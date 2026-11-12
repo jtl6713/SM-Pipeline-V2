@@ -198,6 +198,7 @@ export const TRANSFER_QUEUE_SYNC_FIELDS = Object.freeze([
   "Aspect_Ratio",
   "Preview_Status",
   "Test_Run_ID",
+  "Target_Production_Request_Outputs",
 ]);
 
 export const PHASE6_TRANSFER_QUEUE_TABLE_ID = "tblBZLXPd1p2NRWRK";
@@ -2196,7 +2197,8 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
 /**
  * Phase 6 half-hour queue backfill: open Studio Media Transfer Queue rows →
  * studio_media_transfer_queue. Linked media stays an Airtable id in payload so
- * a missing media_assets FK cannot fail. Targets are not written.
+ * a missing media_assets FK cannot fail. When Target_Production_Request_Outputs
+ * is present, join rows are replaced in studio_media_transfer_targets.
  */
 export async function syncRecentTransferQueueToSupabase(env, deps = {}) {
   await deps.assertLease?.();
@@ -2230,10 +2232,19 @@ export async function syncRecentTransferQueueToSupabase(env, deps = {}) {
     await upsertChunk(env, "studio_media_transfer_queue", chunk);
     deps.onUpsert?.("studio_media_transfer_queue", chunk.length, Date.now() - started);
   }
+  let targets = { skipped: true, reason: "target_field_absent", ok: true, linked: 0 };
+  try {
+    await deps.assertLease?.();
+    targets = await syncTransferQueueTargetsToSupabase(env, records || []);
+  } catch (error) {
+    console.warn("studio_media_transfer_targets backfill failed", error);
+    targets = { ok: false, error: error?.message || String(error), linked: 0 };
+  }
   return {
     ok: true,
     studio_media_transfer_queue: queueRows.length,
     scanned: (records || []).length,
+    studio_media_transfer_targets: targets,
   };
 }
 
@@ -2915,6 +2926,22 @@ function transferQueueLinkId(value) {
   return text.startsWith("rec") ? text : null;
 }
 
+function transferQueueLinkIds(value) {
+  const items = Array.isArray(value) ? value : (value == null || value === "" ? [] : [value]);
+  const ids = [];
+  for (const item of items) {
+    const id = transferQueueLinkId(item);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function chunkAirtableIds(ids, size = 40) {
+  const out = [];
+  for (let index = 0; index < ids.length; index += size) out.push(ids.slice(index, index + size));
+  return out;
+}
+
 function transferQueueText(value) {
   const text = String(value || "").trim();
   return text || null;
@@ -2948,8 +2975,103 @@ function transferQueueWriteThroughRow(record) {
   copy("Aspect_Ratio", "aspect_ratio", transferQueueText(fields.Aspect_Ratio));
   copy("Preview_Status", "preview_status", transferQueueText(selectName(fields.Preview_Status) || fields.Preview_Status));
   copy("Test_Run_ID", "test_run_id", transferQueueText(fields.Test_Run_ID));
+  if ("Target_Production_Request_Outputs" in fields) {
+    payload.target_production_request_output_ids = transferQueueLinkIds(fields.Target_Production_Request_Outputs);
+  }
   if (Object.keys(payload).length) row.payload = payload;
   return row;
+}
+
+/**
+ * Replace studio_media_transfer_targets for queue rows that include
+ * Target_Production_Request_Outputs. Airtable ids stay in the queue payload.
+ * production_request_outputs rows are inserted only as airtable_record_id
+ * anchors so the join FK can resolve. This is not a Production Request
+ * Output read cutover. A missing target field does not clear existing links.
+ */
+export async function syncTransferQueueTargetsToSupabase(env, records) {
+  if (!studioSupabaseConfigured(env)) {
+    return { skipped: true, reason: "supabase_not_configured", ok: true, linked: 0 };
+  }
+  const wanted = [];
+  for (const record of records || []) {
+    if (!record?.id || !record.fields || !("Target_Production_Request_Outputs" in record.fields)) continue;
+    wanted.push({
+      airtable_record_id: record.id,
+      output_ids: transferQueueLinkIds(record.fields.Target_Production_Request_Outputs),
+    });
+  }
+  if (!wanted.length) return { skipped: true, reason: "target_field_absent", ok: true, linked: 0 };
+
+  const outputIds = [...new Set(wanted.flatMap((row) => row.output_ids))];
+  for (const batch of chunkAirtableIds(outputIds)) {
+    await upsertChunk(env, "production_request_outputs", batch.map((id) => ({ airtable_record_id: id })));
+  }
+
+  const queueUuid = new Map();
+  for (const batch of chunkAirtableIds(wanted.map((row) => row.airtable_record_id))) {
+    const rows = await supabaseRest(
+      env,
+      `studio_media_transfer_queue?airtable_record_id=in.(${batch.join(",")})&select=id,airtable_record_id`,
+    );
+    for (const row of rows || []) {
+      if (row?.airtable_record_id && row?.id) queueUuid.set(row.airtable_record_id, row.id);
+    }
+  }
+  const outputUuid = new Map();
+  for (const batch of chunkAirtableIds(outputIds)) {
+    const rows = await supabaseRest(
+      env,
+      `production_request_outputs?airtable_record_id=in.(${batch.join(",")})&select=id,airtable_record_id`,
+    );
+    for (const row of rows || []) {
+      if (row?.airtable_record_id && row?.id) outputUuid.set(row.airtable_record_id, row.id);
+    }
+  }
+
+  const inserts = [];
+  const transferIds = [];
+  let unresolved = 0;
+  for (const row of wanted) {
+    const transferId = queueUuid.get(row.airtable_record_id);
+    if (!transferId) {
+      unresolved += row.output_ids.length;
+      continue;
+    }
+    transferIds.push(transferId);
+    for (const outputId of row.output_ids) {
+      const uuid = outputUuid.get(outputId);
+      if (!uuid) {
+        unresolved += 1;
+        continue;
+      }
+      inserts.push({ transfer_id: transferId, production_request_output_id: uuid });
+    }
+  }
+  for (const batch of chunkAirtableIds(transferIds)) {
+    await supabaseRest(env, `studio_media_transfer_targets?transfer_id=in.(${batch.join(",")})`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+  }
+  for (let index = 0; index < inserts.length; index += 200) {
+    await supabaseRest(
+      env,
+      "studio_media_transfer_targets?on_conflict=transfer_id,production_request_output_id",
+      {
+        method: "POST",
+        body: inserts.slice(index, index + 200),
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      },
+    );
+  }
+  return {
+    ok: true,
+    linked: inserts.length,
+    unresolved,
+    queue_rows: transferIds.length,
+    output_anchors: outputIds.length,
+  };
 }
 
 export async function syncAirtableTransferQueueRowToSupabase(env, record) {
@@ -2961,7 +3083,16 @@ export async function syncAirtableTransferQueueRowToSupabase(env, record) {
     airtable_record_id: record.id,
     ...row,
   }]);
-  return { ok: true, mode: "upsert" };
+  let targets = { skipped: true, reason: "target_field_absent", ok: true, linked: 0 };
+  if (record.fields && "Target_Production_Request_Outputs" in record.fields) {
+    try {
+      targets = await syncTransferQueueTargetsToSupabase(env, [record]);
+    } catch (error) {
+      console.warn("studio_media_transfer_targets write-through failed", error);
+      targets = { ok: false, error: error?.message || String(error), linked: 0 };
+    }
+  }
+  return { ok: true, mode: "upsert", studio_media_transfer_targets: targets };
 }
 
 export function studioSideEffectOutboxMissing(error) {

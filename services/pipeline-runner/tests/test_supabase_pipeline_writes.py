@@ -195,6 +195,55 @@ def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatc
     assert "source_url" not in body["payload"]
     assert "Source_R2_Key" not in str(body)
     assert "source_media_asset_id" not in body or body.get("source_media_asset_id") is None
+    assert not any("studio_media_transfer_targets" in row[1] or "production_request_outputs" in row[1] for row in seen)
+
+
+def test_queue_update_mirrors_target_links_without_file_bytes(monkeypatch):
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        return Response({
+            "id": "recQueue1",
+            "fields": {
+                "Transfer_Status": "Ready",
+                "Target_Production_Request_Outputs": ["recProOutput1", "not-a-record"],
+                "Source_URL": "https://example.com/file.jpg",
+                "Source_R2_Key": "library/file.jpg",
+            },
+        })
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if method == "GET" and "studio_media_transfer_queue?" in url:
+            return Response([{"id": "11111111-1111-1111-1111-111111111111", "airtable_record_id": "recQueue1"}])
+        if method == "GET" and "production_request_outputs?" in url:
+            return Response([{"id": "22222222-2222-2222-2222-222222222222", "airtable_record_id": "recProOutput1"}])
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings()).update_record(
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        "recQueue1",
+        {"Target_Production_Request_Outputs": ["recProOutput1"]},
+    )
+    assert record["id"] == "recQueue1"
+    queued = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
+    assert queued[0][2][0]["payload"]["target_production_request_output_ids"] == ["recProOutput1"]
+    assert "Source_URL" not in str(queued[0][2])
+    assert "Source_R2_Key" not in str(queued[0][2])
+    anchors = [row for row in seen if row[0] == "POST" and "production_request_outputs" in row[1]]
+    assert anchors[0][2] == [{"airtable_record_id": "recProOutput1"}]
+    joins = [row for row in seen if row[0] == "POST" and "studio_media_transfer_targets" in row[1]]
+    assert joins[0][2] == [{
+        "transfer_id": "11111111-1111-1111-1111-111111111111",
+        "production_request_output_id": "22222222-2222-2222-2222-222222222222",
+    }]
+    deletes = [row for row in seen if row[0] == "DELETE" and "studio_media_transfer_targets" in row[1]]
+    assert "transfer_id=eq.11111111-1111-1111-1111-111111111111" in deletes[0][1]
+    assert seen.index(deletes[0]) < seen.index(joins[0])
 
 
 def test_queue_supabase_failure_does_not_fail_airtable_update(monkeypatch):

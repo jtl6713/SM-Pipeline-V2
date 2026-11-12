@@ -1038,3 +1038,5 @@ Deploy 2026-11-11 Worker 0.10.817-assets-densify-oneshot: POST /api/ops/supabase
 Deploy 2026-11-11 Worker 0.10.818-assets-densify-media-only: POST /api/ops/supabase/sync media_only=true runs media densify under lease without the full profile pipeline (partial Factory sync was marking ok=false and burning the lease before densify landed). Densify workflow uses media_only + media_limit=600. Phase 7 not started.
 
 Deploy 2026-11-11 Worker 0.10.819-assets-densify-null-sanitize: Strip U+0000 from Supabase upsert payloads (Airtable long-text/JSON can carry null bytes; PostgREST 22P05 blocked media densify). Re-trigger densify media_only media_limit=600. Phase 7 not started.
+
+Deploy 2026-11-11 Worker 0.10.820-supabase-phase6-transfer-targets: Mirror Studio Media Transfer Queue Target_Production_Request_Outputs into studio_media_transfer_targets. Airtable stays write SoR. Production Request Output rows are Airtable-id anchors for the join only. Phase 7 not started.
