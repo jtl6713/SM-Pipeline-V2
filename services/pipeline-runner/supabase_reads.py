@@ -6,7 +6,8 @@ turn these reads on. Allowlisted formulas translate to PostgREST filters;
 views, other FIND/ARRAYJOIN, unmapped sorts, unmapped requested fields,
 unmarked rows (when none remain), and Supabase errors stay on Airtable.
 OR of allowlisted predicates is translated. Three Studio produce Platform
-Output link lookups are the FIND exception.
+Output link lookups are the FIND exception, including inside AND. OR of a
+link lookup stays on Airtable.
 """
 
 from __future__ import annotations
