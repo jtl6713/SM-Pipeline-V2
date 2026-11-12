@@ -4,7 +4,7 @@
  * A stale Airtable timestamp does not prove a Graph create failed, nor does a
  * missing saved ID establish absence of an Instagram post.
  */
-import { listSupabaseDeskHealPage, studioSupabaseConfigured, studioWriteSource } from "./supabase-pipeline-reads.mjs";
+import { listSupabaseDeskHealPage, readSupabaseShapedOutput, mirrorQualityRecoveryEvent, readSupabaseQualityRecoveryEvent, studioSupabaseConfigured, studioWriteSource } from "./supabase-pipeline-reads.mjs";
 
 export const QA_IG_STALE_UPLOAD_SIGNATURE = "QA-IG-STALE-UPLOAD";
 export const QA_IG_STALE_UPLOAD_THRESHOLD_MS = 30 * 60 * 1000;
@@ -136,6 +136,22 @@ export function staleInstagramReelFormula(nowMs = Date.now(), thresholdMs = QA_I
     + '{Platform_Media_ID}!=BLANK()))))';
 }
 
+async function readStaleInstagramOutput(env, id, airtableFetch) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const copied = await readSupabaseShapedOutput(env, id).catch(() => null);
+    if (copied) return copied;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs", id);
+}
+
+async function readStaleLedgerRow(env, airtableFetch, id) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const copied = await readSupabaseQualityRecoveryEvent(env, id).catch(() => null);
+    if (copied?.fields?.Event_Key) return copied;
+  }
+  return airtableFetch(env, QA_IG_STALE_UPLOAD_LEDGER, id);
+}
+
 export async function auditStaleInstagramReels(env, {
   airtableFetch, verifyProvider, verifyContainer, inspectLease, recoverSafe,
   nowMs = Date.now(), limit = 12,
@@ -191,7 +207,7 @@ export async function auditStaleInstagramReels(env, {
     const decision = classifyStaleInstagramReel(observed, { nowMs });
     if (!decision) continue;
     // The first list response is a *candidate*, not mutation authorization.
-    const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs", observed.id);
+    const current = await readStaleInstagramOutput(env, (observed.id), airtableFetch);
     const recheck = classifyStaleInstagramReel(current, { nowMs });
     if (!recheck || current?.id !== observed.id
       || recheck.lock_at !== decision.lock_at
@@ -301,7 +317,8 @@ export async function auditStaleInstagramReels(env, {
     const persistedId = saved.records[0]?.id;
     if (!/^rec[A-Za-z0-9]{14}$/.test(String(persistedId || "")))
       throw new Error("QA stale Reel ledger record ID unverified");
-    const persisted = await airtableFetch(env, QA_IG_STALE_UPLOAD_LEDGER, persistedId);
+    await mirrorQualityRecoveryEvent(env, saved.records[0]).catch(() => null);
+    const persisted = await readStaleLedgerRow(env, airtableFetch, persistedId);
     if (persisted?.id !== persistedId
       || persisted.fields?.Event_Key !== eventKey
       || persisted.fields?.Outcome !== outcome
@@ -347,7 +364,8 @@ export async function auditStaleInstagramReels(env, {
           const outcomeId=outcomeSaved?.records?.[0]?.id;
           if(!/^rec[A-Za-z0-9]{14}$/.test(String(outcomeId||"")))
             throw new Error("QA IG recovery outcome not durably stored");
-          const auditReadback=await airtableFetch(env,QA_IG_STALE_UPLOAD_LEDGER,outcomeId);
+          await mirrorQualityRecoveryEvent(env, outcomeSaved.records[0]).catch(() => null);
+          const auditReadback=await readStaleLedgerRow(env, airtableFetch, outcomeId);
           if(auditReadback?.fields?.Event_Key!==outcomeKey ||
              auditReadback?.fields?.Outcome!=="fenced_pregraph_mae_rescheduled")
             throw new Error("QA IG recovery outcome audit readback failed");

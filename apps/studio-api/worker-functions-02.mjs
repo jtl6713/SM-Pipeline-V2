@@ -34,6 +34,7 @@ import {
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
   listSupabasePlanScheduleRows,
+  listSupabaseDeskHealOutputs,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -1035,10 +1036,12 @@ export async function studioGateR4ForPrivateDriveWatermark(env, options = {}) {
 /*__STUDIO_WORKER_END:studioGateR4ForPrivateDriveWatermark__*/
 
 export async function studioRemotionRenderBusy(env) {
-  const active = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 8,
-    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-  }).catch(() => []);
+  const active = (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))
+    ? await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 8 }).catch(() => [])
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []);
   if (active.length) {
     return { busy: true, activeCount: active.length, source: "airtable", activeIds: active.map((row) => row.id) };
   }
@@ -1202,13 +1205,15 @@ export async function writeOpsQueueControls(env, controls, actor = null) {
 
 export async function studioLoadRenderQueueCandidates(env, { limit = 80, fields = null, controls = null } = {}) {
   const fieldList = Array.isArray(fields) ? fields.filter(Boolean) : [];
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit,
-    sortField: "Output_ID",
-    sortDirection: "asc",
-    filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
-    ...(fieldList.length ? { fields: fieldList } : {}),
-  }).catch(() => []);
+  const rows = (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))
+    ? await listSupabaseDeskHealOutputs(env, { kind: "render_queue", limit, sortDirection: "asc" }).catch(() => [])
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      sortField: "Output_ID",
+      sortDirection: "asc",
+      filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
+      ...(fieldList.length ? { fields: fieldList } : {}),
+    }).catch(() => []);
   return sortRenderQueueCandidates(rows, f, controls);
 }
 /*__STUDIO_WORKER_END:studioLoadRenderQueueCandidates__*/
@@ -1222,10 +1227,12 @@ export async function studioAdmitRenderQueue(env, options = {}) {
   if (!candidates.length) {
     return { admitted: false, reason: "no_candidates", waiting: 0, started: null, controls };
   }
-  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 16,
-    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-  }).catch(() => []);
+  const activeHolds = (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))
+    ? await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => [])
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 16,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []);
   // A stale Airtable "Rendering" hold can block every Story indefinitely even
   // when the real renderer has zero active jobs. First run the existing R5
   // poll/reconciliation against saved job IDs, then re-check canonical holds.

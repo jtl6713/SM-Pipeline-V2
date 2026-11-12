@@ -8011,15 +8011,25 @@ export function studioOccupiedMsFromRow(row, now = Date.now()) {
 
 export async function studioLoadOccupiedScheduleRows(env, { profile = null, requireComplete = false, platform = "" } = {}) {
   const now = Date.now();
-  const fetchRows = () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: STUDIO_OCCUPIED_LIST_LIMIT,
-    sortField: "Scheduled_Post_Date",
-    sortDirection: "asc",
-    filterFormula: studioOccupiedFilterFormula(now, profile, platform),
-    // Platform Outputs has Content_Profile (lookup) but no Brand field.
-    // Requesting Brand 422s Airtable and 500s calendar Save Schedule.
-    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile"],
-  });
+  const fetchRows = () => {
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env) && profile?.id) {
+      return listSupabaseOccupiedScheduleRows(env, {
+        profileAirtableId: profile.id,
+        platform,
+        startIso: new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString(),
+        endIso: new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString(),
+      });
+    }
+    return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: STUDIO_OCCUPIED_LIST_LIMIT,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
+      filterFormula: studioOccupiedFilterFormula(now, profile, platform),
+      // Platform Outputs has Content_Profile (lookup) but no Brand field.
+      // Requesting Brand 422s Airtable and 500s calendar Save Schedule.
+      fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile"],
+    });
+  };
   // Mutations must NEVER interpret an unavailable or truncated calendar as
   // empty capacity. Strict reads bypass the best-effort UI cache and fail closed.
   if (requireComplete) {
@@ -12401,7 +12411,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       pulses.push({ key: "R5_STALE_RENDERING_FINALIZED", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  const longRendering = await listRecords(env, outputTable, {
+  const longRendering = await studioListDeskHealOutputs(env, "render_long", {
     limit: 8,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -13476,7 +13486,7 @@ export async function studioHealIgCarouselChildPollFailure(env, options = {}) {
     const linked = arrayOrEmpty(f(row, "Carousel Slides"));
     let slides = [];
     try {
-      slides = await Promise.all(linked.map((id) => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
+      slides = await studioReadCarouselSlides(env, linked, airtableFetch, PHASE6_CAROUSEL_SLIDES_TABLE);
     } catch (error) {
       pulses.push({
         key: "IG_AP2C_CHILD_POLL",

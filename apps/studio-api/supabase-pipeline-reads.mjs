@@ -1526,6 +1526,7 @@ export const CAROUSEL_SLIDE_COPY_FIELDS = Object.freeze([
   "Deleted From Carousel",
   "IG_Child_Container_ID",
   "IG_Child_Container_Status",
+  "IG_Child_Container_Status",
   "Slide_Voiceover_Status",
   "Slide_Voiceover_Text",
   "Slide_Voiceover_URL",
@@ -2095,6 +2096,16 @@ export function deskHealOutputFilter(kind, options = {}) {
     return "test_run_id=is.null&render_status=eq.Failed"
       + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)&or=(final_file_url.is.null,final_file_url.eq.)";
   }
+  if (kind === "render_active") {
+    return "test_run_id=is.null&render_status=eq.Rendering"
+      + "&and(remotion_job_id.not.is.null,remotion_job_id.neq.)&or=(final_file_url.is.null,final_file_url.eq.)";
+  }
+  if (kind === "render_long") {
+    const cutoff = encodeURIComponent(new Date(Date.now() - 15 * 60 * 1000).toISOString());
+    return "test_run_id=is.null&render_status=eq.Rendering"
+      + "&and(remotion_job_id.not.is.null,remotion_job_id.neq.)&or=(final_file_url.is.null,final_file_url.eq.)"
+      + `&updated_at=lt.${cutoff}`;
+  }
   throw new Error("Unknown desk heal candidate list");
 }
 
@@ -2135,7 +2146,7 @@ function shapeDeskHealRecord(row) {
 
 export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortDirection = "desc" } = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
-  const capped = Math.max(1, Math.min(60, Number(limit) || 30));
+  const capped = Math.max(1, Math.min(80, Number(limit) || 30));
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const order = `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
@@ -2195,6 +2206,97 @@ export async function readSupabaseMaeOutput(env, airtableId) {
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row?.airtable_record_id) return null;
   return maeScheduleFieldsFromSupabase(row, "");
+}
+
+const HOME_FAILURE_STATUSES = [
+  "Output_Status", "Render_Status", "Publish_Status", "Asset_Selection_Status",
+  "IG_Carousel_Status", "TikTok_Draft_Status", "FB_Publish_Status",
+  "FB_Slideshow_Status", "YouTube_Package_Status", "YouTube_Upload_Status",
+  "YouTube_Processing_Status",
+];
+const HOME_FAILURE_ERRORS = [
+  "Publish_Error_Message", "Remotion_Error_Message", "Final_File_Error_Message",
+  "IG_Carousel_Error_Message", "Music_Error_Message", "FB_Slideshow_Error_Message",
+  "YouTube_Error_Message", "YouTube_Processing_Failure_Reason", "YouTube_Rejection_Reason",
+];
+
+/** Same superset as the Quality Agent home failure formula, applied to a shaped row. */
+export function supabaseOutputMatchesHomeFailure(fields = {}) {
+  for (const key of HOME_FAILURE_STATUSES) {
+    const text = String(fields?.[key] || "").toLowerCase();
+    if (text.includes("failed") || text.includes("error")) return true;
+  }
+  for (const key of HOME_FAILURE_ERRORS) {
+    if (String(fields?.[key] || "").trim()) return true;
+  }
+  return false;
+}
+
+export async function readSupabaseShapedOutput(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=${OUTPUT_SELECT}&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row?.airtable_record_id) return null;
+  return shapeDeskHealRecord(row);
+}
+
+/** One page of a Platform Output census. Offset is a raw row count. */
+export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 0, filterFormula = "" } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase output census is not configured");
+  const capped = Math.max(1, Math.min(100, Number(limit) || 100));
+  const start = Math.max(0, Number(offset) || 0);
+  if (start >= 12000) return { records: [], offset: null };
+  const formula = String(filterFormula || "");
+  const pastDue = formula.includes("{Scheduled_Post_Date}");
+  const failure = formula.includes("FIND(");
+  let path = `platform_outputs?test_run_id=is.null&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+  if (pastDue) {
+    const iso = formula.match(/IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)/)?.[1];
+    if (!iso) throw new Error("Supabase past-due census needs a clock");
+    path = `platform_outputs?test_run_id=is.null&do_not_publish=eq.false&review_status=eq.Approved`
+      + `&scheduled_post_date=lt.${encodeURIComponent(iso)}&scheduled_post_date=not.is.null`
+      + `&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+  }
+  const rows = await supabaseRest(env, path);
+  const batch = Array.isArray(rows) ? rows : [];
+  let records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
+  if (failure) records = records.filter((row) => supabaseOutputMatchesHomeFailure(row.fields));
+  const next = start + capped;
+  return { records, offset: batch.length === capped && next < 12000 ? String(next) : null };
+}
+
+export async function mirrorQualityRecoveryEvent(env, record) {
+  if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true, reason: "missing_record" };
+  const fields = record.fields || {};
+  await supabaseRest(env, "quality_agent_recovery_events?on_conflict=airtable_record_id", {
+    method: "POST",
+    body: [{
+      airtable_record_id: record.id,
+      event_key: fields.Event_Key || null,
+      outcome: fields.Outcome || null,
+      output_record_id: fields.Output_Record_ID || null,
+      output_number: fields.Output_ID ?? null,
+      fields,
+    }],
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+  });
+  return { ok: true };
+}
+
+export async function readSupabaseQualityRecoveryEvent(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
+  const rows = await supabaseRest(
+    env,
+    `quality_agent_recovery_events?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,fields&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row?.airtable_record_id) return null;
+  return { id: row.airtable_record_id, fields: isPlainObject(row.fields) ? row.fields : {} };
 }
 
 export function mergeMaeOccupancyRows(airtableRows, supabaseRows) {
@@ -3650,6 +3752,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       contentUuidByAirtableId,
       fullRecord: false,
     });
+    row.updated_at = new Date().toISOString();
     await upsertChunk(env, "platform_outputs", [row]);
     await patchRenderHealColumns(env, record).catch((error) => {
       console.warn("render heal column copy failed", error);
@@ -3675,6 +3778,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     if (Object.prototype.hasOwnProperty.call(fields, "Do_Not_Publish")) {
       body.do_not_publish = Boolean(fields.Do_Not_Publish);
     }
+    body.updated_at = new Date().toISOString();
     const bagPatch = packOutputListFields(fields);
     if (Object.keys(bagPatch).length) {
       const existing = await supabaseRest(
@@ -3718,6 +3822,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
   if (options.fullRecord !== true) {
     [row] = await applyStoredProjection(env, "platform_outputs", [row], "error_messages");
   }
+  row.updated_at = new Date().toISOString();
   await upsertChunk(env, "platform_outputs", [row]);
   await patchRenderHealColumns(env, record).catch((error) => {
     console.warn("render heal column copy failed", error);
