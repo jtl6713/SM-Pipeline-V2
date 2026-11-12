@@ -262,6 +262,44 @@ def test_queue_supabase_failure_does_not_fail_airtable_update(monkeypatch):
     assert record["fields"]["Transfer_Status"] == "Error"
 
 
+def test_phase6_request_update_keeps_supabase_row_when_airtable_fails(monkeypatch):
+    seen = []
+
+    def fake_patch(*_args, **_kwargs):
+        return Response({"error": {"type": "INVALID"}}, status_code=422)
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
+        PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
+    )
+    assert record["id"] == "recRequest1"
+    assert record["fields"]["Request_Status"] == "Submitted"
+    patches = [row for row in seen if row[0] == "PATCH" and "production_requests" in row[1]]
+    assert patches[0][2] == {"request_status": "Submitted"}
+
+
+def test_phase6_flag_off_still_requires_airtable_for_request_updates(monkeypatch):
+    def fake_patch(*_args, **_kwargs):
+        return Response({"error": {"type": "INVALID"}}, status_code=422)
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", lambda *args, **kwargs: Response(""))
+    try:
+        AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+            PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
+        )
+    except requests.HTTPError:
+        return
+    raise AssertionError("Phase 6 updates must still require Airtable when the phase 6 flag is off")
+
+
 def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
     seen = []
 

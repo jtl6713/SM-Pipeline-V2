@@ -40,6 +40,9 @@ import {
   syncAirtableOutputRowToSupabase,
   parseAirtableCreateFields,
   mintAirtableRecordId,
+  studioPhase6WriteSource,
+  studioPhase6WritesMode,
+  studioPhase6LegacyExportEnabled,
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
@@ -293,6 +296,36 @@ test("studioAssetsReadSource restores Asset Manager list only when its own flag 
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Classification_Status"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Manual_Classification_JSON"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Search_Keywords"));
+});
+
+test("phase 6 update source stays airtable until its own flag is set", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role",
+    AIRTABLE_PRODUCTION_REQUEST_TABLE_ID: "tblRequests",
+    AIRTABLE_MEDIA_TABLE_ID: "tblMedia",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
+  };
+  assert.equal(studioPhase6WriteSource(configured), "airtable");
+  assert.equal(studioPhase6WritesMode(configured), "airtable_sor_write_through");
+  assert.equal(studioPhase6LegacyExportEnabled({
+    ...configured,
+    STUDIO_WRITE_SOURCE: "supabase",
+  }, "Production Requests"), false);
+  assert.equal(studioPhase6LegacyExportEnabled({
+    ...configured,
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+  }, "Production Requests"), true);
+  assert.equal(studioPhase6LegacyExportEnabled({
+    ...configured,
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+  }, "tblOutputs"), false);
+  assert.equal(studioPhase6WritesMode({
+    ...configured,
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+  }), "supabase_sor_legacy_export");
+  assert.match(readStudioWorkerSource(), /Airtable phase6 legacy export failed; keeping Supabase commit/);
+  assert.match(readStudioWorkerSource(), /supabase phase6 update commit failed; Airtable remains required/);
 });
 
 test("studioAuthReadSource stays airtable until its own flag is set", () => {
@@ -779,7 +812,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.822-supabase-output-content-creates/);
+  assert.match(worker, /0\.10\.823-supabase-phase6-update-sor/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -790,7 +823,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_assets_densify_null_sanitize_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
-  assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
+  assert.match(worker, /phase6_writes: studioPhase6WritesMode\(env\)/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue", "studio_media_transfer_targets"\]/);
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
   assert.match(worker, /phase6_backfill_tables: \["media_assets", "studio_media_transfer_queue"\]/);
@@ -881,7 +914,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.822-supabase-output-content-creates/);
+  assert.match(worker, /0\.10\.823-supabase-phase6-update-sor/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2290,7 +2323,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.822-supabase-output-content-creates/);
+  assert.match(worker, /0\.10\.823-supabase-phase6-update-sor/);
   assert.match(worker, /Airtable legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /releaseMintedAirtableIds/);
 });
