@@ -1184,7 +1184,8 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
       return fields.Transfer_Status != null || fields.Error_Message != null
         || fields.Preview_Status != null || fields.Source_Drive_File_ID != null
         || fields.Transfer_ID != null || fields.Source_Media_Asset != null
-        || fields.Generated_Media_Asset != null;
+        || fields.Generated_Media_Asset != null
+        || "Target_Production_Request_Outputs" in fields;
     }
     if (kind === "auth_org") {
       return fields.Organization_Name != null || fields.Organization_ID != null;

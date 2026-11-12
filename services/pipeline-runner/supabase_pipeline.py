@@ -365,6 +365,18 @@ def _partial_patch(record: dict, kind: str) -> dict:
     return body
 
 
+def _queue_target_ids(value: Any) -> list[str]:
+    items = value if isinstance(value, list) else ([] if value in (None, "") else [value])
+    ids: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            item = item.get("id")
+        text = str(item or "").strip()
+        if text.startswith("rec") and text not in ids:
+            ids.append(text)
+    return ids
+
+
 def _queue_text(value: Any) -> str | None:
     if isinstance(value, list):
         value = value[0] if value else None
@@ -405,9 +417,69 @@ def _queue_row(record: dict) -> dict:
             continue
         if value:
             payload[column] = value
+    if "Target_Production_Request_Outputs" in fields:
+        payload["target_production_request_output_ids"] = _queue_target_ids(
+            fields.get("Target_Production_Request_Outputs")
+        )
     if payload:
         row["payload"] = payload
     return row
+
+
+def _mirror_queue_targets(settings: dict, record: dict) -> None:
+    """Join rows only. production_request_outputs anchors are Airtable ids, not a read cutover."""
+    fields = record.get("fields") or {}
+    if "Target_Production_Request_Outputs" not in fields or not record.get("id"):
+        return
+    output_ids = _queue_target_ids(fields.get("Target_Production_Request_Outputs"))
+    queue_rows = _rest(
+        settings,
+        f"studio_media_transfer_queue?airtable_record_id=eq.{record['id']}&select=id&limit=1",
+        "GET",
+    )
+    if not isinstance(queue_rows, list) or not queue_rows or not queue_rows[0].get("id"):
+        return
+    transfer_id = queue_rows[0]["id"]
+    output_uuids: list[str] = []
+    if output_ids:
+        _rest(
+            settings,
+            "production_request_outputs?on_conflict=airtable_record_id",
+            "POST",
+            [{"airtable_record_id": airtable_id} for airtable_id in output_ids],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        listed = _rest(
+            settings,
+            "production_request_outputs?airtable_record_id=in.("
+            + ",".join(output_ids)
+            + ")&select=id,airtable_record_id",
+            "GET",
+        )
+        by_airtable = {
+            row.get("airtable_record_id"): row.get("id")
+            for row in (listed or [])
+            if isinstance(row, dict)
+        }
+        output_uuids = [by_airtable[airtable_id] for airtable_id in output_ids if by_airtable.get(airtable_id)]
+    _rest(
+        settings,
+        f"studio_media_transfer_targets?transfer_id=eq.{transfer_id}",
+        "DELETE",
+        prefer="return=minimal",
+    )
+    if not output_uuids:
+        return
+    _rest(
+        settings,
+        "studio_media_transfer_targets?on_conflict=transfer_id,production_request_output_id",
+        "POST",
+        [
+            {"transfer_id": transfer_id, "production_request_output_id": output_uuid}
+            for output_uuid in output_uuids
+        ],
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
 
 
 def _mirror_queue(settings: dict, record: dict) -> None:
@@ -422,6 +494,10 @@ def _mirror_queue(settings: dict, record: dict) -> None:
         prefer="resolution=merge-duplicates,return=minimal",
     )
     _enqueue_outbox(settings, "queue", record, "PATCH")
+    try:
+        _mirror_queue_targets(settings, record)
+    except Exception as error:
+        logger.warning("supabase transfer target write-through failed for %s: %s", record.get("id"), error)
 
 
 def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> None:

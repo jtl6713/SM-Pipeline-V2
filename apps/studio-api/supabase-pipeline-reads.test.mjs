@@ -777,7 +777,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.819-assets-densify-null-sanitize/);
+  assert.match(worker, /0\.10\.820-supabase-phase6-transfer-targets/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -789,7 +789,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
-  assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
+  assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue", "studio_media_transfer_targets"\]/);
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
   assert.match(worker, /phase6_backfill_tables: \["media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /phase5_runner_projection_backfill: true/);
@@ -879,7 +879,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.819-assets-densify-null-sanitize/);
+  assert.match(worker, /0\.10\.820-supabase-phase6-transfer-targets/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1478,6 +1478,69 @@ test("phase 6 queue write-through keeps status and a Drive id and drops source U
     assert.equal(JSON.stringify(body).includes("Source_URL"), false);
     assert.equal(JSON.stringify(body).includes("r2"), false);
     assert.equal(body[0].source_media_asset_id, undefined);
+    assert.equal(calls.some((call) => call.url.includes("studio_media_transfer_targets")), false);
+    assert.equal(calls.some((call) => call.url.includes("production_request_outputs")), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 queue write-through replaces transfer targets and keeps file bytes off the mirror", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const method = init?.method || "GET";
+    const href = String(url);
+    calls.push({ method, href, body: init?.body || "" });
+    if (method === "GET" && href.includes("studio_media_transfer_queue?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "11111111-1111-1111-1111-111111111111", airtable_record_id: "recQueue1" }]);
+        },
+      };
+    }
+    if (method === "GET" && href.includes("production_request_outputs?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "22222222-2222-2222-2222-222222222222", airtable_record_id: "recProOutput1" }]);
+        },
+      };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
+      id: "recQueue1",
+      fields: {
+        Transfer_Status: "Ready",
+        Target_Production_Request_Outputs: ["recProOutput1", "not-a-record"],
+        Source_URL: "https://example.com/file.jpg",
+        Source_R2_Key: "library/file.jpg",
+      },
+    });
+    assert.equal(result.mode, "upsert");
+    assert.equal(result.studio_media_transfer_targets.ok, true);
+    assert.equal(result.studio_media_transfer_targets.linked, 1);
+    const queuePost = calls.find((call) => call.method === "POST" && call.href.includes("studio_media_transfer_queue"));
+    const queued = JSON.parse(queuePost.body);
+    assert.deepEqual(queued[0].payload.target_production_request_output_ids, ["recProOutput1"]);
+    assert.equal(JSON.stringify(queued).includes("Source_URL"), false);
+    assert.equal(JSON.stringify(queued).includes("r2"), false);
+    const anchor = calls.find((call) => call.method === "POST" && call.href.includes("production_request_outputs"));
+    assert.deepEqual(JSON.parse(anchor.body), [{ airtable_record_id: "recProOutput1" }]);
+    const join = calls.find((call) => call.method === "POST" && call.href.includes("studio_media_transfer_targets"));
+    assert.match(join.href, /on_conflict=transfer_id,production_request_output_id/);
+    assert.deepEqual(JSON.parse(join.body), [{
+      transfer_id: "11111111-1111-1111-1111-111111111111",
+      production_request_output_id: "22222222-2222-2222-2222-222222222222",
+    }]);
+    const deleted = calls.find((call) => call.method === "DELETE" && call.href.includes("studio_media_transfer_targets"));
+    assert.match(deleted.href, /transfer_id=in\.\(11111111-1111-1111-1111-111111111111\)/);
+    const deleteAt = calls.indexOf(deleted);
+    const joinAt = calls.indexOf(join);
+    assert.ok(deleteAt < joinAt);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2147,7 +2210,7 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(phase6, /runner Airtable client/);
   assert.match(phase6, /0\.10\.799-supabase-phase6-media-queue-backfill/);
   assert.match(phase6, /half-hour media and queue backfill ships/);
-  assert.match(phase6, /studio_media_transfer_targets are not written/);
+  assert.match(phase6, /mirror `studio_media_transfer_targets`/);
   assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
   assert.match(sql, /create table if not exists studio_side_effect_outbox/);
