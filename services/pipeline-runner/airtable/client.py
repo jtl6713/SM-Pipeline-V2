@@ -81,13 +81,12 @@ class AirtableClient:
     def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
         if self._legacy_export(table_id):
             self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
-            try:
-                record = self._patch_record(table_id, record_id, fields, typecast=typecast)
-            except Exception as error:
-                logger.warning("Airtable legacy export failed for %s %s: %s", table_id, record_id, error)
-                return {"id": record_id, "fields": fields}
-            self._mirror(table_id, [record])
-            return record
+            logger.info(
+                "Airtable archive kept the Supabase commit and did not export %s %s",
+                table_id,
+                record_id,
+            )
+            return {"id": record_id, "fields": fields}
         if self._phase6_export(table_id):
             pending = {"id": record_id, "fields": fields}
             committed = self._commit_phase6(table_id, [pending])
@@ -98,18 +97,12 @@ class AirtableClient:
                     record_id,
                 )
             else:
-                try:
-                    record = self._patch_record(table_id, record_id, fields, typecast=typecast)
-                except Exception as error:
-                    logger.warning(
-                        "Airtable phase6 legacy export failed for %s %s: %s",
-                        table_id,
-                        record_id,
-                        error,
-                    )
-                    return pending
-                self._mirror(table_id, [record])
-                return record
+                logger.info(
+                    "Airtable archive kept the Supabase phase6 commit and did not export %s %s",
+                    table_id,
+                    record_id,
+                )
+                return pending
         record = self._patch_record(table_id, record_id, fields, typecast=typecast)
         self._mirror(table_id, [record])
         return record
@@ -213,6 +206,10 @@ class AirtableClient:
                         table_id,
                         error,
                     )
+            if committed:
+                logger.info("Airtable archive kept the Supabase create and did not export %s", table_id)
+                created.extend(minted)
+                continue
             body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
             if typecast:
                 body["typecast"] = True
@@ -287,6 +284,12 @@ class AirtableClient:
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
                 ], partial=True)
+                logger.info("Airtable archive kept the Supabase batch and did not export %s", table_id)
+                updated.extend(
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                )
+                continue
             phase6_committed = False
             if not legacy and self._phase6_export(table_id):
                 phase6_committed = self._commit_phase6(table_id, [
@@ -298,6 +301,16 @@ class AirtableClient:
                         "supabase phase6 batch update commit failed for %s; Airtable remains required",
                         table_id,
                     )
+                else:
+                    logger.info(
+                        "Airtable archive kept the Supabase phase6 batch and did not export %s",
+                        table_id,
+                    )
+                    updated.extend(
+                        {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                        for item in chunk
+                    )
+                    continue
             if typecast:
                 body["typecast"] = True
             response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)

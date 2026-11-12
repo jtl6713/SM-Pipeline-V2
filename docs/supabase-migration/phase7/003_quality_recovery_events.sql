@@ -1,5 +1,5 @@
 -- Quality Agent recovery-event readback. Airtable remains the write source of truth.
--- Phase 7 retirement is not started.
+-- Record deletion is not started. Airtable is a frozen archive.
 
 create table if not exists public.quality_agent_recovery_events (
   id uuid primary key default gen_random_uuid(),
@@ -13,4 +13,4 @@ create table if not exists public.quality_agent_recovery_events (
 );
 
 comment on table public.quality_agent_recovery_events is
-  'Copy of Quality Agent Recovery Ledger rows for readback. Airtable remains the write source of truth. Phase 7 retirement is not started.';
+  'Copy of Quality Agent Recovery Ledger rows for readback. Airtable remains the write source of truth. Record deletion is not started. Airtable is a frozen archive.';

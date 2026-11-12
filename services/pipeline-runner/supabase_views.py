@@ -2,7 +2,7 @@
 
 Only views whose filters use stored columns are included. A view that depends
 on an Airtable formula field stays on Airtable. An unknown view stays on Airtable.
-Phase 7 retirement is not started.
+Record deletion is not started. Airtable is a frozen archive.
 """
 
 from __future__ import annotations

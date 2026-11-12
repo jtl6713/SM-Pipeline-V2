@@ -1348,7 +1348,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.839-desk-request-reads",
+          version: "0.10.840-airtable-archive",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -5343,6 +5343,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       }
     }
   }
+  let archiveRecords = null;
+  if (method !== "GET") {
+    if (legacyExport && outputSorCommitted && mutationRecords.length) archiveRecords = mutationRecords;
+    else if (phase6Records.length) archiveRecords = phase6Records;
+    else if (createLegacy && mintedCreates.length) archiveRecords = mintedCreates;
+    else if (phase6Create && phase6Minted.length) archiveRecords = phase6Minted;
+  }
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
@@ -5352,6 +5359,15 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     ? options.airtableEgressSource : "studio_worker_gateway";
   const { airtableEgressSource, ...fetchOptions } = options;
   let response;
+  let body = {};
+  let airtableCommitted = false;
+  if (archiveRecords) {
+    console.info("Airtable archive kept the Supabase commit and did not export", tableId, method);
+    const raw = String(options?.body || "");
+    body = archiveRecords.length === 1 && !raw.includes('"records"')
+      ? archiveRecords[0]
+      : { records: archiveRecords };
+  } else {
   try {
     response = await fetch(endpoint, {
       ...fetchOptions,
@@ -5382,14 +5398,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
 
   }
   const responseText = await response.text();
-  let body = {};
   try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }
   if (response.status === 429) {
     const cooldown = airtableRetryDelayMs(response, 1);
     airtableNextRequestAt = Math.max(airtableNextRequestAt, Date.now() + cooldown);
     console.warn("Airtable rate limited; failing fast", { attempt: 1, cooldownMs: cooldown });
   }
-  let airtableCommitted = response.ok;
+  airtableCommitted = response.ok;
   if (!response.ok) {
     // Soft-fail ordinary Output/Content legacy exports. MAE schedule/approve
     // passes maeSupabaseVerify so the same keep-Supabase path applies under
@@ -5430,6 +5445,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
       throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
     }
+  }
   }
   // Queue the summary change BEFORE optional Supabase mirror calls so a
   // slow/broken mirror never prevents Home's near-real-time invalidation.

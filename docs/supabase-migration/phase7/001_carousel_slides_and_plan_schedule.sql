@@ -1,6 +1,6 @@
 -- Carousel slide records and Production Request Output schedule fields.
 -- Airtable remains the write source of truth. These columns are a read copy.
--- Phase 7 retirement is not started.
+-- Record deletion is not started. Airtable is a frozen archive.
 
 create table if not exists carousel_slides (
   id uuid primary key default gen_random_uuid(),

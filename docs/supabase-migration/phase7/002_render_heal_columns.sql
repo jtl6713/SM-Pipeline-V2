@@ -1,6 +1,6 @@
 -- Render-heal columns copied from Airtable. Airtable remains the write source of truth.
 -- These columns are patched on their own. They do not mark a lean cron row complete.
--- Phase 7 retirement is not started.
+-- Record deletion is not started. Airtable is a frozen archive.
 
 alter table public.platform_outputs
   add column if not exists output_filename text,

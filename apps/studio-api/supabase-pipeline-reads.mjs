@@ -313,11 +313,10 @@ export function studioAuthReadSource(env) {
 /**
  * Phase 5 remainder write switch for Platform Outputs and Content Items.
  * Default remains Airtable-first write-through. When STUDIO_WRITE_SOURCE=supabase,
- * Output/Content updates commit to Supabase first and Airtable is a best-effort
- * legacy export. Output/Content creates commit to Supabase first. When Airtable
- * create succeeds, callers still receive Airtable's rec id. When it fails, the
- * Supabase row remains under a minted rec id. Production Requests, media, and
- * the transfer queue are not part of this flag. Phase 7 is not started.
+ * Output/Content updates and creates commit to Supabase first. Airtable is a
+ * frozen archive: a successful Supabase commit is not exported. Callers keep
+ * the minted rec id. Production Requests, media, and the transfer queue are
+ * not part of this flag. Record deletion is not started.
  */
 export function studioWriteSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
@@ -328,7 +327,7 @@ export function studioWriteSource(env) {
 
 export function studioPhase5WritesMode(env) {
   return studioWriteSource(env) === "supabase"
-    ? "supabase_sor_legacy_export"
+    ? "supabase_sor_airtable_archived"
     : "airtable_sor_write_through";
 }
 
@@ -347,8 +346,9 @@ export function studioLegacyExportEnabled(env, tableId) {
  * on. Updates and creates commit to Supabase first only when
  * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create without the insert identity
  * still requires Airtable. Held-reschedule note readback uses the Supabase
- * row when STUDIO_WRITE_SOURCE=supabase. The other skip paths, the half-hour
- * Airtable copy, and retiring Airtable stay unchanged.
+ * row when STUDIO_WRITE_SOURCE=supabase. A successful Supabase commit is not
+ * exported to Airtable. The half-hour Airtable copy is stopped while
+ * STUDIO_WRITE_SOURCE=supabase. Record deletion is not started.
  */
 export function studioPhase6WriteSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
@@ -359,7 +359,7 @@ export function studioPhase6WriteSource(env) {
 
 export function studioPhase6WritesMode(env) {
   return studioPhase6WriteSource(env) === "supabase"
-    ? "supabase_sor_legacy_export"
+    ? "supabase_sor_airtable_archived"
     : "airtable_sor_write_through";
 }
 

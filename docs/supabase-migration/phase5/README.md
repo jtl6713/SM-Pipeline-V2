@@ -1,6 +1,6 @@
 # Phase 5 — Output and Content Item write-through
 
-Airtable remains the write source of truth for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content updates and creates commit to Supabase first with Airtable as a best-effort legacy export. When an Output or Content Item create succeeds in Airtable, callers still receive Airtable's `rec` id. When that Airtable create fails, the Supabase row remains under a minted `rec` id. Production Request, Media Asset, and transfer-queue creates do the same when `STUDIO_PHASE6_WRITE_SOURCE=supabase`. Ideas and other tables still mint ids in Airtable.
+Airtable remains the write source of truth for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content updates and creates commit to Supabase first. The legacy export is stopped: Airtable is not updated after that commit, and callers keep the minted `rec` id. Production Request, Media Asset, and transfer-queue creates do the same when `STUDIO_PHASE6_WRITE_SOURCE=supabase`. Ideas and other tables still mint ids in Airtable.
 
 ## What changed
 
@@ -42,7 +42,7 @@ Worker `0.10.801-supabase-phase5-write-sor` honors `STUDIO_WRITE_SOURCE` the sam
 ## Still out of scope
 
 - Snapshotted Output and Content views whose filters are stored columns, and substring `FIND` on a text field, read Supabase when the runner read flags are `supabase`. Views that depend on an Airtable formula field, `OR` of a link lookup, and `FIND` inside a JSON column stay on Airtable. Allowlisted equality/`BLANK`/`RECORD_ID`/`AND`/`OR` formulas, plus the three Studio produce Platform Output link lookups, already run on Supabase.
-- Deleting or stopping Airtable records (Phase 7).
+- Deleting Airtable records is not started. When `STUDIO_WRITE_SOURCE=supabase` the half-hour copy and the legacy export are stopped and existing rows stay.
 - Production Requests, media metadata, and cron as a write source of truth (Phase 6 stays Airtable-first write-through).
 - `resolveAuthorization` on Supabase user tables.
 
@@ -52,6 +52,6 @@ Worker `0.10.801-supabase-phase5-write-sor` honors `STUDIO_WRITE_SOURCE` the sam
 
 ## Half-hour synchronization safety
 
-Cron at UTC minute 0 and 30 still mirrors Airtable profiles, outputs, content, ideas, and open production requests. A separate R2 conditional-write lease (`studio/state/phase5-sync-lease.json` under `STUDIO_MEDIA`) prevents cron and manual sweeps from overlapping across Worker isolates. Only `completed` with `ok=true` counts as success. The in-memory two-error / 15-minute Supabase pool circuit remains active; do not weaken it.
+While `STUDIO_WRITE_SOURCE=supabase`, the half-hour Airtable copy is stopped. The lease and circuit stay in place for a rollback to `airtable`. A separate R2 conditional-write lease (`studio/state/phase5-sync-lease.json` under `STUDIO_MEDIA`) prevents cron and manual sweeps from overlapping across Worker isolates. Only `completed` with `ok=true` counts as success. The in-memory two-error / 15-minute Supabase pool circuit remains active; do not weaken it.
 
 **Activation gate:** list reads were restored per route. Phase 6 Production Request, media metadata, and transfer-queue write-through are confirmed live. Half-hour media and queue backfill ships in Worker `0.10.799`. Write SoR enable is `deploy/enable-studio-write-sor.txt` after Worker `0.10.801`. See [Phase 6](../phase6/README.md) and the [Phase 6 handoff](../../handoffs/supabase-phase6-handoff.md).

@@ -1,7 +1,7 @@
 # Phase 6 handoff (new agent start here)
 
 **Date:** November 9, 2026, 12:18 AM CT. Updated after Joseph said to execute Phase 6.  
-**Status:** Production Request, media metadata, transfer-queue, and transfer-target write-through are confirmed live. Gate [43144632688](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/43144632688) at 8:55 PM CT on November 11, 2026 showed Worker `0.10.820-supabase-phase6-transfer-targets`, runner `2026-11-11-supabase-phase6-transfer-targets`, `phase6_writes=airtable_sor_write_through`, and `studio_media_transfer_targets` in `phase6_write_tables`. A follow-up count the same evening showed 16 join rows and 4 Production Request Output anchors. The first slice shipped in Worker `0.10.784-supabase-phase6-request-writes`. Phase 7 retirement is not started.  
+**Status:** Production Request, media metadata, transfer-queue, and transfer-target write-through are confirmed live. Gate [43144632688](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/43144632688) at 8:55 PM CT on November 11, 2026 showed Worker `0.10.820-supabase-phase6-transfer-targets`, runner `2026-11-11-supabase-phase6-transfer-targets`, `phase6_writes=airtable_sor_write_through`, and `studio_media_transfer_targets` in `phase6_write_tables`. A follow-up count the same evening showed 16 join rows and 4 Production Request Output anchors. The first slice shipped in Worker `0.10.784-supabase-phase6-request-writes`. Airtable is a frozen archive. Record deletion is not started.  
 **Joseph’s ask:** Execute Phase 6. The first slice is Production Request write-through only. Later slices wait for a confirming gate and a separate go-ahead.
 
 Read [the migration index](../supabase-migration/README.md) and [Phase 6](../supabase-migration/phase6/README.md) before editing code.
@@ -40,7 +40,7 @@ The first code change is Production Request write-through in Worker `0.10.784-su
 
 ## What this handoff is not
 
-- Not the Phase 5 remainder write switch. That ships separately as Worker `0.10.801-supabase-phase5-write-sor` plus `deploy/enable-studio-write-sor.txt`. Runner reads enable with `deploy/enable-runner-supabase-reads.txt`. Creates still mint `rec` ids in Airtable. Phase 7 is not started.
+- Not the Phase 5 remainder write switch. That ships separately as Worker `0.10.801-supabase-phase5-write-sor` plus `deploy/enable-studio-write-sor.txt`. Runner reads enable with `deploy/enable-runner-supabase-reads.txt`. Creates on the archived tables keep the minted `rec` id and are not exported. Record deletion is not started.
 - Not Home profile-summary reads (`STUDIO_HOME_PROFILE_SUMMARY_READS`).
 - Not `resolveAuthorization`.
 - Not Phase 7. Do not delete or stop Airtable records.
