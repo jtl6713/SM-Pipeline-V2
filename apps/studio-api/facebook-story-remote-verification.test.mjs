@@ -92,7 +92,8 @@ test("live publishing always persists upload identity before upload/finish and n
   const qa = fs.readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const section = qa.slice(qa.indexOf("export async function studioHealFacebookRateLimitRearm("),
     qa.indexOf("/*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/"));
-  assert.ok(section.indexOf("const outputTable") < section.indexOf("listRecords(env, outputTable"));
+  assert.match(section, /studioScanDeskHealOutputs\(env, "fb_story_remote"/);
+  assert.ok(section.indexOf("const outputTable") < section.indexOf("studioScanDeskHealOutputs"));
   assert.match(section, /verifyFacebookStoryByMediaId/);
   assert.match(section, /FB_STORY_REMOTE_VERIFIED_PUBLISHED/);
   assert.match(section, /reconciled_without_post/);

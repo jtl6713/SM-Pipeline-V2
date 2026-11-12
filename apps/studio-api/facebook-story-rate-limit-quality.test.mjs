@@ -85,7 +85,8 @@ test("Quality and Helpdesk keep the exact signature and restrained action", () =
   assert.match(service, /FACEBOOK_STORY_RATE_LIMIT_368/);
   assert.ok(service.includes("facebookPreapprovalRecoveryReason(latest)"));
   assert.ok(service.includes("facebookPreapprovalRecoveryFields(latest)"));
-  assert.match(service, /scanOutstandingFailedOutputs/);
+  assert.match(service, /studioScanDeskHealOutputs\(env, "fb_preapproval"/);
+  assert.match(healing, /scanOutstandingFailedOutputs/);
   assert.doesNotMatch(service, /studioDispatchApprovedPublishNow/);
   assert.doesNotMatch(service, /Studio_Publish_Dispatch_Count:\\s*0/);
   const worker = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
