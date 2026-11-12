@@ -153,6 +153,8 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   assert.match(stage, /Publish_Next_Retry_At/);
   assert.match(stage, /TikTok_Draft_Last_Checked_At/);
   assert.match(stage, /studioPulseTtd2\(env, row\)/);
+  assert.match(stage, /studioListTiktokReconcileOutputs\(env, "ttd2_processing"/);
+  assert.match(stage, /studioReadTiktokReconcileOutput\(env, candidate\.id\)/);
   assert.doesNotMatch(stage, /studioPulseTtd0|studioPulseTtd1|studioDispatchApprovedPublishNow|studioPublishFacebookPageStory/);
   assert.match(stage, /Do_Not_Publish/);
   assert.match(stage, /currentId !== previousId|previousId !== currentId/);

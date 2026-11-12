@@ -1295,6 +1295,27 @@ const OUTPUT_SELECT = [
   "published_at",
   "remotion_job_id",
   "selected_clip_count",
+  "publish_next_retry_at",
+  "youtube_stage",
+  "tiktok_draft_status",
+  "auto_publish_enabled",
+  "tiktok_draft_type",
+  "asset_aspect_family",
+  "image_count",
+  "image_output_selected",
+  "fb_publish_status",
+  "fb_image_publish_mode",
+  "studio_effective_voiceover_mode",
+  "studio_effective_background_music_mode",
+  "publish_retry_eligible",
+  "ig_carousel_status",
+  "ig_carousel_next_retry_at",
+  "ig_carousel_child_count",
+  "ig_carousel_children_ready_count",
+  "assets_ready_count",
+  "asset_set_revision",
+  "tiktok_9x16_ready_count",
+  "fb_resolved_publish_mode",
   "error_messages",
   "created_at",
   "updated_at",
@@ -2006,6 +2027,74 @@ function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
 
+/** Blank jsonb bag field (missing or empty string). */
+function blankErrorMessage(field) {
+  return `or=(error_messages->>${field}.is.null,error_messages->>${field}.eq.)`;
+}
+
+/** Present jsonb bag field (not null and not empty). */
+function presentErrorMessage(field) {
+  return `and(error_messages->>${field}.not.is.null,error_messages->>${field}.neq.)`;
+}
+
+/**
+ * TikTok draft reconcile clocks that used to be Airtable NOW()/DATEADD formulas.
+ * Inbox drafts become due 15 minutes before Scheduled_Post_Date.
+ */
+function tiktokReconcileClockFilters(options = {}) {
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  const inboxDueIso = encodeDeskFilterValue(new Date(nowMs + 15 * 60 * 1000).toISOString());
+  const retryDueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
+  const checkedBeforeIso = encodeDeskFilterValue(new Date(nowMs - 2 * 60 * 1000).toISOString());
+  return {
+    inboxDue: `or=(scheduled_post_date.is.null,scheduled_post_date.lte.${inboxDueIso})`,
+    retryDue: `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${retryDueIso})`,
+    lastCheckedDue: `or=(${blankErrorMessage("TikTok_Draft_Last_Checked_At")},error_messages->>TikTok_Draft_Last_Checked_At.lt.${checkedBeforeIso})`,
+  };
+}
+
+function tiktokReconcileOutputFilter(kind, options = {}) {
+  const quiet = "test_run_id=is.null&do_not_publish=eq.false&platform=eq.TikTok";
+  const armed = "auto_publish_enabled=eq.true";
+  const blankPublishId = blankErrorMessage("TikTok_Draft_Publish_ID");
+  const hasPublishId = presentErrorMessage("TikTok_Draft_Publish_ID");
+  const clocks = tiktokReconcileClockFilters(options);
+  const readyAssets = encodeDeskFilterValue("Ready for Assets");
+  const readyDelivery = encodeDeskFilterValue("Ready for Delivery");
+  const waitingSchedule = encodeDeskFilterValue("Waiting for Schedule");
+  const processing = encodeDeskFilterValue("Processing");
+  const retryPending = encodeDeskFilterValue("Retry Pending");
+  const delivered = encodeDeskFilterValue("Draft Delivered — Manual Action Required");
+  const completionReceived = encodeDeskFilterValue("Manual Completion Received");
+  if (kind === "ttd0_ready") {
+    const status = `or=(tiktok_draft_status.eq.${readyAssets},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD0*")}))`;
+    return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${status}`;
+  }
+  if (kind === "ttd1_ready") {
+    const status = `or=(tiktok_draft_status.eq.${readyDelivery},tiktok_draft_status.eq.${waitingSchedule},`
+      + `and(tiktok_draft_status.eq.${retryPending},or=(error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD1*")},`
+      + "error_messages->>Publish_Error_Stage.eq.TTD_CAPACITY)))";
+    return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
+  }
+  if (kind === "ttd2_processing") {
+    const status = `or=(tiktok_draft_status.eq.${processing},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD2*")}))`;
+    const base = `${quiet}&${hasPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
+    if (options.requireAutoPublish !== false) {
+      return `${base}&${armed}&published_at=is.null&${clocks.lastCheckedDue}`;
+    }
+    return base;
+  }
+  if (kind === "ttd3_email") {
+    const status = `or=(tiktok_draft_status.eq.${delivered},tiktok_draft_status.eq.${completionReceived},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD3*")}))`;
+    return `${quiet}&${presentErrorMessage("TikTok_Draft_Delivered_At")}&${blankErrorMessage("TikTok_Draft_Email_Sent_At")}`
+      + `&error_messages->>Manual_Completion_Status.eq.${encodeDeskFilterValue("Required")}&${status}`;
+  }
+  throw new Error("Unknown TikTok reconcile candidate list");
+}
+
 function igOpenCarouselFilter() {
   return "test_run_id=is.null&do_not_publish=eq.false&published_at=is.null&platform=eq.Instagram"
     + `&or=(studio_output_type.eq.Carousel,platform_output_type.eq.${encodeDeskFilterValue("Instagram Carousel")})`;
@@ -2069,6 +2158,9 @@ export function deskHealOutputFilter(kind, options = {}) {
     const route = "or=(error_messages->>Publish_Error_Stage.eq.TTD0_ROUTE,"
       + `error_messages->>Publish_Error_Message.ilike.${encodeDeskFilterValue("*TTD0 found neither*")})`;
     return `${quiet}&platform=eq.TikTok&publish_status=eq.Failed&${route}`;
+  }
+  if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
+    return tiktokReconcileOutputFilter(kind, options);
   }
   if (kind === "fb_story_remote") {
     const stage = "or=(error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_RATE_LIMIT_368,"
@@ -2244,19 +2336,29 @@ function shapeDeskHealRecord(row) {
   return shaped;
 }
 
-export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortDirection = "desc" } = {}) {
+export async function listSupabaseDeskHealOutputs(env, {
+  kind,
+  limit = 30,
+  sortDirection = "desc",
+  nowMs = undefined,
+  requireAutoPublish = undefined,
+  cutoffIso = "",
+} = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(80, Number(limit) || 30));
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const order = `order=output_number.${direction}.nullslast`;
+  const order = kind === "ttd0_ready"
+    ? `order=scheduled_post_date.${direction}.nullsfirst`
+    : `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
+  const filterOptions = { nowMs, requireAutoPublish, cutoffIso };
   if (kind === "render_unfetchable" || kind === "inventory_unfetchable") {
     const matches = [];
     const pageSize = 40;
     for (let offset = 0; offset < 320 && matches.length < capped; offset += pageSize) {
       const page = await supabaseRest(
         env,
-        `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${pageSize}&offset=${offset}`,
+        `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${pageSize}&offset=${offset}`,
       );
       const batch = Array.isArray(page) ? page : [];
       for (const row of batch) {
@@ -2270,7 +2372,7 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortD
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${capped}`,
+    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
