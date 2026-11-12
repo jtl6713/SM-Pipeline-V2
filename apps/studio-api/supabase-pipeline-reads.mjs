@@ -346,8 +346,9 @@ export function studioLegacyExportEnabled(env, tableId) {
  * queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not turn this
  * on. Updates and creates commit to Supabase first only when
  * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create without the insert identity
- * still requires Airtable. Held-reschedule readback, the other skip paths,
- * the half-hour Airtable copy, and retiring Airtable stay unchanged.
+ * still requires Airtable. Held-reschedule note readback uses the Supabase
+ * row when STUDIO_WRITE_SOURCE=supabase. The other skip paths, the half-hour
+ * Airtable copy, and retiring Airtable stay unchanged.
  */
 export function studioPhase6WriteSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
@@ -1400,9 +1401,17 @@ function maeScheduleFieldsFromSupabase(row, profileAirtableId) {
       Review_Status: row.review_status || "",
       Studio_Output_Type: row.studio_output_type || "",
       Format: row.format || "",
+      Do_Not_Publish: row.do_not_publish === true,
+      Studio_Output_Notes: bagText(row.error_messages, "Studio_Output_Notes"),
+      Publish_Error_Stage: bagText(row.error_messages, "Publish_Error_Stage"),
       Content_Profile: profileAirtableId ? [profileAirtableId] : [],
     },
   };
+}
+
+function bagText(bag, key) {
+  if (!bag || typeof bag !== "object") return "";
+  return String(bag[key] || "");
 }
 
 /**
@@ -1440,7 +1449,7 @@ export async function readSupabaseMaeOutput(env, airtableId) {
   if (!id) return null;
   const rows = await supabaseRest(
     env,
-    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,platform,scheduled_post_date,youtube_scheduled_publish_at,studio_scheduled_at,publish_status,output_status,review_status,studio_output_type,format&limit=1`,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,platform,scheduled_post_date,youtube_scheduled_publish_at,studio_scheduled_at,publish_status,output_status,review_status,studio_output_type,format,do_not_publish,error_messages&limit=1`,
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row?.airtable_record_id) return null;
@@ -2889,19 +2898,34 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
   let profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
   if (!profileUuid) {
     // Patch schedule fields only when the row already exists from cron sync.
+    // A held reschedule also stores the publish hold and the note so the
+    // following readback does not have to re-read Airtable.
+    const fields = record.fields || {};
+    const body = {
+      scheduled_post_date: fields.Scheduled_Post_Date || null,
+      studio_scheduled_at: fields.Studio_Scheduled_At || null,
+      youtube_scheduled_publish_at: fields.YouTube_Scheduled_Publish_At || null,
+      publish_status: selectName(fields.Publish_Status),
+      output_status: selectName(fields.Output_Status),
+      review_status: selectName(fields.Review_Status),
+    };
+    if (Object.prototype.hasOwnProperty.call(fields, "Do_Not_Publish")) {
+      body.do_not_publish = Boolean(fields.Do_Not_Publish);
+    }
+    const bagPatch = packOutputListFields(fields);
+    if (Object.keys(bagPatch).length) {
+      const existing = await supabaseRest(
+        env,
+        `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
+      ).catch(() => []);
+      body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch);
+    }
     await supabaseRest(
       env,
       `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
       {
         method: "PATCH",
-        body: {
-          scheduled_post_date: record.fields?.Scheduled_Post_Date || null,
-          studio_scheduled_at: record.fields?.Studio_Scheduled_At || null,
-          youtube_scheduled_publish_at: record.fields?.YouTube_Scheduled_Publish_At || null,
-          publish_status: selectName(record.fields?.Publish_Status),
-          output_status: selectName(record.fields?.Output_Status),
-          review_status: selectName(record.fields?.Review_Status),
-        },
+        body,
         headers: { Prefer: "return=minimal" },
       },
     );

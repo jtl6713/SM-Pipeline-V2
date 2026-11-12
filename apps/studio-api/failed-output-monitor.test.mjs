@@ -367,7 +367,8 @@ test("Meta 368 scheduling uses existing legacy MAE only when the global atomic a
   assert.match(section,/!scheduleReservationLaneEnabled\(env, reservationProfile\?\.id, platform\)/);
   assert.match(section,/requireComplete: true/);
   assert.match(section,/qualityFacebookRecoverySlot\(existing,/);
-  assert.match(section,/if \(holdReschedule\) \{[\s\S]*?const verified = await airtableFetch/);
+  assert.match(section,/if \(holdReschedule\) \{[\s\S]*?maeVerifiedScheduleRecord\(env, match\[1\]\)/);
+  assert.match(section,/await airtableFetch\(env, env.AIRTABLE_OUTPUT_TABLE_ID, match\[1\]\)/);
   assert.match(section,/actual !== chosen/);
   assert.match(section,/f\(verified,"Do_Not_Publish"\) !== true/);
   assert.match(section,/f\(verified,"Publish_Status"\)\|\|""\) !== "Failed"/);
