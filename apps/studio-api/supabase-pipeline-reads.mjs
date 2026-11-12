@@ -1515,6 +1515,263 @@ export async function listSupabaseOccupiedScheduleRows(env, { profileAirtableId,
   return rows.map((row) => maeScheduleFieldsFromSupabase(row, profileAirtableId));
 }
 
+export const CAROUSEL_SLIDE_COPY_FIELDS = Object.freeze([
+  "Current Order",
+  "Slide Number",
+  "Deleted From Carousel",
+  "IG_Child_Container_ID",
+  "IG_Child_Container_Status",
+  "Slide_Voiceover_Status",
+  "Slide_Voiceover_Text",
+  "Slide_Voiceover_URL",
+  "Slide_Voiceover_Duration_Seconds",
+  "Slide_Voice_ID",
+  "Slide_Voice_Name",
+  "Slide_Voice",
+  "Studio_Voice_Prep_Request_ID",
+  "Creative_Directives_JSON",
+  "Slide Name",
+  "Is Cover",
+  "Review Status",
+  "Asset_4x5_Public_URL",
+  "Asset_4x5_File_URL",
+  "Asset_9x16_Public_URL",
+  "Asset_9x16_File_URL",
+  "Asset_1x1_Public_URL",
+  "Asset_1x1_File_URL",
+  "Current Image URL",
+  "Final Image URL",
+  "Watermarked Image URL",
+  "AI Image URL",
+  "TikTok_9x16_Safe_Zone_Status",
+  "TikTok_9x16_Safe_Zone_Notes",
+]);
+
+export const PLAN_SCHEDULE_COPY_FIELDS = Object.freeze([
+  "Platform",
+  "Output_Type",
+  "Scheduled_At",
+  "Enabled",
+  "Brand",
+  "Production_Request",
+]);
+
+function recordLinkIds(value) {
+  const ids = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const id = String(item?.id || item || "").trim();
+    if (/^rec[A-Za-z0-9]{14}$/.test(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function checkboxOn(value) {
+  if (value === true || value === 1) return true;
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes";
+}
+
+function parseCreativeDirectives(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  const text = String(value || "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function mapAirtableCarouselSlideToSupabase(record) {
+  if (!record?.id) return null;
+  const fields = record.fields || {};
+  const order = Number(fields["Current Order"]);
+  const copied = {};
+  for (const key of CAROUSEL_SLIDE_COPY_FIELDS) {
+    if (fields[key] !== undefined) copied[key] = fields[key];
+  }
+  return {
+    airtable_record_id: record.id,
+    current_order: Number.isFinite(order) ? order : null,
+    deleted_from_carousel: checkboxOn(fields["Deleted From Carousel"]),
+    ig_child_container_id: String(fields.IG_Child_Container_ID || "").trim() || null,
+    voiceover: {
+      status: fields.Slide_Voiceover_Status ?? null,
+      text: fields.Slide_Voiceover_Text ?? null,
+      url: fields.Slide_Voiceover_URL ?? null,
+      duration_seconds: fields.Slide_Voiceover_Duration_Seconds ?? null,
+      voice_id: fields.Slide_Voice_ID ?? null,
+      voice_name: fields.Slide_Voice_Name ?? null,
+      voice: fields.Slide_Voice ?? null,
+      prep_request_id: fields.Studio_Voice_Prep_Request_ID ?? null,
+    },
+    creative_directives: parseCreativeDirectives(fields.Creative_Directives_JSON),
+    fields: copied,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function airtableShapedCarouselSlide(row) {
+  const fields = { ...(row?.fields || {}) };
+  if (row?.current_order != null) fields["Current Order"] = row.current_order;
+  fields["Deleted From Carousel"] = row?.deleted_from_carousel === true;
+  if (row?.ig_child_container_id) fields.IG_Child_Container_ID = row.ig_child_container_id;
+  const voice = row?.voiceover || {};
+  if (voice.status != null) fields.Slide_Voiceover_Status = voice.status;
+  if (voice.text != null) fields.Slide_Voiceover_Text = voice.text;
+  if (voice.url != null) fields.Slide_Voiceover_URL = voice.url;
+  if (voice.duration_seconds != null) fields.Slide_Voiceover_Duration_Seconds = voice.duration_seconds;
+  if (voice.voice_id != null) fields.Slide_Voice_ID = voice.voice_id;
+  if (voice.voice_name != null) fields.Slide_Voice_Name = voice.voice_name;
+  if (voice.voice != null) fields.Slide_Voice = voice.voice;
+  if (voice.prep_request_id != null) fields.Studio_Voice_Prep_Request_ID = voice.prep_request_id;
+  if (row?.creative_directives && Object.keys(row.creative_directives).length) {
+    fields.Creative_Directives_JSON = JSON.stringify(row.creative_directives);
+  }
+  return { id: row.airtable_record_id, fields };
+}
+
+export async function syncCarouselSlideRecordsToSupabase(env, records) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true, updated: 0 };
+  const rows = (records || []).map(mapAirtableCarouselSlideToSupabase).filter(Boolean);
+  for (let index = 0; index < rows.length; index += 40) {
+    await upsertChunk(env, "carousel_slides", rows.slice(index, index + 40));
+  }
+  return { ok: true, updated: rows.length };
+}
+
+export async function listSupabaseCarouselSlidesByIds(env, ids) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase carousel slide read is not configured");
+  const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  const select = "airtable_record_id,current_order,deleted_from_carousel,ig_child_container_id,voiceover,creative_directives,fields";
+  const rows = [];
+  for (let index = 0; index < wanted.length; index += 40) {
+    const chunk = wanted.slice(index, index + 40);
+    const page = await supabaseRest(
+      env,
+      `carousel_slides?airtable_record_id=in.(${chunk.map(encodeURIComponent).join(",")})&select=${select}&limit=40`,
+    );
+    rows.push(...(Array.isArray(page) ? page : []).filter((row) => row?.airtable_record_id));
+  }
+  return rows.map(airtableShapedCarouselSlide);
+}
+
+export function mapPlanScheduleRow(record, { partial = false } = {}) {
+  const fields = record?.fields || {};
+  if (!record?.id) return null;
+  const row = { airtable_record_id: record.id };
+  const present = (name) => !partial || Object.prototype.hasOwnProperty.call(fields, name);
+  if (present("Platform")) row.platform = String(fields.Platform || "").trim() || null;
+  if (present("Output_Type")) row.output_type = String(fields.Output_Type || "").trim() || null;
+  if (present("Scheduled_At")) {
+    const ms = Date.parse(String(fields.Scheduled_At || ""));
+    row.scheduled_at = Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  if (present("Enabled")) row.enabled = checkboxOn(fields.Enabled);
+  if (present("Brand")) {
+    const brands = recordLinkIds(fields.Brand);
+    row.brand_airtable_id = brands[0] || null;
+    row.brand_airtable_ids = brands;
+  }
+  if (present("Production_Request")) {
+    const requests = recordLinkIds(fields.Production_Request);
+    row.production_request_airtable_id = requests[0] || null;
+    row.production_request_airtable_ids = requests;
+  }
+  if (Object.keys(row).length < 2) return null;
+  return row;
+}
+
+export function airtableShapedPlanScheduleRow(row) {
+  const requests = Array.isArray(row?.production_request_airtable_ids) ? row.production_request_airtable_ids : [];
+  const brands = Array.isArray(row?.brand_airtable_ids) ? row.brand_airtable_ids : [];
+  return {
+    id: row.airtable_record_id,
+    fields: {
+      Platform: row.platform || "",
+      Output_Type: row.output_type || "",
+      Scheduled_At: row.scheduled_at || "",
+      Enabled: row.enabled === true,
+      Brand: brands.length ? brands : (row.brand_airtable_id ? [row.brand_airtable_id] : []),
+      Production_Request: requests.length ? requests : (row.production_request_airtable_id ? [row.production_request_airtable_id] : []),
+    },
+  };
+}
+
+export async function syncPlanScheduleRowsToSupabase(env, records, options = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true, updated: 0 };
+  const rows = (records || []).map((record) => mapPlanScheduleRow(record, options)).filter(Boolean);
+  const size = options.partial === true ? 1 : 40;
+  for (let index = 0; index < rows.length; index += size) {
+    await upsertChunk(env, "production_request_outputs", rows.slice(index, index + size));
+  }
+  return { ok: true, updated: rows.length };
+}
+
+export async function listSupabasePlanScheduleRows(env, { brandAirtableId = "", startIso, endIso } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase plan occupancy read is not configured");
+  const start = encodeURIComponent(startIso);
+  const end = encodeURIComponent(endIso);
+  const brand = /^rec[A-Za-z0-9]{14}$/.test(String(brandAirtableId || ""))
+    ? `&brand_airtable_ids=cs.${encodeURIComponent(JSON.stringify([brandAirtableId]))}`
+    : "";
+  const select = "airtable_record_id,platform,output_type,scheduled_at,enabled,brand_airtable_id,brand_airtable_ids,production_request_airtable_id,production_request_airtable_ids";
+  const rows = [];
+  const pageSize = 500;
+  for (let offset = 0; offset < 6000; offset += pageSize) {
+    const page = await supabaseRest(
+      env,
+      `production_request_outputs?enabled=eq.true&scheduled_at=gte.${start}&scheduled_at=lt.${end}${brand}&select=${select}&order=scheduled_at.asc.nullslast&limit=${pageSize}&offset=${offset}`,
+    );
+    const batch = Array.isArray(page) ? page : [];
+    if (!batch.length) break;
+    rows.push(...batch.filter((row) => row?.airtable_record_id));
+    if (rows.length > 6000) throw new Error("Supabase plan occupancy scan exceeded safety ceiling");
+    if (batch.length < pageSize) break;
+  }
+  return rows.map(airtableShapedPlanScheduleRow);
+}
+
+async function syncAirtableCatalog(env, deps, table, fields, onRecords, maxPages) {
+  const listRecordsPage = deps.listRecordsPage;
+  if (typeof listRecordsPage !== "function") {
+    return { skipped: true, reason: "listRecordsPage_missing", ok: true, updated: 0 };
+  }
+  let offset = null;
+  let updated = 0;
+  let pages = 0;
+  while (pages < maxPages) {
+    await deps.assertLease?.();
+    const page = await listRecordsPage(env, table, { limit: 100, offset, fields: [...fields] });
+    if (!page?.valid) throw new Error(`${table} catalog page was not valid`);
+    const records = page.records || [];
+    if (records.length) updated += await onRecords(records);
+    pages += 1;
+    offset = page.offset || null;
+    if (!offset || !records.length) return { ok: true, updated, pages, done: true };
+  }
+  console.warn("Supabase catalog copy stopped at the page cap", table, maxPages);
+  return { ok: true, updated, pages, done: false };
+}
+
+export async function syncCarouselSlideCatalogToSupabase(env, deps = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
+  const result = await syncAirtableCatalog(env, deps, "Carousel Slides", CAROUSEL_SLIDE_COPY_FIELDS, async (records) => {
+    const saved = await syncCarouselSlideRecordsToSupabase(env, records);
+    return saved.updated || 0;
+  }, 80);
+  return result;
+}
+
+export async function syncPlanScheduleCatalogToSupabase(env, deps = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
+  return syncAirtableCatalog(env, deps, "Production Request Outputs", PLAN_SCHEDULE_COPY_FIELDS, async (records) => {
+    const saved = await syncPlanScheduleRowsToSupabase(env, records);
+    return saved.updated || 0;
+  }, 120);
+}
+
 function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
@@ -3074,6 +3331,15 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
   } else {
     authTables = { skipped: true, reason: "supabase_circuit_open" };
   }
+  let carouselSlides = null;
+  let planSchedules = null;
+  if (!abortedForCircuit && !supabaseCircuitOpen()) {
+    carouselSlides = await runPhaseBackfill("carousel_slides", () => syncCarouselSlideCatalogToSupabase(env, deps));
+    planSchedules = await runPhaseBackfill("plan_schedules", () => syncPlanScheduleCatalogToSupabase(env, deps));
+  } else {
+    carouselSlides = { skipped: true, reason: "supabase_circuit_open" };
+    planSchedules = { skipped: true, reason: "supabase_circuit_open" };
+  }
   const phaseOk = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
     && phaseOk(requests) && phaseOk(media) && phaseOk(queue) && phaseOk(runnerMarkers)
@@ -3088,6 +3354,8 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     studio_media_transfer_queue: queue,
     runner_record_projections: runnerMarkers,
     auth_tables: authTables,
+    carousel_slides: carouselSlides,
+    plan_schedules: planSchedules,
   };
 }
 

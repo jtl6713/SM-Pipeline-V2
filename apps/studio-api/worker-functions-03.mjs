@@ -19,6 +19,7 @@ import {
 } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
+import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
@@ -1994,6 +1995,7 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
         markerScanLimit: options.markerScanLimit,
         skipMediaAssetsBackfill: options.skipMediaAssetsBackfill === true,
         skipTransferQueueBackfill: options.skipTransferQueueBackfill === true,
+        listRecordsPage,
         listOpenOutputs: async (profile) => {
           const pack = await loadOpenPipelineOutputPack(env, profile);
           return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);
@@ -6814,7 +6816,7 @@ export async function phase6SlidesForOutput(env, outputRecord, preferredVoice = 
   if (!ids.length) {
     slides = phase6VirtualSlidesFromSelectedAssets(outputRecord, narration);
   } else {
-    const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
+    const records = await studioReadCarouselSlides(env, ids, airtableFetch, PHASE6_CAROUSEL_SLIDES_TABLE);
     const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
     const platform = String(f(outputRecord, "Platform") || "").trim();
     const defaultVoiceoverVolume = phase6ResolvedVoiceoverVolume(outputRecord);

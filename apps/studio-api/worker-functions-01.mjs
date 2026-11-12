@@ -30,12 +30,14 @@ import {
   listSupabaseOccupiedScheduleRows,
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
+  syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import { loadAuthorizationFromSupabase } from "./supabase-auth-mirror.mjs";
+import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
@@ -4525,6 +4527,16 @@ export function mapProductionRequestOutput(record, master = null, renderFormat =
 }
 /*__STUDIO_WORKER_END:mapProductionRequestOutput__*/
 
+async function studioMirrorPlanScheduleRows(env, records) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) return;
+  if (!Array.isArray(records) || !records.length) return;
+  try {
+    await syncPlanScheduleRowsToSupabase(env, records, { partial: true });
+  } catch (error) {
+    console.warn("plan schedule Supabase mirror failed", error);
+  }
+}
+
 export async function outputRowsForProductionRequest(env, productionRequestId, options = {}) {
   const includeInactive = Boolean(options.includeInactive);
   const requestId = String(productionRequestId || "").trim();
@@ -4817,9 +4829,11 @@ export async function syncProductionRequestOutputs(request, env, url, authorizat
 
   if (patchRows.length) {
     await airtableBatchUpdate(env, PRODUCTION_REQUEST_OUTPUT_TABLE, patchRows, { typecast: false });
+    await studioMirrorPlanScheduleRows(env, patchRows);
   }
   if (createFields.length) {
     const createdRows = await airtableBatchCreate(env, PRODUCTION_REQUEST_OUTPUT_TABLE, createFields, { typecast: false });
+    await studioMirrorPlanScheduleRows(env, createdRows);
     for (const created of createdRows) {
       if (!created?.id) continue;
       byKey.set(rowKey(created), created);
@@ -9116,9 +9130,11 @@ export async function item4SyncPlanOutputs(env, requestRecord, items, { schedule
   }
   if (patchRows.length) {
     await airtableBatchUpdate(env, PRODUCTION_REQUEST_OUTPUT_TABLE, patchRows, { typecast: false });
+    await studioMirrorPlanScheduleRows(env, patchRows);
   }
   if (createFields.length) {
     const createdRows = await airtableBatchCreate(env, PRODUCTION_REQUEST_OUTPUT_TABLE, createFields, { typecast: false });
+    await studioMirrorPlanScheduleRows(env, createdRows);
     for (const created of createdRows) {
       if (created?.id) byKey.set(rowKey(created), created);
     }
@@ -13304,7 +13320,7 @@ export async function studioHealIgCarouselChildVerificationRace(env, options = {
     const linked = arrayOrEmpty(f(row, "Carousel Slides"));
     let slides = [];
     try {
-      slides = await Promise.all(linked.map((id) => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
+      slides = await studioReadCarouselSlides(env, linked, airtableFetch, PHASE6_CAROUSEL_SLIDES_TABLE);
     } catch (error) {
       pulses.push({
         key: "IG_AP1C_VERIFY_RACE",
