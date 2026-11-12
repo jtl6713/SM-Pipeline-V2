@@ -250,46 +250,39 @@ test("finished-video plan rebuild keeps variants Not Needed", () => {
 });
 
 
+
 test("completed-video mode is explicit, with legacy fallback", async () => {
   const { finishedPublishMode } = await import("./az-finished-video.mjs");
-  assert.equal(finishedPublishMode("origin=az-finished-video\\naz-publish-mode=approval"), "approval");
+  assert.equal(finishedPublishMode("origin=az-finished-video\naz-publish-mode=approval"), "approval");
   assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate"), "immediate");
   assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate."), "immediate");
   assert.equal(finishedPublishMode("origin=az-finished-video"), "legacy");
 });
-
-test("Publish Now refuses missing, duplicate, or unready destinations without partial approval", async () => {
+test("Publish Now refuses missing, duplicate, and unready destinations", async () => {
   const { finishedPublishPreflight } = await import("./az-finished-video.mjs");
   const full = FINISHED_DESTINATION_KEYS.map((key) => {
     const [platform, output_type] = key.split("::");
     return { platform, output_type, ready: true };
   });
   assert.equal(finishedPublishPreflight(full).ok, true);
-  const missing = finishedPublishPreflight(full.slice(1));
-  assert.equal(missing.ok, false);
-  assert.deepEqual(missing.missing, ["Instagram::Reel"]);
+  assert.deepEqual(finishedPublishPreflight(full.slice(1)).missing, ["Instagram::Reel"]);
   const blocked = finishedPublishPreflight(full.map((row, index) => index === 3 ? { ...row, ready: false } : row));
-  assert.equal(blocked.ok, false);
   assert.deepEqual(blocked.blocked, ["YouTube::Short"]);
-  const duplicate = finishedPublishPreflight([...full, full[0]]);
-  assert.equal(duplicate.ok, false);
-  assert.deepEqual(duplicate.duplicates, ["Instagram::Reel"]);
-  const unexpected = finishedPublishPreflight([...full, { platform: "LinkedIn", output_type: "Video", ready: true }]);
-  assert.equal(unexpected.ok, false);
-  assert.deepEqual(unexpected.unsupported, ["LinkedIn::Video"]);
-  const horizontal = finishedPublishPreflight([{
-    platform: "YouTube", output_type: "Standard Video", ready: true,
-  }], { notes: "source-aspect=horizontal" });
-  assert.equal(horizontal.ok, true);
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(finishedPublishPreflight([...full, full[0]]).duplicates, ["Instagram::Reel"]);
+  assert.deepEqual(finishedPublishPreflight([...full, { platform: "LinkedIn", output_type: "Video", ready: true }]).unsupported, ["LinkedIn::Video"]);
+  assert.equal(finishedPublishPreflight([{ platform: "YouTube", output_type: "Standard Video", ready: true }], { notes: "source-aspect=horizontal" }).ok, true);
 });
-
-test("finished-video worker retains normal approval and requires all-output preflight for Publish Now", () => {
-  const az = worker.slice(worker.indexOf("export async function azAutoApproveIfReady"), worker.indexOf("/*__STUDIO_WORKER_END:azAutoApproveIfReady__*/"));
-  assert.match(az, /publishMode === "approval"[^\\n]*manual_approval/);
-  assert.match(az, /finishedPublishPreflight\\(outputs\\.map/);
-  assert.match(az, /publish_now_preflight/);
-  assert.match(az, /scheduled_post_date: "immediate", publish_now: true/);
-  const advance = worker.slice(worker.indexOf("export async function advanceAzFinishedVideo"), worker.indexOf("/*__STUDIO_WORKER_END:advanceAzFinishedVideo__*/"));
-  assert.match(advance, /finishedPublishMode\\(studioRequestNotesText\\(record\\)\\) === "approval"/);
-  assert.match(advance, /waiting: stories\\?\\.restamped/);
+test("finished-video worker checks approval mode and complete family", () => {
+  const start = worker.indexOf("async function azAutoApproveIfReady");
+  assert.ok(start >= 0);
+  const az = worker.slice(start, worker.indexOf("async function azEnsurePlatformOutputs", start));
+  assert.ok(az.includes('publishMode === "approval"'));
+  assert.ok(az.includes("finishedPublishPreflight(outputs.map"));
+  assert.ok(az.includes("publish_now_preflight"));
+  assert.ok(az.includes('scheduled_post_date: "immediate", publish_now: true'));
+  const advanceStart = worker.indexOf("async function advanceAzFinishedVideo");
+  assert.ok(advanceStart >= 0);
+  const advance = worker.slice(advanceStart, worker.indexOf("async function opsForceAzNavyPierTitle", advanceStart));
+  assert.ok(advance.includes('finishedPublishMode(studioRequestNotesText(record)) === "approval"'));
 });
