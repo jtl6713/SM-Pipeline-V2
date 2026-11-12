@@ -1930,6 +1930,18 @@ export async function writeStudioSupabaseSyncLast(env, payload) {
 export async function studioSyncSupabasePipelineReads(env, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
+  // Frozen archive: do not read Airtable to refresh Supabase. The previous
+  // completed sync record stays. Roll back by setting STUDIO_WRITE_SOURCE=airtable.
+  if (studioWriteSource(env) === "supabase") {
+    return {
+      skipped: true,
+      ok: true,
+      reason: "airtable_archived",
+      airtable_archive: "frozen",
+      half_hour_airtable_copy: "stopped",
+      legacy_export: "stopped",
+    };
+  }
   // Both manual and cron sync share this R2 conditional-write lease. Fail
   // closed if binding or CAS is unavailable; never silently run unlocked.
   return withPhase5SyncLease(env.STUDIO_MEDIA, async ({ assertOwned }) => {
@@ -2061,6 +2073,9 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
     assets_read_routes: STUDIO_SUPABASE_ASSETS_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
+    airtable_archive: studioWriteSource(env) === "supabase" ? "frozen" : "writable",
+    legacy_export: studioWriteSource(env) === "supabase" ? "stopped" : "airtable_first",
+    half_hour_airtable_copy: studioWriteSource(env) === "supabase" ? "stopped" : "running",
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
     phase6_writes: studioPhase6WritesMode(env),
@@ -2153,6 +2168,9 @@ export async function postStudioSupabaseSync(request, env) {
     music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
     assets_read_routes: STUDIO_SUPABASE_ASSETS_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
+    airtable_archive: studioWriteSource(env) === "supabase" ? "frozen" : "writable",
+    legacy_export: studioWriteSource(env) === "supabase" ? "stopped" : "airtable_first",
+    half_hour_airtable_copy: studioWriteSource(env) === "supabase" ? "stopped" : "running",
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
     phase6_writes: studioPhase6WritesMode(env),

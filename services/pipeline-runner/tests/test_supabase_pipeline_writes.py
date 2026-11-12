@@ -408,25 +408,22 @@ def test_output_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
     assert posts[0][2][0]["platform"] == "TikTok"
 
 
-def test_output_create_adopts_airtable_id_when_export_succeeds(monkeypatch):
+def test_output_create_keeps_minted_id_when_airtable_is_archived(monkeypatch):
     seen = []
     monkeypatch.setattr(
         requests, "post",
-        lambda url, *, headers, json, timeout: Response({
-            "records": [{"id": "recAirtableOutput1", "fields": {"Platform": "TikTok"}}],
-        }),
+        lambda url, *, headers, json, timeout: (_ for _ in ()).throw(AssertionError("airtable export")),
     )
     monkeypatch.setattr(requests, "request", _supabase_request_log(seen))
     rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
         PLATFORM_OUTPUTS_TABLE, [{"Platform": "TikTok"}],
     )
-    assert rows[0]["id"] == "recAirtableOutput1"
-    assert any(row[0] == "DELETE" and "platform_outputs" in row[1] for row in seen)
-    real = [
-        row for row in seen
-        if row[0] == "POST" and "platform_outputs" in row[1] and row[2][0]["airtable_record_id"] == "recAirtableOutput1"
-    ]
-    assert real
+    assert rows[0]["id"].startswith("rec")
+    assert len(rows[0]["id"]) == 17
+    assert rows[0]["fields"]["Platform"] == "TikTok"
+    assert not any(row[0] == "DELETE" for row in seen)
+    posts = [row for row in seen if row[0] == "POST" and "platform_outputs" in row[1]]
+    assert posts[0][2][0]["airtable_record_id"] == rows[0]["id"]
 
 
 def test_request_create_still_requires_airtable(monkeypatch):

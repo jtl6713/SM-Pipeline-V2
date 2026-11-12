@@ -283,7 +283,7 @@ jobs:
           health_write = health.get("studio_write_source")
           write_pair_ok = (
               (phase5_mode == "airtable_sor_write_through" and runner_write == "airtable")
-              or (phase5_mode == "supabase_sor_legacy_export" and runner_write == "supabase")
+              or (phase5_mode in ("supabase_sor_legacy_export", "supabase_sor_airtable_archived") and runner_write == "supabase")
           )
           check(
               "phase5_writes matches runner studio_write_source",
