@@ -18,6 +18,7 @@ import {
 } from "./scripted-short-producer-plan.mjs";
 import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
 import { scriptedShortSceneDirections, scriptedShortDirectedScenes, scriptedShortApplySceneDirections } from "./scripted-short-scene-directions.mjs";
+import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -32,6 +33,7 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  listSupabasePlanScheduleRows,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -5481,12 +5483,7 @@ export async function item4ListParentCarouselSlides(env, parentId) {
     const rows = [];
     for (let i = 0; i < linkedIds.length; i += 40) {
       const chunk = linkedIds.slice(i, i + 40);
-      const orFind = chunk.map((id) => `RECORD_ID()="${id}"`).join(",");
-      const page = await listRecords(env, "Carousel Slides", {
-        limit: Math.min(100, chunk.length),
-        filterFormula: `OR(${orFind})`,
-      });
-      rows.push(...page);
+      rows.push(...await studioReadCarouselSlides(env, chunk, airtableFetch, "Carousel Slides"));
     }
     return rows.filter((row) => !Boolean(f(row, "Deleted From Carousel")));
   } catch (error) {
@@ -7543,6 +7540,30 @@ export function studioDestinationScheduleStamp(current, key, stamps, _overrides)
 
 export async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "", profile = null } = {}) {
   const occupied = await studioOccupiedSchedulesOrEmpty(env, { profile });
+  const absorb = (rows) => {
+    for (const row of rows || []) {
+      const requestIds = arrayOrEmpty(f(row, "Production_Request")).map((id) => String(id || "").trim());
+      if (excludeRequestId && requestIds.includes(excludeRequestId)) continue;
+      const brandId = studioFirstLinkedId(f(profile, "Brand"));
+      if (brandId && !studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) continue;
+      const outputType = String(f(row, "Output_Type") || "").trim();
+      const platform = String(f(row, "Platform") || "").trim();
+      const ms = studioScheduleMs(f(row, "Scheduled_At"));
+      if (!platform || ms == null) continue;
+      const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
+      (occupied[lane] ||= []).push(ms);
+    }
+  };
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const now = Date.now();
+    const rows = await listSupabasePlanScheduleRows(env, {
+      brandAirtableId: studioFirstLinkedId(f(profile, "Brand")),
+      startIso: new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS).toISOString(),
+      endIso: new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString(),
+    });
+    absorb(rows);
+    return occupied;
+  }
   try {
     const now = Date.now();
     const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS).toISOString());
@@ -7567,17 +7588,7 @@ export async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = 
       filterFormula: `AND({Enabled}=1,{Scheduled_At}!="",IS_AFTER({Scheduled_At},DATETIME_PARSE("${lookback}")),IS_BEFORE({Scheduled_At},DATETIME_PARSE("${horizon}"))${brandClause})`,
       fields: ["Platform", "Output_Type", "Scheduled_At", "Production_Request", "Brand"],
     });
-    for (const row of rows || []) {
-      const requestIds = arrayOrEmpty(f(row, "Production_Request")).map((id) => String(id || "").trim());
-      if (excludeRequestId && requestIds.includes(excludeRequestId)) continue;
-      if (brandId && !studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) continue;
-      const outputType = String(f(row, "Output_Type") || "").trim();
-      const platform = String(f(row, "Platform") || "").trim();
-      const ms = studioScheduleMs(f(row, "Scheduled_At"));
-      if (!platform || ms == null) continue;
-      const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
-      (occupied[lane] ||= []).push(ms);
-    }
+    absorb(rows);
   } catch (error) {
     console.warn("pending plan schedule occupancy read failed", error);
   }

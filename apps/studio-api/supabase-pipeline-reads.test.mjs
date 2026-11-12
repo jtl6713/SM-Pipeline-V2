@@ -41,6 +41,10 @@ import {
   readSupabaseMaeOutput,
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
+  mapAirtableCarouselSlideToSupabase,
+  airtableShapedCarouselSlide,
+  mapPlanScheduleRow,
+  listSupabasePlanScheduleRows,
   parseAirtableCreateFields,
   mintAirtableRecordId,
   studioPhase6WriteSource,
@@ -815,7 +819,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.834-ig-stale-reads/);
+  assert.match(worker, /0\.10\.835-carousel-plan-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -919,7 +923,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.834-ig-stale-reads/);
+  assert.match(worker, /0\.10\.835-carousel-plan-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1132,6 +1136,7 @@ test("desk heal candidate lists read Supabase and keep the note bag", async () =
       worker.indexOf("async function studioHealIgCarouselChildPollFailure"),
     );
     assert.ok(verify.length > 0);
+    assert.match(verify, /studioReadCarouselSlides/);
     assert.match(verify, /PHASE6_CAROUSEL_SLIDES_TABLE/);
     const stale = worker.slice(
       worker.indexOf("async function studioHealAwaitingApprovalStaleRfr"),
@@ -2598,8 +2603,78 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.834-ig-stale-reads/);
+  assert.match(worker, /0\.10\.835-carousel-plan-reads/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
+});
+
+test("carousel slides and plan schedules map and read Supabase", async () => {
+  const slide = mapAirtableCarouselSlideToSupabase({
+    id: "rec12345678901234",
+    fields: {
+      "Current Order": 2,
+      "Deleted From Carousel": false,
+      IG_Child_Container_ID: "child-1",
+      Slide_Voiceover_Text: "hello",
+      Creative_Directives_JSON: JSON.stringify({ include: true, overlay: { text: "gold" } }),
+      "Final Image URL": "https://example.test/slide.jpg",
+    },
+  });
+  assert.equal(slide.current_order, 2);
+  assert.equal(slide.deleted_from_carousel, false);
+  assert.equal(slide.ig_child_container_id, "child-1");
+  assert.equal(slide.voiceover.text, "hello");
+  assert.equal(slide.creative_directives.overlay.text, "gold");
+  const shaped = airtableShapedCarouselSlide(slide);
+  assert.equal(shaped.fields["Final Image URL"], "https://example.test/slide.jpg");
+  assert.equal(shaped.fields.IG_Child_Container_ID, "child-1");
+  const plan = mapPlanScheduleRow({
+    id: "recPlanOutput0001",
+    fields: {
+      Platform: "Instagram",
+      Output_Type: "Reel",
+      Scheduled_At: "2026-11-20T15:30:00.000Z",
+      Enabled: true,
+      Brand: ["recBrand000000001"],
+      Production_Request: ["recRequest0000001"],
+    },
+  });
+  assert.equal(plan.enabled, true);
+  assert.equal(plan.brand_airtable_id, "recBrand000000001");
+  assert.deepEqual(plan.production_request_airtable_ids, ["recRequest0000001"]);
+  const partial = mapPlanScheduleRow({
+    id: "recPlanOutput0001",
+    fields: { Scheduled_At: "2026-11-21T15:30:00.000Z" },
+  }, { partial: true });
+  assert.equal(partial.scheduled_at, "2026-11-21T15:30:00.000Z");
+  assert.equal("enabled" in partial, false);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /production_request_outputs\?enabled=eq\.true/);
+    assert.match(String(url), /brand_airtable_ids=cs\./);
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const rows = await listSupabasePlanScheduleRows({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "secret",
+    }, {
+      brandAirtableId: "recBrand000000001",
+      startIso: "2026-11-12T00:00:00.000Z",
+      endIso: "2026-12-12T00:00:00.000Z",
+    });
+    assert.deepEqual(rows, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const planSource = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const occupancy = planSource.slice(
+    planSource.indexOf("export async function studioLoadPlanScheduleOccupancy"),
+    planSource.indexOf("export function studioInsightsObservationsTable"),
+  );
+  assert.match(occupancy, /listSupabasePlanScheduleRows/);
+  assert.match(occupancy, /pending plan schedule occupancy read failed/);
+  const build = await readFile(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  assert.match(build, /studioReadCarouselSlides\(env, ids, airtableFetch, PHASE6_CAROUSEL_SLIDES_TABLE\)/);
 });
