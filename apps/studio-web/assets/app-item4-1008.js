@@ -9881,7 +9881,7 @@ function timedScriptAssetLabel(asset, index) {
       primaryLocationUserEdited = true;
     }
     const notes = String($("azFinishedNotes")?.value || "")
-      .replace(/(?:^|\\n)\\s*az-publish-mode=(?:approval|immediate)[^\\n]*/gi, "").trim();
+      .replace(/(?:^|\n)\s*az-publish-mode=(?:approval|immediate)[^\n]*/gi, "").trim();
     // Persist the operator decision on the canonical Production Request before upload.
     // The Worker uses it to bypass MAE only for an explicitly confirmed all-output send.
     const modeNotes = [notes, `az-publish-mode=${azFinishedPublishMode()}`].filter(Boolean).join("\n\n");
