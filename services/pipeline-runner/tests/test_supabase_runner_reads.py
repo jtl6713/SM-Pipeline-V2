@@ -124,7 +124,7 @@ def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
     client = _client(studio_runner_output_read_source="supabase")
     find_rows = client.list_records(
         PLATFORM_OUTPUTS_TABLE,
-        formula='OR({Platform}="TikTok",{Platform}="Instagram")',
+        formula='IS_BEFORE({Publish_Next_Retry_At},NOW())',
         max_records=2,
     )
     view_rows = client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
@@ -160,6 +160,31 @@ def test_produce_content_number_find_reads_supabase(monkeypatch):
     assert rows[0]["id"] == "recOutput102"
     assert "content_items.content_number=eq.102" in seen[0]
     assert "and=" not in seen[0]
+
+
+def test_or_formula_reads_supabase(monkeypatch):
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        return Response([{
+            "airtable_record_id": "recOutputOr",
+            "platform": "TikTok",
+            "error_messages": {"_runner_record_projection": "v1"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    rows = _client(studio_runner_output_read_source="supabase").list_records(
+        PLATFORM_OUTPUTS_TABLE,
+        formula='OR({Platform}="TikTok",{Platform}="Instagram")',
+        max_records=5,
+    )
+    assert rows[0]["id"] == "recOutputOr"
+    assert "or(platform.eq.TikTok,platform.eq.Instagram)" in seen[0]
 
 
 def test_r4_style_formula_reads_supabase(monkeypatch):
