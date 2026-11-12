@@ -451,7 +451,8 @@ test("supabase write source lists stale reel candidates without an Airtable form
     assert.equal(results.length, 1);
     assert.equal(results[0].outcome, "stale_lock_needs_eyes");
     assert.equal(paths.some((path) => path.startsWith("?")), false);
-    assert.equal(paths.includes("rec12345678901234"), true);
+    assert.equal(paths.includes("rec12345678901234"), false);
+    assert.match(urls.join("\n"), /airtable_record_id=eq.rec12345678901234/);
     assert.match(urls[0], /Publish_Locked_By\.eq\.AP1-IG/);
   } finally {
     globalThis.fetch = previous;

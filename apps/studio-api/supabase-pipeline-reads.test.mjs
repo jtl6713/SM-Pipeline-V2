@@ -48,6 +48,7 @@ import {
   mapRenderHealColumns,
   creativeMasterExtraValue,
   deskHealOutputFilter,
+  supabaseOutputMatchesHomeFailure,
   parseAirtableCreateFields,
   mintAirtableRecordId,
   studioPhase6WriteSource,
@@ -822,7 +823,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.836-render-master-reads/);
+  assert.match(worker, /0\.10\.837-read-batch/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -926,7 +927,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.836-render-master-reads/);
+  assert.match(worker, /0\.10\.837-read-batch/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2606,7 +2607,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.836-render-master-reads/);
+  assert.match(worker, /0\.10\.837-read-batch/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2715,7 +2716,20 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(heals, /studioListDeskHealOutputs\(env, "render_queue"/);
   assert.match(heals, /studioScanDeskHealOutputs\(\s*env,\s*"render_failed"/);
   assert.match(heals, /studioLastModifiedStaleFormula\(15\)/);
+  assert.match(heals, /studioListDeskHealOutputs\(env, "render_long"/);
+  assert.match(heals, /studioReadCarouselSlides\(env, linked, airtableFetch, PHASE6_CAROUSEL_SLIDES_TABLE\)/);
+  const admission = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  assert.match(admission, /listSupabaseDeskHealOutputs\(env, \{ kind: "render_queue"/);
+  assert.match(admission, /kind: "render_active"/);
   const factory = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(factory, /readSupabaseCreativeMasterContent\(env, contentId\)/);
   assert.match(factory, /studioAdoptCreativeMasterReviewMediaOnly/);
+  assert.match(factory, /listSupabaseOutputCensusPage\(env, options\)/);
+  const stale = await readFile(new URL("./qa-ig-stale-upload.mjs", import.meta.url), "utf8");
+  assert.match(stale, /readSupabaseShapedOutput\(env, id\)/);
+  assert.match(stale, /readSupabaseQualityRecoveryEvent\(env, id\)/);
+  assert.match(stale, /observed\.id\)/);
+  assert.match(deskHealOutputFilter("render_long"), /updated_at=lt\./);
+  assert.equal(supabaseOutputMatchesHomeFailure({ Render_Status: "Failed" }), true);
+  assert.equal(supabaseOutputMatchesHomeFailure({ Output_Status: "Ready for Review" }), false);
 });

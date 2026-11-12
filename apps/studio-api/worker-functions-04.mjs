@@ -107,6 +107,7 @@ import {
   studioSupabaseConfigured,
   readSupabaseMaeOutput,
   readSupabaseCreativeMasterContent,
+  listSupabaseOutputCensusPage,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -9653,9 +9654,13 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
     const scanAtMs = Date.now();
+    const pageOutputs = (options) => (
+      studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+        ? listSupabaseOutputCensusPage(env, options)
+        : listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)
+    );
     const [rows, profiles, recoveredScan, overdueScan] = await Promise.all([
-      scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+      scanOutstandingFailedOutputs(pageOutputs,
         { filterFormula: QA_HOME_FAILED_CANDIDATE_FORMULA, requireUnique: true }),
       listContentProfileRecords(env).catch(() => []),
       // Independent, persistent events survive overwritten dispatch notes.
@@ -9665,8 +9670,7 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
-      scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+      scanOutstandingFailedOutputs(pageOutputs,
         { filterFormula: qaHomePastDueCandidateFormula(scanAtMs), requireUnique: true })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [],
@@ -10696,10 +10700,13 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     // comparison stays unavailable instead of claiming the wrong cache.
     const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
-    const all=await scanOutstandingFailedOutputs((options)=>
-      listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
-        ...options,fields:EXCEPTION_CENSUS_FIELDS,
-      }),{
+    const all=await scanOutstandingFailedOutputs((options)=>(
+      (studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env))
+        ? listSupabaseOutputCensusPage(env, options)
+        : listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
+          ...options,fields:EXCEPTION_CENSUS_FIELDS,
+        })
+    ),{
         filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
     // A source-canonical census must not launch a second expensive QA scan.
