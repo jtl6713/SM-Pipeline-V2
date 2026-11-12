@@ -25,7 +25,7 @@ Approve, schedule, publish-status, and heal paths that pass `skipSupabaseWriteTh
 
 `/api/health` includes `studio_supabase_phase5_writes_v1: true`, `studio_write_source`, and `studio_phase5_writes`.
 
-`GET /api/ops/supabase/sync` includes `phase5_writes` (`airtable_sor_write_through` or `supabase_sor_legacy_export`) and `phase5_write_tables`.
+`GET /api/ops/supabase/sync` includes `phase5_writes` (`airtable_sor_write_through` or `supabase_sor_legacy_export`) and `phase5_write_tables`. Gate [43144632688](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/43144632688) showed `phase5_writes=supabase_sor_legacy_export` and runner `studio_write_source=supabase`.
 
 ## Second half — pipeline runner
 
@@ -33,7 +33,7 @@ The pipeline runner is the other writer. `AirtableClient` create, update, and at
 
 Setting `STUDIO_WRITE_SOURCE=supabase` makes Output/Content updates commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids.
 
-Runner `2026-11-10-supabase-runner-formula-fallbacks` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Enable the read flags with `deploy/enable-runner-supabase-reads.txt`. Worker `0.10.800-supabase-phase5-runner-marker-backfill` densifies full-record markers during half-hour sync. Allowlisted formulas (equality, `BLANK()`, `!=""`, numeric `>`, `RECORD_ID()`, nested `AND`, `NOT({checkbox})`) translate to PostgREST filters on typed columns or densified jsonb extras. Views, `FIND`/`ARRAYJOIN`/`OR`, an unmapped sort, an unmapped requested field, a missing/unmarked page, and a Supabase error stay on Airtable. Phase 7 is not started.
+Runner `2026-11-11-supabase-phase6-transfer-targets` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. That behavior shipped in `2026-11-10-supabase-runner-formula-fallbacks` and is still the formula rule. Enable the read flags with `deploy/enable-runner-supabase-reads.txt`. Worker `0.10.800-supabase-phase5-runner-marker-backfill` densifies full-record markers during half-hour sync. Allowlisted formulas (equality, `BLANK()`, `!=""`, numeric `>`, `RECORD_ID()`, nested `AND`, `NOT({checkbox})`) translate to PostgREST filters on typed columns or densified jsonb extras. Views, `FIND`/`ARRAYJOIN`/`OR`, an unmapped sort, an unmapped requested field, a missing/unmarked page, and a Supabase error stay on Airtable. Phase 7 is not started.
 
 Worker `0.10.801-supabase-phase5-write-sor` honors `STUDIO_WRITE_SOURCE` the same way. Enable both services together with `deploy/enable-studio-write-sor.txt`: that workflow waits for the live Worker build, puts the Worker secret, sets the runner `.env`, restarts the runner, and verifies `/health`.
 
