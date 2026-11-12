@@ -248,3 +248,48 @@ test("finished-video plan rebuild keeps variants Not Needed", () => {
   );
   assert.match(plan, /Studio_Variant_Status:finishedVideo\?"Not Needed":"None"/);
 });
+
+
+test("completed-video mode is explicit, with legacy fallback", async () => {
+  const { finishedPublishMode } = await import("./az-finished-video.mjs");
+  assert.equal(finishedPublishMode("origin=az-finished-video\\naz-publish-mode=approval"), "approval");
+  assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate"), "immediate");
+  assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate."), "immediate");
+  assert.equal(finishedPublishMode("origin=az-finished-video"), "legacy");
+});
+
+test("Publish Now refuses missing, duplicate, or unready destinations without partial approval", async () => {
+  const { finishedPublishPreflight } = await import("./az-finished-video.mjs");
+  const full = FINISHED_DESTINATION_KEYS.map((key) => {
+    const [platform, output_type] = key.split("::");
+    return { platform, output_type, ready: true };
+  });
+  assert.equal(finishedPublishPreflight(full).ok, true);
+  const missing = finishedPublishPreflight(full.slice(1));
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.missing, ["Instagram::Reel"]);
+  const blocked = finishedPublishPreflight(full.map((row, index) => index === 3 ? { ...row, ready: false } : row));
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(blocked.blocked, ["YouTube::Short"]);
+  const duplicate = finishedPublishPreflight([...full, full[0]]);
+  assert.equal(duplicate.ok, false);
+  assert.deepEqual(duplicate.duplicates, ["Instagram::Reel"]);
+  const unexpected = finishedPublishPreflight([...full, { platform: "LinkedIn", output_type: "Video", ready: true }]);
+  assert.equal(unexpected.ok, false);
+  assert.deepEqual(unexpected.unsupported, ["LinkedIn::Video"]);
+  const horizontal = finishedPublishPreflight([{
+    platform: "YouTube", output_type: "Standard Video", ready: true,
+  }], { notes: "source-aspect=horizontal" });
+  assert.equal(horizontal.ok, true);
+});
+
+test("finished-video worker retains normal approval and requires all-output preflight for Publish Now", () => {
+  const az = worker.slice(worker.indexOf("export async function azAutoApproveIfReady"), worker.indexOf("/*__STUDIO_WORKER_END:azAutoApproveIfReady__*/"));
+  assert.match(az, /publishMode === "approval"[^\\n]*manual_approval/);
+  assert.match(az, /finishedPublishPreflight\\(outputs\\.map/);
+  assert.match(az, /publish_now_preflight/);
+  assert.match(az, /scheduled_post_date: "immediate", publish_now: true/);
+  const advance = worker.slice(worker.indexOf("export async function advanceAzFinishedVideo"), worker.indexOf("/*__STUDIO_WORKER_END:advanceAzFinishedVideo__*/"));
+  assert.match(advance, /finishedPublishMode\\(studioRequestNotesText\\(record\\)\\) === "approval"/);
+  assert.match(advance, /waiting: stories\\?\\.restamped/);
+});
