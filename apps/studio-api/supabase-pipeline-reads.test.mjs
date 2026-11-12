@@ -409,7 +409,7 @@ test("packOutputListFields drops typed and huge JSON columns", () => {
   assert.equal(bag.Output_ID, undefined);
   assert.equal(bag.Platform, undefined);
   assert.equal(bag.Selected_Assets_JSON, undefined);
-  assert.equal(bag.Publish_Retry_Eligible, true);
+  assert.equal(bag.Publish_Retry_Eligible, undefined);
   assert.equal(bag.Manual_Fallback_Required, true);
 });
 
@@ -439,8 +439,10 @@ test("mapAirtableOutputToSupabase maps lean Pipeline fields into projection bag"
   assert.equal(row.platform, "TikTok");
   assert.equal(row.content_item_id, "22222222-2222-2222-2222-222222222222");
   assert.equal(row.content_profile_id, "11111111-1111-1111-1111-111111111111");
-  assert.equal(row.error_messages.Publish_Retry_Eligible, true);
-  assert.equal(row.error_messages.TikTok_Draft_Status, "Draft Delivered");
+  assert.equal(row.publish_retry_eligible, true);
+  assert.equal(row.tiktok_draft_status, "Draft Delivered");
+  assert.equal(row.error_messages.Publish_Retry_Eligible, undefined);
+  assert.equal(row.error_messages.TikTok_Draft_Status, undefined);
   assert.equal(row.error_messages.Selected_Assets_JSON, undefined);
   assert.equal(row.error_messages._runner_record_projection, undefined);
 });
@@ -824,7 +826,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.841-airtable-activity/);
+  assert.match(worker, /0\.10\.842-publish-queue-columns/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -928,7 +930,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.841-airtable-activity/);
+  assert.match(worker, /0\.10\.842-publish-queue-columns/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1045,7 +1047,8 @@ test("lean output upsert keeps a stored runner marker", async () => {
     const post = calls.find((call) => call.method === "POST" && call.url.includes("platform_outputs"));
     const row = JSON.parse(post.body)[0];
     assert.equal(row.error_messages._runner_record_projection, "v1");
-    assert.equal(row.error_messages.Publish_Retry_Eligible, true);
+    assert.equal(row.publish_retry_eligible, true);
+    assert.equal(row.error_messages.Publish_Retry_Eligible, undefined);
     assert.equal(row.error_messages.Output_Notes, "old");
     assert.equal(row.error_messages._airtable_links.Content_Item, "recContent1");
     const unmarked = retainProjectionKeys(
@@ -2608,7 +2611,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.841-airtable-activity/);
+  assert.match(worker, /0\.10\.842-publish-queue-columns/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

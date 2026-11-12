@@ -51,7 +51,19 @@ def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
     )
     assert rows == [{
         "id": "recOutput9",
-        "fields": {"Output_ID": 9, "Platform": "Instagram", "Do_Not_Publish": False},
+        "fields": {
+            "Output_ID": 9,
+            "Platform": "Instagram",
+            "Do_Not_Publish": False,
+            "FB_Resolved_Publish_Mode": "Single Photo",
+            "YouTube_Action_Due_Now": 0,
+            "TikTok_Draft_Action_Due_Now": 0,
+            "FB_Action_Due_Now": 0,
+            "IG_Carousel_Due_Now": 1,
+            "IG_Carousel_All_Children_Ready": 0,
+            "Assets_Need_Resolution": 1,
+            "TTD0_Asset_Route_Ready": 0,
+        },
     }]
 
 
@@ -363,3 +375,55 @@ def test_supabase_read_failure_falls_back_to_airtable(monkeypatch):
     monkeypatch.setattr(requests, "request", fake_request)
     rows = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
     assert rows[0]["fields"]["Platform"] == "TikTok"
+
+
+def test_due_now_formula_lists_supabase(monkeypatch):
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        return Response([{
+            "airtable_record_id": "recYt1",
+            "platform": "YouTube",
+            "auto_publish_enabled": True,
+            "do_not_publish": False,
+            "publish_status": "Ready to Publish",
+            "youtube_stage": "Upload",
+            "error_messages": {"_runner_record_projection": "v1", "YouTube_Action_Due_Now": "0"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    rows = _client(studio_runner_output_read_source="supabase").list_records(
+        PLATFORM_OUTPUTS_TABLE, formula="{YouTube_Action_Due_Now}=1", max_records=2,
+    )
+    assert "platform.eq.YouTube" in seen[0]
+    assert rows[0]["fields"]["YouTube_Action_Due_Now"] == 1
+
+
+def test_fallback_stays_on_until_a_table_is_stopped(monkeypatch):
+    import supabase_reads
+
+    assert supabase_reads.FALLBACK_STOPPED_TABLES == frozenset()
+
+    def fake_get(url, *, headers, params, timeout):
+        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
+
+    def fake_request(method, url, *, headers, json, timeout):
+        return Response([])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    rows = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
+    assert rows[0]["fields"]["Platform"] == "TikTok"
+
+    monkeypatch.setattr(
+        supabase_reads,
+        "FALLBACK_STOPPED_TABLES",
+        frozenset({PLATFORM_OUTPUTS_TABLE}),
+    )
+    stopped = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
+    assert stopped == []

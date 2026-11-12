@@ -198,6 +198,21 @@ def test_nested_and_blank_and_record_id():
     assert "%2520" not in path
 
 
+def test_due_now_formulas_use_stored_columns():
+    due = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "{YouTube_Action_Due_Now}=1",
+    )
+    assert due is not None
+    assert "platform.eq.YouTube" in due
+    assert "DATETIME_" not in due
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "{TTD0_Asset_Route_Ready}=1",
+    ) is None
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "{Assets_Need_Resolution}=1",
+    ) is None
+
+
 def test_content_not_checkbox_uses_extras_bag():
     got = formula_to_postgrest_filter(
         CONTENT_ITEMS_TABLE,

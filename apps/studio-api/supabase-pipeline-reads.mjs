@@ -688,6 +688,12 @@ const TYPED_OUTPUT_FIELD_KEYS = new Set([
   "Thumbnail_URL", "Final_File_URL", "Publish_Asset_URL", "Studio_Preview_URL", "Platform_Post_URL",
   "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At", "Published_At",
   "Remotion_Job_ID", "Selected_Clip_Count", "Content_Item", "Content_Profile",
+  "Publish_Next_Retry_At", "YouTube_Stage", "TikTok_Draft_Status", "Auto_Publish_Enabled",
+  "TikTok_Draft_Type", "Asset_Aspect_Family", "Image_Count", "Image_Output_Selected",
+  "FB_Publish_Status", "FB_Image_Publish_Mode", "Studio_Effective_Voiceover_Mode",
+  "Studio_Effective_Background_Music_Mode", "Publish_Retry_Eligible", "IG_Carousel_Status",
+  "IG_Carousel_Next_Retry_At", "IG_Carousel_Child_Count", "IG_Carousel_Children_Ready_Count",
+  "Assets_Ready_Count", "Asset_Set_Revision", "TikTok_9x16_Ready_Count", "FB_Resolved_Publish_Mode",
 ]);
 
 const TYPED_CONTENT_FIELD_KEYS = new Set([
@@ -808,7 +814,7 @@ async function applyStoredProjection(env, table, rows, column) {
 export function airtableShapedOutputFromSupabase(row) {
   const contentAirtableId = row.content_item_airtable_id || null;
   const bag = publicProjectionBag(isPlainObject(row.error_messages) ? row.error_messages : {});
-  return {
+  const shaped = {
     id: row.airtable_record_id,
     createdTime: row.created_at || undefined,
     fields: {
@@ -846,6 +852,34 @@ export function airtableShapedOutputFromSupabase(row) {
         : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
     },
   };
+  const queueColumns = [
+    ["publish_next_retry_at", "Publish_Next_Retry_At", "value"],
+    ["youtube_stage", "YouTube_Stage", "value"],
+    ["tiktok_draft_status", "TikTok_Draft_Status", "value"],
+    ["auto_publish_enabled", "Auto_Publish_Enabled", "bool"],
+    ["tiktok_draft_type", "TikTok_Draft_Type", "value"],
+    ["asset_aspect_family", "Asset_Aspect_Family", "value"],
+    ["image_count", "Image_Count", "value"],
+    ["image_output_selected", "Image_Output_Selected", "bool"],
+    ["fb_publish_status", "FB_Publish_Status", "value"],
+    ["fb_image_publish_mode", "FB_Image_Publish_Mode", "value"],
+    ["studio_effective_voiceover_mode", "Studio_Effective_Voiceover_Mode", "value"],
+    ["studio_effective_background_music_mode", "Studio_Effective_Background_Music_Mode", "value"],
+    ["publish_retry_eligible", "Publish_Retry_Eligible", "bool"],
+    ["ig_carousel_status", "IG_Carousel_Status", "value"],
+    ["ig_carousel_next_retry_at", "IG_Carousel_Next_Retry_At", "value"],
+    ["ig_carousel_child_count", "IG_Carousel_Child_Count", "value"],
+    ["ig_carousel_children_ready_count", "IG_Carousel_Children_Ready_Count", "value"],
+    ["assets_ready_count", "Assets_Ready_Count", "value"],
+    ["asset_set_revision", "Asset_Set_Revision", "value"],
+    ["tiktok_9x16_ready_count", "TikTok_9x16_Ready_Count", "value"],
+    ["fb_resolved_publish_mode", "FB_Resolved_Publish_Mode", "value"],
+  ];
+  for (const [column, key, kind] of queueColumns) {
+    if (row[column] == null || row[column] === "") continue;
+    shaped.fields[key] = kind === "bool" ? row[column] === true : row[column];
+  }
+  return shaped;
 }
 
 export function airtableShapedContentFromSupabase(row) {
@@ -3012,6 +3046,28 @@ export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidBy
     selected_clip_count: fields.Selected_Clip_Count ?? null,
     error_messages: bag,
   };
+  const present = (key) => Object.prototype.hasOwnProperty.call(fields, key);
+  if (present("Publish_Next_Retry_At")) row.publish_next_retry_at = fields.Publish_Next_Retry_At || null;
+  if (present("YouTube_Stage")) row.youtube_stage = selectName(fields.YouTube_Stage);
+  if (present("TikTok_Draft_Status")) row.tiktok_draft_status = selectName(fields.TikTok_Draft_Status);
+  if (present("Auto_Publish_Enabled")) row.auto_publish_enabled = Boolean(fields.Auto_Publish_Enabled);
+  if (present("TikTok_Draft_Type")) row.tiktok_draft_type = selectName(fields.TikTok_Draft_Type);
+  if (present("Asset_Aspect_Family")) row.asset_aspect_family = selectName(fields.Asset_Aspect_Family);
+  if (present("Image_Count")) row.image_count = fields.Image_Count ?? null;
+  if (present("Image_Output_Selected")) row.image_output_selected = Boolean(fields.Image_Output_Selected);
+  if (present("FB_Publish_Status")) row.fb_publish_status = selectName(fields.FB_Publish_Status);
+  if (present("FB_Image_Publish_Mode")) row.fb_image_publish_mode = selectName(fields.FB_Image_Publish_Mode);
+  if (present("Studio_Effective_Voiceover_Mode")) row.studio_effective_voiceover_mode = selectName(fields.Studio_Effective_Voiceover_Mode);
+  if (present("Studio_Effective_Background_Music_Mode")) row.studio_effective_background_music_mode = selectName(fields.Studio_Effective_Background_Music_Mode);
+  if (present("Publish_Retry_Eligible")) row.publish_retry_eligible = Boolean(fields.Publish_Retry_Eligible);
+  if (present("IG_Carousel_Status")) row.ig_carousel_status = selectName(fields.IG_Carousel_Status);
+  if (present("IG_Carousel_Next_Retry_At")) row.ig_carousel_next_retry_at = fields.IG_Carousel_Next_Retry_At || null;
+  if (present("IG_Carousel_Child_Count")) row.ig_carousel_child_count = fields.IG_Carousel_Child_Count ?? null;
+  if (present("IG_Carousel_Children_Ready_Count")) row.ig_carousel_children_ready_count = fields.IG_Carousel_Children_Ready_Count ?? null;
+  if (present("Assets_Ready_Count")) row.assets_ready_count = fields.Assets_Ready_Count ?? null;
+  if (present("Asset_Set_Revision")) row.asset_set_revision = fields.Asset_Set_Revision || null;
+  if (present("TikTok_9x16_Ready_Count")) row.tiktok_9x16_ready_count = fields.TikTok_9x16_Ready_Count ?? null;
+  if (present("FB_Resolved_Publish_Mode")) row.fb_resolved_publish_mode = selectName(fields.FB_Resolved_Publish_Mode);
   let complete = Boolean(fullRecord);
   const links = {};
   if (contentAirtableId) {
