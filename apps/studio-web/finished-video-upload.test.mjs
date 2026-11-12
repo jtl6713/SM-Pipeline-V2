@@ -72,3 +72,23 @@ test("Completed Video offers one all-output Publish Now or normal approval decis
   assert.ok(app.includes("az-publish-mode="));
   assert.ok(app.includes('if (/az-publish-mode=approval/i.test(notes)) return false;'));
 });
+
+test("Completed Video publish question is fully inside the panel, never a clipped fieldset legend", () => {
+  const block = html.slice(html.indexOf('<div class="az-publish-choices"'), html.indexOf('id="azFinishedZone"'));
+  assert.match(block, /<div class="az-publish-choices" role="group" aria-labelledby="azFinishedPublishHeading">/);
+  assert.match(block, /<h3 class="az-publish-heading" id="azFinishedPublishHeading">How would you like to publish\?<\/h3>/);
+  assert.doesNotMatch(block, /<legend>/);
+  assert.match(block, /name="azFinishedPublishMode" value="approval" checked/);
+  assert.match(block, /name="azFinishedPublishMode" value="immediate"/);
+
+  const styles = fs.readFileSync(path.join(here, "assets", "finished-upload-contrast-0927.css"), "utf8");
+  assert.match(styles, /#azFinishedDrop \.az-publish-choices\{[^}]*display:grid;grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(styles, /#azFinishedDrop \.az-publish-choices > \.az-publish-heading\{[^}]*margin:0 0 3px/);
+  assert.match(styles, /@media \(max-width:600px\)/);
+});
+
+test("Completed Video title is vivid cyan on the dark upload panel", () => {
+  const styles = fs.readFileSync(path.join(here, "assets", "finished-upload-contrast-0927.css"), "utf8");
+  assert.match(styles, /#azFinishedDrop > h2\{color:#9be7ff!important/);
+  assert.match(styles, /#azFinishedDrop\{background:#101d42/);
+});
