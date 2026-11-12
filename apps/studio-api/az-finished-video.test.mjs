@@ -301,8 +301,9 @@ test("Publish Now uses staged approvals and releases the complete group together
   assert.match(approval, /released\.length !== outputs\.length/);
   assert.match(approval, /group_release_readback_failed/);
   // Both the atomic reservation and legacy approval write path must defer.
-  const deferMatches = worker.match(/Auto_Publish_Enabled: options\.deferPublishUntilGroupRelease !== true/g) || [];
-  assert.ok(deferMatches.length >= 2, "both approval paths must hold auto publish before group release");
+  const approvalWriters = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const deferMatches = approvalWriters.match(/Auto_Publish_Enabled: options\.deferPublishUntilGroupRelease !== true/g) || [];
+  assert.equal(deferMatches.length, 2, "both atomic and legacy approval paths must hold auto publish before group release");
 });
 
 test("Publish Now writes an explicit immediate timestamp rather than an MAE slot", () => {
