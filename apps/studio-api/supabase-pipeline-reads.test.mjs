@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.843-idea-settings-slides/);
+  assert.match(worker, /0\.10\.844-tiktok-draft-reconcile/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.843-idea-settings-slides/);
+  assert.match(worker, /0\.10\.844-tiktok-draft-reconcile/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2617,7 +2617,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.843-idea-settings-slides/);
+  assert.match(worker, /0\.10\.844-tiktok-draft-reconcile/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2758,6 +2758,19 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(deskHealOutputFilter("inventory_az_ready"), /output_caption/);
   assert.match(deskHealOutputFilter("inventory_approved_dispatch"), /platform=neq\.TikTok/);
   assert.match(deskHealOutputFilter("inventory_published_cover"), /YouTube%20Short/);
+  const nowMs = Date.parse("2026-11-12T22:40:00.000Z");
+  assert.match(deskHealOutputFilter("ttd0_ready", { nowMs }), /tiktok_draft_status\.eq\.Ready%20for%20Assets/);
+  assert.match(deskHealOutputFilter("ttd0_ready", { nowMs }), /scheduled_post_date\.lte\.2026-11-12T22%3A55%3A00\.000Z/);
+  assert.match(deskHealOutputFilter("ttd1_ready", { nowMs }), /Waiting%20for%20Schedule/);
+  assert.match(deskHealOutputFilter("ttd1_ready", { nowMs }), /publish_next_retry_at\.lte\.2026-11-12T22%3A40%3A00\.000Z/);
+  assert.match(deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: true }), /auto_publish_enabled=eq\.true/);
+  assert.match(deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: true }), /TikTok_Draft_Last_Checked_At/);
+  assert.doesNotMatch(deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: false }), /auto_publish_enabled=eq\.true/);
+  assert.match(deskHealOutputFilter("ttd3_email"), /TikTok_Draft_Email_Sent_At/);
+  assert.match(deskHealOutputFilter("ttd3_email"), /Manual_Completion_Status\.eq\.Required/);
+  assert.match(factory, /kind: "ttd0_ready"/);
+  assert.match(factory, /kind: "ttd3_email"/);
+  assert.match(factory, /studioReadTiktokReconcileOutput/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_produce"/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_escalated"/);
   assert.match(deskRequestFilter("inventory_escalated"), /production_job->>step=eq\.escalated/);

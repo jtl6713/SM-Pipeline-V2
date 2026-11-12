@@ -116,6 +116,7 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  readSupabaseShapedOutput,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -1089,6 +1090,26 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
  * upload, create a remote draft or mark a public publication as complete.
  * Light cron keeps this independent from the expensive half-hour QA sweep.
  */
+async function studioListTiktokReconcileOutputs(env, kind, airtableList) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return listSupabaseDeskHealOutputs(env, {
+      kind,
+      limit: airtableList.limit,
+      sortDirection: airtableList.sortDirection,
+      requireAutoPublish: kind === "ttd2_processing" ? true : undefined,
+    });
+  }
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
+}
+
+async function studioReadTiktokReconcileOutput(env, recordId) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const shaped = await readSupabaseShapedOutput(env, recordId);
+    if (shaped) return shaped;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+}
+
 export async function studioReconcileTiktokProcessing(env, options = {}) {
   if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
   const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
@@ -1097,14 +1118,14 @@ export async function studioReconcileTiktokProcessing(env, options = {}) {
     + ',OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)),'
     + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
     + 'OR({TikTok_Draft_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{TikTok_Draft_Last_Checked_At},"minutes")>=2))';
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+  const rows = await studioListTiktokReconcileOutputs(env, "ttd2_processing", {
     limit, filterFormula: formula,
     sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc",
   });
   const results = [];
   for (const candidate of rows) {
     try {
-      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const row = await studioReadTiktokReconcileOutput(env, candidate.id);
       const status = String(f(row, "TikTok_Draft_Status") || "");
       const stage = String(f(row, "Publish_Error_Stage") || "");
       const previousId = String(f(candidate, "TikTok_Draft_Publish_ID") || "");
@@ -1128,7 +1149,7 @@ export async function studioReconcileTiktokProcessing(env, options = {}) {
         existing_draft_only: true, no_new_upload: true,
       };
       if (poll?.ok !== false && poll?.needs_email === true) {
-        const confirmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+        const confirmed = await studioReadTiktokReconcileOutput(env, candidate.id);
         if (String(f(confirmed, "TikTok_Draft_Publish_ID") || "") === currentId
             && !f(confirmed, "TikTok_Draft_Email_Sent_At")
             && String(f(confirmed, "Manual_Completion_Status") || "") === "Required"
@@ -1154,6 +1175,7 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
   const scans = [
     {
       stage: "ttd0",
+      kind: "ttd0_ready",
       pulse: studioPulseTtd0,
       formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))`,
       sortField: "Scheduled_Post_Date",
@@ -1161,16 +1183,20 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
     },
     {
       stage: "ttd1",
+      kind: "ttd1_ready",
       pulse: studioPulseTtd1,
       formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Ready for Delivery",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
     },
     {
       stage: "ttd2",
+      kind: "ttd2_processing",
       pulse: studioPulseTtd2,
       formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
+      requireAutoPublish: false,
     },
     {
       stage: "ttd3",
+      kind: "ttd3_email",
       pulse: studioPulseTtd3,
       formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Delivered_At}!="",{TikTok_Draft_Email_Sent_At}="",{Manual_Completion_Status}="Required",OR({TikTok_Draft_Status}="Draft Delivered — Manual Action Required",{TikTok_Draft_Status}="Manual Completion Received",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD3",UPPER({Publish_Error_Stage}&""))>0)))',
     },
@@ -1178,12 +1204,21 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
   for (const scan of scans) {
     let rows = [];
     try {
-      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit,
-        filterFormula: scan.formula,
-        sortField: scan.sortField || null,
-        sortDirection: scan.sortDirection || "desc",
-      });
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        rows = await listSupabaseDeskHealOutputs(env, {
+          kind: scan.kind,
+          limit,
+          sortDirection: scan.sortDirection || "desc",
+          requireAutoPublish: scan.requireAutoPublish,
+        });
+      } else {
+        rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit,
+          filterFormula: scan.formula,
+          sortField: scan.sortField || null,
+          sortDirection: scan.sortDirection || "desc",
+        });
+      }
     } catch (error) {
       console.warn(`tiktok ${scan.stage} reconcile scan failed`, error);
       continue;
