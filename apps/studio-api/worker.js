@@ -193,6 +193,7 @@ import {
   parseAirtableCreateFields,
   mintAirtableRecordId,
   releaseMintedAirtableIds,
+  adoptMintedPhase6MediaIds,
   studioSupabaseCommitOutputContentFirst,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
@@ -5455,6 +5456,8 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
     try {
       if (airtableRecords.length) {
+        const identity = await adoptMintedPhase6MediaIds(env, tableId, phase6Minted, airtableRecords);
+        if (identity?.ok === false) throw new Error("phase6 media identity adoption failed: " + identity.reason);
         const adopted = await studioSupabaseCommitPhase6First(env, tableId, airtableRecords, { create: true });
         if (!adopted?.ok) throw new Error("phase6 create adoption missing identity");
       }
