@@ -109,6 +109,7 @@ import {
   readSupabaseCreativeMasterContent,
   listSupabaseOutputCensusPage,
   listSupabaseDeskHealOutputs,
+  listSupabaseDeskInventoryRequests,
   listSupabaseQualityRecoveryPage,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -9776,6 +9777,13 @@ export async function studioQualityAuditApprovedPastDue(env, options = {}) {
 
 /*__STUDIO_WORKER_END:studioQualityAuditApprovedPastDue__*/
 
+async function studioListDeskInventoryRequests(env, kind, airtableList) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return listSupabaseDeskInventoryRequests(env, { kind, limit: airtableList.limit }).catch(() => []);
+  }
+  return listRecords(env, PRODUCTION_REQUEST_TABLE, airtableList).catch(() => []);
+}
+
 async function studioListDeskInventoryOutputs(env, kind, airtableList) {
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
     return listSupabaseDeskHealOutputs(env, {
@@ -9793,13 +9801,13 @@ export async function gatherStudioDeskInventory(env) {
   const [modeRow, capsRow, produceRows, readyNoJob, invalidRenderSources, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows, promotedRows, autonomousPromoted, notRfrOutputs, azReadyOutputs, approvedDispatch, publishedCovers] = await Promise.all([
     studioSettingsByName(env, DESK_SETTING_NAME).catch(() => null),
     studioSettingsByName(env, DESK_CAPS_SETTING_NAME).catch(() => null),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    studioListDeskInventoryRequests(env, "inventory_produce", {
       limit: 25,
       sortField: "Created_At",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
+    }),
     studioListDeskInventoryOutputs(env, "inventory_ready_no_job", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
@@ -9822,11 +9830,11 @@ export async function gatherStudioDeskInventory(env) {
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    studioListDeskInventoryRequests(env, "inventory_preparing", {
       limit: 12,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Studio_Variant_Status}="Preparing",{Studio_Variant_Status}="Error"))',
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
+    }),
     listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Transfer_Status}="Processing")',
@@ -9835,26 +9843,26 @@ export async function gatherStudioDeskInventory(env) {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Transfer_Status}="Error")',
     }).catch(() => []),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    studioListDeskInventoryRequests(env, "inventory_autonomous", {
       limit: 8,
       filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),FIND('origin=autonomous',{Production_Notes}&'')>0,{Test_Run_ID}=BLANK())",
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    }),
+    studioListDeskInventoryRequests(env, "inventory_az", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    }),
+    studioListDeskInventoryRequests(env, "inventory_promoted", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Request_Status}="Promoted")',
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    }),
+    studioListDeskInventoryRequests(env, "inventory_autonomous_promoted", {
       limit: 8,
       filterFormula: "AND({Test_Run_ID}=BLANK(),FIND('origin=autonomous',{Production_Notes}&'')>0,{Request_Status}='Promoted')",
       fields: DESK_INVENTORY_REQUEST_FIELDS,
-    }).catch(() => []),
+    }),
     studioListDeskInventoryOutputs(env, "inventory_continuation", {
       limit: 8,
       filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}!="Ready for Review",${studioLastModifiedStaleFormula(15)})`,
@@ -9892,13 +9900,13 @@ export async function gatherStudioDeskInventory(env) {
   };
 
   scanned("produce_stale", "produce_escalated", "produce_clip_mismatch", "produce_stamp_422", "drive_music_404");
-  const escalatedRows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+  const escalatedRows = await studioListDeskInventoryRequests(env, "inventory_escalated", {
     limit: 8,
     sortField: "Updated_At",
     sortDirection: "desc",
     filterFormula: `AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",{Studio_Production_Job_JSON}!="",OR(FIND('"step":"escalated"',{Studio_Production_Job_JSON}),FIND('"step": "escalated"',{Studio_Production_Job_JSON})))`,
     fields: DESK_INVENTORY_REQUEST_FIELDS,
-  }).catch(() => []);
+  });
   const contentToRequest = new Map();
   for (const record of [...(promotedRows || []), ...(autonomousPromoted || []), ...(azRows || []), ...(autonomousRows || []), ...(produceRows || []), ...(escalatedRows || [])]) {
     const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));

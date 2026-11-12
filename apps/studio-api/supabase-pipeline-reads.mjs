@@ -1922,6 +1922,33 @@ async function syncFilteredCatalog(env, deps, table, fields, filterFormula, onRe
   return { ok: true, updated, pages, done: false };
 }
 
+const RECOVERY_LEDGER_COPY_FIELDS = [
+  "Event_Key", "Outcome", "Output_Record_ID", "Output_ID", "Reconciled_At",
+  "Profile_ID", "Platform", "Output_Type", "Evidence_Source", "Post_ID",
+  "Verified_At", "Actor", "Media_ID", "Details_JSON",
+];
+
+export async function syncQualityRecoveryCatalogToSupabase(env, deps = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
+  return syncFilteredCatalog(
+    env,
+    deps,
+    "Quality Agent Recovery Ledger",
+    RECOVERY_LEDGER_COPY_FIELDS,
+    'AND({Outcome}="reconciled_published",{Reconciled_At}!="")',
+    async (records) => {
+      let updated = 0;
+      for (const record of records) {
+        await mirrorQualityRecoveryEvent(env, record);
+        updated += 1;
+      }
+      return updated;
+    },
+    8,
+    "",
+  );
+}
+
 export async function syncRenderHealCatalogToSupabase(env, deps = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
   const table = deps.outputTable || "Platform Outputs";
@@ -2213,6 +2240,37 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortD
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
     .map(shapeDeskHealRecord);
+}
+
+export function deskRequestFilter(kind) {
+  const quiet = "or=(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.)";
+  if (kind === "inventory_produce") return `${quiet}&production_job=not.is.null`;
+  if (kind === "inventory_preparing") return `${quiet}&variant_status=in.(Preparing,Error)`;
+  if (kind === "inventory_autonomous") {
+    return `${quiet}&request_status=in.(Draft,Ready,Submitted)&production_notes=ilike.${encodeDeskFilterValue("*origin=autonomous*")}`;
+  }
+  if (kind === "inventory_az") {
+    return `${quiet}&request_status=neq.Cancelled&production_notes=ilike.${encodeDeskFilterValue("*origin=az-finished-video*")}`;
+  }
+  if (kind === "inventory_promoted") return `${quiet}&request_status=eq.Promoted`;
+  if (kind === "inventory_autonomous_promoted") {
+    return `${quiet}&request_status=eq.Promoted&production_notes=ilike.${encodeDeskFilterValue("*origin=autonomous*")}`;
+  }
+  if (kind === "inventory_escalated") return `${quiet}&request_status=neq.Cancelled&production_job->>step=eq.escalated`;
+  throw new Error("Unknown desk inventory request list");
+}
+
+export async function listSupabaseDeskInventoryRequests(env, { kind, limit = 8 } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk inventory read is not configured");
+  const capped = Math.max(1, Math.min(40, Number(limit) || 8));
+  const order = kind === "inventory_produce" ? "created_at.desc.nullslast" : "updated_at.desc.nullslast";
+  const rows = await supabaseRest(
+    env,
+    `production_requests?${deskRequestFilter(kind)}&select=${REQUEST_SELECT}&order=${order}&limit=${capped}`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.airtable_record_id)
+    .map(airtableShapedProductionRequestFromSupabase);
 }
 
 /** One page of a full heal census. Offset is a row count, not an Airtable cursor. */
@@ -3755,16 +3813,19 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
   let planSchedules = null;
   let renderHealColumns = null;
   let creativeMasters = null;
+  let qualityRecovery = null;
   if (!abortedForCircuit && !supabaseCircuitOpen()) {
     carouselSlides = await runPhaseBackfill("carousel_slides", () => syncCarouselSlideCatalogToSupabase(env, deps));
     planSchedules = await runPhaseBackfill("plan_schedules", () => syncPlanScheduleCatalogToSupabase(env, deps));
     renderHealColumns = await runPhaseBackfill("render_heal_columns", () => syncRenderHealCatalogToSupabase(env, deps));
     creativeMasters = await runPhaseBackfill("creative_masters", () => syncCreativeMasterCatalogToSupabase(env, deps));
+    qualityRecovery = await runPhaseBackfill("quality_recovery", () => syncQualityRecoveryCatalogToSupabase(env, deps));
   } else {
     carouselSlides = { skipped: true, reason: "supabase_circuit_open" };
     planSchedules = { skipped: true, reason: "supabase_circuit_open" };
     renderHealColumns = { skipped: true, reason: "supabase_circuit_open" };
     creativeMasters = { skipped: true, reason: "supabase_circuit_open" };
+    qualityRecovery = { skipped: true, reason: "supabase_circuit_open" };
   }
   const phaseOk = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
@@ -3784,6 +3845,7 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     plan_schedules: planSchedules,
     render_heal_columns: renderHealColumns,
     creative_masters: creativeMasters,
+    quality_recovery: qualityRecovery,
   };
 }
 
