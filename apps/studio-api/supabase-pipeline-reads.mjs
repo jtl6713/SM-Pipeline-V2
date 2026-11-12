@@ -1448,13 +1448,43 @@ function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
 
+function igOpenCarouselFilter() {
+  return "test_run_id=is.null&do_not_publish=eq.false&published_at=is.null&platform=eq.Instagram"
+    + `&or=(studio_output_type.eq.Carousel,platform_output_type.eq.${encodeDeskFilterValue("Instagram Carousel")})`;
+}
+
 /**
- * Candidate pages for the four desk heals that used to list Platform Outputs
- * from Airtable. Typed columns are filtered here. The classifier still decides
- * whether a row is healed. The patch stays on the existing Airtable export.
+ * Candidate pages for desk heals that used to list Platform Outputs from Airtable.
+ * Typed columns and the error-message bag are filtered here. The classifier still
+ * decides whether a row is healed. The patch stays on the existing Airtable export.
+ * Render heals that need excluded clip JSON stay on Airtable.
  */
 export function deskHealOutputFilter(kind) {
   const quiet = "test_run_id=is.null&do_not_publish=eq.false";
+  if (kind === "native_photo") {
+    const statuses = ["Ready for Review", "Approved for Publishing", "Published"]
+      .map(encodeDeskFilterValue)
+      .join(",");
+    return `${quiet}&published_at=is.null&render_status=eq.${encodeDeskFilterValue("Native Photo Route")}`
+      + `&output_status=in.(${statuses})`;
+  }
+  if (kind === "ig_too_many") {
+    const error = `error_messages->>IG_Carousel_Error_Message.ilike.${encodeDeskFilterValue("*too little or too many attachments*")}`;
+    const overflow = `and(error_messages->>IG_Carousel_Status.eq.${encodeDeskFilterValue("Children Ready")},error_messages->IG_Carousel_Child_Count.gt.10)`;
+    const parentBlank = "or=(error_messages->>IG_Carousel_Parent_Container_ID.is.null,error_messages->>IG_Carousel_Parent_Container_ID.eq.)";
+    return `${igOpenCarouselFilter()}&${parentBlank}&or=(${error},${overflow})`;
+  }
+  if (kind === "ig_verify_race") {
+    return `${igOpenCarouselFilter()}&error_messages->>IG_Carousel_Error_Message.ilike.${encodeDeskFilterValue("*AP1C child-ID verification mismatch*")}`;
+  }
+  if (kind === "ig_poll_failure") {
+    const terminal = `error_messages->>IG_Carousel_Error_Message.ilike.${encodeDeskFilterValue("*AP2C verified terminal child failure or poll timeout*")}`;
+    const mismatch = `error_messages->>IG_Carousel_Error_Message.ilike.${encodeDeskFilterValue("*AP2C verified child-count mismatch*")}`;
+    return `${igOpenCarouselFilter()}&or=(${terminal},${mismatch})`;
+  }
+  if (kind === "ig_rate_limit") {
+    return `${igOpenCarouselFilter()}&error_messages->>IG_Carousel_Error_Message.ilike.${encodeDeskFilterValue("*User is performing too many actions*")}`;
+  }
   if (kind === "stale_rfr") {
     const armed = ["Ready to Schedule", "Ready to Publish", "Scheduled", "Publishing"]
       .map(encodeDeskFilterValue)
