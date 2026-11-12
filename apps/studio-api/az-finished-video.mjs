@@ -83,7 +83,7 @@ export function canonicalFinishedDestinationKey(platform, outputType, { horizont
     if (p === "YouTube" && o === "Standard Video") return "YouTube::Standard Video";
     return "";
   }
-  if (o === "Story") return `${p}::Story`;
+  if (/story/i.test(o) && (p === "Instagram" || p === "Facebook")) return `${p}::Story`;
   if (p === "Instagram") return "Instagram::Reel";
   if (p === "Facebook") return "Facebook::Reel";
   if (p === "TikTok") return "TikTok::Video Draft";
