@@ -144,11 +144,17 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.active_outputs = Number(!failed && !["Published", "Skipped"].includes(state));
   if (isQueuedForPlatformDispatch(row)) result.scheduled[row.platform] = 1;
 
-  if (state !== "Ready for Review" && state !== "Awaiting Approval") return result;
   const output = String(row.output_status || "").trim().toLowerCase();
   const render = String(row.render_status || "").trim().toLowerCase();
   const review = String(row.review_status || "").trim().toLowerCase();
   const publish = String(row.publish_status || "").trim().toLowerCase();
+  // Home's lean Supabase page omits caption and file URLs, so the shared
+  // Pipeline label falls through to Preparing Assets. All Profiles still
+  // counts Ready for Review status. Factory Needs eyes keeps the package gate.
+  const reviewLabeled = state === "Ready for Review" || state === "Awaiting Approval";
+  const statusLabeled = output === "ready for review"
+    && !["Published", "Skipped", "Failed", "Approved", "Scheduled", "Changes Requested", "Review Held", "Manual Action Required", "Draft Delivered", "Uploading", "Platform Processing"].includes(state);
+  if (!reviewLabeled && !statusLabeled) return result;
   if (["approved", "rejected", "skipped"].includes(review)) return result;
   if (["in production", "rendering", "ready for render", "approved", "approved for publishing", "published"].includes(output)) return result;
   if (/ready for render|waiting in render queue|rendering|queued|pending render|^processing$|^preparing$|^failed$|^blocked$/.test(render)) return result;
