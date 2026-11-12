@@ -1,6 +1,6 @@
 /* High-contrast mobile upload workflow. Scoped to the finished-video path. */
 #azFinishedDrop{background:#101d42;color:#f8fbff;min-width:0;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}
-#azFinishedDrop h2{color:#fff;font-weight:800;text-shadow:none}
+#azFinishedDrop > h2{color:#9be7ff!important;font-weight:800;line-height:1.35;text-shadow:0 1px 8px rgba(0,0,0,.3)}
 #azFinishedDrop>p,#azFinishedDrop .az-drop-title>span,#azFinishedDrop .az-drop-zone span{color:#edf3ff}
 #azFinishedDrop .ez-portal-back{color:#fff}
 #azFinishedDrop .az-drop-title input,#azFinishedDrop .az-optional-fields input,#azFinishedDrop .az-optional-fields textarea{background:#08172f;color:#fff;border:1px solid #a5bce2;max-width:100%;box-sizing:border-box}
@@ -18,12 +18,15 @@
 @media(max-width:600px){#azFinishedDrop{padding:14px 12px}#azFinishedDrop .az-drop-title{min-width:0}#azFinishedDrop .az-drop-zone{padding:14px 12px}#azFinishedDrop .az-drop-zone>div{min-width:0}#azFinishedDrop .az-drop-title input{width:100%}}
 
 /* Completed Video: explicit all-outputs versus normal human approval. */
-.az-publish-choices{border:1px solid #d5dfeb;border-radius:14px;padding:14px;margin:16px 0 18px;display:grid;gap:10px;background:#f7faff;color:#182638}
-.az-publish-choices legend{font-weight:800;font-size:1rem;padding:0 5px}
-.az-publish-choice{display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid #cbd7e6;border-radius:11px;background:#fff;cursor:pointer;line-height:1.45}
+#azFinishedDrop .az-publish-choices{border:1px solid #d5dfeb;border-radius:14px;padding:16px;margin:16px 0 18px;display:grid;grid-template-columns:minmax(0,1fr);gap:10px;background:#f7faff;color:#182638;min-width:0;box-sizing:border-box}
+#azFinishedDrop .az-publish-choices > .az-publish-heading{display:block;margin:0 0 3px;padding:0;color:#173757!important;font-size:1.05rem;font-weight:800;line-height:1.45;overflow:visible}
+#azFinishedDrop .az-publish-choice{display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid #cbd7e6;border-radius:11px;background:#fff;cursor:pointer;line-height:1.45;min-width:0;box-sizing:border-box}
 .az-publish-choice:has(input:checked){border:2px solid #0670c9;background:#eaf4ff;padding:11px}
 .az-publish-choice input{margin:5px 0 0;accent-color:#0670c9;flex:none}
 .az-publish-choice span{display:block;min-width:0}
 .az-publish-choice strong{display:block;font-size:1rem;color:#122b4a}
 .az-publish-choice small{display:block;color:#42566b;font-size:.875rem;margin-top:3px}
 .az-publish-choices .subtle{font-size:.82rem;margin:0;line-height:1.4;color:#45586b}
+
+/* Keep the full panel title and radio labels visible on narrow screens. */
+@media (max-width:600px){#azFinishedDrop .az-publish-choices{padding:14px 12px;gap:10px}#azFinishedDrop .az-publish-choices > .az-publish-heading{font-size:1rem;line-height:1.4}#azFinishedDrop .az-publish-choice{gap:10px}#azFinishedDrop .az-publish-choice span{min-width:0;overflow-wrap:break-word}}
