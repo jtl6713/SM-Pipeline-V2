@@ -88,6 +88,9 @@ Thumbs.db
 *backup-*
 *_backups/
 
+# Local agent scratch: SQL dumps, logs, and backfill payloads. Never commit.
+.local-dev/
+
 # Local repair session scratch (not durable repo evidence)
 repair/_tmp_make/
 repair/evidence/*/
