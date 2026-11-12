@@ -318,10 +318,15 @@ jobs:
                   phase6_flag is True,
                   f"version={version!r}",
               )
+              phase6_mode = sync.get("phase6_writes")
               check(
-                  "phase6_writes=airtable_sor_write_through",
-                  sync.get("phase6_writes") == "airtable_sor_write_through",
-                  f"got {sync.get('phase6_writes')!r}",
+                  "phase6_writes is airtable-first or archived supabase",
+                  phase6_mode in (
+                      "airtable_sor_write_through",
+                      "supabase_sor_legacy_export",
+                      "supabase_sor_airtable_archived",
+                  ),
+                  f"got {phase6_mode!r}",
               )
               tables = sync.get("phase6_write_tables")
               if isinstance(tables, list) and "studio_media_transfer_targets" in tables:
@@ -348,14 +353,27 @@ jobs:
                       tables == ["production_requests"],
                       f"got {tables!r}",
                   )
-          check(
-              "last_sync completed+ok",
-              last.get("status") == "completed" and last.get("ok") is True,
-              f"status={last.get('status')!r} ok={last.get('ok')!r} error={last.get('error')!r}",
+          copy_stopped = (
+              sync.get("half_hour_airtable_copy") == "stopped"
+              or phase5_mode == "supabase_sor_airtable_archived"
           )
+          if copy_stopped:
+              check(
+                  "half-hour Airtable copy stopped",
+                  True,
+                  f"last_status={last.get('status')!r} ok={last.get('ok')!r}",
+              )
+          else:
+              check(
+                  "last_sync completed+ok",
+                  last.get("status") == "completed" and last.get("ok") is True,
+                  f"status={last.get('status')!r} ok={last.get('ok')!r} error={last.get('error')!r}",
+              )
 
           at_ms = last.get("at")
-          if isinstance(at_ms, (int, float)) and at_ms > 0:
+          if copy_stopped:
+              pass
+          elif isinstance(at_ms, (int, float)) and at_ms > 0:
               age_min = (now * 1000 - float(at_ms)) / 60000.0
               check("last_sync age < 40 min", age_min < 40, f"age_min={age_min:.1f}")
           else:
