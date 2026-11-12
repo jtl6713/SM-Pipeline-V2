@@ -108,6 +108,8 @@ import {
   readSupabaseMaeOutput,
   readSupabaseCreativeMasterContent,
   listSupabaseOutputCensusPage,
+  listSupabaseDeskHealOutputs,
+  listSupabaseQualityRecoveryPage,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -9659,14 +9661,24 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
         ? listSupabaseOutputCensusPage(env, options)
         : listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)
     );
+    const pageLedger = async (options) => {
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const page = await listSupabaseQualityRecoveryPage(env, options);
+        if ((page.records || []).length || options.offset) return page;
+        // An empty Supabase copy must not report zero recovered events.
+        const airtable = await listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options);
+        if ((airtable?.records || []).length) return airtable;
+        return page;
+      }
+      return listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options);
+    };
     const [rows, profiles, recoveredScan, overdueScan] = await Promise.all([
       scanOutstandingFailedOutputs(pageOutputs,
         { filterFormula: QA_HOME_FAILED_CANDIDATE_FORMULA, requireUnique: true }),
       listContentProfileRecords(env).catch(() => []),
       // Independent, persistent events survive overwritten dispatch notes.
       // Full pagination; never report an unavailable ledger as zero recovered.
-      scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options),
+      scanOutstandingFailedOutputs(pageLedger,
       { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
@@ -9764,6 +9776,17 @@ export async function studioQualityAuditApprovedPastDue(env, options = {}) {
 
 /*__STUDIO_WORKER_END:studioQualityAuditApprovedPastDue__*/
 
+async function studioListDeskInventoryOutputs(env, kind, airtableList) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return listSupabaseDeskHealOutputs(env, {
+      kind,
+      limit: airtableList.limit,
+      sortDirection: airtableList.sortDirection || "desc",
+    }).catch(() => []);
+  }
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList).catch(() => []);
+}
+
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
@@ -9777,28 +9800,28 @@ export async function gatherStudioDeskInventory(env) {
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
       fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    studioListDeskInventoryOutputs(env, "inventory_ready_no_job", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "inventory_unfetchable", {
       limit: 12,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "render_long", {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(15)})`,
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "inventory_orphan", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
+    }),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 12,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Studio_Variant_Status}="Preparing",{Studio_Variant_Status}="Error"))',
@@ -9832,26 +9855,26 @@ export async function gatherStudioDeskInventory(env) {
       filterFormula: "AND({Test_Run_ID}=BLANK(),FIND('origin=autonomous',{Production_Notes}&'')>0,{Request_Status}='Promoted')",
       fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    studioListDeskInventoryOutputs(env, "inventory_continuation", {
       limit: 8,
       filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}!="Ready for Review",${studioLastModifiedStaleFormula(15)})`,
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "inventory_az_ready", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Final_File_URL}!="",{Output_Caption}!="",{Thumbnail_URL}!="",OR({Review_Status}="",{Review_Status}="Review Sent"))',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "inventory_approved_dispatch", {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Output_Status}="Approved for Publishing",{Published_At}=BLANK(),{Platform}!="TikTok",${studioLastModifiedStaleFormula(15)})`,
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    }),
+    studioListDeskInventoryOutputs(env, "inventory_published_cover", {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Published",{Publish_Status}="Published"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Platform_Output_Type}="Instagram Reel",{Platform_Output_Type}="Facebook Reel",{Platform_Output_Type}="YouTube Short"))',
       fields: DESK_INVENTORY_OUTPUT_FIELDS,
-    }).catch(() => []),
+    }),
   ]);
 
   const mode = parseDeskMode(f(modeRow, "Setting_Value"));
@@ -11323,11 +11346,13 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       fields: OPS_QUEUE_REQUEST_FIELDS,
       filterFormula: OPS_QUEUE_REQUEST_FORMULA,
     })),
-    settleList("activeHolds", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 16,
-      fields: OPS_QUEUE_OUTPUT_FIELDS,
-      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-    })),
+    settleList("activeHolds", studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+      ? listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => [])
+      : listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: 16,
+        fields: OPS_QUEUE_OUTPUT_FIELDS,
+        filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+      })),
     // Separate Remotion-lane fetch so a full Publishing backlog cannot empty Rendering Queue.
     settleList("renderLane", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 100,
@@ -12889,10 +12914,12 @@ export async function reorderStudioOperationsRenderQueue(request, env, authoriza
   const saved = await writeOpsQueueControls(env, next, actor);
   // Recompute positions so the UI can refresh immediately.
   const candidates = await studioLoadRenderQueueCandidates(env, { limit: 100, controls: saved });
-  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 16,
-    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-  }).catch(() => []);
+  const activeHolds = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+    ? await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => [])
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 16,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []);
   const { byId, total } = assignRenderQueuePositions(candidates, f, { activeHolds, controls: saved });
   return respond(request, env, {
     ok: true,

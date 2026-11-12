@@ -2106,11 +2106,49 @@ export function deskHealOutputFilter(kind, options = {}) {
       + "&and(remotion_job_id.not.is.null,remotion_job_id.neq.)&or=(final_file_url.is.null,final_file_url.eq.)"
       + `&updated_at=lt.${cutoff}`;
   }
+  if (kind === "inventory_ready_no_job") {
+    return `test_run_id=is.null&render_status=eq.${encodeDeskFilterValue("Ready for Render")}`
+      + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)";
+  }
+  if (kind === "inventory_unfetchable") {
+    const statuses = [encodeDeskFilterValue("Ready for Render"), "Rendering", "Failed"].join(",");
+    return `test_run_id=is.null&render_status=in.(${statuses})&render_clip_list=not.is.null`;
+  }
+  if (kind === "inventory_orphan") {
+    return `test_run_id=is.null&output_status=eq.${encodeDeskFilterValue("In Production")}`
+      + "&published_at=is.null&or=(remotion_job_id.is.null,remotion_job_id.eq.)";
+  }
+  if (kind === "inventory_continuation") {
+    const cutoff = encodeURIComponent(new Date(Date.now() - 15 * 60 * 1000).toISOString());
+    const closed = ["Published", encodeDeskFilterValue("Approved for Publishing"), encodeDeskFilterValue("Ready for Review")].join(",");
+    return "test_run_id=is.null&published_at=is.null"
+      + `&output_status=not.in.(${closed})`
+      + "&error_messages->Production_Request_Output=not.is.null"
+      + `&updated_at=lt.${cutoff}`;
+  }
+  if (kind === "inventory_az_ready") {
+    return `test_run_id=is.null&output_status=eq.${encodeDeskFilterValue("Ready for Review")}`
+      + "&and(final_file_url.not.is.null,final_file_url.neq.)"
+      + "&and(output_caption.not.is.null,output_caption.neq.)"
+      + "&and(thumbnail_url.not.is.null,thumbnail_url.neq.)"
+      + `&or=(review_status.is.null,review_status.eq.,review_status.eq.${encodeDeskFilterValue("Review Sent")})`;
+  }
+  if (kind === "inventory_approved_dispatch") {
+    const cutoff = encodeURIComponent(new Date(Date.now() - 15 * 60 * 1000).toISOString());
+    return `test_run_id=is.null&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&published_at=is.null&platform=neq.TikTok&updated_at=lt.${cutoff}`;
+  }
+  if (kind === "inventory_published_cover") {
+    const reel = ["Reel", "Short"].map(encodeDeskFilterValue).join(",");
+    const named = ["Instagram Reel", "Facebook Reel", "YouTube Short"].map(encodeDeskFilterValue).join(",");
+    return "test_run_id=is.null"
+      + `&and=(or(output_status.eq.Published,publish_status.eq.Published),or(studio_output_type.in.(${reel}),platform_output_type.in.(${named})))`;
+  }
   throw new Error("Unknown desk heal candidate list");
 }
 
 function deskHealSelect(kind) {
-  if (kind === "render_vo" || kind === "render_unfetchable") {
+  if (kind === "render_vo" || kind === "render_unfetchable" || kind === "inventory_unfetchable") {
     return `${OUTPUT_SELECT},render_clip_list,remotion_props`;
   }
   if (kind === "render_queue") return `${OUTPUT_SELECT},render_heal_fields`;
@@ -2150,7 +2188,7 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortD
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const order = `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
-  if (kind === "render_unfetchable") {
+  if (kind === "render_unfetchable" || kind === "inventory_unfetchable") {
     const matches = [];
     const pageSize = 40;
     for (let offset = 0; offset < 320 && matches.length < capped; offset += pageSize) {
@@ -2285,6 +2323,30 @@ export async function mirrorQualityRecoveryEvent(env, record) {
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
   });
   return { ok: true };
+}
+
+/** One page of reconciled Quality Agent recovery events. Offset is a row count. */
+export async function listSupabaseQualityRecoveryPage(env, { limit = 100, offset = 0, filterFormula = "" } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase recovery ledger read is not configured");
+  if (!String(filterFormula || "").includes("reconciled_published")) {
+    throw new Error("Supabase recovery ledger scan needs the reconciled outcome");
+  }
+  const capped = Math.max(1, Math.min(100, Number(limit) || 100));
+  const start = Math.max(0, Number(offset) || 0);
+  if (start >= 4000) return { records: [], offset: null };
+  const rows = await supabaseRest(
+    env,
+    "quality_agent_recovery_events?outcome=eq.reconciled_published"
+      + "&fields->>Reconciled_At=not.is.null&fields->>Reconciled_At=neq."
+      + `&select=airtable_record_id,fields&order=created_at.asc.nullslast&limit=${capped}&offset=${start}`,
+  );
+  const batch = Array.isArray(rows) ? rows : [];
+  const records = batch.filter((row) => row?.airtable_record_id).map((row) => ({
+    id: row.airtable_record_id,
+    fields: isPlainObject(row.fields) ? row.fields : {},
+  }));
+  const next = start + capped;
+  return { records, offset: batch.length === capped && next < 4000 ? String(next) : null };
 }
 
 export async function readSupabaseQualityRecoveryEvent(env, airtableId) {
@@ -2705,7 +2767,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
   const reviewOutputs = shapedOutputs.filter((row) => matchesOpsQueueReviewFormula(row.fields));
-  const activeHolds = shapedOutputs.filter((row) => matchesRenderActiveHold(row.fields));
+  const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
   const requests = (requestRows || [])
     .map(airtableShapedProductionRequestFromSupabase)

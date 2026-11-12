@@ -49,6 +49,7 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  listSupabaseDeskHealOutputs,
   listSupabaseMusicRecords,
   listSupabaseAssetLibraryRecords,
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
@@ -1800,11 +1801,7 @@ export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { li
   const [jobs, queueControls, activeHolds] = await Promise.all([
     loadStudioProductionJobsForOutputs(env, records).catch(() => new Map()),
     readOpsQueueControls(env).catch(() => ({})),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 16,
-      fields: OUTPUT_LIST_FIELDS,
-      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-    }).catch(() => []),
+    listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []),
   ]);
   const queueCandidates = await studioLoadRenderQueueCandidates(env, {
     limit: 100,
@@ -1870,11 +1867,13 @@ export async function buildPipelineOutputsPayload(env, profile, { limit, reviewO
   const [jobs, queueControls, activeHolds, labels] = await Promise.all([
     loadStudioProductionJobsForOutputs(env, records),
     readOpsQueueControls(env),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 16,
-      fields: OUTPUT_LIST_FIELDS,
-      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-    }).catch(() => []),
+    (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+      ? listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => [])
+      : listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: 16,
+        fields: OUTPUT_LIST_FIELDS,
+        filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+      }).catch(() => [])),
     reviewOnly ? Promise.resolve(new Map()) : pipelineContentLabelsById(env, profile, studioPipelineContentIdsFromOutputs(records)),
   ]);
   const queueCandidates = await studioLoadRenderQueueCandidates(env, {
