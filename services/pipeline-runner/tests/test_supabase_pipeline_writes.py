@@ -344,3 +344,60 @@ def test_default_mode_still_raises_airtable_errors(monkeypatch):
     except requests.HTTPError:
         return
     raise AssertionError("expected Airtable HTTPError")
+
+
+def _supabase_request_log(seen):
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response([])
+    return fake_request
+
+
+def test_output_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
+    seen = []
+    monkeypatch.setattr(requests, "post", lambda url, *, headers, json, timeout: Response({"error": "nope"}, status_code=422))
+    monkeypatch.setattr(requests, "request", _supabase_request_log(seen))
+    rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+        PLATFORM_OUTPUTS_TABLE, [{"Platform": "TikTok"}],
+    )
+    assert rows[0]["fields"]["Platform"] == "TikTok"
+    assert rows[0]["id"].startswith("rec")
+    assert len(rows[0]["id"]) == 17
+    posts = [row for row in seen if row[0] == "POST" and "platform_outputs" in row[1]]
+    assert posts[0][2][0]["airtable_record_id"] == rows[0]["id"]
+    assert posts[0][2][0]["platform"] == "TikTok"
+
+
+def test_output_create_adopts_airtable_id_when_export_succeeds(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        requests, "post",
+        lambda url, *, headers, json, timeout: Response({
+            "records": [{"id": "recAirtableOutput1", "fields": {"Platform": "TikTok"}}],
+        }),
+    )
+    monkeypatch.setattr(requests, "request", _supabase_request_log(seen))
+    rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+        PLATFORM_OUTPUTS_TABLE, [{"Platform": "TikTok"}],
+    )
+    assert rows[0]["id"] == "recAirtableOutput1"
+    assert any(row[0] == "DELETE" and "platform_outputs" in row[1] for row in seen)
+    real = [
+        row for row in seen
+        if row[0] == "POST" and "platform_outputs" in row[1] and row[2][0]["airtable_record_id"] == "recAirtableOutput1"
+    ]
+    assert real
+
+
+def test_request_create_still_requires_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda url, *, headers, json, timeout: Response({"error": "nope"}, status_code=422))
+    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
+    try:
+        AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
+        )
+    except requests.HTTPError:
+        return
+    raise AssertionError("request create should still require Airtable")

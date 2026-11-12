@@ -186,6 +186,9 @@ import {
   studioPhase5WritesMode,
   studioLegacyExportEnabled,
   parseAirtableMutationRecords,
+  parseAirtableCreateFields,
+  mintAirtableRecordId,
+  releaseMintedAirtableIds,
   studioSupabaseCommitOutputContentFirst,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
@@ -1340,7 +1343,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.821-completed-video-publish-choice",
+          version: "0.10.822-supabase-output-content-creates",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -5259,15 +5262,35 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const method = String(options?.method || "GET").toUpperCase();
   const legacyExport = method === "PATCH" && studioLegacyExportEnabled(env, tableId);
+  const createLegacy = method === "POST"
+    && studioLegacyExportEnabled(env, tableId)
+    && options?.skipSupabaseWriteThrough !== true;
   const mutationRecords = legacyExport
     ? parseAirtableMutationRecords(pathOrParams, options?.body)
     : [];
-  // STUDIO_WRITE_SOURCE=supabase: Output/Content PATCH commits to Supabase
-  // first. Creates (POST) still mint Airtable rec ids. Schedule/approve paths
-  // that pass skipSupabaseWriteThrough still require a successful Airtable
-  // export so MAE verify can re-read Airtable under the reservation lock.
+  // STUDIO_WRITE_SOURCE=supabase: Output/Content PATCH and POST commit to
+  // Supabase first. A successful Airtable create still returns Airtable's rec
+  // id. A failed Airtable create keeps the Supabase row. Schedule/approve
+  // paths that pass skipSupabaseWriteThrough still require a successful
+  // Airtable export so MAE verify can re-read Airtable under the reservation lock.
   if (legacyExport && mutationRecords.length) {
     await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
+  }
+  let mintedCreates = [];
+  if (createLegacy) {
+    const createFields = parseAirtableCreateFields(options?.body);
+    if (createFields.length) {
+      mintedCreates = createFields.map((fields) => ({ id: mintAirtableRecordId(), fields }));
+      try {
+        const committed = await studioSupabaseCommitOutputContentFirst(
+          env, tableId, mintedCreates, { create: true },
+        );
+        if (!committed?.ok) mintedCreates = [];
+      } catch (error) {
+        console.warn("supabase create commit failed; Airtable remains required", error);
+        mintedCreates = [];
+      }
+    }
   }
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
@@ -5326,6 +5349,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
         ? mutationRecords[0]
         : { records: mutationRecords };
       airtableCommitted = false;
+    } else if (createLegacy && mintedCreates.length) {
+      console.warn("Airtable legacy export create failed; keeping Supabase commit", tableId, response.status);
+      const raw = String(options?.body || "");
+      body = mintedCreates.length === 1 && !raw.includes('"records"')
+        ? mintedCreates[0]
+        : { records: mintedCreates };
+      airtableCommitted = false;
     } else {
       const airtableType = body?.error?.type ? String(body.error.type) : "";
       const airtableMessage = body?.error?.message ? String(body.error.message) : "";
@@ -5342,6 +5372,17 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
     });
+  }
+  if (mintedCreates.length && airtableCommitted) {
+    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
+    try {
+      if (airtableRecords.length) {
+        await studioSupabaseCommitOutputContentFirst(env, tableId, airtableRecords, { create: true });
+      }
+      await releaseMintedAirtableIds(env, tableId, mintedCreates.map((row) => row.id));
+    } catch (error) {
+      console.warn("supabase minted create adoption failed", tableId, error);
+    }
   }
   if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
     await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
