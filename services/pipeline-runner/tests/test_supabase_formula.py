@@ -2,6 +2,7 @@
 
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from lettering.formulas import lettering_production_formula
+from p3.formulas import p3_duplicate_output_formula, p3_mapping_formula, p3_seeded_outputs_formula
 from r3.formulas import r3_production_formula
 from studio_produce.context import outputs_formula
 from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
@@ -64,7 +65,18 @@ def test_produce_output_link_finds():
         'AND(FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",")>0,'
         'OR({Output_Status}="Planned",{Output_Status}="In Production"))'
     )
-    assert formula_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, wrapped) is None
+    wrapped_filter = formula_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, wrapped)
+    assert wrapped_filter == (
+        "combo:content_items.content_number=eq.102|||"
+        "or(output_status.eq.Planned,output_status.eq.In Production)"
+    )
+    wrapped_path = attach_formula_filter("platform_outputs?select=*&limit=50", wrapped_filter)
+    assert "content_items.content_number=eq.102" in wrapped_path
+    assert "output_status.eq.Planned" in wrapped_path
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'OR(FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",")>0,{Platform}="TikTok")',
+    ) is None
     parent = "recParent12345678"
     request_id = "recRequest1234567"
     assert formula_to_postgrest_filter(
@@ -99,6 +111,27 @@ def test_or_of_allowlisted_predicates():
         CONTENT_ITEMS_TABLE,
         'OR({Content_Status}="Idea Approved",{Content_Status}="Ready for Script")',
     ) == "or(content_status.eq.Idea Approved,content_status.eq.Ready for Script)"
+
+
+def test_p3_output_formulas_compose_the_content_link():
+    seeded = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, p3_seeded_outputs_formula("102"),
+    )
+    assert seeded is not None
+    assert seeded.startswith("combo:content_items.content_number=eq.102|||")
+    assert "Production_Request_Output" in seeded
+    assert "or(output_status.eq.Planned,output_status.eq.In Production)" in seeded
+    duplicate = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        p3_duplicate_output_formula("102", "Instagram", "Reel"),
+    )
+    assert duplicate == (
+        "combo:content_items.content_number=eq.102|||"
+        "and(platform.eq.Instagram,format.eq.Reel)"
+    )
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, p3_mapping_formula("Instagram,TikTok", "Reel"),
+    ) is None
 
 
 def test_nested_and_blank_and_record_id():

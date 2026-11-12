@@ -131,9 +131,52 @@ def _not_truthy_filter(ref: str) -> str:
     return f"or({ref}.is.null,{ref}.eq.false,{ref}.eq.0,{ref}.eq.)"
 
 
+def _join_filters(joiner: str, filters: list[str]) -> str | None:
+    """AND can attach produce link params beside column filters. OR cannot."""
+    links: list[str] = []
+    columns: list[str] = []
+    for item in filters:
+        if item.startswith("combo:"):
+            if joiner == "or":
+                return None
+            params, _, rest = item[6:].partition("|||")
+            if params:
+                links.extend(part for part in params.split("&") if part)
+            if rest:
+                columns.append(rest)
+            continue
+        if item.startswith("link:"):
+            if joiner == "or":
+                return None
+            links.append(item[5:])
+            continue
+        columns.append(item)
+    column_filter = None
+    if len(columns) == 1:
+        column_filter = columns[0]
+    elif columns:
+        column_filter = joiner + "(" + ",".join(columns) + ")"
+    if not links:
+        return column_filter
+    if joiner == "or":
+        return None
+    params = "&".join(links)
+    if not column_filter:
+        return "link:" + params
+    return f"combo:{params}|||{column_filter}"
+
+
 def _predicate_filter(table_id: str, pred: str) -> str | None:
     text = " ".join(str(pred or "").strip().split())
     if not text:
+        return None
+    linked = _produce_link_filter(table_id, text)
+    if linked:
+        return linked
+    upper = text.upper()
+    if ("FIND(" in upper or "ARRAYJOIN(" in upper) and not (
+        text.startswith("AND(") or text.startswith("OR(")
+    ):
         return None
 
     match = _RECORD_ID.match(text)
@@ -156,7 +199,7 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
         if len(filters) == 1:
             return filters[0]
         joiner = "or" if text.startswith("OR(") else "and"
-        return joiner + "(" + ",".join(filters) + ")"
+        return _join_filters(joiner, filters)
 
     match = _NOT_FIELD.match(text)
     if match:
@@ -232,12 +275,11 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
     cleaned = " ".join(str(formula).strip().split())
     if not cleaned:
         return None
-    linked = _produce_link_filter(table_id, cleaned)
-    if linked:
-        return linked
     # Hard reject patterns that need Airtable semantics we do not translate.
+    # FIND/ARRAYJOIN are handled per clause so the three produce lookups can
+    # sit inside AND. Any other FIND still returns None.
     upper = cleaned.upper()
-    for token in ("FIND(", "ARRAYJOIN(", "SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
+    for token in ("SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
         if token in upper:
             return None
     return _predicate_filter(table_id, cleaned)
@@ -246,6 +288,10 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
 def attach_formula_filter(path: str, formula_filter: str | None) -> str:
     if not formula_filter:
         return path
+    if formula_filter.startswith("combo:"):
+        params, _, rest = formula_filter[6:].partition("|||")
+        path = f"{path}&{params}" if params else path
+        return attach_formula_filter(path, rest or None)
     if formula_filter.startswith("link:"):
         return f"{path}&{formula_filter[5:]}"
     # PostgREST `and=(...)` query param. Keep structural chars; encode values
