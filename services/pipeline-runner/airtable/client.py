@@ -181,21 +181,32 @@ class AirtableClient:
     def create_records(self, table_id: str, records: list[dict[str, Any]], *, typecast: bool = True) -> list[dict[str, Any]]:
         import requests
 
-        from supabase_pipeline import commit_minted_creates, mint_record_id, release_minted_record_ids
+        from supabase_pipeline import (
+            commit_minted_creates,
+            commit_phase6_creates,
+            mint_record_id,
+            release_minted_record_ids,
+            release_phase6_minted_ids,
+        )
 
         url = f"{self._api_root}/{self._base_id}/{table_id}"
         created: list[dict[str, Any]] = []
         legacy = self._legacy_export(table_id)
+        phase6 = self._phase6_export(table_id) and not legacy
         for start in range(0, len(records), 10):
             chunk = records[start : start + 10]
             minted = [
                 {"id": mint_record_id(), "fields": dict(item)}
                 for item in chunk
-            ] if legacy else []
+            ] if (legacy or phase6) else []
             committed = False
             if minted:
                 try:
-                    committed = commit_minted_creates(self._settings, table_id, minted)
+                    committed = (
+                        commit_minted_creates(self._settings, table_id, minted)
+                        if legacy
+                        else commit_phase6_creates(self._settings, table_id, minted)
+                    )
                 except Exception as error:
                     logger.warning(
                         "supabase create commit failed for %s; Airtable remains required: %s",
@@ -219,10 +230,22 @@ class AirtableClient:
             batch = response.json().get("records", [])
             if committed:
                 try:
-                    commit_minted_creates(self._settings, table_id, batch)
-                    release_minted_record_ids(
-                        self._settings, table_id, [row["id"] for row in minted],
-                    )
+                    if legacy:
+                        commit_minted_creates(self._settings, table_id, batch)
+                        release_minted_record_ids(
+                            self._settings, table_id, [row["id"] for row in minted],
+                        )
+                    else:
+                        adopted = commit_phase6_creates(self._settings, table_id, batch)
+                        if adopted:
+                            release_phase6_minted_ids(
+                                self._settings, table_id, [row["id"] for row in minted],
+                            )
+                        else:
+                            logger.warning(
+                                "supabase phase6 create id adoption skipped for %s",
+                                table_id,
+                            )
                 except Exception as error:
                     logger.warning(
                         "supabase create id adoption failed for %s: %s",

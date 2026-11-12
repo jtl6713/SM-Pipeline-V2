@@ -1,6 +1,6 @@
 # Phase 5 — Output and Content Item write-through
 
-Airtable remains the write source of truth for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content updates and creates commit to Supabase first with Airtable as a best-effort legacy export. When an Output or Content Item create succeeds in Airtable, callers still receive Airtable's `rec` id. When that Airtable create fails, the Supabase row remains under a minted `rec` id. Other tables still mint ids in Airtable.
+Airtable remains the write source of truth for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content updates and creates commit to Supabase first with Airtable as a best-effort legacy export. When an Output or Content Item create succeeds in Airtable, callers still receive Airtable's `rec` id. When that Airtable create fails, the Supabase row remains under a minted `rec` id. Production Request, Media Asset, and transfer-queue creates do the same when `STUDIO_PHASE6_WRITE_SOURCE=supabase`. Ideas and other tables still mint ids in Airtable.
 
 ## What changed
 

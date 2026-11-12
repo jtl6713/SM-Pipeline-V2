@@ -1347,7 +1347,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.825-mae-supabase-verify",
+          version: "0.10.826-supabase-phase6-creates",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -5274,6 +5274,9 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const createLegacy = method === "POST"
     && studioLegacyExportEnabled(env, tableId)
     && options?.skipSupabaseWriteThrough !== true;
+  const phase6Create = method === "POST"
+    && studioPhase6LegacyExportEnabled(env, tableId)
+    && options?.skipSupabaseWriteThrough !== true;
   const mutationRecords = legacyExport
     ? parseAirtableMutationRecords(pathOrParams, options?.body)
     : [];
@@ -5284,8 +5287,11 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // Airtable export unless maeSupabaseVerify is set and the Supabase commit
   // succeeded. Those schedule/approve paths verify the slot from Supabase.
   // STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
-  // transfer-queue PATCH commit to Supabase first. Creates stay Airtable-first.
-  // The half-hour copy inserts a missing Phase 6 row and does not overwrite one.
+  // transfer-queue PATCH and POST commit to Supabase first. A successful
+  // Airtable create still returns Airtable's rec id. A failed Airtable create
+  // keeps the Supabase row. A create missing the insert identity still
+  // requires Airtable. The half-hour copy inserts a missing Phase 6 row and
+  // does not overwrite one. Retiring Airtable is not this change.
   let outputSorCommitted = false;
   if (legacyExport && mutationRecords.length) {
     const committed = await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
@@ -5316,6 +5322,22 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       } catch (error) {
         console.warn("supabase create commit failed; Airtable remains required", error);
         mintedCreates = [];
+      }
+    }
+  }
+  let phase6Minted = [];
+  if (phase6Create) {
+    const createFields = parseAirtableCreateFields(options?.body);
+    if (createFields.length) {
+      phase6Minted = createFields.map((fields) => ({ id: mintAirtableRecordId(), fields }));
+      try {
+        const committed = await studioSupabaseCommitPhase6First(
+          env, tableId, phase6Minted, { create: true },
+        );
+        if (!committed?.ok) phase6Minted = [];
+      } catch (error) {
+        console.warn("supabase phase6 create commit failed; Airtable remains required", error);
+        phase6Minted = [];
       }
     }
   }
@@ -5393,6 +5415,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
         ? mintedCreates[0]
         : { records: mintedCreates };
       airtableCommitted = false;
+    } else if (phase6Create && phase6Minted.length) {
+      console.warn("Airtable phase6 legacy export create failed; keeping Supabase commit", tableId, response.status);
+      const raw = String(options?.body || "");
+      body = phase6Minted.length === 1 && !raw.includes('"records"')
+        ? phase6Minted[0]
+        : { records: phase6Minted };
+      airtableCommitted = false;
     } else {
       const airtableType = body?.error?.type ? String(body.error.type) : "";
       const airtableMessage = body?.error?.message ? String(body.error.message) : "";
@@ -5419,6 +5448,18 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       await releaseMintedAirtableIds(env, tableId, mintedCreates.map((row) => row.id));
     } catch (error) {
       console.warn("supabase minted create adoption failed", tableId, error);
+    }
+  }
+  if (phase6Minted.length && airtableCommitted) {
+    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
+    try {
+      if (airtableRecords.length) {
+        const adopted = await studioSupabaseCommitPhase6First(env, tableId, airtableRecords, { create: true });
+        if (!adopted?.ok) throw new Error("phase6 create adoption missing identity");
+      }
+      await releaseMintedAirtableIds(env, tableId, phase6Minted.map((row) => row.id));
+    } catch (error) {
+      console.warn("supabase phase6 minted create adoption failed", tableId, error);
     }
   }
   if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {

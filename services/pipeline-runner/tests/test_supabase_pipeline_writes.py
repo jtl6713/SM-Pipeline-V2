@@ -439,3 +439,41 @@ def test_request_create_still_requires_airtable(monkeypatch):
     except requests.HTTPError:
         return
     raise AssertionError("request create should still require Airtable")
+
+
+def test_phase6_request_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
+    seen = []
+
+    def fake_post(*_args, **_kwargs):
+        return Response({"error": {"type": "INVALID"}}, status_code=422)
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "request", fake_request)
+    records = AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).create_records(
+        PRODUCTION_REQUESTS_TABLE,
+        [{"Production_Request_ID": "900", "Request_Status": "Draft", "Requested_Title": "Pier"}],
+    )
+    assert records[0]["id"].startswith("rec")
+    assert records[0]["fields"]["Request_Status"] == "Draft"
+    posts = [row for row in seen if row[0] == "POST" and "production_requests" in row[1]]
+    assert posts
+    assert posts[0][2][0]["request_status"] == "Draft"
+    assert posts[0][2][0]["airtable_record_id"] == records[0]["id"]
+
+
+def test_phase6_create_without_identity_still_requires_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *_args, **_kwargs: Response({"error": "nope"}, status_code=422))
+    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
+    try:
+        AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).create_records(
+            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
+        )
+    except requests.HTTPError:
+        return
+    raise AssertionError("a Phase 6 create without identity must still require Airtable")
