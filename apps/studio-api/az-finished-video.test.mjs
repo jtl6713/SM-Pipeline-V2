@@ -314,3 +314,16 @@ test("Publish Now writes an explicit immediate timestamp rather than an MAE slot
   assert.match(fn, /requestedIso = new Date\(\)\.toISOString\(\)/);
   assert.match(fn, /if \(immediate && !bumped && !options\.forceWrite\) return \{\}/);
 });
+
+test("Staged Publish Now outputs cannot enter the guarded publisher before group release", () => {
+  const start = worker.indexOf("function studioPublishCanDispatchNow");
+  const end = worker.indexOf("function studioPromoteDuePublishStatus", start);
+  assert.ok(start >= 0 && end > start);
+  const guard = worker.slice(start, end);
+  assert.match(guard, /az-publish-mode=immediate/);
+  assert.match(guard, /Auto_Publish_Enabled/);
+  assert.match(guard, /return false/);
+  const dispatchStart = worker.indexOf("async function studioDispatchApprovedPublishNow");
+  const dispatch = worker.slice(dispatchStart, worker.indexOf("async function studioDispatchApprovedPublishTail", dispatchStart));
+  assert.ok(dispatch.includes("studioPublishCanDispatchNow(record)"));
+});
