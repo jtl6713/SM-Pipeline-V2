@@ -288,3 +288,29 @@ test("finished-video worker checks approval mode and complete family", () => {
   const advance = worker.slice(advanceStart, worker.indexOf("async function opsForceAzNavyPierTitle", advanceStart));
   assert.ok(advance.includes('finishedPublishMode(studioRequestNotesText(record)) === "approval"'));
 });
+
+test("Publish Now uses staged approvals and releases the complete group together", () => {
+  const start = worker.indexOf("async function azAutoApproveIfReady");
+  const stop = worker.indexOf("async function azEnsurePlatformOutputs", start);
+  assert.ok(start >= 0 && stop > start, "finished-video approval function is present");
+  const approval = worker.slice(start, stop);
+  assert.match(approval, /deferPublishUntilGroupRelease: true/);
+  assert.match(approval, /armedCount === outputs\.length/);
+  assert.match(approval, /partial_group_release/);
+  assert.match(approval, /airtableBatchUpdate\(env, env\.AIRTABLE_OUTPUT_TABLE_ID/);
+  assert.match(approval, /released\.length !== outputs\.length/);
+  assert.match(approval, /group_release_readback_failed/);
+  // Both the atomic reservation and legacy approval write path must defer.
+  const deferMatches = worker.match(/Auto_Publish_Enabled: options\.deferPublishUntilGroupRelease !== true/g) || [];
+  assert.ok(deferMatches.length >= 2, "both approval paths must hold auto publish before group release");
+});
+
+test("Publish Now writes an explicit immediate timestamp rather than an MAE slot", () => {
+  const fn = worker.slice(
+    worker.indexOf("function studioPublishScheduleFields"),
+    worker.indexOf("function studioStorySiblingStamp")
+  );
+  assert.match(fn, /String\(raw\)\.trim\(\)\.toLowerCase\(\) === "immediate"/);
+  assert.match(fn, /requestedIso = new Date\(\)\.toISOString\(\)/);
+  assert.match(fn, /if \(immediate && !bumped && !options\.forceWrite\) return \{\}/);
+});
