@@ -812,7 +812,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
+  assert.match(worker, /0\.10\.827-media-asset-reconcile/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -821,6 +821,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_assets_densify_oneshot_v1: true/);
   assert.match(worker, /studio_supabase_assets_densify_media_only_v1: true/);
   assert.match(worker, /studio_supabase_assets_densify_null_sanitize_v1: true/);
+  assert.match(worker, /studio_supabase_media_reconcile_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: studioPhase6WritesMode\(env\)/);
@@ -868,6 +869,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
     /auth_tables: result\?\.auth_tables/,
   );
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  assert.match(pipelineFns, /media_reconcile/);
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioMusicReadSource\(env\) === "supabase"/);
@@ -914,7 +916,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
+  assert.match(worker, /0\.10\.827-media-asset-reconcile/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1899,6 +1901,61 @@ test("phase 6 media backfill POST bodies share identical keys across sparse rows
   }
 });
 
+test("media reconcile inserts missing named assets and keeps walking the Airtable offset", async () => {
+  const posts = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const method = init?.method || "GET";
+    if (method === "GET" && String(url).includes("airtable_record_id=in.")) {
+      return { ok: true, async text() { return JSON.stringify([{ airtable_record_id: "recExistingMedia01" }]); } };
+    }
+    if (method === "POST" && String(url).includes("media_assets")) posts.push(JSON.parse(init.body));
+    return { ok: true, async text() { return ""; } };
+  };
+  let calls = 0;
+  try {
+    const result = await syncRecentMediaAssetsToSupabase({
+      ...supabaseEnv,
+      AIRTABLE_MEDIA_TABLE_ID: "tblMedia",
+      STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    }, {
+      mediaReconcile: true,
+      mediaReconcilePages: 2,
+      listRecordsPage: async (_env, _table, options) => {
+        calls += 1;
+        if (!options.offset) {
+          return {
+            records: [
+              { id: "recExistingMedia01", fields: { "Asset Name": "Kept", "Google Drive File ID": "drive-a", Content_Profile: ["recgtK8Z7eNADNtVy"] } },
+              { id: "recMissingMedia0001", fields: { "Asset Name": "Tribeca 1", Location: "Tribeca", "Google Drive File ID": "drive-b", Content_Profile: ["recgtK8Z7eNADNtVy"] } },
+            ],
+            offset: "page2",
+          };
+        }
+        return {
+          records: [
+            { id: "recMissingMedia0002", fields: { "Asset Name": "Tribeca 2", "Google Drive File ID": "drive-c" } },
+          ],
+          offset: null,
+        };
+      },
+    });
+    assert.equal(result.done, true);
+    assert.equal(result.offset, null);
+    assert.equal(result.scanned, 3);
+    assert.equal(result.media_assets, 2);
+    assert.equal(calls, 2);
+    const inserted = posts.flat().map((row) => row.airtable_record_id).sort();
+    assert.deepEqual(inserted, ["recMissingMedia0001", "recMissingMedia0002"]);
+    const tribeca = posts.flat().find((row) => row.airtable_record_id === "recMissingMedia0001");
+    assert.equal(tribeca.google_drive_file_id, "drive-b");
+    assert.equal(tribeca.metadata.location, "Tribeca");
+    assert.equal(tribeca.metadata.content_profile_airtable_id, "recgtK8Z7eNADNtVy");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("phase 6 half-hour media backfill upserts named assets and skips unnamed rows", async () => {
   const posts = [];
   const originalFetch = globalThis.fetch;
@@ -2343,7 +2400,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
+  assert.match(worker, /0\.10\.827-media-asset-reconcile/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

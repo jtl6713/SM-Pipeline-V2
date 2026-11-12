@@ -1,0 +1,1 @@
+2026-11-11: Trigger reconcile STUDIO_ASSETS media_only media_reconcile now after Worker 0.10.827-media-asset-reconcile is live. Page every named Media Asset into Supabase. Insert missing rows with profile, metadata, and Google Drive file id. Do not overwrite an existing row. Do not retire Airtable asset reads. Phase 7 retirement is not started. Trigger once.

@@ -2375,8 +2375,6 @@ export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
  */
 export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
   await deps.assertLease?.();
-  const listRecords = deps.listRecords;
-  if (!listRecords) throw new Error("syncRecentMediaAssetsToSupabase requires listRecords");
   if (!studioSupabaseConfigured(env)) {
     return { skipped: true, reason: "supabase_not_configured", ok: true };
   }
@@ -2386,6 +2384,11 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
   if (!mediaTableId) {
     return { skipped: true, reason: "media_table_not_configured", ok: true };
   }
+  if (deps.mediaReconcile === true) {
+    return syncMediaAssetReconcilePages(env, deps, mediaTableId);
+  }
+  const listRecords = deps.listRecords;
+  if (!listRecords) throw new Error("syncRecentMediaAssetsToSupabase requires listRecords");
   const mediaLimit = Math.max(20, Math.min(800, Number(deps.mediaLimit) || 200));
   const filterFormula = deps.mediaFilterFormula || null;
   const records = await listRecords(env, mediaTableId, {
@@ -2409,6 +2412,60 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
     media_assets: mediaRows.length,
     scanned: (records || []).length,
     skipped_unnamed: Math.max(0, (records || []).length - namedMediaRows.length),
+  };
+}
+
+/**
+ * One page-walk of Media Assets for the catalog reconcile. Inserts named rows
+ * that Supabase does not already have. Does not overwrite an existing row and
+ * does not change the half-hour newest-N copy. Airtable reads stay on.
+ */
+async function syncMediaAssetReconcilePages(env, deps, mediaTableId) {
+  const listRecordsPage = deps.listRecordsPage;
+  if (!listRecordsPage) throw new Error("syncMediaAssetReconcilePages requires listRecordsPage");
+  const pages = Math.max(1, Math.min(8, Number(deps.mediaReconcilePages) || 8));
+  let offset = String(deps.mediaOffset || "").trim() || null;
+  let scanned = 0;
+  let inserted = 0;
+  let skippedUnnamed = 0;
+  let done = false;
+  for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
+    await deps.assertLease?.();
+    const page = await listRecordsPage(env, mediaTableId, {
+      limit: 100,
+      sortField: "Added_At",
+      sortDirection: "desc",
+      fields: [...MEDIA_ASSET_SYNC_FIELDS],
+      offset,
+    });
+    const records = Array.isArray(page?.records) ? page.records : [];
+    scanned += records.length;
+    const namedMediaRows = records.map((record) => mediaAssetBackfillRow(record)).filter(Boolean);
+    skippedUnnamed += Math.max(0, records.length - namedMediaRows.length);
+    const mediaRows = await omitExistingPhase6CronRows(env, "media_assets", namedMediaRows);
+    for (let i = 0; i < mediaRows.length; i += 200) {
+      await deps.assertLease?.();
+      const started = Date.now();
+      const chunk = mediaRows.slice(i, i + 200);
+      await upsertChunk(env, "media_assets", chunk);
+      deps.onUpsert?.("media_assets", chunk.length, Date.now() - started);
+    }
+    inserted += mediaRows.length;
+    offset = page?.offset || null;
+    if (!offset || !records.length) {
+      done = true;
+      offset = null;
+      break;
+    }
+  }
+  return {
+    ok: true,
+    mode: "reconcile",
+    media_assets: inserted,
+    scanned,
+    skipped_unnamed: skippedUnnamed,
+    offset,
+    done,
   };
 }
 
