@@ -10564,7 +10564,8 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       const output = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, ids[0]);
       const proKey = canonicalFinishedDestinationKey(f(pro, "Platform"), f(pro, "Output_Type"), { horizontal });
       const poKey = canonicalFinishedDestinationKey(f(output, "Platform"), studioOutputTypeLabel(output), { horizontal });
-      if (!proKey || proKey !== poKey) return {
+      if (!proKey || proKey !== poKey
+        || !arrayOrEmpty(f(output, "Production_Request_Output")).includes(pro.id)) return {
         waiting: "publish_now_preflight", production_request_id: requestId,
         reason: "platform_output_identity_mismatch", pro_record_id: pro.id,
       };
