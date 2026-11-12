@@ -23,6 +23,37 @@ export const FINISHED_DESTINATION_KEYS = Object.freeze([
 export const FINISHED_HORIZONTAL_KEYS = Object.freeze(["YouTube::Standard Video"]);
 export const AZ_HORIZONTAL_EXPECTED_OUTPUT_COUNT = FINISHED_HORIZONTAL_KEYS.length;
 
+/** Mode is an operator decision captured before finished-video ingest. */
+export function finishedPublishMode(notes) {
+  const match = /(?:^|[;\\n])\\s*az-publish-mode=(approval|immediate)(?=[;\\s]|$)/i.exec(String(notes || ""));
+  return match ? match[1].toLowerCase() : "legacy";
+}
+
+/** Validate the complete enabled output family before approving any Publish Now item. */
+export function finishedPublishPreflight(rows, { notes = "" } = {}) {
+  const expected = finishedDestinationKeysForNotes(notes);
+  const horizontal = isHorizontalFinishedAspect(notes);
+  const present = new Map();
+  const duplicates = [];
+  const unsupported = [];
+  for (const row of rows || []) {
+    const key = canonicalFinishedDestinationKey(row.platform, row.output_type, { horizontal });
+    if (!expected.includes(key)) { unsupported.push(outputPairKey(row.platform, row.output_type)); continue; }
+    if (present.has(key)) { duplicates.push(key); continue; }
+    present.set(key, row);
+  }
+  const missing = expected.filter((key) => !present.has(key));
+  const blocked = expected.filter((key) => present.has(key) && present.get(key).ready !== true);
+  return {
+    ok: Boolean(expected.length && !missing.length && !blocked.length && !duplicates.length && !unsupported.length),
+    expected,
+    missing,
+    blocked,
+    duplicates,
+    unsupported,
+  };
+}
+
 export function outputPairKey(platform, outputType) {
   return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
 }
