@@ -132,6 +132,8 @@ test("canonical keys collapse reel-family types onto the six destinations", () =
   assert.equal(canonicalFinishedDestinationKey("YouTube", "Standard Video"), "YouTube::Short");
   assert.equal(canonicalFinishedDestinationKey("YouTube", "Short"), "YouTube::Short");
   assert.equal(canonicalFinishedDestinationKey("Instagram", "Story"), "Instagram::Story");
+  assert.equal(canonicalFinishedDestinationKey("Instagram", "Instagram Story"), "Instagram::Story");
+  assert.equal(canonicalFinishedDestinationKey("Facebook", "Facebook Story"), "Facebook::Story");
   assert.equal(canonicalFinishedDestinationKey("Facebook", "Story"), "Facebook::Story");
   assert.deepEqual([...FINISHED_DESTINATION_KEYS], [
     "Instagram::Reel",
