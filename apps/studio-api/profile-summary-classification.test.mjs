@@ -25,6 +25,17 @@ test("review count is actionable, not merely Ready for Review state", () => {
     { do_not_publish: true },
     { output_notes: "origin=az-finished-video" },
   ]) assert.equal(homeOutputContribution({ ...base, ...patch }).awaiting_approval, 0);
+  // Overview drops file URLs, so the shared label becomes Preparing Assets
+  // while Output_Status is still Ready for Review.
+  assert.equal(homeOutputContribution({
+    ...base,
+    studio_state: "Preparing Assets",
+  }).awaiting_approval, 1);
+  assert.equal(homeOutputContribution({
+    ...base,
+    studio_state: "Preparing Assets",
+    review_status: "Approved",
+  }).awaiting_approval, 0);
 });
 
 test("scheduled requires authorized undelivered platform dispatch", () => {
