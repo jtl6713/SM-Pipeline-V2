@@ -12512,7 +12512,7 @@ export async function studioCompleteNativePhotoPublishArming(env, record, note =
 export async function studioHealNativePhotoReviewStrands(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "native_photo", {
     limit: Math.max(limit * 4, 20),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -13181,7 +13181,7 @@ export async function studioHealIgCarouselTooManyChildren(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "ig_too_many", {
     limit,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -13256,7 +13256,7 @@ export async function studioHealIgCarouselChildVerificationRace(env, options = {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "ig_verify_race", {
     limit,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -13405,7 +13405,7 @@ export async function studioHealIgCarouselChildPollFailure(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "ig_poll_failure", {
     limit,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -13584,7 +13584,7 @@ export async function studioHealIgCarouselRateLimit(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "ig_rate_limit", {
     limit,
     sortField: "Output_ID",
     sortDirection: "desc",
