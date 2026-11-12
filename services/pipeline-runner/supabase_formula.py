@@ -1,7 +1,8 @@
 """Allowlisted Airtable formula → PostgREST filters for runner Output/Content reads.
 
-Unsupported formulas (other FIND/ARRAYJOIN, OR, views, unknown ops) return None
-so the caller keeps Airtable. Only Platform Outputs and Content Items are covered.
+Unsupported formulas (other FIND/ARRAYJOIN, views, unknown ops) return None
+so the caller keeps Airtable. OR of allowlisted predicates is translated.
+Only Platform Outputs and Content Items are covered.
 Three Studio produce Platform Output lookups are the exception: a content number
 or content record id inside Content_Item, and a record id stored on the
 Production_Request_Output link in the full-record bag.
@@ -25,9 +26,11 @@ _BLANK = re.compile(r'^\{([A-Za-z0-9_]+)\}=BLANK\(\)$')
 _EMPTY = re.compile(r'^\{([A-Za-z0-9_]+)\}=""$')
 _NE_EMPTY = re.compile(r'^\{([A-Za-z0-9_]+)\}!=""$')
 _NE_BLANK = re.compile(r'^\{([A-Za-z0-9_]+)\}!=BLANK\(\)$')
+_NE = re.compile(r'^\{([A-Za-z0-9_]+)\}!="([^"]+)"$')
 _GT = re.compile(r"^\{([A-Za-z0-9_]+)\}>(\d+)$")
 _NOT_FIELD = re.compile(r"^NOT\(\{([A-Za-z0-9_]+)\}\)$")
 _AND = re.compile(r"^AND\((.*)\)$", re.DOTALL)
+_OR = re.compile(r"^OR\((.*)\)$", re.DOTALL)
 _SAFE_FIELD = re.compile(r"^[A-Za-z0-9_]+$")
 _REC_ID = r"rec[A-Za-z0-9]{14}"
 _FIND_CONTENT_TOKEN = re.compile(
@@ -67,10 +70,21 @@ def _split_top_level(args: str) -> list[str] | None:
     parts: list[str] = []
     depth = 0
     start = 0
+    in_string = False
     i = 0
     while i < len(args):
         ch = args[i]
-        if ch == "(":
+        if in_string:
+            if ch == "\\" and i + 1 < len(args):
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
@@ -80,7 +94,7 @@ def _split_top_level(args: str) -> list[str] | None:
             parts.append(args[start:i].strip())
             start = i + 1
         i += 1
-    if depth != 0:
+    if depth != 0 or in_string:
         return None
     tail = args[start:].strip()
     if tail:
@@ -97,11 +111,19 @@ def _nonempty_filter(ref: str) -> str:
     return f"and({ref}.not.is.null,{ref}.neq.)"
 
 
-def _eq_filter(ref: str, value: str) -> str:
+def _literal_filter(ref: str, op: str, value: str) -> str | None:
+    # Commas and parentheses are PostgREST or()/and() separators. A value
+    # that contains them stays on Airtable instead of splitting the filter.
+    if any(ch in value for ch in ',()"'):
+        return None
+    return f"{ref}.{op}.{value}"
+
+
+def _eq_filter(ref: str, value: str) -> str | None:
     if value == "":
         return _blank_filter(ref)
     # Encode once in attach_formula_filter so spaces do not become %2520.
-    return f"{ref}.eq.{value}"
+    return _literal_filter(ref, "eq", value)
 
 
 def _not_truthy_filter(ref: str) -> str:
@@ -118,7 +140,7 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     if match:
         return f"airtable_record_id.eq.{match.group(1)}"
 
-    match = _AND.match(text)
+    match = _AND.match(text) or _OR.match(text)
     if match:
         parts = _split_top_level(match.group(1))
         if not parts:
@@ -133,7 +155,8 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
             return None
         if len(filters) == 1:
             return filters[0]
-        return "and(" + ",".join(filters) + ")"
+        joiner = "or" if text.startswith("OR(") else "and"
+        return joiner + "(" + ",".join(filters) + ")"
 
     match = _NOT_FIELD.match(text)
     if match:
@@ -154,6 +177,11 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     if match:
         ref = _field_ref(table_id, match.group(1))
         return _nonempty_filter(ref) if ref else None
+
+    match = _NE.match(text)
+    if match:
+        ref = _field_ref(table_id, match.group(1))
+        return _literal_filter(ref, "neq", match.group(2)) if ref else None
 
     match = _GT.match(text)
     if match:
@@ -209,7 +237,7 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
         return linked
     # Hard reject patterns that need Airtable semantics we do not translate.
     upper = cleaned.upper()
-    for token in ("FIND(", "ARRAYJOIN(", "OR(", "SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
+    for token in ("FIND(", "ARRAYJOIN(", "SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
         if token in upper:
             return None
     return _predicate_filter(table_id, cleaned)

@@ -1,8 +1,11 @@
 """Allowlisted Airtable formula → PostgREST filters."""
 
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from lettering.formulas import lettering_production_formula
+from r3.formulas import r3_production_formula
 from studio_produce.context import outputs_formula
 from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
+from t1.formulas import t1_production_formula
 
 
 def test_platform_equality_and_unsupported_find():
@@ -16,7 +19,14 @@ def test_platform_equality_and_unsupported_find():
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         'OR({Platform}="TikTok",{Platform}="Instagram")',
+    ) == "or(platform.eq.TikTok,platform.eq.Instagram)"
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'OR({Platform}="TikTok",FIND("233",ARRAYJOIN({PO_Output_ID}))>0)',
     ) is None
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, '{Format}!="Story"',
+    ) == "format.neq.Story"
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         'FIND("233",ARRAYJOIN({PO_Output_ID}))>0',
@@ -66,6 +76,29 @@ def test_produce_output_link_finds():
     assert "Production_Request_Output" in formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, None, None),
     )
+
+
+def test_or_of_allowlisted_predicates():
+    lettering = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, lettering_production_formula(),
+    )
+    assert lettering is not None
+    assert "or(output_status.eq.Ready for Review,output_status.eq.In Production)" in lettering
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, t1_production_formula(),
+    ) is not None
+    r3 = formula_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, r3_production_formula())
+    assert r3 is not None
+    assert "format.neq.Story" in r3
+    assert "or(format.eq.Vertical Short Video," in r3
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'OR({Output_Title}="Hello, world",{Platform}="TikTok")',
+    ) is None
+    assert formula_to_postgrest_filter(
+        CONTENT_ITEMS_TABLE,
+        'OR({Content_Status}="Idea Approved",{Content_Status}="Ready for Script")',
+    ) == "or(content_status.eq.Idea Approved,content_status.eq.Ready for Script)"
 
 
 def test_nested_and_blank_and_record_id():
