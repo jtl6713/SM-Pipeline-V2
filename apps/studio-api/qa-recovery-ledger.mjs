@@ -9,6 +9,8 @@
  * inserts are harmless to reporting because reporting deduplicates by key.
  * No Meta tokens, upload URLs, or user credentials belong in this ledger.
  */
+import { mirrorQualityRecoveryEvent } from "./supabase-pipeline-reads.mjs";
+
 export const QUALITY_RECOVERY_LEDGER_TABLE = "Quality Agent Recovery Ledger";
 export const QUALITY_RECOVERY_OUTCOME = "reconciled_published";
 const recordPattern = /^rec[A-Za-z0-9]{14}$/;
@@ -130,6 +132,7 @@ export async function persistVerifiedRecoveryInAirtable(env, record, evidence, {
       const saved = await airtableFetch(env, QUALITY_RECOVERY_LEDGER_TABLE, "", {
         method: "POST", body: JSON.stringify({ fields, typecast: true }),
       });
+      if (saved?.id) await mirrorQualityRecoveryEvent(env, { id: saved.id, fields }).catch(() => null);
       return saved?.id || null;
     },
   });

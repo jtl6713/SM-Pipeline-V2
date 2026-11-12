@@ -823,7 +823,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.837-read-batch/);
+  assert.match(worker, /0\.10\.838-desk-inventory-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -927,7 +927,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.837-read-batch/);
+  assert.match(worker, /0\.10\.838-desk-inventory-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2607,7 +2607,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.837-read-batch/);
+  assert.match(worker, /0\.10\.838-desk-inventory-reads/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2730,6 +2730,19 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(stale, /readSupabaseQualityRecoveryEvent\(env, id\)/);
   assert.match(stale, /observed\.id\)/);
   assert.match(deskHealOutputFilter("render_long"), /updated_at=lt\./);
+  assert.match(deskHealOutputFilter("inventory_ready_no_job"), /Ready%20for%20Render/);
+  assert.match(deskHealOutputFilter("inventory_unfetchable"), /render_clip_list=not\.is\.null/);
+  assert.match(deskHealOutputFilter("inventory_orphan"), /In%20Production/);
+  assert.match(deskHealOutputFilter("inventory_continuation"), /Production_Request_Output/);
+  assert.match(deskHealOutputFilter("inventory_az_ready"), /output_caption/);
+  assert.match(deskHealOutputFilter("inventory_approved_dispatch"), /platform=neq\.TikTok/);
+  assert.match(deskHealOutputFilter("inventory_published_cover"), /YouTube%20Short/);
+  assert.match(factory, /studioListDeskInventoryOutputs\(env, "inventory_ready_no_job"/);
+  assert.match(factory, /listSupabaseQualityRecoveryPage\(env, options\)/);
+  assert.match(factory, /QUALITY_RECOVERY_LEDGER_TABLE/);
+  assert.match(factory, /kind: "render_active"/);
+  const pipeline = await readFile(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  assert.match(pipeline, /kind: "render_active"/);
   assert.equal(supabaseOutputMatchesHomeFailure({ Render_Status: "Failed" }), true);
   assert.equal(supabaseOutputMatchesHomeFailure({ Output_Status: "Ready for Review" }), false);
 });
