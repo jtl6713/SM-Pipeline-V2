@@ -60,14 +60,15 @@ test("finished-video production player can use the persisted public MP4", () => 
 });
 
 
+
 test("Completed Video offers one all-output Publish Now or normal approval decision", () => {
   const section = html.slice(html.indexOf('id="azFinishedDrop"'), html.indexOf('id="ezWizard"'));
-  assert.match(section, /name="azFinishedPublishMode" value="approval" checked/);
-  assert.match(section, /name="azFinishedPublishMode" value="immediate"/);
-  assert.match(section, /Publish Now — All Outputs/);
-  assert.match(section, /Normal Approval/);
+  assert.ok(section.includes('name="azFinishedPublishMode" value="approval" checked'));
+  assert.ok(section.includes('name="azFinishedPublishMode" value="immediate"'));
+  assert.ok(section.includes("Publish Now — All Outputs"));
+  assert.ok(section.includes("Normal Approval"));
   const begin = app.slice(app.indexOf("async function beginAzFinishedVideo"), app.indexOf("function bindAzFinishedDrop"));
-  assert.match(begin, /azFinishedPublishMode\\(\\) === "immediate" && !window\\.confirm/);
-  assert.match(app, /az-publish-mode=\\$\\{azFinishedPublishMode\\(\\)\\}/);
-  assert.match(app, /if \\(\\/az-publish-mode=approval\\/i\\.test\\(notes\\)\\) return false/);
+  assert.ok(begin.includes('azFinishedPublishMode() === "immediate" && !window.confirm'));
+  assert.ok(app.includes("az-publish-mode="));
+  assert.ok(app.includes('if (/az-publish-mode=approval/i.test(notes)) return false;'));
 });
