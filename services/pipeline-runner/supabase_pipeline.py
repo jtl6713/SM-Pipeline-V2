@@ -7,10 +7,12 @@ Default: after a successful Airtable create/update of Platform Outputs or
 Content Items, upsert the returned row into Supabase. Supabase errors are
 logged and do not fail the Airtable write.
 
-STUDIO_WRITE_SOURCE=supabase (not enabled in production): updates to those
-two tables commit to Supabase first. Airtable is then a best-effort legacy
-export. A failed export is logged and the caller still receives the record.
-Creates still go to Airtable first so Airtable can mint rec ids.
+STUDIO_WRITE_SOURCE=supabase: Output and Content Item updates and creates
+commit to Supabase first. Airtable is then a best-effort legacy export.
+STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
+transfer-queue updates and creates do the same. A successful Airtable create
+still returns Airtable's rec id. A failed Airtable create keeps the Supabase
+row. A Phase 6 create without the insert identity still requires Airtable.
 """
 
 from __future__ import annotations
@@ -803,6 +805,53 @@ def _mirror_create_one(settings: dict, kind: str, record: dict) -> None:
             prefer="resolution=merge-duplicates,return=minimal",
         )
     _enqueue_outbox(settings, kind, record, "POST")
+
+
+def phase6_create_identity(kind: str, record: dict) -> bool:
+    """True only when the body can insert a new Phase 6 row, not patch one."""
+    if kind == "request":
+        row = _request_row(record)
+        return row.get("production_request_id") is not None and row.get("request_status") is not None
+    if kind == "media":
+        return bool(_media_row(record).get("asset_name"))
+    if kind == "queue":
+        return bool(_queue_row(record))
+    return False
+
+
+def commit_phase6_creates(settings: dict | None, table_id: str, records: list[dict]) -> bool:
+    if studio_phase6_write_source(settings) != "supabase":
+        return False
+    kind = phase6_table_kind(table_id)
+    rows = [record for record in (records or []) if isinstance(record, dict)]
+    if not kind or not supabase_configured(settings) or not rows:
+        return False
+    if any(not record.get("id") or not phase6_create_identity(kind, record) for record in rows):
+        return False
+    for record in rows:
+        if kind == "request":
+            _mirror_request(settings or {}, record)
+        elif kind == "media":
+            _mirror_media(settings or {}, record)
+        else:
+            _mirror_queue(settings or {}, record)
+    return True
+
+
+def release_phase6_minted_ids(settings: dict | None, table_id: str, record_ids: list[str]) -> None:
+    kind = phase6_table_kind(table_id)
+    table = {
+        "request": "production_requests",
+        "media": "media_assets",
+        "queue": "studio_media_transfer_queue",
+    }.get(kind, "")
+    ids = [str(record_id) for record_id in record_ids or [] if record_id]
+    if not table or not ids or not supabase_configured(settings):
+        return
+    try:
+        _rest(settings or {}, f"{table}?airtable_record_id=in.({','.join(ids)})", "DELETE")
+    except Exception as error:
+        logger.warning("supabase phase6 minted-id release failed for %s: %s", table, error)
 
 
 def commit_minted_creates(settings: dict | None, table_id: str, records: list[dict]) -> bool:

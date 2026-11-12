@@ -342,10 +342,12 @@ export function studioLegacyExportEnabled(env, tableId) {
 }
 
 /**
- * Phase 6 update switch for Production Requests, Media Assets, and the
- * transfer queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not
- * turn this on. Creates, MAE skip paths, the half-hour Airtable copy, and
- * Phase 7 stay unchanged.
+ * Phase 6 switch for Production Requests, Media Assets, and the transfer
+ * queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not turn this
+ * on. Updates and creates commit to Supabase first only when
+ * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create without the insert identity
+ * still requires Airtable. Held-reschedule readback, the other skip paths,
+ * the half-hour Airtable copy, and retiring Airtable stay unchanged.
  */
 export function studioPhase6WriteSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
@@ -419,11 +421,18 @@ export async function releaseMintedAirtableIds(env, tableId, ids) {
     .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
   if (!clean.length || !studioSupabaseConfigured(env)) return { skipped: true, reason: "empty" };
   const table = String(tableId || "");
+  const phase6Kind = phase6TableKind(env, tableId);
   const supabaseTable = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
     ? "platform_outputs"
     : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
       ? "content_items"
-      : "";
+      : phase6Kind === "request"
+        ? "production_requests"
+        : phase6Kind === "media"
+          ? "media_assets"
+          : phase6Kind === "queue"
+            ? "studio_media_transfer_queue"
+            : "";
   if (!supabaseTable) return { skipped: true, reason: "table" };
   await supabaseRest(env, `${supabaseTable}?airtable_record_id=in.(${clean.map(encodeURIComponent).join(",")})`, {
     method: "DELETE",
@@ -2910,12 +2919,13 @@ function productionRequestWriteThroughRow(record) {
   return row;
 }
 
-export async function syncAirtableProductionRequestRowToSupabase(env, record) {
+export async function syncAirtableProductionRequestRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = productionRequestWriteThroughRow(record);
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
   const identity = row.production_request_id != null && row.request_status != null;
+  if (options.create === true && !identity) return { ok: false, reason: "create_identity" };
   if (identity) {
     await upsertChunk(env, "production_requests", [{
       airtable_record_id: record.id,
@@ -2935,17 +2945,17 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record) {
   return { ok: true, mode: "patch" };
 }
 
-export async function studioSupabaseCommitPhase6First(env, tableId, records) {
+export async function studioSupabaseCommitPhase6First(env, tableId, records, options = {}) {
   if (!studioPhase6LegacyExportEnabled(env, tableId)) return { ok: false, reason: "disabled" };
   const kind = phase6TableKind(env, tableId);
   const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
   if (!rows.length) return { ok: false, reason: "empty" };
   for (const record of rows) {
     const synced = kind === "request"
-      ? await syncAirtableProductionRequestRowToSupabase(env, record)
+      ? await syncAirtableProductionRequestRowToSupabase(env, record, options)
       : kind === "media"
-        ? await syncAirtableMediaAssetRowToSupabase(env, record)
-        : await syncAirtableTransferQueueRowToSupabase(env, record);
+        ? await syncAirtableMediaAssetRowToSupabase(env, record, options)
+        : await syncAirtableTransferQueueRowToSupabase(env, record, options);
     if (!synced?.ok) return { ok: false, reason: synced?.reason || "sync", id: record.id };
   }
   return { ok: true, kind, count: rows.length };
@@ -3145,11 +3155,12 @@ async function mergeMediaAssetMetadata(env, recordId, patchMeta) {
   return { ...prior, ...patchMeta };
 }
 
-export async function syncAirtableMediaAssetRowToSupabase(env, record) {
+export async function syncAirtableMediaAssetRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = mediaAssetWriteThroughRow(record);
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  if (options.create === true && !row.asset_name) return { ok: false, reason: "create_identity" };
   if (row.metadata) {
     row.metadata = await mergeMediaAssetMetadata(env, record.id, row.metadata) || row.metadata;
   }
@@ -3330,11 +3341,15 @@ export async function syncTransferQueueTargetsToSupabase(env, records) {
   };
 }
 
-export async function syncAirtableTransferQueueRowToSupabase(env, record) {
+export async function syncAirtableTransferQueueRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = transferQueueWriteThroughRow(record);
-  if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  if (!Object.keys(row).length) {
+    return options.create === true
+      ? { ok: false, reason: "create_identity" }
+      : { skipped: true, reason: "empty_patch" };
+  }
   await upsertChunk(env, "studio_media_transfer_queue", [{
     airtable_record_id: record.id,
     ...row,

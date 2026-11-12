@@ -812,7 +812,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.825-mae-supabase-verify/);
+  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -914,7 +914,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.825-mae-supabase-verify/);
+  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1169,6 +1169,26 @@ test("phase 6 production request write-through patches one present column", asyn
     assert.equal(calls[0].method, "PATCH");
     assert.match(calls[0].url, /production_requests\?airtable_record_id=eq\.recRequest1/);
     assert.deepEqual(JSON.parse(calls[0].body), { request_status: "Submitted" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 create without request identity does not insert a Supabase row", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
+      id: "recRequestThin",
+      fields: { Requested_Title: "Pier lights" },
+    }, { create: true });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "create_identity");
+    assert.equal(calls.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2323,7 +2343,8 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.825-mae-supabase-verify/);
-  assert.match(worker, /Airtable legacy export create failed; keeping Supabase commit/);
+  assert.match(worker, /0\.10\.826-supabase-phase6-creates/);
+  assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
+  assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
 });
