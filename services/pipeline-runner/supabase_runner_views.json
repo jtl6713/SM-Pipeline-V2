@@ -1,0 +1,492 @@
+{
+  "R5 - Rendering Jobs to Poll": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Render_Status",
+        "type": "singleSelect",
+        "value": [
+          "Rendering"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Remotion_Status_URL",
+        "type": "url"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Final_File_URL",
+        "type": "url"
+      }
+    ]
+  },
+  "AP0 - Ready to Prepare Publish Asset": {
+    "op": "and",
+    "args": [
+      {
+        "op": "=",
+        "field": "Auto_Publish_Enabled",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Review_Status",
+        "type": "singleSelect",
+        "value": [
+          "Approved"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Ready to Publish"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Final_File_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Final_File_Storage_Status",
+        "type": "singleSelect",
+        "value": [
+          "Uploaded"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Asset_URL",
+        "type": "url"
+      },
+      {
+        "op": "=",
+        "field": "Manual_Fallback_Required",
+        "type": "checkbox",
+        "value": false
+      }
+    ]
+  },
+  "TTD3 — Ready for Handoff Email": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "TikTok"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "TikTok_Draft_Status",
+        "type": "singleSelect",
+        "value": [
+          "Draft Delivered — Manual Action Required"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "TikTok_Draft_Delivered_At",
+        "type": "dateTime"
+      },
+      {
+        "op": "isEmpty",
+        "field": "TikTok_Draft_Email_Sent_At",
+        "type": "dateTime"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "TikTok_Manual_Completion_URL",
+        "type": "url"
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Manual_Completion_Status",
+        "type": "singleSelect",
+        "value": [
+          "Required"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      }
+    ]
+  },
+  "R2B - Retry Asset Selection": {
+    "op": "and",
+    "args": [
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Content_Item",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Output_Status",
+        "type": "singleSelect",
+        "value": [
+          "Ready for Review"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Asset_Selection_Status",
+        "type": "singleSelect",
+        "value": [
+          "Partial Match",
+          "Selection Error"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Asset_Need_Status",
+        "type": "singleSelect",
+        "value": [
+          "Sent to Team",
+          "Partially Fulfilled",
+          "Fulfilled"
+        ]
+      },
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "isEmpty",
+            "field": "Asset_Selection_Attempt_Count",
+            "type": "number"
+          },
+          {
+            "op": "<",
+            "field": "Asset_Selection_Attempt_Count",
+            "type": "number",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "isEmpty",
+            "field": "Asset_Selection_Next_Retry_At",
+            "type": "dateTime"
+          },
+          {
+            "op": "<=",
+            "field": "Asset_Selection_Next_Retry_At",
+            "type": "dateTime",
+            "value": {
+              "mode": "today",
+              "timeZone": "America/Chicago"
+            }
+          }
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "Render_Status",
+        "type": "singleSelect"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Render_Clip_List_JSON",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Remotion_Props_JSON",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Output_URL",
+        "type": "url"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Final_File_URL",
+        "type": "url"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Final_File_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Format",
+        "type": "singleSelect",
+        "value": [
+          "Vertical Short Video",
+          "Story"
+        ]
+      }
+    ]
+  },
+  "C8 - Existing Carousel Outputs": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isNotEmpty",
+        "field": "Content_Item",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Platform",
+        "type": "singleSelect"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Platform_Output_Type",
+        "type": "singleSelect"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Aspect_Ratio",
+        "type": "singleSelect"
+      }
+    ]
+  },
+  "C9 - Ready for Carousel Publish Package": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform_Output_Type",
+        "type": "singleSelect",
+        "value": [
+          "Instagram Carousel",
+          "Instagram Photo Set",
+          "TikTok Video",
+          "YouTube Short",
+          "Facebook Post"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Output_Status",
+        "type": "singleSelect",
+        "value": [
+          "Approved for Publishing",
+          "Approved"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Review_Status",
+        "type": "singleSelect",
+        "value": [
+          "Approved"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Not Ready"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      }
+    ]
+  },
+  "P1 - Ready for Package Generation": {
+    "op": "and",
+    "args": [
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "=",
+            "field": "Content_Status",
+            "type": "singleSelect",
+            "value": "Idea Approved"
+          },
+          {
+            "op": "=",
+            "field": "Content_Status",
+            "type": "singleSelect",
+            "value": "Ready for Script"
+          }
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Content_Title",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Idea_Summary",
+        "type": "multilineText"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Content_Profile",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Source_Candidate",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Produce",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Script",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Voiceover_Script",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Caption",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Hashtags",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Thumbnail_Concept",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Thumbnail_Prompt",
+        "type": "multilineText"
+      },
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "isEmpty",
+            "field": "Script",
+            "type": "multilineText"
+          },
+          {
+            "op": "=",
+            "field": "Script_Status",
+            "type": "singleSelect",
+            "value": "Not Started"
+          },
+          {
+            "op": "=",
+            "field": "Script_Status",
+            "type": "singleSelect",
+            "value": "Ready"
+          }
+        ]
+      }
+    ]
+  },
+  "P3 - Ready for Platform Outputs": {
+    "op": "and",
+    "args": [
+      {
+        "op": "=",
+        "field": "Content_Status",
+        "type": "singleSelect",
+        "value": "Thumbnail Ready"
+      },
+      {
+        "op": "=",
+        "field": "Script_Status",
+        "type": "singleSelect",
+        "value": "Generated"
+      },
+      {
+        "op": "=",
+        "field": "Voiceover_Status",
+        "type": "singleSelect",
+        "value": "Generated"
+      },
+      {
+        "op": "=",
+        "field": "Thumbnail_Status",
+        "type": "singleSelect",
+        "value": "Generated"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Voiceover_URL",
+        "type": "url"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Thumbnail_URL",
+        "type": "url"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Source_Candidate",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Content_Profile",
+        "type": "multipleRecordLinks"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Caption",
+        "type": "multilineText"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Hashtags",
+        "type": "multilineText"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Produce",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform Outputs",
+        "type": "multipleRecordLinks"
+      }
+    ]
+  }
+}

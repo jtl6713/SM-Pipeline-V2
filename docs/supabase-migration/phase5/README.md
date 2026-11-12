@@ -41,7 +41,7 @@ Worker `0.10.801-supabase-phase5-write-sor` honors `STUDIO_WRITE_SOURCE` the sam
 
 ## Still out of scope
 
-- Retiring Airtable views and the remaining `FIND`/`ARRAYJOIN` formulas. Allowlisted equality/`BLANK`/`RECORD_ID`/`AND`/`OR` formulas, plus the three Studio produce Platform Output link lookups, already run on Supabase when the runner read flags are `supabase`.
+- Snapshotted Output and Content views whose filters are stored columns, and substring `FIND` on a text field, read Supabase when the runner read flags are `supabase`. Views that depend on an Airtable formula field, `OR` of a link lookup, and `FIND` inside a JSON column stay on Airtable. Allowlisted equality/`BLANK`/`RECORD_ID`/`AND`/`OR` formulas, plus the three Studio produce Platform Output link lookups, already run on Supabase.
 - Deleting or stopping Airtable records (Phase 7).
 - Production Requests, media metadata, and cron as a write source of truth (Phase 6 stays Airtable-first write-through).
 - `resolveAuthorization` on Supabase user tables.

@@ -9,7 +9,57 @@ from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
 from t1.formulas import t1_production_formula
 
 
-def test_platform_equality_and_unsupported_find():
+def test_text_find_and_spaced_link_find():
+    notes = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'FIND("Studio exact source authority", {Asset_Selection_Notes} & "") > 0',
+    )
+    assert notes == "error_messages->>Asset_Selection_Notes.like.*Studio exact source authority*"
+    missing = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'FIND("https://render.example",{Remotion_Status_URL})=0',
+    )
+    assert missing is not None
+    assert "not.like.*https://render.example*" in missing
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        "FIND('drive-id', {Selected_Assets_JSON} & '') > 0",
+    ) is None
+    spaced = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        'FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",") > 0',
+    )
+    assert spaced == "link:content_items.content_number=eq.102"
+
+
+def test_snapshotted_runner_views():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from supabase_views import view_to_postgrest_filter
+
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=ZoneInfo("America/Chicago"))
+    rendering = view_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "R5 - Rendering Jobs to Poll", now=now,
+    )
+    assert rendering is not None
+    assert "render_status.eq.Rendering" in rendering
+    assert "final_file_url" in rendering
+    retry = view_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "R2B - Retry Asset Selection", now=now,
+    )
+    assert retry is not None
+    assert "content_item_id.not.is.null" in retry
+    assert "Asset_Selection_Attempt_Count.lt.5" in retry
+    assert "lt.2026-11-13T06:00:00Z" in retry
+    assert "render_clip_list" in retry
+    assert view_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, "Ready Queue") is None
+    legacy = view_to_postgrest_filter(CONTENT_ITEMS_TABLE, "viwwnVJVPqfy7iYJK")
+    assert legacy is None
+    package = view_to_postgrest_filter(
+        CONTENT_ITEMS_TABLE, "P1 - Ready for Package Generation",
+    )
+    assert package is None
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, '{Platform}="Instagram"',
     ) == "platform.eq.Instagram"

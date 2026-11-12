@@ -133,6 +133,33 @@ def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
     assert len(airtable) == 2
 
 
+def test_snapshotted_view_reads_supabase(monkeypatch):
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        return Response([{
+            "airtable_record_id": "recRender1",
+            "render_status": "Rendering",
+            "error_messages": {"_runner_record_projection": "v1", "Remotion_Status_URL": "https://render.example/job"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    rows = _client(studio_runner_output_read_source="supabase").list_records(
+        PLATFORM_OUTPUTS_TABLE,
+        view="R5 - Rendering Jobs to Poll",
+        formula="{Test_Run_ID}=BLANK()",
+        max_records=5,
+    )
+    assert rows[0]["id"] == "recRender1"
+    assert "render_status.eq.Rendering" in seen[0]
+    assert "test_run_id" in seen[0]
+
+
 def test_produce_content_number_find_reads_supabase(monkeypatch):
     seen = []
 
