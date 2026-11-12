@@ -39,6 +39,7 @@ import {
   syncAirtableContentRowToSupabase,
   syncAirtableOutputRowToSupabase,
   readSupabaseMaeOutput,
+  listSupabaseDeskHealOutputs,
   parseAirtableCreateFields,
   mintAirtableRecordId,
   studioPhase6WriteSource,
@@ -813,7 +814,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
+  assert.match(worker, /0\.10\.831-desk-heal-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -917,7 +918,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
+  assert.match(worker, /0\.10\.831-desk-heal-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1043,6 +1044,61 @@ test("lean output upsert keeps a stored runner marker", async () => {
     );
     assert.equal(unmarked.Output_Notes, undefined);
     assert.equal(unmarked.Publish_Retry_Eligible, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("desk heal candidate lists read Supabase and keep the note bag", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return { ok: true, async text() { return JSON.stringify([{
+      airtable_record_id: "recHeal1",
+      output_number: 3200,
+      output_status: "In Production",
+      review_status: "Changes Requested",
+      render_status: "Rendered",
+      publish_status: "Not Ready",
+      do_not_publish: false,
+      final_file_url: "https://media.chicagoshining.com/final.mp4",
+      updated_at: "2026-11-12T05:00:00.000Z",
+      error_messages: {
+        Publish_Error_Stage: "TTD0_ROUTE",
+        Review_Notes: "operator note",
+        Auto_Publish_Enabled: true,
+      },
+    }]); } };
+  };
+  try {
+    const rows = await listSupabaseDeskHealOutputs(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "secret" },
+      { kind: "phantom_rerender", limit: 24 },
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "recHeal1");
+    assert.equal(rows[0].fields.Output_Status, "In Production");
+    assert.equal(rows[0].fields.Final_File_URL, "https://media.chicagoshining.com/final.mp4");
+    assert.equal(rows[0].fields.Review_Notes, "operator note");
+    assert.equal(rows[0].fields.Publish_Error_Stage, "TTD0_ROUTE");
+    assert.equal(rows[0].fields.Updated_At, "2026-11-12T05:00:00.000Z");
+    const url = calls[0];
+    assert.match(url, /platform_outputs\?/);
+    assert.match(url, /output_status=eq\.In%20Production/);
+    assert.match(url, /review_status=eq\.Changes%20Requested/);
+    assert.match(url, /render_status\.eq\.Native%20Photo%20Route/);
+    assert.match(url, /order=output_number\.desc/);
+    assert.doesNotMatch(url, /api\.airtable\.com/);
+    const worker = readStudioWorkerSource();
+    for (const marker of ["stale_rfr", "phantom_rerender", "live_failed", "ttd0_blank_draft"]) {
+      assert.match(worker, new RegExp(`studioListDeskHealOutputs\\(env, "${marker}"`));
+    }
+    const stale = worker.slice(
+      worker.indexOf("export async function studioHealAwaitingApprovalStaleRfr"),
+      worker.indexOf("export async function studioHealPhantomRerender"),
+    );
+    assert.doesNotMatch(stale, /listRecords\(env, outputTable/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2502,7 +2558,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
+  assert.match(worker, /0\.10\.831-desk-heal-reads/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

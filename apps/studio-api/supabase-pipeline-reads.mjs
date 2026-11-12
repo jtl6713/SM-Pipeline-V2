@@ -1444,6 +1444,65 @@ export async function listSupabaseOccupiedScheduleRows(env, { profileAirtableId,
   return rows.map((row) => maeScheduleFieldsFromSupabase(row, profileAirtableId));
 }
 
+function encodeDeskFilterValue(value) {
+  return encodeURIComponent(String(value));
+}
+
+/**
+ * Candidate pages for the four desk heals that used to list Platform Outputs
+ * from Airtable. Typed columns are filtered here. The classifier still decides
+ * whether a row is healed. The patch stays on the existing Airtable export.
+ */
+export function deskHealOutputFilter(kind) {
+  const quiet = "test_run_id=is.null&do_not_publish=eq.false";
+  if (kind === "stale_rfr") {
+    const armed = ["Ready to Schedule", "Ready to Publish", "Scheduled", "Publishing"]
+      .map(encodeDeskFilterValue)
+      .join(",");
+    return `${quiet}&published_at=is.null&output_status=eq.${encodeDeskFilterValue("Ready for Review")}`
+      + `&review_status=eq.Approved&publish_status=in.(${armed})`;
+  }
+  if (kind === "phantom_rerender") {
+    const nativeOrFile = `or=(render_status.eq.${encodeDeskFilterValue("Native Photo Route")},`
+      + "and(final_file_url.not.is.null,final_file_url.neq.))";
+    return `${quiet}&published_at=is.null&output_status=eq.${encodeDeskFilterValue("In Production")}`
+      + `&review_status=eq.${encodeDeskFilterValue("Changes Requested")}&${nativeOrFile}`;
+  }
+  if (kind === "live_failed") {
+    const live = [
+      "published_at.not.is.null",
+      "and(platform_post_url.not.is.null,platform_post_url.neq.)",
+      "error_messages->>Platform_Post_ID.not.is.null",
+      "error_messages->>YouTube_Video_ID.not.is.null",
+    ].join(",");
+    return `${quiet}&publish_status=eq.Failed&or=(${live})`;
+  }
+  if (kind === "ttd0_blank_draft") {
+    const route = "or=(error_messages->>Publish_Error_Stage.eq.TTD0_ROUTE,"
+      + `error_messages->>Publish_Error_Message.ilike.${encodeDeskFilterValue("*TTD0 found neither*")})`;
+    return `${quiet}&platform=eq.TikTok&publish_status=eq.Failed&${route}`;
+  }
+  throw new Error("Unknown desk heal candidate list");
+}
+
+export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30 } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
+  const capped = Math.max(1, Math.min(60, Number(limit) || 30));
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?${deskHealOutputFilter(kind)}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.airtable_record_id)
+    .map((row) => {
+      const shaped = airtableShapedOutputFromSupabase(flattenOutputRow(row));
+      if (!shaped.fields.Last_Modified && !shaped.fields.Updated_At && row.updated_at) {
+        shaped.fields.Updated_At = row.updated_at;
+      }
+      return shaped;
+    });
+}
+
 export async function readSupabaseMaeOutput(env, airtableId) {
   const id = String(airtableId || "").trim();
   if (!id) return null;

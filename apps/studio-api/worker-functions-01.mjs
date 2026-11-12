@@ -28,6 +28,7 @@ import {
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
   listSupabaseOccupiedScheduleRows,
+  listSupabaseDeskHealOutputs,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -12580,10 +12581,24 @@ export async function studioHealNativePhotoReviewStrands(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioHealNativePhotoReviewStrands__*/
 
+function studioDeskHealAutoPublishEnabled(record) {
+  const value = f(record, "Auto_Publish_Enabled");
+  if (value === true || value === 1) return true;
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes";
+}
+
+async function studioListDeskHealOutputs(env, kind, airtableList) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return listSupabaseDeskHealOutputs(env, { kind, limit: airtableList.limit });
+  }
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
+}
+
 export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "stale_rfr", {
     limit: Math.max(limit * 3, 30),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12628,7 +12643,7 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
 export async function studioHealPhantomRerender(env, options = {}) {
   const limit = Math.max(1, Math.min(16, Number(options.limit || 8)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "phantom_rerender", {
     limit: Math.max(limit * 3, 24),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12679,7 +12694,7 @@ export async function studioHealPhantomRerender(env, options = {}) {
 export async function studioHealLiveFailedPublishStatus(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "live_failed", {
     limit: Math.max(limit * 3, 24),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12730,7 +12745,7 @@ export async function studioHealLiveFailedPublishStatus(env, options = {}) {
 export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "ttd0_blank_draft", {
     limit: Math.max(limit * 3, 18),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12739,6 +12754,7 @@ export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
   const healed = [];
   for (const record of rows || []) {
     if (healed.length >= limit) break;
+    if (!studioDeskHealAutoPublishEnabled(record)) continue;
     const row = mapDeskInventoryOutput(record);
     const finding = classifyTtd0RouteBlankDraft(row);
     if (!finding) continue;
