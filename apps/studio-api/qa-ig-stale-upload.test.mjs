@@ -404,3 +404,56 @@ test("failed MAE attempt may be retried from same already-fenced generation",asy
   assert.equal(output[0].outcome,"fenced_pregraph_mae_retry_candidate");
   assert.equal(attempts,1);
 });
+test("supabase write source lists stale reel candidates without an Airtable formula", async () => {
+  const previous = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify([{
+      airtable_record_id: "rec12345678901234",
+      output_number: 9289,
+      platform: "Instagram",
+      platform_output_type: "Instagram Reel",
+      publish_status: "Publishing",
+      review_status: "Approved",
+      output_status: "Approved for Publishing",
+      publish_method: "Automated",
+      do_not_publish: false,
+      error_messages: {
+        Publish_Locked_By: "AP1-IG",
+        Publish_Locked_At: "2026-11-02T17:00:00Z",
+        Last_Publish_Attempt_At: "2026-11-02T17:01:00Z",
+        Auto_Publish_Enabled: true,
+      },
+    }]), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const paths = [];
+  let ledger = null;
+  try {
+    const results = await auditStaleInstagramReels({
+      STUDIO_WRITE_SOURCE: "supabase",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "secret",
+      AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
+    }, {
+      nowMs: NOW,
+      airtableFetch: async (_env, table, path, options) => {
+        paths.push(String(path || ""));
+        if (table === "Quality Agent Recovery Ledger" && options?.method === "PATCH") {
+          ledger = JSON.parse(options.body).records[0].fields;
+          return { records: [{ id: "rec12345678901239" }] };
+        }
+        if (table === "Quality Agent Recovery Ledger") return { id: path, fields: ledger };
+        if (String(path).startsWith("?")) throw new Error("formula list");
+        return row();
+      },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].outcome, "stale_lock_needs_eyes");
+    assert.equal(paths.some((path) => path.startsWith("?")), false);
+    assert.equal(paths.includes("rec12345678901234"), true);
+    assert.match(urls[0], /Publish_Locked_By\.eq\.AP1-IG/);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});

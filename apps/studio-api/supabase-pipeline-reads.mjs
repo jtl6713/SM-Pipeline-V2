@@ -1530,7 +1530,7 @@ function igOpenCarouselFilter() {
  * decides whether a row is healed. The patch stays on the existing Airtable export.
  * Render heals that need excluded clip JSON stay on Airtable.
  */
-export function deskHealOutputFilter(kind) {
+export function deskHealOutputFilter(kind, options = {}) {
   const quiet = "test_run_id=is.null&do_not_publish=eq.false";
   if (kind === "native_photo") {
     const statuses = ["Ready for Review", "Approved for Publishing", "Published"]
@@ -1609,6 +1609,22 @@ export function deskHealOutputFilter(kind) {
       + "&and(error_messages->>Platform_Post_ID.not.is.null,error_messages->>Platform_Post_ID.neq.)"
       + `&error_messages->>Studio_Publish_Dispatch_Note.ilike.${encodeDeskFilterValue("*QA-AUTOVERIFY-RECOVERED:*")}`;
   }
+  if (kind === "ig_stale_reel") {
+    const cutoff = String(options.cutoffIso || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(cutoff)) throw new Error("Instagram stale reel scan needs a cutoff");
+    const before = encodeDeskFilterValue(cutoff);
+    const reel = `platform=eq.Instagram&platform_output_type=eq.${encodeDeskFilterValue("Instagram Reel")}&publish_status=eq.Publishing`;
+    const locked = `and(error_messages->>Publish_Locked_By.eq.AP1-IG,error_messages->>Publish_Locked_At.lt.${before})`;
+    const blankLock = "or=(error_messages->>Publish_Locked_By.is.null,error_messages->>Publish_Locked_By.eq.)";
+    const blankLockAt = "or=(error_messages->>Publish_Locked_At.is.null,error_messages->>Publish_Locked_At.eq.)";
+    const blankStarted = "or=(error_messages->>Publish_Started_At.is.null,error_messages->>Publish_Started_At.eq.)";
+    const proof = "or=("
+      + `error_messages->>Output_Notes.ilike.${encodeDeskFilterValue("*QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation*")},`
+      + "and(error_messages->>Platform_Post_ID.not.is.null,error_messages->>Platform_Post_ID.neq.),"
+      + "and(error_messages->>Platform_Media_ID.not.is.null,error_messages->>Platform_Media_ID.neq.))";
+    const unlocked = `and(${blankLock},${blankLockAt},${blankStarted},error_messages->>Last_Publish_Attempt_At.lt.${before},${proof})`;
+    return `${reel}&or=(${locked},${unlocked})`;
+  }
   if (kind === "failed_status") {
     const message = "and(error_messages->>Publish_Error_Message.not.is.null,error_messages->>Publish_Error_Message.neq.,"
       + `or=(publish_status.eq.${encodeDeskFilterValue("Ready to Publish")},publish_status.eq.Publishing))`;
@@ -1638,7 +1654,7 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30 } = {}
 }
 
 /** One page of a full heal census. Offset is a row count, not an Airtable cursor. */
-export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset = 0 } = {}) {
+export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset = 0, cutoffIso = "" } = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(100, Number(limit) || 100));
   const start = Math.max(0, Number(offset) || 0);
@@ -1648,7 +1664,7 @@ export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset 
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind)}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
+    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
   );
   const batch = Array.isArray(rows) ? rows : [];
   const records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);

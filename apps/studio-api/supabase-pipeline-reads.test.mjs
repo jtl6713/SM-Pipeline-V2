@@ -815,7 +815,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.833-facebook-heal-reads/);
+  assert.match(worker, /0\.10\.834-ig-stale-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -919,7 +919,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.833-facebook-heal-reads/);
+  assert.match(worker, /0\.10\.834-ig-stale-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1099,6 +1099,16 @@ test("desk heal candidate lists read Supabase and keep the note bag", async () =
     assert.equal(page.offset, "1");
     assert.match(calls.at(-1), /Publish_Error_Stage\.eq\.FBS3_RATE_LIMIT/);
     assert.match(calls.at(-1), /offset=0/);
+    const stalePage = await listSupabaseDeskHealPage(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "secret" },
+      { kind: "ig_stale_reel", limit: 1, offset: 0, cutoffIso: "2026-11-12T06:00:00.000Z" },
+    );
+    assert.equal(stalePage.records.length, 1);
+    assert.match(calls.at(-1), /Publish_Locked_By\.eq\.AP1-IG/);
+    assert.match(calls.at(-1), /Publish_Locked_At\.lt\.2026-11-12T06%3A00%3A00\.000Z/);
+    const staleAudit = await readFile(new URL("./qa-ig-stale-upload.mjs", import.meta.url), "utf8");
+    assert.match(staleAudit, /kind: "ig_stale_reel"/);
+    assert.match(staleAudit, /observed\.id\)/);
     const worker = readStudioWorkerSource();
     for (const marker of [
       "stale_rfr", "phantom_rerender", "live_failed", "ttd0_blank_draft",
@@ -2588,7 +2598,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.833-facebook-heal-reads/);
+  assert.match(worker, /0\.10\.834-ig-stale-reads/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

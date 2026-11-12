@@ -4,6 +4,8 @@
  * A stale Airtable timestamp does not prove a Graph create failed, nor does a
  * missing saved ID establish absence of an Instagram post.
  */
+import { listSupabaseDeskHealPage, studioSupabaseConfigured, studioWriteSource } from "./supabase-pipeline-reads.mjs";
+
 export const QA_IG_STALE_UPLOAD_SIGNATURE = "QA-IG-STALE-UPLOAD";
 export const QA_IG_STALE_UPLOAD_THRESHOLD_MS = 30 * 60 * 1000;
 export const QA_IG_STALE_UPLOAD_LEDGER = "Quality Agent Recovery Ledger";
@@ -159,6 +161,16 @@ export async function auditStaleInstagramReels(env, {
     } catch { cursor = ""; }
   }
   const readPage = async offset => {
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      const cutoffIso = new Date(queryNowMs - Math.max(QA_IG_STALE_UPLOAD_THRESHOLD_MS, 60000)).toISOString();
+      const page = await listSupabaseDeskHealPage(env, {
+        kind: "ig_stale_reel",
+        limit: bounded,
+        offset: /^\d+$/.test(String(offset || "")) ? offset : 0,
+        cutoffIso,
+      });
+      return { records: page.records, offset: page.offset };
+    }
     const params = "?filterByFormula=" + encodeURIComponent(staleInstagramReelFormula(queryNowMs))
       + "&pageSize=" + bounded
       + (offset ? "&offset=" + encodeURIComponent(offset) : "");
