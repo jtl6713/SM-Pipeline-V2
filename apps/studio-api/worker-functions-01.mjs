@@ -10527,6 +10527,17 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
   if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
   const publishMode = finishedPublishMode(studioRequestNotesText(requestRecord));
   if (publishMode === "approval") return { waiting: "manual_approval", production_request_id: requestId };
+  const markGroupReleased = async () => {
+    // This durable receipt drives Home upload progress without polling all
+    // Platform Outputs every four seconds. Only write after Airtable group release.
+    const current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    const notes = String(f(current, "Production_Notes") || "");
+    if (/az-publish-now-released=\d{4}-\d{2}-\d{2}T/.test(notes)) return;
+    const marker = `\n\naz-publish-now-released=${new Date().toISOString()}`;
+    await item4UpdateRequestState(env, requestId, {
+      Production_Notes: notes.slice(0, 10000 - marker.length) + marker,
+    });
+  };
   let cover = options.cover || null;
   if (!options.skipCover) {
     try {
@@ -10588,7 +10599,10 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
     const committed = (row) => String(f(row, "Review_Status") || "").trim() === "Approved"
       && ["Approved for Publishing", "Published"].includes(String(f(row, "Output_Status") || "").trim());
     const armedCount = outputs.filter((row) => committed(row) && f(row, "Auto_Publish_Enabled") === true).length;
-    if (armedCount === outputs.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
+    if (armedCount === outputs.length) {
+      await markGroupReleased();
+      return { skipped: "already_queued", count: outputs.length, cover, finals };
+    }
     if (armedCount > 0) return { waiting: "publish_now_preflight", reason: "partial_group_release",
       production_request_id: requestId, armed_count: armedCount, expected: outputs.length, cover, finals };
 
@@ -10627,6 +10641,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       return { waiting: "publish_now_preflight", reason: "group_release_readback_failed",
         production_request_id: requestId, expected: outputs.length, actual: released.length };
     }
+    await markGroupReleased();
     return { ok: true, released_count: released.length, count: outputs.length,
       production_request_id: requestId, cover, finals };
   }
