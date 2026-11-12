@@ -28,7 +28,6 @@ import {
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
   listSupabaseOccupiedScheduleRows,
-  mergeMaeOccupancyRows,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -8009,6 +8008,23 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null, requ
   // empty capacity. Strict reads bypass the best-effort UI cache and fail closed.
   if (requireComplete) {
     if (!profile?.id) throw new HttpError(503, "Profile is required to reserve MAE capacity");
+    // Output writes are Supabase-first. The reservation walk uses that calendar
+    // and does not page Airtable. A missing profile or a failed read fails CLOSED.
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      try {
+        const supabaseRows = await listSupabaseOccupiedScheduleRows(env, {
+          profileAirtableId: profile.id,
+          platform,
+          startIso: new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString(),
+          endIso: new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString(),
+        });
+        if (!Array.isArray(supabaseRows)) throw new Error("Supabase MAE occupancy page missing");
+        return supabaseRows;
+      } catch (error) {
+        console.warn("authoritative MAE occupancy read failed", error);
+        throw new HttpError(503, "Cannot verify complete MAE occupancy; approval or reschedule was not committed");
+      }
+    }
     // The bounded list is suitable for UI previews, not authoritative MAE.
     // Walk every Airtable page for the scoped profile/platform before reserving.
     // Any missing/repeated cursor, failed page or excessive scan fails CLOSED.
@@ -8034,15 +8050,6 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null, requ
         if (offset && cursors.has(offset)) throw new Error("Repeated MAE occupancy cursor");
         if (offset) cursors.add(offset);
       } while (offset);
-      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-        const supabaseRows = await listSupabaseOccupiedScheduleRows(env, {
-          profileAirtableId: profile.id,
-          platform,
-          startIso: new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString(),
-          endIso: new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString(),
-        });
-        return mergeMaeOccupancyRows(rows, supabaseRows);
-      }
     } catch (error) {
       console.warn("authoritative MAE occupancy read failed", error);
       throw new HttpError(503, "Cannot verify complete MAE occupancy; approval or reschedule was not committed");
