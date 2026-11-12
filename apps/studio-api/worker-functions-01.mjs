@@ -10539,7 +10539,41 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       console.warn("AZ ensure public finals failed", requestId, error);
     }
   }
-  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  // Publish Now must never use the broad content-item fallback, which can see
+  // unrelated or disabled siblings. Require exact enabled PRO -> PO links.
+  let outputs;
+  if (publishMode === "immediate") {
+    const proRows = (await outputRowsForProductionRequest(env, requestId, { includeInactive: true }))
+      .filter((row) => Boolean(f(row, "Enabled")));
+    const horizontal = isHorizontalFinishedAspect(studioRequestNotesText(requestRecord));
+    const expectedCount = azExpectedOutputCount(studioRequestNotesText(requestRecord));
+    const linked = [];
+    const seen = new Set();
+    if (proRows.length !== expectedCount) return {
+      waiting: "publish_now_preflight", production_request_id: requestId,
+      reason: "expected_enabled_output_count", expected: expectedCount, actual: proRows.length,
+    };
+    for (const pro of proRows) {
+      const ids = arrayOrEmpty(f(pro, "Platform_Output"))
+        .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+      if (ids.length !== 1 || seen.has(ids[0])) return {
+        waiting: "publish_now_preflight", production_request_id: requestId,
+        reason: "missing_or_duplicate_platform_output_link", pro_record_id: pro.id,
+      };
+      seen.add(ids[0]);
+      const output = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, ids[0]);
+      const proKey = canonicalFinishedDestinationKey(f(pro, "Platform"), f(pro, "Output_Type"), { horizontal });
+      const poKey = canonicalFinishedDestinationKey(f(output, "Platform"), studioOutputTypeLabel(output), { horizontal });
+      if (!proKey || proKey !== poKey) return {
+        waiting: "publish_now_preflight", production_request_id: requestId,
+        reason: "platform_output_identity_mismatch", pro_record_id: pro.id,
+      };
+      linked.push(output);
+    }
+    outputs = linked;
+  } else {
+    outputs = await azPlatformOutputsForRequest(env, requestId);
+  }
   if (!outputs.length) return { waiting: "outputs", cover, finals };
   if (publishMode === "immediate") {
     const family = finishedPublishPreflight(outputs.map((row) => {
