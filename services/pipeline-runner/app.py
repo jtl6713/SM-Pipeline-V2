@@ -145,6 +145,7 @@ def health():
             "service": "pipeline-runner",
             "version": settings["service_version"],
             "studio_write_source": settings.get("studio_write_source") or "airtable",
+            "studio_phase6_write_source": settings.get("studio_phase6_write_source") or "airtable",
             "studio_runner_output_read_source": runner_table_read_source(settings, PLATFORM_OUTPUTS_TABLE),
             "studio_runner_content_read_source": runner_table_read_source(settings, CONTENT_ITEMS_TABLE),
             "ig_publish_lease_required": os.environ.get("IG_PUBLISH_LEASE_REQUIRED","").strip().lower() == "true",

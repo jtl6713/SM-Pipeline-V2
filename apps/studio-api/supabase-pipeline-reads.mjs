@@ -341,6 +341,39 @@ export function studioLegacyExportEnabled(env, tableId) {
   );
 }
 
+/**
+ * Phase 6 update switch for Production Requests, Media Assets, and the
+ * transfer queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not
+ * turn this on. Creates, MAE skip paths, the half-hour Airtable copy, and
+ * Phase 7 stay unchanged.
+ */
+export function studioPhase6WriteSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_PHASE6_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+export function studioPhase6WritesMode(env) {
+  return studioPhase6WriteSource(env) === "supabase"
+    ? "supabase_sor_legacy_export"
+    : "airtable_sor_write_through";
+}
+
+export function phase6TableKind(env, tableId) {
+  const table = String(tableId || "");
+  const requestTable = String(env?.AIRTABLE_PRODUCTION_REQUEST_TABLE_ID || "");
+  const mediaTable = String(env?.AIRTABLE_MEDIA_TABLE_ID || "");
+  if (table === "Production Requests" || (requestTable && table === requestTable)) return "request";
+  if (table === "Media Assets" || (mediaTable && table === mediaTable)) return "media";
+  if (table === "Studio Media Transfer Queue" || table === "tblBZLXPd1p2NRWRK") return "queue";
+  return "";
+}
+
+export function studioPhase6LegacyExportEnabled(env, tableId) {
+  return studioPhase6WriteSource(env) === "supabase" && Boolean(phase6TableKind(env, tableId));
+}
+
 export function parseAirtableMutationRecords(pathOrParams, rawBody) {
   let parsed = rawBody;
   if (typeof rawBody === "string") {
@@ -2767,6 +2800,22 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record) {
     },
   );
   return { ok: true, mode: "patch" };
+}
+
+export async function studioSupabaseCommitPhase6First(env, tableId, records) {
+  if (!studioPhase6LegacyExportEnabled(env, tableId)) return { ok: false, reason: "disabled" };
+  const kind = phase6TableKind(env, tableId);
+  const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
+  if (!rows.length) return { ok: false, reason: "empty" };
+  for (const record of rows) {
+    const synced = kind === "request"
+      ? await syncAirtableProductionRequestRowToSupabase(env, record)
+      : kind === "media"
+        ? await syncAirtableMediaAssetRowToSupabase(env, record)
+        : await syncAirtableTransferQueueRowToSupabase(env, record);
+    if (!synced?.ok) return { ok: false, reason: synced?.reason || "sync", id: record.id };
+  }
+  return { ok: true, kind, count: rows.length };
 }
 
 /**

@@ -128,6 +128,26 @@ def legacy_export_enabled(settings: dict | None, table_id: str) -> bool:
     return studio_write_source(settings) == "supabase" and bool(table_kind(table_id))
 
 
+def studio_phase6_write_source(settings: dict | None) -> str:
+    """Phase 6 updates only. STUDIO_WRITE_SOURCE does not select this."""
+    raw = str((settings or {}).get("studio_phase6_write_source") or "airtable").strip().lower()
+    if raw == "supabase" and supabase_configured(settings):
+        return "supabase"
+    return "airtable"
+
+
+def phase6_table_kind(table_id: str) -> str:
+    return {
+        PRODUCTION_REQUESTS_TABLE: "request",
+        MEDIA_ASSETS_TABLE: "media",
+        MEDIA_TRANSFER_QUEUE_TABLE: "queue",
+    }.get(str(table_id or ""), "")
+
+
+def phase6_legacy_export_enabled(settings: dict | None, table_id: str) -> bool:
+    return studio_phase6_write_source(settings) == "supabase" and bool(phase6_table_kind(table_id))
+
+
 def _select(value: Any) -> Any:
     if value is None or value == "":
         return None

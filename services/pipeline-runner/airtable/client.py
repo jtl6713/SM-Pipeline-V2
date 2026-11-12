@@ -37,6 +37,17 @@ class AirtableClient:
 
         return legacy_export_enabled(self._settings, table_id)
 
+    def _phase6_export(self, table_id: str) -> bool:
+        from supabase_pipeline import phase6_legacy_export_enabled
+
+        return phase6_legacy_export_enabled(self._settings, table_id)
+
+    def _commit_phase6(self, table_id: str, records: list[dict]) -> bool:
+        from supabase_pipeline import mirror_airtable_records
+
+        result = mirror_airtable_records(self._settings, table_id, records, partial=True)
+        return bool(result.get("ok")) and result.get("count") == len(records)
+
     def get_record(self, table_id: str, record_id: str) -> dict:
         import requests
 
@@ -77,6 +88,28 @@ class AirtableClient:
                 return {"id": record_id, "fields": fields}
             self._mirror(table_id, [record])
             return record
+        if self._phase6_export(table_id):
+            pending = {"id": record_id, "fields": fields}
+            committed = self._commit_phase6(table_id, [pending])
+            if not committed:
+                logger.warning(
+                    "supabase phase6 update commit failed for %s %s; Airtable remains required",
+                    table_id,
+                    record_id,
+                )
+            else:
+                try:
+                    record = self._patch_record(table_id, record_id, fields, typecast=typecast)
+                except Exception as error:
+                    logger.warning(
+                        "Airtable phase6 legacy export failed for %s %s: %s",
+                        table_id,
+                        record_id,
+                        error,
+                    )
+                    return pending
+                self._mirror(table_id, [record])
+                return record
         record = self._patch_record(table_id, record_id, fields, typecast=typecast)
         self._mirror(table_id, [record])
         return record
@@ -231,12 +264,32 @@ class AirtableClient:
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
                 ], partial=True)
+            phase6_committed = False
+            if not legacy and self._phase6_export(table_id):
+                phase6_committed = self._commit_phase6(table_id, [
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                ])
+                if not phase6_committed:
+                    logger.warning(
+                        "supabase phase6 batch update commit failed for %s; Airtable remains required",
+                        table_id,
+                    )
             if typecast:
                 body["typecast"] = True
             response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
             if not response.ok and legacy:
                 logger.warning(
                     "Airtable legacy export batch failed for %s: %s %s",
+                    table_id,
+                    response.status_code,
+                    (response.text or "")[:300],
+                )
+                updated.extend({"id": str(item["id"]), "fields": dict(item.get("fields") or {})} for item in chunk)
+                continue
+            if not response.ok and phase6_committed:
+                logger.warning(
+                    "Airtable phase6 legacy export batch failed for %s: %s %s",
                     table_id,
                     response.status_code,
                     (response.text or "")[:300],

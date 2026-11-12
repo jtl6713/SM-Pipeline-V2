@@ -184,7 +184,11 @@ import {
   studioAuthReadSource,
   studioWriteSource,
   studioPhase5WritesMode,
+  studioPhase6WriteSource,
+  studioPhase6WritesMode,
   studioLegacyExportEnabled,
+  studioPhase6LegacyExportEnabled,
+  studioSupabaseCommitPhase6First,
   parseAirtableMutationRecords,
   parseAirtableCreateFields,
   mintAirtableRecordId,
@@ -1343,7 +1347,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.822-supabase-output-content-creates",
+          version: "0.10.823-supabase-phase6-update-sor",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1381,6 +1385,8 @@ export default {
           studio_supabase_sync_shrink_v1: true,
           studio_write_source: studioWriteSource(env),
           studio_phase5_writes: studioPhase5WritesMode(env),
+          studio_phase6_write_source: studioPhase6WriteSource(env),
+          studio_phase6_writes: studioPhase6WritesMode(env),
           studio_read_source: studioReadSource(env),
           studio_pipeline_read_source: studioPipelineReadSource(env),
           studio_content_read_source: studioContentReadSource(env),
@@ -5262,6 +5268,9 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const method = String(options?.method || "GET").toUpperCase();
   const legacyExport = method === "PATCH" && studioLegacyExportEnabled(env, tableId);
+  const phase6Export = method === "PATCH"
+    && studioPhase6LegacyExportEnabled(env, tableId)
+    && options?.skipSupabaseWriteThrough !== true;
   const createLegacy = method === "POST"
     && studioLegacyExportEnabled(env, tableId)
     && options?.skipSupabaseWriteThrough !== true;
@@ -5273,8 +5282,23 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // id. A failed Airtable create keeps the Supabase row. Schedule/approve
   // paths that pass skipSupabaseWriteThrough still require a successful
   // Airtable export so MAE verify can re-read Airtable under the reservation lock.
+  // STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
+  // transfer-queue PATCH commit to Supabase first. Creates stay Airtable-first.
+  // The flag is unset in this deploy, so Phase 6 stays Airtable-first.
   if (legacyExport && mutationRecords.length) {
     await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
+  }
+  let phase6Records = phase6Export
+    ? parseAirtableMutationRecords(pathOrParams, options?.body)
+    : [];
+  if (phase6Records.length) {
+    try {
+      const committed = await studioSupabaseCommitPhase6First(env, tableId, phase6Records);
+      if (!committed?.ok) phase6Records = [];
+    } catch (error) {
+      console.warn("supabase phase6 update commit failed; Airtable remains required", error);
+      phase6Records = [];
+    }
   }
   let mintedCreates = [];
   if (createLegacy) {
@@ -5348,6 +5372,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       body = mutationRecords.length === 1 && !raw.includes('"records"')
         ? mutationRecords[0]
         : { records: mutationRecords };
+      airtableCommitted = false;
+    } else if (phase6Records.length) {
+      console.warn("Airtable phase6 legacy export failed; keeping Supabase commit", tableId, response.status);
+      const raw = String(options?.body || "");
+      body = phase6Records.length === 1 && !raw.includes('"records"')
+        ? phase6Records[0]
+        : { records: phase6Records };
       airtableCommitted = false;
     } else if (createLegacy && mintedCreates.length) {
       console.warn("Airtable legacy export create failed; keeping Supabase commit", tableId, response.status);

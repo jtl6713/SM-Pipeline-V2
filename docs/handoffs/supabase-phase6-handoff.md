@@ -8,7 +8,7 @@ Read [the migration index](../supabase-migration/README.md) and [Phase 6](../sup
 
 ## What is already done (do not redo)
 
-Studio list reads are on Supabase. Writes are still Airtable for creates and for Phase 6 tables. Output and Content Item updates use Supabase first, with an Airtable legacy export. Drive is still the media authority.
+Studio list reads are on Supabase. Writes are still Airtable for creates and for Phase 6 tables. Output and Content Item updates use Supabase first, with an Airtable legacy export. Phase 6 updates commit to Supabase first only when `STUDIO_PHASE6_WRITE_SOURCE=supabase`. That secret is not set. `STUDIO_WRITE_SOURCE` does not cover these tables. Drive is still the media authority.
 
 | Work | Production |
 |---|---|
