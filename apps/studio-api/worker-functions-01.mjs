@@ -8217,6 +8217,12 @@ export function studioPublishIsDue(record, graceMs = 120000) {
 /*__STUDIO_WORKER_END:studioPublishIsDue__*/
 
 export function studioPublishCanDispatchNow(record) {
+  // A Completed Video Publish Now approval remains held until every output in
+  // the operator's group has passed preflight and the Airtable batch is released.
+  const publishNotes = [f(record, "Output_Notes"), f(record, "Review_Notes")].map(String).join("\n");
+  if ((/az-publish-mode=immediate/i.test(publishNotes)
+      || publishNotes.includes("Completed Video — all-outputs Publish Now"))
+      && f(record, "Auto_Publish_Enabled") !== true) return false;
   // Initial scheduled dispatch shares the overview eligibility decision.
   // Retries/recovery (already attempted) and intentional unscheduled manual dispatches
   // continue through their existing gates, rather than being silently disabled.
