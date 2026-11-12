@@ -29,6 +29,7 @@ import {
   syncAirtableTransferQueueRowToSupabase,
   listSupabaseOccupiedScheduleRows,
   listSupabaseDeskHealOutputs,
+  listSupabaseDeskHealPage,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -12595,6 +12596,19 @@ async function studioListDeskHealOutputs(env, kind, airtableList) {
   return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
 }
 
+async function studioScanDeskHealOutputs(env, kind, outputTable, scanOptions) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return scanOutstandingFailedOutputs(
+      (page) => listSupabaseDeskHealPage(env, { kind, limit: page.limit, offset: page.offset }),
+      scanOptions,
+    );
+  }
+  return scanOutstandingFailedOutputs(
+    (page) => listRecordsPage(env, outputTable, page),
+    scanOptions,
+  );
+}
+
 export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -12808,10 +12822,9 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Read-only Meta verification for previously exhausted Graph 368 holds.
   // Exact saved video/media identity only; an absent Graph entry NEVER permits
   // rearming or resetting the original dispatch counter.
-  const remoteCandidates = await scanOutstandingFailedOutputs(
-    (page) => listRecordsPage(env, outputTable, page),
-    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",OR({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Publish_Error_Stage}="FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"),{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")' },
-  ).catch((error) => {
+  const remoteCandidates = await studioScanDeskHealOutputs(env, "fb_story_remote", outputTable, {
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",OR({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Publish_Error_Stage}="FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"),{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")',
+  }).catch((error) => {
     console.warn("QA Facebook Story remote census unavailable", String(error?.message || error));
     return [];
   });
@@ -12875,8 +12888,10 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Evidence-positive reconciliation of previously published Stories whose
   // Studio status is stale. Require BOTH remote post ID and publication time;
   // no Graph create is made. Also picks up legacy already-published receipts.
-  const evidenced = await listRecords(env, outputTable, {
+  const evidenced = await studioListDeskHealOutputs(env, "fb_story_evidenced", {
     limit: Math.max(limit * 3, 18),
+    sortField: "Output_ID",
+    sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!="",{Platform_Post_ID}!="",OR({Publish_Status}!="Published",{Output_Status}!="Published",{Publish_Error_Stage}!=""))',
   }).catch(() => []);
   const evidenceHealed = [];
@@ -12924,10 +12939,9 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
         String(error?.message || error));
     }
   }
-  const candidates = await scanOutstandingFailedOutputs(
-    (args) => listRecordsPage(env, outputTable, args),
-    { filterFormula: FACEBOOK_PREAPPROVAL_FORMULA }
-  ).catch((error) => {
+  const candidates = await studioScanDeskHealOutputs(env, "fb_preapproval", outputTable, {
+    filterFormula: FACEBOOK_PREAPPROVAL_FORMULA,
+  }).catch((error) => {
     console.warn("Facebook preapproval candidate census unavailable", error);
     return [];
   });
@@ -12971,8 +12985,10 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Recovery evidence must survive overwritten Studio notes. If Airtable's
   // event append failed after a successful reconciliation, backfill verified
   // outputs bearing the earlier recovery marker. Each event key is deduped.
-  const noteRecoveryCandidates = await listRecords(env, outputTable, {
+  const noteRecoveryCandidates = await studioListDeskHealOutputs(env, "fb_note_recovery", {
     limit: Math.max(12, limit * 3),
+    sortField: "Output_ID",
+    sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Publish_Status}="Published",{Output_Status}="Published",{Platform_Post_ID}!="",FIND("QA-AUTOVERIFY-RECOVERED:",{Studio_Publish_Dispatch_Note}&"")>0)',
   }).catch(() => []);
   for (const row of noteRecoveryCandidates) {
@@ -13004,8 +13020,8 @@ export async function studioHealFailedStatuses(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const filterFormula = 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,OR({Publish_Status}="Failed",AND({Publish_Error_Message}!="",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Publishing"))))';
-  const failedPublish = await scanOutstandingFailedOutputs(
-    (options) => listRecordsPage(env, outputTable, options), { filterFormula });
+  const failedPublish = (await studioScanDeskHealOutputs(env, "failed_status", outputTable, { filterFormula }))
+    .filter((row) => studioDeskHealAutoPublishEnabled(row));
   let retried = 0;
   for (const row of failedPublish) {
     if (retried >= limit) break;

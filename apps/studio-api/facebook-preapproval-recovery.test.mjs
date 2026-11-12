@@ -96,9 +96,11 @@ test("the cron recovery performs no direct Meta Graph send or counter reset", ()
   assert.ok(start >= 0 && end > start);
   assert.match(block, /facebookPreapprovalRecoveryReason\(latest\)/);
   assert.match(block, /facebookPreapprovalRecoveryFields\(latest\)/);
-  assert.match(block, /scanOutstandingFailedOutputs/);
+  assert.match(block, /studioScanDeskHealOutputs/);
+  assert.match(worker, /scanOutstandingFailedOutputs/);
   assert.doesNotMatch(block, /studioDispatchApprovedPublishNow/);
   assert.doesNotMatch(block, /Studio_Publish_Dispatch_Count:\s*0/);
+  assert.match(block, /studioScanDeskHealOutputs\(env, "fb_preapproval"/);
   assert.ok(block.indexOf("const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID") <
-    block.indexOf("listRecords(env, outputTable"), "no TDZ table access");
+    block.indexOf("studioScanDeskHealOutputs"), "no TDZ table access");
 });

@@ -1512,7 +1512,46 @@ export function deskHealOutputFilter(kind) {
       + `error_messages->>Publish_Error_Message.ilike.${encodeDeskFilterValue("*TTD0 found neither*")})`;
     return `${quiet}&platform=eq.TikTok&publish_status=eq.Failed&${route}`;
   }
+  if (kind === "fb_story_remote") {
+    const stage = "or=(error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_RATE_LIMIT_368,"
+      + "error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING)";
+    const postBlank = "or=(error_messages->>Platform_Post_ID.is.null,error_messages->>Platform_Post_ID.eq.)";
+    const mediaPresent = "and(error_messages->>Platform_Media_ID.not.is.null,error_messages->>Platform_Media_ID.neq.)";
+    return `test_run_id=is.null&platform=eq.Facebook&platform_output_type=eq.${encodeDeskFilterValue("Facebook Story")}`
+      + `&published_at=is.null&${stage}&${postBlank}&${mediaPresent}`;
+  }
+  if (kind === "fb_story_evidenced") {
+    const stale = "or=(publish_status.neq.Published,output_status.neq.Published,"
+      + "and(error_messages->>Publish_Error_Stage.not.is.null,error_messages->>Publish_Error_Stage.neq.))";
+    return `test_run_id=is.null&platform=eq.Facebook&platform_output_type=eq.${encodeDeskFilterValue("Facebook Story")}`
+      + `&published_at=not.is.null&and(error_messages->>Platform_Post_ID.not.is.null,error_messages->>Platform_Post_ID.neq.)&${stale}`;
+  }
+  if (kind === "fb_preapproval") {
+    const stage = "or=(error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_RATE_LIMIT_368,"
+      + "error_messages->>Publish_Error_Stage.eq.FBS3_RATE_LIMIT,"
+      + "error_messages->>Publish_Error_Stage.eq.FB_GRAPH_RATE_LIMIT)";
+    return `${quiet}&platform=eq.Facebook&${stage}`;
+  }
+  if (kind === "fb_note_recovery") {
+    return `test_run_id=is.null&platform=eq.Facebook&platform_output_type=eq.${encodeDeskFilterValue("Facebook Story")}`
+      + "&publish_status=eq.Published&output_status=eq.Published"
+      + "&and(error_messages->>Platform_Post_ID.not.is.null,error_messages->>Platform_Post_ID.neq.)"
+      + `&error_messages->>Studio_Publish_Dispatch_Note.ilike.${encodeDeskFilterValue("*QA-AUTOVERIFY-RECOVERED:*")}`;
+  }
+  if (kind === "failed_status") {
+    const message = "and(error_messages->>Publish_Error_Message.not.is.null,error_messages->>Publish_Error_Message.neq.,"
+      + `or=(publish_status.eq.${encodeDeskFilterValue("Ready to Publish")},publish_status.eq.Publishing))`;
+    return `${quiet}&published_at=is.null&or=(publish_status.eq.Failed,${message})`;
+  }
   throw new Error("Unknown desk heal candidate list");
+}
+
+function shapeDeskHealRecord(row) {
+  const shaped = airtableShapedOutputFromSupabase(flattenOutputRow(row));
+  if (!shaped.fields.Last_Modified && !shaped.fields.Updated_At && row.updated_at) {
+    shaped.fields.Updated_At = row.updated_at;
+  }
+  return shaped;
 }
 
 export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30 } = {}) {
@@ -1524,13 +1563,26 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30 } = {}
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
-    .map((row) => {
-      const shaped = airtableShapedOutputFromSupabase(flattenOutputRow(row));
-      if (!shaped.fields.Last_Modified && !shaped.fields.Updated_At && row.updated_at) {
-        shaped.fields.Updated_At = row.updated_at;
-      }
-      return shaped;
-    });
+    .map(shapeDeskHealRecord);
+}
+
+/** One page of a full heal census. Offset is a row count, not an Airtable cursor. */
+export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset = 0 } = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
+  const capped = Math.max(1, Math.min(100, Number(limit) || 100));
+  const start = Math.max(0, Number(offset) || 0);
+  if (start >= 2000) {
+    console.warn("Supabase desk heal scan stopped at the safety ceiling", kind);
+    return { records: [], offset: null };
+  }
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?${deskHealOutputFilter(kind)}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
+  );
+  const batch = Array.isArray(rows) ? rows : [];
+  const records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
+  const next = start + capped;
+  return { records, offset: batch.length === capped && next < 2000 ? String(next) : null };
 }
 
 export async function readSupabaseMaeOutput(env, airtableId) {
