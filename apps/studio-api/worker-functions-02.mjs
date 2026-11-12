@@ -24,7 +24,9 @@ import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-g
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioFactoryOpsReadSource,
+  studioWriteSource,
   studioSupabaseConfigured,
+  readSupabaseMaeOutput,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -7109,6 +7111,15 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
 }
 /*__STUDIO_WORKER_END:platformOutputSeedFields__*/
 
+async function maeVerifiedScheduleRecord(env, id, tableId) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const row = await readSupabaseMaeOutput(env, id);
+    if (!row?.id) throw new HttpError(503, "Supabase schedule write could not be verified");
+    return row;
+  }
+  return airtableFetch(env, tableId, id);
+}
+
 export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
   platformOutput,
   desiredSchedule,
@@ -7211,10 +7222,11 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
     write: async (plan, { signal }) => airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id, {
       method: "PATCH",
       signal,
+      maeSupabaseVerify: true,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written, plan) => {
-      const authoritative = await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id);
+      const authoritative = await maeVerifiedScheduleRecord(env, current.id, STUDIO_PLATFORM_OUTPUT_TABLE);
       if (vacate) {
         const stillScheduled = [
           f(authoritative, "Scheduled_Post_Date"),

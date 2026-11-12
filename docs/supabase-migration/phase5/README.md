@@ -15,7 +15,7 @@ the Worker awaits a write-through of the records Airtable returned when write So
 
 Rows are mirrored only when the Airtable body includes an identity field (`Output_ID` / `Platform`, or `Content_ID` / `Content_Title` / `Content_Status`). A partial body cannot blank the Supabase projection. Content rows whose profile uuid is not resolved yet are patched in place and do not clear `content_profile_id`.
 
-Approve, schedule, publish-status, and heal paths that pass `skipSupabaseWriteThrough: true` still complete the verified Airtable mutation under the scheduling reservation lock, and issue exactly **one** post-lock Supabase mirror. **Never restore the former second upsert:** it was a production pool-saturation bug. When `STUDIO_WRITE_SOURCE=supabase`, those PATCH paths commit the partial fields to Supabase first, then still require a successful Airtable legacy export so MAE verify can re-read Airtable under the lock.
+Approve, schedule, publish-status, and heal paths that pass `skipSupabaseWriteThrough: true` still issue exactly **one** post-lock Supabase mirror. **Never restore the former second upsert:** it was a production pool-saturation bug. When `STUDIO_WRITE_SOURCE=supabase`, those PATCH paths commit the partial fields to Supabase first. Schedule and approve paths that pass `maeSupabaseVerify` verify the slot from Supabase after that commit. Other skip paths still require a successful Airtable export.
 
 ## Side-effect outbox
 

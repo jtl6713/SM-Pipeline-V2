@@ -27,10 +27,10 @@ The last sync in that gate finished at 8:34 PM CT with `status=completed`, `ok=t
 ## What is still Airtable
 
 - Creates outside Platform Outputs and Content Items. Output and Content Item creates commit to Supabase first; a successful Airtable export still supplies the `rec` id callers keep.
-- Schedule/approve MAE verify still re-reads Airtable under the reservation lock even after the write SoR flip; those paths require a successful Airtable legacy export.
+- Schedule/approve MAE verify reads the Supabase slot when `STUDIO_WRITE_SOURCE=supabase` (`maeSupabaseVerify`). A successful Supabase commit is enough for that verify. Held reschedule notes and other skip paths still require Airtable. Authoritative occupancy still walks Airtable and overlays the Supabase window so a Supabase-only slot stays occupied.
 - Production Request, media metadata, and transfer-queue creates. Updates on those tables commit to Supabase first when `STUDIO_PHASE6_WRITE_SOURCE=supabase` (`deploy/enable-studio-phase6-write-source.txt`). Confirm `phase6_writes=supabase_sor_legacy_export` on the next read-only gate.
 - Pipeline-runner Airtable views and `FIND`/`ARRAYJOIN` formula selectors other than the three Studio produce Platform Output link lookups (content number, content record id, and the stored Production Request Output record id). Allowlisted Output/Content formulas, including `OR`, run on Supabase when runner read flags are enabled (`deploy/enable-runner-supabase-reads.txt`). Unmarked rows and an empty link match still fall back to Airtable.
-- The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
+- The half-hour cron still reads Airtable. When `STUDIO_WRITE_SOURCE=supabase`, an existing Platform Output keeps its Studio-owned schedule and approval columns. When `STUDIO_PHASE6_WRITE_SOURCE=supabase`, an existing Production Request, Media Asset, or transfer-queue row is not overwritten; a missing create is still inserted. The cron does not write Supabase back to Airtable.
 - `STUDIO_HOME_PROFILE_SUMMARY_READS`. That is a separate Durable Object summary, and this cutover did not turn it on.
 
 ## Remaining phases

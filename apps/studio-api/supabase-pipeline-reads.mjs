@@ -1378,6 +1378,131 @@ export async function listSupabaseScheduleGrid(env, { profileAirtableId, startIs
   };
 }
 
+function maeScheduleFieldsFromSupabase(row, profileAirtableId) {
+  return {
+    id: row.airtable_record_id,
+    fields: {
+      Platform: row.platform || "",
+      Scheduled_Post_Date: row.scheduled_post_date || "",
+      YouTube_Scheduled_Publish_At: row.youtube_scheduled_publish_at || "",
+      Studio_Scheduled_At: row.studio_scheduled_at || "",
+      Publish_Status: row.publish_status || "",
+      Output_Status: row.output_status || "",
+      Review_Status: row.review_status || "",
+      Studio_Output_Type: row.studio_output_type || "",
+      Format: row.format || "",
+      Content_Profile: profileAirtableId ? [profileAirtableId] : [],
+    },
+  };
+}
+
+/**
+ * Complete MAE window from platform_outputs. Fail closed: a missing profile
+ * or a short page must not look like an empty calendar.
+ */
+export async function listSupabaseOccupiedScheduleRows(env, { profileAirtableId, platform = "", startIso, endIso } = {}) {
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase profile missing for MAE occupancy");
+  const start = encodeURIComponent(startIso);
+  const end = encodeURIComponent(endIso);
+  const platformClause = String(platform || "").trim()
+    ? `&platform=eq.${encodeURIComponent(String(platform).trim())}`
+    : "";
+  const window = `or=(and(scheduled_post_date.gte.${start},scheduled_post_date.lte.${end}),and(youtube_scheduled_publish_at.gte.${start},youtube_scheduled_publish_at.lte.${end}),and(studio_scheduled_at.gte.${start},studio_scheduled_at.lte.${end}))`;
+  const select = "airtable_record_id,platform,scheduled_post_date,youtube_scheduled_publish_at,studio_scheduled_at,publish_status,output_status,review_status,studio_output_type,format";
+  const rows = [];
+  const pageSize = 500;
+  for (let offset = 0; offset < 6000; offset += pageSize) {
+    const page = await supabaseRest(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false&test_run_id=is.null${platformClause}&${window}&select=${select}&order=scheduled_post_date.asc.nullslast&limit=${pageSize}&offset=${offset}`,
+    );
+    const batch = Array.isArray(page) ? page : [];
+    if (!batch.length) break;
+    rows.push(...batch.filter((row) => row?.airtable_record_id));
+    if (rows.length > 6000) throw new Error("Supabase MAE occupancy scan exceeded safety ceiling");
+    if (batch.length < pageSize) break;
+  }
+  return rows.map((row) => maeScheduleFieldsFromSupabase(row, profileAirtableId));
+}
+
+export async function readSupabaseMaeOutput(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!id) return null;
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,platform,scheduled_post_date,youtube_scheduled_publish_at,studio_scheduled_at,publish_status,output_status,review_status,studio_output_type,format&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row?.airtable_record_id) return null;
+  return maeScheduleFieldsFromSupabase(row, "");
+}
+
+export function mergeMaeOccupancyRows(airtableRows, supabaseRows) {
+  const byId = new Map();
+  for (const row of airtableRows || []) {
+    if (row?.id) byId.set(row.id, row);
+  }
+  for (const row of supabaseRows || []) {
+    if (row?.id) byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
+export const OUTPUT_CRON_PRESERVE_COLUMNS = [
+  "scheduled_post_date",
+  "studio_scheduled_at",
+  "youtube_scheduled_publish_at",
+  "publish_status",
+  "output_status",
+  "review_status",
+  "publish_method",
+  "do_not_publish",
+];
+
+async function lookupExistingAirtableIds(env, table, ids) {
+  const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  const found = new Set();
+  for (let i = 0; i < wanted.length; i += 80) {
+    const chunk = wanted.slice(i, i + 80).map((id) => encodeURIComponent(id)).join(",");
+    const rows = await supabaseRest(
+      env,
+      `${table}?airtable_record_id=in.(${chunk})&select=airtable_record_id&limit=80`,
+    );
+    for (const row of rows || []) {
+      if (row?.airtable_record_id) found.add(row.airtable_record_id);
+    }
+  }
+  return found;
+}
+
+/** Keep Studio-owned schedule and approval columns when the half-hour copy hits an existing output. */
+export async function splitOutputCronSorRows(env, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (studioWriteSource(env) !== "supabase" || !list.length) return { existing: [], fresh: list };
+  const existingIds = await lookupExistingAirtableIds(env, "platform_outputs", list.map((row) => row?.airtable_record_id));
+  const existing = [];
+  const fresh = [];
+  for (const row of list) {
+    if (!row?.airtable_record_id || !existingIds.has(row.airtable_record_id)) {
+      fresh.push(row);
+      continue;
+    }
+    const copy = { ...row };
+    for (const key of OUTPUT_CRON_PRESERVE_COLUMNS) delete copy[key];
+    existing.push(copy);
+  }
+  return { existing, fresh };
+}
+
+/** Phase 6 updates are already Supabase-first. The half-hour copy may insert a missing create, not overwrite one. */
+export async function omitExistingPhase6CronRows(env, table, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (studioPhase6WriteSource(env) !== "supabase" || !list.length) return list;
+  const existingIds = await lookupExistingAirtableIds(env, table, list.map((row) => row?.airtable_record_id));
+  return list.filter((row) => row?.airtable_record_id && !existingIds.has(row.airtable_record_id));
+}
+
 export async function listSupabaseContentItems(env, { profileAirtableId, limit = 100 } = {}) {
   const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
   if (!profileId) return { records: [], outputs: [], profileMissing: true };
@@ -2164,8 +2289,11 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     profileUuid,
     contentUuidByAirtableId,
   })), "error_messages");
-  for (let i = 0; i < outputRows.length; i += 200) {
-    await guardedUpsert("platform_outputs", outputRows.slice(i, i + 200));
+  const outputCron = await splitOutputCronSorRows(env, outputRows);
+  for (const batch of [outputCron.fresh, outputCron.existing]) {
+    for (let i = 0; i < batch.length; i += 200) {
+      await guardedUpsert("platform_outputs", batch.slice(i, i + 200));
+    }
   }
 
   // A Factory skip leaves the Airtable open pack, but an older Supabase row
@@ -2216,7 +2344,11 @@ export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
     fields: [...PRODUCTION_REQUEST_SYNC_FIELDS],
     filterFormula,
   });
-  const requestRows = (requests || []).map((row) => mapAirtableProductionRequestToSupabase(row, null));
+  const requestRows = await omitExistingPhase6CronRows(
+    env,
+    "production_requests",
+    (requests || []).map((row) => mapAirtableProductionRequestToSupabase(row, null)),
+  );
   for (let i = 0; i < requestRows.length; i += 200) {
     await deps.assertLease?.();
     const started = Date.now();
@@ -2254,7 +2386,8 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
     fields: [...MEDIA_ASSET_SYNC_FIELDS],
     ...(filterFormula ? { filterFormula } : {}),
   });
-  const mediaRows = (records || []).map((record) => mediaAssetBackfillRow(record)).filter(Boolean);
+  const namedMediaRows = (records || []).map((record) => mediaAssetBackfillRow(record)).filter(Boolean);
+  const mediaRows = await omitExistingPhase6CronRows(env, "media_assets", namedMediaRows);
   for (let i = 0; i < mediaRows.length; i += 200) {
     await deps.assertLease?.();
     const started = Date.now();
@@ -2266,7 +2399,7 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
     ok: true,
     media_assets: mediaRows.length,
     scanned: (records || []).length,
-    skipped_unnamed: Math.max(0, (records || []).length - mediaRows.length),
+    skipped_unnamed: Math.max(0, (records || []).length - namedMediaRows.length),
   };
 }
 
@@ -2296,11 +2429,11 @@ export async function syncRecentTransferQueueToSupabase(env, deps = {}) {
     fields: [...TRANSFER_QUEUE_SYNC_FIELDS],
     filterFormula,
   });
-  const queueRows = (records || []).map((record) => {
+  const queueRows = await omitExistingPhase6CronRows(env, "studio_media_transfer_queue", (records || []).map((record) => {
     const body = transferQueueWriteThroughRow(record);
     if (!Object.keys(body).length) return null;
     return { airtable_record_id: record.id, ...body };
-  }).filter(Boolean);
+  }).filter(Boolean));
   for (let i = 0; i < queueRows.length; i += 200) {
     await deps.assertLease?.();
     const started = Date.now();
