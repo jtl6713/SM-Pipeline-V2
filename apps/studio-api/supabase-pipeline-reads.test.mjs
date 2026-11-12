@@ -38,6 +38,7 @@ import {
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
   syncAirtableOutputRowToSupabase,
+  readSupabaseMaeOutput,
   parseAirtableCreateFields,
   mintAirtableRecordId,
   studioPhase6WriteSource,
@@ -812,7 +813,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.829-mae-occupancy-supabase/);
+  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -916,7 +917,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.829-mae-occupancy-supabase/);
+  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1042,6 +1043,63 @@ test("lean output upsert keeps a stored runner marker", async () => {
     );
     assert.equal(unmarked.Output_Notes, undefined);
     assert.equal(unmarked.Publish_Retry_Eligible, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("held reschedule patch stores the hold and the note for Supabase readback", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    if (String(url).includes("content_profiles")) {
+      return { ok: true, async text() { return "[]"; } };
+    }
+    if (String(url).includes("select=error_messages")) {
+      return { ok: true, async text() { return JSON.stringify([{
+        error_messages: { _runner_record_projection: "v1", Output_Notes: "keep" },
+      }]); } };
+    }
+    if (String(url).includes("do_not_publish,error_messages")) {
+      return { ok: true, async text() { return JSON.stringify([{
+        airtable_record_id: "recHeld1",
+        platform: "Facebook",
+        scheduled_post_date: "2026-11-13T15:00:00.000Z",
+        publish_status: "Failed",
+        do_not_publish: true,
+        error_messages: {
+          Studio_Output_Notes: "SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION | 2026-11-13T15:00:00.000Z",
+          Publish_Error_Stage: "FBS3_RATE_LIMIT",
+        },
+      }]); } };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const patched = await syncAirtableOutputRowToSupabase(supabaseEnv, {
+      id: "recHeld1",
+      fields: {
+        Scheduled_Post_Date: "2026-11-13T15:00:00.000Z",
+        Publish_Status: "Failed",
+        Do_Not_Publish: true,
+        Studio_Output_Notes: "SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION | 2026-11-13T15:00:00.000Z",
+        Publish_Error_Stage: "FBS3_RATE_LIMIT",
+      },
+    });
+    assert.equal(patched.mode, "patch");
+    const patch = calls.find((call) => call.method === "PATCH");
+    const body = JSON.parse(patch.body);
+    assert.equal(body.do_not_publish, true);
+    assert.equal(body.publish_status, "Failed");
+    assert.match(body.error_messages.Studio_Output_Notes, /SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/);
+    assert.equal(body.error_messages.Publish_Error_Stage, "FBS3_RATE_LIMIT");
+    assert.equal(body.error_messages.Output_Notes, "keep");
+    const read = await readSupabaseMaeOutput(supabaseEnv, "recHeld1");
+    assert.equal(read.fields.Do_Not_Publish, true);
+    assert.equal(read.fields.Publish_Status, "Failed");
+    assert.equal(read.fields.Publish_Error_Stage, "FBS3_RATE_LIMIT");
+    assert.match(read.fields.Studio_Output_Notes, /SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2444,7 +2502,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.829-mae-occupancy-supabase/);
+  assert.match(worker, /0\.10\.830-held-reschedule-readback/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

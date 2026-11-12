@@ -16352,13 +16352,11 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         method: "PATCH",
         signal,
         skipSupabaseWriteThrough: true,
-        maeSupabaseVerify: holdReschedule !== true,
+        maeSupabaseVerify: true,
         body: JSON.stringify({ fields: plan.fields, typecast: true }),
       }),
       verify: async (written, plan) => {
-        const authoritative = holdReschedule
-          ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
-          : await maeVerifiedScheduleRecord(env, match[1]);
+        const authoritative = await maeVerifiedScheduleRecord(env, match[1]);
         const storedRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
         const storedMs = Date.parse(storedRaw);
         const selectedMs = Date.parse(plan.selectedIso);
@@ -16380,7 +16378,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         if (holdReschedule && (f(authoritative,"Do_Not_Publish")!==true ||
             f(authoritative,"Publish_Status")!=="Failed" ||
             !String(f(authoritative,"Studio_Output_Notes")||"").includes("SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION"))) {
-          throw new HttpError(409,"Held reschedule guard did not survive Airtable readback");
+          throw new HttpError(409,"Held reschedule guard did not survive schedule readback");
         }
         written.__atomic_verified_record = authoritative;
         return new Date(storedMs).toISOString();
@@ -16447,6 +16445,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
       method: "PATCH",
       skipSupabaseWriteThrough: true,
+      maeSupabaseVerify: true,
       body: JSON.stringify({
         fields,
         typecast: true,
@@ -16456,7 +16455,9 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       // The existing legacy route lacks atomic Durable Object reservations.
       // Fail closed on stale or inconsistent authoritative write readback;
       // do not release a hold or transform a failed posting into a success.
-      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+      const verified = (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))
+        ? await maeVerifiedScheduleRecord(env, match[1])
+        : await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
       const chosen = Date.parse(String(f(fields,"Scheduled_Post_Date")||""));
       const actual = Date.parse(String(f(verified,"Scheduled_Post_Date")||""));
       if (!Number.isFinite(actual) || actual !== chosen
@@ -16465,16 +16466,15 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           || String(f(verified,"Publish_Error_Stage")||"") !== "FBS3_RATE_LIMIT")
         throw new HttpError(409,"Held Facebook slot/hold authoritative readback mismatch");
       updated = verified;
-      // Airtable is the authoritative write source. In this exceptional
-      // held-only operation, acknowledge the exact verified date/hold before
-      // touching provider dispatch or the large general output serializer.
-      // A failing non-authoritative Supabase mirror is logged, not a false
-      // ambiguous scheduling response after Airtable has already committed.
+      // When writes are Supabase, the readback above already proved the hold.
+      // The flag-off path still acknowledges the Airtable row and only mirrors.
       studioInvalidateOccupiedScheduleCache();
-      await studioSupabaseWriteThroughOutput(env, updated, "schedule").catch(error => {
-        console.warn("held spam MAE schedule Supabase mirror failed", match[1], error);
-        return null;
-      });
+      if (!(studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))) {
+        await studioSupabaseWriteThroughOutput(env, updated, "schedule").catch(error => {
+          console.warn("held spam MAE schedule Supabase mirror failed", match[1], error);
+          return null;
+        });
+      }
       return respond(request, env, {
         ok: true,
         held_spam_rescheduled_pending_verification: true,
