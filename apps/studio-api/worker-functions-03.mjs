@@ -1953,9 +1953,13 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
         await assertOwned();
         const media = await syncRecentMediaAssetsToSupabase(env, {
           listRecords,
+          listRecordsPage,
           assertLease: assertOwned,
           onUpsert,
           mediaLimit: options.mediaLimit ?? 600,
+          mediaReconcile: options.mediaReconcile === true,
+          mediaOffset: options.mediaOffset || "",
+          mediaReconcilePages: options.mediaReconcilePages,
         });
         result = {
           ok: media?.ok === true,
@@ -2120,6 +2124,8 @@ export async function postStudioSupabaseSync(request, env) {
   const skipMediaAssetsBackfill = payload?.skip_media_assets_backfill === true;
   const skipTransferQueueBackfill = payload?.skip_transfer_queue_backfill === true;
   const mediaOnly = payload?.media_only === true;
+  const mediaReconcile = payload?.media_reconcile === true;
+  const mediaOffset = String(payload?.media_offset || "");
   const result = await studioSyncSupabasePipelineReads(env, {
     outputLimit,
     contentLimit,
@@ -2129,6 +2135,8 @@ export async function postStudioSupabaseSync(request, env) {
     skipMediaAssetsBackfill,
     skipTransferQueueBackfill,
     mediaOnly,
+    mediaReconcile,
+    mediaOffset,
   });
   studioMarkMappedListDirty();
   return respond(request, env, {

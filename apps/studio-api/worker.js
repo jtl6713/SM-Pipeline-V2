@@ -1347,7 +1347,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.826-supabase-phase6-creates",
+          version: "0.10.827-media-asset-reconcile",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1382,6 +1382,7 @@ export default {
           studio_supabase_assets_densify_oneshot_v1: true,
           studio_supabase_assets_densify_media_only_v1: true,
           studio_supabase_assets_densify_null_sanitize_v1: true,
+          studio_supabase_media_reconcile_v1: true,
           studio_supabase_sync_shrink_v1: true,
           studio_write_source: studioWriteSource(env),
           studio_phase5_writes: studioPhase5WritesMode(env),
