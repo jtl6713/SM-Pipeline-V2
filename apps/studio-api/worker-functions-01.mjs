@@ -10577,6 +10577,15 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
   }
   if (!outputs.length) return { waiting: "outputs", cover, finals };
   if (publishMode === "immediate") {
+    // Only the fully approved, batch-released group may reach the publisher.
+    // A partial release is quarantined for review rather than releasing peers.
+    const committed = (row) => String(f(row, "Review_Status") || "").trim() === "Approved"
+      && ["Approved for Publishing", "Published"].includes(String(f(row, "Output_Status") || "").trim());
+    const armedCount = outputs.filter((row) => committed(row) && f(row, "Auto_Publish_Enabled") === true).length;
+    if (armedCount === outputs.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
+    if (armedCount > 0) return { waiting: "publish_now_preflight", reason: "partial_group_release",
+      production_request_id: requestId, armed_count: armedCount, expected: outputs.length, cover, finals };
+
     const family = finishedPublishPreflight(outputs.map((row) => {
       const review = String(f(row, "Review_Status") || "").trim();
       const status = String(f(row, "Output_Status") || "").trim();
@@ -10586,7 +10595,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       return {
         platform: f(row, "Platform"),
         output_type: studioOutputTypeLabel(row),
-        ready: alreadyCommitted || (studioOutputReadyForPublishApproval(row) && !azOutputQueueBlockers(row).length),
+        ready: !azOutputQueueBlockers(row).length && (alreadyCommitted || studioOutputReadyForPublishApproval(row)),
       };
     }), { notes: studioRequestNotesText(requestRecord) });
     if (!family.ok) return { waiting: "publish_now_preflight", production_request_id: requestId,
@@ -10599,7 +10608,22 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
     if (review === "Approved" || status === "Approved for Publishing") return false;
     return true;
   });
-  if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
+  if (!pending.length) {
+    if (publishMode !== "immediate") return { skipped: "already_queued", count: outputs.length, cover, finals };
+    // All six vertical destinations (or the one horizontal destination) are
+    // preflighted and approved while Auto_Publish_Enabled=false. One Airtable
+    // batch commits the release only after the entire group is staged.
+    const released = await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID,
+      outputs.map((row) => ({ id: row.id, fields: { Auto_Publish_Enabled: true } })));
+    if (released.length !== outputs.length
+      || outputs.some((row) => !released.some((saved) => saved.id === row.id
+        && f(saved, "Auto_Publish_Enabled") === true))) {
+      return { waiting: "publish_now_preflight", reason: "group_release_readback_failed",
+        production_request_id: requestId, expected: outputs.length, actual: released.length };
+    }
+    return { ok: true, released_count: released.length, count: outputs.length,
+      production_request_id: requestId, cover, finals };
+  }
 
   // Approve whichever destinations are ready now. Stories still rendering must not
   // hold Reels/Shorts/TikTok at Ready for Review (no human Approve gate on AZ).
@@ -10710,7 +10734,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       immediate ? "Completed Video — all-outputs Publish Now" : "AZ finished-video auto-queue", stamp, {
       ...(immediate ? { scheduled_post_date: "immediate", publish_now: true } : (iso ? { scheduled_post_date: iso } : {})),
       timezone: timeZone,
-    }, { occupiedMs, timeZone, extraSiblings, ...(immediate ? { recheckBestSlot: false } : {}) });
+    }, { occupiedMs, timeZone, extraSiblings, ...(immediate ? { recheckBestSlot: false, deferPublishUntilGroupRelease: true } : {}) });
     const bookedRaw = String(f(updated, "Scheduled_Post_Date") || iso || "").trim();
     const booked = studioScheduleMs(bookedRaw) ?? Date.parse(bookedRaw);
     if (Number.isFinite(booked) && !isStory) {
