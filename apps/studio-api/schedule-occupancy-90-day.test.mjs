@@ -37,6 +37,10 @@ test("authoritative occupancy paginates all pages and fails closed on read error
   assert.doesNotMatch(scan, /rows\.length >= STUDIO_OCCUPIED_LIST_LIMIT/);
   assert.match(scan, /rows\.length > 6000/);
   assert.match(scan, /Invalid or empty MAE occupancy page with continuation/);
+  assert.match(scan, /studioWriteSource\(env\) === "supabase"/);
+  assert.ok(scan.indexOf("listSupabaseOccupiedScheduleRows") < scan.indexOf("await listRecordsPage"),
+    "Supabase occupancy must be decided before the Airtable page walk");
+  assert.doesNotMatch(scan, /mergeMaeOccupancyRows/);
   const reads = between(f02, "export async function studioOccupiedSchedulesOrEmpty", "/*__STUDIO_WORKER_END:studioOccupiedSchedulesOrEmpty__*/");
   assert.match(reads, /if \(options\.requireComplete === true\) \{/);
   assert.match(reads, /return studioLoadOccupiedSchedules\(env, options\)/);
