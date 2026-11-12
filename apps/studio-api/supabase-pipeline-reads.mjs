@@ -2027,14 +2027,22 @@ function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
 
+/**
+ * PostgREST values used inside or=(...) / and=(...) must be double-quoted when
+ * they contain spaces, or the logic-tree parser splits on the space (PGRST100).
+ */
+function encodeDeskLogicValue(value) {
+  return encodeURIComponent(`"${String(value)}"`);
+}
+
 /** Blank jsonb bag field (missing or empty string). */
 function blankErrorMessage(field) {
   return `or=(error_messages->>${field}.is.null,error_messages->>${field}.eq.)`;
 }
 
-/** Present jsonb bag field (not null and not empty). */
+/** Present jsonb bag field (not null and not empty). Top-level needs and=. */
 function presentErrorMessage(field) {
-  return `and(error_messages->>${field}.not.is.null,error_messages->>${field}.neq.)`;
+  return `and=(error_messages->>${field}.not.is.null,error_messages->>${field}.neq.)`;
 }
 
 /**
@@ -2049,7 +2057,10 @@ function tiktokReconcileClockFilters(options = {}) {
   return {
     inboxDue: `or=(scheduled_post_date.is.null,scheduled_post_date.lte.${inboxDueIso})`,
     retryDue: `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${retryDueIso})`,
-    lastCheckedDue: `or=(${blankErrorMessage("TikTok_Draft_Last_Checked_At")},error_messages->>TikTok_Draft_Last_Checked_At.lt.${checkedBeforeIso})`,
+    // Flatten blank + stale checks; nested or= inside or= is invalid PostgREST.
+    lastCheckedDue: "or=(error_messages->>TikTok_Draft_Last_Checked_At.is.null,"
+      + "error_messages->>TikTok_Draft_Last_Checked_At.eq.,"
+      + `error_messages->>TikTok_Draft_Last_Checked_At.lt.${checkedBeforeIso})`,
   };
 }
 
@@ -2059,27 +2070,32 @@ function tiktokReconcileOutputFilter(kind, options = {}) {
   const blankPublishId = blankErrorMessage("TikTok_Draft_Publish_ID");
   const hasPublishId = presentErrorMessage("TikTok_Draft_Publish_ID");
   const clocks = tiktokReconcileClockFilters(options);
-  const readyAssets = encodeDeskFilterValue("Ready for Assets");
-  const readyDelivery = encodeDeskFilterValue("Ready for Delivery");
-  const waitingSchedule = encodeDeskFilterValue("Waiting for Schedule");
-  const processing = encodeDeskFilterValue("Processing");
-  const retryPending = encodeDeskFilterValue("Retry Pending");
-  const delivered = encodeDeskFilterValue("Draft Delivered — Manual Action Required");
-  const completionReceived = encodeDeskFilterValue("Manual Completion Received");
+  const readyAssets = encodeDeskLogicValue("Ready for Assets");
+  const readyDelivery = encodeDeskLogicValue("Ready for Delivery");
+  const waitingSchedule = encodeDeskLogicValue("Waiting for Schedule");
+  const processing = encodeDeskLogicValue("Processing");
+  const retryPending = encodeDeskLogicValue("Retry Pending");
+  const delivered = encodeDeskLogicValue("Draft Delivered — Manual Action Required");
+  const completionReceived = encodeDeskLogicValue("Manual Completion Received");
+  const ttd0 = encodeDeskLogicValue("*TTD0*");
+  const ttd1 = encodeDeskLogicValue("*TTD1*");
+  const ttd2 = encodeDeskLogicValue("*TTD2*");
+  const ttd3 = encodeDeskLogicValue("*TTD3*");
   if (kind === "ttd0_ready") {
     const status = `or=(tiktok_draft_status.eq.${readyAssets},`
-      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD0*")}))`;
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd0}))`;
     return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${status}`;
   }
   if (kind === "ttd1_ready") {
+    // Nested operators inside or= must be or(...)/and(...), not or= / and=.
     const status = `or=(tiktok_draft_status.eq.${readyDelivery},tiktok_draft_status.eq.${waitingSchedule},`
-      + `and(tiktok_draft_status.eq.${retryPending},or=(error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD1*")},`
+      + `and(tiktok_draft_status.eq.${retryPending},or(error_messages->>Publish_Error_Stage.ilike.${ttd1},`
       + "error_messages->>Publish_Error_Stage.eq.TTD_CAPACITY)))";
     return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
   }
   if (kind === "ttd2_processing") {
     const status = `or=(tiktok_draft_status.eq.${processing},`
-      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD2*")}))`;
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd2}))`;
     const base = `${quiet}&${hasPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
     if (options.requireAutoPublish !== false) {
       return `${base}&${armed}&published_at=is.null&${clocks.lastCheckedDue}`;
@@ -2088,7 +2104,7 @@ function tiktokReconcileOutputFilter(kind, options = {}) {
   }
   if (kind === "ttd3_email") {
     const status = `or=(tiktok_draft_status.eq.${delivered},tiktok_draft_status.eq.${completionReceived},`
-      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${encodeDeskFilterValue("*TTD3*")}))`;
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd3}))`;
     return `${quiet}&${presentErrorMessage("TikTok_Draft_Delivered_At")}&${blankErrorMessage("TikTok_Draft_Email_Sent_At")}`
       + `&error_messages->>Manual_Completion_Status.eq.${encodeDeskFilterValue("Required")}&${status}`;
   }
