@@ -171,6 +171,7 @@
   let ezWizardHistory = [];
   let ezWizardBusy = false;
   let azFinishedPath = false;
+  let azFinishedGroupReleased = false;
   let ezPortalPath = null;
   let azProgressTimer = 0;
   let ezAutoPlanAfterUpload = false;
@@ -5324,6 +5325,7 @@
     if (!assetsReady) return "ingesting";
     const rows = Array.isArray(outputs) ? outputs : [];
     if (!rows.length) return "cover/caption";
+    if (azFinishedPublishMode() === "immediate" && azFinishedGroupReleased) return "queued";
     const story = (row) => /story/i.test(String(row?.studio_output_type || row?.output_type || row?.format || ""));
     const mains = rows.filter((row) => !story(row));
     const hasCover = mains.length && mains.every((row) => {
@@ -5343,11 +5345,14 @@
         || /ready to (schedule|publish)|publishing|published/i.test(publish);
     });
     const scheduled = rows.some((row) => String(row.scheduled_post_date || "").trim());
-    if (queued) return "queued";
+    if (queued) return azFinishedPublishMode() === "immediate" ? "group-release" : "queued";
     if (azFinishedPublishMode() === "approval" && hasCover && hasCaption
       && rows.every((row) => /ready for review|approved for publishing/i.test(String(row.output_status || "")))) {
       return "approval";
     }
+    if (azFinishedPublishMode() === "immediate" && rows.every((row) =>
+      row.enabled !== false && Array.isArray(row.platform_output_links) && row.platform_output_links.length === 1
+    )) return "group-release";
     if (scheduled && hasCover && hasCaption) return "scheduled";
     return "cover/caption";
   }
@@ -5379,7 +5384,8 @@
         stopAzFinishedProgressPolling();
         return;
       }
-      if (stage === "scheduled") setAzFinishedMessage(`Times are set. Studio is queueing publishes. ${closeNote}`, "success");
+      if (stage === "group-release") setAzFinishedMessage("Preparing and validating all destinations. No output dispatches until the complete Publish Now group is released.", "success");
+      else if (stage === "scheduled") setAzFinishedMessage(`Times are set. Studio is queueing publishes. ${closeNote}`, "success");
       else if (stage === "compressing") setAzFinishedMessage(item4CompressionProgressLabel(), "success");
       else if (stage === "cover/caption") setAzFinishedMessage(`Preparing covers, captions and outputs for ${azFinishedPublishMode() === "approval" ? "normal Approval" : "the all-destination Publish Now check"}. ${closeNote}`, "success");
       else setAzFinishedMessage(`Ingesting the file. ${closeNote}`, "success");
@@ -9920,6 +9926,7 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     azFinishedPath = true;
+    azFinishedGroupReleased = false;
     $("azFinishedDrop")?.classList.add("is-busy");
     setAzFinishedProgress("ingesting");
     setAzFinishedMessage(bytes > ITEM4_DIRECT_UPLOAD_MAX_BYTES
@@ -14420,6 +14427,9 @@ function timedScriptAssetLabel(asset, index) {
     // platform selection and output matrix after the operator switches content.
     if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision) return;
     productionRequestOutputs = Array.isArray(result.records) ? result.records : [];
+    azFinishedGroupReleased = /az-publish-now-released=\d{4}-\d{2}-\d{2}T/.test(
+      String(result.production_request?.production_notes || "")
+    );
     clearOutputMatrix();
 
     if (productionRequestOutputs.length) {
