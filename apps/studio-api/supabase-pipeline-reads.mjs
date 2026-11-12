@@ -1485,6 +1485,49 @@ async function lookupExistingAirtableIds(env, table, ids) {
   return found;
 }
 
+async function lookupExistingDriveFileIds(env, ids) {
+  const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  const found = new Set();
+  for (let i = 0; i < wanted.length; i += 80) {
+    const chunk = wanted.slice(i, i + 80).map((id) => encodeURIComponent(id)).join(",");
+    const rows = await supabaseRest(
+      env,
+      `media_assets?google_drive_file_id=in.(${chunk})&select=google_drive_file_id&limit=80`,
+    );
+    for (const row of rows || []) {
+      const driveId = String(row?.google_drive_file_id || "").trim();
+      if (driveId) found.add(driveId);
+    }
+  }
+  return found;
+}
+
+/**
+ * media_assets.google_drive_file_id is unique. Airtable has historical duplicates
+ * of the same Drive file. Inserting the second record 409s and stops the page
+ * walk, so a duplicate is skipped and the file already in Supabase stays.
+ */
+async function omitRowsWithExistingDriveFile(env, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const existing = await lookupExistingDriveFileIds(
+    env,
+    list.map((row) => row?.google_drive_file_id),
+  );
+  const seen = new Set(existing);
+  const kept = [];
+  let skipped = 0;
+  for (const row of list) {
+    const driveId = String(row?.google_drive_file_id || "").trim();
+    if (driveId && seen.has(driveId)) {
+      skipped += 1;
+      continue;
+    }
+    if (driveId) seen.add(driveId);
+    kept.push(row);
+  }
+  return { rows: kept, skipped };
+}
+
 /** Keep Studio-owned schedule and approval columns when the half-hour copy hits an existing output. */
 export async function splitOutputCronSorRows(env, rows) {
   const list = Array.isArray(rows) ? rows : [];
@@ -2417,8 +2460,10 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
 
 /**
  * One page-walk of Media Assets for the catalog reconcile. Inserts named rows
- * that Supabase does not already have. Does not overwrite an existing row and
- * does not change the half-hour newest-N copy. Airtable reads stay on.
+ * that Supabase does not already have. A Drive file id that is already stored,
+ * or repeated on the same page, is skipped so the unique index cannot 409 the
+ * walk. Does not overwrite an existing row and does not change the half-hour
+ * newest-N copy. Airtable reads stay on.
  */
 async function syncMediaAssetReconcilePages(env, deps, mediaTableId) {
   const listRecordsPage = deps.listRecordsPage;
@@ -2428,6 +2473,7 @@ async function syncMediaAssetReconcilePages(env, deps, mediaTableId) {
   let scanned = 0;
   let inserted = 0;
   let skippedUnnamed = 0;
+  let skippedDuplicateDrive = 0;
   let done = false;
   for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
     await deps.assertLease?.();
@@ -2442,7 +2488,10 @@ async function syncMediaAssetReconcilePages(env, deps, mediaTableId) {
     scanned += records.length;
     const namedMediaRows = records.map((record) => mediaAssetBackfillRow(record)).filter(Boolean);
     skippedUnnamed += Math.max(0, records.length - namedMediaRows.length);
-    const mediaRows = await omitExistingPhase6CronRows(env, "media_assets", namedMediaRows);
+    const missingMediaRows = await omitExistingPhase6CronRows(env, "media_assets", namedMediaRows);
+    const driveFilter = await omitRowsWithExistingDriveFile(env, missingMediaRows);
+    skippedDuplicateDrive += driveFilter.skipped;
+    const mediaRows = driveFilter.rows;
     for (let i = 0; i < mediaRows.length; i += 200) {
       await deps.assertLease?.();
       const started = Date.now();
@@ -2464,6 +2513,7 @@ async function syncMediaAssetReconcilePages(env, deps, mediaTableId) {
     media_assets: inserted,
     scanned,
     skipped_unnamed: skippedUnnamed,
+    skipped_duplicate_drive: skippedDuplicateDrive,
     offset,
     done,
   };
