@@ -580,6 +580,12 @@ test("mapAirtableContent/Idea/Request helpers populate jsonb bags", () => {
     },
   }, "11111111-1111-1111-1111-111111111111");
   assert.equal(idea.payload.Studio_Photo_Wait_Status, "Waiting");
+  const shapedIdea = airtableShapedIdeaFromSupabase({
+    airtable_record_id: "recIdeaABCDEFGHIJK",
+    candidate_title: "Bridge lights",
+    payload: { Studio_Photo_Match_JSON: "{\"action\":\"wait\"}", Candidate_Title: "Bridge lights" },
+  });
+  assert.match(shapedIdea.fields.Studio_Photo_Match_JSON, /wait/);
 
   const request = mapAirtableProductionRequestToSupabase({
     id: "recRequestABCDEFG",
@@ -826,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.842-publish-queue-columns/);
+  assert.match(worker, /0\.10\.843-idea-settings-slides/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -930,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.842-publish-queue-columns/);
+  assert.match(worker, /0\.10\.843-idea-settings-slides/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2611,7 +2617,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.842-publish-queue-columns/);
+  assert.match(worker, /0\.10\.843-idea-settings-slides/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2728,6 +2734,17 @@ test("render heal columns and creative master registry stay off the lean marker"
   const factory = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(factory, /readSupabaseCreativeMasterContent\(env, contentId\)/);
   assert.match(factory, /studioAdoptCreativeMasterReviewMediaOnly/);
+  const reviewMedia = factory.slice(
+    factory.indexOf("async function studioAdoptCreativeMasterReviewMediaOnly"),
+    factory.indexOf("export async function factoryApproveOutput"),
+  );
+  assert.doesNotMatch(reviewMedia, /skipSupabaseWriteThrough/);
+  const repair = heals.slice(
+    heals.indexOf("export async function studioRepairUnfetchableRenderSources"),
+    heals.indexOf("/*__STUDIO_WORKER_END:studioRepairUnfetchableRenderSources__*/"),
+  );
+  assert.match(repair, /Render_Clip_List_JSON/);
+  assert.doesNotMatch(repair, /skipSupabaseWriteThrough/);
   assert.match(factory, /listSupabaseOutputCensusPage\(env, options\)/);
   const stale = await readFile(new URL("./qa-ig-stale-upload.mjs", import.meta.url), "utf8");
   assert.match(stale, /readSupabaseShapedOutput\(env, id\)/);

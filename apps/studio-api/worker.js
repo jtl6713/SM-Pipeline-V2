@@ -100,7 +100,7 @@ function makeReviewFactoryHandoffOperations(env) {
       return rows[0];
     },
     patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
-      method:"PATCH",skipSupabaseWriteThrough:true,
+      method:"PATCH",
       body:JSON.stringify({fields,typecast:false}),
     }),
     // Content-owned creative authority is separate from platform publishing.
@@ -195,6 +195,8 @@ import {
   releaseMintedAirtableIds,
   adoptMintedPhase6MediaIds,
   studioSupabaseCommitOutputContentFirst,
+  studioSideTableRead,
+  studioSideTableCommit,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -1358,7 +1360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.842-publish-queue-columns",
+          version: "0.10.843-idea-settings-slides",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5355,17 +5357,33 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       }
     }
   }
+  let sideRead = null;
+  if (method === "GET" && studioWriteSource(env) === "supabase") {
+    sideRead = await studioSideTableRead(env, tableId, pathOrParams).catch((error) => {
+      console.warn("supabase side-table read failed; Airtable remains required", error);
+      return null;
+    });
+  }
+  let sideArchive = null;
+  if (!sideRead && method !== "GET" && studioWriteSource(env) === "supabase") {
+    try {
+      const committed = await studioSideTableCommit(env, tableId, method, pathOrParams, options?.body);
+      if (committed?.ok && committed.records?.length) sideArchive = committed.records;
+    } catch (error) {
+      console.warn("supabase side-table commit failed; Airtable remains required", error);
+    }
+  }
   let archiveRecords = null;
   if (method !== "GET") {
     if (legacyExport && outputSorCommitted && mutationRecords.length) archiveRecords = mutationRecords;
     else if (phase6Records.length) archiveRecords = phase6Records;
     else if (createLegacy && mintedCreates.length) archiveRecords = mintedCreates;
     else if (phase6Create && phase6Minted.length) archiveRecords = phase6Minted;
+    else if (sideArchive) archiveRecords = sideArchive;
   }
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
-  await airtableRequestSlot();
   const airtableRequestStarted = Date.now();
   const source = ["shadow_reconcile", "home_overview_refresh", "home_ideas_refresh", "autonomous_refill_scan"].includes(options.airtableEgressSource)
     ? options.airtableEgressSource : "studio_worker_gateway";
@@ -5373,13 +5391,16 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   let response;
   let body = {};
   let airtableCommitted = false;
-  if (archiveRecords) {
+  if (sideRead) {
+    body = sideRead;
+  } else if (archiveRecords) {
     console.info("Airtable archive kept the Supabase commit and did not export", tableId, method);
     const raw = String(options?.body || "");
     body = archiveRecords.length === 1 && !raw.includes('"records"')
       ? archiveRecords[0]
       : { records: archiveRecords };
   } else {
+  await airtableRequestSlot();
   try {
     response = await fetch(endpoint, {
       ...fetchOptions,

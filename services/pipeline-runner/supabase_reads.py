@@ -99,6 +99,15 @@ def try_list_supabase_records(
     sort_direction: str = "asc",
 ) -> list[dict] | None:
     """Airtable-shaped rows, or None when this call must use Airtable."""
+    from settings_store import list_settings
+
+    try:
+        stored_settings = list_settings(settings, table_id, formula, max_records)
+    except Exception as error:
+        logger.warning("supabase settings read failed for %s; using Airtable: %s", table_id, error)
+        stored_settings = None
+    if stored_settings is not None:
+        return stored_settings
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
     # Unknown views and views that use an Airtable formula field stay on Airtable.

@@ -7,7 +7,7 @@ import {
 /**
  * Carousel build and the verify-race heal read slide records from Supabase
  * when Output/Content writes are Supabase-first. A slide that is not in the
- * copy yet is still read from Airtable. Patches stay on the Airtable export.
+ * copy yet is still read from Airtable. A slide patch commits to carousel_slides.
  */
 export async function studioReadCarouselSlides(env, ids, airtableFetch, tableName) {
   const wanted = [...new Set((ids || [])

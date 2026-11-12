@@ -1197,22 +1197,23 @@ export async function listSupabaseMusicRecords(env, { limit = 100, ids = null } 
 export function airtableShapedIdeaFromSupabase(row) {
   const bag = isPlainObject(row.payload) ? row.payload : {};
   const profileId = row.content_profile_airtable_id || bag.content_profile_airtable_id || null;
+  const fields = { ...bag };
+  delete fields.content_profile_airtable_id;
+  fields.Candidate_ID = bag.Candidate_ID ?? null;
+  fields.Candidate_Title = row.candidate_title || bag.Candidate_Title || null;
+  fields.Idea_Summary = row.idea_summary || bag.Idea_Summary || null;
+  fields.Candidate_Status = row.status || bag.Candidate_Status || null;
+  fields.Content_Profile = profileId ? [profileId] : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []);
+  fields["Content Items"] = Array.isArray(bag["Content Items"]) ? bag["Content Items"] : [];
+  fields.Promoted_Content_Record_ID = bag.Promoted_Content_Record_ID || null;
+  fields.Create_Date = bag.Create_Date || row.created_at || null;
+  fields.Studio_Photo_Wait_Status = bag.Studio_Photo_Wait_Status || null;
+  fields.Production_Notes = bag.Production_Notes || null;
+  fields.Production_Config_Notes = bag.Production_Config_Notes || null;
   return {
     id: row.airtable_record_id,
     createdTime: bag.Create_Date || row.created_at || undefined,
-    fields: {
-      Candidate_ID: bag.Candidate_ID ?? null,
-      Candidate_Title: row.candidate_title || bag.Candidate_Title || null,
-      Idea_Summary: row.idea_summary || bag.Idea_Summary || null,
-      Candidate_Status: row.status || bag.Candidate_Status || null,
-      Content_Profile: profileId ? [profileId] : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
-      "Content Items": Array.isArray(bag["Content Items"]) ? bag["Content Items"] : [],
-      Promoted_Content_Record_ID: bag.Promoted_Content_Record_ID || null,
-      Create_Date: bag.Create_Date || row.created_at || null,
-      Studio_Photo_Wait_Status: bag.Studio_Photo_Wait_Status || null,
-      Production_Notes: bag.Production_Notes || null,
-      Production_Config_Notes: bag.Production_Config_Notes || null,
-    },
+    fields,
   };
 }
 
@@ -4883,4 +4884,264 @@ export async function purgeDeletedDuplicatePackages(env) {
   }
   result.snapshots = await stripDeletedDuplicateSnapshots(env);
   return result;
+}
+
+export const PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
+export const ENGAGEMENT_SETTINGS_TABLE_ID = "tblY1wDxmrf5khAYy";
+export const CAROUSEL_SLIDES_TABLE_ID = "tblcnQDBvUngpjDED";
+export const IDEA_CANDIDATES_TABLE_ID = "tblTQapddqD47GOIG";
+
+function sideTableKind(env, tableId) {
+  const table = String(tableId || "");
+  const idea = String(env?.AIRTABLE_IDEA_TABLE_ID || IDEA_CANDIDATES_TABLE_ID);
+  if (table === idea || table === IDEA_CANDIDATES_TABLE_ID) return "idea";
+  if (table === PIPELINE_SETTINGS_TABLE_ID) return "pipeline_settings";
+  if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
+  if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
+  return "";
+}
+
+function sideRecordId(pathOrParams) {
+  const text = String(pathOrParams || "").replace(/^\//, "").split("?")[0].trim();
+  return /^rec[A-Za-z0-9]{14}$/.test(text) ? text : "";
+}
+
+function sideQuery(pathOrParams) {
+  const text = String(pathOrParams || "");
+  const index = text.indexOf("?");
+  return new URLSearchParams(index >= 0 ? text.slice(index + 1) : "");
+}
+
+function compactFormula(formula) {
+  return String(formula || "").replace(/\s+/g, "");
+}
+
+function settingsListFilter(formula) {
+  const text = compactFormula(formula);
+  let match = text.match(/^\{Setting_Name\}="([^"]*)"$/);
+  if (match) return { name: match[1], active: false, prefix: "" };
+  match = text.match(/^AND\(\{Active\}=1,\{Setting_Name\}="([^"]*)"\)$/);
+  if (match) return { name: match[1], active: true, prefix: "" };
+  if (text === "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)"
+    || text === 'AND({Active}=1,FIND("A1_JOB_",{Setting_Name})=1)') {
+    return { name: "", active: true, prefix: "A1_JOB_" };
+  }
+  return null;
+}
+
+function ideaProfileIds(formula) {
+  const text = compactFormula(formula);
+  const ids = [...text.matchAll(/FIND\("([^"]+)",ARRAYJOIN\(\{Content_Profile\}\)(?:&"")?\)/g)]
+    .map((match) => match[1])
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
+  if (!ids.length || !text.includes("ARRAYJOIN({Content_Profile})")) return null;
+  return {
+    ids: [...new Set(ids)],
+    openOnly: text.includes("{Promoted_Content_Record_ID}=BLANK()") && text.includes("{ContentItems}=BLANK()"),
+  };
+}
+
+function settingActive(value) {
+  return value === true || value === 1 || String(value ?? "").trim().toLowerCase() === "true";
+}
+
+function shapeSetting(row) {
+  const payload = isPlainObject(row?.payload) ? row.payload : {};
+  return { id: row.airtable_record_id, fields: { ...payload } };
+}
+
+async function readIdeaRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `idea_candidates?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row?.airtable_record_id ? airtableShapedIdeaFromSupabase(row) : null;
+}
+
+async function readSettingRows(env, source, filter, limit) {
+  const parts = [`payload->>source=eq.${source}`, `select=airtable_record_id,payload`, `limit=${limit}`];
+  if (filter.name) parts.push(`payload->>Setting_Name=eq.${encodeURIComponent(filter.name)}`);
+  if (filter.prefix) parts.push(`payload->>Setting_Name=like.${encodeURIComponent(filter.prefix)}*`);
+  const rows = await supabaseRest(env, `engagement_settings?${parts.join("&")}`);
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.airtable_record_id)
+    .map(shapeSetting)
+    .filter((row) => !filter.active || settingActive(row.fields.Active));
+}
+
+async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
+  const uuids = [];
+  for (const id of profileIds) {
+    const uuid = await resolveSupabaseProfileId(env, id).catch(() => null);
+    if (uuid) uuids.push(uuid);
+  }
+  if (!uuids.length) return [];
+  const rows = await supabaseRest(
+    env,
+    `idea_candidates?content_profile_id=in.(${uuids.map(encodeURIComponent).join(",")})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at&order=created_at.desc&limit=${limit}`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.airtable_record_id)
+    .map(airtableShapedIdeaFromSupabase)
+    .filter((row) => {
+      if (!openOnly) return true;
+      const promoted = String(row.fields.Promoted_Content_Record_ID || "").trim();
+      const items = row.fields["Content Items"];
+      return !promoted && (!Array.isArray(items) || items.length === 0);
+    });
+}
+
+/**
+ * Idea, settings, and carousel-slide reads that can be answered from Supabase.
+ * Returns null when this call must stay on Airtable.
+ */
+export async function studioSideTableRead(env, tableId, pathOrParams) {
+  if (studioWriteSource(env) !== "supabase") return null;
+  const kind = sideTableKind(env, tableId);
+  if (!kind) return null;
+  const id = sideRecordId(pathOrParams);
+  if (id) {
+    if (kind === "idea") {
+      const row = await readIdeaRow(env, id);
+      return row || null;
+    }
+    if (kind === "slides") {
+      const rows = await listSupabaseCarouselSlidesByIds(env, [id]);
+      return rows[0] || null;
+    }
+    const source = kind === "engagement_settings" ? "engagement" : "pipeline";
+    const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
+    return rows.find((row) => row.id === id) || null;
+  }
+  const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
+  const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
+  if (kind === "pipeline_settings" || kind === "engagement_settings") {
+    const filter = settingsListFilter(formula);
+    if (!filter) return null;
+    const records = await readSettingRows(env, kind === "engagement_settings" ? "engagement" : "pipeline", filter, limit);
+    return records.length ? { records } : null;
+  }
+  if (kind === "idea") {
+    const profiles = ideaProfileIds(formula);
+    if (!profiles) return null;
+    const records = await readIdeasForProfiles(env, profiles.ids, profiles.openOnly, limit);
+    return records.length ? { records } : null;
+  }
+  return null;
+}
+
+async function commitIdeaRecords(env, records) {
+  const saved = [];
+  for (const record of records) {
+    const existingRows = await supabaseRest(
+      env,
+      `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload,content_profile_id,candidate_title,idea_summary,status&limit=1`,
+    ).catch(() => []);
+    const existing = Array.isArray(existingRows) ? existingRows[0] : null;
+    const prior = isPlainObject(existing?.payload) ? existing.payload : {};
+    const fields = record.fields || {};
+    const payload = { ...prior, ...fields };
+    const profileAirtableId = firstLink(fields.Content_Profile) || prior.content_profile_airtable_id || null;
+    if (profileAirtableId) payload.content_profile_airtable_id = profileAirtableId;
+    const body = {
+      airtable_record_id: record.id,
+      candidate_title: fields.Candidate_Title || existing?.candidate_title || payload.Candidate_Title || null,
+      idea_summary: fields.Idea_Summary || existing?.idea_summary || payload.Idea_Summary || null,
+      status: selectName(fields.Candidate_Status) || existing?.status || selectName(payload.Candidate_Status),
+      payload,
+      updated_at: new Date().toISOString(),
+    };
+    const profileUuid = profileAirtableId
+      ? await resolveSupabaseProfileId(env, profileAirtableId).catch(() => null)
+      : existing?.content_profile_id || null;
+    if (profileUuid) body.content_profile_id = profileUuid;
+    if (existing) {
+      await supabaseRest(env, `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}`, {
+        method: "PATCH",
+        body,
+        headers: { Prefer: "return=minimal" },
+      });
+    } else {
+      await upsertChunk(env, "idea_candidates", [body]);
+    }
+    saved.push({ id: record.id, fields: payload });
+  }
+  return saved;
+}
+
+async function commitSettingRecords(env, source, records, { insert = false } = {}) {
+  const prepared = [];
+  for (const record of records) {
+    const existingRows = await supabaseRest(
+      env,
+      `engagement_settings?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+    ).catch(() => []);
+    const existing = Array.isArray(existingRows) ? existingRows[0] : null;
+    if (!existing && !insert) return null;
+    const prior = isPlainObject(existing?.payload) ? existing.payload : {};
+    prepared.push({
+      id: record.id,
+      existed: Boolean(existing),
+      payload: { ...prior, ...(record.fields || {}), source },
+    });
+  }
+  const saved = [];
+  for (const record of prepared) {
+    const body = { airtable_record_id: record.id, payload: record.payload };
+    if (record.existed) {
+      await supabaseRest(env, `engagement_settings?airtable_record_id=eq.${encodeURIComponent(record.id)}`, {
+        method: "PATCH",
+        body,
+        headers: { Prefer: "return=minimal" },
+      });
+    } else {
+      await upsertChunk(env, "engagement_settings", [body]);
+    }
+    saved.push({ id: record.id, fields: record.payload });
+  }
+  return saved;
+}
+
+async function commitSlideRecords(env, records) {
+  const merged = [];
+  for (const record of records) {
+    const existing = await listSupabaseCarouselSlidesByIds(env, [record.id]).catch(() => []);
+    const prior = existing[0]?.fields || {};
+    merged.push({ id: record.id, fields: { ...prior, ...(record.fields || {}) } });
+  }
+  await syncCarouselSlideRecordsToSupabase(env, merged);
+  return merged;
+}
+
+/** Commit idea, settings, or slide writes. ok false leaves the Airtable call in place. */
+export async function studioSideTableCommit(env, tableId, method, pathOrParams, rawBody) {
+  if (studioWriteSource(env) !== "supabase") return { ok: false, reason: "airtable" };
+  const kind = sideTableKind(env, tableId);
+  if (!kind) return { ok: false, reason: "table" };
+  const verb = String(method || "GET").toUpperCase();
+  if (verb === "PATCH" || verb === "POST") {
+    const parsed = verb === "PATCH"
+      ? parseAirtableMutationRecords(pathOrParams, rawBody)
+      : parseAirtableCreateFields(rawBody).map((fields) => ({ id: mintAirtableRecordId(), fields }));
+    if (!parsed.length) return { ok: false, reason: "no_records" };
+    const records = kind === "idea"
+      ? await commitIdeaRecords(env, parsed)
+      : kind === "slides"
+        ? await commitSlideRecords(env, parsed)
+        : await commitSettingRecords(env, kind === "engagement_settings" ? "engagement" : "pipeline", parsed, { insert: verb === "POST" });
+    if (!records) return { ok: false, reason: "missing_row" };
+    return { ok: records.length === parsed.length, records };
+  }
+  if (verb === "DELETE") {
+    const id = sideRecordId(pathOrParams);
+    if (!id) return { ok: false, reason: "no_records" };
+    const table = kind === "idea" ? "idea_candidates" : kind === "slides" ? "carousel_slides" : "engagement_settings";
+    await supabaseRest(env, `${table}?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+    return { ok: true, records: [{ id, deleted: true }] };
+  }
+  return { ok: false, reason: "method" };
 }

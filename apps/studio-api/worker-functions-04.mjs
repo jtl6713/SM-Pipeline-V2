@@ -11733,7 +11733,7 @@ async function studioAdoptCreativeMasterReviewMediaOnly(env,id,fields){
   // state, publish flags, or task dispatch. The per-output Factory lease is
   // acquired by the separate creative-master guard before this write.
   return airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
-    method:"PATCH",skipSupabaseWriteThrough:true,
+    method:"PATCH",
     body:JSON.stringify({fields,typecast:false}),
   });
 }

@@ -51,8 +51,12 @@ class AirtableClient:
     def get_record(self, table_id: str, record_id: str) -> dict:
         import requests
 
+        from settings_store import get_setting
         from supabase_reads import try_get_supabase_record
 
+        setting = get_setting(self._settings, table_id, record_id)
+        if setting is not None:
+            return setting
         supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
         if supabase_row is not None:
             return supabase_row
@@ -79,6 +83,20 @@ class AirtableClient:
         return response.json()
 
     def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
+        from settings_store import commit_setting
+
+        try:
+            committed_setting = commit_setting(self._settings, table_id, record_id, fields)
+        except Exception as error:
+            logger.warning("supabase settings commit failed for %s; Airtable remains required: %s", record_id, error)
+            committed_setting = False
+        if committed_setting:
+            logger.info(
+                "Airtable archive kept the settings commit and did not export %s %s",
+                table_id,
+                record_id,
+            )
+            return {"id": record_id, "fields": fields}
         if self._legacy_export(table_id):
             self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
             logger.info(
