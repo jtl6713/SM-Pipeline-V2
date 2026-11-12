@@ -3,11 +3,11 @@
 Airtable stays the default. Each table has its own flag, so a global
 STUDIO_READ_SOURCE value cannot turn both on. STUDIO_WRITE_SOURCE does not
 turn these reads on. Allowlisted formulas translate to PostgREST filters;
-views, other FIND/ARRAYJOIN, unmapped sorts, unmapped requested fields,
-unmarked rows (when none remain), and Supabase errors stay on Airtable.
-OR of allowlisted predicates is translated. Three Studio produce Platform
-Output link lookups are the FIND exception, including inside AND. OR of a
-link lookup stays on Airtable.
+views and FIND/ARRAYJOIN that are not a stored-column view or a text/link
+lookup stay on Airtable. OR of allowlisted predicates is translated. Three
+Studio produce Platform Output link lookups are the FIND exception, including
+inside AND. OR of a link lookup stays on Airtable. A substring FIND on a JSON
+column stays on Airtable.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
+from supabase_views import view_to_postgrest_filter
 from supabase_pipeline import (
     CONTENT_PATCH_COLUMNS,
     OUTPUT_JSON_COLUMNS,
@@ -92,14 +93,26 @@ def try_list_supabase_records(
     """Airtable-shaped rows, or None when this call must use Airtable."""
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
-    # Views stay on Airtable. Allowlisted formulas become PostgREST filters.
+    # Unknown views and views that use an Airtable formula field stay on Airtable.
+    # A snapshotted view filter is combined with an allowlisted formula.
+    view_filter = ""
     if view:
-        return None
+        view_filter = view_to_postgrest_filter(table_id, view)
+        if view_filter is None:
+            return None
     formula_filter = None
     if formula:
         formula_filter = formula_to_postgrest_filter(table_id, formula)
         if formula_filter is None:
             return None
+    if view_filter and formula_filter:
+        from supabase_formula import _join_filters
+
+        formula_filter = _join_filters("and", [view_filter, formula_filter])
+        if formula_filter is None:
+            return None
+    elif view_filter:
+        formula_filter = view_filter
     columns = _columns_for(table_id)
     if not columns:
         return None

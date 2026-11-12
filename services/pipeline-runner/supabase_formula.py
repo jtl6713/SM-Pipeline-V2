@@ -1,11 +1,12 @@
 """Allowlisted Airtable formula → PostgREST filters for runner Output/Content reads.
 
-Unsupported formulas (other FIND/ARRAYJOIN, views, unknown ops) return None
+Unsupported formulas (JSON FIND, OR of a link lookup, unknown ops) return None
 so the caller keeps Airtable. OR of allowlisted predicates is translated.
 Only Platform Outputs and Content Items are covered.
 Three Studio produce Platform Output lookups are the exception: a content number
 or content record id inside Content_Item, and a record id stored on the
-Production_Request_Output link in the full-record bag.
+Production_Request_Output link in the full-record bag. A substring FIND on a
+text field is translated. Views are translated separately from the snapshot.
 """
 
 from __future__ import annotations
@@ -59,6 +60,12 @@ def _bag(table_id: str) -> str:
 def _field_ref(table_id: str, field: str) -> str | None:
     if not _SAFE_FIELD.match(field or ""):
         return None
+    if table_id == PLATFORM_OUTPUTS_TABLE and field == "Content_Item":
+        return "content_item_id"
+    if field == "Content_Profile" and table_id in (PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE):
+        return "content_profile_id"
+    if table_id == CONTENT_ITEMS_TABLE and field == "Production_Request":
+        return "production_request_id"
     columns = _columns(table_id)
     if field in columns:
         return columns[field]
@@ -104,10 +111,14 @@ def _split_top_level(args: str) -> list[str] | None:
 
 def _blank_filter(ref: str) -> str:
     # Airtable BLANK covers null and empty string for text-ish fields.
+    if ref in {"content_item_id", "content_profile_id", "production_request_id"}:
+        return f"{ref}.is.null"
     return f"or({ref}.is.null,{ref}.eq.)"
 
 
 def _nonempty_filter(ref: str) -> str:
+    if ref in {"content_item_id", "content_profile_id", "production_request_id"}:
+        return f"{ref}.not.is.null"
     return f"and({ref}.not.is.null,{ref}.neq.)"
 
 
@@ -166,13 +177,79 @@ def _join_filters(joiner: str, filters: list[str]) -> str | None:
     return f"combo:{params}|||{column_filter}"
 
 
+def _tighten(text: str) -> str:
+    """Drop spaces beside operators so `{Field} = BLANK()` matches the allowlist."""
+    out: list[str] = []
+    in_string = False
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                in_string = False
+            i += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = True
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == " ":
+            prev = out[-1] if out else ""
+            nxt = text[i + 1] if i + 1 < len(text) else ""
+            if prev in "=!<>" or nxt in "=!<>":
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+_FIND_CONTAINS = re.compile(
+    r'^FIND\("([^"]*)",\s*\{([A-Za-z0-9_]+)\}(?: & "")?\)(>0|=0)$'
+)
+_FIND_CONTAINS_SQ = re.compile(
+    r"^FIND\('([^']*)',\s*\{([A-Za-z0-9_]+)\}(?: & '')?\)(>0|=0)$"
+)
+
+
+def _find_text_filter(table_id: str, text: str) -> str | None:
+    """Substring FIND on one field. None when this shape is not safe to translate."""
+    match = _FIND_CONTAINS.match(text) or _FIND_CONTAINS_SQ.match(text)
+    if not match:
+        return None
+    needle, field, op = match.group(1), match.group(2), match.group(3)
+    if not needle or any(ch in needle for ch in ',()*"'):
+        return None
+    from supabase_pipeline import OUTPUT_JSON_COLUMNS
+
+    if table_id == PLATFORM_OUTPUTS_TABLE and field in OUTPUT_JSON_COLUMNS:
+        return None
+    ref = _field_ref(table_id, field)
+    if not ref:
+        return None
+    like = f"{ref}.like.*{needle}*"
+    if op == ">0":
+        return like
+    return f"or({ref}.is.null,{ref}.eq.,{ref}.not.like.*{needle}*)"
+
+
 def _predicate_filter(table_id: str, pred: str) -> str | None:
-    text = " ".join(str(pred or "").strip().split())
+    text = _tighten(" ".join(str(pred or "").strip().split()))
     if not text:
         return None
     linked = _produce_link_filter(table_id, text)
     if linked:
         return linked
+    if _FIND_CONTAINS.match(text) or _FIND_CONTAINS_SQ.match(text):
+        return _find_text_filter(table_id, text)
     upper = text.upper()
     if ("FIND(" in upper or "ARRAYJOIN(" in upper) and not (
         text.startswith("AND(") or text.startswith("OR(")
