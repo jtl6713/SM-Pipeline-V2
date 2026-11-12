@@ -11,6 +11,7 @@ import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
+  studioWriteSource,
   studioAuthReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
@@ -26,6 +27,8 @@ import {
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
+  listSupabaseOccupiedScheduleRows,
+  mergeMaeOccupancyRows,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -1411,7 +1414,7 @@ export async function airtableBatchCreate(env, tableId, fieldRows, { typecast = 
 }
 /*__STUDIO_WORKER_END:airtableBatchCreate__*/
 
-export async function airtableBatchUpdate(env, tableId, updates, { typecast = true, skipSupabaseWriteThrough = false } = {}) {
+export async function airtableBatchUpdate(env, tableId, updates, { typecast = true, skipSupabaseWriteThrough = false, maeSupabaseVerify = false } = {}) {
   const rows = Array.isArray(updates) ? updates.filter((row) => row?.id && row?.fields) : [];
   const updated = [];
   for (let i = 0; i < rows.length; i += AIRTABLE_BATCH_LIMIT) {
@@ -1422,6 +1425,7 @@ export async function airtableBatchUpdate(env, tableId, updates, { typecast = tr
     const body = await airtableFetch(env, tableId, "", {
       method: "PATCH",
       skipSupabaseWriteThrough,
+      maeSupabaseVerify,
       body: JSON.stringify({ records: chunk, typecast }),
     });
     updated.push(...(Array.isArray(body?.records) ? body.records : []));
@@ -8030,6 +8034,15 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null, requ
         if (offset && cursors.has(offset)) throw new Error("Repeated MAE occupancy cursor");
         if (offset) cursors.add(offset);
       } while (offset);
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const supabaseRows = await listSupabaseOccupiedScheduleRows(env, {
+          profileAirtableId: profile.id,
+          platform,
+          startIso: new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString(),
+          endIso: new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString(),
+        });
+        return mergeMaeOccupancyRows(rows, supabaseRows);
+      }
     } catch (error) {
       console.warn("authoritative MAE occupancy read failed", error);
       throw new HttpError(503, "Cannot verify complete MAE occupancy; approval or reschedule was not committed");

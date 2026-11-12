@@ -1347,7 +1347,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.824-overview-awaiting-approval",
+          version: "0.10.825-mae-supabase-verify",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -5281,12 +5281,15 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // Supabase first. A successful Airtable create still returns Airtable's rec
   // id. A failed Airtable create keeps the Supabase row. Schedule/approve
   // paths that pass skipSupabaseWriteThrough still require a successful
-  // Airtable export so MAE verify can re-read Airtable under the reservation lock.
+  // Airtable export unless maeSupabaseVerify is set and the Supabase commit
+  // succeeded. Those schedule/approve paths verify the slot from Supabase.
   // STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
   // transfer-queue PATCH commit to Supabase first. Creates stay Airtable-first.
-  // The flag is unset in this deploy, so Phase 6 stays Airtable-first.
+  // The half-hour copy inserts a missing Phase 6 row and does not overwrite one.
+  let outputSorCommitted = false;
   if (legacyExport && mutationRecords.length) {
-    await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
+    const committed = await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
+    outputSorCommitted = committed?.ok === true;
   }
   let phase6Records = phase6Export
     ? parseAirtableMutationRecords(pathOrParams, options?.body)
@@ -5364,9 +5367,12 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   }
   let airtableCommitted = response.ok;
   if (!response.ok) {
-    // Soft-fail only ordinary Output/Content legacy exports. Callers that own
-    // MAE verify under skipSupabaseWriteThrough still need Airtable to succeed.
-    if (legacyExport && mutationRecords.length && options?.skipSupabaseWriteThrough !== true) {
+    // Soft-fail ordinary Output/Content legacy exports. MAE schedule/approve
+    // passes maeSupabaseVerify so the same keep-Supabase path applies under
+    // the reservation lock. Other skipSupabaseWriteThrough callers still
+    // need Airtable to succeed.
+    const maeSoft = options?.maeSupabaseVerify === true && outputSorCommitted;
+    if (legacyExport && mutationRecords.length && (options?.skipSupabaseWriteThrough !== true || maeSoft)) {
       console.warn("Airtable legacy export failed; keeping Supabase commit", tableId, response.status);
       const raw = String(options?.body || "");
       body = mutationRecords.length === 1 && !raw.includes('"records"')

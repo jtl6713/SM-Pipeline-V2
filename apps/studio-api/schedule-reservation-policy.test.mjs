@@ -59,8 +59,11 @@ test("Production Request valid explicit time stays exact, while blackout seed us
 test("atomic seed schedule mutation is abortable and authoritatively verified", () => {
   const seed = sliceBetween(worker02, "async function studioAtomicApplyPlatformOutputSeedSchedule", "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/");
   assert.match(seed, /write: async \(plan, \{ signal \}\) => airtableFetch/);
-  assert.match(seed, /method: "PATCH",[\s\S]{0,100}signal,/);
-  assert.match(seed, /const authoritative = await airtableFetch/);
+  assert.match(seed, /method: "PATCH",[\s\S]{0,160}signal,/);
+  assert.match(seed, /maeSupabaseVerify: true/);
+  assert.match(seed, /maeVerifiedScheduleRecord\(env, current\.id, STUDIO_PLATFORM_OUTPUT_TABLE\)/);
+  assert.match(worker02, /if \(studioWriteSource\(env\) === "supabase" && studioSupabaseConfigured\(env\)\)/);
+  assert.match(worker02, /return airtableFetch\(env, tableId, id\)/);
   assert.match(seed, /Platform Output seed schedule could not be verified/);
 });
 

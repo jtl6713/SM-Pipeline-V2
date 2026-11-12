@@ -103,7 +103,9 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioFactoryOpsReadSource,
   studioHomeReadSource,
+  studioWriteSource,
   studioSupabaseConfigured,
+  readSupabaseMaeOutput,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -2633,6 +2635,15 @@ export function studioStoryCompanionPlatformBlockers(platformOccupiedMs, compani
 
 /*__STUDIO_WORKER_END:studioStoryCompanionPlatformBlockers__*/
 
+async function maeVerifiedScheduleRecord(env, id) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const row = await readSupabaseMaeOutput(env, id);
+    if (!row?.id) throw new HttpError(503, "Supabase schedule write could not be verified");
+    return row;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+}
+
 async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
   const id = record.id;
   const checkpoint = typeof options.onTimingCheckpoint === "function"
@@ -2846,6 +2857,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         signal,
         // afterCommit owns the one Supabase mirror outside the scheduling lock.
         skipSupabaseWriteThrough: true,
+        maeSupabaseVerify: true,
         body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
       });
       checkpoint("schedule_write_finished");
@@ -2853,7 +2865,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
     },
     verify: async (_updated, plan) => {
       checkpoint("schedule_verify_started");
-      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+      const verified = await maeVerifiedScheduleRecord(env, prepared.id || id);
       const storedIso = String(
         f(verified, "Scheduled_Post_Date")
         || f(verified, "YouTube_Scheduled_Publish_At")
@@ -3091,6 +3103,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     method: "PATCH",
     // Explicit write-through below is the single Supabase mirror for this path.
     skipSupabaseWriteThrough: true,
+    maeSupabaseVerify: true,
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields,
       Auto_Publish_Enabled: options.deferPublishUntilGroupRelease !== true }, typecast: true }),
   });
@@ -3409,10 +3422,11 @@ export async function studioAtomicApplyScheduleRegenEntry(env, {
       signal,
       // afterCommit owns the one Supabase mirror outside the scheduling lock.
       skipSupabaseWriteThrough: true,
+      maeSupabaseVerify: true,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written, plan) => {
-      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      const authoritative = await maeVerifiedScheduleRecord(env, outputId);
       const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
       const selectedMs = Date.parse(plan.selectedIso);
       if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
@@ -3844,7 +3858,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
           env,
           env.AIRTABLE_OUTPUT_TABLE_ID,
           chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
-          { typecast: true, skipSupabaseWriteThrough: true },
+          { typecast: true, skipSupabaseWriteThrough: true, maeSupabaseVerify: true },
         );
         const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
         await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
@@ -12504,10 +12518,11 @@ export async function studioAtomicVacateSkippedOutput(env, row, fields, operatio
       method: "PATCH",
       signal,
       skipSupabaseWriteThrough: true,
+      maeSupabaseVerify: true,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written) => {
-      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id);
+      const authoritative = await maeVerifiedScheduleRecord(env, current.id);
       const stillScheduled = [
         f(authoritative, "Scheduled_Post_Date"),
         f(authoritative, "YouTube_Scheduled_Publish_At"),
@@ -16337,10 +16352,13 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         method: "PATCH",
         signal,
         skipSupabaseWriteThrough: true,
+        maeSupabaseVerify: holdReschedule !== true,
         body: JSON.stringify({ fields: plan.fields, typecast: true }),
       }),
       verify: async (written, plan) => {
-        const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+        const authoritative = holdReschedule
+          ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
+          : await maeVerifiedScheduleRecord(env, match[1]);
         const storedRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
         const storedMs = Date.parse(storedRaw);
         const selectedMs = Date.parse(plan.selectedIso);

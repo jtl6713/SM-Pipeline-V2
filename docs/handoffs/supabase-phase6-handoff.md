@@ -8,7 +8,7 @@ Read [the migration index](../supabase-migration/README.md) and [Phase 6](../sup
 
 ## What is already done (do not redo)
 
-Studio list reads are on Supabase. Writes are still Airtable for creates, for schedule/approve MAE verify, and for the half-hour Airtable copy. Output and Content Item updates use Supabase first, with an Airtable legacy export. Phase 6 updates commit to Supabase first when `STUDIO_PHASE6_WRITE_SOURCE=supabase` (`deploy/enable-studio-phase6-write-source.txt`). `STUDIO_WRITE_SOURCE` does not cover these tables. Drive is still the media authority.
+Studio list reads are on Supabase. Writes are still Airtable for creates, for held-reschedule note readback, and for other skip paths. Schedule and approve MAE verify reads Supabase when `maeSupabaseVerify` is set. The half-hour job still reads Airtable and does not overwrite an existing Supabase-owned output schedule or Phase 6 row. Output and Content Item updates use Supabase first, with an Airtable legacy export. Phase 6 updates commit to Supabase first when `STUDIO_PHASE6_WRITE_SOURCE=supabase` (`deploy/enable-studio-phase6-write-source.txt`). `STUDIO_WRITE_SOURCE` does not cover these tables. Drive is still the media authority.
 
 | Work | Production |
 |---|---|
