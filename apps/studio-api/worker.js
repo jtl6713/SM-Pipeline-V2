@@ -1345,10 +1345,21 @@ export default {
 
       if (url.pathname === "/health" || url.pathname === "/api/health") {
         const supabaseSyncLast = await readStudioSupabaseSyncLast(env).catch(() => null);
+        const airtableActivity = await studioAirtableEgressWindow(env, 6).then((report) => report.activity).catch(() => ({
+          ok: false,
+          window_hours: 6,
+          reason: "egress_unavailable",
+          read_attempts: null,
+          write_attempts: null,
+          any_read: null,
+          any_write: null,
+          any_activity: null,
+        }));
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.840-airtable-archive",
+          version: "0.10.841-airtable-activity",
+          airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -3725,6 +3736,7 @@ export default {
           }
           return respond(request, env, {
             ok: true, source: "pipeline_runner_sqlite", hourly: report.hourly,
+            activity: report.activity || null,
           });
         } catch (error) {
           return respond(request, env, { ok: false, reason: "runner_metrics_unreachable" }, 503);

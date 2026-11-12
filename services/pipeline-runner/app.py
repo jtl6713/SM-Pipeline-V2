@@ -137,13 +137,31 @@ def durable_airtable_egress():
 @app.get("/health")
 def health():
     from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+    from airtable.egress_monitor import read_airtable_egress
     from supabase_reads import runner_table_read_source
+
+    try:
+        airtable_activity = read_airtable_egress(6).get("activity")
+    except (OSError, ValueError):
+        airtable_activity = None
+    if not airtable_activity:
+        airtable_activity = {
+            "ok": False,
+            "window_hours": 6,
+            "reason": "egress_unavailable",
+            "read_attempts": None,
+            "write_attempts": None,
+            "any_read": None,
+            "any_write": None,
+            "any_activity": None,
+        }
 
     return jsonify(
         {
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
+            "airtable_activity": airtable_activity,
             "studio_write_source": settings.get("studio_write_source") or "airtable",
             "studio_phase6_write_source": settings.get("studio_phase6_write_source") or "airtable",
             "studio_runner_output_read_source": runner_table_read_source(settings, PLATFORM_OUTPUTS_TABLE),

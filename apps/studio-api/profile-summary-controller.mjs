@@ -52,14 +52,37 @@ export async function recordStudioAirtableEgress(env, event) {
   });
 }
 
+const AIRTABLE_WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+export function summarizeStudioAirtableActivity(hourly, windowHours = 48) {
+  let readAttempts = 0;
+  let writeAttempts = 0;
+  for (const row of Array.isArray(hourly) ? hourly : []) {
+    const attempts = Number(row?.attempts) || 0;
+    const method = String(row?.method || "").toUpperCase();
+    if (method === "GET") readAttempts += attempts;
+    else if (AIRTABLE_WRITE_METHODS.has(method)) writeAttempts += attempts;
+  }
+  return {
+    ok: true,
+    window_hours: windowHours,
+    read_attempts: readAttempts,
+    write_attempts: writeAttempts,
+    any_read: readAttempts > 0,
+    any_write: writeAttempts > 0,
+    any_activity: readAttempts + writeAttempts > 0,
+  };
+}
+
 export function studioAirtableEgressWindow(env, hours = 48) {
   const stub = profileSummaryStub(env);
   if (!stub) throw new Error("Airtable egress collector unavailable");
+  const windowHours = Math.max(1, Math.min(72, Number(hours) || 48));
   return stub.fetch("https://profile-summary.internal/egress?hours="+
-    encodeURIComponent(String(Math.max(1,Math.min(72,Number(hours)||48))))).then(async res => {
+    encodeURIComponent(String(windowHours))).then(async res => {
       const data = await res.json();
       if (!res.ok || data?.ok !== true) throw new Error("Airtable egress metrics unavailable");
-      return data;
+      return { ...data, activity: summarizeStudioAirtableActivity(data.hourly, windowHours) };
     });
 }
 
