@@ -181,6 +181,7 @@ import {
   FINISHED_HORIZONTAL_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
   azExpectedOutputCount,
+  finishedPublishMode,
   azOutputLockHeld,
   azOutputLockIsFresh,
   azOutputLockToken,
@@ -9862,8 +9863,10 @@ export async function studioContinuationStampPackage(env, po, context) {
     fields.Remotion_Job_ID = null;
     fields.Review_Status = null;
     fields.Review_Email_Sent_At = null;
+    const mode = finishedPublishMode(studioRequestNotesText(requestRecord));
+    const modeStamp = mode === "legacy" ? "" : ` az-publish-mode=${mode}.`;
     fields.Output_Notes = az
-      ? `origin=az-finished-video; ez-input=finished-video. Story teaser: first ${FINISHED_STORY_TEASER_SECONDS}s of the finished file, keep original audio (keepSourceAudio). Skip P1/voiceover/library music. az-auto-queue=1.`
+      ? `origin=az-finished-video; ez-input=finished-video. Story teaser: first ${FINISHED_STORY_TEASER_SECONDS}s of the finished file, keep original audio (keepSourceAudio). Skip P1/voiceover/library music. az-auto-queue=1.${modeStamp}`
       : `origin=ez-wizard; ez-input=finished-video. Story teaser: first ${FINISHED_STORY_TEASER_SECONDS}s of the finished file, keep original audio (keepSourceAudio). Skip P1/voiceover/library music.`;
   } else if (nativePhoto && (sourcePackage?.clips || []).length) {
     fields.Output_Status = "Ready for Review";
