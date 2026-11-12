@@ -1040,3 +1040,4 @@ Deploy 2026-11-11 Worker 0.10.818-assets-densify-media-only: POST /api/ops/supab
 Deploy 2026-11-11 Worker 0.10.819-assets-densify-null-sanitize: Strip U+0000 from Supabase upsert payloads (Airtable long-text/JSON can carry null bytes; PostgREST 22P05 blocked media densify). Re-trigger densify media_only media_limit=600. Phase 7 not started.
 
 Deploy 2026-11-11 Worker 0.10.820-supabase-phase6-transfer-targets: Mirror Studio Media Transfer Queue Target_Production_Request_Outputs into studio_media_transfer_targets. Airtable stays write SoR. Production Request Output rows are Airtable-id anchors for the join only. Phase 7 not started.
+Deploy 2026-11-11 Completed Video all-destination Publish Now or Normal Approval; strict Airtable PRO/PO link and full-output preflight; preserve publish safeguards. PR #1825.
