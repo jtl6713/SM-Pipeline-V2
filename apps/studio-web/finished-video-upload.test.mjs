@@ -58,3 +58,16 @@ test("finished-video production player can use the persisted public MP4", () => 
   assert.match(playable, /preview_public_url \|\| asset\?\.url/);
   assert.match(playable, /media\\\.chicagoshining\\\.com/);
 });
+
+
+test("Completed Video offers one all-output Publish Now or normal approval decision", () => {
+  const section = html.slice(html.indexOf('id="azFinishedDrop"'), html.indexOf('id="ezWizard"'));
+  assert.match(section, /name="azFinishedPublishMode" value="approval" checked/);
+  assert.match(section, /name="azFinishedPublishMode" value="immediate"/);
+  assert.match(section, /Publish Now — All Outputs/);
+  assert.match(section, /Normal Approval/);
+  const begin = app.slice(app.indexOf("async function beginAzFinishedVideo"), app.indexOf("function bindAzFinishedDrop"));
+  assert.match(begin, /azFinishedPublishMode\\(\\) === "immediate" && !window\\.confirm/);
+  assert.match(app, /az-publish-mode=\\$\\{azFinishedPublishMode\\(\\)\\}/);
+  assert.match(app, /if \\(\\/az-publish-mode=approval\\/i\\.test\\(notes\\)\\) return false/);
+});
