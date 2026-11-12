@@ -1020,12 +1020,14 @@ export async function studioGateR4ForPrivateDriveWatermark(env, options = {}) {
   // Global R4 pulses use the pipeline-runner's own selector. Park every
   // ChicagoShining Ready-for-Render row visible in the newest batch first so
   // that selector cannot accidentally launch one against the old renderer.
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 50,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
-  }).catch(() => []);
+  const rows = (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env))
+    ? await listSupabaseDeskHealOutputs(env, { kind: "inventory_ready_no_job", limit: 50 }).catch(() => [])
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 50,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
+    }).catch(() => []);
   for (const row of rows || []) {
     try { await parkOne(row); } catch (error) {
       console.warn("R4 private Drive watermark gate park failed", row?.id, error);
