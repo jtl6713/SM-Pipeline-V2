@@ -188,6 +188,12 @@ OPTIONAL_BINDINGS = {
     # enable-studio-write-sor installs it. Preserve secret_text; do not print
     # or change the live value during ordinary Worker deploys.
     "STUDIO_WRITE_SOURCE": "secret_text",
+    # Phase 6 update SoR for Production Requests, Media Assets, and the
+    # transfer queue. Optional until enable-studio-phase6-write-source
+    # installs it. Preserve secret_text; do not print or change the live
+    # value during ordinary Worker deploys. STUDIO_WRITE_SOURCE does not
+    # cover these tables. Default remains Airtable (flag unset).
+    "STUDIO_PHASE6_WRITE_SOURCE": "secret_text",
     "SUPABASE_URL": "plain_text",
     "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
 }

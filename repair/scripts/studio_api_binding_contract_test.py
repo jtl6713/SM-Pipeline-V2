@@ -260,6 +260,27 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unknown write source flag")
 
+    def test_phase6_write_source_flag_is_optional_secret_and_keeps_write_source(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["STUDIO_CONTENT_READ_SOURCE"] = "secret_text"
+        got["STUDIO_FACTORY_OPS_READ_SOURCE"] = "secret_text"
+        got["STUDIO_HOME_READ_SOURCE"] = "secret_text"
+        got["STUDIO_WRITE_SOURCE"] = "secret_text"
+        self.assertTrue(assert_live_contract(got, "phase6 write source absent")["ok"])
+        got["STUDIO_PHASE6_WRITE_SOURCE"] = "secret_text"
+        result = assert_live_contract(got, "phase6 write source present")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["STUDIO_PHASE6_WRITE_SOURCE"])
+        self.assertTrue(result["optional_present"]["STUDIO_WRITE_SOURCE"])
+        got["STUDIO_PHASE6_WRITE_SOURCE"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "phase6 write source type mismatch")
+        got.pop("STUDIO_PHASE6_WRITE_SOURCE")
+        got["STUDIO_PHASE6_WRITE_SOURCE_BYPASS"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown phase6 write source flag")
+
     def test_music_read_flag_is_optional_secret_and_keeps_earlier_flags(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
