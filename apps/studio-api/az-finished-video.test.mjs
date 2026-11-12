@@ -328,3 +328,25 @@ test("Staged Publish Now outputs cannot enter the guarded publisher before group
   const dispatch = worker.slice(dispatchStart, worker.indexOf("async function studioDispatchApprovedPublishTail", dispatchStart));
   assert.ok(dispatch.includes("studioPublishCanDispatchNow(record)"));
 });
+
+test("Completed Video only records Publish Now success after a durable Airtable batch release", () => {
+  const functionSource = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+  const fn = functionSource.slice(
+    functionSource.indexOf("async function azAutoApproveIfReady"),
+    functionSource.indexOf("async function azEnsurePlatformOutputs")
+  );
+  assert.match(fn, /const markGroupReleased = async/);
+  assert.match(fn, /az-publish-now-released=/);
+  assert.match(fn, /airtableBatchUpdate\(env, env\.AIRTABLE_OUTPUT_TABLE_ID/);
+  const release = fn.indexOf("const released = await airtableBatchUpdate");
+  const marker = fn.indexOf("await markGroupReleased()", release);
+  assert.ok(release >= 0 && marker > release, "receipt must be written after verified release");
+});
+
+test("Completed Video Home progress does not confuse staged approval with published release", () => {
+  const browser = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
+  assert.match(browser, /azFinishedGroupReleased = \/az-publish-now-released=/);
+  assert.match(browser, /azFinishedPublishMode\(\) === "immediate" && azFinishedGroupReleased/);
+  assert.match(browser, /return azFinishedPublishMode\(\) === "immediate" \? "group-release" : "queued"/);
+  assert.match(browser, /No output dispatches until the complete Publish Now group is released/);
+});
