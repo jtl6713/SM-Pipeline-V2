@@ -1,6 +1,6 @@
 # Phase 5 — Output and Content Item write-through
 
-Airtable remains the write source of truth for creates (Airtable mints `rec` ids) and for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content **updates** commit to Supabase first with Airtable as a best-effort legacy export.
+Airtable remains the write source of truth for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content updates and creates commit to Supabase first with Airtable as a best-effort legacy export. When an Output or Content Item create succeeds in Airtable, callers still receive Airtable's `rec` id. When that Airtable create fails, the Supabase row remains under a minted `rec` id. Other tables still mint ids in Airtable.
 
 ## What changed
 
@@ -31,7 +31,7 @@ Approve, schedule, publish-status, and heal paths that pass `skipSupabaseWriteTh
 
 The pipeline runner is the other writer. `AirtableClient` create, update, and atomic upsert of Platform Outputs and Content Items mirror into Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set. Other tables are unchanged.
 
-Setting `STUDIO_WRITE_SOURCE=supabase` makes Output/Content updates commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids.
+Setting `STUDIO_WRITE_SOURCE=supabase` makes Output/Content updates and creates commit to Supabase first and treats the Airtable write as a best-effort legacy export. A successful create still returns Airtable's `rec` id. A failed Airtable create keeps the Supabase row.
 
 Runner `2026-11-11-supabase-runner-p3-and-links` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. List and get behavior shipped in `2026-11-10-supabase-runner-formula-fallbacks`. Enable the read flags with `deploy/enable-runner-supabase-reads.txt`. Worker `0.10.800-supabase-phase5-runner-marker-backfill` densifies full-record markers during half-hour sync. Allowlisted formulas (equality, `!="literal"`, `BLANK()`, `!=""`, numeric `>`, `RECORD_ID()`, nested `AND`, `OR`, `NOT({checkbox})`) translate to PostgREST filters on typed columns or densified jsonb extras. The three Studio produce Platform Output lookups also translate, including when `AND` combines one of them with allowlisted predicates (P3 seeded and duplicate output selectors): a comma-bounded content number in `Content_Item`, a content record id in `Content_Item`, and a `Production_Request_Output` record id stored on the full-record bag. `OR` of a link lookup stays on Airtable. Views, every other `FIND`/`ARRAYJOIN`, `IS_BEFORE`, an unmapped sort, an unmapped requested field, a missing/unmarked page, and a Supabase error stay on Airtable. An empty link match falls back to Airtable. Phase 7 is not started.
 

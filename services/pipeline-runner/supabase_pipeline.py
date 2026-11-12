@@ -204,6 +204,13 @@ def _outbox_missing(error: BaseException) -> bool:
     return any(token in text for token in ("PGRST205", "schema cache", "does not exist", "Could not find the table", "404"))
 
 
+def mint_record_id() -> str:
+    """Stand-in rec id used only until Airtable returns one, or if that export fails."""
+    import secrets
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    return "rec" + "".join(secrets.choice(alphabet) for _ in range(14))
+
+
 def _profile_uuid(settings: dict, airtable_id: str | None) -> str | None:
     if not airtable_id:
         return None
@@ -749,6 +756,56 @@ def _mirror_media(settings: dict, record: dict) -> None:
             prefer="return=minimal",
         )
     _enqueue_outbox(settings, "media", record, "PATCH")
+
+
+def _mirror_create_one(settings: dict, kind: str, record: dict) -> None:
+    """Insert an Output or Content Item before Airtable has minted its id."""
+    fields = record.get("fields") or {}
+    if kind == "output":
+        profile_uuid = _profile_uuid(settings, _first_link(fields.get("Content_Profile")))
+        content_uuid = _content_uuid(settings, _first_link(fields.get("Content_Item")))
+        row = _output_row(record, profile_uuid, content_uuid)
+        _rest(
+            settings,
+            "platform_outputs?on_conflict=airtable_record_id",
+            "POST",
+            [row],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    else:
+        profile_uuid = _profile_uuid(settings, _first_link(fields.get("Content_Profile")))
+        row = _content_row(record, profile_uuid)
+        _rest(
+            settings,
+            "content_items?on_conflict=airtable_record_id",
+            "POST",
+            [row],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    _enqueue_outbox(settings, kind, record, "POST")
+
+
+def commit_minted_creates(settings: dict | None, table_id: str, records: list[dict]) -> bool:
+    kind = table_kind(table_id)
+    if kind not in ("output", "content") or not supabase_configured(settings):
+        return False
+    for record in records or []:
+        if not isinstance(record, dict) or not record.get("id"):
+            return False
+        _mirror_create_one(settings or {}, kind, record)
+    return True
+
+
+def release_minted_record_ids(settings: dict | None, table_id: str, record_ids: list[str]) -> None:
+    kind = table_kind(table_id)
+    ids = [str(record_id) for record_id in record_ids or [] if record_id]
+    if kind not in ("output", "content") or not ids or not supabase_configured(settings):
+        return
+    table = "platform_outputs" if kind == "output" else "content_items"
+    try:
+        _rest(settings or {}, f"{table}?airtable_record_id=in.({','.join(ids)})", "DELETE")
+    except Exception as error:
+        logger.warning("supabase minted-id release failed for %s: %s", table, error)
 
 
 def mirror_airtable_records(settings: dict | None, table_id: str, records: list[dict], *, partial: bool = False) -> dict:

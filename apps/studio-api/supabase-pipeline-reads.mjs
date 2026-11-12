@@ -314,8 +314,10 @@ export function studioAuthReadSource(env) {
  * Phase 5 remainder write switch for Platform Outputs and Content Items.
  * Default remains Airtable-first write-through. When STUDIO_WRITE_SOURCE=supabase,
  * Output/Content updates commit to Supabase first and Airtable is a best-effort
- * legacy export. Creates still mint Airtable rec ids. Production Requests, media,
- * and the transfer queue are not part of this flag. Phase 7 is not started.
+ * legacy export. Output/Content creates commit to Supabase first. When Airtable
+ * create succeeds, callers still receive Airtable's rec id. When it fails, the
+ * Supabase row remains under a minted rec id. Production Requests, media, and
+ * the transfer queue are not part of this flag. Phase 7 is not started.
  */
 export function studioWriteSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
@@ -355,7 +357,48 @@ export function parseAirtableMutationRecords(pathOrParams, rawBody) {
   return [];
 }
 
-export async function studioSupabaseCommitOutputContentFirst(env, tableId, records) {
+export function parseAirtableCreateFields(rawBody) {
+  let parsed = rawBody;
+  if (typeof rawBody === "string") {
+    try { parsed = JSON.parse(rawBody); } catch { return []; }
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  if (Array.isArray(parsed.records)) {
+    return parsed.records
+      .filter((row) => row?.fields && typeof row.fields === "object" && !row.id)
+      .map((row) => row.fields);
+  }
+  if (parsed.fields && typeof parsed.fields === "object" && !parsed.id) return [parsed.fields];
+  return [];
+}
+
+export function mintAirtableRecordId() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(14));
+  let id = "rec";
+  for (const byte of bytes) id += alphabet[byte % alphabet.length];
+  return id;
+}
+
+export async function releaseMintedAirtableIds(env, tableId, ids) {
+  const clean = (Array.isArray(ids) ? ids : [])
+    .map((id) => String(id || ""))
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
+  if (!clean.length || !studioSupabaseConfigured(env)) return { skipped: true, reason: "empty" };
+  const table = String(tableId || "");
+  const supabaseTable = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
+    ? "platform_outputs"
+    : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
+      ? "content_items"
+      : "";
+  if (!supabaseTable) return { skipped: true, reason: "table" };
+  await supabaseRest(env, `${supabaseTable}?airtable_record_id=in.(${clean.map(encodeURIComponent).join(",")})`, {
+    method: "DELETE",
+  });
+  return { ok: true, count: clean.length };
+}
+
+export async function studioSupabaseCommitOutputContentFirst(env, tableId, records, options = {}) {
   const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
   if (!rows.length) return { skipped: true, reason: "no_records" };
   const table = String(tableId || "");
@@ -368,11 +411,11 @@ export async function studioSupabaseCommitOutputContentFirst(env, tableId, recor
   const results = [];
   for (const record of rows) {
     const synced = kind === "output"
-      ? await syncAirtableOutputRowToSupabase(env, record, { fullRecord: false })
-      : await syncAirtableContentRowToSupabase(env, record, { fullRecord: false });
-    results.push({ id: record.id, synced });
+      ? await syncAirtableOutputRowToSupabase(env, record, { fullRecord: false, create: options.create === true })
+      : await syncAirtableContentRowToSupabase(env, record, { fullRecord: false, create: options.create === true });
+    if (synced?.ok) results.push({ id: record.id, synced });
   }
-  return { ok: true, kind, count: results.length, results };
+  return { ok: results.length === rows.length, kind, count: results.length, results };
 }
 
 export function studioSupabaseBaseUrl(env) {
@@ -2537,6 +2580,29 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
 
+  if (options.create === true) {
+    const profileAirtableId = firstLink(record.fields?.Content_Profile);
+    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+    const contentAirtableId = firstLink(record.fields?.Content_Item);
+    const contentUuidByAirtableId = new Map();
+    if (contentAirtableId) {
+      const contentRows = await supabaseRest(
+        env,
+        `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
+      ).catch(() => []);
+      if (Array.isArray(contentRows) && contentRows[0]?.id) {
+        contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
+      }
+    }
+    const row = mapAirtableOutputToSupabase(record, {
+      profileUuid: profileUuid || null,
+      contentUuidByAirtableId,
+      fullRecord: false,
+    });
+    await upsertChunk(env, "platform_outputs", [row]);
+    return { ok: true, mode: "create" };
+  }
+
   const profileAirtableId = firstLink(record.fields?.Content_Profile);
   let profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
   if (!profileUuid) {
@@ -2592,6 +2658,14 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
 export async function syncAirtableContentRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
+  if (options.create === true) {
+    const fields = record.fields || {};
+    const profileAirtableId = firstLink(fields.Content_Profile);
+    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+    const row = mapAirtableContentToSupabase(record, profileUuid || null, { fullRecord: false });
+    await upsertChunk(env, "content_items", [row]);
+    return { ok: true, mode: "create" };
+  }
   const fields = record.fields || {};
   const profileAirtableId = firstLink(fields.Content_Profile);
   const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;

@@ -148,16 +148,54 @@ class AirtableClient:
     def create_records(self, table_id: str, records: list[dict[str, Any]], *, typecast: bool = True) -> list[dict[str, Any]]:
         import requests
 
+        from supabase_pipeline import commit_minted_creates, mint_record_id, release_minted_record_ids
+
         url = f"{self._api_root}/{self._base_id}/{table_id}"
         created: list[dict[str, Any]] = []
+        legacy = self._legacy_export(table_id)
         for start in range(0, len(records), 10):
             chunk = records[start : start + 10]
+            minted = [
+                {"id": mint_record_id(), "fields": dict(item)}
+                for item in chunk
+            ] if legacy else []
+            committed = False
+            if minted:
+                try:
+                    committed = commit_minted_creates(self._settings, table_id, minted)
+                except Exception as error:
+                    logger.warning(
+                        "supabase create commit failed for %s; Airtable remains required: %s",
+                        table_id,
+                        error,
+                    )
             body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
             if typecast:
                 body["typecast"] = True
             response = self._request("POST", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
+            if not response.ok and committed:
+                logger.warning(
+                    "Airtable legacy export create failed for %s: %s %s",
+                    table_id,
+                    response.status_code,
+                    (response.text or "")[:300],
+                )
+                created.extend(minted)
+                continue
             response.raise_for_status()
             batch = response.json().get("records", [])
+            if committed:
+                try:
+                    commit_minted_creates(self._settings, table_id, batch)
+                    release_minted_record_ids(
+                        self._settings, table_id, [row["id"] for row in minted],
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "supabase create id adoption failed for %s: %s",
+                        table_id,
+                        error,
+                    )
             created.extend(batch)
             self._mirror(table_id, batch)
         return created
