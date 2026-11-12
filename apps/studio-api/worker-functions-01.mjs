@@ -155,6 +155,8 @@ import {
   FINISHED_HORIZONTAL_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
   azExpectedOutputCount,
+  finishedPublishMode,
+  finishedPublishPreflight,
   azOutputLockHeld,
   azOutputLockIsFresh,
   azOutputLockToken,
@@ -8215,6 +8217,12 @@ export function studioPublishIsDue(record, graceMs = 120000) {
 /*__STUDIO_WORKER_END:studioPublishIsDue__*/
 
 export function studioPublishCanDispatchNow(record) {
+  // A Completed Video Publish Now approval remains held until every output in
+  // the operator's group has passed preflight and the Airtable batch is released.
+  const publishNotes = [f(record, "Output_Notes"), f(record, "Review_Notes")].map(String).join("\n");
+  if ((/az-publish-mode=immediate/i.test(publishNotes)
+      || publishNotes.includes("Completed Video — all-outputs Publish Now"))
+      && f(record, "Auto_Publish_Enabled") !== true) return false;
   // Initial scheduled dispatch shares the overview eligibility decision.
   // Retries/recovery (already attempted) and intentional unscheduled manual dispatches
   // continue through their existing gates, rather than being silently disabled.
@@ -10517,6 +10525,19 @@ export async function azRestampFinishedStories(env, requestId, options = {}) {
 export async function azAutoApproveIfReady(env, requestId, options = {}) {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
+  const publishMode = finishedPublishMode(studioRequestNotesText(requestRecord));
+  if (publishMode === "approval") return { waiting: "manual_approval", production_request_id: requestId };
+  const markGroupReleased = async () => {
+    // This durable receipt drives Home upload progress without polling all
+    // Platform Outputs every four seconds. Only write after Airtable group release.
+    const current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    const notes = String(f(current, "Production_Notes") || "");
+    if (/az-publish-now-released=\d{4}-\d{2}-\d{2}T/.test(notes)) return;
+    const marker = `\n\naz-publish-now-released=${new Date().toISOString()}`;
+    await item4UpdateRequestState(env, requestId, {
+      Production_Notes: notes.slice(0, 10000 - marker.length) + marker,
+    });
+  };
   let cover = options.cover || null;
   if (!options.skipCover) {
     try {
@@ -10535,15 +10556,95 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
       console.warn("AZ ensure public finals failed", requestId, error);
     }
   }
-  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  // Publish Now must never use the broad content-item fallback, which can see
+  // unrelated or disabled siblings. Require exact enabled PRO -> PO links.
+  let outputs;
+  if (publishMode === "immediate") {
+    const proRows = (await outputRowsForProductionRequest(env, requestId, { includeInactive: true }))
+      .filter((row) => Boolean(f(row, "Enabled")));
+    const horizontal = isHorizontalFinishedAspect(studioRequestNotesText(requestRecord));
+    const expectedCount = azExpectedOutputCount(studioRequestNotesText(requestRecord));
+    const linked = [];
+    const seen = new Set();
+    if (proRows.length !== expectedCount) return {
+      waiting: "publish_now_preflight", production_request_id: requestId,
+      reason: "expected_enabled_output_count", expected: expectedCount, actual: proRows.length,
+    };
+    for (const pro of proRows) {
+      const ids = arrayOrEmpty(f(pro, "Platform_Output"))
+        .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+      if (ids.length !== 1 || seen.has(ids[0])) return {
+        waiting: "publish_now_preflight", production_request_id: requestId,
+        reason: "missing_or_duplicate_platform_output_link", pro_record_id: pro.id,
+      };
+      seen.add(ids[0]);
+      const output = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, ids[0]);
+      const proKey = canonicalFinishedDestinationKey(f(pro, "Platform"), f(pro, "Output_Type"), { horizontal });
+      const poKey = canonicalFinishedDestinationKey(f(output, "Platform"), studioOutputTypeLabel(output), { horizontal });
+      if (!proKey || proKey !== poKey
+        || !arrayOrEmpty(f(output, "Production_Request_Output")).includes(pro.id)) return {
+        waiting: "publish_now_preflight", production_request_id: requestId,
+        reason: "platform_output_identity_mismatch", pro_record_id: pro.id,
+      };
+      linked.push(output);
+    }
+    outputs = linked;
+  } else {
+    outputs = await azPlatformOutputsForRequest(env, requestId);
+  }
   if (!outputs.length) return { waiting: "outputs", cover, finals };
+  if (publishMode === "immediate") {
+    // Only the fully approved, batch-released group may reach the publisher.
+    // A partial release is quarantined for review rather than releasing peers.
+    const committed = (row) => String(f(row, "Review_Status") || "").trim() === "Approved"
+      && ["Approved for Publishing", "Published"].includes(String(f(row, "Output_Status") || "").trim());
+    const armedCount = outputs.filter((row) => committed(row) && f(row, "Auto_Publish_Enabled") === true).length;
+    if (armedCount === outputs.length) {
+      await markGroupReleased();
+      return { skipped: "already_queued", count: outputs.length, cover, finals };
+    }
+    if (armedCount > 0) return { waiting: "publish_now_preflight", reason: "partial_group_release",
+      production_request_id: requestId, armed_count: armedCount, expected: outputs.length, cover, finals };
+
+    const family = finishedPublishPreflight(outputs.map((row) => {
+      const review = String(f(row, "Review_Status") || "").trim();
+      const status = String(f(row, "Output_Status") || "").trim();
+      const publish = String(f(row, "Publish_Status") || "").trim();
+      const alreadyCommitted = review === "Approved" || status === "Approved for Publishing"
+        || /^(?:ready to schedule|ready to publish|publishing|published)$/i.test(publish);
+      return {
+        platform: f(row, "Platform"),
+        output_type: studioOutputTypeLabel(row),
+        ready: !azOutputQueueBlockers(row).length && (alreadyCommitted || studioOutputReadyForPublishApproval(row)),
+      };
+    }), { notes: studioRequestNotesText(requestRecord) });
+    if (!family.ok) return { waiting: "publish_now_preflight", production_request_id: requestId,
+      missing: family.missing, blocked: family.blocked,
+      duplicates: family.duplicates, unsupported: family.unsupported, cover, finals };
+  }
   const pending = outputs.filter((row) => {
     const review = String(f(row, "Review_Status") || "").trim();
     const status = String(f(row, "Output_Status") || "").trim();
     if (review === "Approved" || status === "Approved for Publishing") return false;
     return true;
   });
-  if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
+  if (!pending.length) {
+    if (publishMode !== "immediate") return { skipped: "already_queued", count: outputs.length, cover, finals };
+    // All six vertical destinations (or the one horizontal destination) are
+    // preflighted and approved while Auto_Publish_Enabled=false. One Airtable
+    // batch commits the release only after the entire group is staged.
+    const released = await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID,
+      outputs.map((row) => ({ id: row.id, fields: { Auto_Publish_Enabled: true } })));
+    if (released.length !== outputs.length
+      || outputs.some((row) => !released.some((saved) => saved.id === row.id
+        && f(saved, "Auto_Publish_Enabled") === true))) {
+      return { waiting: "publish_now_preflight", reason: "group_release_readback_failed",
+        production_request_id: requestId, expected: outputs.length, actual: released.length };
+    }
+    await markGroupReleased();
+    return { ok: true, released_count: released.length, count: outputs.length,
+      production_request_id: requestId, cover, finals };
+  }
 
   // Approve whichever destinations are ready now. Stories still rendering must not
   // hold Reels/Shorts/TikTok at Ready for Review (no human Approve gate on AZ).
@@ -10604,7 +10705,8 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
   // timezone fills M1 then A1 then E1 then M2. Industry evening windows and
   // +3h occupancy bumps are what used to land NYC at 12:00 AM / 1:00 AM.
   const occupancyProfile = await item4ProductionProfileRecord(env, requestRecord).catch(() => null);
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile, requireComplete: true });
+  const occupiedByPlatform = publishMode === "immediate"
+    ? {} : await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile, requireComplete: true });
   const reservedAll = studioFlattenOccupiedByPlatform(occupiedByPlatform);
   const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamp = new Date().toISOString();
@@ -10620,7 +10722,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
     const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
     const key = studioAzScheduleKey(platform, outputType);
     let iso = "";
-    if (!isStory) {
+    if (!isStory && publishMode !== "immediate") {
       const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Studio_Scheduled_At") || "").trim();
       iso = existingIso && !Number.isNaN(Date.parse(existingIso))
         ? new Date(existingIso).toISOString()
@@ -10648,10 +10750,12 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
         scheduled_at: scheduleIso,
       };
     });
-    const updated = await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
-      ...(iso ? { scheduled_post_date: iso } : {}),
+    const immediate = publishMode === "immediate";
+    const updated = await approveOutputRecordForPublishing(env, row,
+      immediate ? "Completed Video — all-outputs Publish Now" : "AZ finished-video auto-queue", stamp, {
+      ...(immediate ? { scheduled_post_date: "immediate", publish_now: true } : (iso ? { scheduled_post_date: iso } : {})),
       timezone: timeZone,
-    }, { occupiedMs, timeZone, extraSiblings });
+    }, { occupiedMs, timeZone, extraSiblings, ...(immediate ? { recheckBestSlot: false, deferPublishUntilGroupRelease: true } : {}) });
     const bookedRaw = String(f(updated, "Scheduled_Post_Date") || iso || "").trim();
     const booked = studioScheduleMs(bookedRaw) ?? Date.parse(bookedRaw);
     if (Number.isFinite(booked) && !isStory) {
@@ -10662,7 +10766,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
     if (Number.isFinite(Date.parse(bookedRaw))) scheduled[key] = new Date(Date.parse(bookedRaw)).toISOString();
   }
   const notes = String(f(requestRecord, "Production_Notes") || "");
-  if (!/az-schedule=/i.test(notes)) {
+  if (publishMode === "legacy" && !/az-schedule=/i.test(notes)) {
     await item4UpdateRequestState(env, requestId, {
       Production_Notes: `${notes}\n\naz-schedule=ready-now; auto-queued without Approve gate`.slice(0, 10000),
     }).catch(() => null);
@@ -10965,8 +11069,14 @@ export async function advanceAzFinishedVideo(env, requestId, authorization, ctx 
         phase,
       };
     }
-    // Prefer scheduling ready destinations before (or without waiting on) Story remotion.
-    // One approval per invoke — approveOutputRecordForPublishing is subrequest-heavy.
+    // Normal Approval leaves every finished-video output in the existing human review queue.
+    // Publish Now takes the all-destination preflight path below and bypasses MAE dates.
+    if (finishedPublishMode(studioRequestNotesText(record)) === "approval") {
+      const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
+      return { ok: true, waiting: stories?.restamped || stories?.remaining ? "story_render" : "manual_approval",
+        cover, finals, stories, ensure_outputs: ensureOutputs, phase };
+    }
+    // One or two approvals per tick keeps Cloudflare/Airtable subrequest costs bounded.
     const approveFirst = await azAutoApproveIfReady(env, requestId, {
       skipCover: true,
       skipFinals: true,
