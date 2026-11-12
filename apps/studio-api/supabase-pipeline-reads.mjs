@@ -440,6 +440,77 @@ export async function releaseMintedAirtableIds(env, tableId, ids) {
   return { ok: true, count: clean.length };
 }
 
+
+/**
+ * Phase 6 Media Asset creates first reserve a provisional Supabase record ID,
+ * then Airtable returns the canonical ID. Re-key the *same* media_assets row
+ * before upserting the authoritative response. A second INSERT cannot work:
+ * media_assets_drive_file_uidx uniquely owns the Drive file already.
+ *
+ * Fail closed if any immutable identity (Drive file, transfer ID, profile,
+ * asset name) differs. Never delete provisional media before adoption.
+ */
+export async function adoptMintedPhase6MediaIds(env, tableId, provisional, canonical) {
+  if (phase6TableKind(env, tableId) !== "media") return { skipped: true, reason: "not_media" };
+  const minted = Array.isArray(provisional) ? provisional : [];
+  const saved = Array.isArray(canonical) ? canonical : [];
+  if (!minted.length || minted.length !== saved.length) return { ok: false, reason: "record_count_mismatch" };
+  let adopted = 0, already = 0;
+  for (let index = 0; index < minted.length; index++) {
+    const from = minted[index], to = saved[index];
+    const source = from?.fields || {}, target = to?.fields || {};
+    const drive = String(source["Google Drive File ID"] || "").trim();
+    const transfer = String(source.Studio_Transfer_ID || "").trim();
+    const profile = firstLink(source.Content_Profile);
+    const name = String(source["Asset Name"] || "").trim();
+    if (!/^rec[A-Za-z0-9]{14}$/.test(String(from?.id || ""))
+      || !/^rec[A-Za-z0-9]{14}$/.test(String(to?.id || ""))
+      || from.id === to.id || !drive || !transfer || !profile || !name
+      || drive !== String(target["Google Drive File ID"] || "").trim()
+      || transfer !== String(target.Studio_Transfer_ID || "").trim()
+      || profile !== firstLink(target.Content_Profile)
+      || name !== String(target["Asset Name"] || "").trim()) {
+      return { ok: false, reason: "immutable_media_identity_mismatch", index };
+    }
+
+    const selector = "select=id,airtable_record_id,asset_name,google_drive_file_id,metadata&limit=1";
+    const existing = await supabaseRest(env,
+      "media_assets?airtable_record_id=eq." + encodeURIComponent(from.id) + "&" + selector);
+    const matches = row => row?.google_drive_file_id === drive
+      && row?.asset_name === name
+      && row?.metadata?.studio_transfer_id === transfer
+      && row?.metadata?.content_profile_airtable_id === profile;
+    if (!Array.isArray(existing) || existing.length > 1) {
+      return { ok: false, reason: "provisional_ambiguous", index };
+    }
+    if (!existing.length) {
+      // Read-back after a successful prior adoption: no repeated mutation.
+      const current = await supabaseRest(env,
+        "media_assets?airtable_record_id=eq." + encodeURIComponent(to.id) + "&" + selector);
+      if (current?.length !== 1 || !matches(current[0])) {
+        return { ok: false, reason: "provisional_missing", index };
+      }
+      already++;
+      continue;
+    }
+    if (!matches(existing[0])) return { ok: false, reason: "provisional_metadata_mismatch", index };
+    const updated = await supabaseRest(env,
+      "media_assets?id=eq." + encodeURIComponent(existing[0].id)
+      + "&airtable_record_id=eq." + encodeURIComponent(from.id)
+      + "&google_drive_file_id=eq." + encodeURIComponent(drive), {
+        method: "PATCH",
+        body: { airtable_record_id: to.id },
+        headers: { Prefer: "return=representation" },
+      });
+    if (!Array.isArray(updated) || updated.length !== 1
+      || updated[0]?.airtable_record_id !== to.id || !matches(updated[0])) {
+      return { ok: false, reason: "adoption_unconfirmed", index };
+    }
+    adopted++;
+  }
+  return { ok: true, count: saved.length, adopted, already };
+}
+
 export async function studioSupabaseCommitOutputContentFirst(env, tableId, records, options = {}) {
   const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
   if (!rows.length) return { skipped: true, reason: "no_records" };
