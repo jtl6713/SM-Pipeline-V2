@@ -28,7 +28,8 @@ test("profile overview includes overdue approved outputs separately from platfor
 });
 
 test("awaiting approval is review-ready but not approved or rendering", () => {
-  assert.match(classifier, /state !== "Ready for Review" && state !== "Awaiting Approval"/);
+  assert.match(classifier, /state === "Ready for Review" \|\| state === "Awaiting Approval"/);
+  assert.match(classifier, /output === "ready for review"/);
   assert.ok(classifier.includes('["approved", "rejected", "skipped"].includes(review)'));
   assert.ok(classifier.includes("ready for render|waiting in render queue"));
   const ready = { id: "rec12345678901234", studio_state: "Ready for Review",
