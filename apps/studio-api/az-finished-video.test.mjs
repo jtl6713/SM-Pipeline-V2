@@ -132,6 +132,8 @@ test("canonical keys collapse reel-family types onto the six destinations", () =
   assert.equal(canonicalFinishedDestinationKey("YouTube", "Standard Video"), "YouTube::Short");
   assert.equal(canonicalFinishedDestinationKey("YouTube", "Short"), "YouTube::Short");
   assert.equal(canonicalFinishedDestinationKey("Instagram", "Story"), "Instagram::Story");
+  assert.equal(canonicalFinishedDestinationKey("Instagram", "Instagram Story"), "Instagram::Story");
+  assert.equal(canonicalFinishedDestinationKey("Facebook", "Facebook Story"), "Facebook::Story");
   assert.equal(canonicalFinishedDestinationKey("Facebook", "Story"), "Facebook::Story");
   assert.deepEqual([...FINISHED_DESTINATION_KEYS], [
     "Instagram::Reel",
@@ -247,4 +249,104 @@ test("finished-video plan rebuild keeps variants Not Needed", () => {
     worker.indexOf("async function getItem4OutputPlan"),
   );
   assert.match(plan, /Studio_Variant_Status:finishedVideo\?"Not Needed":"None"/);
+});
+
+
+
+test("completed-video mode is explicit, with legacy fallback", async () => {
+  const { finishedPublishMode } = await import("./az-finished-video.mjs");
+  assert.equal(finishedPublishMode("origin=az-finished-video\naz-publish-mode=approval"), "approval");
+  assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate"), "immediate");
+  assert.equal(finishedPublishMode("origin=az-finished-video; az-publish-mode=immediate."), "immediate");
+  assert.equal(finishedPublishMode("origin=az-finished-video"), "legacy");
+});
+test("Publish Now refuses missing, duplicate, and unready destinations", async () => {
+  const { finishedPublishPreflight } = await import("./az-finished-video.mjs");
+  const full = FINISHED_DESTINATION_KEYS.map((key) => {
+    const [platform, output_type] = key.split("::");
+    return { platform, output_type, ready: true };
+  });
+  assert.equal(finishedPublishPreflight(full).ok, true);
+  assert.deepEqual(finishedPublishPreflight(full.slice(1)).missing, ["Instagram::Reel"]);
+  const blocked = finishedPublishPreflight(full.map((row, index) => index === 3 ? { ...row, ready: false } : row));
+  assert.deepEqual(blocked.blocked, ["YouTube::Short"]);
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(finishedPublishPreflight([...full, full[0]]).duplicates, ["Instagram::Reel"]);
+  assert.deepEqual(finishedPublishPreflight([...full, { platform: "LinkedIn", output_type: "Video", ready: true }]).unsupported, ["LinkedIn::Video"]);
+  assert.equal(finishedPublishPreflight([{ platform: "YouTube", output_type: "Standard Video", ready: true }], { notes: "source-aspect=horizontal" }).ok, true);
+});
+test("finished-video worker checks approval mode and complete family", () => {
+  const start = worker.indexOf("async function azAutoApproveIfReady");
+  assert.ok(start >= 0);
+  const az = worker.slice(start, worker.indexOf("async function azEnsurePlatformOutputs", start));
+  assert.ok(az.includes('publishMode === "approval"'));
+  assert.ok(az.includes("finishedPublishPreflight(outputs.map"));
+  assert.ok(az.includes("publish_now_preflight"));
+  assert.ok(az.includes('scheduled_post_date: "immediate", publish_now: true'));
+  const advanceStart = worker.indexOf("async function advanceAzFinishedVideo");
+  assert.ok(advanceStart >= 0);
+  const advance = worker.slice(advanceStart, worker.indexOf("async function opsForceAzNavyPierTitle", advanceStart));
+  assert.ok(advance.includes('finishedPublishMode(studioRequestNotesText(record)) === "approval"'));
+});
+
+test("Publish Now uses staged approvals and releases the complete group together", () => {
+  const start = worker.indexOf("async function azAutoApproveIfReady");
+  const stop = worker.indexOf("async function azEnsurePlatformOutputs", start);
+  assert.ok(start >= 0 && stop > start, "finished-video approval function is present");
+  const approval = worker.slice(start, stop);
+  assert.match(approval, /deferPublishUntilGroupRelease: true/);
+  assert.match(approval, /armedCount === outputs\.length/);
+  assert.match(approval, /partial_group_release/);
+  assert.match(approval, /airtableBatchUpdate\(env, env\.AIRTABLE_OUTPUT_TABLE_ID/);
+  assert.match(approval, /released\.length !== outputs\.length/);
+  assert.match(approval, /group_release_readback_failed/);
+  // Both the atomic reservation and legacy approval write path must defer.
+  const approvalWriters = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const deferMatches = approvalWriters.match(/Auto_Publish_Enabled: options\.deferPublishUntilGroupRelease !== true/g) || [];
+  assert.equal(deferMatches.length, 2, "both atomic and legacy approval paths must hold auto publish before group release");
+});
+
+test("Publish Now writes an explicit immediate timestamp rather than an MAE slot", () => {
+  const fn = worker.slice(
+    worker.indexOf("function studioPublishScheduleFields"),
+    worker.indexOf("function studioStorySiblingStamp")
+  );
+  assert.match(fn, /String\(raw\)\.trim\(\)\.toLowerCase\(\) === "immediate"/);
+  assert.match(fn, /requestedIso = new Date\(\)\.toISOString\(\)/);
+  assert.match(fn, /if \(immediate && !bumped && !options\.forceWrite\) return \{\}/);
+});
+
+test("Staged Publish Now outputs cannot enter the guarded publisher before group release", () => {
+  const start = worker.indexOf("function studioPublishCanDispatchNow");
+  const end = worker.indexOf("function studioPromoteDuePublishStatus", start);
+  assert.ok(start >= 0 && end > start);
+  const guard = worker.slice(start, end);
+  assert.match(guard, /az-publish-mode=immediate/);
+  assert.match(guard, /Auto_Publish_Enabled/);
+  assert.match(guard, /return false/);
+  const dispatchStart = worker.indexOf("async function studioDispatchApprovedPublishNow");
+  const dispatch = worker.slice(dispatchStart, worker.indexOf("async function studioDispatchApprovedPublishTail", dispatchStart));
+  assert.ok(dispatch.includes("studioPublishCanDispatchNow(record)"));
+});
+
+test("Completed Video only records Publish Now success after a durable Airtable batch release", () => {
+  const functionSource = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+  const fn = functionSource.slice(
+    functionSource.indexOf("async function azAutoApproveIfReady"),
+    functionSource.indexOf("async function azEnsurePlatformOutputs")
+  );
+  assert.match(fn, /const markGroupReleased = async/);
+  assert.match(fn, /az-publish-now-released=/);
+  assert.match(fn, /airtableBatchUpdate\(env, env\.AIRTABLE_OUTPUT_TABLE_ID/);
+  const release = fn.indexOf("const released = await airtableBatchUpdate");
+  const marker = fn.indexOf("await markGroupReleased()", release);
+  assert.ok(release >= 0 && marker > release, "receipt must be written after verified release");
+});
+
+test("Completed Video Home progress does not confuse staged approval with published release", () => {
+  const browser = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
+  assert.match(browser, /azFinishedGroupReleased = \/az-publish-now-released=/);
+  assert.match(browser, /azFinishedPublishMode\(\) === "immediate" && azFinishedGroupReleased/);
+  assert.match(browser, /return azFinishedPublishMode\(\) === "immediate" \? "group-release" : "queued"/);
+  assert.match(browser, /No output dispatches until the complete Publish Now group is released/);
 });

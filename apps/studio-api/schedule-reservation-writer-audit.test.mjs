@@ -51,6 +51,10 @@ function scheduleReferencingAirtableWriters() {
 }
 
 const EXPECTED_WRITER_SURFACE = [
+  // Completed Video all-output release changes only Auto_Publish_Enabled after
+  // six separate, reservation-authorized approvals. It reads schedule fields
+  // but never creates, moves, or deletes any authoritative schedule timestamps.
+  "worker-functions-01.mjs:azAutoApproveIfReady",
   "worker-functions-01.mjs:studioCompleteNativePhotoPublishArming",
   // Facebook rate-limit recovery preserves Scheduled_Post_Date until the next
   // approved atomic MAE move. It clears only the non-authoritative suggestion marker.

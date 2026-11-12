@@ -2834,7 +2834,9 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         action: existingScheduleIso && existingScheduleIso !== scheduledIso ? "move" : "reserve",
         selectedIso: scheduledIso,
         previousIso: existingScheduleIso,
-        patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
+        patchFields: { ...fields, ...preparedHandoff, ...scheduleFields,
+          // Publish Now is a two-phase group release: no member dispatches while peers stage.
+          Auto_Publish_Enabled: options.deferPublishUntilGroupRelease !== true },
       };
     },
     write: async (plan, { signal }) => {
@@ -3089,7 +3091,8 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     method: "PATCH",
     // Explicit write-through below is the single Supabase mirror for this path.
     skipSupabaseWriteThrough: true,
-    body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
+    body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields,
+      Auto_Publish_Enabled: options.deferPublishUntilGroupRelease !== true }, typecast: true }),
   });
   checkpoint("schedule_write_finished");
   if (!options.skipOccupancyRefresh) studioInvalidateOccupiedScheduleCache();

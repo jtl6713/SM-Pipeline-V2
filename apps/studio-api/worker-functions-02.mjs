@@ -157,6 +157,7 @@ import {
   FINISHED_HORIZONTAL_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
   azExpectedOutputCount,
+  finishedPublishMode,
   azOutputLockHeld,
   azOutputLockIsFresh,
   azOutputLockToken,
@@ -7254,8 +7255,10 @@ export function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
   if (!kind) return {};
   const firstUrl = String(clips[0]?.url || "").trim() || null;
   const az = studioIsAzFinishedVideo(requestRecord);
+  const mode = finishedPublishMode(studioRequestNotesText(requestRecord));
+  const modeStamp = mode === "legacy" ? "" : ` az-publish-mode=${mode}.`;
   const note = az
-    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (photorealistic scene; restrained gold / black-and-gold lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
+    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (photorealistic scene; restrained gold / black-and-gold lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.${modeStamp}`
     : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (photorealistic scene; restrained gold / black-and-gold lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file.`;
   if (kind === "finished-video") {
     return {
