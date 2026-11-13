@@ -23,6 +23,7 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  outputRecordHasDensifiedIdentity,
   syncAirtableContentRowToSupabase,
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
@@ -1144,7 +1145,10 @@ export async function studioSupabaseWriteThroughOutput(env, record, label = "out
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   try {
-    const result = await syncAirtableOutputRowToSupabase(env, record, { fullRecord: true });
+    // Sparse approve/schedule bodies under Supabase write SoR must PATCH only
+    // present columns. fullRecord upsert blanks densified identity.
+    const fullRecord = outputRecordHasDensifiedIdentity(record);
+    const result = await syncAirtableOutputRowToSupabase(env, record, { fullRecord });
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");
     studioReadCacheDropPrefix("schedule-grid:");

@@ -19,6 +19,11 @@ test("Factory approve and schedule regen skip the in-lock mirror and keep one af
   const approve = functions04.slice(approveStart, approveEnd);
   assert.match(approve, /skipSupabaseWriteThrough: true/);
   assert.match(approve, /studioSupabaseWriteThroughOutput\(env, updated, "approve"\)/);
+  const write = await readFile(path.join(here, "worker-functions-01.mjs"), "utf8");
+  assert.match(write, /outputRecordHasDensifiedIdentity\(record\)/);
+  const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.match(reads, /export function outputRecordHasDensifiedIdentity/);
+  assert.match(reads, /options\.fullRecord === true && outputRecordHasDensifiedIdentity\(record\)/);
 
   assert.match(functions04, /skipSupabaseWriteThrough: true/);
   assert.match(functions04, /"schedule-regen"/);

@@ -4199,6 +4199,19 @@ export function buildPresentOutputColumnPatch(record, {
   return { body, bagPatch: packOutputListFields(fields) };
 }
 
+/**
+ * True when the Airtable-shaped body carries densified list identity.
+ * Factory approve / schedule under STUDIO_WRITE_SOURCE=supabase return the
+ * archived PATCH body only (status + schedule). A fullRecord upsert of that
+ * sparse body blanks output_number, platform, content_item_id, and media URLs
+ * (proven NYC 2087/2088 on 2026-11-13).
+ */
+export function outputRecordHasDensifiedIdentity(record) {
+  const fields = record?.fields || {};
+  if (fields.Output_ID == null) return false;
+  return Boolean(selectName(fields.Platform) || selectName(fields.Platform_Output_Type));
+}
+
 export async function syncAirtableOutputRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
@@ -4230,7 +4243,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     return { ok: true, mode: "create" };
   }
 
-  if (options.fullRecord === true) {
+  if (options.fullRecord === true && outputRecordHasDensifiedIdentity(record)) {
     const profileAirtableId = firstLink(record.fields?.Content_Profile);
     const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
     const contentAirtableId = firstLink(record.fields?.Content_Item);
@@ -4257,8 +4270,9 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     return { ok: true, mode: "upsert" };
   }
 
-  // Partial mutations (dispatch stamps, promote, caption backfill): PATCH only
-  // the columns present on the field patch so schedule/status stay intact.
+  // Partial mutations (dispatch stamps, promote, caption backfill, and sparse
+  // approve/schedule responses): PATCH only the columns present on the field
+  // patch so densified identity and schedule/status stay intact.
   const profileAirtableId = firstLink(record.fields?.Content_Profile);
   const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
   const contentAirtableId = firstLink(record.fields?.Content_Item);

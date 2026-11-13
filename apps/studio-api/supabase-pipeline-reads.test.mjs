@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.857-manual-attention-drilldown/);
+  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.857-manual-attention-drilldown/);
+  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1018,6 +1018,64 @@ test("phase 5 content write-through patches present columns when profile is unre
     assert.equal(body.content_title, "Pier");
     assert.equal(body.content_status, "Thumbnail Ready");
     assert.equal(body.content_profile_id, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("sparse approve fullRecord write-through patches present columns only", async () => {
+  const { outputRecordHasDensifiedIdentity } = await import("./supabase-pipeline-reads.mjs");
+  assert.equal(outputRecordHasDensifiedIdentity({
+    id: "recSparse",
+    fields: {
+      Review_Status: "Approved",
+      Output_Status: "Approved for Publishing",
+      Publish_Status: "Ready to Schedule",
+      Scheduled_Post_Date: "2027-01-11T16:30:00.000Z",
+      Auto_Publish_Enabled: true,
+    },
+  }), false);
+  assert.equal(outputRecordHasDensifiedIdentity({
+    id: "recDense",
+    fields: { Output_ID: 10381, Platform: "Instagram", Platform_Output_Type: "Instagram Reel" },
+  }), true);
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    if (String(url).includes("select=error_messages")) {
+      return { ok: true, async text() { return JSON.stringify([{
+        error_messages: { _runner_record_projection: "v1", Output_Notes: "keep" },
+      }]); } };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const sparse = await syncAirtableOutputRowToSupabase(supabaseEnv, {
+      id: "recSparseApprove",
+      fields: {
+        Review_Status: "Approved",
+        Output_Status: "Approved for Publishing",
+        Publish_Status: "Ready to Schedule",
+        Scheduled_Post_Date: "2027-01-11T16:30:00.000Z",
+        Auto_Publish_Enabled: true,
+        Publish_Method: "Automated",
+      },
+    }, { fullRecord: true });
+    assert.equal(sparse.mode, "patch");
+    const patch = calls.find((call) => call.method === "PATCH" && call.url.includes("platform_outputs"));
+    assert.ok(patch, "expected PATCH not upsert");
+    const body = JSON.parse(patch.body);
+    assert.equal(body.review_status, "Approved");
+    assert.equal(body.output_status, "Approved for Publishing");
+    assert.equal(body.publish_status, "Ready to Schedule");
+    assert.equal(body.auto_publish_enabled, true);
+    assert.equal(Object.hasOwn(body, "output_number"), false);
+    assert.equal(Object.hasOwn(body, "platform"), false);
+    assert.equal(Object.hasOwn(body, "content_item_id"), false);
+    assert.equal(Object.hasOwn(body, "platform_output_type"), false);
+    assert.equal(calls.some((call) => call.method === "POST"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2635,7 +2693,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.857-manual-attention-drilldown/);
+  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
