@@ -195,7 +195,7 @@ def main():
         if rows:
             supabase_upsert(url, key, "engagement_settings", rows)
             saved_settings += len(rows)
-    print(f"settings_upserted={saved_settings}")
+    print(f"settings_upserted={saved_settings}", flush=True)
     saved_queue = 0
     for page in airtable_pages(pat, QUEUE, QUEUE_FIELDS):
         rows = [queue_row(record) for record in page if record.get("id")]
@@ -203,10 +203,10 @@ def main():
             supabase_upsert(url, key, "studio_media_transfer_queue", rows)
             saved_queue += len(rows)
         if saved_queue and saved_queue % 1000 == 0:
-            print(f"queue_upserted={saved_queue}")
-    print(f"queue_upserted={saved_queue}")
-    print(f"queue_supabase={supabase_count(url, key, 'studio_media_transfer_queue')}")
-    print(f"queue_ready_supabase={supabase_count(url, key, 'studio_media_transfer_queue', '&status=eq.Ready')}")
+            print(f"queue_upserted={saved_queue}", flush=True)
+    print(f"queue_upserted={saved_queue}", flush=True)
+    print(f"queue_supabase={supabase_count(url, key, 'studio_media_transfer_queue')}", flush=True)
+    print(f"queue_ready_supabase={supabase_count(url, key, 'studio_media_transfer_queue', '&status=eq.Ready')}", flush=True)
     present = 0
     for name in SETTING_NAMES:
         count = supabase_count(
@@ -216,7 +216,7 @@ def main():
             "&payload->>Setting_Name=eq." + urllib.parse.quote(name),
         )
         present += 1 if count else 0
-    print(f"settings_present={present}")
+    print(f"settings_present={present}", flush=True)
 
 
 if __name__ == "__main__":
