@@ -1444,6 +1444,50 @@ function flattenIdeaRow(row) {
   };
 }
 
+
+/**
+ * Profile-scoped Manual Action candidates for Pipeline rescue + Home click-through.
+ * Mirrors the Airtable loadManualActionPipelineOutputs formula against typed
+ * columns + error_messages bag fields. Callers still run mapOutput /
+ * studio_state === "Manual Action Required" for the final badge gate.
+ */
+export async function listSupabaseManualActionOutputs(env, { profileAirtableId, limit = 100 } = {}) {
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) return [];
+  const capped = Math.max(1, Math.min(500, Number(limit) || 100));
+  const manualPublish = encodeDeskLogicValue("Manual Publish Required");
+  const musicManual = encodeDeskLogicValue("Manual Action Required");
+  const completionRequired = encodeDeskLogicValue("Required");
+  const published = encodeDeskLogicValue("Published");
+  const publishedPrivately = encodeDeskLogicValue("Published Privately");
+  const skipped = encodeDeskLogicValue("Skipped");
+  const manualFlags = [
+    `publish_status.eq.${manualPublish}`,
+    "tiktok_draft_status.ilike.*Manual Action*",
+    "tiktok_draft_status.ilike.*Manual Fallback*",
+    `error_messages->>Manual_Completion_Status.eq.${completionRequired}`,
+    `error_messages->>Music_Status.eq.${musicManual}`,
+    "error_messages->>Manual_Fallback_Required.eq.true",
+    "error_messages->>Manual_Fallback_Required.eq.1",
+  ].join(",");
+  const openStatus = `or=(output_status.is.null,and(output_status.neq.${published},output_status.neq.${skipped}))`;
+  const openPublish = `or=(publish_status.is.null,and(publish_status.neq.${published},publish_status.neq.${publishedPrivately}))`;
+  const blankPost = "or=(platform_post_url.is.null,platform_post_url.eq.)";
+  const blankManualUrl = blankErrorMessage("Manual_Published_URL");
+  const path = `platform_outputs?content_profile_id=eq.${profileId}`
+    + "&do_not_publish=eq.false&test_run_id=is.null"
+    + `&${openStatus}&${openPublish}&${blankPost}&${blankManualUrl}`
+    + `&or=(${manualFlags})`
+    + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}`;
+  const rows = await supabaseRest(env, path).catch((error) => {
+    console.warn("supabase manual-action scan failed", error);
+    return [];
+  });
+  return stripDeletedDuplicateOutputRecords(
+    (rows || []).map((row) => airtableShapedOutputFromSupabase(flattenOutputRow(row))).filter((row) => row?.id),
+  );
+}
+
 export async function listSupabasePipelineOutputs(env, { profileAirtableId, limit = 250, reviewOnly = false } = {}) {
   const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
   if (!profileId) return { records: [], contentByAirtableId: new Map(), profileMissing: true };
@@ -1460,9 +1504,13 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
 
   let open = [];
   if (!reviewOnly) {
+    // PostgREST `neq` excludes nulls. Ready-for-Delivery TikToks often have a
+    // blank Output_Status; dropping them left Home Manual counts with an empty
+    // Pipeline click-through once they aged past newest-250.
+    const openStatus = "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))";
     const openRaw = await supabaseRest(
       env,
-      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=1000`,
+      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false&${openStatus}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=1000`,
     ).catch(() => []);
     open = (openRaw || []).filter((row) => !String(row?.test_run_id || "").trim());
   }
