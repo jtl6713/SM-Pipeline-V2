@@ -1,4 +1,5 @@
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
+import { readProfileSummaryDirtyBatch } from "./supabase-pipeline-reads.mjs";
 import { mapOutput, mapIdea } from "./worker-functions-01.mjs";
 import { studioOverviewRowMatchesProfile } from "./worker-functions-04.mjs";
 import { buildProfileSummaryV6Row, profileSummaryV6StaticParity } from "./profile-summary-v6.mjs";
@@ -374,6 +375,35 @@ export class StudioProfileSummary {
     }
     for (const [kind, items] of grouped) {
       try {
+        const stored = await readProfileSummaryDirtyBatch(this.env, kind, items.map((item) => item.record_id)).catch(() => null);
+        if (Array.isArray(stored)) {
+          const readById = new Map(stored.map((row) => [row.id, row]));
+          this.state.storage.transactionSync(() => {
+            if (this.getMeta("building_generation")) return;
+            for (const item of items) {
+              const latest = records(this.sql,
+                "SELECT touched_at FROM pending WHERE kind=? AND record_id=?",
+                item.kind, item.record_id)[0];
+              if (!latest || Number(latest.touched_at) !== Number(item.touched_at)) continue;
+              const record = readById.get(item.record_id) || null;
+              const profile = record && eligibleRecord(kind, record) ? this.inferProfile(record) : "";
+              if (record && eligibleRecord(kind, record) && !profile) throw new Error("Cannot resolve profile for " + item.record_id);
+              this.modify(kind, item.record_id, profile,
+                profile ? contributionForRecord(kind, record) : ZERO(),
+                Date.now(), profile ? dueAtForRecord(kind, record) : 0,
+                profile ? approvedFutureAtForRecord(kind, record) : 0);
+              const lag = Math.max(0, Date.now() - Number(item.touched_at));
+              this.incrementMetric("dirty_applied");
+              this.incrementMetric("dirty_lag_sum_ms", lag);
+              this.putMeta("dirty_lag_max_ms", Math.max(Number(this.getMeta("dirty_lag_max_ms") || 0), lag));
+              const bucket = LAG_BUCKET_MS.find((limit) => lag <= limit);
+              this.incrementMetric(bucket ? "dirty_lag_le_" + bucket : "dirty_lag_over_60000");
+              this.sql.exec("DELETE FROM pending WHERE kind=? AND record_id=?", kind, item.record_id);
+            }
+          });
+          this.putMeta("error", "");
+          continue;
+        }
         const base = code(this.env.AIRTABLE_BASE_ID);
         const table = kind === "output" ? this.env.AIRTABLE_OUTPUT_TABLE_ID : this.env.AIRTABLE_IDEA_TABLE_ID;
         if (!base || !table || !this.env.AIRTABLE_PAT) throw new Error("Airtable binding unavailable");

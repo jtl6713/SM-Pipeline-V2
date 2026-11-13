@@ -21,10 +21,11 @@ def test_text_find_and_spaced_link_find():
     )
     assert missing is not None
     assert "not.like.*https://render.example*" in missing
-    assert formula_to_postgrest_filter(
+    assets = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         "FIND('drive-id', {Selected_Assets_JSON} & '') > 0",
-    ) is None
+    )
+    assert assets == "selected_assets_text.like.*drive-id*"
     spaced = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         'FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",") > 0',
@@ -59,7 +60,8 @@ def test_snapshotted_runner_views():
     package = view_to_postgrest_filter(
         CONTENT_ITEMS_TABLE, "P1 - Ready for Package Generation",
     )
-    assert package is None
+    assert package is not None
+    assert "Source_Candidate" in package
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, '{Platform}="Instagram"',
     ) == "platform.eq.Instagram"
@@ -95,7 +97,7 @@ def test_produce_output_link_finds():
         PLATFORM_OUTPUTS_TABLE,
         f'FIND("{parent}", ARRAYJOIN({{Content_Item}}))',
     )
-    assert content_rec == f"link:content_items.airtable_record_id=eq.{parent}"
+    assert content_rec == f"content_item_airtable_id.eq.{parent}"
     request_id = "recRequest1234567"
     request_link = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
@@ -134,7 +136,7 @@ def test_produce_output_link_finds():
     ) == "link:content_items.content_number=eq.102"
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, parent, None),
-    ) == f"link:content_items.airtable_record_id=eq.{parent}"
+    ) == f"content_item_airtable_id.eq.{parent}"
     assert "Production_Request_Output" in formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, None, None),
     )

@@ -344,8 +344,8 @@ export function studioLegacyExportEnabled(env, tableId) {
  * Phase 6 switch for Production Requests, Media Assets, and the transfer
  * queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not turn this
  * on. Updates and creates commit to Supabase first only when
- * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create without the insert identity
- * still requires Airtable. Held-reschedule note readback uses the Supabase
+ * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create uses the minted Supabase id
+ * when Airtable identity fields are absent. Held-reschedule note readback uses the Supabase
  * row when STUDIO_WRITE_SOURCE=supabase. A successful Supabase commit is not
  * exported to Airtable. The half-hour Airtable copy is stopped while
  * STUDIO_WRITE_SOURCE=supabase. Record deletion is not started.
@@ -3018,6 +3018,7 @@ export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidBy
     airtable_record_id: record.id,
     output_number: fields.Output_ID ?? null,
     content_item_id: contentAirtableId ? (contentUuidByAirtableId.get(contentAirtableId) || null) : null,
+    ...("Content_Item" in fields ? { content_item_airtable_id: contentAirtableId || null } : {}),
     content_profile_id: profileUuid,
     platform: selectName(fields.Platform) || "Unknown",
     format: selectName(fields.Format),
@@ -4118,6 +4119,10 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = productionRequestWriteThroughRow(record);
+  if (options.create === true) {
+    if (row.production_request_id == null) row.production_request_id = record.id;
+    if (row.request_status == null) row.request_status = "Draft";
+  }
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
   const identity = row.production_request_id != null && row.request_status != null;
   if (options.create === true && !identity) return { ok: false, reason: "create_identity" };
@@ -4354,6 +4359,12 @@ export async function syncAirtableMediaAssetRowToSupabase(env, record, options =
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = mediaAssetWriteThroughRow(record);
+  if (options.create === true && !row.asset_name) {
+    row.asset_name = `Untitled ${record.id}`;
+    if (row.active == null) row.active = true;
+    if (row.do_not_use == null) row.do_not_use = false;
+    if (row.studio_favorite == null) row.studio_favorite = false;
+  }
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
   if (options.create === true && !row.asset_name) return { ok: false, reason: "create_identity" };
   if (row.metadata) {
@@ -4421,6 +4432,14 @@ function transferQueueWriteThroughRow(record) {
   if ("Transfer_Status" in fields) row.status = selectName(fields.Transfer_Status);
   if ("Error_Message" in fields) row.error_message = transferQueueText(fields.Error_Message);
   if ("Preview_Error" in fields) row.preview_error = transferQueueText(fields.Preview_Error);
+  if ("Attempt_Count" in fields && fields.Attempt_Count != null && fields.Attempt_Count !== "") {
+    const attempts = Number(fields.Attempt_Count);
+    if (Number.isFinite(attempts)) row.attempt_count = Math.trunc(attempts);
+  }
+  if ("Last_Attempt_At" in fields) {
+    const stamp = transferQueueText(fields.Last_Attempt_At);
+    if (stamp) row.last_attempt_at = stamp;
+  }
   const payload = {};
   const copy = (key, column, value) => {
     if (!(key in fields) || !value) return;
@@ -4540,6 +4559,7 @@ export async function syncAirtableTransferQueueRowToSupabase(env, record, option
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = transferQueueWriteThroughRow(record);
+  if (!Object.keys(row).length && options.create === true) row.status = "Pending";
   if (!Object.keys(row).length) {
     return options.create === true
       ? { ok: false, reason: "create_identity" }
@@ -4898,6 +4918,7 @@ function sideTableKind(env, tableId) {
   if (table === PIPELINE_SETTINGS_TABLE_ID) return "pipeline_settings";
   if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
+  if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   return "";
 }
 
@@ -4992,8 +5013,239 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
     });
 }
 
+const QUEUE_FILTER_FIELDS = {
+  Transfer_Status: "status",
+  Asset_Kind: "payload->>asset_kind",
+  Preview_Status: "payload->>preview_status",
+  Test_Run_ID: "payload->>test_run_id",
+  Production_Request_Record_ID: "payload->>production_request_record_id",
+  Source_Drive_File_ID: "payload->>source_drive_file_id",
+  Aspect_Ratio: "payload->>aspect_ratio",
+  Source_Asset_ID: "payload->>source_asset_id",
+};
+
+const QUEUE_PAYLOAD_FIELDS = {
+  transfer_id: "Transfer_ID",
+  production_request_record_id: "Production_Request_Record_ID",
+  asset_kind: "Asset_Kind",
+  source_asset_id: "Source_Asset_ID",
+  source_name: "Source_Name",
+  source_drive_file_id: "Source_Drive_File_ID",
+  source_media_asset_id: "Source_Media_Asset",
+  generated_media_asset_id: "Generated_Media_Asset",
+  aspect_ratio: "Aspect_Ratio",
+  preview_status: "Preview_Status",
+  test_run_id: "Test_Run_ID",
+  media_asset_record_id: "Media_Asset_Record_ID",
+};
+
+function tightenQueueFormula(text) {
+  let out = "";
+  let inString = false;
+  let quote = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < text.length) {
+        out += text[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) continue;
+    out += ch;
+  }
+  return out;
+}
+
+function splitQueueArgs(args) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  let inString = false;
+  let quote = "";
+  for (let i = 0; i < args.length; i += 1) {
+    const ch = args[i];
+    if (inString) {
+      if (ch === "\\" && i + 1 < args.length) {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+    } else if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth < 0) return null;
+    } else if (ch === "," && depth === 0) {
+      parts.push(args.slice(start, i));
+      start = i + 1;
+    }
+  }
+  if (depth !== 0 || inString) return null;
+  if (start < args.length) parts.push(args.slice(start));
+  return parts;
+}
+
+function queuePredicate(text) {
+  if (text.startsWith("AND(") && text.endsWith(")")) return queueJoin("and", text.slice(4, -1));
+  if (text.startsWith("OR(") && text.endsWith(")")) return queueJoin("or", text.slice(3, -1));
+  const blank = text.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
+  if (blank) {
+    const ref = QUEUE_FILTER_FIELDS[blank[1]];
+    return ref ? `or(${ref}.is.null,${ref}.eq.)` : null;
+  }
+  const eq = text.match(/^\{([A-Za-z0-9_]+)\}=(?:"([^"]*)"|'([^']*)')$/);
+  if (!eq) return null;
+  const ref = QUEUE_FILTER_FIELDS[eq[1]];
+  const value = eq[2] != null ? eq[2] : eq[3];
+  if (!ref || /[,()"]/.test(value)) return null;
+  return `${ref}.eq.${value}`;
+}
+
+function queueJoin(joiner, args) {
+  const parts = splitQueueArgs(args);
+  if (!parts?.length) return null;
+  const filters = [];
+  for (const part of parts) {
+    const item = queuePredicate(part);
+    if (!item) return null;
+    filters.push(item);
+  }
+  return filters.length === 1 ? filters[0] : `${joiner}(${filters.join(",")})`;
+}
+
+function queueFormulaFilter(formula) {
+  const cleaned = tightenQueueFormula(String(formula || ""));
+  return cleaned ? queuePredicate(cleaned) : null;
+}
+
+function shapeQueueRow(row) {
+  if (!row?.airtable_record_id) return null;
+  const payload = isPlainObject(row.payload) ? row.payload : {};
+  const fields = {};
+  if (row.status != null) fields.Transfer_Status = row.status;
+  if (row.error_message != null) fields.Error_Message = row.error_message;
+  if (row.preview_error != null) fields.Preview_Error = row.preview_error;
+  if (row.attempt_count != null) fields.Attempt_Count = row.attempt_count;
+  if (row.last_attempt_at) fields.Last_Attempt_At = row.last_attempt_at;
+  if (row.updated_at) fields.Updated_At = row.updated_at;
+  for (const [column, airtableKey] of Object.entries(QUEUE_PAYLOAD_FIELDS)) {
+    if (!payload[column]) continue;
+    fields[airtableKey] = airtableKey === "Source_Media_Asset" || airtableKey === "Generated_Media_Asset"
+      ? [payload[column]]
+      : payload[column];
+  }
+  if (Array.isArray(payload.target_production_request_output_ids) && payload.target_production_request_output_ids.length) {
+    fields.Target_Production_Request_Outputs = payload.target_production_request_output_ids;
+  }
+  return { id: row.airtable_record_id, fields };
+}
+
+async function readQueueRows(env, formula, limit, offset, recordId = "") {
+  const tight = tightenQueueFormula(String(formula || ""));
+  if (!recordId && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) return null;
+  const translated = recordId ? "" : queueFormulaFilter(formula);
+  if (!recordId && !translated) return null
+  const filter = recordId
+    ? `airtable_record_id=eq.${encodeURIComponent(recordId)}`
+    : `and=(${translated})`;
+  const rows = await supabaseRest(
+    env,
+    "studio_media_transfer_queue?select=airtable_record_id,status,error_message,preview_error,attempt_count,last_attempt_at,updated_at,payload"
+      + `&order=updated_at.desc&limit=${limit}&offset=${offset}&${filter}`,
+  );
+  if (!Array.isArray(rows)) return null;
+  return rows.map(shapeQueueRow).filter(Boolean);
+}
+
+function summaryProfileIdFromFormula(formula) {
+  const ids = [...String(formula || "").matchAll(/FIND\("([^"]+)",\s*ARRAYJOIN\(\{Content_Profile\}\)/g)]
+    .map((match) => match[1])
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
+  return ids[0] || "";
+}
+
 /**
- * Idea, settings, and carousel-slide reads that can be answered from Supabase.
+ * Profile-summary reconcile pages. Null means this call stays on Airtable.
+ */
+export async function listProfileSummaryRecords(env, tableId, options = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const profileAirtableId = summaryProfileIdFromFormula(options.filterFormula);
+  if (!profileAirtableId) return null;
+  const profileUuid = await resolveSupabaseProfileId(env, profileAirtableId).catch(() => null);
+  if (!profileUuid) return null;
+  const ideaTable = String(env?.AIRTABLE_IDEA_TABLE_ID || IDEA_CANDIDATES_TABLE_ID);
+  const outputTable = String(env?.AIRTABLE_OUTPUT_TABLE_ID || "");
+  const limit = Math.max(1, Math.min(10000, Number(options.limit) || 10000));
+  if (outputTable && String(tableId) === outputTable) {
+    const rows = await supabaseRestAll(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileUuid}`
+        + "&and=(or(output_status.is.null,output_status.neq.Published),or(publish_status.is.null,publish_status.neq.Published))"
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc`,
+      { pageSize: 1000, maxRows: limit },
+    );
+    if ((rows || []).length >= limit) return null;
+    return (rows || []).map((row) => airtableShapedOutputFromSupabase(flattenOutputRow(row))).filter((row) => row?.id);
+  }
+  if (String(tableId) === ideaTable) {
+    const rows = await supabaseRestAll(
+      env,
+      `idea_candidates?content_profile_id=eq.${profileUuid}`
+        + "&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)"
+        + "&order=created_at.desc",
+      { pageSize: 1000, maxRows: limit },
+    );
+    if ((rows || []).length >= limit) return null;
+    return (rows || [])
+      .map((row) => airtableShapedIdeaFromSupabase(flattenIdeaRow(row)))
+      .filter((row) => row?.id && !String(row.fields.Promoted_Content_Record_ID || "").trim()
+        && (!Array.isArray(row.fields["Content Items"]) || row.fields["Content Items"].length === 0));
+  }
+  return null;
+}
+
+/**
+ * Dirty reread by record id. Null when any id is missing, so Airtable still covers the gap.
+ */
+export async function readProfileSummaryDirtyBatch(env, kind, ids) {
+  const clean = [...new Set((ids || []).map((id) => String(id || "")).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  if (!clean.length || !studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const quoted = clean.map(encodeURIComponent).join(",");
+  const rows = kind === "idea"
+    ? await supabaseRest(
+      env,
+      `idea_candidates?airtable_record_id=in.(${quoted})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)`,
+    )
+    : await supabaseRest(
+      env,
+      `platform_outputs?airtable_record_id=in.(${quoted})&select=${OUTPUT_SELECT}`,
+    );
+  const shaped = (Array.isArray(rows) ? rows : []).map((row) => (
+    kind === "idea"
+      ? airtableShapedIdeaFromSupabase(flattenIdeaRow(row))
+      : airtableShapedOutputFromSupabase(flattenOutputRow(row))
+  )).filter((row) => row?.id);
+  if (shaped.length !== clean.length) return null;
+  return shaped;
+}
+
+/**
+ * Idea, settings, carousel-slide, and transfer-queue reads that can be answered from Supabase.
  * Returns null when this call must stay on Airtable.
  */
 export async function studioSideTableRead(env, tableId, pathOrParams) {
@@ -5009,6 +5261,11 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (kind === "slides") {
       const rows = await listSupabaseCarouselSlidesByIds(env, [id]);
       return rows[0] || null;
+    }
+    if (kind === "queue") {
+      if (studioPhase6WriteSource(env) !== "supabase") return null;
+      const rows = await readQueueRows(env, "", 1, 0, id);
+      return rows?.[0] || null;
     }
     const source = kind === "engagement_settings" ? "engagement" : "pipeline";
     const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
@@ -5027,6 +5284,15 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (!profiles) return null;
     const records = await readIdeasForProfiles(env, profiles.ids, profiles.openOnly, limit);
     return records.length ? { records } : null;
+  }
+  if (kind === "queue") {
+    if (studioPhase6WriteSource(env) !== "supabase") return null;
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await readQueueRows(env, formula, limit, offset);
+    if (!records) return null;
+    const body = { records };
+    if (records.length === limit) body.offset = String(offset + records.length);
+    return body;
   }
   return null;
 }

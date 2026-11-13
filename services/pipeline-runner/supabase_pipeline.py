@@ -12,7 +12,7 @@ commit to Supabase first. Airtable is then a best-effort legacy export.
 STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
 transfer-queue updates and creates do the same. A successful Airtable create
 still returns Airtable's rec id. A failed Airtable create keeps the Supabase
-row. A Phase 6 create without the insert identity still requires Airtable.
+row. A Phase 6 create uses the minted Supabase id when Airtable identity fields are absent.
 """
 
 from __future__ import annotations
@@ -339,6 +339,7 @@ def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> di
         "airtable_record_id": record["id"],
         "output_number": fields.get("Output_ID"),
         "content_item_id": content_uuid if content_airtable_id else None,
+        **({"content_item_airtable_id": content_airtable_id} if "Content_Item" in fields else {}),
         "content_profile_id": profile_uuid,
         "platform": _select(fields.get("Platform")) or "Unknown",
         "format": _select(fields.get("Format")),
@@ -501,6 +502,13 @@ def _queue_row(record: dict) -> dict:
         row["error_message"] = _queue_text(fields.get("Error_Message"))
     if "Preview_Error" in fields:
         row["preview_error"] = _queue_text(fields.get("Preview_Error"))
+    if "Attempt_Count" in fields and fields.get("Attempt_Count") not in (None, ""):
+        try:
+            row["attempt_count"] = int(fields.get("Attempt_Count"))
+        except (TypeError, ValueError):
+            pass
+    if "Last_Attempt_At" in fields and _queue_text(fields.get("Last_Attempt_At")):
+        row["last_attempt_at"] = _queue_text(fields.get("Last_Attempt_At"))
     payload: dict[str, Any] = {}
     for airtable_key, column in (
         ("Transfer_ID", "transfer_id"),
@@ -883,6 +891,23 @@ def _mirror_create_one(settings: dict, kind: str, record: dict) -> None:
     _enqueue_outbox(settings, kind, record, "POST")
 
 
+def _with_phase6_create_identity(kind: str, record: dict) -> dict:
+    """A minted Supabase id is enough to insert. Missing Airtable fields get defaults."""
+    fields = dict(record.get("fields") or {})
+    minted = str(record.get("id") or "")
+    if kind == "request":
+        if fields.get("Production_Request_ID") in (None, ""):
+            fields["Production_Request_ID"] = minted
+        if not fields.get("Request_Status"):
+            fields["Request_Status"] = "Draft"
+    elif kind == "media":
+        if not str(fields.get("Asset Name") or "").strip():
+            fields["Asset Name"] = f"Untitled {minted}"
+    elif kind == "queue" and not _queue_row({"fields": fields}):
+        fields["Transfer_Status"] = "Pending"
+    return {**record, "fields": fields}
+
+
 def phase6_create_identity(kind: str, record: dict) -> bool:
     """True only when the body can insert a new Phase 6 row, not patch one."""
     if kind == "request":
@@ -902,9 +927,10 @@ def commit_phase6_creates(settings: dict | None, table_id: str, records: list[di
     rows = [record for record in (records or []) if isinstance(record, dict)]
     if not kind or not supabase_configured(settings) or not rows:
         return False
-    if any(not record.get("id") or not phase6_create_identity(kind, record) for record in rows):
+    prepared = [_with_phase6_create_identity(kind, record) for record in rows]
+    if any(not record.get("id") or not phase6_create_identity(kind, record) for record in prepared):
         return False
-    for record in rows:
+    for record in prepared:
         if kind == "request":
             _mirror_request(settings or {}, record)
         elif kind == "media":
