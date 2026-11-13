@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.877-closeout-exception-msgs/);
+  assert.match(worker, /0\.10\.878-closeout-repair-lease/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.877-closeout-exception-msgs/);
+  assert.match(worker, /0\.10\.878-closeout-repair-lease/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.877-closeout-exception-msgs/);
+  assert.match(worker, /0\.10\.878-closeout-repair-lease/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.877-closeout-exception-msgs/);
+  assert.match(worker, /0\.10\.878-closeout-repair-lease/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3544,6 +3544,61 @@ test("Media Asset Logo/name/Drive list formulas read from Supabase under Phase6"
       { limit: 5 },
     );
     assert.equal(refused, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Make Admin Queue repair leases read and write from Supabase under write SoR", async () => {
+  const { studioSideTableRead, studioSideTableCommit, MAKE_ADMIN_QUEUE_TABLE_ID } = await import(
+    "./supabase-pipeline-reads.mjs"
+  );
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      urls.push(href);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (method === "POST" || method === "PATCH") {
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recLease000000001",
+        command_id: "REPAIR-LEASE-1",
+        action: "GET_SCENARIO",
+        scenario_id: 5556716,
+        status: "Processing",
+        correlation_id: "run-1",
+        notes: "REPAIR_LEASE_V1 lease-abc; exact resource allowlist enforced",
+        request_json: { lease_id: "lease-abc", test_run_id: "run-1", scenario_id: 5556716 },
+        result_json: { operations_used: 0, runs_used: 0 },
+        fields: {},
+        requested_at: "2026-11-13T00:00:00.000Z",
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const listed = await studioSideTableRead(
+      env,
+      MAKE_ADMIN_QUEUE_TABLE_ID,
+      '?filterByFormula=AND({Status}="Processing",FIND("REPAIR_LEASE_V1", {Notes}&"")>0)&maxRecords=50',
+    );
+    assert.equal(listed.records[0].id, "recLease000000001");
+    assert.equal(listed.records[0].fields.Status, "Processing");
+    assert.ok(urls.some((url) => url.includes("make_admin_queue") && url.includes("status=eq.Processing")));
+    const patched = await studioSideTableCommit(
+      env,
+      MAKE_ADMIN_QUEUE_TABLE_ID,
+      "PATCH",
+      "recLease000000001",
+      JSON.stringify({ fields: { Status: "Succeeded", Result_JSON: "{\"state\":\"closed\"}" } }),
+    );
+    assert.equal(patched.ok, true);
+    assert.equal(patched.records[0].fields.Status, "Succeeded");
   } finally {
     globalThis.fetch = originalFetch;
   }

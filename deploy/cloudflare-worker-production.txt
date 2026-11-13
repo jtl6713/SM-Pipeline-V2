@@ -1125,3 +1125,5 @@ Deploy 2026-11-13 Worker 0.10.875-closeout-variant-queue: Variant queue Media_As
 Deploy 2026-11-13 Worker 0.10.876-closeout-idea-library: Idea library stills/suggestions and photo-wait/scripted-short media scans prefer Supabase asset library under assets-read or Phase6. Record deletion is not started. Verify /health version 0.10.876-closeout-idea-library.
 
 Deploy 2026-11-13 Worker 0.10.877-closeout-exception-msgs: Exception Recovery Messages read/write and Pipeline Settings table-name side reads prefer Supabase. Record deletion is not started. Verify /health version 0.10.877-closeout-exception-msgs.
+
+Deploy 2026-11-13 Worker 0.10.878-closeout-repair-lease: Make Admin Queue repair lease Processing lists and PATCH/POST prefer Supabase under write SoR. Record deletion is not started. Verify /health version 0.10.878-closeout-repair-lease.
