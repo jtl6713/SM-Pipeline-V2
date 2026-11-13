@@ -13868,13 +13868,7 @@ export async function getStudioOperations(request, env, authorization) {
     const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
     const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
     const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
-    const listOpsProfiles = async () => {
-      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-        const rows = await listSupabaseContentProfiles(env, { limit: 50 }).catch(() => null);
-        if (Array.isArray(rows) && rows.length) return rows;
-      }
-      return listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
-    };
+    const listOpsProfiles = async () => listContentProfileRecords(env);
     const listOpsPublish = async (lane, limit, viewId) => {
       if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
         const rows = await listSupabaseOpsPublishOutputs(env, { lane, limit }).catch(() => null);
