@@ -184,7 +184,7 @@ def test_handoff_email_shows_profile_in_subject_and_top():
     subject = handoff_email_subject(record, profile=profile)
     html = handoff_email_html(record, profile=profile)
 
-    assert "TikTok Draft #595 — New York Shining — Ready in Inbox" in subject
+    assert "TikTok Draft #595 - New York Shining - Ready in Inbox" in subject
     assert profile_display_name(record, profile) == "New York Shining"
     assert "<b>Profile:</b> New York Shining" in html
     assert "TikTok inbox for <b>New York Shining</b>" in html
@@ -253,7 +253,7 @@ def test_az_publish_package_email():
         TikTok_Draft_Publish_ID="pub-az",
     )
     assert is_az_finished_video(record) is True
-    assert handoff_email_subject(record) == "ChicagoShining publish package — Riverwalk sunset"
+    assert handoff_email_subject(record) == "ChicagoShining publish package - Riverwalk sunset"
     ig = _record(
         Platform="Instagram",
         Studio_Output_Type="Reel",
