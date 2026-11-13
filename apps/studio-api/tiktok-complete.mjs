@@ -19,12 +19,14 @@ export function tiktokCompleteEligibility(record = {}) {
   if (isTikTokPostUrl(record.platform_post_url) || isTikTokPostUrl(record.manual_published_url)) return "already_published";
   const manual = String(record.manual_completion_status || "").trim().toLowerCase();
   const studio = String(record.studio_state || "").trim().toLowerCase();
+  const music = String(record.music_status || "").trim().toLowerCase();
   const awaiting = manual === "required"
     || studio.includes("manual action")
     || studio === "draft delivered"
     || draft.includes("manual action")
     || draft.includes("draft delivered")
-    || draft.includes("manual completion received");
+    || draft.includes("manual completion received")
+    || music.includes("manual action");
   if (!awaiting) return record.do_not_publish ? "do_not_publish" : "manual_completion_not_required";
   return null;
 }

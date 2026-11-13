@@ -46,6 +46,7 @@ import {
   supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
   listSupabaseManualActionOutputs,
+  readSupabaseShapedOutput,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
   listSupabaseOverviewPack,
@@ -7317,9 +7318,26 @@ export function mapPhase6CreativeOutput(record) {
 }
 /*__STUDIO_WORKER_END:mapPhase6CreativeOutput__*/
 
+/** Prefer live Supabase SoR for creative / manual-complete gates. Airtable is archive-frozen. */
+export async function studioReadOutputRecord(env, recordId) {
+  const id = String(recordId || "").trim();
+  if (!id) return null;
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    try {
+      const shaped = await readSupabaseShapedOutput(env, id);
+      if (shaped?.id) return shaped;
+    } catch (error) {
+      console.warn("supabase output read failed; falling back to Airtable", id, error);
+    }
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+}
+/*__STUDIO_WORKER_END:studioReadOutputRecord__*/
+
 export async function getOutputCreative(request, env, url, authorization) {
   const id = phase6RecordIdFromPath(url);
-  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const record = await studioReadOutputRecord(env, id);
+  if (!record?.id) throw new HttpError(404, "Platform Output was not found");
   const output = mapPhase6CreativeOutput(record);
   const narration = await phase6ResolveNarrationVoice(env, record);
   const [slides, voiceCatalog] = await Promise.all([
@@ -9100,10 +9118,9 @@ export async function getOutputCreativeHandoffStatus(request, env, url, authoriz
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative\/handoff\/status$/);
   if (!match) throw new HttpError(400, "Invalid Phase 6 handoff status route");
   const id = match[1];
-  const record = await phase6RestoreProductionReviewReady(
-    env,
-    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)
-  );
+  const live = await studioReadOutputRecord(env, id);
+  if (!live?.id) throw new HttpError(404, "Platform Output was not found");
+  const record = await phase6RestoreProductionReviewReady(env, live);
   const slides = await phase6SlidesForOutput(env, record);
   return respond(request, env, {
     ok: true,

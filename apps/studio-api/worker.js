@@ -931,6 +931,7 @@ import {
   studioQualityScheduleHeldMetaSpam,
   markStudioYoutubeComplete,
   markStudioTiktokComplete,
+  markStudioMetaComplete,
   resendStudioTiktokDraft,
   markStudioOutputPublished,
   pulseA1SForDriveFile,
@@ -1026,6 +1027,7 @@ export default {
       const isOutputTiktokCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-complete$/.test(url.pathname);
       const isOutputTiktokResendRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-resend$/.test(url.pathname);
       const isOutputYoutubeCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/youtube-complete$/.test(url.pathname);
+      const isOutputMetaCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/meta-complete$/.test(url.pathname);
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
@@ -1173,6 +1175,7 @@ export default {
       const isOutputTiktokCompleteWrite = isOutputTiktokCompleteRoute && request.method === "POST";
       const isOutputTiktokResendWrite = isOutputTiktokResendRoute && request.method === "POST";
       const isOutputYoutubeCompleteWrite = isOutputYoutubeCompleteRoute && request.method === "POST";
+      const isOutputMetaCompleteWrite = isOutputMetaCompleteRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
@@ -1277,6 +1280,7 @@ export default {
         isOutputTiktokCompleteWrite ||
         isOutputTiktokResendWrite ||
         isOutputYoutubeCompleteWrite ||
+        isOutputMetaCompleteWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
         (isAdminRepairControlRoute && request.method === "GET") ||
@@ -1362,7 +1366,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.859-factory-strip-orphan-siblings",
+          version: "0.10.860-meta-manual-url",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4284,6 +4288,12 @@ export default {
         assertWriteRequest(request, env);
         requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
         return markStudioYoutubeComplete(request, env, url);
+      }
+
+      if (isOutputMetaCompleteWrite) {
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
+        return markStudioMetaComplete(request, env, url);
       }
 
       if (isOutputCreativeReviewRoute) {
@@ -7552,6 +7562,7 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:phase6FindModule__*/
 /*__STUDIO_WORKER_EXTRACT:phase6EnsureP0202DynamicVoiceMapping__*/
 /*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadOutputRecord__*/
 /*__STUDIO_WORKER_EXTRACT:getOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6Select__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlideDirectiveFromPayload__*/
@@ -8529,7 +8540,11 @@ const YOUTUBE_COMPLETE_ERRORS = {
 };
 
 /*__STUDIO_WORKER_EXTRACT:patchYoutubeManualClose__*/
+/*__STUDIO_WORKER_EXTRACT:isMetaPostUrl__*/
+/*__STUDIO_WORKER_EXTRACT:metaCompleteEligibility__*/
+/*__STUDIO_WORKER_EXTRACT:metaManualPublishFields__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioYoutubeComplete__*/
+/*__STUDIO_WORKER_EXTRACT:markStudioMetaComplete__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioTiktokComplete__*/
 /*__STUDIO_WORKER_EXTRACT:resendStudioTiktokDraft__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioOutputPublished__*/

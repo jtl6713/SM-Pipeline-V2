@@ -1089,3 +1089,6 @@ Deploy 2026-11-13 Worker 0.10.857-manual-attention-drilldown: Home Manual Action
 Deploy 2026-11-13 Worker 0.10.858-factory-approve-partial-upsert: Sparse Factory approve/schedule write-through under STUDIO_WRITE_SOURCE=supabase must PATCH present columns only; fullRecord upsert was blanking output_number/platform/content_item_id/media URLs (NYC 2087/2088). Verify /health version 0.10.858-factory-approve-partial-upsert.
 
 Deploy 2026-11-13 Worker 0.10.859-factory-strip-orphan-siblings: Factory desk pack strips superseded Supabase twin ghosts (Content 2094 Battery Park 6+6 Approve lock). Ban-list Output_IDs 10409/11/13/17/19/21. Verify /health version 0.10.859-factory-strip-orphan-siblings.
+Deploy 2026-11-13 Worker 0.10.858-tiktok-url-entry-supabase: Creative GET and TikTok complete/resend eligibility read Supabase SoR so Music_Status Manual Action Required shows the URL paste form (Output 5031). Verify /health version 0.10.858-tiktok-url-entry-supabase.
+
+Deploy 2026-11-13 Worker 0.10.860-meta-manual-url: POST /api/outputs/:id/meta-complete closes Instagram/Facebook Manual_Fallback with live URL; ops published clears Manual_Fallback_Required. Verify /health version 0.10.860-meta-manual-url.
