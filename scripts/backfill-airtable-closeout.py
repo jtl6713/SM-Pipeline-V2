@@ -152,6 +152,29 @@ def queue_row(record):
     return row
 
 
+def supabase_upsert_tolerant(url, key, table, rows):
+    if not rows:
+        return 0
+    try:
+        supabase_upsert(url, key, table, rows)
+        return 0
+    except SystemExit:
+        if len(rows) == 1:
+            row = dict(rows[0])
+            if "last_attempt_at" in row:
+                row.pop("last_attempt_at", None)
+                try:
+                    supabase_upsert(url, key, table, [row])
+                    return 0
+                except SystemExit:
+                    pass
+            return 1
+        mid = max(1, len(rows) // 2)
+        return supabase_upsert_tolerant(url, key, table, rows[:mid]) + supabase_upsert_tolerant(
+            url, key, table, rows[mid:]
+        )
+
+
 def supabase_upsert(url, key, table, rows):
     endpoint = f"{url.rstrip('/')}/rest/v1/{table}?on_conflict=airtable_record_id"
     headers = {
@@ -206,16 +229,21 @@ def main():
             saved_settings += len(rows)
     log(f"settings_upserted={saved_settings}")
     saved_queue = 0
+    skipped_queue = 0
     for page in airtable_pages(pat, QUEUE, QUEUE_FIELDS):
         rows = [queue_row(record) for record in page if record.get("id")]
         if rows:
-            supabase_upsert(url, key, "studio_media_transfer_queue", rows)
+            skipped_queue += supabase_upsert_tolerant(url, key, "studio_media_transfer_queue", rows)
             saved_queue += len(rows)
         if saved_queue and saved_queue % 1000 == 0:
             log(f"queue_upserted={saved_queue}")
     log(f"queue_upserted={saved_queue}")
+    log(f"queue_rows_skipped={skipped_queue}")
     log(f"queue_supabase={supabase_count(url, key, 'studio_media_transfer_queue')}")
-    log(f"queue_ready_supabase={supabase_count(url, key, 'studio_media_transfer_queue', '&status=eq.Ready')}")
+    ready = supabase_count(url, key, "studio_media_transfer_queue", "&status=eq.Ready")
+    log(f"queue_ready_supabase={ready}")
+    if ready is None or ready < 5000:
+        raise SystemExit("ready_short")
     present = 0
     for name in SETTING_NAMES:
         count = supabase_count(
