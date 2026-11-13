@@ -3059,10 +3059,21 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   for (const row of [...(outputRows || []), ...(reviewReadyRows || [])]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
-  const shapedOutputs = [...outputById.values()]
+  const rawShapedOutputs = [...outputById.values()]
     .map(flattenOutputRow)
     .filter((row) => !String(row.test_run_id || "").trim())
     .map(airtableShapedOutputFromSupabase);
+  // Number-keyed DELETE when ban-listed ghosts appear in the Factory pack
+  // (before strip removes them from the returned lanes).
+  if (rawShapedOutputs.some((row) => deletedDuplicateOutputNumberSet.has(Number(row?.fields?.Output_ID || 0)))) {
+    purgeOrphanDuplicateOutputNumbers(env).catch((error) => {
+      console.warn("factory desk orphan output number purge failed", error);
+    });
+  }
+  // Pipeline list already strips superseded twins. Factory desk must too —
+  // otherwise Airtable-deleted In Production mirrors block Approve all
+  // (Content 2094: 6 ready · 6 sibling awaiting).
+  const shapedOutputs = stripDeletedDuplicateOutputRecords(rawShapedOutputs);
 
   const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
@@ -4952,7 +4963,11 @@ const DELETED_DUPLICATE_OUTPUT_IDS = [
   "recoMgriu7rn2pHj7", "recex6i9WzOC13Wti", "rec9t91ZqbxJLxiCF", "recot50yrLl0VoETV", "recWA4cpIbqr2WSzE", "rec1UCKk1Huz788pn",
   "recHV33S4TvBOm8hD", "recbBvtb61NsmYGES", "recOUArffBQOaAfpt", "rec5azEFIRtCv0K8l", "rec4ulP5DfYM6K8MB", "recaFIU9BfcsYb1a3",
   "recb619ve9eyLpr9Y", "reco3wurWPUbKAETL", "recrA2FCy2OEJl5bT", "recG27kdXGFz6dS3f", "recr4MHDxWaoLtjgi", "recCEhemMEzksqhxW",
-  "recBNzLsc7JIEoGYk", "recxwWwe5GzRDcf3G", "rec8HS8rOJ6JNFwdh", "recF7sQ6TaLLy5v9Q", "recZyw5WZAeJ9Zfjq", "recWsWcQBIV8C3r2a"
+  "recBNzLsc7JIEoGYk", "recxwWwe5GzRDcf3G", "rec8HS8rOJ6JNFwdh", "recF7sQ6TaLLy5v9Q", "recZyw5WZAeJ9Zfjq", "recWsWcQBIV8C3r2a",
+  // NYC Content 2094 Battery Park View Guide — Airtable-deleted In Production twins
+  // that blocked Factory Approve all (6 ready · 6 sibling awaiting).
+  "recUk2dHAy46NC1m1", "recvEyf19YgvnnYLK", "recMRltdcjj1EPYVP",
+  "recUeWwgha0wxtAqJ", "rec2iCOn0znlnw7Au", "reccNV0YE7k3ntvmU",
 ];
 const DELETED_DUPLICATE_CONTENT_IDS = [
   "recWNbnAIsxpYNbkJ", "recM7FoAUXSUp5x8I", "recBjFgzASl88oxdS", "recyMKQJ8p53i1HOq", "recsgloGPGs0WWkNw",
@@ -4979,7 +4994,11 @@ const DELETED_DUPLICATE_PROFILE_IDS = [
 ];
 // Ghost Platform Outputs that no longer exist in Airtable. Strip/purge by Output_ID
 // when the Airtable record id is unknown (Supabase MCP unavailable).
-const DELETED_DUPLICATE_OUTPUT_NUMBERS = [10236, 10238, 10240];
+const DELETED_DUPLICATE_OUTPUT_NUMBERS = [
+  10236, 10238, 10240,
+  // Content 2094 Battery Park View Guide mirror ghosts (10409/11/13/17/19/21).
+  10409, 10411, 10413, 10417, 10419, 10421,
+];
 const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
 const deletedDuplicateContentIdSet = new Set(DELETED_DUPLICATE_CONTENT_IDS);
 const deletedDuplicateOutputNumberSet = new Set(

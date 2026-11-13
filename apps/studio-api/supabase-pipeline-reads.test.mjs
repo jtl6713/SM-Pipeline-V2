@@ -143,6 +143,65 @@ test("collapse drops Preparing Assets sibling when Ready deliverable exists", ()
   ]);
 });
 
+test("C2094 Battery Park: In Production mirror twins collapse against Ready for Review package", () => {
+  const content = "recPBmCmPvWX9oj5t";
+  const ready = (id, n, platform, type) => ({
+    id,
+    fields: {
+      Output_ID: n,
+      Content_Item: [content],
+      Platform: platform,
+      Studio_Output_Type: type,
+      Output_Status: "Ready for Review",
+      Render_Status: "Rendered",
+      Final_File_URL: `https://cdn.example/${n}.mp4`,
+    },
+  });
+  const ghost = (id, n, platform, type) => ({
+    id,
+    fields: {
+      Output_ID: n,
+      Content_Item: [content],
+      Platform: platform,
+      Studio_Output_Type: type,
+      Output_Status: "In Production",
+    },
+  });
+  const rows = [
+    ready("recumjXQiNCXZWtVx", 10408, "Instagram", "Reel"),
+    ghost("recUk2dHAy46NC1m1", 10409, "Instagram", "Reel"),
+    ready("recAHiD1TqJQcAdMN", 10410, "Facebook", "Reel"),
+    ghost("recvEyf19YgvnnYLK", 10411, "Facebook", "Reel"),
+    ready("recBMNUUwwS55JRAs", 10412, "TikTok", "Video Draft"),
+    ghost("recMRltdcjj1EPYVP", 10413, "TikTok", "Video Draft"),
+    ready("recJAvgmZr9y0ed2g", 10414, "YouTube", "Short"),
+    ready("rec5d440tAK094p5F", 10415, "Instagram", "Story"),
+    ghost("recUeWwgha0wxtAqJ", 10417, "YouTube", "Short"),
+    ready("recIYpA0plMhsV3xh", 10418, "Facebook", "Story"),
+    ghost("rec2iCOn0znlnw7Au", 10419, "Instagram", "Story"),
+    ghost("reccNV0YE7k3ntvmU", 10421, "Facebook", "Story"),
+  ];
+  const kept = stripDeletedDuplicateOutputRecords(rows).map((row) => row.id);
+  assert.deepEqual(kept, [
+    "recumjXQiNCXZWtVx",
+    "recAHiD1TqJQcAdMN",
+    "recBMNUUwwS55JRAs",
+    "recJAvgmZr9y0ed2g",
+    "rec5d440tAK094p5F",
+    "recIYpA0plMhsV3xh",
+  ]);
+});
+
+test("listSupabaseFactoryDeskPack strips superseded twins before lane filters", async () => {
+  const source = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export async function listSupabaseFactoryDeskPack");
+  const end = source.indexOf("export function homogenizeUpsertRows", start);
+  assert.ok(start >= 0 && end > start, "factory desk pack source slice");
+  const slice = source.slice(start, end);
+  assert.match(slice, /stripDeletedDuplicateOutputRecords\(rawShapedOutputs\)/);
+  assert.match(slice, /purgeOrphanDuplicateOutputNumbers/);
+});
+
 
 test("studioReadSource defaults to airtable and requires supabase secrets", () => {
   assert.equal(studioReadSource({}), "airtable");
@@ -832,7 +891,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
+  assert.match(worker, /0\.10\.859-factory-strip-orphan-siblings/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +995,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
+  assert.match(worker, /0\.10\.859-factory-strip-orphan-siblings/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2693,7 +2752,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.858-factory-approve-partial-upsert/);
+  assert.match(worker, /0\.10\.859-factory-strip-orphan-siblings/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

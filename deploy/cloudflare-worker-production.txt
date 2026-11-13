@@ -1087,3 +1087,5 @@ Deploy 2026-11-13 Worker 0.10.856-overview-skip-airtable-tiktok-overlay: Skip Ai
 Deploy 2026-11-13 Worker 0.10.857-manual-attention-drilldown: Home Manual Action click uses authoritative Supabase mode=manual/attention drill-down so older Music_Status / Manual_Fallback rows outside newest-250 still appear in Pipeline. loadManualActionPipelineOutputs reads Supabase under SoR. Open pack includes null Output_Status. Verify /health version 0.10.857-manual-attention-drilldown.
 
 Deploy 2026-11-13 Worker 0.10.858-factory-approve-partial-upsert: Sparse Factory approve/schedule write-through under STUDIO_WRITE_SOURCE=supabase must PATCH present columns only; fullRecord upsert was blanking output_number/platform/content_item_id/media URLs (NYC 2087/2088). Verify /health version 0.10.858-factory-approve-partial-upsert.
+
+Deploy 2026-11-13 Worker 0.10.859-factory-strip-orphan-siblings: Factory desk pack strips superseded Supabase twin ghosts (Content 2094 Battery Park 6+6 Approve lock). Ban-list Output_IDs 10409/11/13/17/19/21. Verify /health version 0.10.859-factory-strip-orphan-siblings.
