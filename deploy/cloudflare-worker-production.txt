@@ -1095,3 +1095,5 @@ Deploy 2026-11-13 Worker 0.10.860-meta-manual-url: POST /api/outputs/:id/meta-co
 Deploy 2026-11-13 Worker 0.10.861-closeout-columns: Empty Output, Content, idea, and settings lists stay on Supabase. Ready queue lists use the stored copy. P3, content-number, and Production Request Output lookups use stored columns. Profile-summary reread no longer falls back when a row is missing or the page is large. Record deletion is not started. Verify /health version 0.10.861-closeout-columns.
 
 Deploy 2026-11-13 Worker 0.10.862-manual-action-guidance: TikTok resend allows Supabase SoR null Output_Status + Music/studio Manual Action Required (Vizcaya 4988 / SoHo 5031). Verify /health version 0.10.862-manual-action-guidance.
+
+Deploy 2026-11-13 Worker 0.10.863-meta-republish: POST /api/outputs/:id/meta-republish clears Manual_Fallback after confirmed_not_live and dispatches Studio Graph publish. Verify /health version 0.10.863-meta-republish.

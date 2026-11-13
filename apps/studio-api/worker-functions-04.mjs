@@ -16884,6 +16884,92 @@ export function metaManualPublishFields({ url, now, existingNotes = "", platform
 }
 /*__STUDIO_WORKER_END:metaManualPublishFields__*/
 
+// Keep aligned with apps/studio-api/meta-complete.mjs (operator-confirmed Graph republish).
+export function metaRepublishEligibility(record = {}) {
+  const base = metaCompleteEligibility(record);
+  if (base === "not_meta" || base === "do_not_publish" || base === "already_published") return base;
+  if (base === "manual_completion_not_required") {
+    const publish = String(record.publish_status || "").trim().toLowerCase();
+    if (publish === "failed") return null;
+    return base;
+  }
+  if (String(record.replace_transaction_id || "").trim()) return "replace_open";
+  return null;
+}
+/*__STUDIO_WORKER_END:metaRepublishEligibility__*/
+
+export function metaPublishDue(scheduledPostDate = "", nowMs = Date.now()) {
+  const ms = Date.parse(String(scheduledPostDate || "").trim());
+  if (!Number.isFinite(ms)) return true;
+  return ms <= nowMs;
+}
+/*__STUDIO_WORKER_END:metaPublishDue__*/
+
+export function metaRepublishRearmFields({
+  now,
+  existingNotes = "",
+  platform = "",
+  scheduledPostDate = "",
+  platformOutputType = "",
+  nowMs = Date.now(),
+} = {}) {
+  const stamp = String(now || "").trim() || new Date().toISOString();
+  const label = String(platform || "Meta").trim() || "Meta";
+  const note = `Studio ${label} republish requested at ${stamp} after operator confirmed the post is not live.`;
+  const notes = String(existingNotes || "").trim()
+    ? `${String(existingNotes).trim()}\n\n${note}`
+    : note;
+  const due = metaPublishDue(scheduledPostDate, nowMs);
+  const outputType = String(platformOutputType || "").trim().toLowerCase();
+  const carousel = outputType.includes("carousel") || outputType.includes("multi-image");
+  const fields = {
+    Do_Not_Publish: false,
+    Auto_Publish_Enabled: true,
+    Publish_Method: "Automated",
+    Output_Status: "Approved for Publishing",
+    Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
+    Manual_Fallback_Required: false,
+    Manual_Completion_Status: "",
+    Manual_Completion_At: null,
+    Publish_Retry_Eligible: due,
+    Publish_Attempt_Count: 0,
+    Studio_Publish_Dispatch_Count: 0,
+    Publish_Error_Message: "",
+    Publish_Error_Stage: "",
+    Publish_Locked_By: "",
+    Publish_Locked_At: null,
+    Publish_Started_At: null,
+    Publish_Next_Retry_At: null,
+    Last_Publish_Attempt_At: null,
+    Platform_Media_ID: "",
+    Platform_Post_ID: "",
+    Platform_Post_URL: "",
+    Manual_Published_URL: "",
+    Published_At: null,
+    Output_Notes: notes.slice(0, 10000),
+  };
+  if (carousel) {
+    fields.IG_Carousel_Status = "Assets Ready";
+    fields.IG_Carousel_Parent_Status = "Not Created";
+    fields.IG_Carousel_Parent_Container_ID = "";
+    fields.IG_Carousel_Published_Media_ID = "";
+    fields.IG_Carousel_Error_Message = "";
+    fields.IG_Carousel_Error_Stage = "";
+    fields.IG_Carousel_Next_Retry_At = null;
+  }
+  return fields;
+}
+/*__STUDIO_WORKER_END:metaRepublishRearmFields__*/
+
+const META_REPUBLISH_ERRORS = {
+  not_meta: "Republish is only available for Instagram or Facebook outputs.",
+  do_not_publish: "This output is held with Do Not Publish.",
+  already_published: "This output is already published. Paste the live URL instead if Studio needs the link.",
+  manual_completion_not_required: "Republish is not available for this output.",
+  replace_open: "Item6 replacement is open on this output. Reconcile or clean up before republishing.",
+  confirmation_required: "Confirm the post is not live before republishing.",
+};
+
 export async function markStudioYoutubeComplete(request, env, url) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/youtube-complete$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
@@ -17031,6 +17117,78 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
   });
 }
 /*__STUDIO_WORKER_END:resendStudioTiktokDraft__*/
+
+export async function republishStudioMeta(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/meta-republish$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  if (payload?.confirmed_not_live !== true) {
+    throw new HttpError(400, META_REPUBLISH_ERRORS.confirmation_required);
+  }
+  const existing = await studioReadOutputRecordForManualComplete(env, match[1]);
+  if (!existing?.id) throw new HttpError(404, "Platform Output was not found");
+  const platform = String(f(existing, "Platform") || "").trim();
+  const view = {
+    platform,
+    do_not_publish: Boolean(f(existing, "Do_Not_Publish")),
+    publish_status: f(existing, "Publish_Status"),
+    output_status: f(existing, "Output_Status"),
+    manual_completion_status: f(existing, "Manual_Completion_Status"),
+    platform_post_url: f(existing, "Platform_Post_URL"),
+    manual_published_url: f(existing, "Manual_Published_URL"),
+    studio_state: normalizedOutputState(existing),
+    manual_fallback_required: Boolean(f(existing, "Manual_Fallback_Required")),
+    replace_transaction_id: f(existing, "Replace_Transaction_ID"),
+  };
+  const reason = metaRepublishEligibility(view);
+  if (reason) {
+    throw new HttpError(
+      reason === "do_not_publish" || reason === "already_published" || reason === "replace_open" ? 409 : 400,
+      META_REPUBLISH_ERRORS[reason] || reason,
+    );
+  }
+  const fields = metaRepublishRearmFields({
+    now: new Date().toISOString(),
+    existingNotes: f(existing, "Output_Notes"),
+    platform,
+    scheduledPostDate: f(existing, "Scheduled_Post_Date"),
+    platformOutputType: f(existing, "Platform_Output_Type"),
+  });
+  const rearmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  const dueNow = fields.Publish_Status === "Ready to Publish";
+  const dispatch = dueNow
+    ? await studioDispatchApprovedPublishNow(env, rearmed)
+    : {
+      ok: true,
+      skipped: "scheduled-hold",
+      held_until: f(existing, "Scheduled_Post_Date") || null,
+      record: rearmed,
+    };
+  if (dueNow && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioDispatchApprovedPublishTail(env, rearmed, dispatch).catch((error) => {
+      console.warn("meta-republish tail failed", match[1], error);
+    }));
+  }
+  const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => rearmed);
+  return respond(request, env, {
+    ok: true,
+    republished: true,
+    output_id: match[1],
+    dispatch: {
+      ok: dispatch?.ok !== false,
+      skipped: dispatch?.skipped || null,
+      target: dispatch?.target || dispatch?.plan?.target || null,
+      held_until: dispatch?.held_until || null,
+      message: dispatch?.message || null,
+    },
+    record: mapOutput(refreshed),
+  });
+}
+/*__STUDIO_WORKER_END:republishStudioMeta__*/
 
 export async function markStudioOutputPublished(request, env, url, authorization) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/published$/.exec(url.pathname);

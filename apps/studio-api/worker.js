@@ -933,6 +933,7 @@ import {
   markStudioTiktokComplete,
   markStudioMetaComplete,
   resendStudioTiktokDraft,
+  republishStudioMeta,
   markStudioOutputPublished,
   pulseA1SForDriveFile,
   pulseM1ResetRenderUrls,
@@ -1028,6 +1029,7 @@ export default {
       const isOutputTiktokResendRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-resend$/.test(url.pathname);
       const isOutputYoutubeCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/youtube-complete$/.test(url.pathname);
       const isOutputMetaCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/meta-complete$/.test(url.pathname);
+      const isOutputMetaRepublishRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/meta-republish$/.test(url.pathname);
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
@@ -1176,6 +1178,7 @@ export default {
       const isOutputTiktokResendWrite = isOutputTiktokResendRoute && request.method === "POST";
       const isOutputYoutubeCompleteWrite = isOutputYoutubeCompleteRoute && request.method === "POST";
       const isOutputMetaCompleteWrite = isOutputMetaCompleteRoute && request.method === "POST";
+      const isOutputMetaRepublishWrite = isOutputMetaRepublishRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
@@ -1366,7 +1369,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.862-manual-action-guidance",
+          version: "0.10.863-meta-republish",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4294,6 +4297,12 @@ export default {
         assertWriteRequest(request, env);
         requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
         return markStudioMetaComplete(request, env, url);
+      }
+
+      if (isOutputMetaRepublishWrite) {
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
+        return republishStudioMeta(request, env, url, authorization, ctx);
       }
 
       if (isOutputCreativeReviewRoute) {
@@ -8543,10 +8552,14 @@ const YOUTUBE_COMPLETE_ERRORS = {
 /*__STUDIO_WORKER_EXTRACT:isMetaPostUrl__*/
 /*__STUDIO_WORKER_EXTRACT:metaCompleteEligibility__*/
 /*__STUDIO_WORKER_EXTRACT:metaManualPublishFields__*/
+/*__STUDIO_WORKER_EXTRACT:metaRepublishEligibility__*/
+/*__STUDIO_WORKER_EXTRACT:metaPublishDue__*/
+/*__STUDIO_WORKER_EXTRACT:metaRepublishRearmFields__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioYoutubeComplete__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioMetaComplete__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioTiktokComplete__*/
 /*__STUDIO_WORKER_EXTRACT:resendStudioTiktokDraft__*/
+/*__STUDIO_WORKER_EXTRACT:republishStudioMeta__*/
 /*__STUDIO_WORKER_EXTRACT:markStudioOutputPublished__*/
 /*__STUDIO_WORKER_EXTRACT:pulseA1SCompression__*/
 /*__STUDIO_WORKER_EXTRACT:pulseA1SForDriveFile__*/
