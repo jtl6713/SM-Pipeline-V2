@@ -2177,6 +2177,18 @@ export function deskHealOutputFilter(kind, options = {}) {
       + `error_messages->>Publish_Error_Message.ilike.${encodeDeskFilterValue("*TTD0 found neither*")})`;
     return `${quiet}&platform=eq.TikTok&publish_status=eq.Failed&${route}`;
   }
+  if (kind === "ttd_processing_missing_id") {
+    const blankPublishId = "or=(error_messages->>TikTok_Draft_Publish_ID.is.null,error_messages->>TikTok_Draft_Publish_ID.eq.)";
+    return `${quiet}&platform=eq.TikTok&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&tiktok_draft_status=eq.Processing&${blankPublishId}`;
+  }
+  if (kind === "tiktok_wiped_approval") {
+    const blankApproval = "or=(output_status.is.null,review_status.is.null)";
+    return `${quiet}&platform=eq.TikTok&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Schedule")}`
+      + `&tiktok_draft_status=eq.${encodeDeskFilterValue("Waiting for Schedule")}`
+      + `&${blankApproval}`;
+  }
   if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
     return tiktokReconcileOutputFilter(kind, options);
   }

@@ -474,3 +474,45 @@ def test_phase6_create_without_identity_still_requires_airtable(monkeypatch):
     except requests.HTTPError:
         return
     raise AssertionError("a Phase 6 create without identity must still require Airtable")
+
+
+def test_partial_ttd1_output_mirror_merges_publish_id_into_bag(monkeypatch):
+    """TTD1 stamps Processing + publish_id without Platform/Output_ID. Bag must merge."""
+    seen = []
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if method == "GET" and "select=error_messages" in url:
+            return Response([{
+                "error_messages": {
+                    "_runner_record_projection": "v1",
+                    "Output_Notes": "keep-me",
+                },
+            }])
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        "recOutputTtd1",
+        {
+            "Publish_Status": "Publishing",
+            "TikTok_Draft_Status": "Processing",
+            "TikTok_Draft_Publish_ID": "p_inbox_url~v2.example",
+            "TikTok_Draft_Response_JSON": '{"ok":true,"publish_id":"p_inbox_url~v2.example"}',
+            "Publish_Error_Message": "",
+        },
+    )
+    assert record["id"] == "recOutputTtd1"
+    patches = [row for row in seen if row[0] == "PATCH" and "platform_outputs" in row[1]]
+    assert patches, "partial TTD1 mirror must PATCH platform_outputs"
+    body = patches[0][2]
+    assert body["publish_status"] == "Publishing"
+    assert body["tiktok_draft_status"] == "Processing"
+    assert body["error_messages"]["TikTok_Draft_Publish_ID"] == "p_inbox_url~v2.example"
+    assert body["error_messages"]["Output_Notes"] == "keep-me"
+    assert body["error_messages"]["_runner_record_projection"] == "v1"
+    assert "TikTok_Draft_Publish_ID" not in body  # bag only, not a typed column
+    assert "Publish_Error_Message" not in body["error_messages"]
