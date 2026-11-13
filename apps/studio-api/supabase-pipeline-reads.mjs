@@ -5491,6 +5491,8 @@ export const IDEA_CANDIDATES_TABLE_ID = "tblTQapddqD47GOIG";
 export const PLATFORM_OUTPUTS_TABLE_ID = "tblrlPeboBthkplH0";
 export const CONTENT_ITEMS_TABLE_ID = "tblwzN9AXWvmKVKPs";
 export const CONTENT_PROFILES_TABLE_ID = "tblNYg2QB0BmmVACy";
+export const MAKE_ADMIN_QUEUE_TABLE_ID = "tbltuSt9UibYzxpah";
+export const REPAIR_LEASE_NOTE_PREFIX = "REPAIR_LEASE_V1";
 
 function sideTableKind(env, tableId) {
   const table = String(tableId || "");
@@ -5511,9 +5513,156 @@ function sideTableKind(env, tableId) {
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   if (table === "Exception Recovery Messages") return "exception_messages";
+  if (table === MAKE_ADMIN_QUEUE_TABLE_ID || table === "Make Admin Queue") return "make_admin_queue";
   if (phase6TableKind(env, table) === "request") return "request";
   if (phase6TableKind(env, table) === "media") return "media";
   return "";
+}
+
+const MAKE_ADMIN_QUEUE_SELECT = [
+  "airtable_record_id",
+  "command_id",
+  "action",
+  "scenario_id",
+  "scenario_name",
+  "status",
+  "correlation_id",
+  "notes",
+  "request_json",
+  "result_json",
+  "error_message",
+  "write_approved",
+  "activation_approved",
+  "requested_by",
+  "requested_at",
+  "started_at",
+  "completed_at",
+  "fields",
+].join(",");
+
+function shapeMakeAdminQueueRow(row) {
+  if (!row?.airtable_record_id) return null;
+  const fields = isPlainObject(row.fields) ? { ...row.fields } : {};
+  if (row.command_id != null) fields.Command_ID = row.command_id;
+  if (row.action != null) fields.Action = row.action;
+  if (row.scenario_id != null) fields.Scenario_ID = row.scenario_id;
+  if (row.scenario_name != null) fields.Scenario_Name = row.scenario_name;
+  if (row.status != null) fields.Status = row.status;
+  if (row.correlation_id != null) fields.Correlation_ID = row.correlation_id;
+  if (row.notes != null) fields.Notes = row.notes;
+  if (row.request_json != null) {
+    fields.Request_JSON = typeof row.request_json === "string"
+      ? row.request_json
+      : JSON.stringify(row.request_json);
+  }
+  if (row.result_json != null) {
+    fields.Result_JSON = typeof row.result_json === "string"
+      ? row.result_json
+      : JSON.stringify(row.result_json);
+  }
+  if (row.error_message != null) fields.Error_Message = row.error_message;
+  if (row.write_approved != null) fields.Write_Approved = row.write_approved;
+  if (row.activation_approved != null) fields.Activation_Approved = row.activation_approved;
+  if (row.requested_by != null) fields.Requested_By = row.requested_by;
+  if (row.requested_at != null) fields.Requested_At = row.requested_at;
+  if (row.started_at != null) fields.Started_At = row.started_at;
+  if (row.completed_at != null) fields.Completed_At = row.completed_at;
+  return { id: row.airtable_record_id, fields };
+}
+
+function parseJsonField(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(String(value)); } catch { return { raw: String(value) }; }
+}
+
+function makeAdminQueueBodyFromFields(id, fields = {}) {
+  return {
+    airtable_record_id: id,
+    command_id: String(fields.Command_ID || "").trim() || null,
+    action: String(fields.Action || "").trim() || null,
+    scenario_id: Number.isFinite(Number(fields.Scenario_ID)) ? Number(fields.Scenario_ID) : null,
+    scenario_name: String(fields.Scenario_Name || "").trim() || null,
+    status: String(fields.Status || "").trim() || null,
+    correlation_id: String(fields.Correlation_ID || "").trim() || null,
+    notes: String(fields.Notes || ""),
+    request_json: parseJsonField(fields.Request_JSON),
+    result_json: parseJsonField(fields.Result_JSON),
+    error_message: String(fields.Error_Message || ""),
+    write_approved: fields.Write_Approved === true,
+    activation_approved: fields.Activation_Approved === true,
+    requested_by: String(fields.Requested_By || "").trim() || null,
+    requested_at: fields.Requested_At || null,
+    started_at: fields.Started_At || null,
+    completed_at: fields.Completed_At || null,
+    fields,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function makeAdminQueueListFilter(formula) {
+  const cleaned = compactFormula(formula);
+  if (!cleaned.includes('{Status}="Processing"') && !cleaned.includes("{Status}='Processing'")) {
+    return null;
+  }
+  if (!cleaned.includes(`FIND("${REPAIR_LEASE_NOTE_PREFIX}"`)
+    && !cleaned.includes(`FIND('${REPAIR_LEASE_NOTE_PREFIX}'`)) {
+    return null;
+  }
+  const parts = ["status=eq.Processing", `notes.ilike.*${encodeURIComponent(REPAIR_LEASE_NOTE_PREFIX)}*`];
+  const scenario = cleaned.match(/\{Scenario_ID\}=(\d+)/);
+  if (scenario) parts.push(`scenario_id=eq.${scenario[1]}`);
+  const correlation = cleaned.match(/\{Correlation_ID\}=(["'])([^"']*)\1/);
+  if (correlation) parts.push(`correlation_id=eq.${encodeURIComponent(correlation[2])}`);
+  const marker = cleaned.match(/FIND\((["'])([^"']+)\1,\{Notes\}/);
+  if (marker && marker[2] !== REPAIR_LEASE_NOTE_PREFIX) {
+    parts.push(`notes.ilike.*${encodeURIComponent(marker[2])}*`);
+  }
+  return parts.join("&");
+}
+
+async function readMakeAdminQueueRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `make_admin_queue?airtable_record_id=eq.${encodeURIComponent(id)}&select=${MAKE_ADMIN_QUEUE_SELECT}&limit=1`,
+  ).catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row ? shapeMakeAdminQueueRow(row) : null;
+}
+
+export async function listSupabaseMakeAdminQueue(env, formula, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const filter = makeAdminQueueListFilter(formula);
+  if (!filter) return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const rows = await supabaseRest(
+    env,
+    `make_admin_queue?${filter}&select=${MAKE_ADMIN_QUEUE_SELECT}`
+      + `&order=requested_at.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(shapeMakeAdminQueueRow).filter(Boolean);
+}
+
+async function commitMakeAdminQueueRecords(env, records, { insert = false } = {}) {
+  const saved = [];
+  for (const record of records) {
+    const id = String(record?.id || mintAirtableRecordId());
+    const existing = insert ? null : await readMakeAdminQueueRow(env, id);
+    const mergedFields = { ...(existing?.fields || {}), ...(record.fields || {}) };
+    const body = makeAdminQueueBodyFromFields(id, mergedFields);
+    if (existing) {
+      await supabaseRest(env, `make_admin_queue?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body,
+        headers: { Prefer: "return=minimal" },
+      });
+    } else {
+      await upsertChunk(env, "make_admin_queue", [body]);
+    }
+    saved.push({ id, fields: mergedFields });
+  }
+  return saved;
 }
 
 function shapeExceptionRecoveryMessage(row) {
@@ -6241,6 +6390,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
       return rows.find((row) => row.id === id) || null;
     }
+    if (kind === "make_admin_queue") {
+      if (studioWriteSource(env) !== "supabase") return null;
+      return await readMakeAdminQueueRow(env, id);
+    }
     return null;
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
@@ -6312,6 +6465,12 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);
     return body;
+  }
+  if (kind === "make_admin_queue") {
+    if (studioWriteSource(env) !== "supabase") return null;
+    const records = await listSupabaseMakeAdminQueue(env, formula, { limit });
+    if (!records) return null;
+    return { records };
   }
   if (kind === "slides") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
@@ -6438,6 +6597,8 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       );
     } else if (kind === "exception_messages" && verb === "POST") {
       records = await createSupabaseExceptionRecoveryMessages(env, parsed);
+    } else if (kind === "make_admin_queue") {
+      records = await commitMakeAdminQueueRecords(env, parsed, { insert: verb === "POST" });
     }
     if (!records) return { ok: false, reason: "missing_row" };
     return { ok: records.length === parsed.length, records };
