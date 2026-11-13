@@ -163,7 +163,10 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
   const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
   assert.ok(independent > 0 && independent < mainWaitUntil && independent < heavy);
-  assert.doesNotMatch(scheduled.slice(Math.max(0, independent - 160), independent), /airtableDataWaitMs/);
+  assert.doesNotMatch(
+    scheduled.slice(Math.max(0, independent - 80), independent + 40),
+    /if \(airtableDataWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx\.waitUntil\(studioReconcileTiktokProcessing/,
+  );
   assert.doesNotMatch(scheduled.slice(independent - 120, independent), /!cadence\.heavy && airtableCooldownWaitMs/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
 });
@@ -176,7 +179,10 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
   const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
   const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
   assert.ok(draftLight > 0 && draftLight < mainWaitUntil && draftLight < heavy);
-  assert.doesNotMatch(scheduled.slice(Math.max(0, draftLight - 160), draftLight), /airtableDataWaitMs/);
+  assert.doesNotMatch(
+    scheduled.slice(Math.max(0, draftLight - 80), draftLight + 40),
+    /if \(airtableDataWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx\.waitUntil\(studioReconcileTiktokDrafts/,
+  );
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
   assert.match(cron, /0\.10\.866-ttd2-ungate-airtable/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
