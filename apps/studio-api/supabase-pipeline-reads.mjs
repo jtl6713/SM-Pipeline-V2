@@ -1308,6 +1308,12 @@ export function airtableShapedProductionRequestFromSupabase(row) {
       Studio_Production_Job_JSON: typeof jobJson === "string" ? jobJson : (bag.Studio_Production_Job_JSON || ""),
       Studio_Variant_Status: row.variant_status || bag.Studio_Variant_Status || null,
       Studio_Output_Plan_Status: row.output_plan_status || bag.Studio_Output_Plan_Status || null,
+      Studio_Variant_Updated_At: bag.Studio_Variant_Updated_At || null,
+      Studio_Master_Asset_Status: bag.Studio_Master_Asset_Status || null,
+      Studio_Master_Asset_Count: bag.Studio_Master_Asset_Count ?? null,
+      Selected_Music_Asset: Array.isArray(bag.Selected_Music_Asset) ? bag.Selected_Music_Asset : [],
+      Background_Music_Mode: bag.Background_Music_Mode || null,
+      Active: bag.Active !== false,
       Master_Content_Type: bag.Master_Content_Type || null,
       Target_Platforms: Array.isArray(bag.Target_Platforms) ? bag.Target_Platforms : [],
       Requested_Title: row.requested_title || bag.Requested_Title || null,
@@ -3569,6 +3575,12 @@ export function mapAirtableProductionRequestToSupabase(record, profileUuid = nul
       Production_Request_ID: fields.Production_Request_ID ?? null,
       Studio_Variant_Status: selectName(fields.Studio_Variant_Status),
       Studio_Output_Plan_Status: selectName(fields.Studio_Output_Plan_Status),
+      Studio_Variant_Updated_At: fields.Studio_Variant_Updated_At || null,
+      Studio_Master_Asset_Status: selectName(fields.Studio_Master_Asset_Status) || fields.Studio_Master_Asset_Status || null,
+      Studio_Master_Asset_Count: fields.Studio_Master_Asset_Count ?? null,
+      Selected_Music_Asset: Array.isArray(fields.Selected_Music_Asset) ? fields.Selected_Music_Asset : [],
+      Background_Music_Mode: fields.Background_Music_Mode || null,
+      Active: fields.Active !== false && fields.Active !== 0,
       Master_Content_Type: fields.Master_Content_Type || null,
       Target_Platforms: Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [],
       Requested_Title: fields.Requested_Title || null,
@@ -5459,6 +5471,8 @@ function sideTableKind(env, tableId) {
   if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
+  if (phase6TableKind(env, table) === "request") return "request";
+  if (phase6TableKind(env, table) === "media") return "media";
   return "";
 }
 
@@ -5524,6 +5538,38 @@ async function readIdeaRow(env, id) {
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   return row?.airtable_record_id ? airtableShapedIdeaFromSupabase(row) : null;
+}
+
+async function readRequestRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `production_requests?airtable_record_id=eq.${encodeURIComponent(id)}&select=${REQUEST_SELECT}&limit=1`,
+  ).catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row?.airtable_record_id ? airtableShapedProductionRequestFromSupabase(row) : null;
+}
+
+async function readMediaRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `media_assets?airtable_record_id=eq.${encodeURIComponent(id)}&select=${MEDIA_LIBRARY_SELECT}&limit=1`,
+  ).catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row?.airtable_record_id ? airtableShapedLibraryAssetFromSupabase(row) : null;
+}
+
+/** Autonomous + prepare-to-review Draft/Ready/Submitted resume queue. */
+export async function listSupabaseAutonomousDraftRequests(env, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const rows = await supabaseRest(
+    env,
+    `production_requests?request_status=in.(Draft,Ready,Submitted)`
+      + `&or=(production_notes.ilike.*origin=autonomous*,production_notes.ilike.*origin=prepare-to-review*)`
+      + `&select=${REQUEST_SELECT}&order=created_at.asc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
 }
 
 async function readSettingRows(env, source, filter, limit) {
@@ -6057,6 +6103,14 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       const rows = await readQueueRows(env, "", 1, 0, id);
       return rows?.[0] || null;
     }
+    if (kind === "request") {
+      if (studioPhase6WriteSource(env) !== "supabase") return null;
+      return await readRequestRow(env, id);
+    }
+    if (kind === "media") {
+      if (studioPhase6WriteSource(env) !== "supabase") return null;
+      return await readMediaRow(env, id);
+    }
     if (kind === "pipeline_settings" || kind === "engagement_settings") {
       const source = kind === "engagement_settings" ? "engagement" : "pipeline";
       const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
@@ -6102,6 +6156,19 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);
     return body;
+  }
+  if (kind === "request") {
+    if (studioPhase6WriteSource(env) !== "supabase") return null;
+    const cleaned = compactFormula(formula);
+    const autonomousDraft = cleaned.includes("origin=autonomous")
+      && cleaned.includes("origin=prepare-to-review")
+      && cleaned.includes("{Request_Status}='Draft'")
+      && cleaned.includes("{Request_Status}='Ready'")
+      && cleaned.includes("{Request_Status}='Submitted'");
+    if (!autonomousDraft) return null;
+    const records = await listSupabaseAutonomousDraftRequests(env, { limit });
+    if (!records) return null;
+    return { records };
   }
   if (kind === "slides") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));

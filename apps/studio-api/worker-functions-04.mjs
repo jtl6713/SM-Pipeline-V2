@@ -121,6 +121,7 @@ import {
   listSupabaseA3ClassifyMedia,
   listSupabaseOversizedMedia,
   listSupabaseIdeaLane,
+  listSupabaseAutonomousDraftRequests,
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
@@ -14795,8 +14796,13 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
 /*__STUDIO_WORKER_END:adoptNextReadyDailyIdea__*/
 
 export async function listAutonomousDraftRequests(env) {
+  const limit = Math.max(40, AUTONOMOUS_HOUR_ASSET_DRAIN + 10);
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const rows = await listSupabaseAutonomousDraftRequests(env, { limit }).catch(() => null);
+    if (Array.isArray(rows)) return rows;
+  }
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: Math.max(40, AUTONOMOUS_HOUR_ASSET_DRAIN + 10),
+    limit,
     // Autonomous harvest + operator Prepare-to-Review both need Draft/Ready/Submitted resume.
     // More than one row so a Chicago/LA draft cannot block the next Miami or NYC draft.
     filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),OR(FIND('origin=autonomous',{Production_Notes}&'')>0,FIND('origin=prepare-to-review',{Production_Notes}&'')>0))",
