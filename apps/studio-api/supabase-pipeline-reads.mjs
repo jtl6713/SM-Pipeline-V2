@@ -5477,8 +5477,16 @@ function shapeQueueRow(row) {
 }
 
 async function readQueueRows(env, formula, limit, offset, recordId = "") {
+  const tight = tightenQueueFormula(String(formula || ""));
   const translated = recordId ? "" : queueFormulaFilter(formula);
   if (!recordId && !translated) return null;
+  if (!recordId && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) {
+    const probe = await supabaseRest(
+      env,
+      "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
+    ).catch(() => null);
+    if (!Array.isArray(probe) || !probe.length) return null;
+  }
   const filter = recordId
     ? `airtable_record_id=eq.${encodeURIComponent(recordId)}`
     : `and=(${translated})`;
