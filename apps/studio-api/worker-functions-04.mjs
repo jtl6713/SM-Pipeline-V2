@@ -118,6 +118,9 @@ import {
   listSupabaseFactoryDeskPack,
   listSupabaseContentProfiles,
   listSupabaseOpsPublishOutputs,
+  listSupabaseA3ClassifyMedia,
+  listSupabaseOversizedMedia,
+  listSupabaseIdeaLane,
   readSupabaseShapedOutput,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
@@ -11310,20 +11313,32 @@ export async function listOversizedIntakeVideos(env) {
 }
 /*__STUDIO_WORKER_END:listOversizedIntakeVideos__*/
 
-export async function listOversizedMediaFromAirtable(env) {
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: 50,
-    filterFormula: `AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),{Google Drive File ID}!="")`,
-  });
-  return records.map((record) => ({
+function mapOversizedMediaRecord(record, source) {
+  return {
     id: record.id,
     name: f(record, "Asset Name"),
     file_size_mb: f(record, "File_Size_MB"),
     mime_type: f(record, "MIME_Type"),
     google_drive_file_id: googleDriveFileId(record),
     google_drive_url: f(record, "Google Drive URL"),
-    source: "airtable",
-  })).filter((row) => row.google_drive_file_id);
+    source,
+  };
+}
+
+export async function listOversizedMediaFromAirtable(env) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const rows = await listSupabaseOversizedMedia(env, { limit: 50 }).catch(() => null);
+    if (Array.isArray(rows)) {
+      return rows.map((record) => mapOversizedMediaRecord(record, "supabase"))
+        .filter((row) => row.google_drive_file_id);
+    }
+  }
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 50,
+    filterFormula: `AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),{Google Drive File ID}!="")`,
+  });
+  return records.map((record) => mapOversizedMediaRecord(record, "airtable"))
+    .filter((row) => row.google_drive_file_id);
 }
 /*__STUDIO_WORKER_END:listOversizedMediaFromAirtable__*/
 
@@ -13284,8 +13299,13 @@ function readyProductionIdeaEligible(idea, requestRecord = null) {
 }
 
 async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
+  const cap = Math.max(1, Math.min(200, Number(limit) || 100));
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const rows = await listSupabaseIdeaLane(env, { lane: "ready_production", limit: cap }).catch(() => null);
+    if (Array.isArray(rows)) return rows.filter(readyProductionIdeaEligible);
+  }
   const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: Math.max(1, Math.min(200, Number(limit) || 100)),
+    limit: cap,
     sortField: "Create_Date",
     sortDirection: "asc",
     filterFormula: READY_PRODUCTION_IDEA_FORMULA,
@@ -13878,13 +13898,20 @@ export async function getStudioOperations(request, env, authorization) {
         limit, view: viewId, filterFormula: "{Test_Run_ID}=BLANK()",
       });
     };
+    const listOpsClassify = async () => {
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const rows = await listSupabaseA3ClassifyMedia(env, { limit: 25 }).catch(() => null);
+        if (Array.isArray(rows)) return rows;
+      }
+      return listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID });
+    };
     const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
       listOpsProfiles(),
       listOpsPublish("ready_to_schedule", 50, STUDIO_PUB1_VIEW_ID),
       listOpsPublish("ready_to_publish", 50, STUDIO_PUB2_VIEW_ID),
       listOpsPublish("published", 25, STUDIO_PUB3_VIEW_ID),
       listOversizedMedia(env).catch(() => []),
-      listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+      listOpsClassify().catch(() => []),
       listActiveA1CompressionJobs(env).catch(() => []),
     ]);
     const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
@@ -14672,20 +14699,26 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
   const enabledIds = profiles.map((row) => row.id).filter(Boolean);
   if (!enabledIds.length) return [];
 
-  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: 40,
-    sortField: "Create_Date",
-    sortDirection: "asc",
-    filterFormula: "AND({Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected')",
-    fields: [
-      "Candidate_Title",
-      "Content_Profile",
-      "Studio_Photo_Wait_Status",
-      "Promoted_Content_Record_ID",
-      "Candidate_Status",
-      "Studio_Matched_Media_Assets",
-    ],
-  });
+  let ideas = null;
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    ideas = await listSupabaseIdeaLane(env, { lane: "photo_ready", limit: 40 }).catch(() => null);
+  }
+  if (!Array.isArray(ideas)) {
+    ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: 40,
+      sortField: "Create_Date",
+      sortDirection: "asc",
+      filterFormula: "AND({Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected')",
+      fields: [
+        "Candidate_Title",
+        "Content_Profile",
+        "Studio_Photo_Wait_Status",
+        "Promoted_Content_Record_ID",
+        "Candidate_Status",
+        "Studio_Matched_Media_Assets",
+      ],
+    });
+  }
   if (!ideas.length) return [];
 
   const open = await listOpenProductionRequests(env, { limit: 100 });
@@ -17638,7 +17671,13 @@ export async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
     a2bPython ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A2B_SCENARIO_ID).catch(() => []),
     a3Python ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A3_SCENARIO_ID).catch(() => []),
     a4Python ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A4_SCENARIO_ID).catch(() => []),
-    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+    (async () => {
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const rows = await listSupabaseA3ClassifyMedia(env, { limit: 25 }).catch(() => null);
+        if (Array.isArray(rows)) return rows;
+      }
+      return listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID });
+    })().catch(() => []),
     listOversizedMedia(env).catch(() => []),
   ]);
   const a2 = inferredA2 || firstRunSince(a2Runs, startedAt);

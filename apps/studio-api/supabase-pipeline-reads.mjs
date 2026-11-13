@@ -998,12 +998,14 @@ export function airtableShapedLibraryAssetFromSupabase(row) {
       MIME_Type: row.mime_type || null,
       File_Extension: row.file_extension || null,
       File_Size_Bytes: bytes,
+      File_Size_MB: bytes != null ? bytes / (1024 * 1024) : (meta.file_size_mb != null ? Number(meta.file_size_mb) : null),
       Rights_Status: meta.rights_status || null,
       Asset_Description: meta.asset_description || null,
       Studio_Transfer_ID: meta.studio_transfer_id || null,
       Added_At: meta.added_at || row.created_at || null,
       Content_Profile: profileId ? [profileId] : [],
       Classification_Status: meta.classification_status || null,
+      Intake_Status: meta.intake_status || null,
       Manual_Classification_JSON: meta.manual_classification_json || null,
       Manual_Classification_Audit: meta.manual_classification_audit || null,
       Search_Keywords: meta.search_keywords || null,
@@ -1160,6 +1162,71 @@ export async function listSupabaseAssetLibraryRecords(env, {
     has_more: hasMore,
     read_source: "supabase",
   };
+}
+
+/** Ops / intake A3 classify view — Needs Classification or Classification Error. */
+export async function listSupabaseA3ClassifyMedia(env, { limit = 25 } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 25));
+  const rows = await supabaseRest(
+    env,
+    `media_assets?or=(metadata->>classification_status.eq.Needs%20Classification,`
+      + `metadata->>classification_status.eq.Classification%20Error)`
+      + `&select=${MEDIA_LIBRARY_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
+}
+
+/** Ops oversized video lane — Active video > ~95.36 MB with a Drive file id. */
+export async function listSupabaseOversizedMedia(env, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const minBytes = Math.ceil(95.36 * 1024 * 1024);
+  const rows = await supabaseRest(
+    env,
+    `media_assets?active=eq.true&file_size_bytes=gt.${minBytes}`
+      + `&google_drive_file_id=neq.&or=(media_class.eq.Video,mime_type.like.video/*)`
+      + `&select=${MEDIA_LIBRARY_SELECT}&order=file_size_bytes.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
+}
+
+/**
+ * Idea Candidates lanes used by autonomous/ready-production discovery.
+ * Fields live in payload; status/title are top-level columns.
+ */
+export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const cap = Math.max(1, Math.min(200, Number(limit) || 100));
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)";
+  let filter = "or=(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.)";
+  if (lane === "ready_production" || lane === "photo_ready") {
+    filter += `&payload->>Studio_Photo_Wait_Status=eq.${encodeDeskFilterValue("Ready")}`;
+    filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
+    filter += "&status=neq.On Hold&status=neq.Rejected";
+    if (lane === "ready_production") filter += "&status=neq.Promoted";
+  } else if (lane === "photo_waiting") {
+    filter += `&payload->>Studio_Photo_Wait_Status=eq.${encodeDeskFilterValue("Waiting")}`;
+    filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
+    filter += "&status=neq.On Hold";
+  } else {
+    throw new Error("Unknown idea lane");
+  }
+  const rows = await supabaseRest(
+    env,
+    `idea_candidates?${filter}&select=${select}&order=created_at.asc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows
+    .map((row) => airtableShapedIdeaFromSupabase(flattenIdeaRow(row)))
+    .filter((row) => {
+      if (!row?.id) return false;
+      const items = row.fields?.["Content Items"];
+      if (Array.isArray(items) && items.length) return false;
+      return true;
+    });
 }
 
 /**

@@ -35,6 +35,7 @@ import {
   listSupabaseFactoryDeskPack,
   listSupabasePlanScheduleRows,
   listSupabaseDeskHealOutputs,
+  listSupabaseIdeaLane,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -1151,20 +1152,28 @@ export async function loadFactoryIdeaCandidates(env) {
     }
   }
   if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
-  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: 40,
-    sortField: "Candidate_ID",
-    sortDirection: "desc",
-    fields: [
-      "Candidate_ID",
-      "Candidate_Title",
-      "Candidate_Status",
-      "Content_Profile",
-      "Studio_Photo_Wait_Status",
-      "Production_Notes",
-    ],
-    filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
-  }).catch(() => []);
+  let ideas = null;
+  let ideaReadSource = "airtable";
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    ideas = await listSupabaseIdeaLane(env, { lane: "photo_waiting", limit: 40 }).catch(() => null);
+    if (Array.isArray(ideas)) ideaReadSource = "supabase";
+  }
+  if (!Array.isArray(ideas)) {
+    ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: 40,
+      sortField: "Candidate_ID",
+      sortDirection: "desc",
+      fields: [
+        "Candidate_ID",
+        "Candidate_Title",
+        "Candidate_Status",
+        "Content_Profile",
+        "Studio_Photo_Wait_Status",
+        "Production_Notes",
+      ],
+      filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
+    }).catch(() => []);
+  }
   const profileIds = [...new Set((ideas || [])
     .map((row) => firstOpsLinkedId(f(row, "Content_Profile")))
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
@@ -1186,7 +1195,7 @@ export async function loadFactoryIdeaCandidates(env) {
       production_notes: f(record, "Production_Notes") || "",
       request_status: null,
       updated_at: record?.createdTime || null,
-      read_source: "airtable",
+      read_source: ideaReadSource,
     };
   });
 }

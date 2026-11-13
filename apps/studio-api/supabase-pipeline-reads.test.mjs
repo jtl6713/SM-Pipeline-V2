@@ -80,6 +80,9 @@ import {
   mapAirtableProfileToSupabase,
   airtableShapedContentProfileFromSupabase,
   listSupabaseOpsPublishOutputs,
+  listSupabaseA3ClassifyMedia,
+  listSupabaseOversizedMedia,
+  listSupabaseIdeaLane,
   CONTENT_PROFILES_TABLE_ID,
 } from "./supabase-pipeline-reads.mjs";
 
@@ -895,7 +898,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
+  assert.match(worker, /0\.10\.871-closeout-ideas-media/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -999,7 +1002,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
+  assert.match(worker, /0\.10\.871-closeout-ideas-media/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2756,7 +2759,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
+  assert.match(worker, /0\.10\.871-closeout-ideas-media/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3056,7 +3059,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
+  assert.match(worker, /0\.10\.871-closeout-ideas-media/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3269,4 +3272,86 @@ test("studioSideTableRead serves Content Profile lists and Ops PUB lanes from Su
   assert.match(ops, /listSupabaseOpsPublishOutputs\(env, \{ lane, limit \}/);
   const profilesFn = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   assert.match(profilesFn, /listSupabaseContentProfiles\(env, \{ limit: 100 \}/);
+});
+
+test("Ops A3 classify, oversized media, and idea lanes read from Supabase", async () => {
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      urls.push(href);
+      if (href.includes("/media_assets?")) {
+        if (href.includes("classification_status")) {
+          return new Response(JSON.stringify([{
+            airtable_record_id: "recMedia000000001",
+            asset_name: "Pier",
+            media_class: "Image",
+            active: true,
+            google_drive_file_id: "drive1",
+            mime_type: "image/jpeg",
+            file_size_bytes: 1024,
+            metadata: {
+              classification_status: "Needs Classification",
+              content_profile_airtable_id: null,
+              intake_status: "Ready",
+            },
+          }]), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response(JSON.stringify([{
+          airtable_record_id: "recMedia000000002",
+          asset_name: "Clip",
+          media_class: "Video",
+          active: true,
+          google_drive_file_id: "drive2",
+          mime_type: "video/mp4",
+          file_size_bytes: 120_000_000,
+          metadata: {},
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (href.includes("/idea_candidates?")) {
+        return new Response(JSON.stringify([{
+          airtable_record_id: "recIdea0000000001",
+          candidate_title: "Pier sunset",
+          idea_summary: "",
+          status: "Generated",
+          payload: {
+            Studio_Photo_Wait_Status: "Ready",
+            Promoted_Content_Record_ID: null,
+            "Content Items": [],
+            content_profile_airtable_id: "recProfile0000001",
+          },
+          created_at: "2026-11-13T12:00:00.000Z",
+          content_profiles: { airtable_record_id: "recProfile0000001" },
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch ${href}`);
+    };
+    const classify = await listSupabaseA3ClassifyMedia(env, { limit: 25 });
+    assert.equal(classify[0].id, "recMedia000000001");
+    assert.equal(classify[0].fields.Classification_Status, "Needs Classification");
+    assert.ok(urls.some((url) => url.includes("Needs%20Classification")));
+    const oversized = await listSupabaseOversizedMedia(env, { limit: 50 });
+    assert.equal(oversized[0].id, "recMedia000000002");
+    assert.ok(oversized[0].fields.File_Size_MB > 95);
+    assert.ok(urls.some((url) => url.includes("file_size_bytes=gt.")));
+    const ready = await listSupabaseIdeaLane(env, { lane: "ready_production", limit: 40 });
+    assert.equal(ready[0].id, "recIdea0000000001");
+    assert.equal(ready[0].fields.Studio_Photo_Wait_Status, "Ready");
+    assert.ok(urls.some((url) => url.includes("Studio_Photo_Wait_Status=eq.Ready")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const ops = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(ops, /listSupabaseA3ClassifyMedia\(env/);
+  assert.match(ops, /listSupabaseOversizedMedia\(env/);
+  assert.match(ops, /listSupabaseIdeaLane\(env, \{ lane: "ready_production"/);
+  assert.match(ops, /listSupabaseIdeaLane\(env, \{ lane: "photo_ready"/);
+  const factory = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  assert.match(factory, /listSupabaseIdeaLane\(env, \{ lane: "photo_waiting"/);
 });
