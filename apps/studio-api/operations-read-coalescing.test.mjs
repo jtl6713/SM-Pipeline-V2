@@ -39,8 +39,8 @@ test("Authoritative Airtable mutations drop Operations snapshot when relevant ta
   ]) assert.ok(fn.includes(relevant), "Expected invalidation of " + relevant);
 });
 
-test("Operations retains canonical Airtable reader rather than querying Supabase", () => {
-  assert.match(operations, /listRecords\(env, STUDIO_IDEA_PROFILE_TABLE_ID/);
+test("Operations prefers Supabase Content Profiles and PUB queues with Airtable fallback", () => {
+  assert.match(operations, /listContentProfileRecords\(env\)/);
+  assert.match(operations, /listSupabaseOpsPublishOutputs\(env, \{ lane, limit \}/);
   assert.match(operations, /listRecords\(env, env\.AIRTABLE_OUTPUT_TABLE_ID/);
-  assert.doesNotMatch(operations, /studioReadSource\(|supabase/);
 });

@@ -3265,9 +3265,8 @@ test("studioSideTableRead serves Content Profile lists and Ops PUB lanes from Su
     globalThis.fetch = originalFetch;
   }
   const ops = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
-  assert.match(ops, /listSupabaseContentProfiles\(env, \{ limit: 50 \}/);
-  assert.match(ops, /listSupabaseOpsPublishOutputs\(env, \{ lane, limit \}/);
   assert.match(ops, /listContentProfileRecords\(env\)/);
+  assert.match(ops, /listSupabaseOpsPublishOutputs\(env, \{ lane, limit \}/);
   const profilesFn = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   assert.match(profilesFn, /listSupabaseContentProfiles\(env, \{ limit: 100 \}/);
 });

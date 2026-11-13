@@ -49,8 +49,8 @@ test("both scheduled hourly and overnight production call the same authoritative
   const start = workerSource.indexOf("async function studioGlobalAutomaticIdeaInventory(");
   assert.ok(start > 0);
   const helper = workerSource.slice(start, workerSource.indexOf("async function harvestAutonomousNewsHeadlines(", start));
-  assert.match(helper, /STUDIO_IDEA_PROFILE_TABLE_ID/);
-  assert.match(helper, /filterFormula: "{Active}=1"/);
+  assert.match(helper, /listContentProfileRecords\(env\)/);
+  assert.match(helper, /Boolean\(f\(record, "Active"\)\)/);
   assert.match(helper, /refresh: true, requireLive: true/);
   assert.match(helper, /refill.source !== "live"/);
   assert.match(helper, /globalIdeaPipelineLoad/);
