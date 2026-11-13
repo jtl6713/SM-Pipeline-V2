@@ -1135,3 +1135,5 @@ Deploy 2026-11-13 Worker 0.10.880-closeout-output-side: Broader Platform Output 
 Retry 2026-11-13 Worker 0.10.880-closeout-output-side after active-source verify curl 404. No code change. Verify /health version 0.10.880-closeout-output-side.
 
 Deploy 2026-11-13 Worker 0.10.881-closeout-idea-intake: Idea photo-wait/quality lanes and unfinished intake-batch media scans prefer Supabase. Record deletion is not started. Verify /health version 0.10.881-closeout-idea-intake.
+
+Deploy 2026-11-13 Worker 0.10.882-closeout-pro-request: Production Request Outputs and PR job/RECORD_ID packs prefer Supabase; unscoped transfer Ready drops density probe. Record deletion is not started. Verify /health version 0.10.882-closeout-pro-request.

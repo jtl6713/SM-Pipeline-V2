@@ -35,6 +35,9 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
   listSupabaseContentProfiles,
+  listSupabaseProductionRequestOutputs,
+  listSupabaseProductionRequestsByIds,
+  listSupabaseRequestsWithProductionJob,
   readSupabasePipelineSetting,
   syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
@@ -4568,6 +4571,16 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
   const includeInactive = Boolean(options.includeInactive);
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) return [];
+
+  const fromSupabase = await listSupabaseProductionRequestOutputs(env, requestId, {
+    includeInactive,
+    limit: 500,
+  }).catch(() => null);
+  if (Array.isArray(fromSupabase)) {
+    return fromSupabase.sort(
+      (a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0),
+    );
+  }
 
   // Reverse links lag during concurrent POSTs, so also scan by the request
   // name/id. Include inactive rows when collapsing so extras cannot hide.
@@ -11609,13 +11622,17 @@ export async function loadStudioProductionJobsForOutputs(env, records) {
   ));
   const jobFields = ["Studio_Production_Job_JSON", "Promoted_Content_Item"];
   const recent = unresolvedContent
-    ? await studioReadCoalesce("produce-jobs:recent", 20000, () => listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    ? await studioReadCoalesce("produce-jobs:recent", 20000, async () => {
+      const fromSupabase = await listSupabaseRequestsWithProductionJob(env, { limit: 50 }).catch(() => null);
+      if (Array.isArray(fromSupabase)) return fromSupabase;
+      return listRecords(env, PRODUCTION_REQUEST_TABLE, {
         limit: 50,
         sortField: "Created_At",
         sortDirection: "desc",
         filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
         fields: jobFields,
-      }).catch(() => []))
+      }).catch(() => []);
+    })
     : [];
   const jobs = new Map();
   const contentToRequest = new Map();
@@ -11629,14 +11646,18 @@ export async function loadStudioProductionJobsForOutputs(env, records) {
   }
   const missingJobIds = directIds.filter((id) => !jobs.has(id)).slice(0, 25);
   if (missingJobIds.length) {
-    const formula = missingJobIds.length === 1
-      ? `RECORD_ID()="${airtableFormulaEscape(missingJobIds[0])}"`
-      : `OR(${missingJobIds.map((id) => `RECORD_ID()="${airtableFormulaEscape(id)}"`).join(",")})`;
-    const fetched = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-      limit: missingJobIds.length,
-      filterFormula: formula,
-      fields: jobFields,
-    }).catch(() => []);
+    const fromSupabase = await listSupabaseProductionRequestsByIds(env, missingJobIds).catch(() => null);
+    let fetched = Array.isArray(fromSupabase) ? fromSupabase : null;
+    if (!fetched) {
+      const formula = missingJobIds.length === 1
+        ? `RECORD_ID()="${airtableFormulaEscape(missingJobIds[0])}"`
+        : `OR(${missingJobIds.map((id) => `RECORD_ID()="${airtableFormulaEscape(id)}"`).join(",")})`;
+      fetched = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+        limit: missingJobIds.length,
+        filterFormula: formula,
+        fields: jobFields,
+      }).catch(() => []);
+    }
     for (const requestRecord of fetched || []) {
       if (requestRecord?.id) jobs.set(requestRecord.id, parseStudioProductionJob(requestRecord));
     }

@@ -1959,6 +1959,135 @@ export function airtableShapedPlanScheduleRow(row) {
   };
 }
 
+const PRO_OUTPUT_SELECT = [
+  "airtable_record_id",
+  "platform",
+  "output_type",
+  "aspect_ratio",
+  "enabled",
+  "notes",
+  "scheduled_at",
+  "created_at",
+  "production_request_airtable_id",
+  "production_request_airtable_ids",
+  "brand_airtable_id",
+  "brand_airtable_ids",
+].join(",");
+
+/** Airtable-shaped Production Request Output from densified plan/schedule columns. */
+export function airtableShapedProOutputFromSupabase(row) {
+  if (!row?.airtable_record_id) return null;
+  const requests = Array.isArray(row.production_request_airtable_ids)
+    ? row.production_request_airtable_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (row.production_request_airtable_id && !requests.includes(row.production_request_airtable_id)) {
+    requests.unshift(String(row.production_request_airtable_id));
+  }
+  const brands = Array.isArray(row.brand_airtable_ids)
+    ? row.brand_airtable_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (row.brand_airtable_id && !brands.includes(row.brand_airtable_id)) {
+    brands.unshift(String(row.brand_airtable_id));
+  }
+  const enabled = row.enabled === true;
+  return {
+    id: row.airtable_record_id,
+    createdTime: row.created_at || undefined,
+    fields: {
+      Platform: row.platform || "",
+      Output_Type: row.output_type || "",
+      Aspect_Ratio: row.aspect_ratio || "",
+      Enabled: enabled,
+      // Active is not a typed column; schedule densify uses Enabled as the gate.
+      Active: enabled,
+      Output_Order: 0,
+      Notes: row.notes || "",
+      Scheduled_At: row.scheduled_at || "",
+      Production_Request: requests,
+      Brand: brands,
+    },
+  };
+}
+
+/** Production Request Outputs for one parent request (Phase 6 SoR). */
+export async function listSupabaseProductionRequestOutputs(env, productionRequestId, {
+  includeInactive = false,
+  limit = 200,
+} = {}) {
+  const requestId = String(productionRequestId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(requestId)) return null;
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const cap = Math.max(1, Math.min(500, Number(limit) || 200));
+  const enabledFilter = includeInactive ? "" : "&enabled=eq.true";
+  const rows = await supabaseRest(
+    env,
+    `production_request_outputs?or=(production_request_airtable_id.eq.${encodeURIComponent(requestId)}`
+      + `,production_request_airtable_ids.cs.${encodeURIComponent(JSON.stringify([requestId]))})`
+      + `&select=${PRO_OUTPUT_SELECT}${enabledFilter}`
+      + `&order=created_at.asc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedProOutputFromSupabase).filter((row) => row?.id);
+}
+
+export async function listSupabaseProductionRequestOutputsByIds(env, ids) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  if (!wanted.length) return [];
+  const rows = [];
+  for (let index = 0; index < wanted.length; index += 40) {
+    const chunk = wanted.slice(index, index + 40);
+    const page = await supabaseRest(
+      env,
+      `production_request_outputs?airtable_record_id=in.(${chunk.map(encodeURIComponent).join(",")})`
+        + `&select=${PRO_OUTPUT_SELECT}&limit=40`,
+    ).catch(() => null);
+    if (!Array.isArray(page)) return null;
+    rows.push(...page.filter((row) => row?.airtable_record_id));
+  }
+  return rows.map(airtableShapedProOutputFromSupabase).filter((row) => row?.id);
+}
+
+async function readProOutputRow(env, id) {
+  const rows = await listSupabaseProductionRequestOutputsByIds(env, [id]);
+  if (!Array.isArray(rows)) return null;
+  return rows[0] || null;
+}
+
+/** Production Requests by RECORD_ID pack (Phase 6 SoR). */
+export async function listSupabaseProductionRequestsByIds(env, ids) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  if (!wanted.length) return [];
+  const rows = [];
+  for (let index = 0; index < wanted.length; index += 40) {
+    const chunk = wanted.slice(index, index + 40);
+    const page = await supabaseRest(
+      env,
+      `production_requests?airtable_record_id=in.(${chunk.map(encodeURIComponent).join(",")})`
+        + `&select=${REQUEST_SELECT}&limit=40`,
+    ).catch(() => null);
+    if (!Array.isArray(page)) return null;
+    rows.push(...page.filter((row) => row?.airtable_record_id));
+  }
+  return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+}
+
+/** Recent Production Requests with a non-blank Studio_Production_Job_JSON. */
+export async function listSupabaseRequestsWithProductionJob(env, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const rows = await supabaseRest(
+    env,
+    `production_requests?production_job=not.is.null`
+      + `&select=${REQUEST_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows
+    .map(airtableShapedProductionRequestFromSupabase)
+    .filter((row) => row?.id && String(row.fields?.Studio_Production_Job_JSON || "").trim());
+}
+
 export async function syncPlanScheduleRowsToSupabase(env, records, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true, updated: 0 };
   const rows = (records || []).map((record) => mapPlanScheduleRow(record, options)).filter(Boolean);
@@ -5557,6 +5686,7 @@ function sideTableKind(env, tableId) {
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   if (table === "Exception Recovery Messages") return "exception_messages";
   if (table === MAKE_ADMIN_QUEUE_TABLE_ID || table === "Make Admin Queue") return "make_admin_queue";
+  if (table === "Production Request Outputs") return "pro_output";
   if (phase6TableKind(env, table) === "request") return "request";
   if (phase6TableKind(env, table) === "media") return "media";
   return "";
@@ -6096,21 +6226,9 @@ function shapeQueueRow(row) {
 }
 
 async function readQueueRows(env, formula, limit, offset, recordId = "") {
-  const tight = tightenQueueFormula(String(formula || ""));
   const translated = recordId ? "" : queueFormulaFilter(formula);
   if (!recordId && !translated) return null;
-  // Bulk Ready scans need a dense Ready set. PR- and media-scoped Ready
-  // lookups (preview drain, variant rows) must still answer from Supabase.
-  const scopedReady = tight.includes("{Production_Request_Record_ID}=")
-    || tight.includes("{Media_Asset_Record_ID}=");
-  if (!recordId && !scopedReady
-    && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) {
-    const probe = await supabaseRest(
-      env,
-      "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
-    ).catch(() => null);
-    if (!Array.isArray(probe) || !probe.length) return null;
-  }
+  // Unscoped Ready is the Supabase answer under Phase 6 SoR (archive frozen).
   const filter = recordId
     ? `airtable_record_id=eq.${encodeURIComponent(recordId)}`
     : `and=(${translated})`;
@@ -6484,6 +6602,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       if (studioPhase6WriteSource(env) !== "supabase") return null;
       return await readRequestRow(env, id);
     }
+    if (kind === "pro_output") {
+      if (studioPhase6WriteSource(env) !== "supabase") return null;
+      return await readProOutputRow(env, id);
+    }
     if (kind === "media") {
       if (studioPhase6WriteSource(env) !== "supabase") return null;
       return await readMediaRow(env, id);
@@ -6541,6 +6663,25 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (kind === "request") {
     if (studioPhase6WriteSource(env) !== "supabase") return null;
     const cleaned = compactFormula(formula);
+    const recordIds = [...cleaned.matchAll(/RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"/g)]
+      .map((match) => match[1]);
+    const recordIdOnly = recordIds.length > 0 && (
+      cleaned === `RECORD_ID()="${recordIds[0]}"`
+      || (cleaned.startsWith("OR(") && cleaned.endsWith(")")
+        && cleaned === `OR(${recordIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`)
+    );
+    if (recordIdOnly) {
+      const records = await listSupabaseProductionRequestsByIds(env, recordIds);
+      if (!records) return null;
+      return { records };
+    }
+    const withJob = cleaned === 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")'
+      || cleaned === "AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!=\"\")";
+    if (withJob) {
+      const records = await listSupabaseRequestsWithProductionJob(env, { limit });
+      if (!records) return null;
+      return { records };
+    }
     const autonomousDraft = cleaned.includes("origin=autonomous")
       && cleaned.includes("origin=prepare-to-review")
       && cleaned.includes("{Request_Status}='Draft'")
@@ -6550,6 +6691,29 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     const records = await listSupabaseAutonomousDraftRequests(env, { limit });
     if (!records) return null;
     return { records };
+  }
+  if (kind === "pro_output") {
+    if (studioPhase6WriteSource(env) !== "supabase") return null;
+    const cleaned = compactFormula(formula);
+    const recordIds = [...cleaned.matchAll(/RECORD_ID\(\)='(rec[A-Za-z0-9]{14})'|RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"/g)]
+      .map((match) => match[1] || match[2])
+      .filter(Boolean);
+    if (recordIds.length && (cleaned.startsWith("OR(") || cleaned.startsWith("RECORD_ID()="))) {
+      const records = await listSupabaseProductionRequestOutputsByIds(env, recordIds);
+      if (!records) return null;
+      return { records };
+    }
+    const prFind = cleaned.match(/FIND\('(rec[A-Za-z0-9]{14})',ARRAYJOIN\(\{Production_Request\}\)/)
+      || cleaned.match(/FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request\}\)/);
+    if (prFind?.[1]) {
+      const records = await listSupabaseProductionRequestOutputs(env, prFind[1], {
+        includeInactive: true,
+        limit,
+      });
+      if (!records) return null;
+      return { records };
+    }
+    return null;
   }
   if (kind === "media") {
     if (studioPhase6WriteSource(env) !== "supabase") return null;
