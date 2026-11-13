@@ -1023,6 +1023,7 @@ export function airtableShapedLibraryAssetFromSupabase(row) {
       Visible_Subjects: meta.visible_subjects || null,
       Duration_Seconds: meta.duration_seconds ?? null,
       Intake_Date: meta.intake_date || null,
+      Intake_Batch_ID: meta.intake_batch_id || null,
     },
   };
 }
@@ -1184,6 +1185,25 @@ export async function listSupabaseA3ClassifyMedia(env, { limit = 25 } = {}) {
   return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
 }
 
+/** Intake batches still Needs Classification / Processing. */
+export async function listSupabaseUnfinishedIntakeBatches(env, batchIds, { limit = 100 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!unique.length) return [];
+  const cap = Math.max(1, Math.min(100, Number(limit) || 100));
+  const orParts = unique
+    .map((id) => `metadata->>intake_batch_id.eq.${encodeURIComponent(id)}`)
+    .join(",");
+  const rows = await supabaseRest(
+    env,
+    `media_assets?or=(${orParts})`
+      + `&or=(metadata->>classification_status.eq.Needs%20Classification,metadata->>classification_status.eq.Processing)`
+      + `&select=${MEDIA_LIBRARY_SELECT}&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
+}
+
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
 export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
@@ -1236,7 +1256,8 @@ export async function listSupabaseOversizedMedia(env, { limit = 50 } = {}) {
  */
 export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
   if (!studioSupabaseConfigured(env)) return null;
-  const cap = Math.max(1, Math.min(200, Number(limit) || 100));
+  // Photo-wait fair queue scans up to 2000 lean rows.
+  const cap = Math.max(1, Math.min(2000, Number(limit) || 100));
   const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)";
   let filter = "or=(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.)";
   if (lane === "ready_production" || lane === "photo_ready") {
@@ -1248,6 +1269,9 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
     filter += `&payload->>Studio_Photo_Wait_Status=eq.${encodeDeskFilterValue("Waiting")}`;
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
     filter += "&status=neq.On Hold";
+  } else if (lane === "photo_quality") {
+    filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
+    filter += "&status=neq.On Hold&status=neq.Rejected&status=neq.Promoted";
   } else {
     throw new Error("Unknown idea lane");
   }

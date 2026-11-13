@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.880-closeout-output-side/);
+  assert.match(worker, /0\.10\.881-closeout-idea-intake/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.880-closeout-output-side/);
+  assert.match(worker, /0\.10\.881-closeout-idea-intake/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.880-closeout-output-side/);
+  assert.match(worker, /0\.10\.881-closeout-idea-intake/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.880-closeout-output-side/);
+  assert.match(worker, /0\.10\.881-closeout-idea-intake/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3547,6 +3547,23 @@ test("Media Asset Logo/name/Drive list formulas read from Supabase under Phase6"
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Idea photo-wait/quality lanes and unfinished intake prefer Supabase helpers", async () => {
+  const reads = await readFile(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "supabase-pipeline-reads.mjs"),
+    "utf8",
+  );
+  const wf03 = await readFile(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "worker-functions-03.mjs"),
+    "utf8",
+  );
+  assert.match(reads, /lane === "photo_quality"/);
+  assert.match(reads, /listSupabaseUnfinishedIntakeBatches/);
+  assert.match(reads, /Intake_Batch_ID: meta\.intake_batch_id/);
+  assert.match(wf03, /listSupabaseIdeaLane\(env, \{ lane: "photo_waiting"/);
+  assert.match(wf03, /listSupabaseIdeaLane\(env, \{ lane: "photo_quality"/);
+  assert.match(wf03, /listSupabaseUnfinishedIntakeBatches/);
 });
 
 test("Output side-table translator covers YouTube rearm leaf predicates", async () => {
