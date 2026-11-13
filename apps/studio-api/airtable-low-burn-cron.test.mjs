@@ -116,6 +116,7 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: 2 \}\)/);
+  assert.match(beforeHeavy, /ctx\.waitUntil\(studioHealTtdProcessingMissingPublishId\(env, \{ limit: 2 \}\)/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);

@@ -1069,3 +1069,5 @@ Deploy 2026-11-13 Worker 0.10.846-tiktok-draft-light-cron: TikTok TTD0/TTD1/TTD3
 Deploy 2026-11-13 Worker 0.10.847-supabase-partial-patch: Partial Platform Output Supabase commits PATCH only present columns. Dispatch stamps and promotes no longer upsert null into scheduled_post_date / publish_status. Caption/promote callers merge archive PATCH fields. Verify /health version 0.10.847-supabase-partial-patch.
 
 Deploy 2026-11-13 Worker 0.10.848-ttd1-publish-id-stamp: Persist TTD1 publish_id from pulse response; heal Processing-without-publish-id back to Ready for Delivery; restore wiped TikTok approval columns. Runner 2026-11-13-ttd1-partial-bag-mirror merges bag fields on partial Output mirrors. Verify /health version 0.10.848-ttd1-publish-id-stamp.
+
+Deploy 2026-11-13 Worker 0.10.849-ttd-missing-id-light-heal: Run Processing-without-publish_id TikTok heal on independent light cron so heavy maintenance cannot park TTD1 bag-drop rows for a half hour. Verify /health version 0.10.849-ttd-missing-id-light-heal.
