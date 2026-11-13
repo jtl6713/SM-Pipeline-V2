@@ -110,6 +110,7 @@ test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window
   const end = next > begin ? next : begin + 5000;
   const reconcile = worker.slice(begin, end);
   assert.match(reconcile, /TikTok_Draft_Status}="Waiting for Schedule"/);
+  assert.match(reconcile, /TikTok_Draft_Status}="Ready for Assets"/);
   assert.match(reconcile, /Publish_Next_Retry_At}=BLANK/);
   assert.match(reconcile, /STUDIO_TIKTOK_INBOX_DUE_FORMULA/);
   assert.match(reconcile, /listSupabaseDeskHealOutputs\(env, \{/);
@@ -118,6 +119,11 @@ test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window
   assert.match(reconcile, /kind: "ttd2_processing"/);
   assert.match(reconcile, /kind: "ttd3_email"/);
   assert.match(reconcile, /studioWriteSource\(env\) === "supabase"/);
+  const ttd0Start = reconcile.indexOf('stage: "ttd0"');
+  const ttd1Start = reconcile.indexOf('stage: "ttd1"');
+  assert.ok(ttd0Start >= 0 && ttd1Start > ttd0Start);
+  assert.match(reconcile.slice(ttd0Start, ttd1Start), /Waiting for Schedule/);
+  assert.doesNotMatch(reconcile.slice(ttd1Start), /Waiting for Schedule/);
 });
 
 test("TTD2 processing confirmation reread uses Supabase when write source is supabase", async () => {

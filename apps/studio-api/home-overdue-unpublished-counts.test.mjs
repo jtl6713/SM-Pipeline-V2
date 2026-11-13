@@ -167,6 +167,25 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
 });
 
+test("TTD draft reconcile runs on independent light cron and overdue lists Supabase", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
+  const draftLight = scheduled.indexOf("ctx.waitUntil(studioReconcileTiktokDrafts");
+  const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
+  const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(draftLight > 0 && draftLight < mainWaitUntil && draftLight < heavy);
+  assert.match(scheduled.slice(draftLight - 220, draftLight), /!cadence.heavy/);
+  assert.match(cron, /0\.10\.846-tiktok-draft-light-cron/);
+  const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
+  const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
+  assert.ok(overdueStart > 0 && overdueEnd > overdueStart);
+  const overdue = impl.slice(overdueStart, overdueEnd);
+  assert.match(overdue, /kind: "overdue_scheduled"/);
+  assert.match(overdue, /studioOverdueDispatchBudgetOpen/);
+  assert.match(overdue, /studioWriteSource\(env\) === "supabase"/);
+});
+
 
 test("YTS1 stale jobs receive independent bounded status polling without duplicate upload", () => {
   const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");

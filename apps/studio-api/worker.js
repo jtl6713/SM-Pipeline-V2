@@ -1360,7 +1360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.845-tiktok-reconcile-filter",
+          version: "0.10.846-tiktok-draft-light-cron",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4515,6 +4515,23 @@ export default {
           results, new_uploads: 0,
         })))
         .catch((error) => console.warn("TTD2 existing-draft light cron unavailable", error)));
+    }
+    // Due TTD0/TTD1/TTD3 draft advances previously waited for the heavy gate
+    // at the end of a long maintenance sweep. After Airtable freeze, discovery
+    // works but heavy ticks still starve Ready for Delivery. Bound the same
+    // reconcile on independent LIGHT ticks so inbox drafts keep moving.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokDrafts(env, { limit: 2 })
+        .then((results) => console.info("TTD draft light cron", JSON.stringify({
+          checked: results.length,
+          stages: results.reduce((acc, row) => {
+            const key = row.stage || "unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {}),
+          results,
+        })))
+        .catch((error) => console.warn("TTD draft light cron unavailable", error)));
     }
     // Existing YouTube upload-job YTS1 GET polls were stranded late behind
     // heavy maintenance. Confirm the EXACT saved job ID; never upload again.
