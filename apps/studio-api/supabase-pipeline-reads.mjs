@@ -2553,6 +2553,25 @@ export function deskHealOutputFilter(kind, options = {}) {
     ].join(",");
     return `${quiet}&platform.eq.YouTube&publish_status.neq.Published&or=(${stages})&or=(${quota})`;
   }
+  if (kind === "youtube_manual_live") {
+    const manual = encodeDeskFilterValue("Manual Publish Required");
+    const required = encodeDeskFilterValue("Required");
+    const hasVideo = "error_messages->>YouTube_Video_ID.not.is.null";
+    const hasUrl = "and(platform_post_url.not.is.null,platform_post_url.neq.)";
+    const hasPostId = "and(platform_post_id.not.is.null,platform_post_id.neq.)";
+    return `${quiet}&platform.eq.YouTube`
+      + `&publish_status.neq.Published&publish_status.neq.${encodeDeskFilterValue("Published Privately")}`
+      + `&output_status.neq.Published`
+      + `&or=(publish_status.eq.${manual},error_messages->>Manual_Fallback_Required.eq.true,error_messages->>Manual_Completion_Status.eq.${required})`
+      + `&or=(${hasVideo},${hasUrl},${hasPostId})`;
+  }
+  if (kind === "youtube_manual_rearm") {
+    const manual = encodeDeskFilterValue("Manual Publish Required");
+    const blankVideo = "or=(error_messages->>YouTube_Video_ID.is.null,error_messages->>YouTube_Video_ID.eq.)";
+    const retryDue = "or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.now())";
+    return `${quiet}&platform.eq.YouTube&publish_status.eq.${manual}`
+      + `&publish_retry_eligible.eq.true&${blankVideo}&${retryDue}`;
+  }
   throw new Error("Unknown desk heal candidate list");
 }
 

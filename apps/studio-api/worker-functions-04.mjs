@@ -869,10 +869,18 @@ export async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
   const limit = Number(options.limit || 3);
   let rows = [];
   try {
-    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
-    });
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      rows = await listSupabaseDeskHealOutputs(env, {
+        kind: "youtube_manual_live",
+        limit,
+      }).catch(() => null);
+    }
+    if (!Array.isArray(rows)) {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
+      });
+    }
   } catch (error) {
     console.warn("youtube manual live-video heal scan failed", error);
     return [];
@@ -904,7 +912,15 @@ export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}="Manual Publish Required",{Publish_Retry_Eligible}=1,{YouTube_Video_ID}="",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
   let rows = [];
   try {
-    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      rows = await listSupabaseDeskHealOutputs(env, {
+        kind: "youtube_manual_rearm",
+        limit,
+      }).catch(() => null);
+    }
+    if (!Array.isArray(rows)) {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
+    }
   } catch (error) {
     console.warn("youtube manual-publish rearm scan failed", error);
     return [];
