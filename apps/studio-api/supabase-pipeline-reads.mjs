@@ -5504,13 +5504,95 @@ function sideTableKind(env, tableId) {
   if (table === profiles || table === CONTENT_PROFILES_TABLE_ID || table === "Content Profiles") {
     return "profile";
   }
-  if (table === PIPELINE_SETTINGS_TABLE_ID) return "pipeline_settings";
-  if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
+  if (table === PIPELINE_SETTINGS_TABLE_ID || table === "Pipeline Settings") return "pipeline_settings";
+  if (table === ENGAGEMENT_SETTINGS_TABLE_ID || table === "Engagement Settings") {
+    return "engagement_settings";
+  }
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
+  if (table === "Exception Recovery Messages") return "exception_messages";
   if (phase6TableKind(env, table) === "request") return "request";
   if (phase6TableKind(env, table) === "media") return "media";
   return "";
+}
+
+function shapeExceptionRecoveryMessage(row) {
+  if (!row?.airtable_record_id && !row?.event_key) return null;
+  const fields = isPlainObject(row.fields) ? { ...row.fields } : {};
+  if (row.event_key) fields.Event_Key = row.event_key;
+  if (row.output_record_id) fields.Output_Record_ID = row.output_record_id;
+  if (row.exception_signature != null) fields.Exception_Signature = row.exception_signature;
+  if (row.role) fields.Role = row.role;
+  if (row.message_text != null) fields.Message_Text = row.message_text;
+  if (row.actor) fields.Actor = row.actor;
+  if (row.reply_to_event_key != null) fields.Reply_To_Event_Key = row.reply_to_event_key;
+  if (row.intent_json != null) {
+    fields.Intent_JSON = typeof row.intent_json === "string"
+      ? row.intent_json
+      : JSON.stringify(row.intent_json);
+  }
+  if (row.created_at) fields.Created_At = row.created_at;
+  return {
+    id: row.airtable_record_id || row.event_key,
+    fields,
+  };
+}
+
+/** Exception Recovery Center conversation rows for one Platform Output. */
+export async function listSupabaseExceptionRecoveryMessages(env, outputRecordId, {
+  limit = 1000,
+  offset = 0,
+} = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const outputId = String(outputRecordId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(outputId)) return null;
+  const cap = Math.max(1, Math.min(1000, Number(limit) || 1000));
+  const skip = Math.max(0, Number(offset) || 0);
+  const rows = await supabaseRest(
+    env,
+    `exception_recovery_messages?output_record_id=eq.${encodeURIComponent(outputId)}`
+      + `&select=airtable_record_id,event_key,output_record_id,exception_signature,role,message_text,actor,`
+      + `reply_to_event_key,intent_json,fields,created_at`
+      + `&order=created_at.asc&limit=${cap}&offset=${skip}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
+}
+
+/** Append Exception Recovery conversation rows (idempotent on event_key). */
+export async function createSupabaseExceptionRecoveryMessages(env, records) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const rows = (Array.isArray(records) ? records : []).map((record) => {
+    const fields = isPlainObject(record?.fields) ? record.fields : {};
+    const eventKey = String(fields.Event_Key || "").trim();
+    if (!eventKey) return null;
+    return {
+      airtable_record_id: String(record?.id || mintAirtableRecordId()),
+      event_key: eventKey,
+      output_record_id: String(fields.Output_Record_ID || "").trim(),
+      exception_signature: String(fields.Exception_Signature || "").trim() || null,
+      role: String(fields.Role || "").trim() || null,
+      message_text: String(fields.Message_Text || ""),
+      actor: String(fields.Actor || "").trim() || null,
+      reply_to_event_key: String(fields.Reply_To_Event_Key || "").trim() || null,
+      intent_json: (() => {
+        try {
+          return fields.Intent_JSON ? JSON.parse(String(fields.Intent_JSON)) : null;
+        } catch {
+          return { raw: String(fields.Intent_JSON || "") };
+        }
+      })(),
+      fields,
+      created_at: String(fields.Created_At || new Date().toISOString()),
+    };
+  }).filter(Boolean);
+  if (!rows.length) return null;
+  await supabaseRest(env, "exception_recovery_messages?on_conflict=event_key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(rows),
+  });
+  return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
 }
 
 function sideRecordId(pathOrParams) {
@@ -6219,6 +6301,18 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (!records) return null;
     return { records };
   }
+  if (kind === "exception_messages") {
+    if (studioWriteSource(env) !== "supabase") return null;
+    const cleaned = compactFormula(formula);
+    const match = cleaned.match(/^\{Output_Record_ID\}=(["'])(rec[A-Za-z0-9]{14})\1$/);
+    if (!match) return null;
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await listSupabaseExceptionRecoveryMessages(env, match[2], { limit, offset });
+    if (!records) return null;
+    const body = { records };
+    if (records.length === limit) body.offset = String(offset + records.length);
+    return body;
+  }
   if (kind === "slides") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
     const records = await readSlideRows(env, formula, limit, offset);
@@ -6332,13 +6426,19 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       ? parseAirtableMutationRecords(pathOrParams, rawBody)
       : parseAirtableCreateFields(rawBody).map((fields) => ({ id: mintAirtableRecordId(), fields }));
     if (!parsed.length) return { ok: false, reason: "no_records" };
-    const records = kind === "idea"
-      ? await commitIdeaRecords(env, parsed)
-      : kind === "slides"
-        ? await commitSlideRecords(env, parsed)
-        : kind === "pipeline_settings" || kind === "engagement_settings"
-          ? await commitSettingRecords(env, kind === "engagement_settings" ? "engagement" : "pipeline", parsed, { insert: verb === "POST" })
-          : null;
+    let records = null;
+    if (kind === "idea") records = await commitIdeaRecords(env, parsed);
+    else if (kind === "slides") records = await commitSlideRecords(env, parsed);
+    else if (kind === "pipeline_settings" || kind === "engagement_settings") {
+      records = await commitSettingRecords(
+        env,
+        kind === "engagement_settings" ? "engagement" : "pipeline",
+        parsed,
+        { insert: verb === "POST" },
+      );
+    } else if (kind === "exception_messages" && verb === "POST") {
+      records = await createSupabaseExceptionRecoveryMessages(env, parsed);
+    }
     if (!records) return { ok: false, reason: "missing_row" };
     return { ok: records.length === parsed.length, records };
   }
