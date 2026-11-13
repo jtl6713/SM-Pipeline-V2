@@ -195,11 +195,22 @@ def try_list_queue_records(settings: dict | None, *, formula: str | None, max_re
     if studio_phase6_write_source(settings) != "supabase":
         return None
     tight = _tighten(str(formula or ""))
-    if '{Transfer_Status}="Ready"' in tight or "{Transfer_Status}='Ready'" in tight:
-        return None
     translated = queue_formula_filter(formula)
     if not translated:
         return None
+    if '{Transfer_Status}="Ready"' in tight or "{Transfer_Status}='Ready'" in tight:
+        # A short Ready copy would hide rows. Stay on Airtable until the backfill
+        # has at least 5000 Ready rows.
+        try:
+            probe = _rest(
+                settings or {},
+                "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
+                "GET",
+            )
+        except Exception:
+            return None
+        if not isinstance(probe, list) or not probe:
+            return None
     limit = max(1, min(int(max_records or 10), 100))
     safe = "(),.=*_->>"
     path = (

@@ -66,6 +66,8 @@ def _field_ref(table_id: str, field: str) -> str | None:
         return "content_profile_id"
     if table_id == CONTENT_ITEMS_TABLE and field == "Production_Request":
         return "production_request_id"
+    if table_id == PLATFORM_OUTPUTS_TABLE and field == "Production_Request_Output":
+        return "production_request_output_text"
     columns = _columns(table_id)
     if field in columns:
         return columns[field]
@@ -342,7 +344,7 @@ def _produce_link_filter(table_id: str, cleaned: str) -> str | None:
     if match:
         token = match.group(1)
         if token.isdigit():
-            return _link_param(f"content_items.content_number=eq.{token}")
+            return f"content_number.eq.{token}"
         if re.fullmatch(_REC_ID, token):
             return f"content_item_airtable_id.eq.{token}"
         return None
@@ -355,9 +357,7 @@ def _produce_link_filter(table_id: str, cleaned: str) -> str | None:
         # on the bag. A token that is not in that array returns no rows, and
         # the caller falls back to Airtable.
         token = match.group(1)
-        return _link_param(
-            'error_messages=cs.{"Production_Request_Output":["' + token + '"]}'
-        )
+        return f"production_request_output_text.like.*{token}*"
     return None
 
 

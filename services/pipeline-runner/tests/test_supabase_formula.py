@@ -30,7 +30,7 @@ def test_text_find_and_spaced_link_find():
         PLATFORM_OUTPUTS_TABLE,
         'FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",") > 0',
     )
-    assert spaced == "link:content_items.content_number=eq.102"
+    assert spaced == "content_number.eq.102"
 
 
 def test_snapshotted_runner_views():
@@ -56,7 +56,8 @@ def test_snapshotted_runner_views():
     assert "render_clip_list" in retry
     assert view_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, "Ready Queue") is None
     legacy = view_to_postgrest_filter(CONTENT_ITEMS_TABLE, "viwwnVJVPqfy7iYJK")
-    assert legacy is None
+    assert legacy is not None
+    assert "platform_output_count" in legacy
     package = view_to_postgrest_filter(
         CONTENT_ITEMS_TABLE, "P1 - Ready for Package Generation",
     )
@@ -91,7 +92,7 @@ def test_produce_output_link_finds():
         PLATFORM_OUTPUTS_TABLE,
         'FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",")>0',
     )
-    assert content_number == "link:content_items.content_number=eq.102"
+    assert content_number == "content_number.eq.102"
     parent = "recParent12345678"
     content_rec = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
@@ -103,12 +104,10 @@ def test_produce_output_link_finds():
         PLATFORM_OUTPUTS_TABLE,
         f'FIND("{request_id}", ARRAYJOIN({{Production_Request_Output}}))',
     )
-    assert request_link == (
-        'link:error_messages=cs.{"Production_Request_Output":["' + request_id + '"]}'
-    )
+    assert request_link == f"production_request_output_text.like.*{request_id}*"
     path = attach_formula_filter("platform_outputs?select=*&limit=50", content_number)
-    assert "content_items.content_number=eq.102" in path
-    assert "and=" not in path
+    assert "content_number.eq.102" in path
+    assert "and=" in path
     assert formula_to_postgrest_filter(
         CONTENT_ITEMS_TABLE,
         'FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",")>0',
@@ -118,28 +117,27 @@ def test_produce_output_link_finds():
         'OR({Output_Status}="Planned",{Output_Status}="In Production"))'
     )
     wrapped_filter = formula_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, wrapped)
-    assert wrapped_filter == (
-        "combo:content_items.content_number=eq.102|||"
-        "or(output_status.eq.Planned,output_status.eq.In Production)"
-    )
+    assert wrapped_filter is not None
+    assert "content_number.eq.102" in wrapped_filter
+    assert "or(output_status.eq.Planned,output_status.eq.In Production)" in wrapped_filter
     wrapped_path = attach_formula_filter("platform_outputs?select=*&limit=50", wrapped_filter)
-    assert "content_items.content_number=eq.102" in wrapped_path
+    assert "content_number.eq.102" in wrapped_path
     assert "output_status.eq.Planned" in wrapped_path
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         'OR(FIND(",102,", "," & ARRAYJOIN({Content_Item}) & ",")>0,{Platform}="TikTok")',
-    ) is None
+    ) == "or(content_number.eq.102,platform.eq.TikTok)"
     parent = "recParent12345678"
     request_id = "recRequest1234567"
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, parent, 102),
-    ) == "link:content_items.content_number=eq.102"
+    ) == "content_number.eq.102"
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, parent, None),
     ) == f"content_item_airtable_id.eq.{parent}"
-    assert "Production_Request_Output" in formula_to_postgrest_filter(
+    assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, outputs_formula(request_id, None, None),
-    )
+    ) == f"production_request_output_text.like.*{request_id}*"
 
 
 def test_or_of_allowlisted_predicates():
@@ -170,17 +168,14 @@ def test_p3_output_formulas_compose_the_content_link():
         PLATFORM_OUTPUTS_TABLE, p3_seeded_outputs_formula("102"),
     )
     assert seeded is not None
-    assert seeded.startswith("combo:content_items.content_number=eq.102|||")
-    assert "Production_Request_Output" in seeded
+    assert "content_number.eq.102" in seeded
+    assert "production_request_output_text" in seeded
     assert "or(output_status.eq.Planned,output_status.eq.In Production)" in seeded
     duplicate = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         p3_duplicate_output_formula("102", "Instagram", "Reel"),
     )
-    assert duplicate == (
-        "combo:content_items.content_number=eq.102|||"
-        "and(platform.eq.Instagram,format.eq.Reel)"
-    )
+    assert duplicate == "and(content_number.eq.102,platform.eq.Instagram,format.eq.Reel)"
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE, p3_mapping_formula("Instagram,TikTok", "Reel"),
     ) is None

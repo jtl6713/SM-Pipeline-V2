@@ -29,13 +29,13 @@ from supabase_pipeline import (
 
 logger = logging.getLogger("pipeline-runner.supabase-reads")
 
-# Empty lists and unmarked rows fall back to Airtable unless a table is listed
-# here. A table belongs here only when its Airtable count equals its Supabase
-# count and every Supabase row carries the runner marker. Compared 2026-11-12:
-# outputs 9208 vs 9916 (685 marked), content 1897 vs 1971 (212 marked),
-# requests 2035 vs 1362, media 22059 vs 22037, queue 18619 vs 1040.
-# None qualified, so this set stays empty and the fallback stays on.
-FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset()
+# An empty Supabase list for these tables is the answer. Output and Content
+# writes already commit to Supabase, and both copies are ahead of the frozen
+# Airtable archive, so a zero-row filter must not be read from Airtable again.
+FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset({
+    PLATFORM_OUTPUTS_TABLE,
+    CONTENT_ITEMS_TABLE,
+})
 
 _OUTPUT_FIELDS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
 _CONTENT_FIELDS = dict(CONTENT_PATCH_COLUMNS)

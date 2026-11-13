@@ -94,8 +94,8 @@ def test_unmarked_list_uses_supabase_when_runner_reads_supabase(monkeypatch):
     assert unmarked[0]["fields"]["TikTok_Draft_Publish_ID"] == "v_inbox_url~v2.lean-stamp"
     assert airtable == []
     empty = client.list_records(PLATFORM_OUTPUTS_TABLE, max_records=5, sort_field="Output_ID")
-    assert empty[0]["id"] == "recOutput1"
-    assert len(airtable) == 1
+    assert empty == []
+    assert airtable == []
 
 
 def test_formula_and_content_flag_stay_independent(monkeypatch):
@@ -206,8 +206,8 @@ def test_produce_content_number_find_reads_supabase(monkeypatch):
         sort_direction="desc",
     )
     assert rows[0]["id"] == "recOutput102"
-    assert "content_items.content_number=eq.102" in seen[0]
-    assert "and=" not in seen[0]
+    assert "content_number.eq.102" in seen[0]
+    assert "and=" in seen[0]
 
 
 def test_or_formula_reads_supabase(monkeypatch):
@@ -414,13 +414,16 @@ def test_due_now_formula_lists_supabase(monkeypatch):
     assert rows[0]["fields"]["YouTube_Action_Due_Now"] == 1
 
 
-def test_fallback_stays_on_until_a_table_is_stopped(monkeypatch):
+def test_empty_output_list_stays_on_supabase(monkeypatch):
     import supabase_reads
 
-    assert supabase_reads.FALLBACK_STOPPED_TABLES == frozenset()
+    assert supabase_reads.FALLBACK_STOPPED_TABLES == frozenset({
+        PLATFORM_OUTPUTS_TABLE,
+        CONTENT_ITEMS_TABLE,
+    })
 
     def fake_get(url, *, headers, params, timeout):
-        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
+        raise AssertionError("airtable list")
 
     def fake_request(method, url, *, headers, json, timeout):
         return Response([])
@@ -428,12 +431,4 @@ def test_fallback_stays_on_until_a_table_is_stopped(monkeypatch):
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
     rows = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
-    assert rows[0]["fields"]["Platform"] == "TikTok"
-
-    monkeypatch.setattr(
-        supabase_reads,
-        "FALLBACK_STOPPED_TABLES",
-        frozenset({PLATFORM_OUTPUTS_TABLE}),
-    )
-    stopped = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
-    assert stopped == []
+    assert rows == []

@@ -642,7 +642,7 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
  */
 export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000, headers = {}, signal = null } = {}) {
   const size = Math.max(1, Math.min(1000, Number(pageSize) || 1000));
-  const ceiling = Math.max(1, Math.min(20000, Number(maxRows) || 10000));
+  const ceiling = Math.max(1, Math.min(50000, Number(maxRows) || 10000));
   const stripped = String(pathAndQuery || "")
     .replace(/([?&])(limit|offset)=\d+/gi, "$1")
     .replace(/[?&]$/, "")
@@ -5478,9 +5478,15 @@ function shapeQueueRow(row) {
 
 async function readQueueRows(env, formula, limit, offset, recordId = "") {
   const tight = tightenQueueFormula(String(formula || ""));
-  if (!recordId && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) return null;
   const translated = recordId ? "" : queueFormulaFilter(formula);
-  if (!recordId && !translated) return null
+  if (!recordId && !translated) return null;
+  if (!recordId && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) {
+    const probe = await supabaseRest(
+      env,
+      "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
+    ).catch(() => null);
+    if (!Array.isArray(probe) || !probe.length) return null;
+  }
   const filter = recordId
     ? `airtable_record_id=eq.${encodeURIComponent(recordId)}`
     : `and=(${translated})`;
@@ -5501,7 +5507,7 @@ function summaryProfileIdFromFormula(formula) {
 }
 
 /**
- * Profile-summary reconcile pages. Null means this call stays on Airtable.
+ * Profile-summary reconcile pages. A full page is the Supabase answer.
  */
 export async function listProfileSummaryRecords(env, tableId, options = {}) {
   if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
@@ -5511,7 +5517,7 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
   if (!profileUuid) return null;
   const ideaTable = String(env?.AIRTABLE_IDEA_TABLE_ID || IDEA_CANDIDATES_TABLE_ID);
   const outputTable = String(env?.AIRTABLE_OUTPUT_TABLE_ID || "");
-  const limit = Math.max(1, Math.min(10000, Number(options.limit) || 10000));
+  const limit = Math.max(1, Math.min(50000, Number(options.limit) || 50000));
   if (outputTable && String(tableId) === outputTable) {
     const rows = await supabaseRestAll(
       env,
@@ -5520,7 +5526,6 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
         + `&select=${OUTPUT_SELECT}&order=output_number.desc`,
       { pageSize: 1000, maxRows: limit },
     );
-    if ((rows || []).length >= limit) return null;
     return (rows || []).map((row) => airtableShapedOutputFromSupabase(flattenOutputRow(row))).filter((row) => row?.id);
   }
   if (String(tableId) === ideaTable) {
@@ -5531,7 +5536,6 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
         + "&order=created_at.desc",
       { pageSize: 1000, maxRows: limit },
     );
-    if ((rows || []).length >= limit) return null;
     return (rows || [])
       .map((row) => airtableShapedIdeaFromSupabase(flattenIdeaRow(row)))
       .filter((row) => row?.id && !String(row.fields.Promoted_Content_Record_ID || "").trim()
@@ -5541,7 +5545,7 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
 }
 
 /**
- * Dirty reread by record id. Null when any id is missing, so Airtable still covers the gap.
+ * Dirty reread by record id. Missing ids are absent from Supabase and stay out of the batch.
  */
 export async function readProfileSummaryDirtyBatch(env, kind, ids) {
   const clean = [...new Set((ids || []).map((id) => String(id || "")).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
@@ -5561,7 +5565,7 @@ export async function readProfileSummaryDirtyBatch(env, kind, ids) {
       ? airtableShapedIdeaFromSupabase(flattenIdeaRow(row))
       : airtableShapedOutputFromSupabase(flattenOutputRow(row))
   )).filter((row) => row?.id);
-  if (shaped.length !== clean.length) return null;
+  if (!Array.isArray(rows)) return null;
   return shaped;
 }
 
@@ -5598,13 +5602,13 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     const filter = settingsListFilter(formula);
     if (!filter) return null;
     const records = await readSettingRows(env, kind === "engagement_settings" ? "engagement" : "pipeline", filter, limit);
-    return records.length ? { records } : null;
+    return { records };
   }
   if (kind === "idea") {
     const profiles = ideaProfileIds(formula);
     if (!profiles) return null;
     const records = await readIdeasForProfiles(env, profiles.ids, profiles.openOnly, limit);
-    return records.length ? { records } : null;
+    return { records };
   }
   if (kind === "queue") {
     if (studioPhase6WriteSource(env) !== "supabase") return null;

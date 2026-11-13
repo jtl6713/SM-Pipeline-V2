@@ -171,14 +171,14 @@ async function runStudioProfileSummaryReconcile(env) {
     if (!profileFormula) throw new Error("Missing profile filter");
     const outputs = (await listRecordsWithCoolingRetry(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ',{Output_Status}!="Published",{Publish_Status}!="Published")',
-      limit: 10000, fields: OUTPUT_LIST_FIELDS,
+      limit: 50000, fields: OUTPUT_LIST_FIELDS,
     })).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     const ideas = (await listRecordsWithCoolingRetry(env, env.AIRTABLE_IDEA_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ",{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())",
-      limit: 10000,
+      limit: 50000,
       fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
     })).filter((row) => studioOverviewRowMatchesProfile(row, profile));
-    if (outputs.length >= 10000 || ideas.length >= 10000) {
+    if (outputs.length >= 50000 || ideas.length >= 50000) {
       throw new Error("Summary scan reached an incomplete-result safety ceiling");
     }
     for (const [kind, rows] of [["output", outputs], ["idea", ideas]]) {
