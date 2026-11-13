@@ -453,13 +453,19 @@ def test_due_now_formula_lists_supabase(monkeypatch):
 
 def test_empty_output_list_stays_on_supabase(monkeypatch):
     import supabase_reads
-    from airtable.constants import MEDIA_ASSETS_TABLE, PIPELINE_SETTINGS_TABLE, PRODUCTION_REQUESTS_TABLE
+    from airtable.constants import (
+        MEDIA_ASSETS_TABLE,
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        PIPELINE_SETTINGS_TABLE,
+        PRODUCTION_REQUESTS_TABLE,
+    )
     from settings_store import ENGAGEMENT_SETTINGS_TABLE
 
     assert PLATFORM_OUTPUTS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert CONTENT_ITEMS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert PRODUCTION_REQUESTS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert MEDIA_ASSETS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert MEDIA_TRANSFER_QUEUE_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert PIPELINE_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert ENGAGEMENT_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
 

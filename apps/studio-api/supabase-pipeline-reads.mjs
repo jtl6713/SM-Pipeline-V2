@@ -6243,50 +6243,110 @@ async function readSlideRows(env, formula, limit, offset) {
   return rows.map(airtableShapedCarouselSlide).filter((row) => row?.id);
 }
 
+const OUTPUT_SIDE_EQ_FIELDS = {
+  Platform: "platform",
+  Publish_Status: "publish_status",
+  Output_Status: "output_status",
+  Review_Status: "review_status",
+  Render_Status: "render_status",
+  YouTube_Stage: "youtube_stage",
+};
+
+const OUTPUT_SIDE_BOOL_FIELDS = {
+  Do_Not_Publish: "do_not_publish",
+  Publish_Retry_Eligible: "publish_retry_eligible",
+  Auto_Publish_Enabled: "auto_publish_enabled",
+};
+
+const OUTPUT_SIDE_BLANK_FIELDS = {
+  Test_Run_ID: "test_run_id",
+  Remotion_Job_ID: "remotion_job_id",
+  Final_File_URL: "final_file_url",
+  Published_At: "published_at",
+  Publish_Next_Retry_At: "publish_next_retry_at",
+  YouTube_Video_ID: "error_messages->>YouTube_Video_ID",
+  Platform_Post_URL: "platform_post_url",
+  Platform_Post_ID: "platform_post_id",
+};
+
+function outputSideBlankFilter(column) {
+  return `or(${column}.is.null,${column}.eq.)`;
+}
+
+function outputSideLeafFilter(cleaned) {
+  const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
+  if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
+  if (outputId) return `output_number.eq.${outputId[1]}`;
+  const contentNumber = cleaned.match(/^FIND\(",(\d+),",","&ARRAYJOIN\(\{Content_Item\}\)&","\)>0$/);
+  if (contentNumber) return `content_number.eq.${contentNumber[1]}`;
+  const contentRec = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Item\}\)\)(?:>0)?$/);
+  if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
+  const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
+  if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
+  const blank = cleaned.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
+  if (blank && OUTPUT_SIDE_BLANK_FIELDS[blank[1]]) {
+    return outputSideBlankFilter(OUTPUT_SIDE_BLANK_FIELDS[blank[1]]);
+  }
+  const empty = cleaned.match(/^\{([A-Za-z0-9_]+)\}=""$/);
+  if (empty && OUTPUT_SIDE_BLANK_FIELDS[empty[1]]) {
+    return outputSideBlankFilter(OUTPUT_SIDE_BLANK_FIELDS[empty[1]]);
+  }
+  const notEmpty = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=""$/);
+  if (notEmpty && OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]]) {
+    const col = OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]];
+    return `and(${col}.not.is.null,${col}.neq.)`;
+  }
+  const boolEq = cleaned.match(/^\{([A-Za-z0-9_]+)\}=([01])$/);
+  if (boolEq && OUTPUT_SIDE_BOOL_FIELDS[boolEq[1]]) {
+    return `${OUTPUT_SIDE_BOOL_FIELDS[boolEq[1]]}.eq.${boolEq[2] === "1" ? "true" : "false"}`;
+  }
+  const eq = cleaned.match(/^\{([A-Za-z0-9_]+)\}="([^"]*)"$/);
+  if (eq && OUTPUT_SIDE_EQ_FIELDS[eq[1]]) {
+    return `${OUTPUT_SIDE_EQ_FIELDS[eq[1]]}.eq.${eq[2]}`;
+  }
+  const neq = cleaned.match(/^\{([A-Za-z0-9_]+)\}!="([^"]*)"$/);
+  if (neq && OUTPUT_SIDE_EQ_FIELDS[neq[1]]) {
+    return `${OUTPUT_SIDE_EQ_FIELDS[neq[1]]}.neq.${neq[2]}`;
+  }
+  const beforeNow = cleaned.match(/^IS_BEFORE\(\{Publish_Next_Retry_At\},NOW\(\)\)$/);
+  if (beforeNow) return "publish_next_retry_at.lte.now()";
+  return null;
+}
+
 function outputContentListFilter(kind, formula) {
   const cleaned = tightenSideFormula(formula);
   if (!cleaned) return null;
-  const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
-  if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
-  if (kind === "output") {
-    const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
-    if (outputId) return `output_number.eq.${outputId[1]}`;
-    const platform = cleaned.match(/^\{Platform\}="([^"]+)"$/);
-    if (platform) return `platform.eq.${platform[1]}`;
-    const contentNumber = cleaned.match(/^FIND\(",(\d+),",","&ARRAYJOIN\(\{Content_Item\}\)&","\)>0$/);
-    if (contentNumber) return `content_number.eq.${contentNumber[1]}`;
-    const contentRec = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Item\}\)\)(?:>0)?$/);
-    if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
-    const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
-    if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
-    if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
-      const parts = splitQueueArgs(cleaned.slice(4, -1));
-      if (!parts?.length) return null;
-      const filters = [];
-      for (const part of parts) {
-        const item = outputContentListFilter(kind, part);
-        if (!item) return null;
-        filters.push(item);
-      }
-      return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
+  if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
+    const parts = splitQueueArgs(cleaned.slice(4, -1));
+    if (!parts?.length) return null;
+    const filters = [];
+    for (const part of parts) {
+      const item = outputContentListFilter(kind, part);
+      if (!item) return null;
+      filters.push(item);
     }
-    const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
-    if (blank) return "or(test_run_id.is.null,test_run_id.eq.)";
+    return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
+  }
+  if (cleaned.startsWith("OR(") && cleaned.endsWith(")")) {
+    const parts = splitQueueArgs(cleaned.slice(3, -1));
+    if (!parts?.length) return null;
+    const filters = [];
+    for (const part of parts) {
+      const item = outputContentListFilter(kind, part);
+      if (!item) return null;
+      filters.push(item);
+    }
+    return filters.length === 1 ? filters[0] : `or(${filters.join(",")})`;
+  }
+  if (kind === "output") {
+    return outputSideLeafFilter(cleaned);
   }
   if (kind === "content") {
     const contentId = cleaned.match(/^\{Content_ID\}=(\d+)$/);
     if (contentId) return `content_number.eq.${contentId[1]}`;
-    if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
-      const parts = splitQueueArgs(cleaned.slice(4, -1));
-      if (!parts?.length) return null;
-      const filters = [];
-      for (const part of parts) {
-        const item = outputContentListFilter(kind, part);
-        if (!item) return null;
-        filters.push(item);
-      }
-      return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
-    }
+    const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
+    if (blank) return "or(test_run_id.is.null,test_run_id.eq.)";
   }
   return null;
 }
