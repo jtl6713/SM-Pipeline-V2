@@ -651,6 +651,7 @@ import {
   requireAnyPermission,
   sleepMs,
   airtableCooldownWaitMs,
+  airtableDataWaitMs,
   airtableRetryDelayMs,
   studioInvalidateHotReads,
   f,
@@ -1361,7 +1362,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.849-ttd-missing-id-light-heal",
+          version: "0.10.850-ttd-missing-id-datawait",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4535,14 +4536,16 @@ export default {
         .catch((error) => console.warn("TTD draft light cron unavailable", error)));
     }
     // Processing without TikTok_Draft_Publish_ID is invisible to TTD2 light
-    // polls and TTD1 Ready-for-Delivery discovery. Heal on light ticks so
-    // heavy maintenance cannot leave those rows parked for a half hour.
-    if (!cadence.heavy && airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
-      ctx.waitUntil(studioHealTtdProcessingMissingPublishId(env, { limit: 2 })
+    // polls and TTD1 Ready-for-Delivery discovery. Fire on every tick (not
+    // only light): heavy's late await often starves past the waitUntil budget,
+    // and airtableDataWaitMs stays 0 so an Airtable archive cooldown cannot
+    // ReferenceError / skip this Supabase-only heal.
+    if (airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioHealTtdProcessingMissingPublishId(env, { limit: cadence.heavy ? 4 : 2 })
         .then((healed) => {
-          if (healed?.length) console.info("TTD missing-publish-id light heal", JSON.stringify({ count: healed.length, healed }));
+          if (healed?.length) console.info("TTD missing-publish-id cron heal", JSON.stringify({ count: healed.length, heavy: cadence.heavy, healed }));
         })
-        .catch((error) => console.warn("TTD missing-publish-id light heal unavailable", error)));
+        .catch((error) => console.warn("TTD missing-publish-id cron heal unavailable", error)));
     }
     // Existing YouTube upload-job YTS1 GET polls were stranded late behind
     // heavy maintenance. Confirm the EXACT saved job ID; never upload again.
@@ -5287,6 +5290,7 @@ const AIRTABLE_MIN_GAP_MS = 250;
 const AIRTABLE_SLOT_FAIL_FAST_MS = 8000;
 let airtableNextRequestAt = 0;
 /*__STUDIO_WORKER_EXTRACT:airtableCooldownWaitMs__*/
+/*__STUDIO_WORKER_EXTRACT:airtableDataWaitMs__*/
 async function airtableRequestSlot() {
   const now = Date.now();
   const wait = Math.max(0, airtableNextRequestAt - now);

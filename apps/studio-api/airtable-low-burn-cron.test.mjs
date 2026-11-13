@@ -35,6 +35,7 @@ test("Worker health advertises airtable burn-kill cron build", () => {
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
   assert.match(worker, /airtableCooldownWaitMs/);
+  assert.match(worker, /airtableDataWaitMs/);
 });
 
 test("production Worker keeps five-minute Studio cron and isolates Factory one-minute recovery", () => {
@@ -116,7 +117,12 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: 2 \}\)/);
-  assert.match(beforeHeavy, /ctx\.waitUntil\(studioHealTtdProcessingMissingPublishId\(env, \{ limit: 2 \}\)/);
+  // Missing-publish-id heal is independent of the heavy gate (Supabase SoR);
+  // airtableDataWaitMs must be defined so light ticks do not ReferenceError.
+  assert.match(scheduled, /airtableDataWaitMs\(\)/);
+  assert.match(scheduled, /ctx\.waitUntil\(studioHealTtdProcessingMissingPublishId\(env, \{ limit: cadence\.heavy \? 4 : 2 \}\)/);
+  const fns01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+  assert.match(fns01, /export function airtableDataWaitMs/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);

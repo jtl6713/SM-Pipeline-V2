@@ -1071,3 +1071,5 @@ Deploy 2026-11-13 Worker 0.10.847-supabase-partial-patch: Partial Platform Outpu
 Deploy 2026-11-13 Worker 0.10.848-ttd1-publish-id-stamp: Persist TTD1 publish_id from pulse response; heal Processing-without-publish-id back to Ready for Delivery; restore wiped TikTok approval columns. Runner 2026-11-13-ttd1-partial-bag-mirror merges bag fields on partial Output mirrors. Verify /health version 0.10.848-ttd1-publish-id-stamp.
 
 Deploy 2026-11-13 Worker 0.10.849-ttd-missing-id-light-heal: Run Processing-without-publish_id TikTok heal on independent light cron so heavy maintenance cannot park TTD1 bag-drop rows for a half hour. Verify /health version 0.10.849-ttd-missing-id-light-heal.
+
+Deploy 2026-11-13 Worker 0.10.850-ttd-missing-id-datawait: Define airtableDataWaitMs (was undefined ReferenceError on light ticks) and run Processing-missing-publish_id heal on every cron tick so heavy waitUntil starvation cannot park TTD1 fixtures. Verify /health version 0.10.850-ttd-missing-id-datawait.
