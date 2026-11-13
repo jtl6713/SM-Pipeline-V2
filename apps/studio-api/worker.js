@@ -1362,7 +1362,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.851-ttd1-nullslast",
+          version: "0.10.852-ttd-draft-datawait",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4518,14 +4518,17 @@ export default {
         })))
         .catch((error) => console.warn("TTD2 existing-draft light cron unavailable", error)));
     }
-    // Due TTD0/TTD1/TTD3 draft advances previously waited for the heavy gate
-    // at the end of a long maintenance sweep. After Airtable freeze, discovery
-    // works but heavy ticks still starve Ready for Delivery. Bound the same
-    // reconcile on independent LIGHT ticks so inbox drafts keep moving.
-    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
-      ctx.waitUntil(studioReconcileTiktokDrafts(env, { limit: 2 })
-        .then((results) => console.info("TTD draft light cron", JSON.stringify({
+    // Due TTD0/TTD1/TTD3 draft advances. Reads are Supabase; pulses go to the
+    // Python runner; publish_id stamps write Supabase SoR. Do not gate on the
+    // Airtable archive cooldown — after a heavy tick that 429s Airtable, light
+    // TTD1 was skipped and healed Ready for Delivery rows never got publish_id.
+    // Run every tick (heavy included) so late heavy waitUntil starvation cannot
+    // park the inbox for a half hour.
+    if (airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokDrafts(env, { limit: cadence.heavy ? 4 : 2 })
+        .then((results) => console.info("TTD draft cron", JSON.stringify({
           checked: results.length,
+          heavy: cadence.heavy,
           stages: results.reduce((acc, row) => {
             const key = row.stage || "unknown";
             acc[key] = (acc[key] || 0) + 1;
@@ -4533,7 +4536,7 @@ export default {
           }, {}),
           results,
         })))
-        .catch((error) => console.warn("TTD draft light cron unavailable", error)));
+        .catch((error) => console.warn("TTD draft cron unavailable", error)));
     }
     // Processing without TikTok_Draft_Publish_ID is invisible to TTD2 light
     // polls and TTD1 Ready-for-Delivery discovery. Fire on every tick (not
