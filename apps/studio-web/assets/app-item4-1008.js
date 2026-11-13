@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.935-meta-manual-url";
+  const BUILD_ID = "item4-0.6.936-manual-action-guidance";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18806,6 +18806,18 @@ function timedScriptAssetLabel(asset, index) {
       ["Studio state", output.studio_state || pipelineStudioStateLabel(output) || "—"],
       ["Publish safety", output.do_not_publish ? "Do Not Publish" : "Publishing enabled"],
     ];
+    const studioState = String(output.studio_state || pipelineStudioStateLabel(output) || "").trim();
+    if (/manual action/i.test(studioState)) {
+      const platform = String(output.platform || "").trim().toLowerCase();
+      let what = "See the action card below.";
+      if (platform === "tiktok") {
+        what = "Use TikTok output actions below: Resend draft if needed, then paste the live TikTok URL.";
+      } else if (platform === "instagram" || platform === "facebook") {
+        const label = String(output.platform || "Meta").trim() || "Meta";
+        what = `Use the ${label} live URL card below: paste the public post URL after it is live.`;
+      }
+      rows.unshift(["What to do", what]);
+    }
     if (output.manual_fallback_required) rows.push(["Manual fallback", "Required — paste the live post URL below"]);
     const publishError = String(output.publish_error_message || output.publish_error || "").trim();
     const publishStage = String(output.publish_error_stage || "").trim();
@@ -18886,12 +18898,16 @@ function timedScriptAssetLabel(asset, index) {
     const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
     if (publish === "published" || output === "published" || draft === "published") return false;
     if (output === "approved for publishing") return true;
-    // Supabase SoR often leaves Output_Status null while Music_Status is Manual
-    // Action Required (Miami Vizcaya 4988 / NYC SoHo 5031). Keep Resend available.
+    // Supabase SoR often leaves Output_Status null (Miami Vizcaya 4988 / NYC SoHo 5031).
+    // Anytime Manual Action needs a live URL, also offer Resend (inbox + handoff email).
+    if (tiktokNeedsUrlEntry(record)) return true;
     const music = String(record?.music_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
     if (music.includes("manual action") || studio.includes("manual action")) {
-      return publish === "ready to publish" || publish.includes("manual");
+      return publish === "ready to publish"
+        || publish === "ready to schedule"
+        || publish.includes("manual")
+        || !publish;
     }
     return false;
   }
@@ -19059,12 +19075,14 @@ function timedScriptAssetLabel(asset, index) {
     const photoSoundRequired = tiktok && tiktokPhotoSoundRequired(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
     let prompt = "Manage the TikTok draft here.";
-    if (awaiting) {
+    if (awaiting && canResend) {
       prompt = /manual action/i.test(String(output?.music_status || ""))
-        ? "Add/select sound in the TikTok draft if needed, publish from the inbox, then paste the public URL below."
-        : "After publishing from the TikTok inbox, paste the public URL below.";
+        ? "Action needed: tap Resend draft to TikTok (sends the draft + handoff email), add/select sound in the TikTok inbox if asked, publish there, then paste the public TikTok URL below."
+        : "Action needed: tap Resend draft to TikTok if the draft/email is missing, publish from the TikTok inbox, then paste the public TikTok URL below.";
+    } else if (awaiting) {
+      prompt = "Action needed: publish from the TikTok inbox, then paste the public TikTok URL below.";
     } else if (canResend) {
-      prompt = "Resend the draft to the TikTok inbox when needed. After it is live, open this output again to paste the public URL.";
+      prompt = "Action needed: tap Resend draft to TikTok to send the draft and handoff email again.";
     } else if (posted) {
       prompt = "This TikTok is already live. The public URL is saved.";
     }
@@ -19152,17 +19170,22 @@ function timedScriptAssetLabel(asset, index) {
     const name = metaPlatformLabel(output);
     const publishError = String(output?.publish_error_message || output?.publish_error || "").trim();
     const publishStage = String(output?.publish_error_stage || "").trim();
-    const prompt = output?.manual_fallback_required
-      ? `${name} publish needs a manual close. Confirm the post is live in the app, then paste the public URL below.`
-      : `If ${name} publish finished outside Studio, paste the live post URL here to close this output as published.`;
-    if (heading) heading.textContent = `${name} live URL`;
+    let prompt = `Action needed: paste the live ${name} post URL below after the post is public.`;
+    if (publishError || publishStage) {
+      prompt = `Action needed: ${name} publish failed in Studio. Open ${name}, confirm whether the post is live, publish it there if needed, then paste the public URL below.`;
+    } else if (output?.manual_fallback_required) {
+      prompt = `Action needed: ${name} requires a manual close. Confirm the post is live in the app (or publish it there), then paste the public URL below.`;
+    }
+    if (heading) heading.textContent = `${name}: Manual Action Required`;
     if (label) label.textContent = `${name} post URL`;
     if (save) save.textContent = `Save ${name} URL`;
     if (copy) copy.textContent = (!awaiting && posted) ? `This ${name} post is already live. The public URL is saved.` : prompt;
     if (errorEl) {
-      if (awaiting && (publishStage || publishError)) {
+      if (awaiting && (publishStage || publishError || output?.manual_fallback_required)) {
         errorEl.hidden = false;
-        errorEl.textContent = [publishStage, publishError].filter(Boolean).join(": ");
+        errorEl.textContent = publishStage || publishError
+          ? [publishStage, publishError].filter(Boolean).join(": ")
+          : "Manual fallback is on — Studio is waiting for a public post URL.";
         errorEl.classList.add("error-text");
       } else {
         errorEl.hidden = true;
@@ -20044,6 +20067,7 @@ function timedScriptAssetLabel(asset, index) {
     renderCreativeOutputMeta(output);
     renderCreativeTiktokComplete(output);
     renderCreativeYoutubeComplete(output);
+    renderCreativeMetaComplete(output);
     populateCreativeGlobalControls(output);
     renderCreativeSlides();
     renderCreativeChangeProgress(data.handoff || creativeHandoffStatus);
@@ -22801,7 +22825,7 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(pipelinePublishStatusLabel(record) || "—");
     // Keep render/review/publish detail in the DOM for operators and hermetic
     // assertions; CSS may hide .pipeline-status-detail in the dense Pipeline table.
-    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}<div class="pipeline-status-detail"><span title="Render status">${escapeHtml(render)}</span><span title="Review status">${escapeHtml(review)}</span><span title="Publish status">${escapeHtml(publish)}</span></div>${pipelineTiktokCompleteCell(record)}${pipelineYoutubeCompleteCell(record)}</div>`;
+    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}<div class="pipeline-status-detail"><span title="Render status">${escapeHtml(render)}</span><span title="Review status">${escapeHtml(review)}</span><span title="Publish status">${escapeHtml(publish)}</span></div>${pipelineTiktokCompleteCell(record)}${pipelineYoutubeCompleteCell(record)}${pipelineMetaCompleteCell(record)}</div>`;
   }
 
   function renderOutputsTable(target, records) {

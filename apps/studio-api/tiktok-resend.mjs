@@ -12,8 +12,23 @@ export function tiktokResendEligibility(record = {}) {
   if (publish === "published" || output === "published" || draft === "published") {
     return "already_published";
   }
-  if (output !== "approved for publishing") return "not_approved";
-  return null;
+  if (output === "approved for publishing") return null;
+  // Supabase SoR often leaves Output_Status null while Music_Status / studio
+  // state is Manual Action Required (Miami Vizcaya 4988 / NYC SoHo 5031).
+  const music = String(record.music_status || "").trim().toLowerCase();
+  const studio = String(record.studio_state || "").trim().toLowerCase();
+  const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+  const awaitingManual = music.includes("manual action")
+    || studio.includes("manual action")
+    || manual === "required"
+    || draft.includes("manual action")
+    || draft.includes("draft delivered")
+    || draft.includes("ready for delivery");
+  if (awaitingManual) return null;
+  if (!output && (publish === "ready to publish" || publish === "ready to schedule" || publish.includes("manual"))) {
+    return null;
+  }
+  return "not_approved";
 }
 
 export function tiktokResendRearmFields({
@@ -56,7 +71,7 @@ export const TIKTOK_RESEND_ERRORS = {
   not_tiktok: "Resend draft is only available for TikTok outputs.",
   do_not_publish: "Publishing is blocked on this output.",
   already_published: "This TikTok is already marked Published. Paste a new URL only if you need to correct it.",
-  not_approved: "Approve this TikTok for publishing before resending the draft.",
+  not_approved: "This TikTok is not ready to resend. Approve for publishing or wait until Manual Action Required.",
 };
 
 export function tiktokNeedsDraftResend(record) {

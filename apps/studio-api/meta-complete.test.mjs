@@ -87,3 +87,11 @@ test("Worker wires /meta-complete and UI surfaces Instagram URL paste", () => {
   assert.match(app, /pipelineMetaCompleteCell/);
   assert.match(app, /Manual fallback/);
 });
+
+test("creative load and Pipeline compose Meta URL actions", () => {
+  assert.match(app, /renderCreativeYoutubeComplete\(output\);\s*\n\s*renderCreativeMetaComplete\(output\);/);
+  assert.match(app, /pipelineYoutubeCompleteCell\(record\)\}\$\{pipelineMetaCompleteCell\(record\)/);
+  assert.match(app, /What to do/);
+  assert.match(app, /Action needed:.*Resend draft to TikTok/);
+});
+

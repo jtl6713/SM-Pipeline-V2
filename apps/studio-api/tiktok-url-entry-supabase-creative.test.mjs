@@ -62,7 +62,7 @@ test("Miami Vizcaya 4988 Music_Status Manual opens TikTok URL entry", () => {
   assert.equal(mapped.studio_state, "Manual Action Required");
   assert.equal(tiktokCompleteEligibility(mapped), null);
   assert.equal(tiktokNeedsUrlEntry(mapped), true);
-  assert.match(app, /Add\/select sound in the TikTok draft/);
+  assert.match(app, /Resend draft to TikTok \(sends the draft \+ handoff email\)/);
   assert.match(app, /Miami Vizcaya 4988/);
 });
 
@@ -78,5 +78,10 @@ test("Instagram Manual_Fallback also has meta-complete route and creative card",
   assert.match(worker04, /markStudioMetaComplete/);
   assert.match(app, /metaNeedsUrlEntry/);
   assert.match(app, /creativeMetaComplete/);
+});
+
+test("TikTok Manual Action keeps Resend when URL entry is shown", () => {
+  assert.match(app, /if \(tiktokNeedsUrlEntry\(record\)\) return true;/);
+  assert.match(app, /Resend draft to TikTok \(sends the draft \+ handoff email\)/);
 });
 
