@@ -105,6 +105,8 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.match(afterHeavy, /studioSweepPostPublishMediaRelease/);
 
   // Light body (before heavy gate) must not still call platform reconcile storms.
+  // Bounded TTD draft reconcile is an intentional light waitUntil so heavy
+  // maintenance cannot starve Ready for Delivery after the Airtable freeze.
   const beforeHeavy = scheduled.slice(0, heavyGate);
   assert.match(beforeHeavy, /studioHealPhantomRerender/);
   assert.match(beforeHeavy, /studioHealAutonomousRevisionLock/);
@@ -113,7 +115,7 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.ok(revisionHeal >= 0 && lightResume > revisionHeal);
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
-  assert.doesNotMatch(beforeHeavy, /studioReconcileTiktokDrafts/);
+  assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: 2 \}\)/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);

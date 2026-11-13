@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.845-tiktok-reconcile-filter/);
+  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.845-tiktok-reconcile-filter/);
+  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2617,7 +2617,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.845-tiktok-reconcile-filter/);
+  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2765,8 +2765,10 @@ test("render heal columns and creative master registry stay off the lean marker"
   const ttd2Open = deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: false });
   const ttd3 = deskHealOutputFilter("ttd3_email");
   assert.match(ttd0, /tiktok_draft_status\.eq\.%22Ready%20for%20Assets%22/);
+  assert.match(ttd0, /%22Waiting%20for%20Schedule%22/);
   assert.match(ttd0, /scheduled_post_date\.lte\.2026-11-12T22%3A55%3A00\.000Z/);
-  assert.match(ttd1, /%22Waiting%20for%20Schedule%22/);
+  assert.doesNotMatch(ttd1, /%22Waiting%20for%20Schedule%22/);
+  assert.match(ttd1, /%22Ready%20for%20Delivery%22/);
   assert.match(ttd1, /publish_next_retry_at\.lte\.2026-11-12T22%3A40%3A00\.000Z/);
   assert.match(ttd1, /and\(tiktok_draft_status\.eq\.%22Retry%20Pending%22,or\(/);
   assert.doesNotMatch(ttd1, /or=\(error_messages->>Publish_Error_Stage/);
@@ -2777,8 +2779,15 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(ttd3, /TikTok_Draft_Email_Sent_At/);
   assert.match(ttd3, /Manual_Completion_Status\.eq\.Required/);
   assert.match(ttd3, /%22Draft%20Delivered/);
+  const overdue = deskHealOutputFilter("overdue_scheduled", { nowMs });
+  assert.match(overdue, /publish_status=eq\.Ready%20to%20Schedule/);
+  assert.match(overdue, /output_status=eq\.Approved%20for%20Publishing/);
+  assert.match(overdue, /scheduled_post_date=lt\.2026-11-12T22%3A40%3A00\.000Z/);
+  assert.doesNotMatch(overdue, /publish_status=eq\.%22Ready%20to%20Schedule%22/);
   assert.match(factory, /kind: "ttd0_ready"/);
   assert.match(factory, /kind: "ttd3_email"/);
+  assert.match(factory, /kind: "overdue_scheduled"/);
+  assert.match(factory, /studioOverdueDispatchBudgetOpen/);
   assert.match(factory, /studioReadTiktokReconcileOutput/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_produce"/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_escalated"/);

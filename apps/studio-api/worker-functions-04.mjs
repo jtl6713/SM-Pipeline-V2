@@ -1177,7 +1177,7 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
       stage: "ttd0",
       kind: "ttd0_ready",
       pulse: studioPulseTtd0,
-      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))`,
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))`,
       sortField: "Scheduled_Post_Date",
       sortDirection: "asc",
     },
@@ -1185,7 +1185,9 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
       stage: "ttd1",
       kind: "ttd1_ready",
       pulse: studioPulseTtd1,
-      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Ready for Delivery",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
     },
     {
       stage: "ttd2",
@@ -1515,16 +1517,35 @@ export async function studioHealOverdueTikTokPrep(env, record) {
 }
 /*__STUDIO_WORKER_END:studioHealOverdueTikTokPrep__*/
 
+function studioOverdueDispatchBudgetOpen(record, nowMs = Date.now()) {
+  const count = Number(f(record, "Studio_Publish_Dispatch_Count") || 0);
+  if (Number.isFinite(count) && count >= 8) return false;
+  const lastAt = Date.parse(String(f(record, "Studio_Publish_Dispatch_At") || ""));
+  if (Number.isFinite(lastAt) && (nowMs - lastAt) < 6 * 60 * 1000) return false;
+  return true;
+}
+
 export async function studioReconcileOverdueScheduledPublishes(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
   let rows = [];
   try {
-    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: STUDIO_OVERDUE_SCHEDULED_FORMULA,
-      sortField: "Scheduled_Post_Date",
-      sortDirection: "asc",
-    });
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      const scanned = await listSupabaseDeskHealOutputs(env, {
+        kind: "overdue_scheduled",
+        limit: Math.min(80, Math.max(limit * 4, 24)),
+        sortDirection: "asc",
+        nowMs,
+      });
+      rows = scanned.filter((row) => studioOverdueDispatchBudgetOpen(row, nowMs)).slice(0, limit);
+    } else {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: STUDIO_OVERDUE_SCHEDULED_FORMULA,
+        sortField: "Scheduled_Post_Date",
+        sortDirection: "asc",
+      });
+    }
   } catch (error) {
     console.warn("overdue scheduled publish rescue scan failed", error);
     return [];

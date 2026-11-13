@@ -2082,13 +2082,15 @@ function tiktokReconcileOutputFilter(kind, options = {}) {
   const ttd2 = encodeDeskLogicValue("*TTD2*");
   const ttd3 = encodeDeskLogicValue("*TTD3*");
   if (kind === "ttd0_ready") {
-    const status = `or=(tiktok_draft_status.eq.${readyAssets},`
+    // Due Waiting for Schedule promotes to Ready for Assets inside TTD0 reconcile.
+    const status = `or=(tiktok_draft_status.eq.${readyAssets},tiktok_draft_status.eq.${waitingSchedule},`
       + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd0}))`;
     return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${status}`;
   }
   if (kind === "ttd1_ready") {
     // Nested operators inside or= must be or(...)/and(...), not or= / and=.
-    const status = `or=(tiktok_draft_status.eq.${readyDelivery},tiktok_draft_status.eq.${waitingSchedule},`
+    // Waiting for Schedule belongs on TTD0 (promote → assets), not TTD1 init.
+    const status = `or=(tiktok_draft_status.eq.${readyDelivery},`
       + `and(tiktok_draft_status.eq.${retryPending},or(error_messages->>Publish_Error_Stage.ilike.${ttd1},`
       + "error_messages->>Publish_Error_Stage.eq.TTD_CAPACITY)))";
     return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
@@ -2177,6 +2179,16 @@ export function deskHealOutputFilter(kind, options = {}) {
   }
   if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
     return tiktokReconcileOutputFilter(kind, options);
+  }
+  if (kind === "overdue_scheduled") {
+    const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+    const dueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
+    // Top-level eq filters use plain URL encoding; quoted logic values are for or=/and= only.
+    return `${quiet}&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&review_status=eq.Approved`
+      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Schedule")}`
+      + `&scheduled_post_date=not.is.null&scheduled_post_date=lt.${dueIso}`;
   }
   if (kind === "fb_story_remote") {
     const stage = "or=(error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_RATE_LIMIT_368,"
@@ -2363,7 +2375,7 @@ export async function listSupabaseDeskHealOutputs(env, {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(80, Number(limit) || 30));
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const order = kind === "ttd0_ready"
+  const order = (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "overdue_scheduled")
     ? `order=scheduled_post_date.${direction}.nullsfirst`
     : `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
