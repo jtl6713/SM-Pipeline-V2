@@ -45,6 +45,7 @@ import {
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
+  listSupabaseManualActionOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
   listSupabaseOverviewPack,
@@ -1768,9 +1769,21 @@ export async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
 /*__STUDIO_WORKER_END:writePipelineOutputsSnapshot__*/
 
 export async function loadManualActionPipelineOutputs(env, profile) {
+  // Older manuals fall out of newest-250 / open-1000. All Profiles still counts
+  // them, so Attention/Manual click-through must rescue by predicate, not age.
+  // Under supabase SoR, Airtable is archive-frozen — scan live platform_outputs.
+  if (studioPipelineReadSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    try {
+      return await listSupabaseManualActionOutputs(env, {
+        profileAirtableId: profile.id,
+        limit: 100,
+      });
+    } catch (error) {
+      console.warn("supabase pipeline manual-action scan failed", error);
+      if (studioWriteSource(env) === "supabase") return [];
+    }
+  }
   const profileFormula = contentProfileFilterFormula(profile);
-  // Older manuals fall out of newest-250 once Studio_Pipeline_Open flips off.
-  // All Profiles still counts them, so the attention click showed fewer rows.
   // A stored post URL is already Published and stays out of this scan.
   const manual = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Output_Status}!="Published",{Output_Status}!="Skipped",{Publish_Status}!="Published",{Publish_Status}!="Published Privately",{Platform_Post_URL}=BLANK(),{Manual_Published_URL}=BLANK(),OR({Publish_Status}="Manual Publish Required",FIND("Manual Action",{TikTok_Draft_Status}&""),FIND("Manual Fallback",{TikTok_Draft_Status}&""),{Manual_Completion_Status}="Required",{Music_Status}="Manual Action Required",{Manual_Fallback_Required}=1))';
   const filterFormula = profileFormula ? `AND(${profileFormula},${manual})` : manual;
@@ -2302,7 +2315,44 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
   // A normal newest-250 snapshot cannot answer older Failed/Past Due/No Date
   // clicks, and an Airtable prefilter alone can include the wrong state.
   const focusedMode = String(url.searchParams.get("mode") || "");
-  if (["approved_exceptions", "approved_past_due", "approved_missing_date", "failed"].includes(focusedMode)) {
+  if (["approved_exceptions", "approved_past_due", "approved_missing_date", "failed", "manual", "attention"].includes(focusedMode)) {
+    const manualFocused = focusedMode === "manual" || focusedMode === "attention";
+    const observedAt = Date.now();
+    // Home Manual / Needs attention must not depend on newest-250. Under
+    // supabase SoR, scan platform_outputs; Airtable stays archive-only.
+    if (manualFocused
+      && studioPipelineReadSource(env) === "supabase"
+      && studioSupabaseConfigured(env)) {
+      const rows = await listSupabaseManualActionOutputs(env, {
+        profileAirtableId: profile.id,
+        limit: 200,
+      });
+      const labels = await pipelineContentLabelsById(
+        env, profile, studioPipelineContentIdsFromOutputs(rows));
+      const mapped = rows.map((record) => {
+        const output = mapOutput(
+          record, null, null,
+          labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null);
+        return {
+          ...output,
+          home_exception_kind: homeApprovedExceptionKind(output, observedAt),
+          home_failed: homeIsUnpublishedFailure(output),
+        };
+      });
+      const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
+        String(row?.studio_state || "") === "Manual Action Required"
+      ));
+      return respond(request, env, {
+        ok: true,
+        records: matched,
+        count: matched.length,
+        profile: mapStudioContentProfile(profile),
+        read_source: "supabase",
+        complete: rows.length < 200,
+        scanned_at: new Date(observedAt).toISOString(),
+        mode: focusedMode,
+      });
+    }
     const profileFormula = contentProfileFilterFormula(profile);
     const exceptionFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Review_Status}="Approved",'
       + '{Output_Status}!="Published",{Publish_Status}!="Published",'
@@ -2311,7 +2361,10 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
       + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))';
     const failureFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,'
       + 'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Render_Status}="Failed"))';
-    const localFormula = focusedMode === "failed" ? failureFormula : exceptionFormula;
+    const manualFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Output_Status}!="Published",{Output_Status}!="Skipped",{Publish_Status}!="Published",{Publish_Status}!="Published Privately",{Platform_Post_URL}=BLANK(),{Manual_Published_URL}=BLANK(),OR({Publish_Status}="Manual Publish Required",FIND("Manual Action",{TikTok_Draft_Status}&""),FIND("Manual Fallback",{TikTok_Draft_Status}&""),{Manual_Completion_Status}="Required",{Music_Status}="Manual Action Required",{Manual_Fallback_Required}=1))';
+    const localFormula = focusedMode === "failed"
+      ? failureFormula
+      : (manualFocused ? manualFormula : exceptionFormula);
     const filterFormula = profileFormula ? `AND(${profileFormula},${localFormula})` : localFormula;
     const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       fields: OUTPUT_LIST_FIELDS,
@@ -2323,7 +2376,6 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     });
     const labels = await pipelineContentLabelsById(
       env, profile, studioPipelineContentIdsFromOutputs(rows));
-    const observedAt = Date.now();
     const mapped = rows.map((record) => {
       const output = mapOutput(
         record, null, null,
@@ -2336,6 +2388,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     });
     const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
       focusedMode === "failed" ? row.home_failed
+        : manualFocused ? String(row?.studio_state || "") === "Manual Action Required"
         : focusedMode === "approved_exceptions" ? Boolean(row.home_exception_kind)
         : row.home_exception_kind === focusedMode
     ));

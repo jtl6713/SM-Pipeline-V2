@@ -763,3 +763,5 @@ Deploy Studio UI 0.6.929 blackout 10:30 PM–3:30 AM profile-local and Story com
 2026-11-11T13:01:46Z factory-overlap-empty-activity UI 0.6.930-factory-overlap-activity
 Deploy 2026-11-11 Studio UI 0.6.931-completed-bulk-publish: existing Home Completed Video option chooses all-outputs Publish Now or Normal Approval. PR #1825. Verify custom domain.
 Deploy UI 0.6.932 completed-video publish-choice heading visibility and bright cyan title after PR #1829; 17/17 CI checks passed. No API publishing behavior changes.
+
+Deploy 2026-11-13 Studio UI 0.6.933-manual-attention-drilldown: Pipeline Manual/attention quick views use the focused /api/outputs?mode= drill-down (same as Failed). Hard-refresh; footer UI build 0.6.933.

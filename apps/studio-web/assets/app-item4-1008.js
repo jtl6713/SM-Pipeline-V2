@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.932-publish-contrast-layout";
+  const BUILD_ID = "item4-0.6.933-manual-attention-drilldown";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23768,7 +23768,10 @@ function timedScriptAssetLabel(asset, index) {
       // Strict profile-scoped exception drill-down, not the newest-250 snapshot.
       // Home sees historical approved records that can otherwise be absent from
       // Pipeline, especially rate-limited Stories and already-live FB posts.
-      const focusedView = ["approved_past_due", "approved_missing_date", "failed"].includes(pipelineViewFilter);
+      // Manual / attention share Home's Manual Action Required predicate. Those
+      // rows age out of newest-250 and open-1000, so they need the same focused
+      // drill-down as Failed / past-due (not a client filter on a short page).
+      const focusedView = ["approved_past_due", "approved_missing_date", "failed", "manual", "attention"].includes(pipelineViewFilter);
       if (focusedView) {
         const focusedMode = pipelineViewFilter; // Same explicit Home bucket on the server.
         const focused = await api("/api/outputs?mode=" + focusedMode, { timeoutMs: 15000, retries: 1 });
@@ -28016,7 +28019,7 @@ function timedScriptAssetLabel(asset, index) {
       // Exception/Failed views are a separately scoped historical fetch.
       // Never reuse those rows for All, other profile tabs, or another
       // exception view: that was making navigation silently drop outputs.
-      const needsFreshScope = ["approved_missing_date", "approved_past_due", "failed"].includes(pipelineViewFilter)
+      const needsFreshScope = ["approved_missing_date", "approved_past_due", "failed", "manual", "attention"].includes(pipelineViewFilter)
         || pipelineListExceptionScope === true;
       if (needsFreshScope) {
         pipelineListExceptionScope = false;
