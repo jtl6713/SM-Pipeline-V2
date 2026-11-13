@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ttd.package import handoff_email_text
+from ttd.package import ascii_safe_email_text, handoff_email_text
 
 
 def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
@@ -31,10 +31,10 @@ def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
 
     body = handoff_email_text(record, profile=profile)
 
-    assert "TikTok draft delivered — manual action required" in body
+    assert "TikTok draft delivered - manual action required" in body
     assert "Profile: NYC - New York City" in body
     assert "TikTok: @nyshining8" in body
-    assert "OUTPUT #1304 — OMNY Tap Tips" in body
+    assert "OUTPUT #1304 - OMNY Tap Tips" in body
     assert "CAPTION + HASHTAGS" in body
     assert "Tap in and ride like a local." in body
     assert "#NYC" in body
@@ -42,11 +42,38 @@ def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
     assert "ORDERED DRAFT ASSETS" in body
     assert "MARK AS PUBLISHED" in body
     assert "https://media.chicagoshining.com/omny-01.jpg" in body
+    assert all(ord(ch) < 128 for ch in body)
+    assert "=" * 10 not in body
     assert "<div" not in body.casefold()
     assert "<p" not in body.casefold()
     assert "<br" not in body.casefold()
     assert "<a " not in body.casefold()
     assert "</" not in body.casefold()
+
+
+def test_tiktok_handoff_text_strips_unicode_that_forced_qp_on_apple_mail():
+    record = {
+        "fields": {
+            "Output_ID": 4127,
+            "Output_Title": "Chicago, Illinois, USA",
+            "TikTok_Draft_Type": "Video",
+            "Output_Caption": (
+                "Chicago, Illinois—bold architecture, lakefront breezes 🏙️\n"
+                "What’s your can’t-miss Windy City move?"
+            ),
+            "Output_Hashtags": "#Chicago #Illinois",
+        }
+    }
+    body = handoff_email_text(record)
+    assert "TikTok draft delivered - manual action required" in body
+    assert "OUTPUT #4127 - Chicago, Illinois, USA" in body
+    assert "Chicago, Illinois - bold architecture" in body
+    assert "What's your can't-miss" in body
+    assert "🏙️" not in body
+    assert "—" not in body
+    assert "=E2=80=94" not in body
+    assert all(ord(ch) < 128 for ch in body)
+    assert ascii_safe_email_text("A—B 🏙️ C") == "A - B C"
 
 
 def test_tiktok_handoff_caption_stops_at_five_hashtags():

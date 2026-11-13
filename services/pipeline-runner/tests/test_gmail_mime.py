@@ -4,6 +4,8 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import SMTP
 
+from integrations.gmail import PURPOSE_TIKTOK_HANDOFF, GmailClient
+
 
 def test_tiktok_handoff_mime_uses_single_8bit_html_entity():
     html = '<div><b>Profile:</b> LA — Los Angeles</div><p>TikTok accepted the asset package.</p>'
@@ -29,18 +31,18 @@ def test_tiktok_handoff_mime_uses_single_8bit_html_entity():
     assert b"\n" not in raw.replace(b"\r\n", b"")
 
 
-def test_tiktok_handoff_plain_text_mime_cannot_render_html_tags():
+def test_tiktok_handoff_plain_text_mime_uses_7bit_ascii():
     text_body = (
-        "TikTok draft delivered — manual action required\n\n"
+        "TikTok draft delivered - manual action required\n\n"
         "Profile: NYC - New York City\n"
         "TikTok: @nyshining8\n\n"
-        "Output #1304 — OMNY Tap Tips\n"
+        "Output #1304 - OMNY Tap Tips\n"
         "Mark as Published: https://pipeline.chicagoshining.com/hooks/ttd4\n"
     )
     message = EmailMessage(policy=SMTP)
     message["To"] = "chicagoshining@gmail.com"
     message["Subject"] = "TikTok Draft #1304 — NYC - New York City — Ready in Inbox - OMNY Tap Tips"
-    message.set_content(text_body, subtype="plain", charset="utf-8", cte="8bit")
+    message.set_content(text_body, subtype="plain", charset="utf-8", cte="7bit")
 
     raw = message.as_bytes(policy=SMTP)
     parsed = BytesParser(policy=SMTP).parsebytes(raw)
@@ -48,10 +50,31 @@ def test_tiktok_handoff_plain_text_mime_cannot_render_html_tags():
     assert not parsed.is_multipart()
     assert parsed.get_content_type() == "text/plain"
     assert parsed.get_content_charset() == "utf-8"
-    assert parsed["Content-Transfer-Encoding"].lower() == "8bit"
+    assert parsed["Content-Transfer-Encoding"].lower() == "7bit"
     decoded = parsed.get_content()
     assert "Profile: NYC - New York City" in decoded
     assert "<div" not in decoded.casefold()
+    # Subject may still use RFC 2047 Q-encoding (=E2=80=94); the body must not.
+    body_bytes = raw.split(b"\r\n\r\n", 1)[1]
+    assert b"=E2=80=94" not in body_bytes
+    assert b"=3D=3D=3D" not in body_bytes
     assert "Content-Type: text/plain; charset=\"utf-8\"" in raw.decode("utf-8")
     assert b"\r\n" in raw
     assert b"\n" not in raw.replace(b"\r\n", b"")
+
+
+def test_send_text_rejects_non_ascii_tiktok_handoff(monkeypatch):
+    client = GmailClient()
+    monkeypatch.setattr(client, "access_token", lambda: "token")
+
+    try:
+        client.send_text(
+            to="chicagoshining@gmail.com",
+            subject="TikTok Draft #4127 — test",
+            text_body="TikTok draft delivered — manual action required\n",
+            purpose=PURPOSE_TIKTOK_HANDOFF,
+        )
+    except RuntimeError as exc:
+        assert "7-bit ASCII" in str(exc)
+    else:
+        raise AssertionError("expected non-ASCII TikTok handoff body to raise")
