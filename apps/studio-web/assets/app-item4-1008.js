@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.933-manual-attention-drilldown";
+  const BUILD_ID = "item4-0.6.934-tiktok-url-entry-supabase";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18838,12 +18838,14 @@ function timedScriptAssetLabel(asset, index) {
     if (/^https?:\/\//i.test(tiktokLiveUrl(record))) return false;
     const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
+    const music = String(record?.music_status || "").trim().toLowerCase();
     return manual === "required"
       || studio.includes("manual action")
       || studio === "draft delivered"
       || draft.includes("manual action")
       || draft.includes("draft delivered")
-      || draft.includes("manual completion received");
+      || draft.includes("manual completion received")
+      || music.includes("manual action");
   }
 
   function tiktokInboxIsDue(record) {

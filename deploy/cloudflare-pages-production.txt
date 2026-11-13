@@ -765,3 +765,5 @@ Deploy 2026-11-11 Studio UI 0.6.931-completed-bulk-publish: existing Home Comple
 Deploy UI 0.6.932 completed-video publish-choice heading visibility and bright cyan title after PR #1829; 17/17 CI checks passed. No API publishing behavior changes.
 
 Deploy 2026-11-13 Studio UI 0.6.933-manual-attention-drilldown: Pipeline Manual/attention quick views use the focused /api/outputs?mode= drill-down (same as Failed). Hard-refresh; footer UI build 0.6.933.
+
+Deploy 2026-11-13 Studio UI 0.6.934-tiktok-url-entry-supabase: TikTok URL entry also keys off music_status Manual Action Required. Hard-refresh; footer UI build 0.6.934.

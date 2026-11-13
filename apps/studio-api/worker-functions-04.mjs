@@ -1110,6 +1110,11 @@ async function studioReadTiktokReconcileOutput(env, recordId) {
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
 }
 
+/** Same SoR preference as creative GET — eligibility must not use frozen Airtable. */
+async function studioReadOutputRecordForManualComplete(env, recordId) {
+  return studioReadTiktokReconcileOutput(env, recordId);
+}
+
 export async function studioReconcileTiktokProcessing(env, options = {}) {
   if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
   const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
@@ -16678,12 +16683,14 @@ export function tiktokCompleteEligibility(record = {}) {
   if (isTikTokPostUrl(record.platform_post_url) || isTikTokPostUrl(record.manual_published_url)) return "already_published";
   const manual = String(record.manual_completion_status || "").trim().toLowerCase();
   const studio = String(record.studio_state || "").trim().toLowerCase();
+  const music = String(record.music_status || "").trim().toLowerCase();
   const awaiting = manual === "required"
     || studio.includes("manual action")
     || studio === "draft delivered"
     || draft.includes("manual action")
     || draft.includes("draft delivered")
-    || draft.includes("manual completion received");
+    || draft.includes("manual completion received")
+    || music.includes("manual action");
   if (!awaiting) return record.do_not_publish ? "do_not_publish" : "manual_completion_not_required";
   return null;
 }
@@ -16832,7 +16839,7 @@ export async function markStudioTiktokComplete(request, env, url) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const postUrl = String(payload?.platform_post_url || payload?.tiktok_url || "").trim();
   if (!isTikTokPostUrl(postUrl)) throw new HttpError(400, "Paste a live TikTok URL containing tiktok.com.");
-  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  const current = await studioReadOutputRecordForManualComplete(env, match[1]);
   if (!current?.id) throw new HttpError(404, "Platform Output was not found");
   const reason = tiktokCompleteEligibility(tiktokCompleteViewFromRecord(current));
   if (reason === "already_published") {
@@ -16851,7 +16858,7 @@ export async function markStudioTiktokComplete(request, env, url) {
 export async function resendStudioTiktokDraft(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-resend$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
-  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  const existing = await studioReadOutputRecordForManualComplete(env, match[1]);
   if (!existing?.id) throw new HttpError(404, "Platform Output was not found");
   const reason = tiktokResendEligibility(tiktokCompleteViewFromRecord(existing));
   if (reason) {
