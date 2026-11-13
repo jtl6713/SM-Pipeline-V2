@@ -233,6 +233,53 @@ def test_due_now_formulas_use_stored_columns():
     ) is None
 
 
+def test_orch_auto_publish_and_left_prefix():
+    from orch.formulas import TTD_GUARD, TTD_RETRY_PREFIX
+
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "{Auto_Publish_Enabled}=1",
+    ) is not None
+    assert "auto_publish_enabled" in formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "{Auto_Publish_Enabled}=1",
+    )
+    guard = formula_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, TTD_GUARD)
+    assert guard is not None
+    assert "auto_publish_enabled" in guard
+    assert "publish_next_retry_at" in guard
+    retry = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        TTD_RETRY_PREFIX + 'LEFT({Publish_Error_Stage},4)="TTD0"))',
+    )
+    assert retry is not None
+    assert "Publish_Error_Stage.like.TTD0*" in retry
+
+
+def test_orch_ready_views_expand_due_now():
+    from datetime import datetime, timezone
+
+    from supabase_views import view_to_postgrest_filter
+
+    now = datetime(2026, 11, 13, 18, 0, tzinfo=timezone.utc)
+    ttd2 = view_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "TTD2 — Draft Processing", now=now,
+    )
+    assert ttd2 is not None
+    assert "tiktok_draft_status.eq.Processing" in ttd2
+    assert "publish_next_retry_at" in ttd2
+    assert "TikTok_Draft_Action_Due_Now" not in ttd2
+    yt0 = view_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "YT0 Ready for Package Validation", now=now,
+    )
+    assert yt0 is not None
+    assert "platform.eq.YouTube" in yt0
+    assert "YouTube_Action_Due_Now" not in yt0
+    fb_retry = view_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE, "FB — Retry Eligible", now=now,
+    )
+    assert fb_retry is not None
+    assert "platform.eq.Facebook" in fb_retry
+
+
 def test_content_not_checkbox_uses_extras_bag():
     got = formula_to_postgrest_filter(
         CONTENT_ITEMS_TABLE,

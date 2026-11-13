@@ -2402,6 +2402,47 @@ export function deskHealOutputFilter(kind, options = {}) {
     return "test_run_id=is.null"
       + `&and=(or(output_status.eq.Published,publish_status.eq.Published),or(studio_output_type.in.(${reel}),platform_output_type.in.(${named})))`;
   }
+  // Catalog scans in gatherStudioDeskInventory — same classifiers, Supabase pages.
+  if (kind === "rfr_locked") {
+    const statuses = ["Ready for Review"].map(encodeDeskFilterValue).join(",");
+    const review = encodeDeskFilterValue("Review Sent");
+    const rendered = encodeDeskFilterValue("Rendered");
+    const native = encodeDeskFilterValue("Native Photo Route");
+    return "test_run_id=is.null&published_at=is.null"
+      + `&or=(output_status.in.(${statuses}),review_status.eq.${review},`
+      + `render_status.eq.${rendered},render_status.eq.${native})`;
+  }
+  if (kind === "native_photo_unarmed") {
+    return `${quiet}&published_at=is.null`
+      + `&render_status.eq.${encodeDeskFilterValue("Native Photo Route")}`
+      + `&output_status.eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&or=(review_status.is.null,review_status.neq.Approved,publish_status.is.null,auto_publish_enabled.eq.false)`;
+  }
+  if (kind === "youtube_private_source") {
+    const blankVideo = "or=(error_messages->>YouTube_Video_ID.is.null,error_messages->>YouTube_Video_ID.eq.)";
+    const terminal = `youtube_stage.eq.${encodeDeskFilterValue("Terminal Error")}`;
+    const yt1 = "youtube_stage.eq.YT1";
+    const pub = ["Failed", "Manual Publish Required", "Ready to Publish"]
+      .map(encodeDeskFilterValue).join(",");
+    const uploadFailed = `error_messages->>YouTube_Upload_Status.eq.Failed`;
+    return `${quiet}&platform.eq.YouTube&output_status.eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&${blankVideo}&or=(${terminal},and(${yt1},or(publish_status.in.(${pub}),${uploadFailed})))`;
+  }
+  if (kind === "youtube_cover_quota") {
+    const stages = [
+      "error_messages->>Publish_Error_Stage.ilike.*YTS2_POLL*",
+      "error_messages->>Publish_Error_Stage.ilike.*YTS2_THUMBNAIL*",
+      "error_messages->>Publish_Error_Stage.ilike.*YTS2_QUOTA*",
+      "error_messages->>Publish_Error_Stage.ilike.*YTS1*",
+      "error_messages->>Publish_Error_Stage.ilike.*YTP1*",
+    ].join(",");
+    const quota = [
+      "error_messages->>YouTube_Error_Message.ilike.*quota*",
+      "error_messages->>YouTube_Error_Message.ilike.*failed 403*",
+      "error_messages->>Publish_Error_Message.ilike.*quota*",
+    ].join(",");
+    return `${quiet}&platform.eq.YouTube&publish_status.neq.Published&or=(${stages})&or=(${quota})`;
+  }
   throw new Error("Unknown desk heal candidate list");
 }
 

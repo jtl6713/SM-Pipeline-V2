@@ -160,7 +160,7 @@ function makeReviewFactoryHandoffOperations(env) {
           readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
           withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
           patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
-            method:"PATCH",skipSupabaseWriteThrough:true,
+            method:"PATCH",skipSupabaseWriteThrough:true,maeSupabaseVerify:true,
             body:JSON.stringify({fields,typecast:false}),
           }),
           syncOutput:row=>reviewFactorySyncOutput(env,row,"creative-master-fanout"),
@@ -1371,7 +1371,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.868-closeout-slide-lists",
+          version: "0.10.869-closeout-mae-desk-orch",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5355,11 +5355,10 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     ? parseAirtableMutationRecords(pathOrParams, options?.body)
     : [];
   // STUDIO_WRITE_SOURCE=supabase: Output/Content PATCH and POST commit to
-  // Supabase first. A successful Airtable create still returns Airtable's rec
-  // id. A failed Airtable create keeps the Supabase row. Schedule/approve
-  // paths that pass skipSupabaseWriteThrough still require a successful
-  // Airtable export unless maeSupabaseVerify is set and the Supabase commit
-  // succeeded. Those schedule/approve paths verify the slot from Supabase.
+  // Supabase first. A successful commit sets archiveRecords and skips the
+  // Airtable export. Schedule/approve paths pass skipSupabaseWriteThrough and
+  // maeSupabaseVerify so a failed Airtable export (when export still runs)
+  // keeps the Supabase commit and verify reads from Supabase.
   // STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
   // transfer-queue PATCH and POST commit to Supabase first. A successful
   // Airtable create still returns Airtable's rec id. A failed Airtable create

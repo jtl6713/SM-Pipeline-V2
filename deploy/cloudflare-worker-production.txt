@@ -1107,3 +1107,5 @@ Deploy 2026-11-13 Worker 0.10.866-ttd2-ungate-airtable: TTD2/TTD draft/missing-p
 Deploy 2026-11-13 Worker 0.10.867-closeout-gets-settings: Serve Platform Output and Content Item GETs from Supabase when the row exists. studioUpsertSetting writes engagement_settings and re-reads that row. Record deletion is not started. Verify /health version 0.10.867-closeout-gets-settings.
 
 Deploy 2026-11-13 Worker 0.10.868-closeout-slide-lists: Serve carousel slide lists and allowlisted Output/Content list GETs from Supabase when the formula translates. Densify PO_Output_ID and slide readiness fields into carousel_slides.fields. Record deletion is not started. Verify /health version 0.10.868-closeout-slide-lists.
+
+Deploy 2026-11-13 Worker 0.10.869-closeout-mae-desk-orch: MAE schedule paths keep Supabase under maeSupabaseVerify. Desk catalog Output scans use Supabase heal kinds. Orch Ready views snapshotted with due-now expansion; Auto_Publish_Enabled and LEFT(Publish_Error_Stage) formulas translate. Record deletion is not started. Verify /health version 0.10.869-closeout-mae-desk-orch.

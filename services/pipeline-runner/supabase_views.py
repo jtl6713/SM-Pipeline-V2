@@ -1,7 +1,10 @@
 """Snapshotted Airtable view filters for runner Output and Content lists.
 
-Only views whose filters use stored columns are included. A view that depends
-on an Airtable formula field stays on Airtable. An unknown view stays on Airtable.
+Stored-column views and orch Ready/retry views are included. Due-now Airtable
+formula fields (YouTube/TikTok/FB Action_Due_Now) expand via publish_queue.
+Column-compare formula fields (TTD0_Asset_Route_Ready, Assets_Need_Resolution)
+are omitted from those snapshots; Make eligibility still guards. An unknown
+view stays on Airtable unless the allowlisted list formula translates.
 Record deletion is not started. Airtable is a frozen archive.
 """
 
@@ -95,6 +98,17 @@ def _node(table_id: str, node: dict, now: datetime | None) -> str | None:
         if len(parts) == 1:
             return parts[0]
         return _join_filters(op, parts)
+    field = str(node.get("field") or "")
+    kind = str(node.get("type") or "")
+    # Airtable due-now formula fields are computed from stored columns. Expand
+    # them the same way formula_to_postgrest_filter does for `{Field}=1`.
+    if kind == "dueNow":
+        from publish_queue import due_now_postgrest
+
+        want = node.get("value") in (1, True, "1", "true")
+        if op in {"=", "isAnyOf"}:
+            return due_now_postgrest(field, want, now)
+        return None
     ref = _ref(table_id, node)
     if not ref:
         return None
@@ -102,8 +116,6 @@ def _node(table_id: str, node: dict, now: datetime | None) -> str | None:
         return "or(platform_output_count.is.null,platform_output_count.eq.0)"
     if ref == "platform_output_count" and op == "isNotEmpty":
         return "platform_output_count.gt.0"
-    field = str(node.get("field") or "")
-    kind = str(node.get("type") or "")
     if op == "isEmpty":
         if _json_column(table_id, field):
             return f"or({ref}.is.null,{ref}.eq.[])"

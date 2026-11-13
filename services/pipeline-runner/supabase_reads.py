@@ -183,13 +183,14 @@ def try_list_supabase_records(
     # Unknown views and views that use an Airtable formula field stay on Airtable.
     # A snapshotted view filter is combined with an allowlisted formula.
     # Carousel slide lists already encode readiness in the formula (PO_Output_ID
-    # FIND + status predicates). An unknown Airtable view name must not force
+    # FIND + status predicates). Orch Ready/retry formulas encode platform and
+    # lock gates the same way. An unknown Airtable view name must not force
     # Airtable when that formula translates.
     view_filter = ""
     if view:
         view_filter = view_to_postgrest_filter(table_id, view)
         if view_filter is None:
-            if table_id == CAROUSEL_SLIDES_TABLE and formula:
+            if table_id in {CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE} and formula:
                 view_filter = ""
             else:
                 return None

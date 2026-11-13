@@ -891,7 +891,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.868-closeout-slide-lists/);
+  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -995,7 +995,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.868-closeout-slide-lists/);
+  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2752,7 +2752,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.868-closeout-slide-lists/);
+  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2893,6 +2893,15 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(deskHealOutputFilter("inventory_az_ready"), /output_caption/);
   assert.match(deskHealOutputFilter("inventory_approved_dispatch"), /platform=neq\.TikTok/);
   assert.match(deskHealOutputFilter("inventory_published_cover"), /YouTube%20Short/);
+  assert.match(deskHealOutputFilter("rfr_locked"), /Ready%20for%20Review/);
+  assert.match(deskHealOutputFilter("native_photo_unarmed"), /Native%20Photo%20Route/);
+  assert.match(deskHealOutputFilter("youtube_private_source"), /youtube_stage\.eq\.YT1/);
+  assert.match(deskHealOutputFilter("youtube_cover_quota"), /YTS2_QUOTA/);
+  const catalog = readStudioWorkerSource();
+  assert.match(catalog, /studioListDeskCatalogOutputs\(env, "stale_rfr"/);
+  assert.match(catalog, /studioListDeskCatalogOutputs\(env, "phantom_rerender"/);
+  assert.match(catalog, /studioListDeskCatalogOutputs\(env, "ig_too_many"/);
+  assert.match(catalog, /studioListDeskCatalogOutputs\(env, "youtube_cover_quota"/);
   const nowMs = Date.parse("2026-11-12T22:40:00.000Z");
   const ttd0 = deskHealOutputFilter("ttd0_ready", { nowMs });
   const ttd1 = deskHealOutputFilter("ttd1_ready", { nowMs });
@@ -3043,7 +3052,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.868-closeout-slide-lists/);
+  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");

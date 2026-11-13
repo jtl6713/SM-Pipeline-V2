@@ -9865,6 +9865,11 @@ async function studioListDeskInventoryOutputs(env, kind, airtableList) {
   return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList).catch(() => []);
 }
 
+/** Desk catalog Output scans — prefer Supabase heal kinds when SoR is on. */
+async function studioListDeskCatalogOutputs(env, kind, airtableList) {
+  return studioListDeskInventoryOutputs(env, kind, airtableList);
+}
+
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
@@ -10163,12 +10168,12 @@ export async function gatherStudioDeskInventory(env) {
     };
   }
   try {
-    const igCarouselOverRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const igCarouselOverRows = await studioListDeskCatalogOutputs(env, "ig_too_many", {
       limit: 12,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
-    }).catch(() => []);
+    });
     scanned("ig_carousel_too_many_children");
     for (const record of igCarouselOverRows || []) {
       push(classifyIgCarouselTooManyChildren(mapOut(record)));
@@ -10182,12 +10187,12 @@ export async function gatherStudioDeskInventory(env) {
   }
 
   try {
-    const rfrLockedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const rfrLockedRows = await studioListDeskCatalogOutputs(env, "rfr_locked", {
       limit: 25,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent",{Render_Status}="Rendered",{Render_Status}="Native Photo Route"))',
-    }).catch(() => []);
+    });
     scanned("rfr_locked_missing_deliverable", "native_photo_review_strand", "native_photo_approve_incomplete");
     const mapped = (rfrLockedRows || []).map(mapOut);
     const byContent = new Map();
@@ -10215,12 +10220,12 @@ export async function gatherStudioDeskInventory(env) {
     console.warn("desk rfr locked missing deliverable scan failed", error);
   }
   try {
-    const unarmedNative = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const unarmedNative = await studioListDeskCatalogOutputs(env, "native_photo_unarmed", {
       limit: 20,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Native Photo Route",{Output_Status}="Approved for Publishing",OR({Review_Status}=BLANK(),{Review_Status}!="Approved",{Publish_Status}=BLANK(),{Auto_Publish_Enabled}=0))',
-    }).catch(() => []);
+    });
     scanned("native_photo_approve_incomplete");
     for (const record of unarmedNative || []) {
       push(classifyNativePhotoApproveIncomplete(mapOut(record)));
@@ -10229,12 +10234,12 @@ export async function gatherStudioDeskInventory(env) {
     console.warn("desk native-photo approve-incomplete scan failed", error);
   }
   try {
-    const staleRfrRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const staleRfrRows = await studioListDeskCatalogOutputs(env, "stale_rfr", {
       limit: 30,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
-    }).catch(() => []);
+    });
     scanned("awaiting_approval_stale_rfr");
     for (const record of staleRfrRows || []) {
       push(classifyAwaitingApprovalStaleRfr(mapOut(record)));
@@ -10243,12 +10248,12 @@ export async function gatherStudioDeskInventory(env) {
     console.warn("desk awaiting-approval stale RFR scan failed", error);
   }
   try {
-    const phantomRerenderRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const phantomRerenderRows = await studioListDeskCatalogOutputs(env, "phantom_rerender", {
       limit: 24,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="In Production",{Review_Status}="Changes Requested",OR({Render_Status}="Native Photo Route",AND({Final_File_URL}!="",OR({Render_Status}="Waiting in Render Queue",{Render_Status}="Rendered",{Render_Status}="Ready to Render",{Render_Status}=BLANK()))))',
-    }).catch(() => []);
+    });
     scanned("phantom_rerender");
     for (const record of phantomRerenderRows || []) {
       push(classifyPhantomRerender(mapOut(record), nowMs));
@@ -10288,10 +10293,10 @@ export async function gatherStudioDeskInventory(env) {
   }
 
   try {
-    const youtubeFailed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const youtubeFailed = await studioListDeskCatalogOutputs(env, "youtube_private_source", {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${YOUTUBE_PRIVATE_SOURCE_HEAL_INNER})`,
-    }).catch(() => []);
+    });
     scanned("youtube_private_source_fail");
     for (const record of youtubeFailed || []) {
       push(classifyYoutubePrivateSourceFail({
@@ -10304,10 +10309,10 @@ export async function gatherStudioDeskInventory(env) {
   }
 
   try {
-    const youtubeCoverQuota = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const youtubeCoverQuota = await studioListDeskCatalogOutputs(env, "youtube_cover_quota", {
       limit: 8,
       filterFormula: YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
-    }).catch(() => []);
+    });
     scanned("youtube_cover_quota");
     for (const record of youtubeCoverQuota || []) {
       push(classifyYoutubeCoverQuota(mapOut(record)));
@@ -18904,11 +18909,11 @@ export async function studioRecoverFencedIgStaleUpload(env, options = {}) {
         selectedIso:new Date(scheduleIso).toISOString(),fields};
     },
     write:async(plan,{signal})=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputId,{
-      method:"PATCH",signal,skipSupabaseWriteThrough:true,
+      method:"PATCH",signal,skipSupabaseWriteThrough:true,maeSupabaseVerify:true,
       body:JSON.stringify({fields:plan.fields,typecast:true}),
     }),
     verify:async(written,plan)=>{
-      const row=await readOutput(outputId),a=row?.fields||{};
+      const row=await maeVerifiedScheduleRecord(env,outputId),a=row?.fields||{};
       if(row?.id!==outputId || Date.parse(a.Scheduled_Post_Date)!==Date.parse(plan.selectedIso)
         || a.Publish_Status!=="Ready to Schedule" ||
         a.Publish_Locked_By || a.Publish_Locked_At ||

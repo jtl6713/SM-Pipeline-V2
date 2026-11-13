@@ -79,7 +79,7 @@
       }
     ]
   },
-  "TTD3 — Ready for Handoff Email": {
+  "TTD3 \u2014 Ready for Handoff Email": {
     "op": "and",
     "args": [
       {
@@ -95,7 +95,7 @@
         "field": "TikTok_Draft_Status",
         "type": "singleSelect",
         "value": [
-          "Draft Delivered — Manual Action Required"
+          "Draft Delivered \u2014 Manual Action Required"
         ]
       },
       {
@@ -486,6 +486,1094 @@
         "op": "isEmpty",
         "field": "Platform Outputs",
         "type": "multipleRecordLinks"
+      }
+    ]
+  },
+  "TTD0 \u2014 Ready for Draft Asset Preparation": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "TikTok"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Image_Output_Selected",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Image_Publish_Mode",
+        "type": "singleSelect",
+        "value": [
+          "TikTok Draft"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Auto_Publish_Enabled",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isAnyOf",
+        "field": "TikTok_Draft_Status",
+        "type": "singleSelect",
+        "value": [
+          "Ready for Assets"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "TikTok_Draft_Publish_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      },
+      {
+        "op": "isNoneOf",
+        "field": "Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Published"
+        ]
+      }
+    ]
+  },
+  "TTD1 \u2014 Ready for Draft Initialization": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "TikTok"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Image_Output_Selected",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Image_Publish_Mode",
+        "type": "singleSelect",
+        "value": [
+          "TikTok Draft"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Auto_Publish_Enabled",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Asset_Aspect_Family",
+        "type": "singleSelect",
+        "value": [
+          "9:16"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "TikTok_Draft_Status",
+        "type": "singleSelect",
+        "value": [
+          "Ready for Delivery"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "TikTok_Draft_Publish_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      }
+    ]
+  },
+  "TTD2 \u2014 Draft Processing": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "TikTok"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "TikTok_Draft_Status",
+        "type": "singleSelect",
+        "value": [
+          "Processing"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "TikTok_Draft_Publish_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "=",
+        "field": "TikTok_Draft_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      }
+    ]
+  },
+  "TTD \u2014 Retry Eligible": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "TikTok"
+        ]
+      },
+      {
+        "op": "isAnyOf",
+        "field": "TikTok_Draft_Status",
+        "type": "singleSelect",
+        "value": [
+          "Retry Pending"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Publish_Retry_Eligible",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "=",
+        "field": "TikTok_Draft_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "=",
+        "field": "Manual_Fallback_Required",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      }
+    ]
+  },
+  "FB0 \u2014 Ready for 4x5 Asset Preparation": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Image_Output_Selected",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "isAnyOf",
+        "field": "Image_Publish_Mode",
+        "type": "singleSelect",
+        "value": [
+          "Automated"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Auto_Publish_Enabled",
+        "type": "checkbox",
+        "value": true
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isNoneOf",
+        "field": "Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Published"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      },
+      {
+        "op": ">",
+        "field": "Image_Count",
+        "type": "number",
+        "value": 0
+      },
+      {
+        "op": "=",
+        "field": "FB_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "isEmpty",
+            "field": "FB_Publish_Status",
+            "type": "singleSelect"
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Publish_Status",
+            "type": "singleSelect",
+            "value": [
+              "Ready for Assets"
+            ]
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "isAnyOf",
+                "field": "FB_Publish_Status",
+                "type": "singleSelect",
+                "value": [
+                  "Retry Pending"
+                ]
+              },
+              {
+                "op": "contains",
+                "field": "Publish_Error_Stage",
+                "type": "singleLineText",
+                "value": "FB0"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "FB1 \u2014 Ready to Create Photo Objects": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "FB_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      },
+      {
+        "op": "or",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "FB_Publish_Status",
+            "type": "singleSelect",
+            "value": [
+              "Ready for Photo Media"
+            ]
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "isAnyOf",
+                "field": "FB_Publish_Status",
+                "type": "singleSelect",
+                "value": [
+                  "Retry Pending"
+                ]
+              },
+              {
+                "op": "contains",
+                "field": "Publish_Error_Stage",
+                "type": "singleLineText",
+                "value": "FB1"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "FB2 \u2014 Ready to Publish Multi-Photo": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "FB_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "FB_Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Photo Media Ready"
+        ]
+      },
+      {
+        "op": ">",
+        "field": "FB_Photo_Count",
+        "type": "number",
+        "value": 0
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "FB_Photo_IDs_JSON",
+        "type": "multilineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      }
+    ]
+  },
+  "FB2R \u2014 Reconcile Ambiguous Publish": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "FB_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "FB_Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Reconcile Pending"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      }
+    ]
+  },
+  "FB3 \u2014 Ready to Finalize": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "FB_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "FB_Publish_Status",
+        "type": "singleSelect",
+        "value": [
+          "Published Pending Finalize"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Platform_Post_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "=",
+        "field": "Do_Not_Publish",
+        "type": "checkbox",
+        "value": false
+      },
+      {
+        "op": "isEmpty",
+        "field": "Publish_Locked_At",
+        "type": "dateTime"
+      }
+    ]
+  },
+  "FBS1 \u2014 Ready to Start Slideshow Render": {
+    "op": "or",
+    "args": [
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Ready to Render"
+            ]
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          },
+          {
+            "op": "isEmpty",
+            "field": "Platform_Post_ID",
+            "type": "singleLineText"
+          }
+        ]
+      },
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Retry Pending"
+            ]
+          },
+          {
+            "op": "contains",
+            "field": "Publish_Error_Stage",
+            "type": "singleLineText",
+            "value": "FBS1"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          }
+        ]
+      }
+    ]
+  },
+  "FBS2 \u2014 Slideshow Renders to Poll": {
+    "op": "or",
+    "args": [
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Rendering"
+            ]
+          },
+          {
+            "op": "isNotEmpty",
+            "field": "FB_Slideshow_Render_Status_URL",
+            "type": "url"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          }
+        ]
+      },
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Retry Pending"
+            ]
+          },
+          {
+            "op": "contains",
+            "field": "Publish_Error_Stage",
+            "type": "singleLineText",
+            "value": "FBS2"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          }
+        ]
+      }
+    ]
+  },
+  "FBS3 \u2014 Ready to Publish Slideshow Reel": {
+    "op": "or",
+    "args": [
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Video Ready"
+            ]
+          },
+          {
+            "op": "isNotEmpty",
+            "field": "FB_Slideshow_Public_URL",
+            "type": "url"
+          },
+          {
+            "op": "isEmpty",
+            "field": "Platform_Post_ID",
+            "type": "singleLineText"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          }
+        ]
+      },
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Retry Pending"
+            ]
+          },
+          {
+            "op": "contains",
+            "field": "Publish_Error_Stage",
+            "type": "singleLineText",
+            "value": "FBS3"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          }
+        ]
+      }
+    ]
+  },
+  "FBS4 \u2014 Slideshow Reels to Poll": {
+    "op": "or",
+    "args": [
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Reel Processing"
+            ]
+          },
+          {
+            "op": "isNotEmpty",
+            "field": "FB_Slideshow_Meta_Video_ID",
+            "type": "singleLineText"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          },
+          {
+            "op": "isNoneOf",
+            "field": "Publish_Status",
+            "type": "singleSelect",
+            "value": [
+              "Published"
+            ]
+          }
+        ]
+      },
+      {
+        "op": "and",
+        "args": [
+          {
+            "op": "isAnyOf",
+            "field": "Platform",
+            "type": "singleSelect",
+            "value": [
+              "Facebook"
+            ]
+          },
+          {
+            "op": "isAnyOf",
+            "field": "FB_Slideshow_Status",
+            "type": "singleSelect",
+            "value": [
+              "Retry Pending"
+            ]
+          },
+          {
+            "op": "contains",
+            "field": "Publish_Error_Stage",
+            "type": "singleLineText",
+            "value": "FBS4"
+          },
+          {
+            "op": "isNotEmpty",
+            "field": "FB_Slideshow_Meta_Video_ID",
+            "type": "singleLineText"
+          },
+          {
+            "op": "=",
+            "field": "FB_Action_Due_Now",
+            "type": "dueNow",
+            "value": 1
+          },
+          {
+            "op": "isEmpty",
+            "field": "Publish_Locked_At",
+            "type": "dateTime"
+          },
+          {
+            "op": "isNoneOf",
+            "field": "Publish_Status",
+            "type": "singleSelect",
+            "value": [
+              "Published"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "YT0 Ready for Package Validation": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "YouTube"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "YouTube_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isEmpty",
+        "field": "YouTube_Stage",
+        "type": "singleSelect"
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "Final_File_URL",
+        "type": "url"
+      },
+      {
+        "op": "=",
+        "field": "Auto_Publish_Enabled",
+        "type": "checkbox",
+        "value": true
+      }
+    ]
+  },
+  "YT1 Ready to Start Upload": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "YouTube"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "YouTube_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "YouTube_Stage",
+        "type": "singleSelect",
+        "value": [
+          "YT1"
+        ]
+      },
+      {
+        "op": "isEmpty",
+        "field": "YouTube_Upload_Job_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "YouTube_Video_ID",
+        "type": "singleLineText"
+      }
+    ]
+  },
+  "YT2 Ready to Check Upload": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "YouTube"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "YouTube_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "YouTube_Stage",
+        "type": "singleSelect",
+        "value": [
+          "YT2"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "YouTube_Upload_Job_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isEmpty",
+        "field": "YouTube_Video_ID",
+        "type": "singleLineText"
+      }
+    ]
+  },
+  "YT2 Ready to Check Processing": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "YouTube"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "YouTube_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "YouTube_Stage",
+        "type": "singleSelect",
+        "value": [
+          "YT2"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "YouTube_Video_ID",
+        "type": "singleLineText"
+      },
+      {
+        "op": "isNoneOf",
+        "field": "YouTube_Processing_Status",
+        "type": "singleSelect",
+        "value": [
+          "Succeeded",
+          "Failed"
+        ]
+      }
+    ]
+  },
+  "YT4 Ready for Finalization": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "YouTube"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "YouTube_Action_Due_Now",
+        "type": "dueNow",
+        "value": 1
+      },
+      {
+        "op": "isAnyOf",
+        "field": "YouTube_Stage",
+        "type": "singleSelect",
+        "value": [
+          "YT4"
+        ]
+      },
+      {
+        "op": "isNotEmpty",
+        "field": "YouTube_Video_ID",
+        "type": "singleLineText"
+      }
+    ]
+  },
+  "FB \u2014 Retry Eligible": {
+    "op": "and",
+    "args": [
+      {
+        "op": "isAnyOf",
+        "field": "Platform",
+        "type": "singleSelect",
+        "value": [
+          "Facebook"
+        ]
+      },
+      {
+        "op": "=",
+        "field": "Publish_Retry_Eligible",
+        "type": "checkbox",
+        "value": true
       }
     ]
   }

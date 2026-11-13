@@ -362,7 +362,12 @@ _CHECKBOX_FIELDS = frozenset({
     "Active",
     "Do_Not_Use",
     "Studio_Favorite",
+    "Auto_Publish_Enabled",
+    "Publish_Retry_Eligible",
+    "Image_Output_Selected",
 })
+
+_LEFT_EQ = re.compile(r'^LEFT\(\{([A-Za-z0-9_]+)\},(\d+)\)="([^"]*)"$')
 
 
 def _checkbox_one_filter(table_id: str, text: str) -> str | None:
@@ -380,6 +385,20 @@ def _checkbox_one_filter(table_id: str, text: str) -> str | None:
     return f"or({ref}.is.null,{ref}.eq.false,{ref}.eq.0,{ref}.eq.False,{ref}.eq.)"
 
 
+def _left_prefix_filter(table_id: str, text: str) -> str | None:
+    """LEFT({Field},N)="prefix" for orch retry Publish_Error_Stage gates."""
+    match = _LEFT_EQ.match(text)
+    if not match:
+        return None
+    field, _n, prefix = match.group(1), int(match.group(2)), match.group(3)
+    if not prefix or any(ch in prefix for ch in ',()*"'):
+        return None
+    ref = _field_ref(table_id, field)
+    if not ref:
+        return None
+    return f"{ref}.like.{prefix}*"
+
+
 def _predicate_filter(table_id: str, pred: str) -> str | None:
     text = _tighten(" ".join(str(pred or "").strip().split()))
     if not text:
@@ -393,6 +412,9 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     now_cmp = _now_compare_filter(table_id, text)
     if now_cmp:
         return now_cmp
+    left = _left_prefix_filter(table_id, text)
+    if left:
+        return left
     if _FIND_CONTAINS.match(text) or _FIND_CONTAINS_SQ.match(text):
         return _find_text_filter(table_id, text)
     upper = text.upper()
