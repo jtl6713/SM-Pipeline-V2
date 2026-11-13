@@ -12868,8 +12868,8 @@ export async function studioHealTtdProcessingMissingPublishId(env, options = {})
   }).catch(() => []);
   const wiped = await studioListDeskHealOutputs(env, "tiktok_wiped_approval", {
     limit: Math.max(limit * 3, 18),
-    sortField: "Scheduled_Post_Date",
-    sortDirection: "asc",
+    sortField: "Output_ID",
+    sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Publish_Status}="Ready to Schedule",{TikTok_Draft_Status}="Waiting for Schedule",OR({Output_Status}=BLANK(),{Review_Status}=BLANK()),{Published_At}=BLANK())',
   }).catch(() => []);
   const healed = [];
