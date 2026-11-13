@@ -54,6 +54,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseMusicRecords,
   listSupabaseAssetLibraryRecords,
+  listSupabasePipelineSettingsByNames,
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
@@ -11346,7 +11347,18 @@ export async function studioActivePipelineSettings(env, names, contextRecord) {
   }
   const uniqueFetch = [...new Set(fetchNames)];
   const formula = `AND({Active}=1,OR(${uniqueFetch.map((name) => `{Setting_Name}='${name.replace(/'/g, "\\'")}'`).join(",")}))`;
-  const rows = await listRecords(env, "Pipeline Settings", { limit: Math.max(40, uniqueFetch.length + 10), filterFormula: formula });
+  let rows = null;
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    rows = await listSupabasePipelineSettingsByNames(env, uniqueFetch, {
+      limit: Math.max(40, uniqueFetch.length + 10),
+    }).catch(() => null);
+  }
+  if (!Array.isArray(rows)) {
+    rows = await listRecords(env, "Pipeline Settings", {
+      limit: Math.max(40, uniqueFetch.length + 10),
+      filterFormula: formula,
+    });
+  }
   const map = {};
   for (const row of rows) {
     const name = String(f(row, "Setting_Name") || "").trim();

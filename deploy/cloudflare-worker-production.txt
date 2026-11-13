@@ -1113,3 +1113,5 @@ Deploy 2026-11-13 Worker 0.10.869-closeout-mae-desk-orch: MAE schedule paths kee
 Deploy 2026-11-13 Worker 0.10.870-closeout-profiles-pub: Content Profiles list/GET and Ops PUB1/PUB2/PUB3 queues read from Supabase when STUDIO_WRITE_SOURCE=supabase. platform_setup densifies Brand/Organization/voice/music flags. Record deletion is not started. Verify /health version 0.10.870-closeout-profiles-pub.
 
 Deploy 2026-11-13 Worker 0.10.871-closeout-ideas-media: Ops A3 classify + oversized media and ready/photo idea lanes read from Supabase when STUDIO_WRITE_SOURCE=supabase. Record deletion is not started. Verify /health version 0.10.871-closeout-ideas-media.
+
+Deploy 2026-11-13 Worker 0.10.872-closeout-settings: Pipeline Settings reads (studioSettingsByName, Active OR Setting_Name packs, single-quote formulas) prefer Supabase engagement_settings. Exception Messages table still Airtable. Record deletion is not started. Verify /health version 0.10.872-closeout-settings.

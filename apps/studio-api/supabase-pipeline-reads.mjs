@@ -5479,13 +5479,19 @@ function compactFormula(formula) {
 
 function settingsListFilter(formula) {
   const text = compactFormula(formula);
-  let match = text.match(/^\{Setting_Name\}="([^"]*)"$/);
-  if (match) return { name: match[1], active: false, prefix: "" };
-  match = text.match(/^AND\(\{Active\}=1,\{Setting_Name\}="([^"]*)"\)$/);
-  if (match) return { name: match[1], active: true, prefix: "" };
+  let match = text.match(/^\{Setting_Name\}=(["'])([^"']*)\1$/);
+  if (match) return { name: match[2], active: false, prefix: "", names: [] };
+  match = text.match(/^AND\(\{Active\}=1,\{Setting_Name\}=(["'])([^"']*)\1\)$/);
+  if (match) return { name: match[2], active: true, prefix: "", names: [] };
   if (text === "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)"
     || text === 'AND({Active}=1,FIND("A1_JOB_",{Setting_Name})=1)') {
-    return { name: "", active: true, prefix: "A1_JOB_" };
+    return { name: "", active: true, prefix: "A1_JOB_", names: [] };
+  }
+  // Active=1 AND OR({Setting_Name}='a',{Setting_Name}="b",...) — publish destination packs.
+  match = text.match(/^AND\(\{Active\}=1,OR\((.+)\)\)$/);
+  if (match) {
+    const names = [...match[1].matchAll(/\{Setting_Name\}=(["'])([^"']*)\1/g)].map((row) => row[2]);
+    if (names.length) return { name: "", active: true, prefix: "", names: [...new Set(names)] };
   }
   return null;
 }
@@ -5524,11 +5530,47 @@ async function readSettingRows(env, source, filter, limit) {
   const parts = [`payload->>source=eq.${source}`, `select=airtable_record_id,payload`, `limit=${limit}`];
   if (filter.name) parts.push(`payload->>Setting_Name=eq.${encodeURIComponent(filter.name)}`);
   if (filter.prefix) parts.push(`payload->>Setting_Name=like.${encodeURIComponent(filter.prefix)}*`);
+  if (Array.isArray(filter.names) && filter.names.length) {
+    const orParts = filter.names
+      .map((name) => `payload->>Setting_Name.eq.${encodeURIComponent(String(name))}`)
+      .join(",");
+    parts.push(`or=(${orParts})`);
+  }
   const rows = await supabaseRest(env, `engagement_settings?${parts.join("&")}`);
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
     .map(shapeSetting)
     .filter((row) => !filter.active || settingActive(row.fields.Active));
+}
+
+/** Direct Pipeline Settings read by Setting_Name (Active preferred). */
+export async function readSupabasePipelineSetting(env, name, { activeOnly = true } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const settingName = String(name || "").trim();
+  if (!settingName) return null;
+  const rows = await readSettingRows(
+    env,
+    "pipeline",
+    { name: settingName, active: Boolean(activeOnly), prefix: "", names: [] },
+    5,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows[0] || null;
+}
+
+/** Active Pipeline Settings whose Setting_Name is in names. */
+export async function listSupabasePipelineSettingsByNames(env, names, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
+  if (!wanted.length) return [];
+  const cap = Math.max(1, Math.min(200, Number(limit) || Math.max(40, wanted.length + 10)));
+  const rows = await readSettingRows(
+    env,
+    "pipeline",
+    { name: "", active: true, prefix: "", names: wanted },
+    cap,
+  ).catch(() => null);
+  return Array.isArray(rows) ? rows : null;
 }
 
 async function readIdeasForProfiles(env, profileIds, openOnly, limit) {

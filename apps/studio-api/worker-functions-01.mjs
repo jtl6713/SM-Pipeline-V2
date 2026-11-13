@@ -32,6 +32,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
   listSupabaseContentProfiles,
+  readSupabasePipelineSetting,
   syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -9706,6 +9707,10 @@ export async function syncMiamiTikTokPipelineSecret(request, env) {
 /*__STUDIO_WORKER_END:syncMiamiTikTokPipelineSecret__*/
 
 export async function item4PipelineSetting(env, name) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
+    if (row?.id) return String(f(row, "Setting_Value") || "").trim();
+  }
   const rows = await listRecords(env, "Pipeline Settings", {
     limit: 5,
     filterFormula: `AND({Active}=1,{Setting_Name}='${String(name).replace(/'/g, "\\'")}')`,

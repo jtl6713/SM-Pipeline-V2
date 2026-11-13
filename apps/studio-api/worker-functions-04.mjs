@@ -121,6 +121,8 @@ import {
   listSupabaseA3ClassifyMedia,
   listSupabaseOversizedMedia,
   listSupabaseIdeaLane,
+  readSupabasePipelineSetting,
+  listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
@@ -9471,6 +9473,10 @@ export function mapOperationsProfile(record) {
 /*__STUDIO_WORKER_END:mapOperationsProfile__*/
 
 export async function studioSettingsByName(env, name) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
+    if (row?.id) return row;
+  }
   const rows = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
     limit: 5,
     filterFormula: `AND({Active}=1,{Setting_Name}="${String(name).replace(/"/g, "")}")`,
