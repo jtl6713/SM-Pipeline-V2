@@ -12,6 +12,8 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
   studioWriteSource,
+  studioPhase6WriteSource,
+  studioAssetsReadSource,
   studioAuthReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
@@ -20,6 +22,7 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  listSupabaseAssetLibraryRecords,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -584,6 +587,7 @@ import {
   matchNewlyCreatedIdeaPhotos,
   respondStudioMappedList,
   libraryProfileScopeFormula,
+  resolveLibraryScopeProfileId,
   assetLibraryFilterFormula,
   deferItem4MakeHardening,
   item4EnsureR2StudioExactSourceGuard,
@@ -7235,6 +7239,49 @@ export function mapIdeaLibraryAsset(record, row = {}) {
 }
 /*__STUDIO_WORKER_END:mapIdeaLibraryAsset__*/
 
+function preferSupabaseIdeaLibraryMedia(env) {
+  if (!studioSupabaseConfigured(env)) return false;
+  if (studioAssetsReadSource(env) === "supabase") return true;
+  return studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase";
+}
+
+async function listIdeaLibraryMediaRecords(env, {
+  limit,
+  query = "",
+  kind = "",
+  profileId = "",
+  filterFormula = null,
+} = {}) {
+  if (preferSupabaseIdeaLibraryMedia(env)) {
+    try {
+      const packed = await listSupabaseAssetLibraryRecords(env, {
+        limit,
+        query: phraseOrQueryForSupabaseLibrary(query),
+        kind,
+        profileId,
+        sortField: "Added_At",
+        sortDirection: "desc",
+      });
+      if (Array.isArray(packed?.records)) return packed.records;
+    } catch (error) {
+      console.warn("supabase idea library media list failed; falling back to Airtable", error);
+    }
+  }
+  return listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula,
+  });
+}
+
+function phraseOrQueryForSupabaseLibrary(query) {
+  // Quoted phrases and FIND-style Airtable packs are applied after fetch for
+  // idea browse; Supabase only gets a loose token search when unquoted.
+  const phrase = libraryQuotedPhrase(query);
+  return phrase ? "" : String(query || "").trim();
+}
+
 export async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
@@ -7246,14 +7293,16 @@ export async function getMediaLibraryStills(request, env, url, authorization) {
   if (/^rec[A-Za-z0-9]+$/.test(ideaId)) {
     try { idea = await loadAuthorizedIdea(env, ideaId, authorization); } catch {}
   }
+  const profileId = await resolveLibraryScopeProfileId(env, authorization, url, { idea }).catch(() => "");
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea, includeUnscoped: false });
   // Operator browse/search uses the Asset Manager name FIND (already excludes fill-crop),
   // not the idea photo-wait subject-token OR which flooded scans with luxury/glamorous hits.
   const browseFormula = assetLibraryFilterFormula(query, includeVideo ? "" : "photo");
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+  const records = await listIdeaLibraryMediaRecords(env, {
     limit: IDEA_LIBRARY_SCAN_LIMIT,
-    sortField: "Intake_Date",
-    sortDirection: "desc",
+    query,
+    kind: includeVideo ? "" : "photo",
+    profileId: profileId || "",
     filterFormula: combineAirtableFormulas(browseFormula, scopeFormula),
   });
   const items = [];
@@ -7316,11 +7365,15 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
   const scanLimit = operatorSearch
     ? IDEA_LIBRARY_SCAN_LIMIT
     : (filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT);
+  const profileId = await resolveLibraryScopeProfileId(env, authorization, url, { idea }).catch(() => "");
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+  const records = await listIdeaLibraryMediaRecords(env, {
     limit: scanLimit,
-    sortField: "Intake_Date",
-    sortDirection: "desc",
+    // Place-key Airtable OR packs stay on the Airtable fallback; Supabase
+    // loads a profile-scoped recent page and ranks in memory.
+    query: operatorSearch ? query : "",
+    kind: includeVideo ? "" : "photo",
+    profileId: profileId || "",
     filterFormula: combineAirtableFormulas(
       phrase
         ? ideaLibraryNamePhraseFormula(phrase, { includeVideo })

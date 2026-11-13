@@ -1080,7 +1080,9 @@ export async function listSupabaseAssetLibraryRecords(env, {
   sortField = "Added_At",
   sortDirection = "desc",
 } = {}) {
-  const capped = Math.max(1, Math.min(200, Number(limit) || 50));
+  // Idea-library scans need up to IDEA_LIBRARY_SCAN_LIMIT (500); Asset Manager
+  // pages stay well under that.
+  const capped = Math.max(1, Math.min(500, Number(limit) || 50));
   if (Array.isArray(ids) && ids.length) {
     const unique = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
     const records = [];

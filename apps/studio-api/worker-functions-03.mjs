@@ -39,6 +39,7 @@ import {
   studioAssetsReadSource,
   studioAuthReadSource,
   studioWriteSource,
+  studioPhase6WriteSource,
   studioPhase5WritesMode,
   studioPhase6WritesMode,
   studioSupabaseConfigured,
@@ -799,17 +800,38 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     : scanKeys;
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
   const scopeFormula = await mediaAssetProfileScopeForId(
     env,
-    firstLinkedRecordId(f(idea, "Content_Profile")),
+    profileId,
     { crossScope, includeUnscoped: true },
   );
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: scanLimit,
-    sortField: "Intake_Date",
-    sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(filterKeys), scopeFormula),
-  });
+  let records = null;
+  if (studioSupabaseConfigured(env) && (
+    studioAssetsReadSource(env) === "supabase"
+    || (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase")
+  )) {
+    try {
+      const packed = await listSupabaseAssetLibraryRecords(env, {
+        limit: scanLimit,
+        kind: "photo",
+        profileId: crossScope ? "" : (profileId || ""),
+        sortField: "Added_At",
+        sortDirection: "desc",
+      });
+      if (Array.isArray(packed?.records)) records = packed.records;
+    } catch (error) {
+      console.warn("supabase idea photo-wait stills failed; falling back to Airtable", error);
+    }
+  }
+  if (!records) {
+    records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+      limit: scanLimit,
+      sortField: "Intake_Date",
+      sortDirection: "desc",
+      filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(filterKeys), scopeFormula),
+    });
+  }
   const ranked = [];
   for (const record of records) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
@@ -853,17 +875,38 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
     : scanKeys;
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
   const scopeFormula = await mediaAssetProfileScopeForId(
     env,
-    firstLinkedRecordId(f(idea, "Content_Profile")),
+    profileId,
     { crossScope, includeUnscoped: true },
   );
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: scanLimit,
-    sortField: "Intake_Date",
-    sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryVideoFilterFormula(filterKeys), scopeFormula),
-  });
+  let records = null;
+  if (studioSupabaseConfigured(env) && (
+    studioAssetsReadSource(env) === "supabase"
+    || (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase")
+  )) {
+    try {
+      const packed = await listSupabaseAssetLibraryRecords(env, {
+        limit: scanLimit,
+        kind: "video",
+        profileId: crossScope ? "" : (profileId || ""),
+        sortField: "Added_At",
+        sortDirection: "desc",
+      });
+      if (Array.isArray(packed?.records)) records = packed.records;
+    } catch (error) {
+      console.warn("supabase idea scripted-short videos failed; falling back to Airtable", error);
+    }
+  }
+  if (!records) {
+    records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+      limit: scanLimit,
+      sortField: "Intake_Date",
+      sortDirection: "desc",
+      filterFormula: combineAirtableFormulas(ideaLibraryVideoFilterFormula(filterKeys), scopeFormula),
+    });
+  }
   const ranked = [];
   for (const record of records) {
     if (!ideaLibraryIsEligibleVideo(record)) continue;
