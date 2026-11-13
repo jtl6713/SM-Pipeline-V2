@@ -1353,6 +1353,9 @@ const OVERVIEW_OUTPUT_SELECT = [
   "youtube_scheduled_publish_at",
   "published_at",
   "remotion_job_id",
+  // Typed TikTok draft column — often absent from error_messages after lean stamps.
+  // Home Manual Action needs it when Manual_Completion_Status is also missing.
+  "tiktok_draft_status",
   "error_messages",
   "created_at",
 ].join(",");

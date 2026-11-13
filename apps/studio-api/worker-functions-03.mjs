@@ -2236,6 +2236,11 @@ export function mappedTikTokNeedsLivePublishCheck(row) {
 
 export async function overlayLiveTikTokPublishRows(env, mappedRows) {
   const rows = Array.isArray(mappedRows) ? mappedRows : [];
+  // Airtable is archive-frozen under STUDIO_WRITE_SOURCE=supabase. Re-reading
+  // Manual Action / Draft Delivered suspects from Airtable clobbers the live
+  // Supabase studio_state (Home Manual Action drops to 0) and can park force
+  // refresh past the 26s budget while the UI stays on "Refreshing…".
+  if (studioWriteSource(env) === "supabase") return rows;
   const suspects = rows.filter(mappedTikTokNeedsLivePublishCheck).slice(0, 24);
   if (!suspects.length || !env?.AIRTABLE_OUTPUT_TABLE_ID) return rows;
   const formula = `OR(${suspects.map((row) => `RECORD_ID()='${String(row.id).replace(/'/g, "")}'`).join(",")})`;
