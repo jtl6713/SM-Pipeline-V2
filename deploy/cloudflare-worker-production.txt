@@ -1117,3 +1117,5 @@ Deploy 2026-11-13 Worker 0.10.871-closeout-ideas-media: Ops A3 classify + oversi
 Deploy 2026-11-13 Worker 0.10.872-closeout-settings: Pipeline Settings reads (studioSettingsByName, Active OR Setting_Name packs, single-quote formulas) prefer Supabase engagement_settings. Exception Messages table still Airtable. Record deletion is not started. Verify /health version 0.10.872-closeout-settings.
 
 Deploy 2026-11-13 Worker 0.10.873-closeout-pr-media-gets: Production Request and Media Asset GETs plus autonomous draft lists read from Supabase under Phase6. PR publish_status densifies master/music/variant fields. Record deletion is not started. Verify /health version 0.10.873-closeout-pr-media-gets.
+
+Deploy 2026-11-13 Worker 0.10.874-closeout-media-lists: Media Asset list formulas for Logo role, exact Asset Name, and Drive file id prefer Supabase under Phase6. Record deletion is not started. Verify /health version 0.10.874-closeout-media-lists.
