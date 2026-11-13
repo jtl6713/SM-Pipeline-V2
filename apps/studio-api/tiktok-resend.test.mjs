@@ -107,9 +107,37 @@ test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window
   assert.ok(begin >= 0, "Expected real reconciliation function");
   // Restored Worker source omits END markers; bound the body by the next function.
   const next = worker.indexOf("\nasync function ", begin + 1);
-  const end = next > begin ? next : begin + 4000;
+  const end = next > begin ? next : begin + 5000;
   const reconcile = worker.slice(begin, end);
   assert.match(reconcile, /TikTok_Draft_Status}="Waiting for Schedule"/);
+  assert.match(reconcile, /TikTok_Draft_Status}="Ready for Assets"/);
   assert.match(reconcile, /Publish_Next_Retry_At}=BLANK/);
   assert.match(reconcile, /STUDIO_TIKTOK_INBOX_DUE_FORMULA/);
+  assert.match(reconcile, /listSupabaseDeskHealOutputs\(env, \{/);
+  assert.match(reconcile, /kind: "ttd0_ready"/);
+  assert.match(reconcile, /kind: "ttd1_ready"/);
+  assert.match(reconcile, /kind: "ttd2_processing"/);
+  assert.match(reconcile, /kind: "ttd3_email"/);
+  assert.match(reconcile, /studioWriteSource\(env\) === "supabase"/);
+  const ttd0Start = reconcile.indexOf('stage: "ttd0"');
+  const ttd1Start = reconcile.indexOf('stage: "ttd1"');
+  assert.ok(ttd0Start >= 0 && ttd1Start > ttd0Start);
+  assert.match(reconcile.slice(ttd0Start, ttd1Start), /Waiting for Schedule/);
+  assert.doesNotMatch(reconcile.slice(ttd1Start), /Waiting for Schedule/);
+});
+
+test("TTD2 processing confirmation reread uses Supabase when write source is supabase", async () => {
+  const worker = readStudioWorkerSource();
+  const begin = worker.indexOf("async function studioReconcileTiktokProcessing");
+  assert.ok(begin >= 0);
+  const next = worker.indexOf("\nasync function ", begin + 1);
+  const end = next > begin ? next : begin + 4000;
+  const stage = worker.slice(begin, end);
+  assert.match(stage, /studioListTiktokReconcileOutputs\(env, "ttd2_processing"/);
+  assert.match(stage, /studioReadTiktokReconcileOutput\(env, candidate\.id\)/);
+  assert.match(stage, /sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc"/);
+  const moduleSource = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  assert.match(moduleSource, /async function studioReadTiktokReconcileOutput/);
+  assert.match(moduleSource, /readSupabaseShapedOutput\(env, recordId\)/);
+  assert.match(moduleSource, /listSupabaseDeskHealOutputs\(env, \{\s*kind,/);
 });

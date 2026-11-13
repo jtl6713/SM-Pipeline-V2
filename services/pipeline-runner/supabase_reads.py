@@ -23,7 +23,6 @@ from supabase_pipeline import (
     CONTENT_PATCH_COLUMNS,
     OUTPUT_JSON_COLUMNS,
     OUTPUT_PATCH_COLUMNS,
-    RUNNER_RECORD_PROJECTION,
     _rest,
     supabase_configured,
 )
@@ -165,9 +164,10 @@ def try_list_supabase_records(
         if not isinstance(row, dict):
             return None
         shaped = _record_from_row(row, table_id)
-        # Unmarked rows stay on Airtable. Skip them here; if none remain,
-        # fall back so densify/backfill gaps cannot hide work forever.
-        # A table in FALLBACK_STOPPED_TABLES returns the marked rows only.
+        # Unmarked rows are still valid when Supabase is the runner read
+        # source. Skipping them forced Airtable fallback and hid Worker lean
+        # stamps (TikTok_Draft_Publish_ID) after the archive freeze.
+        # A table in FALLBACK_STOPPED_TABLES returns shaped rows only.
         if not shaped:
             continue
         if fields:
@@ -216,8 +216,10 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         columns = _CONTENT_FIELDS
     else:
         return None
-    if bag.get("_runner_record_projection") != RUNNER_RECORD_PROJECTION:
-        return None
+    # Full densify still stamps _runner_record_projection=v1. Rejecting
+    # unmarked rows forced Airtable fallback; with runner output reads on
+    # Supabase and Airtable archive writes frozen, that hid lean Worker
+    # stamps (TikTok_Draft_Publish_ID only) and TTD2 never saw publish_id.
     shaped = _shaped(row, columns, None)
     if not shaped:
         return None
@@ -245,8 +247,9 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
 def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str) -> dict | None:
     """One Airtable-shaped record, or None when this call must use Airtable.
 
-    Rows written before the full-record marker stay on Airtable. A missing row
-    or a Supabase error also stays on Airtable.
+    Lean Worker stamps may omit _runner_record_projection; the bag and typed
+    columns are still authoritative when this table's runner read source is
+    Supabase. A missing row or a Supabase error stays on Airtable.
     """
     if runner_table_read_source(settings, table_id) != "supabase":
         return None

@@ -471,6 +471,68 @@ def _partial_patch(record: dict, kind: str) -> dict:
     return body
 
 
+def _merge_json_bag(settings: dict, table: str, record_id: str, column: str, patch: dict) -> dict:
+    """Merge a sparse jsonb patch. Never replace the whole bag with partial fields."""
+    prior: dict[str, Any] = {}
+    try:
+        existing = _rest(
+            settings,
+            f"{table}?airtable_record_id=eq.{record_id}&select={column}&limit=1",
+            "GET",
+        )
+        if isinstance(existing, list) and existing and isinstance(existing[0].get(column), dict):
+            prior = dict(existing[0][column])
+    except Exception:
+        prior = {}
+    merged = {**prior, **(patch or {})}
+    # Explicit empty string clears a bag key (TTD2 auto-reinit clears publish id).
+    for key, value in list((patch or {}).items()):
+        if value == "":
+            merged.pop(key, None)
+    return merged
+
+
+def _partial_output_bag_and_json(settings: dict, record: dict) -> dict:
+    """Bag + JSON columns for a partial Output mutation (TTD1 publish_id, etc.)."""
+    fields = record.get("fields") or {}
+    body: dict[str, Any] = {}
+    bag = _pack(fields, TYPED_OUTPUT, OUTPUT_EXCLUDE)
+    # Empty-string clears must reach the merge even though _pack skips them.
+    for key, value in fields.items():
+        if key in TYPED_OUTPUT or key in OUTPUT_EXCLUDE:
+            continue
+        if value == "":
+            bag[key] = ""
+    if bag:
+        body["error_messages"] = _merge_json_bag(
+            settings, "platform_outputs", record["id"], "error_messages", bag
+        )
+    for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
+        if airtable_key not in fields:
+            continue
+        parsed = _json_column(fields.get(airtable_key))
+        if parsed is not None:
+            body[column] = parsed
+        elif fields.get(airtable_key) in (None, ""):
+            body[column] = None
+    return body
+
+
+def _partial_content_extras(settings: dict, record: dict) -> dict:
+    fields = record.get("fields") or {}
+    extras = _pack(fields, TYPED_CONTENT)
+    for key, value in fields.items():
+        if key in TYPED_CONTENT:
+            continue
+        if value == "":
+            extras[key] = ""
+    if not extras:
+        return {}
+    return {
+        "extras": _merge_json_bag(settings, "content_items", record["id"], "extras", extras),
+    }
+
+
 def _queue_target_ids(value: Any) -> list[str]:
     items = value if isinstance(value, list) else ([] if value in (None, "") else [value])
     ids: list[str] = []
@@ -663,7 +725,14 @@ def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> N
 
 def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> None:
     if not _ready(record, kind) and partial:
+        # TTD1 and other stage patches often omit Platform/Output_ID. Typed
+        # columns alone used to land while bag fields like TikTok_Draft_Publish_ID
+        # were dropped, leaving Processing rows that TTD2 cannot poll.
         body = _partial_patch(record, kind)
+        if kind == "output":
+            body.update(_partial_output_bag_and_json(settings, record))
+        else:
+            body.update(_partial_content_extras(settings, record))
         if not body:
             return
         table = "platform_outputs" if kind == "output" else "content_items"
@@ -676,15 +745,27 @@ def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> No
     profile_uuid = _profile_uuid(settings, _first_link(fields.get("Content_Profile")))
     if kind == "output":
         if not profile_uuid:
-            _rest(settings, f"platform_outputs?airtable_record_id=eq.{record['id']}", "PATCH", {
-                "scheduled_post_date": fields.get("Scheduled_Post_Date") or None,
-                "studio_scheduled_at": fields.get("Studio_Scheduled_At") or None,
-                "youtube_scheduled_publish_at": fields.get("YouTube_Scheduled_Publish_At") or None,
-                "publish_status": _select(fields.get("Publish_Status")),
-                "output_status": _select(fields.get("Output_Status")),
-                "review_status": _select(fields.get("Review_Status")),
-                "error_messages": _pack(fields, TYPED_OUTPUT, OUTPUT_EXCLUDE),
-            })
+            body = _partial_patch(record, "output")
+            if "Scheduled_Post_Date" in fields:
+                body["scheduled_post_date"] = fields.get("Scheduled_Post_Date") or None
+            if "Studio_Scheduled_At" in fields:
+                body["studio_scheduled_at"] = fields.get("Studio_Scheduled_At") or None
+            if "YouTube_Scheduled_Publish_At" in fields:
+                body["youtube_scheduled_publish_at"] = fields.get("YouTube_Scheduled_Publish_At") or None
+            body.update(_partial_output_bag_and_json(settings, record))
+            if body:
+                _rest(settings, f"platform_outputs?airtable_record_id=eq.{record['id']}", "PATCH", body)
+        elif partial:
+            # Sparse upsert would replace error_messages. Patch present columns + merge bag.
+            body = _partial_patch(record, "output")
+            body.update(_partial_output_bag_and_json(settings, record))
+            if profile_uuid and "Content_Profile" in fields:
+                body["content_profile_id"] = profile_uuid
+            content_uuid = _content_uuid(settings, _first_link(fields.get("Content_Item")))
+            if content_uuid and "Content_Item" in fields:
+                body["content_item_id"] = content_uuid
+            if body:
+                _rest(settings, f"platform_outputs?airtable_record_id=eq.{record['id']}", "PATCH", body)
         else:
             content_uuid = _content_uuid(settings, _first_link(fields.get("Content_Item")))
             _rest(
@@ -697,8 +778,14 @@ def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> No
     else:
         if not profile_uuid:
             body = _partial_patch(record, "content")
-            if "Content_ID" in fields:
-                body["extras"] = _pack(fields, TYPED_CONTENT)
+            body.update(_partial_content_extras(settings, record))
+            if body:
+                _rest(settings, f"content_items?airtable_record_id=eq.{record['id']}", "PATCH", body)
+        elif partial:
+            body = _partial_patch(record, "content")
+            body.update(_partial_content_extras(settings, record))
+            if profile_uuid and "Content_Profile" in fields:
+                body["content_profile_id"] = profile_uuid
             if body:
                 _rest(settings, f"content_items?airtable_record_id=eq.{record['id']}", "PATCH", body)
         else:

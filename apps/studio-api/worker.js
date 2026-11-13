@@ -651,6 +651,7 @@ import {
   requireAnyPermission,
   sleepMs,
   airtableCooldownWaitMs,
+  airtableDataWaitMs,
   airtableRetryDelayMs,
   studioInvalidateHotReads,
   f,
@@ -705,6 +706,7 @@ import {
   studioHealPhantomRerender,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
+  studioHealTtdProcessingMissingPublishId,
   studioHealFacebookRateLimitRearm,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
@@ -1360,7 +1362,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.844-queue-attempt-columns",
+          version: "0.10.855-queue-attempt-columns",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4506,15 +4508,50 @@ export default {
     // ran only late in a long heavy sweep: 24 live Processing drafts had one
     // poll apiece and expired retry timestamps. Poll four oldest-checked first
     // on independent LIGHT ticks; avoid competing with the heavy TTD2 sweep.
-    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
-      ctx.waitUntil(studioReconcileTiktokProcessing(env, { limit: 4 })
-        .then((results) => console.info("TTD2 existing-draft light cron", JSON.stringify({
+    // Existing-draft TTD2 polls are Supabase + runner; do not skip them when
+    // the Airtable archive slot is cooling after a heavy sweep.
+    if (airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokProcessing(env, { limit: cadence.heavy ? 6 : 4 })
+        .then((results) => console.info("TTD2 existing-draft cron", JSON.stringify({
           checked: results.length,
+          heavy: cadence.heavy,
           delivered: results.filter((x) => x.status === "draft_delivered").length,
           processing: results.filter((x) => x.status === "processing").length,
           results, new_uploads: 0,
         })))
-        .catch((error) => console.warn("TTD2 existing-draft light cron unavailable", error)));
+        .catch((error) => console.warn("TTD2 existing-draft cron unavailable", error)));
+    }
+    // Due TTD0/TTD1/TTD3 draft advances. Reads are Supabase; pulses go to the
+    // Python runner; publish_id stamps write Supabase SoR. Do not gate on the
+    // Airtable archive cooldown — after a heavy tick that 429s Airtable, light
+    // TTD1 was skipped and healed Ready for Delivery rows never got publish_id.
+    // Run every tick (heavy included) so late heavy waitUntil starvation cannot
+    // park the inbox for a half hour.
+    if (airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokDrafts(env, { limit: cadence.heavy ? 4 : 2 })
+        .then((results) => console.info("TTD draft cron", JSON.stringify({
+          checked: results.length,
+          heavy: cadence.heavy,
+          stages: results.reduce((acc, row) => {
+            const key = row.stage || "unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {}),
+          results,
+        })))
+        .catch((error) => console.warn("TTD draft cron unavailable", error)));
+    }
+    // Processing without TikTok_Draft_Publish_ID is invisible to TTD2 light
+    // polls and TTD1 Ready-for-Delivery discovery. Fire on every tick (not
+    // only light): heavy's late await often starves past the waitUntil budget,
+    // and airtableDataWaitMs stays 0 so an Airtable archive cooldown cannot
+    // ReferenceError / skip this Supabase-only heal.
+    if (airtableDataWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioHealTtdProcessingMissingPublishId(env, { limit: cadence.heavy ? 4 : 2 })
+        .then((healed) => {
+          if (healed?.length) console.info("TTD missing-publish-id cron heal", JSON.stringify({ count: healed.length, heavy: cadence.heavy, healed }));
+        })
+        .catch((error) => console.warn("TTD missing-publish-id cron heal unavailable", error)));
     }
     // Existing YouTube upload-job YTS1 GET polls were stranded late behind
     // heavy maintenance. Confirm the EXACT saved job ID; never upload again.
@@ -4936,6 +4973,11 @@ export default {
         console.warn("studio TTD0 blank-draft heal failed", error);
       }
       try {
+        await studioHealTtdProcessingMissingPublishId(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio TTD processing missing-publish-id heal failed", error);
+      }
+      try {
         await studioHealFacebookRateLimitRearm(env, { limit: 4 });
       } catch (error) {
         console.warn("studio Facebook rate-limit rearm failed", error);
@@ -5254,6 +5296,7 @@ const AIRTABLE_MIN_GAP_MS = 250;
 const AIRTABLE_SLOT_FAIL_FAST_MS = 8000;
 let airtableNextRequestAt = 0;
 /*__STUDIO_WORKER_EXTRACT:airtableCooldownWaitMs__*/
+/*__STUDIO_WORKER_EXTRACT:airtableDataWaitMs__*/
 async function airtableRequestSlot() {
   const now = Date.now();
   const wait = Math.max(0, airtableNextRequestAt - now);
@@ -6299,6 +6342,8 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:studioHealLiveFailedPublishStatus__*/
 /** TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type. */
 /*__STUDIO_WORKER_EXTRACT:studioHealTtd0RouteBlankDraft__*/
+/** Processing without TikTok_Draft_Publish_ID, or wiped TikTok approval columns. */
+/*__STUDIO_WORKER_EXTRACT:studioHealTtdProcessingMissingPublishId__*/
 /** Graph 368 park expired → restore Auto_Publish and pulse FBS3. */
 /*__STUDIO_WORKER_EXTRACT:studioHealFacebookRateLimitRearm__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealFailedStatuses__*/

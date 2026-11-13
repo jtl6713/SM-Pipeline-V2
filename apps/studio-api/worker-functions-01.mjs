@@ -1101,6 +1101,16 @@ export function airtableCooldownWaitMs() {
   return Math.max(0, airtableNextRequestAt - Date.now());
 }/*__STUDIO_WORKER_END:airtableCooldownWaitMs__*/
 
+/**
+ * Wait for Supabase-only desk heals / reconciles that never need the Airtable
+ * request slot. While STUDIO_WRITE_SOURCE=supabase those paths must not stall
+ * behind an archive cooldown — return 0 so cron gates stay open.
+ */
+export function airtableDataWaitMs() {
+  return 0;
+}
+/*__STUDIO_WORKER_END:airtableDataWaitMs__*/
+
 export function airtableRetryDelayMs(response, attempt) {
   const raw = String(response?.headers?.get("Retry-After") || "").trim();
   const seconds = Number(raw);
@@ -8313,10 +8323,18 @@ export async function studioPromoteDuePublishStatus(env, record) {
     fields.IG_Story_Status = "Ready";
   }
   try {
-    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    const patched = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
+    // Archive-mode PATCH returns only the mutated fields. Merge so callers
+    // keep schedule/caption/status that were not part of this promote.
+    return {
+      ...record,
+      ...(patched || {}),
+      id,
+      fields: { ...(record.fields || {}), ...fields, ...(patched?.fields || {}) },
+    };
   } catch (error) {
     console.warn("due publish-status promote failed", id, error);
     return record;
@@ -12846,6 +12864,97 @@ export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
   return healed;
 }
 /*__STUDIO_WORKER_END:studioHealTtd0RouteBlankDraft__*/
+
+export async function studioHealTtdProcessingMissingPublishId(env, options = {}) {
+  // Processing without TikTok_Draft_Publish_ID cannot poll. Reset to Ready for
+  // Delivery so TTD1 can re-init after the runner bag-merge fix / Worker stamp.
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await studioListDeskHealOutputs(env, "ttd_processing_missing_id", {
+    limit: Math.max(limit * 3, 18),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Status}="Processing",{TikTok_Draft_Publish_ID}=BLANK(),{Published_At}=BLANK())',
+  }).catch(() => []);
+  const wiped = await studioListDeskHealOutputs(env, "tiktok_wiped_approval", {
+    limit: Math.max(limit * 3, 18),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Publish_Status}="Ready to Schedule",{TikTok_Draft_Status}="Waiting for Schedule",OR({Output_Status}=BLANK(),{Review_Status}=BLANK()),{Published_At}=BLANK())',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    if (!studioDeskHealAutoPublishEnabled(record)) continue;
+    if (String(f(record, "TikTok_Draft_Publish_ID") || "").trim()) continue;
+    if (!/^processing$/i.test(String(f(record, "TikTok_Draft_Status") || ""))) continue;
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            TikTok_Draft_Status: "Ready for Delivery",
+            Publish_Status: "Ready to Publish",
+            Publish_Error_Stage: "TTD1_MISSING_PUBLISH_ID",
+            Publish_Error_Message: "Processing draft was missing TikTok_Draft_Publish_ID; Studio will re-initialize delivery.",
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      healed.push({
+        key: "TTD_PROCESSING_MISSING_PUBLISH_ID",
+        id: record.id,
+        output_id: f(record, "Output_ID") || null,
+      });
+    } catch (error) {
+      healed.push({
+        key: "TTD_PROCESSING_MISSING_PUBLISH_ID",
+        id: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  for (const record of wiped || []) {
+    if (healed.length >= limit) break;
+    if (!studioDeskHealAutoPublishEnabled(record)) continue;
+    const outputStatus = String(f(record, "Output_Status") || "").trim();
+    const reviewStatus = String(f(record, "Review_Status") || "").trim();
+    if (outputStatus && reviewStatus) continue;
+    if (String(f(record, "Publish_Status") || "").trim() !== "Ready to Schedule") continue;
+    if (String(f(record, "TikTok_Draft_Status") || "").trim() !== "Waiting for Schedule") continue;
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            ...(outputStatus ? {} : { Output_Status: "Approved for Publishing" }),
+            ...(reviewStatus ? {} : { Review_Status: "Approved" }),
+            Studio_Publish_Dispatch_Count: 0,
+          },
+          typecast: true,
+        }),
+      });
+      healed.push({
+        key: "TIKTOK_WIPED_APPROVAL",
+        id: record.id,
+        output_id: f(record, "Output_ID") || null,
+      });
+    } catch (error) {
+      healed.push({
+        key: "TIKTOK_WIPED_APPROVAL",
+        id: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio TTD processing/missing-id heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealTtdProcessingMissingPublishId__*/
 
 export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Rearm approved Graph 368 Reels and Stories after cooldown. Do not bypass

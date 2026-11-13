@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.844-queue-attempt-columns/);
+  assert.match(worker, /0\.10\.855-queue-attempt-columns/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.844-queue-attempt-columns/);
+  assert.match(worker, /0\.10\.855-queue-attempt-columns/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1047,22 +1047,36 @@ test("lean output upsert keeps a stored runner marker", async () => {
         Platform: "Instagram",
         Content_Profile: ["recProfile1"],
         Publish_Retry_Eligible: true,
+        Studio_Publish_Dispatch_Note: "reconcile: ok",
       },
     });
-    assert.equal(result.mode, "upsert");
-    const post = calls.find((call) => call.method === "POST" && call.url.includes("platform_outputs"));
-    const row = JSON.parse(post.body)[0];
+    assert.equal(result.mode, "patch");
+    const patch = calls.find((call) => call.method === "PATCH" && call.url.includes("platform_outputs"));
+    const row = JSON.parse(patch.body);
     assert.equal(row.error_messages._runner_record_projection, "v1");
     assert.equal(row.publish_retry_eligible, true);
+    assert.equal(row.output_number, 4);
+    assert.equal(row.platform, "Instagram");
+    assert.equal(Object.hasOwn(row, "scheduled_post_date"), false);
+    assert.equal(Object.hasOwn(row, "publish_status"), false);
     assert.equal(row.error_messages.Publish_Retry_Eligible, undefined);
     assert.equal(row.error_messages.Output_Notes, "old");
+    assert.equal(row.error_messages.Studio_Publish_Dispatch_Note, "reconcile: ok");
     assert.equal(row.error_messages._airtable_links.Content_Item, "recContent1");
-    const unmarked = retainProjectionKeys(
+    const unmarkedLean = retainProjectionKeys(
       { Output_Notes: "stale" },
       { Publish_Retry_Eligible: true },
     );
-    assert.equal(unmarked.Output_Notes, undefined);
-    assert.equal(unmarked.Publish_Retry_Eligible, true);
+    assert.equal(unmarkedLean.Output_Notes, undefined);
+    assert.equal(unmarkedLean.Publish_Retry_Eligible, true);
+    const unmarkedStamp = retainProjectionKeys(
+      { Output_Notes: "stale", TikTok_Draft_Publish_ID: "v_inbox_url~keep" },
+      { TikTok_Draft_Last_Checked_At: "2026-11-13T04:40:00.000Z" },
+      { merge: true },
+    );
+    assert.equal(unmarkedStamp.Output_Notes, "stale");
+    assert.equal(unmarkedStamp.TikTok_Draft_Publish_ID, "v_inbox_url~keep");
+    assert.equal(unmarkedStamp.TikTok_Draft_Last_Checked_At, "2026-11-13T04:40:00.000Z");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1130,6 +1144,7 @@ test("desk heal candidate lists read Supabase and keep the note bag", async () =
     const worker = readStudioWorkerSource();
     for (const marker of [
       "stale_rfr", "phantom_rerender", "live_failed", "ttd0_blank_draft",
+      "ttd_processing_missing_id", "tiktok_wiped_approval",
       "native_photo", "ig_too_many", "ig_verify_race", "ig_poll_failure", "ig_rate_limit",
       "fb_story_evidenced", "fb_note_recovery",
     ]) {
@@ -2620,7 +2635,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.844-queue-attempt-columns/);
+  assert.match(worker, /0\.10\.855-queue-attempt-columns/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2761,6 +2776,50 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(deskHealOutputFilter("inventory_az_ready"), /output_caption/);
   assert.match(deskHealOutputFilter("inventory_approved_dispatch"), /platform=neq\.TikTok/);
   assert.match(deskHealOutputFilter("inventory_published_cover"), /YouTube%20Short/);
+  const nowMs = Date.parse("2026-11-12T22:40:00.000Z");
+  const ttd0 = deskHealOutputFilter("ttd0_ready", { nowMs });
+  const ttd1 = deskHealOutputFilter("ttd1_ready", { nowMs });
+  const ttd2Armed = deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: true });
+  const ttd2Open = deskHealOutputFilter("ttd2_processing", { nowMs, requireAutoPublish: false });
+  const ttd3 = deskHealOutputFilter("ttd3_email");
+  assert.match(ttd0, /tiktok_draft_status\.eq\.%22Ready%20for%20Assets%22/);
+  assert.match(ttd0, /%22Waiting%20for%20Schedule%22/);
+  assert.match(ttd0, /scheduled_post_date\.lte\.2026-11-12T22%3A55%3A00\.000Z/);
+  assert.doesNotMatch(ttd1, /%22Waiting%20for%20Schedule%22/);
+  assert.match(ttd1, /%22Ready%20for%20Delivery%22/);
+  const deskReads = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  assert.match(deskReads, /kind === "ttd0_ready" \|\| kind === "ttd1_ready"/);
+  assert.match(deskReads, /order=scheduled_post_date\.\$\{direction\}\.nullslast/);
+  assert.doesNotMatch(deskReads, /kind === "ttd0_ready" \|\| kind === "ttd1_ready" \|\| kind === "overdue_scheduled"\)\s*\n\s*\? `order=scheduled_post_date\.\$\{direction\}\.nullsfirst`/);
+  assert.match(ttd1, /publish_next_retry_at\.lte\.2026-11-12T22%3A40%3A00\.000Z/);
+  assert.match(ttd1, /and\(tiktok_draft_status\.eq\.%22Retry%20Pending%22,or\(/);
+  assert.doesNotMatch(ttd1, /or=\(error_messages->>Publish_Error_Stage/);
+  assert.match(ttd2Armed, /auto_publish_enabled=eq\.true/);
+  assert.match(ttd2Armed, /and=\(error_messages->>TikTok_Draft_Publish_ID/);
+  assert.match(ttd2Armed, /TikTok_Draft_Last_Checked_At\.lt\./);
+  assert.doesNotMatch(ttd2Open, /auto_publish_enabled=eq\.true/);
+  const deskReadsOrder = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  assert.match(deskReadsOrder, /kind === "ttd2_processing"/);
+  assert.match(deskReadsOrder, /order=error_messages->>TikTok_Draft_Last_Checked_At\.\$\{direction\}\.nullsfirst/);
+  assert.match(ttd3, /TikTok_Draft_Email_Sent_At/);
+  assert.match(ttd3, /Manual_Completion_Status\.eq\.Required/);
+  assert.match(ttd3, /%22Draft%20Delivered/);
+  const overdue = deskHealOutputFilter("overdue_scheduled", { nowMs });
+  assert.match(overdue, /publish_status=eq\.Ready%20to%20Schedule/);
+  assert.match(overdue, /output_status=eq\.Approved%20for%20Publishing/);
+  assert.match(overdue, /scheduled_post_date=lt\.2026-11-12T22%3A40%3A00\.000Z/);
+  assert.doesNotMatch(overdue, /publish_status=eq\.%22Ready%20to%20Schedule%22/);
+  const missingId = deskHealOutputFilter("ttd_processing_missing_id");
+  assert.match(missingId, /tiktok_draft_status=eq\.Processing/);
+  assert.match(missingId, /TikTok_Draft_Publish_ID\.is\.null/);
+  const wipedApproval = deskHealOutputFilter("tiktok_wiped_approval");
+  assert.match(wipedApproval, /Waiting%20for%20Schedule/);
+  assert.match(wipedApproval, /or=\(output_status\.is\.null,review_status\.is\.null\)/);
+  assert.match(factory, /kind: "ttd0_ready"/);
+  assert.match(factory, /kind: "ttd3_email"/);
+  assert.match(factory, /kind: "overdue_scheduled"/);
+  assert.match(factory, /studioOverdueDispatchBudgetOpen/);
+  assert.match(factory, /studioReadTiktokReconcileOutput/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_produce"/);
   assert.match(factory, /studioListDeskInventoryRequests\(env, "inventory_escalated"/);
   assert.match(deskRequestFilter("inventory_escalated"), /production_job->>step=eq\.escalated/);

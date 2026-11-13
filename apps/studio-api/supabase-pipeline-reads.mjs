@@ -758,12 +758,17 @@ function stampRunnerProjection(bag, links, complete) {
   };
 }
 
-export function retainProjectionKeys(existing, next) {
+export function retainProjectionKeys(existing, next, options = {}) {
   const incoming = isPlainObject(next) ? next : {};
   if (!isPlainObject(existing)) return { ...incoming };
   const marked = existing._runner_record_projection === RUNNER_RECORD_PROJECTION;
-  const bag = marked ? { ...existing } : { ...incoming };
-  if (marked) {
+  // Partial Output stamps (TTD1 publish_id) must merge even when unmarked.
+  // Replacing unmarked bags wiped siblings and left Processing rows with
+  // bag_keys=1 so TTD2 fell back to frozen Airtable. Lean half-hour upserts
+  // keep the replace-unmarked path (options.merge !== true).
+  const merge = options.merge === true || marked;
+  const bag = merge ? { ...existing } : { ...incoming };
+  if (merge) {
     for (const [key, value] of Object.entries(incoming)) {
       if (!key || key.startsWith("_") || value == null || value === "") continue;
       bag[key] = value;
@@ -1295,6 +1300,27 @@ const OUTPUT_SELECT = [
   "published_at",
   "remotion_job_id",
   "selected_clip_count",
+  "publish_next_retry_at",
+  "youtube_stage",
+  "tiktok_draft_status",
+  "auto_publish_enabled",
+  "tiktok_draft_type",
+  "asset_aspect_family",
+  "image_count",
+  "image_output_selected",
+  "fb_publish_status",
+  "fb_image_publish_mode",
+  "studio_effective_voiceover_mode",
+  "studio_effective_background_music_mode",
+  "publish_retry_eligible",
+  "ig_carousel_status",
+  "ig_carousel_next_retry_at",
+  "ig_carousel_child_count",
+  "ig_carousel_children_ready_count",
+  "assets_ready_count",
+  "asset_set_revision",
+  "tiktok_9x16_ready_count",
+  "fb_resolved_publish_mode",
   "error_messages",
   "created_at",
   "updated_at",
@@ -2006,6 +2032,92 @@ function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
 
+/**
+ * PostgREST values used inside or=(...) / and=(...) must be double-quoted when
+ * they contain spaces, or the logic-tree parser splits on the space (PGRST100).
+ */
+function encodeDeskLogicValue(value) {
+  return encodeURIComponent(`"${String(value)}"`);
+}
+
+/** Blank jsonb bag field (missing or empty string). */
+function blankErrorMessage(field) {
+  return `or=(error_messages->>${field}.is.null,error_messages->>${field}.eq.)`;
+}
+
+/** Present jsonb bag field (not null and not empty). Top-level needs and=. */
+function presentErrorMessage(field) {
+  return `and=(error_messages->>${field}.not.is.null,error_messages->>${field}.neq.)`;
+}
+
+/**
+ * TikTok draft reconcile clocks that used to be Airtable NOW()/DATEADD formulas.
+ * Inbox drafts become due 15 minutes before Scheduled_Post_Date.
+ */
+function tiktokReconcileClockFilters(options = {}) {
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  const inboxDueIso = encodeDeskFilterValue(new Date(nowMs + 15 * 60 * 1000).toISOString());
+  const retryDueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
+  const checkedBeforeIso = encodeDeskFilterValue(new Date(nowMs - 2 * 60 * 1000).toISOString());
+  return {
+    inboxDue: `or=(scheduled_post_date.is.null,scheduled_post_date.lte.${inboxDueIso})`,
+    retryDue: `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${retryDueIso})`,
+    // Flatten blank + stale checks; nested or= inside or= is invalid PostgREST.
+    lastCheckedDue: "or=(error_messages->>TikTok_Draft_Last_Checked_At.is.null,"
+      + "error_messages->>TikTok_Draft_Last_Checked_At.eq.,"
+      + `error_messages->>TikTok_Draft_Last_Checked_At.lt.${checkedBeforeIso})`,
+  };
+}
+
+function tiktokReconcileOutputFilter(kind, options = {}) {
+  const quiet = "test_run_id=is.null&do_not_publish=eq.false&platform=eq.TikTok";
+  const armed = "auto_publish_enabled=eq.true";
+  const blankPublishId = blankErrorMessage("TikTok_Draft_Publish_ID");
+  const hasPublishId = presentErrorMessage("TikTok_Draft_Publish_ID");
+  const clocks = tiktokReconcileClockFilters(options);
+  const readyAssets = encodeDeskLogicValue("Ready for Assets");
+  const readyDelivery = encodeDeskLogicValue("Ready for Delivery");
+  const waitingSchedule = encodeDeskLogicValue("Waiting for Schedule");
+  const processing = encodeDeskLogicValue("Processing");
+  const retryPending = encodeDeskLogicValue("Retry Pending");
+  const delivered = encodeDeskLogicValue("Draft Delivered — Manual Action Required");
+  const completionReceived = encodeDeskLogicValue("Manual Completion Received");
+  const ttd0 = encodeDeskLogicValue("*TTD0*");
+  const ttd1 = encodeDeskLogicValue("*TTD1*");
+  const ttd2 = encodeDeskLogicValue("*TTD2*");
+  const ttd3 = encodeDeskLogicValue("*TTD3*");
+  if (kind === "ttd0_ready") {
+    // Due Waiting for Schedule promotes to Ready for Assets inside TTD0 reconcile.
+    const status = `or=(tiktok_draft_status.eq.${readyAssets},tiktok_draft_status.eq.${waitingSchedule},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd0}))`;
+    return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${status}`;
+  }
+  if (kind === "ttd1_ready") {
+    // Nested operators inside or= must be or(...)/and(...), not or= / and=.
+    // Waiting for Schedule belongs on TTD0 (promote → assets), not TTD1 init.
+    const status = `or=(tiktok_draft_status.eq.${readyDelivery},`
+      + `and(tiktok_draft_status.eq.${retryPending},or(error_messages->>Publish_Error_Stage.ilike.${ttd1},`
+      + "error_messages->>Publish_Error_Stage.eq.TTD_CAPACITY)))";
+    return `${quiet}&${armed}&${blankPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
+  }
+  if (kind === "ttd2_processing") {
+    const status = `or=(tiktok_draft_status.eq.${processing},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd2}))`;
+    const base = `${quiet}&${hasPublishId}&${clocks.inboxDue}&${clocks.retryDue}&${status}`;
+    if (options.requireAutoPublish !== false) {
+      return `${base}&${armed}&published_at=is.null&${clocks.lastCheckedDue}`;
+    }
+    return base;
+  }
+  if (kind === "ttd3_email") {
+    const status = `or=(tiktok_draft_status.eq.${delivered},tiktok_draft_status.eq.${completionReceived},`
+      + `and(tiktok_draft_status.eq.${retryPending},error_messages->>Publish_Error_Stage.ilike.${ttd3}))`;
+    return `${quiet}&${presentErrorMessage("TikTok_Draft_Delivered_At")}&${blankErrorMessage("TikTok_Draft_Email_Sent_At")}`
+      + `&error_messages->>Manual_Completion_Status.eq.${encodeDeskFilterValue("Required")}&${status}`;
+  }
+  throw new Error("Unknown TikTok reconcile candidate list");
+}
+
 function igOpenCarouselFilter() {
   return "test_run_id=is.null&do_not_publish=eq.false&published_at=is.null&platform=eq.Instagram"
     + `&or=(studio_output_type.eq.Carousel,platform_output_type.eq.${encodeDeskFilterValue("Instagram Carousel")})`;
@@ -2069,6 +2181,31 @@ export function deskHealOutputFilter(kind, options = {}) {
     const route = "or=(error_messages->>Publish_Error_Stage.eq.TTD0_ROUTE,"
       + `error_messages->>Publish_Error_Message.ilike.${encodeDeskFilterValue("*TTD0 found neither*")})`;
     return `${quiet}&platform=eq.TikTok&publish_status=eq.Failed&${route}`;
+  }
+  if (kind === "ttd_processing_missing_id") {
+    const blankPublishId = "or=(error_messages->>TikTok_Draft_Publish_ID.is.null,error_messages->>TikTok_Draft_Publish_ID.eq.)";
+    return `${quiet}&platform=eq.TikTok&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&tiktok_draft_status=eq.Processing&${blankPublishId}`;
+  }
+  if (kind === "tiktok_wiped_approval") {
+    const blankApproval = "or=(output_status.is.null,review_status.is.null)";
+    return `${quiet}&platform=eq.TikTok&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Schedule")}`
+      + `&tiktok_draft_status=eq.${encodeDeskFilterValue("Waiting for Schedule")}`
+      + `&${blankApproval}`;
+  }
+  if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
+    return tiktokReconcileOutputFilter(kind, options);
+  }
+  if (kind === "overdue_scheduled") {
+    const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+    const dueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
+    // Top-level eq filters use plain URL encoding; quoted logic values are for or=/and= only.
+    return `${quiet}&auto_publish_enabled=eq.true&published_at=is.null`
+      + `&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&review_status=eq.Approved`
+      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Schedule")}`
+      + `&scheduled_post_date=not.is.null&scheduled_post_date=lt.${dueIso}`;
   }
   if (kind === "fb_story_remote") {
     const stage = "or=(error_messages->>Publish_Error_Stage.eq.FACEBOOK_STORY_RATE_LIMIT_368,"
@@ -2244,19 +2381,38 @@ function shapeDeskHealRecord(row) {
   return shaped;
 }
 
-export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortDirection = "desc" } = {}) {
+export async function listSupabaseDeskHealOutputs(env, {
+  kind,
+  limit = 30,
+  sortDirection = "desc",
+  nowMs = undefined,
+  requireAutoPublish = undefined,
+  cutoffIso = "",
+} = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(80, Number(limit) || 30));
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const order = `order=output_number.${direction}.nullslast`;
+  // TTD0/TTD1 must use nullslast. nullsfirst let blank Scheduled_Post_Date
+  // rows monopolize the light limit=2 slots forever and starve due dated
+  // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
+  // TTD2 must fair-queue by Last_Checked (nulls first). output_number.desc
+  // kept pulsing the same high-ID Processing rows and never reached 4121.
+  const order = (kind === "ttd0_ready" || kind === "ttd1_ready")
+    ? `order=scheduled_post_date.${direction}.nullslast`
+    : kind === "overdue_scheduled"
+      ? `order=scheduled_post_date.${direction}.nullsfirst`
+      : kind === "ttd2_processing"
+        ? `order=error_messages->>TikTok_Draft_Last_Checked_At.${direction}.nullsfirst`
+        : `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
+  const filterOptions = { nowMs, requireAutoPublish, cutoffIso };
   if (kind === "render_unfetchable" || kind === "inventory_unfetchable") {
     const matches = [];
     const pageSize = 40;
     for (let offset = 0; offset < 320 && matches.length < capped; offset += pageSize) {
       const page = await supabaseRest(
         env,
-        `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${pageSize}&offset=${offset}`,
+        `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${pageSize}&offset=${offset}`,
       );
       const batch = Array.isArray(page) ? page : [];
       for (const row of batch) {
@@ -2270,7 +2426,7 @@ export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortD
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${capped}`,
+    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
@@ -3911,6 +4067,87 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
  * Write-through after an Airtable schedule (or similar) PATCH so Pipeline
  * schedule-grid reads do not snap the bubble back to a stale Supabase time.
  */
+/**
+ * Partial Output mutations must only write columns present on the Airtable
+ * field patch. Upserting a lean map used to send scheduled_post_date=null /
+ * publish_status=null for every dispatch stamp and wipe live schedule data.
+ */
+export function buildPresentOutputColumnPatch(record, {
+  profileUuid = null,
+  contentUuidByAirtableId = null,
+} = {}) {
+  const fields = record?.fields || {};
+  const present = (key) => Object.prototype.hasOwnProperty.call(fields, key);
+  const body = {};
+  if (present("Output_ID")) body.output_number = fields.Output_ID ?? null;
+  if (present("Platform")) body.platform = selectName(fields.Platform) || "Unknown";
+  if (present("Format")) body.format = selectName(fields.Format);
+  if (present("Platform_Output_Type")) body.platform_output_type = selectName(fields.Platform_Output_Type);
+  if (present("Studio_Output_Type")) body.studio_output_type = selectName(fields.Studio_Output_Type);
+  if (present("Aspect_Ratio")) body.aspect_ratio = selectName(fields.Aspect_Ratio);
+  if (present("Output_Status")) body.output_status = selectName(fields.Output_Status);
+  if (present("Render_Status")) body.render_status = selectName(fields.Render_Status);
+  if (present("Review_Status")) body.review_status = selectName(fields.Review_Status);
+  if (present("Publish_Status")) body.publish_status = selectName(fields.Publish_Status);
+  if (present("Publish_Method")) body.publish_method = selectName(fields.Publish_Method);
+  if (present("Do_Not_Publish")) body.do_not_publish = Boolean(fields.Do_Not_Publish);
+  if (present("Test_Run_ID")) body.test_run_id = fields.Test_Run_ID || null;
+  if (present("Output_Title")) body.output_title = fields.Output_Title || null;
+  if (present("Output_Caption")) body.output_caption = fields.Output_Caption || null;
+  if (present("Output_Hashtags")) body.output_hashtags = fields.Output_Hashtags || null;
+  if (present("Thumbnail_URL")) body.thumbnail_url = fields.Thumbnail_URL || null;
+  if (present("Final_File_URL")) body.final_file_url = fields.Final_File_URL || null;
+  if (present("Publish_Asset_URL")) body.publish_asset_url = fields.Publish_Asset_URL || null;
+  if (present("Studio_Preview_URL")) body.studio_preview_url = fields.Studio_Preview_URL || null;
+  if (present("Platform_Post_URL")) body.platform_post_url = fields.Platform_Post_URL || null;
+  if (present("Scheduled_Post_Date")) body.scheduled_post_date = fields.Scheduled_Post_Date || null;
+  if (present("Studio_Scheduled_At")) body.studio_scheduled_at = fields.Studio_Scheduled_At || null;
+  if (present("YouTube_Scheduled_Publish_At")) {
+    body.youtube_scheduled_publish_at = fields.YouTube_Scheduled_Publish_At || null;
+  }
+  if (present("Published_At")) body.published_at = fields.Published_At || null;
+  if (present("Remotion_Job_ID")) body.remotion_job_id = fields.Remotion_Job_ID || null;
+  if (present("Selected_Clip_Count")) body.selected_clip_count = fields.Selected_Clip_Count ?? null;
+  if (present("Publish_Next_Retry_At")) body.publish_next_retry_at = fields.Publish_Next_Retry_At || null;
+  if (present("YouTube_Stage")) body.youtube_stage = selectName(fields.YouTube_Stage);
+  if (present("TikTok_Draft_Status")) body.tiktok_draft_status = selectName(fields.TikTok_Draft_Status);
+  if (present("Auto_Publish_Enabled")) body.auto_publish_enabled = Boolean(fields.Auto_Publish_Enabled);
+  if (present("TikTok_Draft_Type")) body.tiktok_draft_type = selectName(fields.TikTok_Draft_Type);
+  if (present("Asset_Aspect_Family")) body.asset_aspect_family = selectName(fields.Asset_Aspect_Family);
+  if (present("Image_Count")) body.image_count = fields.Image_Count ?? null;
+  if (present("Image_Output_Selected")) body.image_output_selected = Boolean(fields.Image_Output_Selected);
+  if (present("FB_Publish_Status")) body.fb_publish_status = selectName(fields.FB_Publish_Status);
+  if (present("FB_Image_Publish_Mode")) body.fb_image_publish_mode = selectName(fields.FB_Image_Publish_Mode);
+  if (present("Studio_Effective_Voiceover_Mode")) {
+    body.studio_effective_voiceover_mode = selectName(fields.Studio_Effective_Voiceover_Mode);
+  }
+  if (present("Studio_Effective_Background_Music_Mode")) {
+    body.studio_effective_background_music_mode = selectName(fields.Studio_Effective_Background_Music_Mode);
+  }
+  if (present("Publish_Retry_Eligible")) body.publish_retry_eligible = Boolean(fields.Publish_Retry_Eligible);
+  if (present("IG_Carousel_Status")) body.ig_carousel_status = selectName(fields.IG_Carousel_Status);
+  if (present("IG_Carousel_Next_Retry_At")) {
+    body.ig_carousel_next_retry_at = fields.IG_Carousel_Next_Retry_At || null;
+  }
+  if (present("IG_Carousel_Child_Count")) body.ig_carousel_child_count = fields.IG_Carousel_Child_Count ?? null;
+  if (present("IG_Carousel_Children_Ready_Count")) {
+    body.ig_carousel_children_ready_count = fields.IG_Carousel_Children_Ready_Count ?? null;
+  }
+  if (present("Assets_Ready_Count")) body.assets_ready_count = fields.Assets_Ready_Count ?? null;
+  if (present("Asset_Set_Revision")) body.asset_set_revision = fields.Asset_Set_Revision || null;
+  if (present("TikTok_9x16_Ready_Count")) body.tiktok_9x16_ready_count = fields.TikTok_9x16_Ready_Count ?? null;
+  if (present("FB_Resolved_Publish_Mode")) {
+    body.fb_resolved_publish_mode = selectName(fields.FB_Resolved_Publish_Mode);
+  }
+  if (present("Content_Profile") && profileUuid) body.content_profile_id = profileUuid;
+  if (present("Content_Item") && contentUuidByAirtableId) {
+    const contentAirtableId = firstLink(fields.Content_Item);
+    const contentUuid = contentAirtableId ? contentUuidByAirtableId.get(contentAirtableId) : null;
+    if (contentUuid) body.content_item_id = contentUuid;
+  }
+  return { body, bagPatch: packOutputListFields(fields) };
+}
+
 export async function syncAirtableOutputRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
@@ -3942,48 +4179,37 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     return { ok: true, mode: "create" };
   }
 
-  const profileAirtableId = firstLink(record.fields?.Content_Profile);
-  let profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-  if (!profileUuid) {
-    // Patch schedule fields only when the row already exists from cron sync.
-    // A held reschedule also stores the publish hold and the note so the
-    // following readback does not have to re-read Airtable.
-    const fields = record.fields || {};
-    const body = {
-      scheduled_post_date: fields.Scheduled_Post_Date || null,
-      studio_scheduled_at: fields.Studio_Scheduled_At || null,
-      youtube_scheduled_publish_at: fields.YouTube_Scheduled_Publish_At || null,
-      publish_status: selectName(fields.Publish_Status),
-      output_status: selectName(fields.Output_Status),
-      review_status: selectName(fields.Review_Status),
-    };
-    if (Object.prototype.hasOwnProperty.call(fields, "Do_Not_Publish")) {
-      body.do_not_publish = Boolean(fields.Do_Not_Publish);
-    }
-    body.updated_at = new Date().toISOString();
-    const bagPatch = packOutputListFields(fields);
-    if (Object.keys(bagPatch).length) {
-      const existing = await supabaseRest(
+  if (options.fullRecord === true) {
+    const profileAirtableId = firstLink(record.fields?.Content_Profile);
+    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+    const contentAirtableId = firstLink(record.fields?.Content_Item);
+    const contentUuidByAirtableId = new Map();
+    if (contentAirtableId) {
+      const contentRows = await supabaseRest(
         env,
-        `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
+        `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
       ).catch(() => []);
-      body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch);
+      if (Array.isArray(contentRows) && contentRows[0]?.id) {
+        contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
+      }
     }
-    await supabaseRest(
-      env,
-      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
-      {
-        method: "PATCH",
-        body,
-        headers: { Prefer: "return=minimal" },
-      },
-    );
+    let row = mapAirtableOutputToSupabase(record, {
+      profileUuid,
+      contentUuidByAirtableId,
+      fullRecord: true,
+    });
+    row.updated_at = new Date().toISOString();
+    await upsertChunk(env, "platform_outputs", [row]);
     await patchRenderHealColumns(env, record).catch((error) => {
       console.warn("render heal column copy failed", error);
     });
-    return { ok: true, mode: "patch" };
+    return { ok: true, mode: "upsert" };
   }
 
+  // Partial mutations (dispatch stamps, promote, caption backfill): PATCH only
+  // the columns present on the field patch so schedule/status stay intact.
+  const profileAirtableId = firstLink(record.fields?.Content_Profile);
+  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
   const contentAirtableId = firstLink(record.fields?.Content_Item);
   const contentUuidByAirtableId = new Map();
   if (contentAirtableId) {
@@ -3995,21 +4221,32 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
     }
   }
-
-  let row = mapAirtableOutputToSupabase(record, {
-    profileUuid,
+  const { body, bagPatch } = buildPresentOutputColumnPatch(record, {
+    profileUuid: profileUuid || null,
     contentUuidByAirtableId,
-    fullRecord: options.fullRecord === true,
   });
-  if (options.fullRecord !== true) {
-    [row] = await applyStoredProjection(env, "platform_outputs", [row], "error_messages");
+  if (Object.keys(bagPatch).length) {
+    const existing = await supabaseRest(
+      env,
+      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
+    ).catch(() => []);
+    body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch, { merge: true });
   }
-  row.updated_at = new Date().toISOString();
-  await upsertChunk(env, "platform_outputs", [row]);
+  if (!Object.keys(body).length) return { skipped: true, reason: "no_present_fields" };
+  body.updated_at = new Date().toISOString();
+  await supabaseRest(
+    env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    {
+      method: "PATCH",
+      body,
+      headers: { Prefer: "return=minimal" },
+    },
+  );
   await patchRenderHealColumns(env, record).catch((error) => {
     console.warn("render heal column copy failed", error);
   });
-  return { ok: true, mode: "upsert" };
+  return { ok: true, mode: "patch" };
 }
 
 /**

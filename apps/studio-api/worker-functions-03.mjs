@@ -699,6 +699,7 @@ import {
   healStuckStudioRenders,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
+  studioHealTtdProcessingMissingPublishId,
   studioHealFacebookRateLimitRearm,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
@@ -10621,6 +10622,9 @@ export async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await studioHealTtd0RouteBlankDraft(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_TTD0_BLANK_DRAFT", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealTtdProcessingMissingPublishId(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_TTD_MISSING_PUBLISH_ID", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await studioHealFacebookRateLimitRearm(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_FB_RATE_LIMIT_REARM", error: error instanceof Error ? error.message : String(error) });
   }
@@ -12888,13 +12892,37 @@ export async function studioPulseTtd1(env, record) {
     };
   }
   const skipped = payload?.status === "skipped";
+  const publishId = String(payload?.details?.run?.publish_id || "").trim();
+  const needsPoll = Boolean(payload?.details?.run?.needs_poll);
+  // Runner archive partial mirrors used to stamp typed Processing without the
+  // bag publish_id. Persist the pulse response through Worker write-through so
+  // TTD2 can poll even when the runner bag merge is stale.
+  if (!skipped && needsPoll && publishId && !String(f(record, "TikTok_Draft_Publish_ID") || "").trim()) {
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            TikTok_Draft_Publish_ID: publishId,
+            TikTok_Draft_Status: "Processing",
+            Publish_Status: "Publishing",
+            Publish_Error_Stage: "",
+            Publish_Error_Message: "",
+          },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("TTD1 publish_id stamp failed", recordId, error);
+    }
+  }
   return {
     ok: true,
     skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
     target: "TTD1",
     backend: "python",
-    needs_poll: Boolean(payload?.details?.run?.needs_poll),
-    publish_id: payload?.details?.run?.publish_id,
+    needs_poll: needsPoll,
+    publish_id: publishId || undefined,
   };
 }
 /*__STUDIO_WORKER_END:studioPulseTtd1__*/
@@ -13305,10 +13333,18 @@ export async function studioEnsureOutputCaption(env, record) {
 
   if (!Object.keys(fields).length) return record;
   try {
-    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    const patched = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
+    // Archive-mode PATCH returns only the mutated fields. Keep the caller's
+    // unread columns so dispatch does not false-skip missing-ai-caption.
+    return {
+      ...record,
+      ...(patched || {}),
+      id: record.id,
+      fields: { ...(record.fields || {}), ...fields, ...(patched?.fields || {}) },
+    };
   } catch (error) {
     console.warn("output caption/hashtag backfill failed", record.id, error);
     return record;

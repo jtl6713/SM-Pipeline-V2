@@ -153,6 +153,8 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   assert.match(stage, /Publish_Next_Retry_At/);
   assert.match(stage, /TikTok_Draft_Last_Checked_At/);
   assert.match(stage, /studioPulseTtd2\(env, row\)/);
+  assert.match(stage, /studioListTiktokReconcileOutputs\(env, "ttd2_processing"/);
+  assert.match(stage, /studioReadTiktokReconcileOutput\(env, candidate\.id\)/);
   assert.doesNotMatch(stage, /studioPulseTtd0|studioPulseTtd1|studioDispatchApprovedPublishNow|studioPublishFacebookPageStory/);
   assert.match(stage, /Do_Not_Publish/);
   assert.match(stage, /currentId !== previousId|previousId !== currentId/);
@@ -161,8 +163,29 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
   const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
   assert.ok(independent > 0 && independent < mainWaitUntil && independent < heavy);
-  assert.match(scheduled.slice(independent - 200, independent), /!cadence.heavy/);
+  assert.match(scheduled.slice(independent - 280, independent), /airtableDataWaitMs/);
+  assert.doesNotMatch(scheduled.slice(independent - 120, independent), /!cadence\.heavy && airtableCooldownWaitMs/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
+});
+
+test("TTD draft reconcile runs on independent light cron and overdue lists Supabase", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
+  const draftLight = scheduled.indexOf("ctx.waitUntil(studioReconcileTiktokDrafts");
+  const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
+  const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(draftLight > 0 && draftLight < mainWaitUntil && draftLight < heavy);
+  assert.match(scheduled.slice(draftLight - 280, draftLight), /airtableDataWaitMs/);
+  assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
+  assert.match(cron, /0\.10\.854-ttd2-unmarked-supabase-read/);
+  const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
+  const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
+  assert.ok(overdueStart > 0 && overdueEnd > overdueStart);
+  const overdue = impl.slice(overdueStart, overdueEnd);
+  assert.match(overdue, /kind: "overdue_scheduled"/);
+  assert.match(overdue, /studioOverdueDispatchBudgetOpen/);
+  assert.match(overdue, /studioWriteSource\(env\) === "supabase"/);
 });
 
 
