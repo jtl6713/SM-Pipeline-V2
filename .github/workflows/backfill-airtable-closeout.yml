@@ -100,6 +100,7 @@ jobs:
           if (Test-Path $err) { Remove-Item $err -Force }
           $python = "D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.venv\Scripts\python.exe"
           if (-not (Test-Path $python)) { throw "python_missing" }
+          $env:PYTHONUNBUFFERED = "1"
           Start-Process -FilePath $python -ArgumentList @($py) -WorkingDirectory $repo -RedirectStandardOutput $log -RedirectStandardError $err -WindowStyle Hidden
           Write-Output "backfill_started"
           PS
@@ -115,7 +116,7 @@ jobs:
           if ((Test-Path $err) -and ((Get-Item $err).Length -gt 0)) {
             $line = [string](Get-Content $err -TotalCount 1)
             $safe = $line -replace '(?i)(pat|key|bearer|token|eyJ|sk-).*','[redacted]'
-            if ($safe.Length -gt 80) { $safe = $safe.Substring(0,80) }
+            if ($safe.Length -gt 160) { $safe = $safe.Substring(0,160) }
             Write-Output ("backfill_err_head=" + $safe)
           }
           PS
@@ -127,11 +128,15 @@ jobs:
               jq -r '.job.log // ""' /tmp/ops-job.json | grep -E '^(settings_upserted|settings_present|queue_upserted|queue_supabase|queue_ready_supabase)='
               exit 0
             fi
-            if jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^backfill_err_head=' \
-              && ! jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^settings_upserted='; then
-              jq -r '.job.log // ""' /tmp/ops-job.json | grep '^backfill_err_head=' | head -1
-              echo "backfill_process_error"
-              exit 1
+            err_head=$(jq -r '.job.log // ""' /tmp/ops-job.json | grep '^backfill_err_head=' | head -1 || true)
+            if [[ -n "$err_head" ]] && ! jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^settings_upserted='; then
+              case "$err_head" in
+                *Traceback*|*"http "*|*Error*|*"can't open"*|*"No module"*|*KeyError*)
+                  echo "$err_head"
+                  echo "backfill_process_error"
+                  exit 1
+                  ;;
+              esac
             fi
             sleep 20
           done
