@@ -705,6 +705,7 @@ import {
   studioHealPhantomRerender,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
+  studioHealTtdProcessingMissingPublishId,
   studioHealFacebookRateLimitRearm,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
@@ -1360,7 +1361,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.847-supabase-partial-patch",
+          version: "0.10.848-ttd1-publish-id-stamp",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4953,6 +4954,11 @@ export default {
         console.warn("studio TTD0 blank-draft heal failed", error);
       }
       try {
+        await studioHealTtdProcessingMissingPublishId(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio TTD processing missing-publish-id heal failed", error);
+      }
+      try {
         await studioHealFacebookRateLimitRearm(env, { limit: 4 });
       } catch (error) {
         console.warn("studio Facebook rate-limit rearm failed", error);
@@ -6316,6 +6322,8 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:studioHealLiveFailedPublishStatus__*/
 /** TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type. */
 /*__STUDIO_WORKER_EXTRACT:studioHealTtd0RouteBlankDraft__*/
+/** Processing without TikTok_Draft_Publish_ID, or wiped TikTok approval columns. */
+/*__STUDIO_WORKER_EXTRACT:studioHealTtdProcessingMissingPublishId__*/
 /** Graph 368 park expired → restore Auto_Publish and pulse FBS3. */
 /*__STUDIO_WORKER_EXTRACT:studioHealFacebookRateLimitRearm__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealFailedStatuses__*/

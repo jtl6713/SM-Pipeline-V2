@@ -457,8 +457,10 @@ test("Worker exposes factory desk routes and version flag", async () => {
     assert.match(worker, /0\.10\.\d+(?:-[\w.-]+)?/);
   assert.match(worker, /async function studioHealLiveFailedPublishStatus/);
   assert.match(worker, /async function studioHealTtd0RouteBlankDraft/);
+  assert.match(worker, /async function studioHealTtdProcessingMissingPublishId/);
   assert.match(worker, /await studioHealLiveFailedPublishStatus\(env/);
   assert.match(worker, /await studioHealTtd0RouteBlankDraft\(env/);
+  assert.match(worker, /await studioHealTtdProcessingMissingPublishId\(env/);
 
   assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
