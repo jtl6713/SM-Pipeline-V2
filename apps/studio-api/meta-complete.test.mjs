@@ -7,7 +7,11 @@ import {
   isMetaPostUrl,
   metaCompleteEligibility,
   metaNeedsUrlEntry,
+  metaNeedsRepublish,
+  metaRepublishEligibility,
+  metaRepublishRearmFields,
   metaManualPublishFields,
+  META_REPUBLISH_ERRORS,
 } from "./meta-complete.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -93,5 +97,54 @@ test("creative load and Pipeline compose Meta URL actions", () => {
   assert.match(app, /pipelineYoutubeCompleteCell\(record\)\}\$\{pipelineMetaCompleteCell\(record\)/);
   assert.match(app, /What to do/);
   assert.match(app, /Action needed:.*Resend draft to TikTok/);
+});
+
+test("Manual Action Required copy uses red error styling", () => {
+  const css = fs.readFileSync(path.join(dir, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
+  assert.match(app, /manual-action-required-copy/);
+  assert.match(app, /creative-meta-action-required/);
+  assert.match(css, /manual-action-required-copy/);
+  assert.match(css, /creative-meta-action-required/);
+});
+
+test("Meta Manual Action can Republish after operator confirms not live", () => {
+  assert.equal(metaRepublishEligibility(nycArchIg), null);
+  assert.equal(metaNeedsRepublish(nycArchIg), true);
+  assert.equal(metaRepublishEligibility({
+    ...nycArchIg,
+    replace_transaction_id: "repl_123",
+  }), "replace_open");
+  assert.equal(metaRepublishEligibility({
+    ...nycArchIg,
+    platform_post_url: "https://www.instagram.com/p/live/",
+  }), "already_published");
+  const fields = metaRepublishRearmFields({
+    now: "2026-11-13T14:00:00.000Z",
+    platform: "Instagram",
+    platformOutputType: "Instagram Reel",
+  });
+  assert.equal(fields.Manual_Fallback_Required, false);
+  assert.equal(fields.Publish_Status, "Ready to Publish");
+  assert.equal(fields.Publish_Retry_Eligible, true);
+  assert.equal(fields.Platform_Media_ID, "");
+  assert.equal(fields.Auto_Publish_Enabled, true);
+  assert.match(fields.Output_Notes, /republish requested/);
+  assert.match(META_REPUBLISH_ERRORS.confirmation_required, /Confirm the post is not live/);
+});
+
+test("Worker wires /meta-republish and UI shows Republish button", () => {
+  assert.match(worker04, /export async function republishStudioMeta/);
+  assert.match(worker04, /confirmed_not_live/);
+  assert.match(worker04, /metaRepublishRearmFields/);
+  assert.match(workerJs, /isOutputMetaRepublishWrite/);
+  assert.match(workerJs, /republishStudioMeta/);
+  assert.match(workerJs, /\/meta-republish\$/);
+  assert.match(html, /id="creativeMetaRepublish"/);
+  assert.match(html, />Republish</);
+  assert.match(app, /function metaNeedsRepublish/);
+  assert.match(app, /submitMetaRepublish/);
+  assert.match(app, /\/meta-republish/);
+  assert.match(app, /data-meta-republish/);
+  assert.match(app, /tap Republish/);
 });
 

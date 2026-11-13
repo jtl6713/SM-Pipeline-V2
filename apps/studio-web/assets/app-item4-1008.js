@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.936-manual-action-guidance";
+  const BUILD_ID = "item4-0.6.938-meta-republish";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18814,11 +18814,13 @@ function timedScriptAssetLabel(asset, index) {
         what = "Use TikTok output actions below: Resend draft if needed, then paste the live TikTok URL.";
       } else if (platform === "instagram" || platform === "facebook") {
         const label = String(output.platform || "Meta").trim() || "Meta";
-        what = `Use the ${label} live URL card below: paste the public post URL after it is live.`;
+        what = `Use the ${label} card below: tap Republish if the post is not live, or paste the public URL if it already is.`;
       }
       rows.unshift(["What to do", what]);
     }
-    if (output.manual_fallback_required) rows.push(["Manual fallback", "Required — paste the live post URL below"]);
+    if (output.manual_fallback_required) {
+      rows.push(["Manual fallback", "Required — Republish from Studio, or paste the live post URL if it already exists"]);
+    }
     const publishError = String(output.publish_error_message || output.publish_error || "").trim();
     const publishStage = String(output.publish_error_stage || "").trim();
     if (publishStage || publishError) {
@@ -18832,7 +18834,10 @@ function timedScriptAssetLabel(asset, index) {
     if (output.studio_preview_updated_at) rows.push(["Preview updated", formatStudioDateTime(output.studio_preview_updated_at)]);
     if (output.output_caption) rows.push(["Caption", output.output_caption]);
     if (output.output_hashtags) rows.push(["Hashtags", output.output_hashtags]);
-    let html = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("");
+    let html = rows.map(([label, v]) => {
+      const action = /^(what to do|manual fallback|publish error)$/i.test(String(label || ""));
+      return `<div${action ? ' class="creative-meta-action-required"' : ""}><span>${escapeHtml(label)}</span><b${action ? ' class="error-text"' : ""}>${escapeHtml(v)}</b></div>`;
+    }).join("");
     if (watchUrl) {
       html += `<div><span>File</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(watchUrl)}">Open rendered file ↗</a></b></div>`;
     }
@@ -19005,6 +19010,27 @@ function timedScriptAssetLabel(asset, index) {
     return false;
   }
 
+  function metaNeedsRepublish(record) {
+    if (!metaNeedsUrlEntry(record) && String(record?.publish_status || "").trim().toLowerCase() !== "failed") {
+      return false;
+    }
+    if (String(record?.replace_transaction_id || "").trim()) return false;
+    return metaNeedsUrlEntry(record)
+      || String(record?.publish_status || "").trim().toLowerCase() === "failed";
+  }
+
+  function metaRepublishConfirm(record) {
+    const name = metaPlatformLabel(record);
+    return `Confirm this post is not live on ${name}.\n\nStudio will clear the failed publish state and publish again via the API. If the post is already live, cancel and paste the public URL instead.`;
+  }
+
+  async function submitMetaRepublish(recordId) {
+    return api(`/api/outputs/${encodeURIComponent(recordId)}/meta-republish`, {
+      method: "POST",
+      body: JSON.stringify({ confirmed_not_live: true }),
+    });
+  }
+
   function isMetaPostUrlClient(url, platform = "") {
     const value = String(url || "").trim();
     if (!value) return false;
@@ -19086,9 +19112,14 @@ function timedScriptAssetLabel(asset, index) {
     } else if (posted) {
       prompt = "This TikTok is already live. The public URL is saved.";
     }
-    if (copy) copy.textContent = prompt;
+    if (copy) {
+      copy.textContent = prompt;
+      copy.classList.toggle("error-text", Boolean(awaiting || canResend));
+      copy.classList.toggle("manual-action-required-copy", Boolean(awaiting || canResend));
+    }
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
+      card.classList.remove("manual-action-required");
       form.hidden = true;
       live.hidden = true;
       live.innerHTML = "";
@@ -19097,10 +19128,12 @@ function timedScriptAssetLabel(asset, index) {
       if (resendMessage) resendMessage.textContent = "";
       if (musicWrap) musicWrap.hidden = true;
       if (musicRequirement) musicRequirement.hidden = true;
+      if (copy) copy.classList.remove("error-text", "manual-action-required-copy");
       input.value = "";
       return;
     }
     card.hidden = false;
+    card.classList.toggle("manual-action-required", Boolean(awaiting || canResend));
     form.hidden = !awaiting;
     if (resendWrap) resendWrap.hidden = !canResend;
     if (resendButton) resendButton.disabled = false;
@@ -19152,6 +19185,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
 
+  let creativeMetaRepublishFeedbackKey = "";
   function renderCreativeMetaComplete(output) {
     const card = $("creativeMetaComplete");
     const form = $("creativeMetaCompleteForm");
@@ -19162,30 +19196,51 @@ function timedScriptAssetLabel(asset, index) {
     const label = $("creativeMetaUrlLabel");
     const errorEl = $("creativeMetaPublishError");
     const save = $("creativeMetaCompleteSave");
+    const republishWrap = $("creativeMetaRepublishWrap");
+    const republishButton = $("creativeMetaRepublish");
+    const republishMessage = $("creativeMetaRepublishMessage");
     if (!card || !form || !live || !input) return;
+    const feedbackKey = `${selectedProfileId}:${String(output?.id || "")}`;
+    if (feedbackKey !== creativeMetaRepublishFeedbackKey) {
+      creativeMetaRepublishFeedbackKey = feedbackKey;
+      if (republishMessage) {
+        republishMessage.textContent = "";
+        republishMessage.classList.remove("error-text");
+      }
+    }
     const platform = String(output?.platform || "").trim().toLowerCase();
     const meta = platform === "instagram" || platform === "facebook";
     const awaiting = meta && metaNeedsUrlEntry(output);
+    const canRepublish = meta && metaNeedsRepublish(output);
     const posted = meta ? metaLiveUrl(output) : "";
     const name = metaPlatformLabel(output);
     const publishError = String(output?.publish_error_message || output?.publish_error || "").trim();
     const publishStage = String(output?.publish_error_stage || "").trim();
-    let prompt = `Action needed: paste the live ${name} post URL below after the post is public.`;
+    let prompt = `Action needed: tap Republish if the ${name} post is not live — Studio will publish again. If it is already live, paste the public URL below.`;
     if (publishError || publishStage) {
-      prompt = `Action needed: ${name} publish failed in Studio. Open ${name}, confirm whether the post is live, publish it there if needed, then paste the public URL below.`;
+      prompt = `Action needed: ${name} publish failed in Studio. Confirm the post is not live, tap Republish, or paste the public URL if it already exists.`;
     } else if (output?.manual_fallback_required) {
-      prompt = `Action needed: ${name} requires a manual close. Confirm the post is live in the app (or publish it there), then paste the public URL below.`;
+      prompt = `Action needed: ${name} needs a Studio republish. Confirm the post is not live, tap Republish, or paste the public URL if it already exists.`;
     }
     if (heading) heading.textContent = `${name}: Manual Action Required`;
-    if (label) label.textContent = `${name} post URL`;
+    if (label) label.textContent = `${name} post URL (only if already live)`;
     if (save) save.textContent = `Save ${name} URL`;
-    if (copy) copy.textContent = (!awaiting && posted) ? `This ${name} post is already live. The public URL is saved.` : prompt;
+    if (republishButton) republishButton.textContent = `Republish to ${name}`;
+    const showAction = Boolean(awaiting || canRepublish);
+    if (copy) {
+      copy.textContent = (!awaiting && !canRepublish && posted)
+        ? `This ${name} post is already live. The public URL is saved.`
+        : prompt;
+      copy.classList.toggle("error-text", showAction);
+      copy.classList.toggle("manual-action-required-copy", showAction);
+    }
+    if (heading) heading.classList.toggle("error-text", showAction);
     if (errorEl) {
-      if (awaiting && (publishStage || publishError || output?.manual_fallback_required)) {
+      if (showAction) {
         errorEl.hidden = false;
         errorEl.textContent = publishStage || publishError
           ? [publishStage, publishError].filter(Boolean).join(": ")
-          : "Manual fallback is on — Studio is waiting for a public post URL.";
+          : "Manual Action Required — Republish from Studio, or paste the public URL if live.";
         errorEl.classList.add("error-text");
       } else {
         errorEl.hidden = true;
@@ -19193,16 +19248,28 @@ function timedScriptAssetLabel(asset, index) {
         errorEl.classList.remove("error-text");
       }
     }
-    if (!meta || (!awaiting && !posted)) {
+    if (!meta || (!awaiting && !canRepublish && !posted)) {
       card.hidden = true;
+      card.classList.remove("manual-action-required");
       form.hidden = true;
       live.hidden = true;
       live.innerHTML = "";
       input.value = "";
+      if (republishWrap) republishWrap.hidden = true;
+      if (republishButton) republishButton.disabled = false;
+      if (republishMessage) republishMessage.textContent = "";
+      if (copy) {
+        copy.classList.remove("error-text", "manual-action-required-copy");
+      }
+      if (heading) heading.classList.remove("error-text");
       return;
     }
     card.hidden = false;
+    card.classList.toggle("manual-action-required", showAction);
     form.hidden = !awaiting;
+    if (republishWrap) republishWrap.hidden = !canRepublish;
+    if (republishButton) republishButton.disabled = false;
+    if (republishMessage && !canRepublish) republishMessage.textContent = "";
     live.hidden = awaiting || !posted;
     input.placeholder = platform === "facebook"
       ? "https://www.facebook.com/…/posts/…"
@@ -20564,13 +20631,19 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function pipelineMetaCompleteCell(record) {
-    if (!metaNeedsUrlEntry(record)) return "";
+    const parts = [];
     const name = metaPlatformLabel(record);
-    const current = pipelineMetaUrlDraft(record);
-    const placeholder = String(record?.platform || "").trim().toLowerCase() === "facebook"
-      ? "https://www.facebook.com/…/posts/…"
-      : "https://www.instagram.com/p/…";
-    return `<form class="pipeline-tiktok-complete" data-meta-complete="${escapeHtml(record.id)}"><label><span>${escapeHtml(name)} URL</span><input type="url" required placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
+    if (metaNeedsRepublish(record)) {
+      parts.push(`<div class="pipeline-tiktok-resend" data-meta-republish="${escapeHtml(record.id)}"><button type="button" class="primary-button pipeline-tiktok-resend-btn">Republish to ${escapeHtml(name)}</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></div>`);
+    }
+    if (metaNeedsUrlEntry(record)) {
+      const current = pipelineMetaUrlDraft(record);
+      const placeholder = String(record?.platform || "").trim().toLowerCase() === "facebook"
+        ? "https://www.facebook.com/…/posts/…"
+        : "https://www.instagram.com/p/…";
+      parts.push(`<form class="pipeline-tiktok-complete" data-meta-complete="${escapeHtml(record.id)}"><label><span>${escapeHtml(name)} URL (if already live)</span><input type="url" required placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`);
+    }
+    return parts.join("");
   }
 
   function pipelineYoutubeCompleteCell(record) {
@@ -20662,6 +20735,46 @@ function timedScriptAssetLabel(asset, index) {
 
 
   function bindPipelineMetaComplete(root) {
+    (root || document).querySelectorAll("[data-meta-republish]").forEach((wrap) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      wrap.addEventListener("click", keepOnRow);
+      wrap.addEventListener("mousedown", keepOnRow);
+      wrap.addEventListener("pointerdown", keepOnRow);
+      const button = wrap.querySelector(".pipeline-tiktok-resend-btn");
+      const message = wrap.querySelector(".pipeline-tiktok-complete-msg");
+      button?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const actionProfileId = selectedProfileId;
+        const actionRevision = profileFeedbackRevision;
+        const isCurrentRow = () => profileActionIsCurrent(actionProfileId, actionRevision)
+          && wrap.isConnected;
+        const id = wrap.dataset.metaRepublish;
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
+        if (!id || !button) return;
+        if (!window.confirm(metaRepublishConfirm(record))) return;
+        button.disabled = true;
+        if (message) {
+          message.classList.remove("error-text");
+          message.textContent = "Republishing…";
+        }
+        try {
+          const result = await submitMetaRepublish(id);
+          if (!isCurrentRow()) return;
+          const held = String(result?.dispatch?.skipped || "") === "scheduled-hold";
+          if (message) message.textContent = held ? "Armed for scheduled publish" : "Republish started";
+          await refreshPipelineOutputs({ silent: true });
+        } catch (error) {
+          if (!isCurrentRow()) return;
+          if (message) {
+            message.textContent = error.message || "Could not republish.";
+            message.classList.add("error-text");
+          }
+        } finally {
+          if (isCurrentRow()) button.disabled = false;
+        }
+      });
+    });
     (root || document).querySelectorAll("[data-meta-complete]").forEach((form) => {
       const keepOnRow = (event) => event.stopPropagation();
       form.addEventListener("click", keepOnRow);
@@ -23006,7 +23119,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend, [data-meta-complete], .pipeline-content-media, .pipeline-content-thumb-link, .pipeline-content-thumb-button")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend, [data-meta-complete], [data-meta-republish], .pipeline-content-media, .pipeline-content-thumb-link, .pipeline-content-thumb-button")) return;
           // Content-cell clicks on a Story-first rowspan package must not open Story.
           if (event.target.closest(".pipeline-content-cell")) {
             const groupKey = row.closest("[data-pipeline-group]")?.getAttribute("data-pipeline-group");
@@ -28543,6 +28656,43 @@ function timedScriptAssetLabel(asset, index) {
       phase6Message(error.message || "Could not save the YouTube URL.", "error-text");
     } finally {
       if (button) button.disabled = false;
+    }
+  });
+
+  $("creativeMetaRepublish")?.addEventListener("click", async () => {
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    const button = $("creativeMetaRepublish");
+    const message = $("creativeMetaRepublishMessage");
+    if (!id || !button) return;
+    if (!window.confirm(metaRepublishConfirm(record))) return;
+    button.disabled = true;
+    if (message) {
+      message.classList.remove("error-text");
+      message.textContent = "Republishing…";
+    }
+    try {
+      phase6Message(`Republishing ${metaPlatformLabel(record)}…`);
+      const result = await submitMetaRepublish(id);
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        renderCreativeMetaComplete(activeCreativeOutput);
+      }
+      const held = String(result?.dispatch?.skipped || "") === "scheduled-hold";
+      if (message) message.textContent = held ? "Armed for scheduled publish" : "Republish started";
+      phase6Message(held
+        ? `${metaPlatformLabel(record)} republish armed for the scheduled time.`
+        : `${metaPlatformLabel(record)} republish started.`);
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      if (message) {
+        message.textContent = error.message || "Could not republish.";
+        message.classList.add("error-text");
+      }
+      phase6Message(error.message || "Could not republish.", "error-text");
+    } finally {
+      button.disabled = false;
     }
   });
 

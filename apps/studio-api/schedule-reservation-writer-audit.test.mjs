@@ -65,6 +65,9 @@ const EXPECTED_WRITER_SURFACE = [
   "worker-functions-04.mjs:approveOutputRecordForPublishing",
   "worker-functions-04.mjs:factoryDeleteDeskItem",
   "worker-functions-04.mjs:resendStudioTiktokDraft",
+  // Meta Manual Action Republish reads Scheduled_Post_Date only to decide
+  // Ready to Publish vs Ready to Schedule; it never writes schedule timestamps.
+  "worker-functions-04.mjs:republishStudioMeta",
   "worker-functions-04.mjs:scheduleStudioPublishOutput",
   "worker-functions-04.mjs:studioRecoverFencedIgStaleUpload",
   "worker-functions-04.mjs:studioApproveOutputRecordAtomic",
@@ -188,6 +191,13 @@ test("status-only writers cannot accidentally mutate authoritative schedule capa
   assert.doesNotMatch(resend, /(^|[,{]\s*)Scheduled_Post_Date\s*:/m);
   assert.doesNotMatch(resend, /(^|[,{]\s*)YouTube_Scheduled_Publish_At\s*:/m);
   assert.doesNotMatch(resend, /(^|[,{]\s*)Studio_Scheduled_At\s*:/m);
+
+  const metaRepublish = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
+    .get("republishStudioMeta");
+  assert.ok(metaRepublish);
+  assert.doesNotMatch(metaRepublish, /(^|[,{]\s*)Scheduled_Post_Date\s*:/m);
+  assert.doesNotMatch(metaRepublish, /(^|[,{]\s*)YouTube_Scheduled_Publish_At\s*:/m);
+  assert.doesNotMatch(metaRepublish, /(^|[,{]\s*)Studio_Scheduled_At\s*:/m);
 });
 
 test("visual voiceover canary may clear schedule fields only on isolated nonpublishing test outputs", () => {
