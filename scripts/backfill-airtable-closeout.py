@@ -180,6 +180,15 @@ def supabase_count(url, key, table, extra=""):
     return int(total) if total.isdigit() else None
 
 
+def log(message):
+    print(message, flush=True)
+    path = os.environ.get("CLOSEOUT_LOG")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
+
+
 def main():
     pat = os.environ["AIRTABLE_PAT"]
     url = os.environ["SUPABASE_URL"]
@@ -195,7 +204,7 @@ def main():
         if rows:
             supabase_upsert(url, key, "engagement_settings", rows)
             saved_settings += len(rows)
-    print(f"settings_upserted={saved_settings}", flush=True)
+    log(f"settings_upserted={saved_settings}")
     saved_queue = 0
     for page in airtable_pages(pat, QUEUE, QUEUE_FIELDS):
         rows = [queue_row(record) for record in page if record.get("id")]
@@ -203,10 +212,10 @@ def main():
             supabase_upsert(url, key, "studio_media_transfer_queue", rows)
             saved_queue += len(rows)
         if saved_queue and saved_queue % 1000 == 0:
-            print(f"queue_upserted={saved_queue}", flush=True)
-    print(f"queue_upserted={saved_queue}", flush=True)
-    print(f"queue_supabase={supabase_count(url, key, 'studio_media_transfer_queue')}", flush=True)
-    print(f"queue_ready_supabase={supabase_count(url, key, 'studio_media_transfer_queue', '&status=eq.Ready')}", flush=True)
+            log(f"queue_upserted={saved_queue}")
+    log(f"queue_upserted={saved_queue}")
+    log(f"queue_supabase={supabase_count(url, key, 'studio_media_transfer_queue')}")
+    log(f"queue_ready_supabase={supabase_count(url, key, 'studio_media_transfer_queue', '&status=eq.Ready')}")
     present = 0
     for name in SETTING_NAMES:
         count = supabase_count(
@@ -216,8 +225,13 @@ def main():
             "&payload->>Setting_Name=eq." + urllib.parse.quote(name),
         )
         present += 1 if count else 0
-    print(f"settings_present={present}", flush=True)
+    log(f"settings_present={present}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit as exc:
+        kind = "http" if isinstance(exc.code, str) and str(exc.code).startswith("http") else "error"
+        log(f"closeout_exit={kind}")
+        raise

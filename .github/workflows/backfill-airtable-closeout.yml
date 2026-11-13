@@ -96,16 +96,22 @@ jobs:
           if (-not $env:AIRTABLE_PAT -or -not $env:SUPABASE_URL -or -not $env:SUPABASE_SERVICE_ROLE_KEY) { throw "runner_backfill_env_missing" }
           $log = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout.log"
           $err = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout.err"
-          if (Test-Path $log) { Remove-Item $log -Force }
+          if (Test-Path $log) {
+            Select-String -Path $log -Pattern "^(settings_upserted|settings_present|queue_upserted|queue_supabase|queue_ready_supabase|closeout_exit)=" | ForEach-Object { Write-Output ("prior_" + $_.Line) }
+          }
           if (Test-Path $err) { Remove-Item $err -Force }
+          if (Test-Path $log) { Remove-Item $log -Force }
+          Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*backfill-airtable-closeout.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
           $python = "D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.venv\Scripts\python.exe"
           if (-not (Test-Path $python)) { throw "python_missing" }
           $env:PYTHONUNBUFFERED = "1"
+          $env:CLOSEOUT_LOG = $log
           $launch = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout-launch.cmd"
           @(
             "@echo off",
             "set PYTHONUNBUFFERED=1",
-            "`"$python`" -u `"$py`" > `"$log`" 2> `"$err`""
+            "set CLOSEOUT_LOG=$log",
+            "`"$python`" -u `"$py`" 1> `"$log.stdout`" 2> `"$err`""
           ) | Set-Content -Path $launch -Encoding ascii
           $start = New-Object System.Diagnostics.ProcessStartInfo
           $start.FileName = $launch
@@ -119,7 +125,7 @@ jobs:
           $log = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout.log"
           $err = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout.err"
           if (Test-Path $log) {
-            Select-String -Path $log -Pattern "^(settings_upserted|settings_present|queue_upserted|queue_supabase|queue_ready_supabase)=" | ForEach-Object { $_.Line }
+            Select-String -Path $log -Pattern "^(settings_upserted|settings_present|queue_upserted|queue_supabase|queue_ready_supabase|closeout_exit)=" | ForEach-Object { $_.Line }
           } else {
             Write-Output "backfill_log_missing"
           }
@@ -137,6 +143,10 @@ jobs:
             if jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^settings_present='; then
               jq -r '.job.log // ""' /tmp/ops-job.json | grep -E '^(settings_upserted|settings_present|queue_upserted|queue_supabase|queue_ready_supabase)='
               exit 0
+            fi
+            if jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^closeout_exit='; then
+              echo "backfill_process_error"
+              exit 1
             fi
             err_head=$(jq -r '.job.log // ""' /tmp/ops-job.json | grep '^backfill_err_head=' | head -1 || true)
             if [[ -n "$err_head" ]] && ! jq -r '.job.log // ""' /tmp/ops-job.json | grep -q '^settings_upserted='; then
