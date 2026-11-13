@@ -69,19 +69,33 @@ class GmailClient:
         (raw multipart boundaries, literal inner base64, and literal HTML tags).
         Plain text keeps the message readable on every client while preserving
         full clickable URLs.
+
+        TikTok bodies must stay 7-bit ASCII. Gmail IMAP often rewrites 8bit UTF-8
+        into quoted-printable for Apple Mail; when CTE and body disagree, iOS
+        paints literal =E2=80=94 / =3D (Output 4127). ASCII + 7bit avoids that.
         """
         if purpose not in ALLOWED_EMAIL_PURPOSES:
             return {"id": None, "skipped": True, "reason": "email_disabled", "purpose": purpose}
+        body = str(text_body or "")
         if purpose == PURPOSE_TIKTOK_HANDOFF:
-            lowered = str(text_body or "").casefold()
+            lowered = body.casefold()
             forbidden = ("<div", "<p", "<br", "<a ", "</")
             if any(marker in lowered for marker in forbidden):
                 raise RuntimeError("TikTok handoff text body unexpectedly contains HTML markup")
+            if any(ord(ch) >= 128 for ch in body):
+                raise RuntimeError(
+                    "TikTok handoff text body must be 7-bit ASCII for Apple Mail "
+                    "(non-ASCII forces quoted-printable wire form)"
+                )
 
+        # Prefer 7bit when the body is ASCII-clean. Fall back to quoted-printable
+        # (never 8bit) so CTE always matches the on-the-wire body for non-ASCII
+        # allowlisted mail such as PRIMARY usage alerts.
+        transfer_encoding = "7bit" if all(ord(ch) < 128 for ch in body) else "quoted-printable"
         message = EmailMessage(policy=SMTP)
         message["To"] = to
         message["Subject"] = subject
-        message.set_content(text_body, subtype="plain", charset="utf-8", cte="8bit")
+        message.set_content(body, subtype="plain", charset="utf-8", cte=transfer_encoding)
         raw_bytes = message.as_bytes(policy=SMTP)
         parsed = BytesParser(policy=SMTP).parsebytes(raw_bytes)
         if parsed.is_multipart() or parsed.get_content_type() != "text/plain":
@@ -92,9 +106,16 @@ class GmailClient:
             raise RuntimeError(
                 f"Malformed Gmail text charset: {parsed.get_content_charset()}"
             )
-        if parsed.get("Content-Transfer-Encoding", "").lower() != "8bit":
+        actual_cte = parsed.get("Content-Transfer-Encoding", "").lower()
+        if actual_cte != transfer_encoding:
             raise RuntimeError(
                 f"Malformed Gmail text transfer encoding: {parsed.get('Content-Transfer-Encoding')}"
+            )
+        if transfer_encoding == "7bit" and (
+            b"=E2=80=94" in raw_bytes or b"=3D=3D=3D" in raw_bytes
+        ):
+            raise RuntimeError(
+                "Malformed Gmail text envelope: quoted-printable artifacts in 7bit body"
             )
         if b"\n" in raw_bytes.replace(b"\r\n", b""):
             raise RuntimeError("Malformed Gmail text envelope: bare LF line endings remain")

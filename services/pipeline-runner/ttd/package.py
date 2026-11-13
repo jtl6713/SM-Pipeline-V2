@@ -394,7 +394,7 @@ def sibling_status_text(record: dict[str, Any]) -> str:
     permalink = field_str(record, "Platform_Post_URL")
     publish = field_str(record, "Publish_Status")
     if permalink and publish.casefold() in {"published", "published privately"}:
-        return f"- {label}: live — {permalink}"
+        return f"- {label}: live - {permalink}"
     when = chicago_publish_label(
         field(record, "Scheduled_Post_Date") or field(record, "Recommended_Publication_At")
     )
@@ -414,6 +414,44 @@ def platform_status_text(siblings: list[dict[str, Any]] | None) -> str:
     )
 
 
+def ascii_safe_email_text(value: str) -> str:
+    """Force 7-bit plain text for Apple Mail / Gmail IMAP handoff delivery.
+
+    Gmail stores our 8bit UTF-8 send as-is in Sent, then IMAP to Apple Mail often
+    rewrites the body as quoted-printable. When that rewrite and the CTE header
+    disagree, iOS Mail paints the wire form literally (=E2=80=94, =3D walls,
+    soft-broken URLs). Output 4127 showed that exact failure. Keep the operational
+    body ASCII so transport never needs quoted-printable.
+    """
+    text = str(value or "")
+    replacements = {
+        "\u2014": " - ",  # em dash
+        "\u2013": "-",  # en dash
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2026": "...",
+        "\u00a0": " ",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    cleaned: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if code < 128:
+            cleaned.append(ch)
+        elif ch.isspace():
+            cleaned.append(" ")
+        # Drop emoji and other non-ASCII rather than forcing QP on the MIME body.
+    text = "".join(cleaned)
+    while "  " in text:
+        text = text.replace("  ", " ")
+    # Preserve intentional blank lines; only tidy spaces left by removed glyphs.
+    lines = [line.rstrip() for line in text.splitlines()]
+    return "\n".join(lines)
+
+
 def handoff_email_text(
     record: dict[str, Any],
     *,
@@ -426,7 +464,8 @@ def handoff_email_text(
 
     This intentionally contains no HTML. The handoff has repeatedly rendered raw
     MIME/HTML in Apple Mail, so operational TikTok emails use a single text/plain
-    entity and full URLs instead of rich markup.
+    entity and full URLs instead of rich markup. The body stays 7-bit ASCII so
+    Gmail IMAP cannot leave Apple Mail staring at undecoded quoted-printable.
     """
     output_id = str(field(record, "Output_ID") or "")
     title = field_str(record, "Output_Title") or "TikTok draft"
@@ -446,10 +485,15 @@ def handoff_email_text(
     tiktok_handle = profile_tiktok_handle(profile)
     destination = tiktok_handle or profile_name
 
-    heading = f"{profile_name} publish package" if az else "TikTok draft delivered — manual action required"
+    heading = (
+        f"{profile_name} publish package"
+        if az
+        else "TikTok draft delivered - manual action required"
+    )
+    output_heading = f"OUTPUT #{output_id} - {title}"
     lines = [
         heading,
-        "=" * len(heading),
+        "-" * len(heading),
         "",
         f"Profile: {profile_name}",
     ]
@@ -460,7 +504,7 @@ def handoff_email_text(
     if backup_url:
         lines.extend([
             "",
-            "COMPLETE VIDEO BACKUP — USE IF TIKTOK INBOX SHOWS ONLY THE FIRST PART",
+            "COMPLETE VIDEO BACKUP - USE IF TIKTOK INBOX SHOWS ONLY THE FIRST PART",
             "The source MP4 was checked byte-for-byte against its Drive final BEFORE handoff.",
             "TikTok inbox delivery does not prove the playable draft is complete.",
             "If the inbox video stalls or stops early, DO NOT POST THAT DRAFT.",
@@ -495,8 +539,8 @@ def handoff_email_text(
     lines.extend(
         [
             "",
-            f"OUTPUT #{output_id} — {title}",
-            "-" * min(72, max(20, len(f"OUTPUT #{output_id} — {title}"))),
+            output_heading,
+            "-" * min(72, max(20, len(output_heading))),
             f"Draft type: {draft_type}",
             f"Number of images: {count}",
             f"Recommended publishing time: {when}",
@@ -536,7 +580,7 @@ def handoff_email_text(
     if publish_id:
         lines.extend(["", f"Draft publish ID: {publish_id}"])
 
-    return "\n".join(lines).strip() + "\n"
+    return ascii_safe_email_text("\n".join(lines).strip() + "\n")
 
 def handoff_email_html(
     record: dict[str, Any],
