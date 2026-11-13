@@ -16816,12 +16816,22 @@ export async function patchYoutubeManualClose(env, record, { url, autoHealed = f
 
 // Keep aligned with apps/studio-api/meta-complete.mjs (Worker deploy is this file only).
 export function isMetaPostUrl(url, platform = "") {
-  const value = String(url || "").trim().toLowerCase();
-  if (!value.startsWith("http")) return false;
+  const value = String(url || "").trim();
+  if (!value) return false;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/i.test(parsed.protocol)) return false;
+  const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
   const plat = String(platform || "").trim().toLowerCase();
-  if (plat === "instagram") return value.includes("instagram.com");
-  if (plat === "facebook") return value.includes("facebook.com") || value.includes("fb.watch");
-  return value.includes("instagram.com") || value.includes("facebook.com") || value.includes("fb.watch");
+  const instagram = host === "instagram.com" || host.endsWith(".instagram.com");
+  const facebook = host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.watch";
+  if (plat === "instagram") return instagram;
+  if (plat === "facebook") return facebook;
+  return instagram || facebook;
 }
 /*__STUDIO_WORKER_END:isMetaPostUrl__*/
 

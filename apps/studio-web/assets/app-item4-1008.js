@@ -18989,13 +18989,28 @@ function timedScriptAssetLabel(asset, index) {
     return false;
   }
 
+  function isMetaPostUrlClient(url, platform = "") {
+    const value = String(url || "").trim();
+    if (!value) return false;
+    let parsed;
+    try { parsed = new URL(value); } catch { return false; }
+    if (!/^https?:$/i.test(parsed.protocol)) return false;
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    const plat = String(platform || "").trim().toLowerCase();
+    const instagram = host === "instagram.com" || host.endsWith(".instagram.com");
+    const facebook = host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.watch";
+    if (plat === "instagram") return instagram;
+    if (plat === "facebook") return facebook;
+    return instagram || facebook;
+  }
+
   async function submitMetaComplete(recordId, { url, platform } = {}) {
     const postUrl = String(url || "").trim();
     const plat = String(platform || "").trim().toLowerCase();
-    if (plat === "facebook") {
-      if (!/facebook\.com|fb\.watch/i.test(postUrl)) throw new Error("Paste a live Facebook post URL.");
-    } else if (!/instagram\.com/i.test(postUrl)) {
-      throw new Error("Paste a live Instagram post URL containing instagram.com.");
+    if (!isMetaPostUrlClient(postUrl, plat || "instagram")) {
+      throw new Error(plat === "facebook"
+        ? "Paste a live Facebook post URL."
+        : "Paste a live Instagram post URL (instagram.com).");
     }
     return api(`/api/outputs/${encodeURIComponent(recordId)}/meta-complete`, {
       method: "POST",

@@ -33,7 +33,10 @@ test("Manual_Fallback Instagram opens meta URL entry", () => {
   assert.equal(metaNeedsUrlEntry(nycArchIg), true);
   assert.equal(isMetaPostUrl("https://www.instagram.com/p/ABC123/", "Instagram"), true);
   assert.equal(isMetaPostUrl("https://www.facebook.com/x/posts/1", "Facebook"), true);
+  assert.equal(isMetaPostUrl("https://fb.watch/abc", "Facebook"), true);
   assert.equal(isMetaPostUrl("https://www.tiktok.com/@x/video/1", "Instagram"), false);
+  assert.equal(isMetaPostUrl("https://evil.com/instagram.com/p/x", "Instagram"), false);
+  assert.equal(isMetaPostUrl("https://evil.com/?u=facebook.com", "Facebook"), false);
 });
 
 test("meta complete rejects already-published and non-meta", () => {
