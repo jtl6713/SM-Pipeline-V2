@@ -758,12 +758,17 @@ function stampRunnerProjection(bag, links, complete) {
   };
 }
 
-export function retainProjectionKeys(existing, next) {
+export function retainProjectionKeys(existing, next, options = {}) {
   const incoming = isPlainObject(next) ? next : {};
   if (!isPlainObject(existing)) return { ...incoming };
   const marked = existing._runner_record_projection === RUNNER_RECORD_PROJECTION;
-  const bag = marked ? { ...existing } : { ...incoming };
-  if (marked) {
+  // Partial Output stamps (TTD1 publish_id) must merge even when unmarked.
+  // Replacing unmarked bags wiped siblings and left Processing rows with
+  // bag_keys=1 so TTD2 fell back to frozen Airtable. Lean half-hour upserts
+  // keep the replace-unmarked path (options.merge !== true).
+  const merge = options.merge === true || marked;
+  const bag = merge ? { ...existing } : { ...incoming };
+  if (merge) {
     for (const [key, value] of Object.entries(incoming)) {
       if (!key || key.startsWith("_") || value == null || value === "") continue;
       bag[key] = value;
@@ -4224,7 +4229,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       env,
       `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
     ).catch(() => []);
-    body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch);
+    body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch, { merge: true });
   }
   if (!Object.keys(body).length) return { skipped: true, reason: "no_present_fields" };
   body.updated_at = new Date().toISOString();
