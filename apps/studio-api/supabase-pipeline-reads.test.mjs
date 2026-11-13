@@ -891,7 +891,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.866-ttd2-ungate-airtable/);
+  assert.match(worker, /0\.10\.867-closeout-gets-settings/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -995,7 +995,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.866-ttd2-ungate-airtable/);
+  assert.match(worker, /0\.10\.867-closeout-gets-settings/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2752,7 +2752,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.866-ttd2-ungate-airtable/);
+  assert.match(worker, /0\.10\.867-closeout-gets-settings/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2950,4 +2950,104 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(pipeline, /kind: "render_active"/);
   assert.equal(supabaseOutputMatchesHomeFailure({ Render_Status: "Failed" }), true);
   assert.equal(supabaseOutputMatchesHomeFailure({ Output_Status: "Ready for Review" }), false);
+});
+
+test("studioSideTableRead serves Output and Content GETs when the row exists", async () => {
+  const {
+    studioSideTableRead,
+    studioUpsertSettingOnSupabase,
+    PLATFORM_OUTPUTS_TABLE_ID,
+    CONTENT_ITEMS_TABLE_ID,
+  } = await import("./supabase-pipeline-reads.mjs");
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: PLATFORM_OUTPUTS_TABLE_ID,
+    AIRTABLE_CONTENT_TABLE_ID: CONTENT_ITEMS_TABLE_ID,
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url);
+    calls.push({ href, method: String(options.method || "GET").toUpperCase() });
+    if (href.includes("platform_outputs") && href.includes("recOutput00000001")) {
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recOutput00000001",
+        output_number: 42,
+        platform: "TikTok",
+        output_status: "Ready for Review",
+        do_not_publish: false,
+        error_messages: {},
+        content_items: { airtable_record_id: "recContent0000001" },
+        content_profiles: { airtable_record_id: "recProfile0000001" },
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (href.includes("content_items") && href.includes("recContent0000001")) {
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recContent0000001",
+        content_number: 7,
+        content_title: "Pier",
+        content_status: "Ready",
+        extras: {},
+        content_profiles: { airtable_record_id: "recProfile0000001" },
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (href.includes("platform_outputs") || href.includes("content_items")) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (href.includes("engagement_settings") && String(options.method || "GET").toUpperCase() === "GET") {
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (href.includes("engagement_settings")) {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`unexpected fetch ${href}`);
+  };
+  try {
+    const output = await studioSideTableRead(env, PLATFORM_OUTPUTS_TABLE_ID, "recOutput00000001");
+    const content = await studioSideTableRead(env, CONTENT_ITEMS_TABLE_ID, "recContent0000001");
+    const miss = await studioSideTableRead(env, PLATFORM_OUTPUTS_TABLE_ID, "recMissing0000001");
+    assert.equal(output.id, "recOutput00000001");
+    assert.equal(output.fields.Platform, "TikTok");
+    assert.equal(content.id, "recContent0000001");
+    assert.equal(content.fields.Content_Title, "Pier");
+    assert.equal(miss, null);
+    const reads = await import("./supabase-pipeline-reads.mjs");
+    // Patch readSettingRows path by returning a saved row after upsert.
+    let saved = null;
+    globalThis.fetch = async (url, options = {}) => {
+      const href = String(url);
+      const method = String(options.method || "GET").toUpperCase();
+      calls.push({ href, method });
+      if (href.includes("engagement_settings") && method === "GET") {
+        return new Response(JSON.stringify(saved ? [saved] : []), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (href.includes("engagement_settings") && (method === "POST" || method === "PATCH")) {
+        const body = typeof options.body === "string" ? JSON.parse(options.body) : options.body;
+        const row = Array.isArray(body) ? body[0] : body;
+        saved = { airtable_record_id: row.airtable_record_id, payload: row.payload };
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected settings fetch ${method} ${href}`);
+    };
+    const upserted = await studioUpsertSettingOnSupabase(env, "DESK_MODE", "observe", "test");
+    assert.equal(upserted.fields.Setting_Name, "DESK_MODE");
+    assert.equal(upserted.fields.Active, true);
+    assert.ok(upserted.id.startsWith("rec"));
+    assert.ok(calls.some((row) => row.href.includes("engagement_settings") && row.method !== "GET"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const worker = readStudioWorkerSource();
+  assert.match(worker, /0\.10\.867-closeout-gets-settings/);
+  const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
+  const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  assert.match(side, /kind === "output"/);
+  assert.match(side, /kind === "content"/);
+  assert.match(side, /studioUpsertSettingOnSupabase/);
 });

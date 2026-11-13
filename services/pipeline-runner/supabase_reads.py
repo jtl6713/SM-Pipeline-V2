@@ -16,7 +16,17 @@ import logging
 from typing import Any
 from urllib.parse import quote
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import (
+    CAROUSEL_SLIDES_TABLE,
+    CONTENT_ITEMS_TABLE,
+    MEDIA_ASSETS_TABLE,
+    MEDIA_TRANSFER_QUEUE_TABLE,
+    PIPELINE_SETTINGS_TABLE,
+    PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+    SOURCE_CANDIDATES_TABLE,
+)
+from settings_store import ENGAGEMENT_SETTINGS_TABLE, settings_source
 from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
 from supabase_views import view_to_postgrest_filter
 from supabase_pipeline import (
@@ -24,6 +34,8 @@ from supabase_pipeline import (
     OUTPUT_JSON_COLUMNS,
     OUTPUT_PATCH_COLUMNS,
     _rest,
+    studio_phase6_write_source,
+    studio_write_source,
     supabase_configured,
 )
 
@@ -35,22 +47,63 @@ logger = logging.getLogger("pipeline-runner.supabase-reads")
 FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset({
     PLATFORM_OUTPUTS_TABLE,
     CONTENT_ITEMS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+    MEDIA_ASSETS_TABLE,
+    PIPELINE_SETTINGS_TABLE,
+    ENGAGEMENT_SETTINGS_TABLE,
 })
 
 _OUTPUT_FIELDS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
 _CONTENT_FIELDS = dict(CONTENT_PATCH_COLUMNS)
+_REQUEST_FIELDS = {
+    "Production_Request_ID": "production_request_id",
+    "Request_Status": "request_status",
+    "Requested_Title": "requested_title",
+    "Production_Notes": "production_notes",
+    "Studio_Variant_Status": "variant_status",
+    "Studio_Output_Plan_Status": "output_plan_status",
+}
+_MEDIA_FIELDS = {
+    "Asset Name": "asset_name",
+    "Media_Class": "media_class",
+    "Asset_Role": "asset_role",
+    "Asset_Status": "asset_status",
+    "Active": "active",
+    "Do_Not_Use": "do_not_use",
+    "Studio_Favorite": "studio_favorite",
+    "Google Drive File ID": "google_drive_file_id",
+    "Google Drive URL": "google_drive_url",
+    "MIME_Type": "mime_type",
+    "File_Extension": "file_extension",
+    "File_Size_Bytes": "file_size_bytes",
+}
 
 
 def runner_table_read_source(settings: dict | None, table_id: str) -> str:
+    """Return supabase when this table's rows already live there under SoR.
+
+    Platform Outputs and Content Items still honor their runner read flags.
+    Settings, ideas, slides, and Phase 6 tables leave the hard airtable return
+    when the matching write source is supabase. Untranslated formulas still
+    return None from try_list_supabase_records and stay on Airtable.
+    """
+    if not supabase_configured(settings):
+        return "airtable"
     if table_id == PLATFORM_OUTPUTS_TABLE:
         key = "studio_runner_output_read_source"
-    elif table_id == CONTENT_ITEMS_TABLE:
+        raw = str((settings or {}).get(key) or "airtable").strip().lower()
+        return "supabase" if raw == "supabase" else "airtable"
+    if table_id == CONTENT_ITEMS_TABLE:
         key = "studio_runner_content_read_source"
-    else:
-        return "airtable"
-    raw = str((settings or {}).get(key) or "airtable").strip().lower()
-    if raw == "supabase" and supabase_configured(settings):
+        raw = str((settings or {}).get(key) or "airtable").strip().lower()
+        return "supabase" if raw == "supabase" else "airtable"
+    if settings_source(table_id) and studio_write_source(settings) == "supabase":
         return "supabase"
+    if table_id in {SOURCE_CANDIDATES_TABLE, CAROUSEL_SLIDES_TABLE} and studio_write_source(settings) == "supabase":
+        return "supabase"
+    if table_id in {PRODUCTION_REQUESTS_TABLE, MEDIA_ASSETS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE}:
+        if studio_phase6_write_source(settings) == "supabase":
+            return "supabase"
     return "airtable"
 
 
@@ -59,13 +112,27 @@ def _columns_for(table_id: str) -> dict[str, str]:
         return _OUTPUT_FIELDS
     if table_id == CONTENT_ITEMS_TABLE:
         return _CONTENT_FIELDS
+    if table_id == PRODUCTION_REQUESTS_TABLE:
+        return _REQUEST_FIELDS
+    if table_id == MEDIA_ASSETS_TABLE:
+        return _MEDIA_FIELDS
     return {}
 
 
 def _supabase_table(table_id: str) -> str:
     if table_id == PLATFORM_OUTPUTS_TABLE:
         return "platform_outputs"
-    return "content_items"
+    if table_id == CONTENT_ITEMS_TABLE:
+        return "content_items"
+    if table_id == PRODUCTION_REQUESTS_TABLE:
+        return "production_requests"
+    if table_id == MEDIA_ASSETS_TABLE:
+        return "media_assets"
+    if table_id == CAROUSEL_SLIDES_TABLE:
+        return "carousel_slides"
+    if table_id == SOURCE_CANDIDATES_TABLE:
+        return "idea_candidates"
+    return ""
 
 
 def _shaped(row: dict, columns: dict[str, str], requested: list[str] | None) -> dict | None:
@@ -133,10 +200,14 @@ def try_list_supabase_records(
             return None
     elif view_filter:
         formula_filter = view_filter
-    columns = _columns_for(table_id)
-    if not columns:
+    table = _supabase_table(table_id)
+    if not table:
         return None
-    if fields and any(name not in columns for name in fields):
+    columns = _columns_for(table_id)
+    # Carousel/idea lists shape from payload bags; typed-column maps may be empty.
+    if not columns and table_id not in {CAROUSEL_SLIDES_TABLE, SOURCE_CANDIDATES_TABLE}:
+        return None
+    if fields and columns and any(name not in columns for name in fields):
         return None
     order_column = "airtable_record_id"
     if sort_field:
@@ -147,7 +218,7 @@ def try_list_supabase_records(
     limit = max(1, min(int(max_records or 10), 100))
     select = _list_select(table_id)
     path = (
-        f"{_supabase_table(table_id)}?select={quote(select, safe='(),*')}"
+        f"{table}?select={quote(select, safe='(),*')}"
         f"&order={quote(order_column, safe='')}.{direction}&limit={limit}"
     )
     path = attach_formula_filter(path, formula_filter)
@@ -190,7 +261,17 @@ def _list_select(table_id: str) -> str:
             f"{base},error_messages,{blobs},"
             "content_items(airtable_record_id),content_profiles(airtable_record_id)"
         )
-    return f"{base},extras,content_profiles(airtable_record_id)"
+    if table_id == CONTENT_ITEMS_TABLE:
+        return f"{base},extras,content_profiles(airtable_record_id)"
+    if table_id == PRODUCTION_REQUESTS_TABLE:
+        return f"{base},publish_status,production_job"
+    if table_id == MEDIA_ASSETS_TABLE:
+        return f"{base},metadata"
+    if table_id == CAROUSEL_SLIDES_TABLE:
+        return "airtable_record_id,payload"
+    if table_id == SOURCE_CANDIDATES_TABLE:
+        return "airtable_record_id,candidate_title,idea_summary,status,payload"
+    return base
 
 
 def _overlay_bag(fields: dict[str, Any], bag: dict, *, typed_keys: set[str] | None = None) -> None:
@@ -224,6 +305,22 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     elif table_id == CONTENT_ITEMS_TABLE:
         bag = row.get("extras") if isinstance(row.get("extras"), dict) else {}
         columns = _CONTENT_FIELDS
+    elif table_id == PRODUCTION_REQUESTS_TABLE:
+        bag = row.get("publish_status") if isinstance(row.get("publish_status"), dict) else {}
+        columns = _REQUEST_FIELDS
+    elif table_id == MEDIA_ASSETS_TABLE:
+        bag = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        columns = _MEDIA_FIELDS
+    elif table_id == CAROUSEL_SLIDES_TABLE:
+        bag = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        columns = {}
+    elif table_id == SOURCE_CANDIDATES_TABLE:
+        bag = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        columns = {
+            "Candidate_Title": "candidate_title",
+            "Idea_Summary": "idea_summary",
+            "Candidate_Status": "status",
+        }
     else:
         return None
     # Full densify still stamps _runner_record_projection=v1. Rejecting
@@ -237,7 +334,7 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         return None
     fields: dict[str, Any] = {}
     _overlay_bag(fields, bag, typed_keys=set(columns))
-    shaped = _shaped(row, columns, None)
+    shaped = _shaped(row, columns, None) if columns else {"id": record_id, "fields": {}}
     if not shaped:
         return None
     fields.update(shaped["fields"])
@@ -255,10 +352,22 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         from publish_queue import apply_publish_queue_fields
 
         apply_publish_queue_fields(shaped["fields"])
-    else:
+    elif table_id == CONTENT_ITEMS_TABLE:
         profile_id = _linked(row, "content_profiles")
         if profile_id:
             shaped["fields"]["Content_Profile"] = [profile_id]
+    elif table_id == MEDIA_ASSETS_TABLE:
+        meta = bag if isinstance(bag, dict) else {}
+        if meta.get("rights_status") is not None and "Rights_Status" not in shaped["fields"]:
+            shaped["fields"]["Rights_Status"] = meta.get("rights_status")
+        if meta.get("asset_description") is not None and "Asset_Description" not in shaped["fields"]:
+            shaped["fields"]["Asset_Description"] = meta.get("asset_description")
+        if meta.get("studio_transfer_id") and "Studio_Transfer_ID" not in shaped["fields"]:
+            shaped["fields"]["Studio_Transfer_ID"] = meta.get("studio_transfer_id")
+        if meta.get("google_drive_url") and "Google Drive URL" not in shaped["fields"]:
+            shaped["fields"]["Google Drive URL"] = meta.get("google_drive_url")
+    elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
+        shaped["fields"]["Candidate_Status"] = row.get("status")
     return shaped
 
 
@@ -274,14 +383,17 @@ def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str
     record_id = str(record_id or "").strip()
     if not record_id:
         return None
+    table = _supabase_table(table_id)
+    if not table:
+        return None
     if table_id == PLATFORM_OUTPUTS_TABLE:
         select = "*,content_items(airtable_record_id),content_profiles(airtable_record_id)"
     elif table_id == CONTENT_ITEMS_TABLE:
         select = "*,content_profiles(airtable_record_id)"
     else:
-        return None
+        select = "*"
     path = (
-        f"{_supabase_table(table_id)}?airtable_record_id=eq.{quote(record_id, safe='')}"
+        f"{table}?airtable_record_id=eq.{quote(record_id, safe='')}"
         f"&select={quote(select, safe='(),*')}&limit=1"
     )
     try:

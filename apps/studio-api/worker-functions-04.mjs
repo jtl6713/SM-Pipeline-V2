@@ -117,6 +117,7 @@ import {
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
   readSupabaseShapedOutput,
+  studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -9477,6 +9478,11 @@ export async function studioSettingsByName(env, name) {
 /*__STUDIO_WORKER_END:studioSettingsByName__*/
 
 export async function studioUpsertSetting(env, name, value, notes) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const saved = await studioUpsertSettingOnSupabase(env, name, value, notes);
+    if (saved?.id) return saved;
+    throw new HttpError(502, `Failed to upsert Pipeline Setting "${name}" on Supabase.`);
+  }
   let existing = await studioSettingsByName(env, name);
   if (!existing) {
     // Reactivate a seeded/inactive row — Worker PATs sometimes cannot CREATE settings.

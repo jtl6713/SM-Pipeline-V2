@@ -445,11 +445,15 @@ def test_due_now_formula_lists_supabase(monkeypatch):
 
 def test_empty_output_list_stays_on_supabase(monkeypatch):
     import supabase_reads
+    from airtable.constants import MEDIA_ASSETS_TABLE, PIPELINE_SETTINGS_TABLE, PRODUCTION_REQUESTS_TABLE
+    from settings_store import ENGAGEMENT_SETTINGS_TABLE
 
-    assert supabase_reads.FALLBACK_STOPPED_TABLES == frozenset({
-        PLATFORM_OUTPUTS_TABLE,
-        CONTENT_ITEMS_TABLE,
-    })
+    assert PLATFORM_OUTPUTS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert CONTENT_ITEMS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert PRODUCTION_REQUESTS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert MEDIA_ASSETS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert PIPELINE_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert ENGAGEMENT_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
 
     def fake_get(url, *, headers, params, timeout):
         raise AssertionError("airtable list")
@@ -461,3 +465,52 @@ def test_empty_output_list_stays_on_supabase(monkeypatch):
     monkeypatch.setattr(requests, "request", fake_request)
     rows = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
     assert rows == []
+
+
+def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
+    from airtable.constants import MEDIA_ASSETS_TABLE, PRODUCTION_REQUESTS_TABLE
+    import supabase_reads
+
+    assert supabase_reads.runner_table_read_source(
+        _settings(studio_phase6_write_source="supabase"), MEDIA_ASSETS_TABLE,
+    ) == "supabase"
+    assert supabase_reads.runner_table_read_source(
+        _settings(studio_phase6_write_source="supabase"), PRODUCTION_REQUESTS_TABLE,
+    ) == "supabase"
+    assert supabase_reads.runner_table_read_source(_settings(), MEDIA_ASSETS_TABLE) == "airtable"
+
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        if "media_assets" in url:
+            return Response([{
+                "airtable_record_id": "recMedia00000001",
+                "asset_name": "Pier",
+                "google_drive_file_id": "drive-1",
+                "metadata": {"studio_transfer_id": "t1"},
+            }])
+        return Response([{
+            "airtable_record_id": "recRequest000001",
+            "production_request_id": "12",
+            "request_status": "Ready",
+            "publish_status": {},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    client = _client(studio_phase6_write_source="supabase")
+    media = client.list_records(
+        MEDIA_ASSETS_TABLE, formula='{Google Drive File ID}="drive-1"', max_records=1,
+    )
+    request = client.list_records(
+        PRODUCTION_REQUESTS_TABLE, formula='{Request_Status}="Ready"', max_records=1,
+    )
+    assert media[0]["id"] == "recMedia00000001"
+    assert media[0]["fields"]["Google Drive File ID"] == "drive-1"
+    assert request[0]["fields"]["Request_Status"] == "Ready"
+    assert any("google_drive_file_id.eq.drive-1" in url for url in seen)
+    assert any("request_status.eq.Ready" in url for url in seen)

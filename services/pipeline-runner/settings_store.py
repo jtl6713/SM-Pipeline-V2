@@ -76,7 +76,8 @@ def list_settings(settings: dict, table_id: str, formula: str | None, limit: int
         if parsed["active"] and not _active(shaped["fields"].get("Active")):
             continue
         records.append(shaped)
-    return records or None
+    # An empty match is the Supabase answer. Do not fall through to Airtable.
+    return records
 
 
 def get_setting(settings: dict, table_id: str, record_id: str) -> dict | None:

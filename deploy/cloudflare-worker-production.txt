@@ -1103,3 +1103,5 @@ Deploy 2026-11-13 Worker 0.10.864-tiktok-resend-reread: TikTok Resend / Meta Rep
 Deploy 2026-11-13 Worker 0.10.865-meta-republish-phase2a: Allow POST /meta-republish through Phase 2A gate; keep schedule fields off Resend/Republish writers. Verify /health version 0.10.865-meta-republish-phase2a.
 
 Deploy 2026-11-13 Worker 0.10.866-ttd2-ungate-airtable: TTD2/TTD draft/missing-publish-id cron never gate on Airtable archive cooldown; Processing poll allows empty list publish_id when reread has it. Verify /health version 0.10.866-ttd2-ungate-airtable.
+
+Deploy 2026-11-13 Worker 0.10.867-closeout-gets-settings: Serve Platform Output and Content Item GETs from Supabase when the row exists. studioUpsertSetting writes engagement_settings and re-reads that row. Record deletion is not started. Verify /health version 0.10.867-closeout-gets-settings.

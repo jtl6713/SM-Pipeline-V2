@@ -1,12 +1,12 @@
-"""Allowlisted Airtable formula → PostgREST filters for runner Output/Content reads.
+"""Allowlisted Airtable formula → PostgREST filters for runner Supabase reads.
 
 Unsupported formulas (JSON FIND, OR of a link lookup, unknown ops) return None
 so the caller keeps Airtable. OR of allowlisted predicates is translated.
-Only Platform Outputs and Content Items are covered.
-Three Studio produce Platform Output lookups are the exception: a content number
-or content record id inside Content_Item, and a record id stored on the
-Production_Request_Output link in the full-record bag. A substring FIND on a
-text field is translated. Views are translated separately from the snapshot.
+Platform Outputs, Content Items, Production Requests, and Media Assets are
+covered. Three Studio produce Platform Output lookups are the exception: a
+content number or content record id inside Content_Item, and a record id stored
+on the Production_Request_Output link in the full-record bag. A substring FIND
+on a text field is translated. Views are translated separately from the snapshot.
 """
 
 from __future__ import annotations
@@ -15,19 +15,47 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import (
+    CONTENT_ITEMS_TABLE,
+    MEDIA_ASSETS_TABLE,
+    PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+)
 from supabase_pipeline import CONTENT_PATCH_COLUMNS, OUTPUT_PATCH_COLUMNS
 
 _OUTPUT_COLUMNS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
 _CONTENT_COLUMNS = dict(CONTENT_PATCH_COLUMNS)
+_REQUEST_COLUMNS = {
+    "Production_Request_ID": "production_request_id",
+    "Request_Status": "request_status",
+    "Requested_Title": "requested_title",
+    "Production_Notes": "production_notes",
+    "Studio_Variant_Status": "variant_status",
+    "Studio_Output_Plan_Status": "output_plan_status",
+}
+_MEDIA_COLUMNS = {
+    "Asset Name": "asset_name",
+    "Media_Class": "media_class",
+    "Asset_Role": "asset_role",
+    "Asset_Status": "asset_status",
+    "Active": "active",
+    "Do_Not_Use": "do_not_use",
+    "Studio_Favorite": "studio_favorite",
+    "Google Drive File ID": "google_drive_file_id",
+    "Google Drive URL": "google_drive_url",
+    "MIME_Type": "mime_type",
+    "File_Extension": "file_extension",
+    "File_Size_Bytes": "file_size_bytes",
+    "Studio_Transfer_ID": "metadata->>studio_transfer_id",
+}
 
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')
-_EQ = re.compile(r'^\{([A-Za-z0-9_]+)\}="([^"]*)"$')
-_BLANK = re.compile(r'^\{([A-Za-z0-9_]+)\}=BLANK\(\)$')
-_EMPTY = re.compile(r'^\{([A-Za-z0-9_]+)\}=""$')
-_NE_EMPTY = re.compile(r'^\{([A-Za-z0-9_]+)\}!=""$')
-_NE_BLANK = re.compile(r'^\{([A-Za-z0-9_]+)\}!=BLANK\(\)$')
-_NE = re.compile(r'^\{([A-Za-z0-9_]+)\}!="([^"]+)"$')
+_EQ = re.compile(r'^\{([A-Za-z0-9_ ]+)\}="([^"]*)"$')
+_BLANK = re.compile(r'^\{([A-Za-z0-9_ ]+)\}=BLANK\(\)$')
+_EMPTY = re.compile(r'^\{([A-Za-z0-9_ ]+)\}=""$')
+_NE_EMPTY = re.compile(r'^\{([A-Za-z0-9_ ]+)\}!=""$')
+_NE_BLANK = re.compile(r'^\{([A-Za-z0-9_ ]+)\}!=BLANK\(\)$')
+_NE = re.compile(r'^\{([A-Za-z0-9_ ]+)\}!="([^"]+)"$')
 _GT = re.compile(r"^\{([A-Za-z0-9_]+)\}>(\d+)$")
 _NOT_FIELD = re.compile(r"^NOT\(\{([A-Za-z0-9_]+)\}\)$")
 _AND = re.compile(r"^AND\((.*)\)$", re.DOTALL)
@@ -50,14 +78,27 @@ def _columns(table_id: str) -> dict[str, str]:
         return _OUTPUT_COLUMNS
     if table_id == CONTENT_ITEMS_TABLE:
         return _CONTENT_COLUMNS
+    if table_id == PRODUCTION_REQUESTS_TABLE:
+        return _REQUEST_COLUMNS
+    if table_id == MEDIA_ASSETS_TABLE:
+        return _MEDIA_COLUMNS
     return {}
 
 
 def _bag(table_id: str) -> str:
-    return "error_messages" if table_id == PLATFORM_OUTPUTS_TABLE else "extras"
+    if table_id == PLATFORM_OUTPUTS_TABLE:
+        return "error_messages"
+    if table_id == PRODUCTION_REQUESTS_TABLE:
+        return "publish_status"
+    if table_id == MEDIA_ASSETS_TABLE:
+        return "metadata"
+    return "extras"
 
 
 def _field_ref(table_id: str, field: str) -> str | None:
+    columns = _columns(table_id)
+    if field in columns:
+        return columns[field]
     if not _SAFE_FIELD.match(field or ""):
         return None
     if table_id == PLATFORM_OUTPUTS_TABLE and field == "Content_Item":
@@ -68,9 +109,6 @@ def _field_ref(table_id: str, field: str) -> str | None:
         return "production_request_id"
     if table_id == PLATFORM_OUTPUTS_TABLE and field == "Production_Request_Output":
         return "production_request_output_text"
-    columns = _columns(table_id)
-    if field in columns:
-        return columns[field]
     # Densified extras live in jsonb; allow simple key lookup there.
     return f"{_bag(table_id)}->>{field}"
 
@@ -363,7 +401,12 @@ def _produce_link_filter(table_id: str, cleaned: str) -> str | None:
 
 def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | None:
     """Return a PostgREST `and=(...)` / single filter expression, or None."""
-    if table_id not in (PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE):
+    if table_id not in (
+        PLATFORM_OUTPUTS_TABLE,
+        CONTENT_ITEMS_TABLE,
+        PRODUCTION_REQUESTS_TABLE,
+        MEDIA_ASSETS_TABLE,
+    ):
         return None
     if formula is None:
         return None

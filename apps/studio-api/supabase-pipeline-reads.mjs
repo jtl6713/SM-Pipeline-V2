@@ -5231,10 +5231,16 @@ export const PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
 export const ENGAGEMENT_SETTINGS_TABLE_ID = "tblY1wDxmrf5khAYy";
 export const CAROUSEL_SLIDES_TABLE_ID = "tblcnQDBvUngpjDED";
 export const IDEA_CANDIDATES_TABLE_ID = "tblTQapddqD47GOIG";
+export const PLATFORM_OUTPUTS_TABLE_ID = "tblrlPeboBthkplH0";
+export const CONTENT_ITEMS_TABLE_ID = "tblwzN9AXWvmKVKPs";
 
 function sideTableKind(env, tableId) {
   const table = String(tableId || "");
   const idea = String(env?.AIRTABLE_IDEA_TABLE_ID || IDEA_CANDIDATES_TABLE_ID);
+  const outputs = String(env?.AIRTABLE_OUTPUT_TABLE_ID || PLATFORM_OUTPUTS_TABLE_ID);
+  const content = String(env?.AIRTABLE_CONTENT_TABLE_ID || CONTENT_ITEMS_TABLE_ID);
+  if (table === outputs || table === PLATFORM_OUTPUTS_TABLE_ID) return "output";
+  if (table === content || table === CONTENT_ITEMS_TABLE_ID) return "content";
   if (table === idea || table === IDEA_CANDIDATES_TABLE_ID) return "idea";
   if (table === PIPELINE_SETTINGS_TABLE_ID) return "pipeline_settings";
   if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
@@ -5569,9 +5575,76 @@ export async function readProfileSummaryDirtyBatch(env, kind, ids) {
   return shaped;
 }
 
+async function readOutputRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=${OUTPUT_SELECT}&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row?.airtable_record_id) return null;
+  return shapeDeskHealRecord(row);
+}
+
+async function readContentRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(id)}&select=${CONTENT_SELECT}&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row?.airtable_record_id) return null;
+  return airtableShapedContentFromSupabase(flattenContentRow(row));
+}
+
 /**
- * Idea, settings, carousel-slide, and transfer-queue reads that can be answered from Supabase.
- * Returns null when this call must stay on Airtable.
+ * Upsert a Pipeline Setting into engagement_settings and re-read it.
+ * Does not print Setting_Value. Airtable is not called.
+ */
+export async function studioUpsertSettingOnSupabase(env, name, value, notes) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) {
+    return null;
+  }
+  const settingName = String(name || "").trim();
+  if (!settingName) throw new Error("Setting_Name is required");
+  const existing = await readSettingRows(
+    env,
+    "pipeline",
+    { name: settingName, active: false, prefix: "" },
+    5,
+  );
+  const prior = existing[0] || null;
+  const payload = {
+    ...(isPlainObject(prior?.fields) ? prior.fields : {}),
+    Setting_Name: settingName,
+    Setting_Value: String(value ?? ""),
+    Active: true,
+    Notes: notes || null,
+    source: "pipeline",
+  };
+  const recordId = prior?.id || mintAirtableRecordId();
+  const body = { airtable_record_id: recordId, payload };
+  if (prior?.id) {
+    await supabaseRest(env, `engagement_settings?airtable_record_id=eq.${encodeURIComponent(recordId)}`, {
+      method: "PATCH",
+      body,
+      headers: { Prefer: "return=minimal" },
+    });
+  } else {
+    await upsertChunk(env, "engagement_settings", [body]);
+  }
+  const saved = await readSettingRows(
+    env,
+    "pipeline",
+    { name: settingName, active: false, prefix: "" },
+    5,
+  );
+  const row = saved.find((item) => item.id === recordId) || saved[0] || null;
+  if (!row?.id) throw new Error(`Failed to upsert Pipeline Setting "${settingName}" on Supabase`);
+  return row;
+}
+
+/**
+ * Idea, settings, carousel-slide, transfer-queue, Output, and Content reads from Supabase.
+ * Returns null when this call must stay on Airtable. A missing Output/Content row stays null.
  */
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
@@ -5579,6 +5652,12 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (!kind) return null;
   const id = sideRecordId(pathOrParams);
   if (id) {
+    if (kind === "output") {
+      return await readOutputRow(env, id);
+    }
+    if (kind === "content") {
+      return await readContentRow(env, id);
+    }
     if (kind === "idea") {
       const row = await readIdeaRow(env, id);
       return row || null;
@@ -5592,9 +5671,12 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       const rows = await readQueueRows(env, "", 1, 0, id);
       return rows?.[0] || null;
     }
-    const source = kind === "engagement_settings" ? "engagement" : "pipeline";
-    const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
-    return rows.find((row) => row.id === id) || null;
+    if (kind === "pipeline_settings" || kind === "engagement_settings") {
+      const source = kind === "engagement_settings" ? "engagement" : "pipeline";
+      const rows = await readSettingRows(env, source, { name: "", active: false, prefix: "" }, 1000);
+      return rows.find((row) => row.id === id) || null;
+    }
+    return null;
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
@@ -5709,7 +5791,7 @@ async function commitSlideRecords(env, records) {
 export async function studioSideTableCommit(env, tableId, method, pathOrParams, rawBody) {
   if (studioWriteSource(env) !== "supabase") return { ok: false, reason: "airtable" };
   const kind = sideTableKind(env, tableId);
-  if (!kind) return { ok: false, reason: "table" };
+  if (!kind || kind === "output" || kind === "content") return { ok: false, reason: "table" };
   const verb = String(method || "GET").toUpperCase();
   if (verb === "PATCH" || verb === "POST") {
     const parsed = verb === "PATCH"
@@ -5720,13 +5802,18 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       ? await commitIdeaRecords(env, parsed)
       : kind === "slides"
         ? await commitSlideRecords(env, parsed)
-        : await commitSettingRecords(env, kind === "engagement_settings" ? "engagement" : "pipeline", parsed, { insert: verb === "POST" });
+        : kind === "pipeline_settings" || kind === "engagement_settings"
+          ? await commitSettingRecords(env, kind === "engagement_settings" ? "engagement" : "pipeline", parsed, { insert: verb === "POST" })
+          : null;
     if (!records) return { ok: false, reason: "missing_row" };
     return { ok: records.length === parsed.length, records };
   }
   if (verb === "DELETE") {
     const id = sideRecordId(pathOrParams);
     if (!id) return { ok: false, reason: "no_records" };
+    if (kind !== "idea" && kind !== "slides" && kind !== "pipeline_settings" && kind !== "engagement_settings") {
+      return { ok: false, reason: "table" };
+    }
     const table = kind === "idea" ? "idea_candidates" : kind === "slides" ? "carousel_slides" : "engagement_settings";
     await supabaseRest(env, `${table}?airtable_record_id=eq.${encodeURIComponent(id)}`, {
       method: "DELETE",
