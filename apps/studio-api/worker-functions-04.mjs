@@ -17078,22 +17078,33 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
       TIKTOK_RESEND_ERRORS[reason] || reason,
     );
   }
+  const scheduledPostDate = f(existing, "Scheduled_Post_Date");
   const fields = tiktokResendRearmFields({
     now: new Date().toISOString(),
     existingNotes: f(existing, "Output_Notes"),
-    scheduledPostDate: f(existing, "Scheduled_Post_Date"),
+    scheduledPostDate,
   });
-  const rearmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+  // Keep the armed schedule on SoR when present. Blank scheduled_post_date
+  // sorts nullslast in TTD1 reconcile and starves Ready for Delivery drafts
+  // behind dated peers (Vizcaya 4988 / SoHo 5031).
+  if (String(scheduledPostDate || "").trim()) {
+    fields.Scheduled_Post_Date = scheduledPostDate;
+  }
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
+  // Supabase SoR archive mode returns the PATCH bag only. Dispatch needs the
+  // full output (Platform, caption, Final_File_URL) or TTD1 never starts.
+  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1])
+    .catch(() => existing);
   const dueNow = fields.TikTok_Draft_Status === "Ready for Delivery";
   const dispatch = dueNow
     ? await studioDispatchApprovedPublishNow(env, rearmed)
     : {
       ok: true,
       skipped: "scheduled-hold",
-      held_until: f(existing, "Scheduled_Post_Date") || null,
+      held_until: scheduledPostDate || null,
       record: rearmed,
     };
   if (dueNow && ctx && typeof ctx.waitUntil === "function") {
@@ -17101,7 +17112,7 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
       console.warn("tiktok-resend tail failed", match[1], error);
     }));
   }
-  const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => rearmed);
+  const refreshed = await studioReadOutputRecordForManualComplete(env, match[1]).catch(() => rearmed);
   return respond(request, env, {
     ok: true,
     resent: true,
@@ -17148,24 +17159,31 @@ export async function republishStudioMeta(request, env, url, authorization, ctx 
       META_REPUBLISH_ERRORS[reason] || reason,
     );
   }
+  const scheduledPostDate = f(existing, "Scheduled_Post_Date");
   const fields = metaRepublishRearmFields({
     now: new Date().toISOString(),
     existingNotes: f(existing, "Output_Notes"),
     platform,
-    scheduledPostDate: f(existing, "Scheduled_Post_Date"),
+    scheduledPostDate,
     platformOutputType: f(existing, "Platform_Output_Type"),
   });
-  const rearmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+  if (String(scheduledPostDate || "").trim()) {
+    fields.Scheduled_Post_Date = scheduledPostDate;
+  }
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
+  // Same SoR archive partial-bag trap as TikTok resend — re-read before Graph kick.
+  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1])
+    .catch(() => existing);
   const dueNow = fields.Publish_Status === "Ready to Publish";
   const dispatch = dueNow
     ? await studioDispatchApprovedPublishNow(env, rearmed)
     : {
       ok: true,
       skipped: "scheduled-hold",
-      held_until: f(existing, "Scheduled_Post_Date") || null,
+      held_until: scheduledPostDate || null,
       record: rearmed,
     };
   if (dueNow && ctx && typeof ctx.waitUntil === "function") {
@@ -17173,7 +17191,7 @@ export async function republishStudioMeta(request, env, url, authorization, ctx 
       console.warn("meta-republish tail failed", match[1], error);
     }));
   }
-  const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => rearmed);
+  const refreshed = await studioReadOutputRecordForManualComplete(env, match[1]).catch(() => rearmed);
   return respond(request, env, {
     ok: true,
     republished: true,
