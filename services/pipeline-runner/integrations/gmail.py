@@ -111,8 +111,11 @@ class GmailClient:
             raise RuntimeError(
                 f"Malformed Gmail text transfer encoding: {parsed.get('Content-Transfer-Encoding')}"
             )
+        # Only the body payload — Subject encoded-words can legally contain
+        # =E2=80=94 for legacy titles and must not trip this guard.
+        body_bytes = raw_bytes.split(b"\r\n\r\n", 1)[-1] if b"\r\n\r\n" in raw_bytes else raw_bytes
         if transfer_encoding == "7bit" and (
-            b"=E2=80=94" in raw_bytes or b"=3D=3D=3D" in raw_bytes
+            b"=E2=80=94" in body_bytes or b"=3D=3D=3D" in body_bytes
         ):
             raise RuntimeError(
                 "Malformed Gmail text envelope: quoted-printable artifacts in 7bit body"

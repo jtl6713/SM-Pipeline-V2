@@ -78,3 +78,32 @@ def test_send_text_rejects_non_ascii_tiktok_handoff(monkeypatch):
         assert "7-bit ASCII" in str(exc)
     else:
         raise AssertionError("expected non-ASCII TikTok handoff body to raise")
+
+
+def test_send_text_allows_legacy_em_dash_in_subject_when_body_is_ascii(monkeypatch):
+    """SoHo 5031: long NYC subjects Q-encode em dashes in headers only."""
+    client = GmailClient()
+    monkeypatch.setattr(client, "access_token", lambda: "token")
+    seen = {}
+
+    def fake_post(url, *, headers, json, timeout):
+        seen["raw"] = json["raw"]
+        class Resp:
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return {"id": "msg-soho"}
+        return Resp()
+
+    monkeypatch.setattr("integrations.gmail.requests.post", fake_post)
+    result = client.send_text(
+        to="chicagoshining@gmail.com",
+        subject=(
+            "TikTok Draft #5031 — Chicago Shining NYC — Ready in Inbox - "
+            "SoHo, Manhattan, New York City, NY"
+        ),
+        text_body="TikTok draft delivered - manual action required\n",
+        purpose=PURPOSE_TIKTOK_HANDOFF,
+    )
+    assert result["id"] == "msg-soho"
+    assert seen["raw"]

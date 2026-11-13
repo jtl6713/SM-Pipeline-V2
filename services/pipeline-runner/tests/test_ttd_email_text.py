@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ttd.package import ascii_safe_email_text, handoff_email_text
+from ttd.package import ascii_safe_email_text, handoff_email_subject, handoff_email_text
 
 
 def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
@@ -49,6 +49,22 @@ def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
     assert "<br" not in body.casefold()
     assert "<a " not in body.casefold()
     assert "</" not in body.casefold()
+
+
+def test_tiktok_handoff_subject_stays_ascii_for_long_nyc_titles():
+    record = {
+        "fields": {
+            "Output_ID": 5031,
+            "Output_Title": "SoHo, Manhattan, New York City, NY",
+        }
+    }
+    profile = {"fields": {"Profile_Name": "Chicago Shining NYC", "Display_Name": "Chicago Shining NYC"}}
+    subject = handoff_email_subject(record, profile=profile)
+    assert "—" not in subject
+    assert "=E2=80=94" not in subject
+    assert all(ord(ch) < 128 for ch in subject)
+    assert "5031" in subject
+    assert "SoHo" in subject
 
 
 def test_tiktok_handoff_text_strips_unicode_that_forced_qp_on_apple_mail():
