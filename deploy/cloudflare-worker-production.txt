@@ -1131,3 +1131,5 @@ Deploy 2026-11-13 Worker 0.10.878-closeout-repair-lease: Make Admin Queue repair
 Deploy 2026-11-13 Worker 0.10.879-closeout-youtube-heal: YouTube manual live-video heal and due Manual Publish rearm scans prefer Supabase desk heal lists. Record deletion is not started. Verify /health version 0.10.879-closeout-youtube-heal.
 
 Deploy 2026-11-13 Worker 0.10.880-closeout-output-side: Broader Platform Output side-table formula leaves (status/bool/blank/OR) plus runner FALLBACK_STOPPED for transfer queue. Record deletion is not started. Verify /health version 0.10.880-closeout-output-side.
+
+Retry 2026-11-13 Worker 0.10.880-closeout-output-side after active-source verify curl 404. No code change. Verify /health version 0.10.880-closeout-output-side.
