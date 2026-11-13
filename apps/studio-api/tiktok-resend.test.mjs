@@ -42,6 +42,24 @@ test("tiktokResendEligibility gates published and non-TikTok rows", () => {
   }), true);
 });
 
+
+test("Supabase SoR null Output_Status + Music Manual can resend (Vizcaya 4988)", () => {
+  assert.equal(tiktokResendEligibility({
+    platform: "TikTok",
+    output_status: null,
+    publish_status: "Ready to Publish",
+    tiktok_draft_status: "Ready for Delivery",
+    music_status: "Manual Action Required",
+    studio_state: "Manual Action Required",
+  }), null);
+  assert.equal(tiktokNeedsDraftResend({
+    platform: "TikTok",
+    output_status: "",
+    publish_status: "Ready to Publish",
+    music_status: "Manual Action Required",
+  }), true);
+});
+
 test("tiktokResendRearmFields clear auth park and arm Ready for Delivery", () => {
   const fields = tiktokResendRearmFields({
     now: "2026-09-28T15:30:00.000Z",
