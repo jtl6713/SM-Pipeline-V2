@@ -58,3 +58,4 @@ Deploy 2026-11-08 ITS1 creative_first storyboard writer for Script a Short empty
 2026-11-12 runner 2026-11-12-idea-settings-slides: Pipeline and Engagement settings lists and updates use engagement_settings when the runner write source is supabase. Record deletion is not started. Verify /health version 2026-11-12-idea-settings-slides.
 
 2026-11-13 runner 2026-11-13-ttd1-partial-bag-mirror: Partial Output mirrors (TTD1) merge error_messages bag so TikTok_Draft_Publish_ID lands with Processing. Empty-string clears remove bag keys. Verify /health version 2026-11-13-ttd1-partial-bag-mirror.
+2026-11-13 runner 2026-11-13-ttd2-unmarked-supabase-read: Accept unmarked Supabase Output bags when runner output reads are Supabase so TTD2 sees Worker lean TikTok_Draft_Publish_ID stamps after Airtable archive freeze. Verify /health version 2026-11-13-ttd2-unmarked-supabase-read.

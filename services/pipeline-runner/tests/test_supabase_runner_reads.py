@@ -67,8 +67,11 @@ def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
     }]
 
 
-def test_unmarked_or_empty_list_stays_on_airtable(monkeypatch):
+def test_unmarked_list_uses_supabase_when_runner_reads_supabase(monkeypatch):
+    airtable = []
+
     def fake_get(url, *, headers, params, timeout):
+        airtable.append(url)
         return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
 
     def fake_request(method, url, *, headers, json, timeout):
@@ -77,16 +80,22 @@ def test_unmarked_or_empty_list_stays_on_airtable(monkeypatch):
         return Response([{
             "airtable_record_id": "recOutput1",
             "platform": "Instagram",
-            "error_messages": {"Output_Notes": "lean"},
+            "error_messages": {
+                "TikTok_Draft_Publish_ID": "v_inbox_url~v2.lean-stamp",
+                "Output_Notes": "lean",
+            },
         }])
 
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
     client = _client(studio_runner_output_read_source="supabase")
     unmarked = client.list_records(PLATFORM_OUTPUTS_TABLE, max_records=5)
+    assert unmarked[0]["fields"]["Platform"] == "Instagram"
+    assert unmarked[0]["fields"]["TikTok_Draft_Publish_ID"] == "v_inbox_url~v2.lean-stamp"
+    assert airtable == []
     empty = client.list_records(PLATFORM_OUTPUTS_TABLE, max_records=5, sort_field="Output_ID")
-    assert unmarked[0]["fields"]["Platform"] == "TikTok"
     assert empty[0]["id"] == "recOutput1"
+    assert len(airtable) == 1
 
 
 def test_formula_and_content_flag_stay_independent(monkeypatch):
@@ -301,7 +310,7 @@ def test_get_record_uses_a_marked_projection_and_keeps_links(monkeypatch):
     assert "_runner_record_projection" not in row["fields"]
 
 
-def test_unmarked_get_and_write_source_stay_on_airtable(monkeypatch):
+def test_unmarked_get_uses_supabase_bag_when_runner_reads_supabase(monkeypatch):
     airtable = []
 
     def fake_get(url, *, headers, timeout):
@@ -311,8 +320,11 @@ def test_unmarked_get_and_write_source_stay_on_airtable(monkeypatch):
     def fake_request(*_args, **_kwargs):
         return Response([{
             "airtable_record_id": "recOutput1",
-            "platform": "Instagram",
-            "error_messages": {"Output_Notes": "old"},
+            "platform": "TikTok",
+            "tiktok_draft_status": "Processing",
+            "error_messages": {
+                "TikTok_Draft_Publish_ID": "v_inbox_url~v2.lean-stamp",
+            },
         }])
 
     monkeypatch.setattr(requests, "get", fake_get)
@@ -320,12 +332,10 @@ def test_unmarked_get_and_write_source_stay_on_airtable(monkeypatch):
     unmarked = _client(studio_runner_output_read_source="supabase").get_record(
         PLATFORM_OUTPUTS_TABLE, "recOutput1",
     )
-    write_source = _client(studio_write_source="supabase").get_record(
-        PLATFORM_OUTPUTS_TABLE, "recOutput1",
-    )
     assert unmarked["fields"]["Platform"] == "TikTok"
-    assert write_source["fields"]["Platform"] == "TikTok"
-    assert len(airtable) == 2
+    assert unmarked["fields"]["TikTok_Draft_Status"] == "Processing"
+    assert unmarked["fields"]["TikTok_Draft_Publish_ID"] == "v_inbox_url~v2.lean-stamp"
+    assert airtable == []
 
 
 def test_full_mirror_marks_a_resolved_output(monkeypatch):
