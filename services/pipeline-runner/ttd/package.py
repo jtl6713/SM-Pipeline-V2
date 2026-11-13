@@ -204,9 +204,14 @@ def handoff_email_subject(
     title = field_str(record, "Output_Title") or "TikTok draft"
     profile_name = profile_display_name(record, profile)
     if is_az_finished_video(record):
-        return f"{profile_name} publish package — {title}"
-    output_id = field(record, "Output_ID") or ""
-    return f"TikTok Draft #{output_id} — {profile_name} — Ready in Inbox - {title}"
+        subject = f"{profile_name} publish package - {title}"
+    else:
+        output_id = field(record, "Output_ID") or ""
+        subject = f"TikTok Draft #{output_id} - {profile_name} - Ready in Inbox - {title}"
+    # Subject must stay ASCII. Long subjects with em dashes become
+    # =?utf-8?q?=E2=80=94?= encoded-words; Gmail send_text's 7bit guard
+    # scans raw_bytes and false-fails SoHo 5031 / long NYC titles.
+    return ascii_safe_email_text(subject).replace("\n", " ").strip()
 
 
 def _ordered_asset_urls(record: dict[str, Any]) -> list[str]:

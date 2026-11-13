@@ -193,9 +193,19 @@ def _list_select(table_id: str) -> str:
     return f"{base},extras,content_profiles(airtable_record_id)"
 
 
-def _overlay_bag(fields: dict[str, Any], bag: dict) -> None:
+def _overlay_bag(fields: dict[str, Any], bag: dict, *, typed_keys: set[str] | None = None) -> None:
+    """Copy bag keys into fields. Typed SoR columns must not be overwritten.
+
+    Partial Output patches write TikTok_Draft_Status (etc.) to typed columns
+    while _pack excludes them from the bag merge, so a stale bag value can
+    linger. Overlay used to apply bag last and TTD2 then saw
+    Ready for Delivery over live Processing (Vizcaya 4988 / SoHo 5031).
+    """
+    reserved = typed_keys or set()
     for key, value in bag.items():
         if not key or str(key).startswith("_") or value is None:
+            continue
+        if key in reserved and key in fields:
             continue
         fields[key] = value
 
@@ -220,10 +230,18 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     # unmarked rows forced Airtable fallback; with runner output reads on
     # Supabase and Airtable archive writes frozen, that hid lean Worker
     # stamps (TikTok_Draft_Publish_ID only) and TTD2 never saw publish_id.
+    # Bag first, then typed columns win — same order as Worker
+    # airtableShapedOutputFromSupabase.
+    record_id = str(row.get("airtable_record_id") or "").strip()
+    if not record_id:
+        return None
+    fields: dict[str, Any] = {}
+    _overlay_bag(fields, bag, typed_keys=set(columns))
     shaped = _shaped(row, columns, None)
     if not shaped:
         return None
-    _overlay_bag(shaped["fields"], bag)
+    fields.update(shaped["fields"])
+    shaped = {"id": record_id, "fields": fields}
     if table_id == PLATFORM_OUTPUTS_TABLE:
         for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
             if row.get(column) is not None:
