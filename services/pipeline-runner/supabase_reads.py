@@ -182,11 +182,17 @@ def try_list_supabase_records(
         return None
     # Unknown views and views that use an Airtable formula field stay on Airtable.
     # A snapshotted view filter is combined with an allowlisted formula.
+    # Carousel slide lists already encode readiness in the formula (PO_Output_ID
+    # FIND + status predicates). An unknown Airtable view name must not force
+    # Airtable when that formula translates.
     view_filter = ""
     if view:
         view_filter = view_to_postgrest_filter(table_id, view)
         if view_filter is None:
-            return None
+            if table_id == CAROUSEL_SLIDES_TABLE and formula:
+                view_filter = ""
+            else:
+                return None
     formula_filter = None
     if formula:
         formula_filter = formula_to_postgrest_filter(table_id, formula)
@@ -268,7 +274,11 @@ def _list_select(table_id: str) -> str:
     if table_id == MEDIA_ASSETS_TABLE:
         return f"{base},metadata"
     if table_id == CAROUSEL_SLIDES_TABLE:
-        return "airtable_record_id,payload"
+        # Typed columns + jsonb bag. There is no `payload` column on carousel_slides.
+        return (
+            "airtable_record_id,current_order,deleted_from_carousel,"
+            "ig_child_container_id,voiceover,creative_directives,fields"
+        )
     if table_id == SOURCE_CANDIDATES_TABLE:
         return "airtable_record_id,candidate_title,idea_summary,status,payload"
     return base
@@ -312,7 +322,7 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         bag = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
         columns = _MEDIA_FIELDS
     elif table_id == CAROUSEL_SLIDES_TABLE:
-        bag = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        bag = row.get("fields") if isinstance(row.get("fields"), dict) else {}
         columns = {}
     elif table_id == SOURCE_CANDIDATES_TABLE:
         bag = row.get("payload") if isinstance(row.get("payload"), dict) else {}
@@ -368,6 +378,25 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Google Drive URL"] = meta.get("google_drive_url")
     elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
         shaped["fields"]["Candidate_Status"] = row.get("status")
+    elif table_id == CAROUSEL_SLIDES_TABLE:
+        if row.get("current_order") is not None and "Current Order" not in shaped["fields"]:
+            shaped["fields"]["Current Order"] = row.get("current_order")
+        if "Deleted From Carousel" not in shaped["fields"]:
+            shaped["fields"]["Deleted From Carousel"] = row.get("deleted_from_carousel") is True
+        if row.get("ig_child_container_id") and "IG_Child_Container_ID" not in shaped["fields"]:
+            shaped["fields"]["IG_Child_Container_ID"] = row.get("ig_child_container_id")
+        voice = row.get("voiceover") if isinstance(row.get("voiceover"), dict) else {}
+        if voice.get("status") is not None and "Slide_Voiceover_Status" not in shaped["fields"]:
+            shaped["fields"]["Slide_Voiceover_Status"] = voice.get("status")
+        if voice.get("url") is not None and "Slide_Voiceover_URL" not in shaped["fields"]:
+            shaped["fields"]["Slide_Voiceover_URL"] = voice.get("url")
+        if voice.get("text") is not None and "Slide_Voiceover_Text" not in shaped["fields"]:
+            shaped["fields"]["Slide_Voiceover_Text"] = voice.get("text")
+        directives = row.get("creative_directives")
+        if isinstance(directives, dict) and directives and "Creative_Directives_JSON" not in shaped["fields"]:
+            import json as _json
+
+            shaped["fields"]["Creative_Directives_JSON"] = _json.dumps(directives)
     return shaped
 
 

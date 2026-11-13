@@ -1,6 +1,6 @@
 """Allowlisted Airtable formula → PostgREST filters."""
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from lettering.formulas import lettering_production_formula
 from p3.formulas import p3_duplicate_output_formula, p3_mapping_formula, p3_seeded_outputs_formula
 from r3.formulas import r3_production_formula
@@ -84,6 +84,29 @@ def test_snapshotted_runner_views():
     assert formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
         'FIND("233",ARRAYJOIN({PO_Output_ID}))>0',
+    ) is None
+
+
+def test_carousel_po_output_find_and_retry_now():
+    slide = formula_to_postgrest_filter(
+        CAROUSEL_SLIDES_TABLE,
+        'AND(FIND("9172",ARRAYJOIN({PO_Output_ID}))>0,'
+        '{Shared_Asset_Approved}=1,{Asset_4x5_Public_Status}="Ready",'
+        '{Asset_4x5_Public_URL}!=BLANK())',
+    )
+    assert slide is not None
+    assert "fields->>PO_Output_ID.like.*9172*" in slide
+    assert "Shared_Asset_Approved" in slide
+    assert "Asset_4x5_Public_Status.eq.Ready" in slide
+    retry = formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        "IS_BEFORE({Publish_Next_Retry_At},NOW())",
+    )
+    assert retry is not None
+    assert "publish_next_retry_at.lt." in retry
+    assert formula_to_postgrest_filter(
+        PLATFORM_OUTPUTS_TABLE,
+        "IS_BEFORE({Publish_Next_Retry_At},DATETIME_PARSE('2026-01-01'))",
     ) is None
 
 

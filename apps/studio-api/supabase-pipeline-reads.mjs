@@ -1651,12 +1651,20 @@ export const CAROUSEL_SLIDE_COPY_FIELDS = Object.freeze([
   "Slide Name",
   "Is Cover",
   "Review Status",
+  "Platform Output",
+  "PO_Output_ID",
+  "Shared_Asset_Approved",
+  "Shared_Asset_Revision",
   "Asset_4x5_Public_URL",
+  "Asset_4x5_Public_Status",
   "Asset_4x5_File_URL",
   "Asset_9x16_Public_URL",
   "Asset_9x16_File_URL",
   "Asset_1x1_Public_URL",
   "Asset_1x1_File_URL",
+  "FB_Photo_ID",
+  "FB_Photo_Status",
+  "FB_Photo_Package_Revision",
   "Current Image URL",
   "Final Image URL",
   "Watermarked Image URL",
@@ -5595,6 +5603,133 @@ async function readContentRow(env, id) {
   return airtableShapedContentFromSupabase(flattenContentRow(row));
 }
 
+function tightenSideFormula(text) {
+  return String(text || "").replace(/\s+/g, "");
+}
+
+function slideFormulaFilter(formula) {
+  const cleaned = tightenSideFormula(formula);
+  if (!cleaned) return null;
+  const find = cleaned.match(/^FIND\("([^"]+)",ARRAYJOIN\(\{PO_Output_ID\}\)\)(?:>0)?$/);
+  if (find) {
+    const token = find[1];
+    if (!token || /[,()*"]/.test(token)) return null;
+    return `fields->>PO_Output_ID.like.*${token}*`;
+  }
+  if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
+    const parts = splitQueueArgs(cleaned.slice(4, -1));
+    if (!parts?.length) return null;
+    const filters = [];
+    for (const part of parts) {
+      const item = slideFormulaFilter(part);
+      if (!item) return null;
+      filters.push(item);
+    }
+    return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
+  }
+  const checkbox = cleaned.match(/^\{(Shared_Asset_Approved|Is Cover|Deleted From Carousel)\}=([01])$/);
+  if (checkbox) {
+    const ref = `fields->>${checkbox[1]}`;
+    return checkbox[2] === "1"
+      ? `or(${ref}.eq.true,${ref}.eq.1,${ref}.eq.True)`
+      : `or(${ref}.is.null,${ref}.eq.false,${ref}.eq.0,${ref}.eq.False,${ref}.eq.)`;
+  }
+  const eq = cleaned.match(/^\{(Asset_4x5_Public_Status|FB_Photo_Status|FB_Photo_Package_Revision|Review Status)\}="([^"]*)"$/);
+  if (eq) return `fields->>${eq[1]}.eq.${eq[2]}`;
+  const blank = cleaned.match(/^\{(Asset_4x5_Public_URL|FB_Photo_ID|Asset_4x5_Public_Status)\}=BLANK\(\)$/);
+  if (blank) return `or(fields->>${blank[1]}.is.null,fields->>${blank[1]}.eq.)`;
+  const nonempty = cleaned.match(/^\{(Asset_4x5_Public_URL|FB_Photo_ID)\}!=BLANK\(\)$/);
+  if (nonempty) return `and(fields->>${nonempty[1]}.not.is.null,fields->>${nonempty[1]}.neq.)`;
+  return null;
+}
+
+async function readSlideRows(env, formula, limit, offset) {
+  const translated = slideFormulaFilter(formula);
+  if (!translated) return null;
+  const select = "airtable_record_id,current_order,deleted_from_carousel,ig_child_container_id,voiceover,creative_directives,fields";
+  const rows = await supabaseRest(
+    env,
+    `carousel_slides?select=${select}`
+      + `&order=current_order.asc.nullslast&limit=${limit}&offset=${offset}`
+      + `&and=(${translated})`,
+  );
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedCarouselSlide).filter((row) => row?.id);
+}
+
+function outputContentListFilter(kind, formula) {
+  const cleaned = tightenSideFormula(formula);
+  if (!cleaned) return null;
+  const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
+  if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  if (kind === "output") {
+    const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
+    if (outputId) return `output_number.eq.${outputId[1]}`;
+    const platform = cleaned.match(/^\{Platform\}="([^"]+)"$/);
+    if (platform) return `platform.eq.${platform[1]}`;
+    const contentNumber = cleaned.match(/^FIND\(",(\d+),",","&ARRAYJOIN\(\{Content_Item\}\)&","\)>0$/);
+    if (contentNumber) return `content_number.eq.${contentNumber[1]}`;
+    const contentRec = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Item\}\)\)(?:>0)?$/);
+    if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
+    const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
+    if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
+    if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
+      const parts = splitQueueArgs(cleaned.slice(4, -1));
+      if (!parts?.length) return null;
+      const filters = [];
+      for (const part of parts) {
+        const item = outputContentListFilter(kind, part);
+        if (!item) return null;
+        filters.push(item);
+      }
+      return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
+    }
+    const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
+    if (blank) return "or(test_run_id.is.null,test_run_id.eq.)";
+  }
+  if (kind === "content") {
+    const contentId = cleaned.match(/^\{Content_ID\}=(\d+)$/);
+    if (contentId) return `content_number.eq.${contentId[1]}`;
+    if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
+      const parts = splitQueueArgs(cleaned.slice(4, -1));
+      if (!parts?.length) return null;
+      const filters = [];
+      for (const part of parts) {
+        const item = outputContentListFilter(kind, part);
+        if (!item) return null;
+        filters.push(item);
+      }
+      return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
+    }
+  }
+  return null;
+}
+
+async function readOutputContentListRows(env, kind, formula, limit, offset) {
+  const translated = outputContentListFilter(kind, formula);
+  if (!translated) return null;
+  if (kind === "output") {
+    const rows = await supabaseRest(
+      env,
+      `platform_outputs?select=${OUTPUT_SELECT}`
+        + `&order=output_number.desc.nullslast&limit=${limit}&offset=${offset}`
+        + `&and=(${translated})`,
+    );
+    if (!Array.isArray(rows)) return null;
+    return rows.map((row) => shapeDeskHealRecord(row)).filter((row) => row?.id);
+  }
+  const rows = await supabaseRest(
+    env,
+    `content_items?select=${CONTENT_SELECT}`
+      + `&order=content_number.desc.nullslast&limit=${limit}&offset=${offset}`
+      + `&and=(${translated})`,
+  );
+  if (!Array.isArray(rows)) return null;
+  return rows
+    .map((row) => airtableShapedContentFromSupabase(flattenContentRow(row)))
+    .filter((row) => row?.id);
+}
+
 /**
  * Upsert a Pipeline Setting into engagement_settings and re-read it.
  * Does not print Setting_Value. Airtable is not called.
@@ -5696,6 +5831,22 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (studioPhase6WriteSource(env) !== "supabase") return null;
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
     const records = await readQueueRows(env, formula, limit, offset);
+    if (!records) return null;
+    const body = { records };
+    if (records.length === limit) body.offset = String(offset + records.length);
+    return body;
+  }
+  if (kind === "slides") {
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await readSlideRows(env, formula, limit, offset);
+    if (!records) return null;
+    const body = { records };
+    if (records.length === limit) body.offset = String(offset + records.length);
+    return body;
+  }
+  if (kind === "output" || kind === "content") {
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await readOutputContentListRows(env, kind, formula, limit, offset);
     if (!records) return null;
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);

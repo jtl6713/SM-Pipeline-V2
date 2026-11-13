@@ -132,13 +132,20 @@ def test_formula_and_content_flag_stay_independent(monkeypatch):
 
 def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
     airtable = []
+    supabase = []
 
     def fake_get(url, *, headers, params, timeout):
         airtable.append(params.get("filterByFormula") or params.get("view"))
         return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
 
-    def fake_request(*_args, **_kwargs):
-        raise AssertionError("supabase read")
+    def fake_request(method, url, *, headers, json, timeout):
+        supabase.append(url)
+        return Response([{
+            "airtable_record_id": "recRetry1",
+            "platform": "TikTok",
+            "publish_next_retry_at": "2020-01-01T00:00:00Z",
+            "error_messages": {"_runner_record_projection": "v1"},
+        }])
 
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
@@ -149,9 +156,10 @@ def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
         max_records=2,
     )
     view_rows = client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
-    assert find_rows[0]["fields"]["Platform"] == "TikTok"
+    assert find_rows[0]["id"] == "recRetry1"
+    assert "publish_next_retry_at.lt." in supabase[0]
     assert view_rows[0]["fields"]["Platform"] == "TikTok"
-    assert len(airtable) == 2
+    assert airtable == ["Ready Queue"]
 
 
 def test_snapshotted_view_reads_supabase(monkeypatch):
@@ -514,3 +522,43 @@ def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
     assert request[0]["fields"]["Request_Status"] == "Ready"
     assert any("google_drive_file_id.eq.drive-1" in url for url in seen)
     assert any("request_status.eq.Ready" in url for url in seen)
+
+
+def test_carousel_po_output_list_reads_supabase(monkeypatch):
+    from airtable.constants import CAROUSEL_SLIDES_TABLE
+
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        return Response([{
+            "airtable_record_id": "recSlide1",
+            "current_order": 1,
+            "deleted_from_carousel": False,
+            "fields": {
+                "PO_Output_ID": [9172],
+                "Shared_Asset_Approved": True,
+                "Asset_4x5_Public_Status": "Ready",
+                "Asset_4x5_Public_URL": "https://media.example/slide.jpg",
+            },
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    rows = _client(studio_write_source="supabase").list_records(
+        CAROUSEL_SLIDES_TABLE,
+        formula=(
+            'AND(FIND("9172",ARRAYJOIN({PO_Output_ID}))>0,'
+            '{Shared_Asset_Approved}=1,{Asset_4x5_Public_Status}="Ready",'
+            '{Asset_4x5_Public_URL}!=BLANK())'
+        ),
+        view="FB0 — Ready 4x5 Facebook Slides",
+        max_records=10,
+    )
+    assert rows[0]["id"] == "recSlide1"
+    assert rows[0]["fields"]["PO_Output_ID"] == [9172]
+    assert "fields->>PO_Output_ID.like.*9172*" in seen[0]
+    assert "carousel_slides?" in seen[0]

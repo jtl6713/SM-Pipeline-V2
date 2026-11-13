@@ -2,11 +2,14 @@
 
 Unsupported formulas (JSON FIND, OR of a link lookup, unknown ops) return None
 so the caller keeps Airtable. OR of allowlisted predicates is translated.
-Platform Outputs, Content Items, Production Requests, and Media Assets are
-covered. Three Studio produce Platform Output lookups are the exception: a
-content number or content record id inside Content_Item, and a record id stored
-on the Production_Request_Output link in the full-record bag. A substring FIND
-on a text field is translated. Views are translated separately from the snapshot.
+Platform Outputs, Content Items, Production Requests, Media Assets, and
+Carousel Slides are covered. Three Studio produce Platform Output lookups are
+the exception: a content number or content record id inside Content_Item, and a
+record id stored on the Production_Request_Output link in the full-record bag.
+Carousel slide lists translate FIND on PO_Output_ID plus allowlisted slide
+predicates. IS_BEFORE/IS_AFTER against NOW() on typed time columns is
+translated. A substring FIND on a text field is translated. Views are
+translated separately from the snapshot.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 from airtable.constants import (
+    CAROUSEL_SLIDES_TABLE,
     CONTENT_ITEMS_TABLE,
     MEDIA_ASSETS_TABLE,
     PLATFORM_OUTPUTS_TABLE,
@@ -71,6 +75,26 @@ _FIND_CONTENT_ITEM = re.compile(
 _FIND_REQUEST_OUTPUT = re.compile(
     rf'^FIND\("({_REC_ID})", ARRAYJOIN\(\{{Production_Request_Output\}}\)\)(?:>0)?$'
 )
+_FIND_PO_OUTPUT = re.compile(
+    r'^FIND\("([^"]+)",\s*ARRAYJOIN\(\{PO_Output_ID\}\)\)(?:>0)?$'
+)
+_IS_BEFORE_NOW = re.compile(r"^IS_BEFORE\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
+_IS_AFTER_NOW = re.compile(r"^IS_AFTER\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
+_SLIDE_SAFE_FIELDS = frozenset({
+    "PO_Output_ID",
+    "Shared_Asset_Approved",
+    "Shared_Asset_Revision",
+    "Asset_4x5_Public_Status",
+    "Asset_4x5_Public_URL",
+    "FB_Photo_Status",
+    "FB_Photo_ID",
+    "FB_Photo_Package_Revision",
+    "Is Cover",
+    "Review Status",
+    "Slide Number",
+    "Current Order",
+    "Deleted From Carousel",
+})
 
 
 def _columns(table_id: str) -> dict[str, str]:
@@ -92,6 +116,8 @@ def _bag(table_id: str) -> str:
         return "publish_status"
     if table_id == MEDIA_ASSETS_TABLE:
         return "metadata"
+    if table_id == CAROUSEL_SLIDES_TABLE:
+        return "fields"
     return "extras"
 
 
@@ -99,6 +125,11 @@ def _field_ref(table_id: str, field: str) -> str | None:
     columns = _columns(table_id)
     if field in columns:
         return columns[field]
+    if table_id == CAROUSEL_SLIDES_TABLE:
+        if field not in _SLIDE_SAFE_FIELDS:
+            return None
+        # Spaces stay literal; attach_formula_filter quote() encodes them.
+        return f"fields->>{field}"
     if not _SAFE_FIELD.match(field or ""):
         return None
     if table_id == PLATFORM_OUTPUTS_TABLE and field == "Content_Item":
@@ -291,6 +322,64 @@ def _find_text_filter(table_id: str, text: str) -> str | None:
     return f"or({ref}.is.null,{ref}.eq.,{ref}.not.like.*{needle}*)"
 
 
+def _slide_po_output_filter(table_id: str, text: str) -> str | None:
+    if table_id != CAROUSEL_SLIDES_TABLE:
+        return None
+    match = _FIND_PO_OUTPUT.match(text)
+    if not match:
+        return None
+    token = match.group(1)
+    if not token or any(ch in token for ch in ',()*"'):
+        return None
+    # Densified lookup is a JSON array of Output_ID numbers (or strings).
+    return f"fields->>PO_Output_ID.like.*{token}*"
+
+
+def _now_compare_filter(table_id: str, text: str) -> str | None:
+    before = _IS_BEFORE_NOW.match(text)
+    after = _IS_AFTER_NOW.match(text)
+    match = before or after
+    if not match:
+        return None
+    field = match.group(1)
+    ref = _field_ref(table_id, field)
+    if not ref or "->>" in ref:
+        # Only typed timestamp columns; jsonb string compares are unsafe.
+        return None
+    # NOW() → current UTC. PostgREST accepts ISO timestamps.
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    op = "lt" if before else "gt"
+    return f"and({ref}.not.is.null,{ref}.{op}.{now})"
+
+
+_CHECKBOX_FIELDS = frozenset({
+    "Shared_Asset_Approved",
+    "Is Cover",
+    "Deleted From Carousel",
+    "Do_Not_Publish",
+    "Active",
+    "Do_Not_Use",
+    "Studio_Favorite",
+})
+
+
+def _checkbox_one_filter(table_id: str, text: str) -> str | None:
+    match = re.match(r"^\{([A-Za-z0-9_ ]+)\}=([01])$", text)
+    if not match:
+        return None
+    field, bit = match.group(1), match.group(2)
+    if field not in _CHECKBOX_FIELDS:
+        return None
+    ref = _field_ref(table_id, field)
+    if not ref:
+        return None
+    if bit == "1":
+        return f"or({ref}.eq.true,{ref}.eq.1,{ref}.eq.True)"
+    return f"or({ref}.is.null,{ref}.eq.false,{ref}.eq.0,{ref}.eq.False,{ref}.eq.)"
+
+
 def _predicate_filter(table_id: str, pred: str) -> str | None:
     text = _tighten(" ".join(str(pred or "").strip().split()))
     if not text:
@@ -298,6 +387,12 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     linked = _produce_link_filter(table_id, text)
     if linked:
         return linked
+    slide = _slide_po_output_filter(table_id, text)
+    if slide:
+        return slide
+    now_cmp = _now_compare_filter(table_id, text)
+    if now_cmp:
+        return now_cmp
     if _FIND_CONTAINS.match(text) or _FIND_CONTAINS_SQ.match(text):
         return _find_text_filter(table_id, text)
     upper = text.upper()
@@ -340,6 +435,10 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     if match:
         ref = _field_ref(table_id, match.group(1))
         return _not_truthy_filter(ref) if ref else None
+
+    checkbox = _checkbox_one_filter(table_id, text)
+    if checkbox:
+        return checkbox
 
     match = _EQ.match(text)
     if match:
@@ -406,6 +505,7 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
         CONTENT_ITEMS_TABLE,
         PRODUCTION_REQUESTS_TABLE,
         MEDIA_ASSETS_TABLE,
+        CAROUSEL_SLIDES_TABLE,
     ):
         return None
     if formula is None:
@@ -414,12 +514,18 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
     if not cleaned:
         return None
     # Hard reject patterns that need Airtable semantics we do not translate.
-    # FIND/ARRAYJOIN are handled per clause so the three produce lookups can
-    # sit inside AND. Any other FIND still returns None.
+    # FIND/ARRAYJOIN are handled per clause so the three produce lookups and
+    # carousel PO_Output_ID FIND can sit inside AND. IS_BEFORE/IS_AFTER against
+    # NOW() on typed time columns are handled per clause. Any other FIND or
+    # datetime helper still returns None.
     upper = cleaned.upper()
-    for token in ("SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
+    for token in ("SEARCH(", "REGEX", "DATETIME_"):
         if token in upper:
             return None
+    if "IS_BEFORE" in upper and "NOW()" not in upper:
+        return None
+    if "IS_AFTER" in upper and "NOW()" not in upper:
+        return None
     return _predicate_filter(table_id, cleaned)
 
 
@@ -434,7 +540,7 @@ def attach_formula_filter(path: str, formula_filter: str | None) -> str:
         return f"{path}&{formula_filter[5:]}"
     # PostgREST `and=(...)` query param. Keep structural chars; encode values
     # already handled inside each predicate.
-    safe = "(),.=*_->>"
+    safe = "(),.=*_->>%"
     if formula_filter.startswith("and(") and formula_filter.endswith(")"):
         return f"{path}&and={quote(formula_filter[3:], safe=safe)}"
     return f"{path}&and=({quote(formula_filter, safe=safe)})"
