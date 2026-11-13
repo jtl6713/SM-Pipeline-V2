@@ -18885,7 +18885,15 @@ function timedScriptAssetLabel(asset, index) {
     const output = String(record?.output_status || "").trim().toLowerCase();
     const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
     if (publish === "published" || output === "published" || draft === "published") return false;
-    return output === "approved for publishing";
+    if (output === "approved for publishing") return true;
+    // Supabase SoR often leaves Output_Status null while Music_Status is Manual
+    // Action Required (Miami Vizcaya 4988 / NYC SoHo 5031). Keep Resend available.
+    const music = String(record?.music_status || "").trim().toLowerCase();
+    const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
+    if (music.includes("manual action") || studio.includes("manual action")) {
+      return publish === "ready to publish" || publish.includes("manual");
+    }
+    return false;
   }
 
   async function submitTiktokDraftResend(recordId) {
@@ -19035,8 +19043,17 @@ function timedScriptAssetLabel(asset, index) {
     const canResend = tiktok && tiktokNeedsDraftResend(output);
     const photoSoundRequired = tiktok && tiktokPhotoSoundRequired(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
-    const prompt = "Manage the TikTok draft here. After publishing from the TikTok inbox, paste the public URL below when required.";
-    if (copy) copy.textContent = (!awaiting && posted) ? "This TikTok is already live. The public URL is saved." : prompt;
+    let prompt = "Manage the TikTok draft here.";
+    if (awaiting) {
+      prompt = /manual action/i.test(String(output?.music_status || ""))
+        ? "Add/select sound in the TikTok draft if needed, publish from the inbox, then paste the public URL below."
+        : "After publishing from the TikTok inbox, paste the public URL below.";
+    } else if (canResend) {
+      prompt = "Resend the draft to the TikTok inbox when needed. After it is live, open this output again to paste the public URL.";
+    } else if (posted) {
+      prompt = "This TikTok is already live. The public URL is saved.";
+    }
+    if (copy) copy.textContent = prompt;
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
       form.hidden = true;
