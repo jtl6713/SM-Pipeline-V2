@@ -116,10 +116,20 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.ok(revisionHeal >= 0 && lightResume > revisionHeal);
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
-  // TTD draft reconcile is Supabase/runner SoR — airtableDataWaitMs, every tick.
-  assert.match(scheduled, /airtableDataWaitMs\(\)/);
+  // TTD draft / TTD2 / missing-publish-id heals are Supabase+runner SoR.
+  // They must not sit behind airtableDataWaitMs (archive cooldown parked
+  // Processing drafts with blank last_checked — Vizcaya 4988 / SoHo 5031).
+  assert.match(scheduled, /ctx\.waitUntil\(studioReconcileTiktokProcessing\(env, \{ limit: cadence\.heavy \? 6 : 4 \}\)/);
   assert.match(scheduled, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: cadence\.heavy \? 4 : 2 \}\)/);
   assert.match(scheduled, /ctx\.waitUntil\(studioHealTtdProcessingMissingPublishId\(env, \{ limit: cadence\.heavy \? 4 : 2 \}\)/);
+  const ttd2Wait = scheduled.indexOf("ctx.waitUntil(studioReconcileTiktokProcessing");
+  const ttdDraftWait = scheduled.indexOf("ctx.waitUntil(studioReconcileTiktokDrafts");
+  const ttdHealWait = scheduled.indexOf("ctx.waitUntil(studioHealTtdProcessingMissingPublishId");
+  assert.ok(ttd2Wait >= 0 && ttdDraftWait > ttd2Wait && ttdHealWait > ttdDraftWait);
+  assert.doesNotMatch(
+    scheduled.slice(Math.max(0, ttd2Wait - 120), ttdHealWait + 160),
+    /if \(airtableDataWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx\.waitUntil\(studioReconcileTiktok/,
+  );
   const fns01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
   assert.match(fns01, /export function airtableDataWaitMs/);
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);

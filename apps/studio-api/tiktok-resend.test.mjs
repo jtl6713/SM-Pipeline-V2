@@ -161,6 +161,16 @@ test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window
   assert.doesNotMatch(reconcile.slice(ttd1Start), /Waiting for Schedule/);
 });
 
+test("TTD2 processing poll allows empty list publish_id when reread has it", async () => {
+  const moduleSource = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = moduleSource.indexOf("export async function studioReconcileTiktokProcessing");
+  const end = moduleSource.indexOf("/*__STUDIO_WORKER_END:studioReconcileTiktokProcessing__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const body = moduleSource.slice(start, end);
+  assert.match(body, /previousId && previousId !== currentId/);
+  assert.doesNotMatch(body, /!currentId \|\| previousId !== currentId/);
+});
+
 test("TTD2 processing confirmation reread uses Supabase when write source is supabase", async () => {
   const worker = readStudioWorkerSource();
   const begin = worker.indexOf("async function studioReconcileTiktokProcessing");
