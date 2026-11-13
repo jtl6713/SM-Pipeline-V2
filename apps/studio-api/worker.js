@@ -1284,6 +1284,7 @@ export default {
         isOutputTiktokResendWrite ||
         isOutputYoutubeCompleteWrite ||
         isOutputMetaCompleteWrite ||
+        isOutputMetaRepublishWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
         (isAdminRepairControlRoute && request.method === "GET") ||
@@ -1369,7 +1370,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.864-tiktok-resend-reread",
+          version: "0.10.865-meta-republish-phase2a",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,

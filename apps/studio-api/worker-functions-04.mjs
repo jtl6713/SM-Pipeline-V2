@@ -17084,12 +17084,6 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
     existingNotes: f(existing, "Output_Notes"),
     scheduledPostDate,
   });
-  // Keep the armed schedule on SoR when present. Blank scheduled_post_date
-  // sorts nullslast in TTD1 reconcile and starves Ready for Delivery drafts
-  // behind dated peers (Vizcaya 4988 / SoHo 5031).
-  if (String(scheduledPostDate || "").trim()) {
-    fields.Scheduled_Post_Date = scheduledPostDate;
-  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
@@ -17167,9 +17161,6 @@ export async function republishStudioMeta(request, env, url, authorization, ctx 
     scheduledPostDate,
     platformOutputType: f(existing, "Platform_Output_Type"),
   });
-  if (String(scheduledPostDate || "").trim()) {
-    fields.Scheduled_Post_Date = scheduledPostDate;
-  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),

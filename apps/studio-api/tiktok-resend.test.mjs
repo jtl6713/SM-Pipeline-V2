@@ -107,7 +107,8 @@ test("TikTok resend re-reads the full SoR record before dispatch", async () => {
     body.indexOf("studioReadOutputRecordForManualComplete(env, match[1])")
       < body.indexOf("studioDispatchApprovedPublishNow(env, rearmed)"),
   );
-  assert.match(body, /fields\.Scheduled_Post_Date = scheduledPostDate/);
+  // Schedule capacity stays on the reservation writers — resend must not stamp it.
+  assert.doesNotMatch(body, /fields\.Scheduled_Post_Date\s*=/);
 });
 
 test("Worker and Pipeline UI advertise TikTok draft resend", async () => {

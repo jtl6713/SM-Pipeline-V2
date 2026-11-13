@@ -145,11 +145,13 @@ test("Meta republish re-reads the full SoR record before Graph kick", () => {
   );
 });
 
-test("Worker wires /meta-republish and UI shows Republish button", () => {
+test("Worker wires /meta-republish through Phase 2A and UI shows Republish button", () => {
   assert.match(worker04, /export async function republishStudioMeta/);
   assert.match(worker04, /confirmed_not_live/);
   assert.match(worker04, /metaRepublishRearmFields/);
   assert.match(workerJs, /isOutputMetaRepublishWrite/);
+  assert.match(workerJs, /const isOutputMetaRepublishWrite = isOutputMetaRepublishRoute && request\.method === "POST"/);
+  assert.match(workerJs, /isOutputMetaRepublishWrite \|/);
   assert.match(workerJs, /republishStudioMeta/);
   assert.match(workerJs, /\/meta-republish\$/);
   assert.match(html, /id="creativeMetaRepublish"/);
