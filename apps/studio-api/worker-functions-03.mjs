@@ -55,6 +55,8 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseMusicRecords,
   listSupabaseAssetLibraryRecords,
+  listSupabaseIdeaLane,
+  listSupabaseUnfinishedIntakeBatches,
   listSupabasePipelineSettingsByNames,
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   syncAllProfilesPipelineToSupabase,
@@ -939,6 +941,31 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
 export async function unfinishedIntakeBatchIds(env, batchIds) {
   const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 20);
   const pending = new Set();
+  if (studioSupabaseConfigured(env) && (
+    studioAssetsReadSource(env) === "supabase"
+    || (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase")
+  )) {
+    try {
+      for (let start = 0; start < unique.length; start += 4) {
+        const group = unique.slice(start, start + 4);
+        const rows = await listSupabaseUnfinishedIntakeBatches(env, group, { limit: 100 });
+        if (!Array.isArray(rows)) throw new Error("supabase unfinished intake unavailable");
+        if (rows.length >= 100) {
+          group.forEach((id) => pending.add(id));
+          continue;
+        }
+        const groupSet = new Set(group);
+        for (const row of rows) {
+          const id = String(f(row, "Intake_Batch_ID") || row?.fields?.Intake_Batch_ID || "").trim();
+          if (groupSet.has(id)) pending.add(id);
+        }
+      }
+      return [...pending];
+    } catch (error) {
+      console.warn("supabase unfinished intake batches failed; falling back to Airtable", error);
+      pending.clear();
+    }
+  }
   // Background matching formerly made up to TWENTY SERIAL Airtable queries
   // here, while the operator's forced Find Images Now skipped this entirely.
   // Batch four IDs per query and project only the needed field. Never treat a
@@ -1370,18 +1397,25 @@ export async function matchNewlyCreatedIdeaPhotos(env, created, authorization) {
  * This auditor never attaches media, changes approval or dispatches posts.
  */
 export async function scanIdeaPhotoMatchingQuality(env, { limit = 150 } = {}) {
-  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: Math.min(250, Math.max(1, Number(limit) || 150)),
-    sortField: "Create_Date",
-    sortDirection: "desc",
-    fields: [
-      "Create_Date", "Candidate_Status", "Content_Profile",
-      "Studio_Photo_Wait_Status", "Studio_Photo_Match_JSON",
-      "Production Requests", "Production_Config_Notes",
-      "Promoted_Content_Record_ID", "Content Items", "Test_Run_ID",
-    ],
-    filterFormula: "AND({Test_Run_ID}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')",
-  });
+  const cap = Math.min(250, Math.max(1, Number(limit) || 150));
+  let ideas = null;
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    ideas = await listSupabaseIdeaLane(env, { lane: "photo_quality", limit: cap }).catch(() => null);
+  }
+  if (!Array.isArray(ideas)) {
+    ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: cap,
+      sortField: "Create_Date",
+      sortDirection: "desc",
+      fields: [
+        "Create_Date", "Candidate_Status", "Content_Profile",
+        "Studio_Photo_Wait_Status", "Studio_Photo_Match_JSON",
+        "Production Requests", "Production_Config_Notes",
+        "Promoted_Content_Record_ID", "Content Items", "Test_Run_ID",
+      ],
+      filterFormula: "AND({Test_Run_ID}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')",
+    });
+  }
   const findings = ideas.map((row) => ideaPhotoMatchingSlaFinding(row)).filter(Boolean);
   const counts = Object.create(null);
   for (const row of findings) counts[row.kind] = (counts[row.kind] || 0) + 1;
@@ -1405,19 +1439,25 @@ export async function scanIdeaPhotoMatchingQuality(env, { limit = 150 } = {}) {
 /*__STUDIO_WORKER_END:scanIdeaPhotoMatchingQuality__*/
 
 export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
-  const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    // Enumerate the lean waiting queue before choosing eight. An unsorted
-    // LIMIT 8 repeatedly selected the same rows; Idea #1255 was 53rd of 63.
-    // Small field projection keeps this read bounded as the backlog grows.
-    // Scan a broader fair queue. The previous 500-row cap permanently hid
-    // older waiting ideas once the backlog crossed 500, regardless of how
-    // many matching classified images were subsequently uploaded.
-    // This is a lean two-field projection; downstream matching refreshes
-    // the selected idea before attaching anything.
-    limit: 2000,
-    fields: ["Content_Profile", "Studio_Photo_Match_JSON", "Production_Config_Notes"],
-    filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
-  });
+  let candidates = null;
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    candidates = await listSupabaseIdeaLane(env, { lane: "photo_waiting", limit: 2000 }).catch(() => null);
+  }
+  if (!Array.isArray(candidates)) {
+    candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      // Enumerate the lean waiting queue before choosing eight. An unsorted
+      // LIMIT 8 repeatedly selected the same rows; Idea #1255 was 53rd of 63.
+      // Small field projection keeps this read bounded as the backlog grows.
+      // Scan a broader fair queue. The previous 500-row cap permanently hid
+      // older waiting ideas once the backlog crossed 500, regardless of how
+      // many matching classified images were subsequently uploaded.
+      // This is a lean two-field projection; downstream matching refreshes
+      // the selected idea before attaching anything.
+      limit: 2000,
+      fields: ["Content_Profile", "Studio_Photo_Match_JSON", "Production_Config_Notes"],
+      filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
+    });
+  }
   // Share the same profile-fair selection as blank-state listener recovery.
   // Airtable/library lookups stay profile-scoped; only the queue is fair.
   const records = selectProfileFairIdeaPhotoCandidates(candidates, {
