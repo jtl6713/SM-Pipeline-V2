@@ -2657,7 +2657,7 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(readme, /studio_side_effect_outbox/);
   assert.match(readme, /legacy export/);
   assert.match(readme, /Phase 6/);
-  assert.match(readme, /0\.10\.862-manual-action-guidance/);
+  assert.match(readme, /0\.10\.801-supabase-phase5-write-sor/);
   assert.match(readme, /deploy\/enable-studio-write-sor\.txt/);
   const phase6 = await readFile(path.join(here, "../../docs/supabase-migration/phase6/README.md"), "utf8");
   const handoff = await readFile(path.join(here, "../../docs/handoffs/supabase-phase6-handoff.md"), "utf8");
@@ -2667,12 +2667,12 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
     assert.match(doc, /not started|Not started/);
     assert.match(doc, /STUDIO_WRITE_SOURCE/);
   }
-  assert.match(handoff, /0\.10\.862-manual-action-guidance/);
+  assert.match(handoff, /0\.10\.784-supabase-phase6-request-writes/);
   assert.match(phase6, /production_requests/);
   assert.match(phase6, /Media asset metadata write-through/);
   assert.match(phase6, /Transfer queue write-through/);
   assert.match(phase6, /runner Airtable client/);
-  assert.match(phase6, /0\.10\.862-manual-action-guidance/);
+  assert.match(phase6, /0\.10\.799-supabase-phase6-media-queue-backfill/);
   assert.match(phase6, /half-hour media and queue backfill ships/);
   assert.match(phase6, /mirror `studio_media_transfer_targets`/);
   assert.match(index, /Phase 7/);
