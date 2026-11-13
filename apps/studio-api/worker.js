@@ -7552,6 +7552,7 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:phase6FindModule__*/
 /*__STUDIO_WORKER_EXTRACT:phase6EnsureP0202DynamicVoiceMapping__*/
 /*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadOutputRecord__*/
 /*__STUDIO_WORKER_EXTRACT:getOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6Select__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlideDirectiveFromPayload__*/
