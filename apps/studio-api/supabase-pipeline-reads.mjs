@@ -5682,6 +5682,7 @@ const QUEUE_FILTER_FIELDS = {
   Preview_Status: "payload->>preview_status",
   Test_Run_ID: "payload->>test_run_id",
   Production_Request_Record_ID: "payload->>production_request_record_id",
+  Media_Asset_Record_ID: "payload->>media_asset_record_id",
   Source_Drive_File_ID: "payload->>source_drive_file_id",
   Aspect_Ratio: "payload->>aspect_ratio",
   Source_Asset_ID: "payload->>source_asset_id",
@@ -5822,7 +5823,12 @@ async function readQueueRows(env, formula, limit, offset, recordId = "") {
   const tight = tightenQueueFormula(String(formula || ""));
   const translated = recordId ? "" : queueFormulaFilter(formula);
   if (!recordId && !translated) return null;
-  if (!recordId && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) {
+  // Bulk Ready scans need a dense Ready set. PR- and media-scoped Ready
+  // lookups (preview drain, variant rows) must still answer from Supabase.
+  const scopedReady = tight.includes("{Production_Request_Record_ID}=")
+    || tight.includes("{Media_Asset_Record_ID}=");
+  if (!recordId && !scopedReady
+    && (tight.includes('{Transfer_Status}="Ready"') || tight.includes("{Transfer_Status}='Ready'"))) {
     const probe = await supabaseRest(
       env,
       "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
