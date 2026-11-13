@@ -194,9 +194,6 @@ def _shape(row: dict) -> dict | None:
 def try_list_queue_records(settings: dict | None, *, formula: str | None, max_records: int) -> list[dict] | None:
     if studio_phase6_write_source(settings) != "supabase":
         return None
-    tight = _tighten(str(formula or ""))
-    if '{Transfer_Status}="Ready"' in tight or "{Transfer_Status}='Ready'" in tight:
-        return None
     translated = queue_formula_filter(formula)
     if not translated:
         return None

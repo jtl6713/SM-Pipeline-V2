@@ -1,0 +1,23 @@
+# One-shot copy of the transfer queue and three pipeline settings into Supabase.
+# Prints counts only. Does not flip read or write secrets.
+name: Backfill Airtable Closeout Copies
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backfill:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Copy queue rows and the three settings documents
+        run: python scripts/backfill-airtable-closeout.py

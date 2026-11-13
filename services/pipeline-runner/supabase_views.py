@@ -44,6 +44,8 @@ def _ref(table_id: str, node: dict) -> str | None:
         linked = _LINKS.get(table_id, {}).get(field)
         if linked:
             return linked
+        if table_id == CONTENT_ITEMS_TABLE and field == "Platform Outputs":
+            return "platform_output_count"
         if table_id == CONTENT_ITEMS_TABLE:
             return _field_ref(table_id, field)
         return None
@@ -96,6 +98,10 @@ def _node(table_id: str, node: dict, now: datetime | None) -> str | None:
     ref = _ref(table_id, node)
     if not ref:
         return None
+    if ref == "platform_output_count" and op == "isEmpty":
+        return "or(platform_output_count.is.null,platform_output_count.eq.0)"
+    if ref == "platform_output_count" and op == "isNotEmpty":
+        return "platform_output_count.gt.0"
     field = str(node.get("field") or "")
     kind = str(node.get("type") or "")
     if op == "isEmpty":
