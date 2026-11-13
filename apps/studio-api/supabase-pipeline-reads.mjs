@@ -2387,9 +2387,14 @@ export async function listSupabaseDeskHealOutputs(env, {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(80, Number(limit) || 30));
   const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const order = (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "overdue_scheduled")
-    ? `order=scheduled_post_date.${direction}.nullsfirst`
-    : `order=output_number.${direction}.nullslast`;
+  // TTD0/TTD1 must use nullslast. nullsfirst let blank Scheduled_Post_Date
+  // rows monopolize the light limit=2 slots forever and starve due dated
+  // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
+  const order = (kind === "ttd0_ready" || kind === "ttd1_ready")
+    ? `order=scheduled_post_date.${direction}.nullslast`
+    : kind === "overdue_scheduled"
+      ? `order=scheduled_post_date.${direction}.nullsfirst`
+      : `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
   const filterOptions = { nowMs, requireAutoPublish, cutoffIso };
   if (kind === "render_unfetchable" || kind === "inventory_unfetchable") {

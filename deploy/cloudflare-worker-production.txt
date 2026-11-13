@@ -1073,3 +1073,5 @@ Deploy 2026-11-13 Worker 0.10.848-ttd1-publish-id-stamp: Persist TTD1 publish_id
 Deploy 2026-11-13 Worker 0.10.849-ttd-missing-id-light-heal: Run Processing-without-publish_id TikTok heal on independent light cron so heavy maintenance cannot park TTD1 bag-drop rows for a half hour. Verify /health version 0.10.849-ttd-missing-id-light-heal.
 
 Deploy 2026-11-13 Worker 0.10.850-ttd-missing-id-datawait: Define airtableDataWaitMs (was undefined ReferenceError on light ticks) and run Processing-missing-publish_id heal on every cron tick so heavy waitUntil starvation cannot park TTD1 fixtures. Verify /health version 0.10.850-ttd-missing-id-datawait.
+
+Deploy 2026-11-13 Worker 0.10.851-ttd1-nullslast: TTD0/TTD1 desk lists order scheduled_post_date nullslast so blank-schedule Ready for Delivery rows cannot starve due dated drafts on light limit=2. Verify /health version 0.10.851-ttd1-nullslast.

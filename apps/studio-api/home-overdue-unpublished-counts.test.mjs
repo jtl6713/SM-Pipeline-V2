@@ -176,7 +176,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
   const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
   assert.ok(draftLight > 0 && draftLight < mainWaitUntil && draftLight < heavy);
   assert.match(scheduled.slice(draftLight - 220, draftLight), /!cadence.heavy/);
-  assert.match(cron, /0\.10\.850-ttd-missing-id-datawait/);
+  assert.match(cron, /0\.10\.851-ttd1-nullslast/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);
