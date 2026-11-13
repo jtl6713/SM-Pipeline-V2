@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.852-ttd-draft-datawait/);
+  assert.match(worker, /0\.10\.853-ttd2-last-checked-order/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.852-ttd-draft-datawait/);
+  assert.match(worker, /0\.10\.853-ttd2-last-checked-order/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2624,7 +2624,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.852-ttd-draft-datawait/);
+  assert.match(worker, /0\.10\.853-ttd2-last-checked-order/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -2787,6 +2787,9 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(ttd2Armed, /and=\(error_messages->>TikTok_Draft_Publish_ID/);
   assert.match(ttd2Armed, /TikTok_Draft_Last_Checked_At\.lt\./);
   assert.doesNotMatch(ttd2Open, /auto_publish_enabled=eq\.true/);
+  const deskReadsOrder = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  assert.match(deskReadsOrder, /kind === "ttd2_processing"/);
+  assert.match(deskReadsOrder, /order=error_messages->>TikTok_Draft_Last_Checked_At\.\$\{direction\}\.nullsfirst/);
   assert.match(ttd3, /TikTok_Draft_Email_Sent_At/);
   assert.match(ttd3, /Manual_Completion_Status\.eq\.Required/);
   assert.match(ttd3, /%22Draft%20Delivered/);
