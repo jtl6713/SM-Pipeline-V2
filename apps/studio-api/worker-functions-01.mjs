@@ -31,6 +31,7 @@ import {
   listSupabaseOccupiedScheduleRows,
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
+  listSupabaseContentProfiles,
   syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -3400,6 +3401,13 @@ export async function listContentProfileRecords(env, options = {}) {
   }
   // Do not cache an unsettled/rejected Promise on env — a canceled in-flight
   // listRecords would hang every profile-scoped route until isolate recycle.
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const rows = await listSupabaseContentProfiles(env, { limit: 100 }).catch(() => null);
+    if (Array.isArray(rows) && rows.length) {
+      env.__contentProfilesCache = rows;
+      return rows;
+    }
+  }
   const rows = await listRecords(env, "Content Profiles", { limit: 100, airtableEgressSource: options.airtableEgressSource });
   env.__contentProfilesCache = rows;
   return rows;

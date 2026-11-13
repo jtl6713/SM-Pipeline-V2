@@ -1109,3 +1109,5 @@ Deploy 2026-11-13 Worker 0.10.867-closeout-gets-settings: Serve Platform Output 
 Deploy 2026-11-13 Worker 0.10.868-closeout-slide-lists: Serve carousel slide lists and allowlisted Output/Content list GETs from Supabase when the formula translates. Densify PO_Output_ID and slide readiness fields into carousel_slides.fields. Record deletion is not started. Verify /health version 0.10.868-closeout-slide-lists.
 
 Deploy 2026-11-13 Worker 0.10.869-closeout-mae-desk-orch: MAE schedule paths keep Supabase under maeSupabaseVerify. Desk catalog Output scans use Supabase heal kinds. Orch Ready views snapshotted with due-now expansion; Auto_Publish_Enabled and LEFT(Publish_Error_Stage) formulas translate. Record deletion is not started. Verify /health version 0.10.869-closeout-mae-desk-orch.
+
+Deploy 2026-11-13 Worker 0.10.870-closeout-profiles-pub: Content Profiles list/GET and Ops PUB1/PUB2/PUB3 queues read from Supabase when STUDIO_WRITE_SOURCE=supabase. platform_setup densifies Brand/Organization/voice/music flags. Record deletion is not started. Verify /health version 0.10.870-closeout-profiles-pub.

@@ -116,6 +116,8 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  listSupabaseContentProfiles,
+  listSupabaseOpsPublishOutputs,
   readSupabaseShapedOutput,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
@@ -13869,11 +13871,27 @@ export async function getStudioOperations(request, env, authorization) {
     const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
     const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
     const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
+    const listOpsProfiles = async () => {
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const rows = await listSupabaseContentProfiles(env, { limit: 50 }).catch(() => null);
+        if (Array.isArray(rows) && rows.length) return rows;
+      }
+      return listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
+    };
+    const listOpsPublish = async (lane, limit, viewId) => {
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        const rows = await listSupabaseOpsPublishOutputs(env, { lane, limit }).catch(() => null);
+        if (Array.isArray(rows)) return rows;
+      }
+      return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit, view: viewId, filterFormula: "{Test_Run_ID}=BLANK()",
+      });
+    };
     const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
-      listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
-      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listOpsProfiles(),
+      listOpsPublish("ready_to_schedule", 50, STUDIO_PUB1_VIEW_ID),
+      listOpsPublish("ready_to_publish", 50, STUDIO_PUB2_VIEW_ID),
+      listOpsPublish("published", 25, STUDIO_PUB3_VIEW_ID),
       listOversizedMedia(env).catch(() => []),
       listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
       listActiveA1CompressionJobs(env).catch(() => []),

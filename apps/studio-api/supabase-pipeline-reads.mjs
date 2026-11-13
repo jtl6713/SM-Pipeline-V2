@@ -3239,8 +3239,26 @@ function upsertChunk(env, table, rows) {
   });
 }
 
+function profileLinkIds(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => (typeof item === "string" ? item : item?.id))
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
+}
+
 export function mapAirtableProfileToSupabase(record, { organizationId = null, brandId = null } = {}) {
   const f = (name) => record?.fields?.[name];
+  const platformSetup = {
+    Brand: profileLinkIds(f("Brand")),
+    Organization: profileLinkIds(f("Organization")),
+    Idea_Generation_Enabled: Boolean(f("Idea_Generation_Enabled")),
+    Autonomous_Produce_Enabled: Boolean(f("Autonomous_Produce_Enabled")),
+    Daily_Idea_Limit: f("Daily_Idea_Limit") ?? null,
+    Default_Narration_Voice_ID: String(f("Default_Narration_Voice_ID") || ""),
+    Default_Narration_Voice_Name: String(f("Default_Narration_Voice_Name") || ""),
+    Autonomous_Music_Pool: profileLinkIds(f("Autonomous_Music_Pool")),
+    Studio_Background_Color: String(f("Studio_Background_Color") || ""),
+  };
   return {
     airtable_record_id: record.id,
     profile_name: String(f("Profile_Name") || ""),
@@ -3249,8 +3267,82 @@ export function mapAirtableProfileToSupabase(record, { organizationId = null, br
     active: Boolean(f("Active")),
     organization_id: organizationId,
     brand_id: brandId,
-    platform_setup: {},
+    platform_setup: platformSetup,
   };
+}
+
+/** Airtable-shaped Content Profile from the lean content_profiles row + platform_setup bag. */
+export function airtableShapedContentProfileFromSupabase(row) {
+  if (!row?.airtable_record_id) return null;
+  const setup = isPlainObject(row.platform_setup) ? row.platform_setup : {};
+  const fields = {
+    Profile_Name: row.profile_name || "",
+    Brand_Name: row.brand_name || "",
+    Market_Name: row.market_name || "",
+    Active: row.active === true,
+    Brand: Array.isArray(setup.Brand) ? setup.Brand : [],
+    Organization: Array.isArray(setup.Organization) ? setup.Organization : [],
+    Idea_Generation_Enabled: setup.Idea_Generation_Enabled === true,
+    Autonomous_Produce_Enabled: setup.Autonomous_Produce_Enabled === true,
+    Daily_Idea_Limit: setup.Daily_Idea_Limit ?? null,
+    Default_Narration_Voice_ID: setup.Default_Narration_Voice_ID || "",
+    Default_Narration_Voice_Name: setup.Default_Narration_Voice_Name || "",
+    Autonomous_Music_Pool: Array.isArray(setup.Autonomous_Music_Pool) ? setup.Autonomous_Music_Pool : [],
+    Studio_Background_Color: setup.Studio_Background_Color || "",
+  };
+  return { id: row.airtable_record_id, fields };
+}
+
+export async function listSupabaseContentProfiles(env, { limit = 100, activeOnly = false } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const cap = Math.max(1, Math.min(Number(limit) || 100, 100));
+  const filter = activeOnly ? "&active=eq.true" : "";
+  const rows = await supabaseRest(
+    env,
+    `content_profiles?select=airtable_record_id,profile_name,brand_name,market_name,active,platform_setup`
+      + `${filter}&order=profile_name.asc&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedContentProfileFromSupabase).filter((row) => row?.id);
+}
+
+export async function readSupabaseContentProfile(env, recordId) {
+  const id = String(recordId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !studioSupabaseConfigured(env)) return null;
+  const rows = await supabaseRest(
+    env,
+    `content_profiles?airtable_record_id=eq.${encodeURIComponent(id)}`
+      + `&select=airtable_record_id,profile_name,brand_name,market_name,active,platform_setup&limit=1`,
+  ).catch(() => null);
+  if (!Array.isArray(rows) || !rows[0]) return null;
+  return airtableShapedContentProfileFromSupabase(rows[0]);
+}
+
+/**
+ * Ops PUB1/PUB2/PUB3 queues — explicit publish_status filters so view=
+ * cannot collapse to Test_Run_ID=BLANK under studioSideTableRead.
+ */
+export async function listSupabaseOpsPublishOutputs(env, { lane, limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  const cap = Math.max(1, Math.min(Number(limit) || 50, 100));
+  const quiet = "or(test_run_id.is.null,test_run_id.eq.)";
+  let filter = quiet;
+  if (lane === "ready_to_schedule") {
+    filter += `&publish_status.eq.${encodeDeskFilterValue("Ready to Schedule")}`;
+  } else if (lane === "ready_to_publish") {
+    filter += `&publish_status.eq.${encodeDeskFilterValue("Ready to Publish")}`;
+  } else if (lane === "published") {
+    filter += `&or=(publish_status.eq.Published,output_status.eq.Published)`;
+  } else {
+    throw new Error("Unknown ops publish lane");
+  }
+  const rows = await supabaseRest(
+    env,
+    `platform_outputs?select=${OUTPUT_SELECT}&${filter}`
+      + `&order=output_number.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map((row) => shapeDeskHealRecord(row)).filter((row) => row?.id);
 }
 
 export function mapAirtableContentToSupabase(record, profileUuid, options = {}) {
@@ -5282,15 +5374,20 @@ export const CAROUSEL_SLIDES_TABLE_ID = "tblcnQDBvUngpjDED";
 export const IDEA_CANDIDATES_TABLE_ID = "tblTQapddqD47GOIG";
 export const PLATFORM_OUTPUTS_TABLE_ID = "tblrlPeboBthkplH0";
 export const CONTENT_ITEMS_TABLE_ID = "tblwzN9AXWvmKVKPs";
+export const CONTENT_PROFILES_TABLE_ID = "tblNYg2QB0BmmVACy";
 
 function sideTableKind(env, tableId) {
   const table = String(tableId || "");
   const idea = String(env?.AIRTABLE_IDEA_TABLE_ID || IDEA_CANDIDATES_TABLE_ID);
   const outputs = String(env?.AIRTABLE_OUTPUT_TABLE_ID || PLATFORM_OUTPUTS_TABLE_ID);
   const content = String(env?.AIRTABLE_CONTENT_TABLE_ID || CONTENT_ITEMS_TABLE_ID);
+  const profiles = String(env?.AIRTABLE_PROFILE_TABLE_ID || CONTENT_PROFILES_TABLE_ID);
   if (table === outputs || table === PLATFORM_OUTPUTS_TABLE_ID) return "output";
   if (table === content || table === CONTENT_ITEMS_TABLE_ID) return "content";
   if (table === idea || table === IDEA_CANDIDATES_TABLE_ID) return "idea";
+  if (table === profiles || table === CONTENT_PROFILES_TABLE_ID || table === "Content Profiles") {
+    return "profile";
+  }
   if (table === PIPELINE_SETTINGS_TABLE_ID) return "pipeline_settings";
   if (table === ENGAGEMENT_SETTINGS_TABLE_ID) return "engagement_settings";
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
@@ -5819,8 +5916,9 @@ export async function studioUpsertSettingOnSupabase(env, name, value, notes) {
 }
 
 /**
- * Idea, settings, carousel-slide, transfer-queue, Output, and Content reads from Supabase.
- * Returns null when this call must stay on Airtable. A missing Output/Content row stays null.
+ * Idea, settings, carousel-slide, transfer-queue, Output, Content, and
+ * Content Profile reads from Supabase. Returns null when this call must stay
+ * on Airtable. A missing Output/Content/Profile row stays null.
  */
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
@@ -5833,6 +5931,9 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     }
     if (kind === "content") {
       return await readContentRow(env, id);
+    }
+    if (kind === "profile") {
+      return await readSupabaseContentProfile(env, id);
     }
     if (kind === "idea") {
       const row = await readIdeaRow(env, id);
@@ -5856,6 +5957,22 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
+  if (kind === "profile") {
+    const cleaned = compactFormula(formula);
+    // Full list, Active=1, and Active+Autonomous_Produce_Enabled=1 are the
+    // Content Profile list shapes Studio uses. Other formulas stay on Airtable.
+    const activeOnly = cleaned === "{Active}=1" || cleaned === "AND({Active}=1)";
+    const autonomous = cleaned === "AND({Active}=1,{Autonomous_Produce_Enabled}=1)";
+    if (cleaned && !activeOnly && !autonomous) return null;
+    let records = await listSupabaseContentProfiles(env, {
+      limit, activeOnly: Boolean(cleaned),
+    });
+    if (!records) return null;
+    if (autonomous) {
+      records = records.filter((row) => row?.fields?.Autonomous_Produce_Enabled === true);
+    }
+    return { records };
+  }
   if (kind === "pipeline_settings" || kind === "engagement_settings") {
     const filter = settingsListFilter(formula);
     if (!filter) return null;

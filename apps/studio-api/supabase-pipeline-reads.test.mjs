@@ -77,6 +77,10 @@ import {
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
   MEDIA_ASSET_SYNC_FIELDS,
+  mapAirtableProfileToSupabase,
+  airtableShapedContentProfileFromSupabase,
+  listSupabaseOpsPublishOutputs,
+  CONTENT_PROFILES_TABLE_ID,
 } from "./supabase-pipeline-reads.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -891,7 +895,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
+  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -995,7 +999,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
+  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2752,7 +2756,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
+  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3052,7 +3056,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.869-closeout-mae-desk-orch/);
+  assert.match(worker, /0\.10\.870-closeout-profiles-pub/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3133,4 +3137,137 @@ test("studioSideTableRead serves slide and Output list formulas from Supabase", 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Content Profile map/shape densifies Brand/Organization/voice/music into platform_setup", () => {
+  const mapped = mapAirtableProfileToSupabase({
+    id: "recProfile0000001",
+    fields: {
+      Profile_Name: "ChicagoShining - Chicago",
+      Brand_Name: "Chicago Shining",
+      Market_Name: "Chicago",
+      Active: true,
+      Brand: ["recBrand000000001"],
+      Organization: ["recOrg00000000001"],
+      Idea_Generation_Enabled: true,
+      Autonomous_Produce_Enabled: true,
+      Daily_Idea_Limit: 10,
+      Default_Narration_Voice_ID: "voice1",
+      Default_Narration_Voice_Name: "Kate",
+      Autonomous_Music_Pool: ["recMusic000000001", "recMusic000000002"],
+      Studio_Background_Color: "#a8a8a8",
+    },
+  });
+  assert.equal(mapped.airtable_record_id, "recProfile0000001");
+  assert.equal(mapped.profile_name, "ChicagoShining - Chicago");
+  assert.equal(mapped.active, true);
+  assert.deepEqual(mapped.platform_setup.Brand, ["recBrand000000001"]);
+  assert.deepEqual(mapped.platform_setup.Organization, ["recOrg00000000001"]);
+  assert.equal(mapped.platform_setup.Autonomous_Produce_Enabled, true);
+  assert.equal(mapped.platform_setup.Default_Narration_Voice_ID, "voice1");
+  assert.deepEqual(mapped.platform_setup.Autonomous_Music_Pool, [
+    "recMusic000000001",
+    "recMusic000000002",
+  ]);
+  const shaped = airtableShapedContentProfileFromSupabase(mapped);
+  assert.equal(shaped.id, "recProfile0000001");
+  assert.equal(shaped.fields.Profile_Name, "ChicagoShining - Chicago");
+  assert.equal(shaped.fields.Active, true);
+  assert.deepEqual(shaped.fields.Brand, ["recBrand000000001"]);
+  assert.equal(shaped.fields.Autonomous_Produce_Enabled, true);
+  assert.equal(shaped.fields.Studio_Background_Color, "#a8a8a8");
+});
+
+test("studioSideTableRead serves Content Profile lists and Ops PUB lanes from Supabase", async () => {
+  const { studioSideTableRead } = await import("./supabase-pipeline-reads.mjs");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_PROFILE_TABLE_ID: CONTENT_PROFILES_TABLE_ID,
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      urls.push(href);
+      // platform_outputs select embeds content_profiles(...); match table first.
+      if (href.includes("/platform_outputs?") || href.includes("/rest/v1/platform_outputs")) {
+        return new Response(JSON.stringify([{
+          airtable_record_id: "recOutput00000001",
+          output_number: 42,
+          platform: "Instagram Reel",
+          publish_status: "Ready to Schedule",
+          output_status: "Approved for Publishing",
+          content_items: null,
+          content_profiles: null,
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (href.includes("/content_profiles?") || href.includes("/rest/v1/content_profiles")) {
+        return new Response(JSON.stringify([{
+          airtable_record_id: "recProfile0000001",
+          profile_name: "ChicagoShining - Chicago",
+          brand_name: "Chicago Shining",
+          market_name: "Chicago",
+          active: true,
+          platform_setup: {
+            Brand: ["recBrand000000001"],
+            Organization: ["recOrg00000000001"],
+            Autonomous_Produce_Enabled: true,
+            Idea_Generation_Enabled: true,
+            Daily_Idea_Limit: 10,
+            Default_Narration_Voice_ID: "voice1",
+            Default_Narration_Voice_Name: "Kate",
+            Autonomous_Music_Pool: ["recMusic000000001"],
+            Studio_Background_Color: "#a8a8a8",
+          },
+        }, {
+          airtable_record_id: "recProfile0000002",
+          profile_name: "Inactive City",
+          brand_name: "X",
+          market_name: "X",
+          active: false,
+          platform_setup: { Autonomous_Produce_Enabled: false },
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch ${href}`);
+    };
+    const all = await studioSideTableRead(env, CONTENT_PROFILES_TABLE_ID, "?maxRecords=50");
+    assert.equal(all.records.length, 2);
+    assert.equal(all.records[0].fields.Brand[0], "recBrand000000001");
+    const active = await studioSideTableRead(
+      env,
+      CONTENT_PROFILES_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent("{Active}=1") + "&maxRecords=50",
+    );
+    assert.ok(urls.some((url) => url.includes("content_profiles") && url.includes("active=eq.true")));
+    assert.equal(active.records[0].id, "recProfile0000001");
+    const autonomous = await studioSideTableRead(
+      env,
+      CONTENT_PROFILES_TABLE_ID,
+      "?filterByFormula="
+        + encodeURIComponent("AND({Active}=1,{Autonomous_Produce_Enabled}=1)")
+        + "&maxRecords=50",
+    );
+    assert.equal(autonomous.records.length, 1);
+    assert.equal(autonomous.records[0].fields.Autonomous_Produce_Enabled, true);
+    const refused = await studioSideTableRead(
+      env,
+      CONTENT_PROFILES_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent('{Profile_Name}="Chicago"'),
+    );
+    assert.equal(refused, null);
+    const pub = await listSupabaseOpsPublishOutputs(env, { lane: "ready_to_schedule", limit: 50 });
+    assert.equal(pub[0].id, "recOutput00000001");
+    assert.ok(urls.some((url) => url.includes("publish_status.eq.Ready%20to%20Schedule")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const ops = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(ops, /listSupabaseContentProfiles\(env, \{ limit: 50 \}/);
+  assert.match(ops, /listSupabaseOpsPublishOutputs\(env, \{ lane, limit \}/);
+  assert.match(ops, /listContentProfileRecords\(env\)/);
+  const profilesFn = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(profilesFn, /listSupabaseContentProfiles\(env, \{ limit: 100 \}/);
 });
