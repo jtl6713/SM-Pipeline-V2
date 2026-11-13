@@ -101,7 +101,17 @@ jobs:
           $python = "D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.venv\Scripts\python.exe"
           if (-not (Test-Path $python)) { throw "python_missing" }
           $env:PYTHONUNBUFFERED = "1"
-          Start-Process -FilePath $python -ArgumentList @($py) -WorkingDirectory $repo -RedirectStandardOutput $log -RedirectStandardError $err -WindowStyle Hidden
+          $launch = "D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\backfill-closeout-launch.cmd"
+          @(
+            "@echo off",
+            "set PYTHONUNBUFFERED=1",
+            "`"$python`" -u `"$py`" > `"$log`" 2> `"$err`""
+          ) | Set-Content -Path $launch -Encoding ascii
+          $start = New-Object System.Diagnostics.ProcessStartInfo
+          $start.FileName = $launch
+          $start.UseShellExecute = $true
+          $start.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          [System.Diagnostics.Process]::Start($start) | Out-Null
           Write-Output "backfill_started"
           PS
           )
