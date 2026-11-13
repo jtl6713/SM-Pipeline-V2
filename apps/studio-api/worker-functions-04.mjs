@@ -4555,11 +4555,8 @@ export async function studioEnqueueOvernightScheduleRegenJobs(env) {
   if (String(cfg.day || "") !== today) return { enqueued: 0, reason: "wrong_day" };
 
   const store = await studioLoadScheduleRegenJobStore(env);
-  const profiles = await listRecords(env, "Content Profiles", {
-    limit: 50,
-    filterFormula: "{Active}=1",
-    fields: ["Profile_Name", "Active"],
-  }).catch(() => []);
+  const profiles = (await listContentProfileRecords(env).catch(() => []))
+    .filter((record) => Boolean(f(record, "Active")));
   const already = new Set(
     (Array.isArray(cfg.enqueued_profile_ids) ? cfg.enqueued_profile_ids : []).map((id) => String(id || "").trim()).filter(Boolean),
   );
@@ -11416,7 +11413,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
 
   if (queueReadSource !== "supabase") {
   const settled = await Promise.all([
-    settleList("profiles", listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 })),
+    settleList("profiles", listContentProfileRecords(env)),
     settleList("outputs", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 160,
       sortField: "Output_ID",
@@ -13942,7 +13939,7 @@ export async function getStudioOperationsProfiles(request, env, authorization) {
     if (!profile?.id) throw new HttpError(404, "Selected Content Profile was not found");
     profiles = [profile];
   } else {
-    profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
+    profiles = await listContentProfileRecords(env);
   }
   return respond(request, env, {
     ok: true,
@@ -14192,9 +14189,9 @@ export async function studioGlobalAutomaticIdeaInventory(env) {
   if (target === null) throw new Error("Global automatic idea target is invalid; expected integer 1–10000");
   // All active city profiles contribute, even if their idea-generator toggle
   // is disabled. Otherwise disabling a profile would artificially free room.
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50, filterFormula: "{Active}=1",
-  })).map(mapOperationsProfile);
+  const profiles = (await listContentProfileRecords(env))
+    .filter((record) => Boolean(f(record, "Active")))
+    .map(mapOperationsProfile);
   if (!profiles.length) throw new Error("No active Content Profiles available for global idea inventory");
   const refill = await studioLoadAutonomousRefillScores(env, profiles, {
     refresh: true, requireLive: true,
@@ -14675,10 +14672,9 @@ export async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, request
 /*__STUDIO_WORKER_END:stampPhotoReadyIdeaForAutonomousProduce__*/
 
 export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } = {}) {
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50,
-    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
-  })).map(mapOperationsProfile);
+  const profiles = (await listContentProfileRecords(env))
+    .filter((record) => Boolean(f(record, "Active")) && Boolean(f(record, "Autonomous_Produce_Enabled")))
+    .map(mapOperationsProfile);
   const enabledIds = profiles.map((row) => row.id).filter(Boolean);
   if (!enabledIds.length) return [];
 
@@ -14778,10 +14774,9 @@ export async function listAutonomousDraftRequests(env) {
 /*__STUDIO_WORKER_END:listAutonomousDraftRequests__*/
 
 export async function annotateAutonomousResumeDrafts(env, drafts) {
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50,
-    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
-  })).map(mapOperationsProfile);
+  const profiles = (await listContentProfileRecords(env))
+    .filter((record) => Boolean(f(record, "Active")) && Boolean(f(record, "Autonomous_Produce_Enabled")))
+    .map(mapOperationsProfile);
   const enabled = new Set(profiles.map((row) => row.id));
   const annotated = [];
   const nowMs = Date.now();
@@ -15638,10 +15633,9 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   const pendingDrafts = await listAutonomousDraftRequests(env);
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50,
-    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
-  })).map(mapOperationsProfile);
+  const profiles = (await listContentProfileRecords(env))
+    .filter((record) => Boolean(f(record, "Active")) && Boolean(f(record, "Autonomous_Produce_Enabled")))
+    .map(mapOperationsProfile);
   if (!profiles.length) {
     const result = { skipped: "no_enabled_profiles", chicago_date: chicago.date, slot, status: "skipped", skip_reason: "no_enabled_profiles" };
     if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
@@ -16095,10 +16089,9 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
     if (!inWindow) return { skipped: "outside_chicago_1am_window", chicago_date: chicago.date, chicago_hour: chicago.hour };
     if (lastDate === chicago.date) return { skipped: "already_ran_today", chicago_date: chicago.date };
   }
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50,
-    filterFormula: "AND({Active}=1,{Idea_Generation_Enabled}=1)",
-  })).map(mapOperationsProfile);
+  const profiles = (await listContentProfileRecords(env))
+    .filter((record) => Boolean(f(record, "Active")) && Boolean(f(record, "Idea_Generation_Enabled")))
+    .map(mapOperationsProfile);
   if (!profiles.length) {
     if (options.scheduled) await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, "No enabled idea-generation profiles");
     return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };

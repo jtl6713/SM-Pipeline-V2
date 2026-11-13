@@ -1170,7 +1170,7 @@ export async function loadFactoryIdeaCandidates(env) {
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   const profileMap = new Map();
   if (profileIds.length) {
-    const profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }).catch(() => []);
+    const profiles = await listContentProfileRecords(env).catch(() => []);
     for (const profile of profiles || []) profileMap.set(profile.id, profile);
   }
   return (ideas || []).map((record) => {
