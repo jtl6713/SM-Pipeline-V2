@@ -363,12 +363,16 @@ export function studioPhase6WritesMode(env) {
     : "airtable_sor_write_through";
 }
 
+export const MEDIA_ASSETS_TABLE_ID = "tblSITCujCsJTNcDe";
+
 export function phase6TableKind(env, tableId) {
   const table = String(tableId || "");
   const requestTable = String(env?.AIRTABLE_PRODUCTION_REQUEST_TABLE_ID || "");
-  const mediaTable = String(env?.AIRTABLE_MEDIA_TABLE_ID || "");
+  const mediaTable = String(env?.AIRTABLE_MEDIA_TABLE_ID || MEDIA_ASSETS_TABLE_ID);
   if (table === "Production Requests" || (requestTable && table === requestTable)) return "request";
-  if (table === "Media Assets" || (mediaTable && table === mediaTable)) return "media";
+  if (table === "Media Assets" || table === MEDIA_ASSETS_TABLE_ID || (mediaTable && table === mediaTable)) {
+    return "media";
+  }
   if (table === "Studio Media Transfer Queue" || table === "tblBZLXPd1p2NRWRK") return "queue";
   return "";
 }
@@ -1173,6 +1177,37 @@ export async function listSupabaseA3ClassifyMedia(env, { limit = 25 } = {}) {
     `media_assets?or=(metadata->>classification_status.eq.Needs%20Classification,`
       + `metadata->>classification_status.eq.Classification%20Error)`
       + `&select=${MEDIA_LIBRARY_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
+}
+
+/** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
+export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const cleaned = compactFormula(formula);
+  const cap = Math.max(1, Math.min(100, Number(limit) || 25));
+  let filter = "";
+  const logo = cleaned === "AND({Asset_Role}='Logo',NOT({Do_Not_Use}))"
+    || cleaned === 'AND({Asset_Role}="Logo",NOT({Do_Not_Use}))';
+  const nameMatch = cleaned.match(/^LOWER\(\{AssetName\}&""\)=(["'])([^"']*)\1$/i)
+    || cleaned.match(/^LOWER\(\{AssetName\}&\"\"\)=(["'])([^"']*)\1$/i)
+    || cleaned.match(/^\{AssetName\}=(["'])([^"']*)\1$/i);
+  // compactFormula removes spaces inside {Asset Name} → {AssetName}.
+  const driveMatch = cleaned.match(/^\{GoogleDriveFileID\}=(["'])([^"']*)\1$/)
+    || cleaned.match(/^AND\(\{GoogleDriveFileID\}=(["'])([^"']*)\1\)$/);
+  if (logo) {
+    filter = "asset_role=eq.Logo&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (nameMatch) {
+    filter = `asset_name.ilike.${encodeURIComponent(nameMatch[2])}`;
+  } else if (driveMatch) {
+    filter = `google_drive_file_id=eq.${encodeURIComponent(driveMatch[2])}`;
+  } else {
+    return null;
+  }
+  const rows = await supabaseRest(
+    env,
+    `media_assets?${filter}&select=${MEDIA_LIBRARY_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
   return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
@@ -6167,6 +6202,12 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       && cleaned.includes("{Request_Status}='Submitted'");
     if (!autonomousDraft) return null;
     const records = await listSupabaseAutonomousDraftRequests(env, { limit });
+    if (!records) return null;
+    return { records };
+  }
+  if (kind === "media") {
+    if (studioPhase6WriteSource(env) !== "supabase") return null;
+    const records = await listSupabaseMediaByFormula(env, formula, { limit });
     if (!records) return null;
     return { records };
   }
