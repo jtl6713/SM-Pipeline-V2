@@ -1097,3 +1097,7 @@ Deploy 2026-11-13 Worker 0.10.861-closeout-columns: Empty Output, Content, idea,
 Deploy 2026-11-13 Worker 0.10.862-manual-action-guidance: TikTok resend allows Supabase SoR null Output_Status + Music/studio Manual Action Required (Vizcaya 4988 / SoHo 5031). Verify /health version 0.10.862-manual-action-guidance.
 
 Deploy 2026-11-13 Worker 0.10.863-meta-republish: POST /api/outputs/:id/meta-republish clears Manual_Fallback after confirmed_not_live and dispatches Studio Graph publish. Verify /health version 0.10.863-meta-republish.
+
+Deploy 2026-11-13 Worker 0.10.864-tiktok-resend-reread: TikTok Resend / Meta Republish re-read the full SoR record before publish dispatch (Supabase archive PATCH bag was incomplete). Verify /health version 0.10.864-tiktok-resend-reread.
+
+Deploy 2026-11-13 Worker 0.10.865-meta-republish-phase2a: Allow POST /meta-republish through Phase 2A gate; keep schedule fields off Resend/Republish writers. Verify /health version 0.10.865-meta-republish-phase2a.

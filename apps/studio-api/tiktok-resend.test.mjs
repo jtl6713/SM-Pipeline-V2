@@ -94,6 +94,23 @@ test("tiktokResendRearmFields holds a future schedule out of the TikTok inbox", 
   assert.equal(fields.TikTok_Draft_Publish_ID, "");
 });
 
+test("TikTok resend re-reads the full SoR record before dispatch", async () => {
+  const moduleSource = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = moduleSource.indexOf("export async function resendStudioTiktokDraft");
+  const end = moduleSource.indexOf("/*__STUDIO_WORKER_END:resendStudioTiktokDraft__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const body = moduleSource.slice(start, end);
+  assert.match(body, /studioReadOutputRecordForManualComplete\(env, match\[1\]\)/);
+  assert.match(body, /studioDispatchApprovedPublishNow\(env, rearmed\)/);
+  // Must not dispatch the PATCH bag returned under Supabase archive mode.
+  assert.ok(
+    body.indexOf("studioReadOutputRecordForManualComplete(env, match[1])")
+      < body.indexOf("studioDispatchApprovedPublishNow(env, rearmed)"),
+  );
+  // Schedule capacity stays on the reservation writers — resend must not stamp it.
+  assert.doesNotMatch(body, /fields\.Scheduled_Post_Date\s*=/);
+});
+
 test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   const worker = readStudioWorkerSource();
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");

@@ -132,11 +132,26 @@ test("Meta Manual Action can Republish after operator confirms not live", () => 
   assert.match(META_REPUBLISH_ERRORS.confirmation_required, /Confirm the post is not live/);
 });
 
-test("Worker wires /meta-republish and UI shows Republish button", () => {
+
+test("Meta republish re-reads the full SoR record before Graph kick", () => {
+  assert.match(worker04, /export async function republishStudioMeta/);
+  const start = worker04.indexOf("export async function republishStudioMeta");
+  const end = worker04.indexOf("/*__STUDIO_WORKER_END:republishStudioMeta__*/", start);
+  const body = worker04.slice(start, end);
+  assert.match(body, /studioReadOutputRecordForManualComplete\(env, match\[1\]\)/);
+  assert.ok(
+    body.indexOf("studioReadOutputRecordForManualComplete(env, match[1])")
+      < body.indexOf("studioDispatchApprovedPublishNow(env, rearmed)"),
+  );
+});
+
+test("Worker wires /meta-republish through Phase 2A and UI shows Republish button", () => {
   assert.match(worker04, /export async function republishStudioMeta/);
   assert.match(worker04, /confirmed_not_live/);
   assert.match(worker04, /metaRepublishRearmFields/);
   assert.match(workerJs, /isOutputMetaRepublishWrite/);
+  assert.match(workerJs, /const isOutputMetaRepublishWrite = isOutputMetaRepublishRoute && request\.method === "POST"/);
+  assert.match(workerJs, /isOutputMetaRepublishWrite \|/);
   assert.match(workerJs, /republishStudioMeta/);
   assert.match(workerJs, /\/meta-republish\$/);
   assert.match(html, /id="creativeMetaRepublish"/);
