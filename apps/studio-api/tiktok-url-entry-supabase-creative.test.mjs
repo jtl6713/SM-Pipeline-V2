@@ -44,3 +44,10 @@ test("creative GET and TikTok complete prefer Supabase SoR", () => {
   assert.match(worker04, /markStudioTiktokComplete[\s\S]{0,500}studioReadOutputRecordForManualComplete/);
   assert.match(app, /music\.includes\("manual action"\)/);
 });
+
+test("Instagram Manual_Fallback also has meta-complete route and creative card", () => {
+  assert.match(worker04, /markStudioMetaComplete/);
+  assert.match(app, /metaNeedsUrlEntry/);
+  assert.match(app, /creativeMetaComplete/);
+});
+

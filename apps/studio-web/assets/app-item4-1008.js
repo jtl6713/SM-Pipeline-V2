@@ -270,6 +270,7 @@
   let platformCalendarLoadToken = 0;
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
+  const pipelineMetaUrlDrafts = new Map();
   let pipelineViewFilter = "all";
   let pipelineColumnFilters = {
     output: "",
@@ -300,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.934-tiktok-url-entry-supabase";
+  const BUILD_ID = "item4-0.6.935-meta-manual-url";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -675,6 +676,7 @@
       pipelineListUnverified = true;
       pipelineTiktokUrlDrafts.clear();
       pipelineYoutubeUrlDrafts.clear();
+      pipelineMetaUrlDrafts.clear();
       // An open creative editor belongs to its original output/profile.
       creativeHandoffPollToken += 1;
       activeCreativeOutputId = null;
@@ -18800,8 +18802,16 @@ function timedScriptAssetLabel(asset, index) {
       ["Ratio", output.aspect_ratio || "—"],
       ["Render", output.render_status || "—"],
       ["Review", output.review_status || "—"],
+      ["Publish", output.publish_status || "—"],
+      ["Studio state", output.studio_state || pipelineStudioStateLabel(output) || "—"],
       ["Publish safety", output.do_not_publish ? "Do Not Publish" : "Publishing enabled"],
     ];
+    if (output.manual_fallback_required) rows.push(["Manual fallback", "Required — paste the live post URL below"]);
+    const publishError = String(output.publish_error_message || output.publish_error || "").trim();
+    const publishStage = String(output.publish_error_stage || "").trim();
+    if (publishStage || publishError) {
+      rows.push(["Publish error", [publishStage, publishError].filter(Boolean).join(": ")]);
+    }
     if (output.scheduled_post_date || output.scheduled_at || output.youtube_scheduled_publish_at) {
       rows.push(["Scheduled", formatStudioDateTime(studioEffectiveScheduleIso(output))]);
     }
@@ -18944,6 +18954,48 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
+
+  function metaPlatformLabel(record) {
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    if (platform === "facebook") return "Facebook";
+    return "Instagram";
+  }
+
+  function metaLiveUrl(record) {
+    return String(record?.platform_post_url || record?.manual_published_url || "").trim();
+  }
+
+  function metaNeedsUrlEntry(record) {
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    if (platform !== "instagram" && platform !== "facebook") return false;
+    if (record?.do_not_publish) return false;
+    const publish = String(record?.publish_status || "").trim().toLowerCase();
+    const output = String(record?.output_status || "").trim().toLowerCase();
+    if (publish === "published" || publish === "published privately" || output === "published") return false;
+    if (/^https?:\/\//i.test(metaLiveUrl(record))) return false;
+    const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
+    const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
+    if (manual === "required" || studio.includes("manual action")) return true;
+    if (record?.manual_fallback_required === true) return true;
+    if (publish.includes("manual publish required") || publish === "failed") return true;
+    return false;
+  }
+
+  async function submitMetaComplete(recordId, { url, platform } = {}) {
+    const postUrl = String(url || "").trim();
+    const plat = String(platform || "").trim().toLowerCase();
+    if (plat === "facebook") {
+      if (!/facebook\.com|fb\.watch/i.test(postUrl)) throw new Error("Paste a live Facebook post URL.");
+    } else if (!/instagram\.com/i.test(postUrl)) {
+      throw new Error("Paste a live Instagram post URL containing instagram.com.");
+    }
+    return api(`/api/outputs/${encodeURIComponent(recordId)}/meta-complete`, {
+      method: "POST",
+      body: JSON.stringify({ platform_post_url: postUrl }),
+    });
+  }
+
+
   async function submitTiktokComplete(recordId, { url, musicCompleted, record } = {}) {
     const postUrl = String(url || "").trim();
     if (!/tiktok\.com/i.test(postUrl)) throw new Error("Paste a live TikTok URL containing tiktok.com.");
@@ -19044,6 +19096,65 @@ function timedScriptAssetLabel(asset, index) {
     if (awaiting) input.value = posted;
     if (!awaiting && posted) {
       live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open YouTube ↗</a>`;
+    } else if (!awaiting) {
+      live.hidden = true;
+    }
+  }
+
+
+  function renderCreativeMetaComplete(output) {
+    const card = $("creativeMetaComplete");
+    const form = $("creativeMetaCompleteForm");
+    const live = $("creativeMetaCompleteLive");
+    const input = $("creativeMetaUrl");
+    const copy = $("creativeMetaCompleteCopy");
+    const heading = $("creativeMetaCompleteHeading");
+    const label = $("creativeMetaUrlLabel");
+    const errorEl = $("creativeMetaPublishError");
+    const save = $("creativeMetaCompleteSave");
+    if (!card || !form || !live || !input) return;
+    const platform = String(output?.platform || "").trim().toLowerCase();
+    const meta = platform === "instagram" || platform === "facebook";
+    const awaiting = meta && metaNeedsUrlEntry(output);
+    const posted = meta ? metaLiveUrl(output) : "";
+    const name = metaPlatformLabel(output);
+    const publishError = String(output?.publish_error_message || output?.publish_error || "").trim();
+    const publishStage = String(output?.publish_error_stage || "").trim();
+    const prompt = output?.manual_fallback_required
+      ? `${name} publish needs a manual close. Confirm the post is live in the app, then paste the public URL below.`
+      : `If ${name} publish finished outside Studio, paste the live post URL here to close this output as published.`;
+    if (heading) heading.textContent = `${name} live URL`;
+    if (label) label.textContent = `${name} post URL`;
+    if (save) save.textContent = `Save ${name} URL`;
+    if (copy) copy.textContent = (!awaiting && posted) ? `This ${name} post is already live. The public URL is saved.` : prompt;
+    if (errorEl) {
+      if (awaiting && (publishStage || publishError)) {
+        errorEl.hidden = false;
+        errorEl.textContent = [publishStage, publishError].filter(Boolean).join(": ");
+        errorEl.classList.add("error-text");
+      } else {
+        errorEl.hidden = true;
+        errorEl.textContent = "";
+        errorEl.classList.remove("error-text");
+      }
+    }
+    if (!meta || (!awaiting && !posted)) {
+      card.hidden = true;
+      form.hidden = true;
+      live.hidden = true;
+      live.innerHTML = "";
+      input.value = "";
+      return;
+    }
+    card.hidden = false;
+    form.hidden = !awaiting;
+    live.hidden = awaiting || !posted;
+    input.placeholder = platform === "facebook"
+      ? "https://www.facebook.com/…/posts/…"
+      : "https://www.instagram.com/p/…";
+    if (awaiting) input.value = posted || pipelineMetaUrlDraft(output) || input.value || "";
+    if (!awaiting && posted) {
+      live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open ${escapeHtml(name)} ↗</a>`;
     } else if (!awaiting) {
       live.hidden = true;
     }
@@ -20362,6 +20473,10 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function rememberPipelineYoutubeUrlDrafts() {
+    document.querySelectorAll("[data-meta-complete] input[type=url]").forEach((input) => {
+      const id = input.closest("[data-meta-complete]")?.dataset.metaComplete;
+      if (id) pipelineMetaUrlDrafts.set(id, String(input.value || "").trim());
+    });
     document.querySelectorAll("[data-youtube-complete] input[type=url]").forEach((input) => {
       const id = input.closest("[data-youtube-complete]")?.dataset.youtubeComplete;
       if (!id) return;
@@ -20384,6 +20499,22 @@ function timedScriptAssetLabel(asset, index) {
       parts.push(`<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`);
     }
     return parts.join("");
+  }
+
+
+  function pipelineMetaUrlDraft(record) {
+    if (pipelineMetaUrlDrafts.has(record.id)) return pipelineMetaUrlDrafts.get(record.id);
+    return metaLiveUrl(record);
+  }
+
+  function pipelineMetaCompleteCell(record) {
+    if (!metaNeedsUrlEntry(record)) return "";
+    const name = metaPlatformLabel(record);
+    const current = pipelineMetaUrlDraft(record);
+    const placeholder = String(record?.platform || "").trim().toLowerCase() === "facebook"
+      ? "https://www.facebook.com/…/posts/…"
+      : "https://www.instagram.com/p/…";
+    return `<form class="pipeline-tiktok-complete" data-meta-complete="${escapeHtml(record.id)}"><label><span>${escapeHtml(name)} URL</span><input type="url" required placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
   }
 
   function pipelineYoutubeCompleteCell(record) {
@@ -20459,6 +20590,48 @@ function timedScriptAssetLabel(asset, index) {
         try {
           await submitTiktokComplete(id, { url: input.value, record });
           pipelineTiktokUrlDrafts.delete(id);
+          if (message) message.textContent = "Saved";
+          await refreshPipelineOutputs({ silent: true });
+        } catch (error) {
+          if (message) {
+            message.textContent = error.message || "Could not save URL.";
+            message.classList.add("error-text");
+          }
+        } finally {
+          if (button) button.disabled = false;
+        }
+      });
+    });
+  }
+
+
+  function bindPipelineMetaComplete(root) {
+    (root || document).querySelectorAll("[data-meta-complete]").forEach((form) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      form.addEventListener("click", keepOnRow);
+      form.addEventListener("mousedown", keepOnRow);
+      form.addEventListener("pointerdown", keepOnRow);
+      const input = form.querySelector("input[type=url]");
+      input?.addEventListener("input", () => {
+        const id = form.dataset.metaComplete;
+        if (id) pipelineMetaUrlDrafts.set(id, String(input.value || "").trim());
+      });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = form.dataset.metaComplete;
+        const message = form.querySelector(".pipeline-tiktok-complete-msg");
+        const button = form.querySelector("button[type=submit]");
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
+        if (!id || !input) return;
+        if (button) button.disabled = true;
+        if (message) {
+          message.classList.remove("error-text");
+          message.textContent = "Saving…";
+        }
+        try {
+          await submitMetaComplete(id, { url: input.value, platform: record?.platform });
+          pipelineMetaUrlDrafts.delete(id);
           if (message) message.textContent = "Saved";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
@@ -21351,6 +21524,7 @@ function timedScriptAssetLabel(asset, index) {
         pipelineScheduleDrafts.clear();
         pipelineTiktokUrlDrafts.clear();
         pipelineYoutubeUrlDrafts.clear();
+      pipelineMetaUrlDrafts.clear();
         await refreshPipelineOutputs({ silent: true, force: true }).catch(() => null);
         if (pipelineApproveAllCanRetry) {
           setPipelineLiveHint(pipelineApproveAllProgressText(result));
@@ -22748,6 +22922,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       bindPipelineTiktokComplete(target);
       bindPipelineYoutubeComplete(target);
+      bindPipelineMetaComplete(target);
       target.querySelectorAll("[data-pipeline-use-suggested]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -22775,7 +22950,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend, .pipeline-content-media, .pipeline-content-thumb-link, .pipeline-content-thumb-button")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend, [data-meta-complete], .pipeline-content-media, .pipeline-content-thumb-link, .pipeline-content-thumb-button")) return;
           // Content-cell clicks on a Story-first rowspan package must not open Story.
           if (event.target.closest(".pipeline-content-cell")) {
             const groupKey = row.closest("[data-pipeline-group]")?.getAttribute("data-pipeline-group");
@@ -28314,6 +28489,33 @@ function timedScriptAssetLabel(asset, index) {
       if (button) button.disabled = false;
     }
   });
+
+  $("creativeMetaCompleteForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    const input = $("creativeMetaUrl");
+    const button = $("creativeMetaCompleteSave");
+    if (!id || !input) return;
+    if (button) button.disabled = true;
+    try {
+      phase6Message(`Saving ${metaPlatformLabel(record)} URL…`);
+      const result = await submitMetaComplete(id, { url: input.value, platform: record?.platform });
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        renderCreativeMetaComplete(activeCreativeOutput);
+      }
+      pipelineMetaUrlDrafts.delete(id);
+      phase6Message(`${metaPlatformLabel(record)} URL saved. This output is marked published.`);
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      phase6Message(error.message || "Could not save the post URL.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
   $("creativeDefaultVoicePreview")?.addEventListener("click", () => phase6PreviewSelectedVoice($("creativeDefaultVoice"), $("creativeDefaultVoicePreview")));
   $("creativeVoiceoverVolumeRange")?.addEventListener("input", () => syncCreativeAudioPair("creativeVoiceoverVolumeRange", "creativeVoiceoverVolume"));
   $("creativeVoiceoverVolume")?.addEventListener("input", () => syncCreativeAudioPair("creativeVoiceoverVolume", "creativeVoiceoverVolumeRange"));

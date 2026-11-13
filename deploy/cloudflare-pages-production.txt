@@ -767,3 +767,5 @@ Deploy UI 0.6.932 completed-video publish-choice heading visibility and bright c
 Deploy 2026-11-13 Studio UI 0.6.933-manual-attention-drilldown: Pipeline Manual/attention quick views use the focused /api/outputs?mode= drill-down (same as Failed). Hard-refresh; footer UI build 0.6.933.
 
 Deploy 2026-11-13 Studio UI 0.6.934-tiktok-url-entry-supabase: TikTok URL entry also keys off music_status Manual Action Required. Hard-refresh; footer UI build 0.6.934.
+
+Deploy 2026-11-13 UI 0.6.935-meta-manual-url: Creative/Pipeline Instagram+Facebook Manual Action shows paste-live-URL card and publish error (Output 2911 Arch Reflections). Soft-refresh for UI 0.6.935 / BUILD_ID item4-0.6.935-meta-manual-url.

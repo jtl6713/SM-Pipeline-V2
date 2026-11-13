@@ -16813,6 +16813,67 @@ export async function patchYoutubeManualClose(env, record, { url, autoHealed = f
 }
 /*__STUDIO_WORKER_END:patchYoutubeManualClose__*/
 
+
+// Keep aligned with apps/studio-api/meta-complete.mjs (Worker deploy is this file only).
+export function isMetaPostUrl(url, platform = "") {
+  const value = String(url || "").trim().toLowerCase();
+  if (!value.startsWith("http")) return false;
+  const plat = String(platform || "").trim().toLowerCase();
+  if (plat === "instagram") return value.includes("instagram.com");
+  if (plat === "facebook") return value.includes("facebook.com") || value.includes("fb.watch");
+  return value.includes("instagram.com") || value.includes("facebook.com") || value.includes("fb.watch");
+}
+/*__STUDIO_WORKER_END:isMetaPostUrl__*/
+
+export function metaCompleteEligibility(record = {}) {
+  const platform = String(record.platform || "").trim().toLowerCase();
+  if (platform !== "instagram" && platform !== "facebook") return "not_meta";
+  if (record.do_not_publish) return "do_not_publish";
+  const publish = String(record.publish_status || "").trim().toLowerCase();
+  const output = String(record.output_status || "").trim().toLowerCase();
+  if (publish === "published" || publish === "published privately" || output === "published") return "already_published";
+  if (/^https?:\/\//i.test(String(record.platform_post_url || record.manual_published_url || "").trim())) {
+    return "already_published";
+  }
+  const studio = String(record.studio_state || "").trim().toLowerCase();
+  const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+  const awaiting = studio.includes("manual action")
+    || manual === "required"
+    || record.manual_fallback_required === true
+    || publish.includes("manual publish required");
+  if (!awaiting) return "manual_completion_not_required";
+  return null;
+}
+/*__STUDIO_WORKER_END:metaCompleteEligibility__*/
+
+export function metaManualPublishFields({ url, now, existingNotes = "", platform = "" } = {}) {
+  const stamp = String(now || "").trim() || new Date().toISOString();
+  const liveUrl = String(url || "").trim();
+  const label = String(platform || "Meta").trim() || "Meta";
+  const note = `Studio ${label} publication confirmed at ${stamp}. URL: ${liveUrl}`;
+  const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
+  return {
+    Do_Not_Publish: false,
+    Publish_Locked_At: null,
+    Publish_Locked_By: "",
+    Publish_Started_At: null,
+    Output_Notes: notes.slice(0, 10000),
+    Published_At: stamp,
+    Output_Status: "Published",
+    Publish_Status: "Published",
+    Platform_Post_URL: liveUrl,
+    Manual_Published_URL: liveUrl,
+    Manual_Completion_At: stamp,
+    Manual_Completion_Status: "Completed",
+    Manual_Fallback_Required: false,
+    Publish_Error_Stage: "",
+    Publish_Error_Message: "",
+    Publish_Next_Retry_At: null,
+    Publish_Retry_Eligible: false,
+  };
+}
+/*__STUDIO_WORKER_END:metaManualPublishFields__*/
+
 export async function markStudioYoutubeComplete(request, env, url) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/youtube-complete$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
@@ -16854,6 +16915,60 @@ export async function markStudioTiktokComplete(request, env, url) {
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
 }
 /*__STUDIO_WORKER_END:markStudioTiktokComplete__*/
+
+export async function markStudioMetaComplete(request, env, url) {
+  const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/meta-complete$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const postUrl = String(payload?.platform_post_url || payload?.post_url || "").trim();
+  const current = await studioReadOutputRecordForManualComplete(env, match[1]);
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found");
+  const platform = String(f(current, "Platform") || "").trim();
+  if (!isMetaPostUrl(postUrl, platform)) {
+    throw new HttpError(400, platform.toLowerCase() === "facebook"
+      ? "Paste a live Facebook post URL."
+      : "Paste a live Instagram post URL containing instagram.com.");
+  }
+  const view = {
+    platform,
+    do_not_publish: Boolean(f(current, "Do_Not_Publish")),
+    publish_status: f(current, "Publish_Status"),
+    output_status: f(current, "Output_Status"),
+    manual_completion_status: f(current, "Manual_Completion_Status"),
+    platform_post_url: f(current, "Platform_Post_URL"),
+    manual_published_url: f(current, "Manual_Published_URL"),
+    studio_state: normalizedOutputState(current),
+    manual_fallback_required: Boolean(f(current, "Manual_Fallback_Required")),
+  };
+  const reason = metaCompleteEligibility(view);
+  if (reason === "already_published") {
+    return respond(request, env, { ok: true, already_published: true, record: mapOutput(current) });
+  }
+  if (reason) {
+    const messages = {
+      not_meta: "This action is only for Instagram or Facebook outputs.",
+      do_not_publish: "This output is held with Do Not Publish.",
+      already_published: "This output is already published.",
+      manual_completion_not_required: "Manual URL entry is not required for this output.",
+    };
+    throw new HttpError(reason === "do_not_publish" ? 409 : 400, messages[reason] || reason);
+  }
+  const fields = metaManualPublishFields({
+    url: postUrl,
+    now: new Date().toISOString(),
+    existingNotes: f(current, "Output_Notes"),
+    platform,
+  });
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
+}
+/*__STUDIO_WORKER_END:markStudioMetaComplete__*/
+
+
 
 export async function resendStudioTiktokDraft(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-resend$/.exec(url.pathname);
@@ -16915,7 +17030,8 @@ export async function markStudioOutputPublished(request, env, url, authorization
   const postUrl = String(payload?.platform_post_url || "").trim();
   if (!postUrl) throw new HttpError(400, "Platform post URL is required");
   const notes = String(payload?.notes || "").trim();
-  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  const current = await studioReadOutputRecordForManualComplete(env, match[1]);
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found");
   if (String(f(current, "Platform") || "").trim().toLowerCase() === "tiktok") {
     if (!isTikTokPostUrl(postUrl)) throw new HttpError(400, "Paste a live TikTok URL containing tiktok.com.");
     const updatedTikTok = await patchTiktokManualPublish(env, current, {
@@ -16934,21 +17050,16 @@ export async function markStudioOutputPublished(request, env, url, authorization
     const updatedYouTube = await patchYoutubeManualClose(env, current, { url: postUrl });
     return respond(request, env, { ok: true, record: mapOperationsOutput(updatedYouTube) });
   }
-  const existingNotes = String(f(current, "Output_Notes") || "").trim();
-  const stamp = new Date().toISOString();
-  const appended = [existingNotes, `Studio Operations publish confirmation at ${stamp}.\nPlatform post URL: ${postUrl}${notes ? `\nNotes: ${notes}` : ""}`].filter(Boolean).join("\n\n");
+  const platform = String(f(current, "Platform") || "").trim();
+  const fields = metaManualPublishFields({
+    url: postUrl,
+    now: new Date().toISOString(),
+    existingNotes: [f(current, "Output_Notes"), notes ? `Notes: ${notes}` : ""].filter(Boolean).join("\n\n"),
+    platform,
+  });
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
-    body: JSON.stringify({
-      fields: {
-        Platform_Post_URL: postUrl,
-        Publish_Status: "Published",
-        Output_Status: "Published",
-        Published_At: stamp,
-        Output_Notes: appended.slice(0, 10000),
-      },
-      typecast: true,
-    }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
