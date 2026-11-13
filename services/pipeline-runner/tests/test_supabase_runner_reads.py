@@ -338,6 +338,35 @@ def test_unmarked_get_uses_supabase_bag_when_runner_reads_supabase(monkeypatch):
     assert airtable == []
 
 
+def test_typed_tiktok_status_wins_over_stale_bag(monkeypatch):
+    """TTD1 stamps typed Processing; bag can still say Ready for Delivery."""
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable get")
+
+    def fake_request(*_args, **_kwargs):
+        return Response([{
+            "airtable_record_id": "recDOmhbY27l8SNCj",
+            "platform": "TikTok",
+            "tiktok_draft_status": "Processing",
+            "publish_status": "Publishing",
+            "error_messages": {
+                "TikTok_Draft_Status": "Ready for Delivery",
+                "Publish_Status": "Ready to Publish",
+                "TikTok_Draft_Publish_ID": "v_inbox_url~v2.7707663202070415391",
+            },
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    row = _client(studio_runner_output_read_source="supabase").get_record(
+        PLATFORM_OUTPUTS_TABLE, "recDOmhbY27l8SNCj",
+    )
+    assert row["fields"]["TikTok_Draft_Status"] == "Processing"
+    assert row["fields"]["Publish_Status"] == "Publishing"
+    assert row["fields"]["TikTok_Draft_Publish_ID"] == "v_inbox_url~v2.7707663202070415391"
+
+
 def test_full_mirror_marks_a_resolved_output(monkeypatch):
     seen = []
 

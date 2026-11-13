@@ -503,6 +503,11 @@ def _partial_output_bag_and_json(settings: dict, record: dict) -> dict:
             continue
         if value == "":
             bag[key] = ""
+    # Typed columns are SoR. Drop stale bag copies whenever a typed field is
+    # patched, or TTD2 keeps reading Ready for Delivery over Processing.
+    for key in fields:
+        if key in TYPED_OUTPUT:
+            bag[key] = ""
     if bag:
         body["error_messages"] = _merge_json_bag(
             settings, "platform_outputs", record["id"], "error_messages", bag
