@@ -1204,6 +1204,14 @@ input, select, textarea, button {
 #outputsList .pipeline-tiktok-save{align-self:flex-start;padding:6px 10px;font-size:.78rem}
 #outputsList .pipeline-tiktok-complete-msg{font-size:.72rem;min-height:1em}
 .tiktok-complete-card{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px}
+.tiktok-complete-card.manual-action-required{border-top-color:#f0b4b4;background:#fff7f7;padding:12px 12px 14px;border-radius:12px;border:1px solid #f0c2c2}
+.tiktok-complete-card.manual-action-required .creative-section-heading h3.error-text,
+.tiktok-complete-card.manual-action-required .manual-action-required-copy,
+.tiktok-complete-card.manual-action-required #creativeMetaPublishError,
+.tiktok-complete-card.manual-action-required #creativeTiktokCompleteCopy.error-text{color:var(--red);font-weight:800}
+.creative-output-meta>div.creative-meta-action-required{border-color:#f0b4b4;background:#fff7f7}
+.creative-output-meta>div.creative-meta-action-required span{color:var(--red)}
+.creative-output-meta>div.creative-meta-action-required b.error-text{color:var(--red);font-weight:850}
 .tiktok-complete-card[hidden],.tiktok-complete-form[hidden]{display:none!important}
 .tiktok-complete-form{display:grid;gap:10px}
 .creative-editor-shell.watch-only .tiktok-complete-card{pointer-events:auto;opacity:1}

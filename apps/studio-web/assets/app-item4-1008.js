@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.936-manual-action-guidance";
+  const BUILD_ID = "item4-0.6.937-manual-action-red";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18832,7 +18832,10 @@ function timedScriptAssetLabel(asset, index) {
     if (output.studio_preview_updated_at) rows.push(["Preview updated", formatStudioDateTime(output.studio_preview_updated_at)]);
     if (output.output_caption) rows.push(["Caption", output.output_caption]);
     if (output.output_hashtags) rows.push(["Hashtags", output.output_hashtags]);
-    let html = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("");
+    let html = rows.map(([label, v]) => {
+      const action = /^(what to do|manual fallback|publish error)$/i.test(String(label || ""));
+      return `<div${action ? ' class="creative-meta-action-required"' : ""}><span>${escapeHtml(label)}</span><b${action ? ' class="error-text"' : ""}>${escapeHtml(v)}</b></div>`;
+    }).join("");
     if (watchUrl) {
       html += `<div><span>File</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(watchUrl)}">Open rendered file ↗</a></b></div>`;
     }
@@ -19086,9 +19089,14 @@ function timedScriptAssetLabel(asset, index) {
     } else if (posted) {
       prompt = "This TikTok is already live. The public URL is saved.";
     }
-    if (copy) copy.textContent = prompt;
+    if (copy) {
+      copy.textContent = prompt;
+      copy.classList.toggle("error-text", Boolean(awaiting || canResend));
+      copy.classList.toggle("manual-action-required-copy", Boolean(awaiting || canResend));
+    }
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
+      card.classList.remove("manual-action-required");
       form.hidden = true;
       live.hidden = true;
       live.innerHTML = "";
@@ -19097,10 +19105,12 @@ function timedScriptAssetLabel(asset, index) {
       if (resendMessage) resendMessage.textContent = "";
       if (musicWrap) musicWrap.hidden = true;
       if (musicRequirement) musicRequirement.hidden = true;
+      if (copy) copy.classList.remove("error-text", "manual-action-required-copy");
       input.value = "";
       return;
     }
     card.hidden = false;
+    card.classList.toggle("manual-action-required", Boolean(awaiting || canResend));
     form.hidden = !awaiting;
     if (resendWrap) resendWrap.hidden = !canResend;
     if (resendButton) resendButton.disabled = false;
@@ -19179,13 +19189,19 @@ function timedScriptAssetLabel(asset, index) {
     if (heading) heading.textContent = `${name}: Manual Action Required`;
     if (label) label.textContent = `${name} post URL`;
     if (save) save.textContent = `Save ${name} URL`;
-    if (copy) copy.textContent = (!awaiting && posted) ? `This ${name} post is already live. The public URL is saved.` : prompt;
+    const showAction = Boolean(awaiting);
+    if (copy) {
+      copy.textContent = (!awaiting && posted) ? `This ${name} post is already live. The public URL is saved.` : prompt;
+      copy.classList.toggle("error-text", showAction);
+      copy.classList.toggle("manual-action-required-copy", showAction);
+    }
+    if (heading) heading.classList.toggle("error-text", showAction);
     if (errorEl) {
-      if (awaiting && (publishStage || publishError || output?.manual_fallback_required)) {
+      if (showAction) {
         errorEl.hidden = false;
         errorEl.textContent = publishStage || publishError
           ? [publishStage, publishError].filter(Boolean).join(": ")
-          : "Manual fallback is on — Studio is waiting for a public post URL.";
+          : "Manual Action Required — paste the public post URL below.";
         errorEl.classList.add("error-text");
       } else {
         errorEl.hidden = true;
@@ -19195,13 +19211,19 @@ function timedScriptAssetLabel(asset, index) {
     }
     if (!meta || (!awaiting && !posted)) {
       card.hidden = true;
+      card.classList.remove("manual-action-required");
       form.hidden = true;
       live.hidden = true;
       live.innerHTML = "";
       input.value = "";
+      if (copy) {
+        copy.classList.remove("error-text", "manual-action-required-copy");
+      }
+      if (heading) heading.classList.remove("error-text");
       return;
     }
     card.hidden = false;
+    card.classList.toggle("manual-action-required", showAction);
     form.hidden = !awaiting;
     live.hidden = awaiting || !posted;
     input.placeholder = platform === "facebook"

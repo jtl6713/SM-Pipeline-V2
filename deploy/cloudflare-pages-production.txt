@@ -771,3 +771,5 @@ Deploy 2026-11-13 Studio UI 0.6.934-tiktok-url-entry-supabase: TikTok URL entry 
 Deploy 2026-11-13 UI 0.6.935-meta-manual-url: Creative/Pipeline Instagram+Facebook Manual Action shows paste-live-URL card and publish error (Output 2911 Arch Reflections). Soft-refresh for UI 0.6.935 / BUILD_ID item4-0.6.935-meta-manual-url.
 
 Deploy 2026-11-13 UI 0.6.936-manual-action-guidance: Render Instagram/Facebook Manual Action URL card on creative load; Pipeline Meta URL cell; clear What-to-do copy; keep TikTok Resend with URL entry. Hard-refresh UI 0.6.936.
+
+Deploy 2026-11-13 UI 0.6.937-manual-action-red: Instagram/Facebook Manual Action Required copy, heading, and What-to-do rows render in red. Hard-refresh UI 0.6.937.

@@ -95,3 +95,11 @@ test("creative load and Pipeline compose Meta URL actions", () => {
   assert.match(app, /Action needed:.*Resend draft to TikTok/);
 });
 
+test("Manual Action Required copy uses red error styling", () => {
+  const css = fs.readFileSync(path.join(dir, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
+  assert.match(app, /manual-action-required-copy/);
+  assert.match(app, /creative-meta-action-required/);
+  assert.match(css, /manual-action-required-copy/);
+  assert.match(css, /creative-meta-action-required/);
+});
+
