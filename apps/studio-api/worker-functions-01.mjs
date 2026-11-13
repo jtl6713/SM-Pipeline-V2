@@ -1101,6 +1101,16 @@ export function airtableCooldownWaitMs() {
   return Math.max(0, airtableNextRequestAt - Date.now());
 }/*__STUDIO_WORKER_END:airtableCooldownWaitMs__*/
 
+/**
+ * Wait for Supabase-only desk heals / reconciles that never need the Airtable
+ * request slot. While STUDIO_WRITE_SOURCE=supabase those paths must not stall
+ * behind an archive cooldown — return 0 so cron gates stay open.
+ */
+export function airtableDataWaitMs() {
+  return 0;
+}
+/*__STUDIO_WORKER_END:airtableDataWaitMs__*/
+
 export function airtableRetryDelayMs(response, attempt) {
   const raw = String(response?.headers?.get("Retry-After") || "").trim();
   const seconds = Number(raw);
