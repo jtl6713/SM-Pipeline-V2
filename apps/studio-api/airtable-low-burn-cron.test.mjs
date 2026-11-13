@@ -116,10 +116,9 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.ok(revisionHeal >= 0 && lightResume > revisionHeal);
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
-  assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: 2 \}\)/);
-  // Missing-publish-id heal is independent of the heavy gate (Supabase SoR);
-  // airtableDataWaitMs must be defined so light ticks do not ReferenceError.
+  // TTD draft reconcile is Supabase/runner SoR — airtableDataWaitMs, every tick.
   assert.match(scheduled, /airtableDataWaitMs\(\)/);
+  assert.match(scheduled, /ctx\.waitUntil\(studioReconcileTiktokDrafts\(env, \{ limit: cadence\.heavy \? 4 : 2 \}\)/);
   assert.match(scheduled, /ctx\.waitUntil\(studioHealTtdProcessingMissingPublishId\(env, \{ limit: cadence\.heavy \? 4 : 2 \}\)/);
   const fns01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
   assert.match(fns01, /export function airtableDataWaitMs/);
