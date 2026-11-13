@@ -4040,6 +4040,87 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
  * Write-through after an Airtable schedule (or similar) PATCH so Pipeline
  * schedule-grid reads do not snap the bubble back to a stale Supabase time.
  */
+/**
+ * Partial Output mutations must only write columns present on the Airtable
+ * field patch. Upserting a lean map used to send scheduled_post_date=null /
+ * publish_status=null for every dispatch stamp and wipe live schedule data.
+ */
+export function buildPresentOutputColumnPatch(record, {
+  profileUuid = null,
+  contentUuidByAirtableId = null,
+} = {}) {
+  const fields = record?.fields || {};
+  const present = (key) => Object.prototype.hasOwnProperty.call(fields, key);
+  const body = {};
+  if (present("Output_ID")) body.output_number = fields.Output_ID ?? null;
+  if (present("Platform")) body.platform = selectName(fields.Platform) || "Unknown";
+  if (present("Format")) body.format = selectName(fields.Format);
+  if (present("Platform_Output_Type")) body.platform_output_type = selectName(fields.Platform_Output_Type);
+  if (present("Studio_Output_Type")) body.studio_output_type = selectName(fields.Studio_Output_Type);
+  if (present("Aspect_Ratio")) body.aspect_ratio = selectName(fields.Aspect_Ratio);
+  if (present("Output_Status")) body.output_status = selectName(fields.Output_Status);
+  if (present("Render_Status")) body.render_status = selectName(fields.Render_Status);
+  if (present("Review_Status")) body.review_status = selectName(fields.Review_Status);
+  if (present("Publish_Status")) body.publish_status = selectName(fields.Publish_Status);
+  if (present("Publish_Method")) body.publish_method = selectName(fields.Publish_Method);
+  if (present("Do_Not_Publish")) body.do_not_publish = Boolean(fields.Do_Not_Publish);
+  if (present("Test_Run_ID")) body.test_run_id = fields.Test_Run_ID || null;
+  if (present("Output_Title")) body.output_title = fields.Output_Title || null;
+  if (present("Output_Caption")) body.output_caption = fields.Output_Caption || null;
+  if (present("Output_Hashtags")) body.output_hashtags = fields.Output_Hashtags || null;
+  if (present("Thumbnail_URL")) body.thumbnail_url = fields.Thumbnail_URL || null;
+  if (present("Final_File_URL")) body.final_file_url = fields.Final_File_URL || null;
+  if (present("Publish_Asset_URL")) body.publish_asset_url = fields.Publish_Asset_URL || null;
+  if (present("Studio_Preview_URL")) body.studio_preview_url = fields.Studio_Preview_URL || null;
+  if (present("Platform_Post_URL")) body.platform_post_url = fields.Platform_Post_URL || null;
+  if (present("Scheduled_Post_Date")) body.scheduled_post_date = fields.Scheduled_Post_Date || null;
+  if (present("Studio_Scheduled_At")) body.studio_scheduled_at = fields.Studio_Scheduled_At || null;
+  if (present("YouTube_Scheduled_Publish_At")) {
+    body.youtube_scheduled_publish_at = fields.YouTube_Scheduled_Publish_At || null;
+  }
+  if (present("Published_At")) body.published_at = fields.Published_At || null;
+  if (present("Remotion_Job_ID")) body.remotion_job_id = fields.Remotion_Job_ID || null;
+  if (present("Selected_Clip_Count")) body.selected_clip_count = fields.Selected_Clip_Count ?? null;
+  if (present("Publish_Next_Retry_At")) body.publish_next_retry_at = fields.Publish_Next_Retry_At || null;
+  if (present("YouTube_Stage")) body.youtube_stage = selectName(fields.YouTube_Stage);
+  if (present("TikTok_Draft_Status")) body.tiktok_draft_status = selectName(fields.TikTok_Draft_Status);
+  if (present("Auto_Publish_Enabled")) body.auto_publish_enabled = Boolean(fields.Auto_Publish_Enabled);
+  if (present("TikTok_Draft_Type")) body.tiktok_draft_type = selectName(fields.TikTok_Draft_Type);
+  if (present("Asset_Aspect_Family")) body.asset_aspect_family = selectName(fields.Asset_Aspect_Family);
+  if (present("Image_Count")) body.image_count = fields.Image_Count ?? null;
+  if (present("Image_Output_Selected")) body.image_output_selected = Boolean(fields.Image_Output_Selected);
+  if (present("FB_Publish_Status")) body.fb_publish_status = selectName(fields.FB_Publish_Status);
+  if (present("FB_Image_Publish_Mode")) body.fb_image_publish_mode = selectName(fields.FB_Image_Publish_Mode);
+  if (present("Studio_Effective_Voiceover_Mode")) {
+    body.studio_effective_voiceover_mode = selectName(fields.Studio_Effective_Voiceover_Mode);
+  }
+  if (present("Studio_Effective_Background_Music_Mode")) {
+    body.studio_effective_background_music_mode = selectName(fields.Studio_Effective_Background_Music_Mode);
+  }
+  if (present("Publish_Retry_Eligible")) body.publish_retry_eligible = Boolean(fields.Publish_Retry_Eligible);
+  if (present("IG_Carousel_Status")) body.ig_carousel_status = selectName(fields.IG_Carousel_Status);
+  if (present("IG_Carousel_Next_Retry_At")) {
+    body.ig_carousel_next_retry_at = fields.IG_Carousel_Next_Retry_At || null;
+  }
+  if (present("IG_Carousel_Child_Count")) body.ig_carousel_child_count = fields.IG_Carousel_Child_Count ?? null;
+  if (present("IG_Carousel_Children_Ready_Count")) {
+    body.ig_carousel_children_ready_count = fields.IG_Carousel_Children_Ready_Count ?? null;
+  }
+  if (present("Assets_Ready_Count")) body.assets_ready_count = fields.Assets_Ready_Count ?? null;
+  if (present("Asset_Set_Revision")) body.asset_set_revision = fields.Asset_Set_Revision || null;
+  if (present("TikTok_9x16_Ready_Count")) body.tiktok_9x16_ready_count = fields.TikTok_9x16_Ready_Count ?? null;
+  if (present("FB_Resolved_Publish_Mode")) {
+    body.fb_resolved_publish_mode = selectName(fields.FB_Resolved_Publish_Mode);
+  }
+  if (present("Content_Profile") && profileUuid) body.content_profile_id = profileUuid;
+  if (present("Content_Item") && contentUuidByAirtableId) {
+    const contentAirtableId = firstLink(fields.Content_Item);
+    const contentUuid = contentAirtableId ? contentUuidByAirtableId.get(contentAirtableId) : null;
+    if (contentUuid) body.content_item_id = contentUuid;
+  }
+  return { body, bagPatch: packOutputListFields(fields) };
+}
+
 export async function syncAirtableOutputRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
@@ -4071,48 +4152,37 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     return { ok: true, mode: "create" };
   }
 
-  const profileAirtableId = firstLink(record.fields?.Content_Profile);
-  let profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-  if (!profileUuid) {
-    // Patch schedule fields only when the row already exists from cron sync.
-    // A held reschedule also stores the publish hold and the note so the
-    // following readback does not have to re-read Airtable.
-    const fields = record.fields || {};
-    const body = {
-      scheduled_post_date: fields.Scheduled_Post_Date || null,
-      studio_scheduled_at: fields.Studio_Scheduled_At || null,
-      youtube_scheduled_publish_at: fields.YouTube_Scheduled_Publish_At || null,
-      publish_status: selectName(fields.Publish_Status),
-      output_status: selectName(fields.Output_Status),
-      review_status: selectName(fields.Review_Status),
-    };
-    if (Object.prototype.hasOwnProperty.call(fields, "Do_Not_Publish")) {
-      body.do_not_publish = Boolean(fields.Do_Not_Publish);
-    }
-    body.updated_at = new Date().toISOString();
-    const bagPatch = packOutputListFields(fields);
-    if (Object.keys(bagPatch).length) {
-      const existing = await supabaseRest(
+  if (options.fullRecord === true) {
+    const profileAirtableId = firstLink(record.fields?.Content_Profile);
+    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+    const contentAirtableId = firstLink(record.fields?.Content_Item);
+    const contentUuidByAirtableId = new Map();
+    if (contentAirtableId) {
+      const contentRows = await supabaseRest(
         env,
-        `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
+        `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
       ).catch(() => []);
-      body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch);
+      if (Array.isArray(contentRows) && contentRows[0]?.id) {
+        contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
+      }
     }
-    await supabaseRest(
-      env,
-      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
-      {
-        method: "PATCH",
-        body,
-        headers: { Prefer: "return=minimal" },
-      },
-    );
+    let row = mapAirtableOutputToSupabase(record, {
+      profileUuid,
+      contentUuidByAirtableId,
+      fullRecord: true,
+    });
+    row.updated_at = new Date().toISOString();
+    await upsertChunk(env, "platform_outputs", [row]);
     await patchRenderHealColumns(env, record).catch((error) => {
       console.warn("render heal column copy failed", error);
     });
-    return { ok: true, mode: "patch" };
+    return { ok: true, mode: "upsert" };
   }
 
+  // Partial mutations (dispatch stamps, promote, caption backfill): PATCH only
+  // the columns present on the field patch so schedule/status stay intact.
+  const profileAirtableId = firstLink(record.fields?.Content_Profile);
+  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
   const contentAirtableId = firstLink(record.fields?.Content_Item);
   const contentUuidByAirtableId = new Map();
   if (contentAirtableId) {
@@ -4124,21 +4194,32 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
     }
   }
-
-  let row = mapAirtableOutputToSupabase(record, {
-    profileUuid,
+  const { body, bagPatch } = buildPresentOutputColumnPatch(record, {
+    profileUuid: profileUuid || null,
     contentUuidByAirtableId,
-    fullRecord: options.fullRecord === true,
   });
-  if (options.fullRecord !== true) {
-    [row] = await applyStoredProjection(env, "platform_outputs", [row], "error_messages");
+  if (Object.keys(bagPatch).length) {
+    const existing = await supabaseRest(
+      env,
+      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
+    ).catch(() => []);
+    body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch);
   }
-  row.updated_at = new Date().toISOString();
-  await upsertChunk(env, "platform_outputs", [row]);
+  if (!Object.keys(body).length) return { skipped: true, reason: "no_present_fields" };
+  body.updated_at = new Date().toISOString();
+  await supabaseRest(
+    env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    {
+      method: "PATCH",
+      body,
+      headers: { Prefer: "return=minimal" },
+    },
+  );
   await patchRenderHealColumns(env, record).catch((error) => {
     console.warn("render heal column copy failed", error);
   });
-  return { ok: true, mode: "upsert" };
+  return { ok: true, mode: "patch" };
 }
 
 /**

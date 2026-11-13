@@ -13305,10 +13305,18 @@ export async function studioEnsureOutputCaption(env, record) {
 
   if (!Object.keys(fields).length) return record;
   try {
-    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    const patched = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
+    // Archive-mode PATCH returns only the mutated fields. Keep the caller's
+    // unread columns so dispatch does not false-skip missing-ai-caption.
+    return {
+      ...record,
+      ...(patched || {}),
+      id: record.id,
+      fields: { ...(record.fields || {}), ...fields, ...(patched?.fields || {}) },
+    };
   } catch (error) {
     console.warn("output caption/hashtag backfill failed", record.id, error);
     return record;

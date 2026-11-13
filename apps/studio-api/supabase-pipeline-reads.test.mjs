@@ -832,7 +832,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
+  assert.match(worker, /0\.10\.847-supabase-partial-patch/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -936,7 +936,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
+  assert.match(worker, /0\.10\.847-supabase-partial-patch/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1047,15 +1047,21 @@ test("lean output upsert keeps a stored runner marker", async () => {
         Platform: "Instagram",
         Content_Profile: ["recProfile1"],
         Publish_Retry_Eligible: true,
+        Studio_Publish_Dispatch_Note: "reconcile: ok",
       },
     });
-    assert.equal(result.mode, "upsert");
-    const post = calls.find((call) => call.method === "POST" && call.url.includes("platform_outputs"));
-    const row = JSON.parse(post.body)[0];
+    assert.equal(result.mode, "patch");
+    const patch = calls.find((call) => call.method === "PATCH" && call.url.includes("platform_outputs"));
+    const row = JSON.parse(patch.body);
     assert.equal(row.error_messages._runner_record_projection, "v1");
     assert.equal(row.publish_retry_eligible, true);
+    assert.equal(row.output_number, 4);
+    assert.equal(row.platform, "Instagram");
+    assert.equal(Object.hasOwn(row, "scheduled_post_date"), false);
+    assert.equal(Object.hasOwn(row, "publish_status"), false);
     assert.equal(row.error_messages.Publish_Retry_Eligible, undefined);
     assert.equal(row.error_messages.Output_Notes, "old");
+    assert.equal(row.error_messages.Studio_Publish_Dispatch_Note, "reconcile: ok");
     assert.equal(row.error_messages._airtable_links.Content_Item, "recContent1");
     const unmarked = retainProjectionKeys(
       { Output_Notes: "stale" },
@@ -2617,7 +2623,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.846-tiktok-draft-light-cron/);
+  assert.match(worker, /0\.10\.847-supabase-partial-patch/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);

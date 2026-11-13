@@ -8313,10 +8313,18 @@ export async function studioPromoteDuePublishStatus(env, record) {
     fields.IG_Story_Status = "Ready";
   }
   try {
-    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    const patched = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
+    // Archive-mode PATCH returns only the mutated fields. Merge so callers
+    // keep schedule/caption/status that were not part of this promote.
+    return {
+      ...record,
+      ...(patched || {}),
+      id,
+      fields: { ...(record.fields || {}), ...fields, ...(patched?.fields || {}) },
+    };
   } catch (error) {
     console.warn("due publish-status promote failed", id, error);
     return record;
