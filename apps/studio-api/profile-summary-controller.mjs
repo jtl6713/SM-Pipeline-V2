@@ -9,6 +9,7 @@ import {
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
 import { homeApprovedCalendarCounts } from "./home-approved-calendar-counts.mjs";
 import { validProfileSummaryV6Rows } from "./profile-summary-v6.mjs";
+import { listProfileSummaryRecords } from "./supabase-pipeline-reads.mjs";
 
 export const PROFILE_SUMMARY_BINDING = "STUDIO_PROFILE_SUMMARIES";
 const NAME = "all-profiles-v1";
@@ -120,6 +121,8 @@ function buildProfileInfo(profiles) {
  * Failed/interrupted runs leave the prior completed ledger intact.
  */
 async function listRecordsWithCoolingRetry(env, tableId, options) {
+  const stored = await listProfileSummaryRecords(env, tableId, options).catch(() => null);
+  if (Array.isArray(stored)) return stored;
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {

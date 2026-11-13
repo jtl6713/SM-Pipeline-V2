@@ -228,10 +228,20 @@ def _find_text_filter(table_id: str, text: str) -> str | None:
     needle, field, op = match.group(1), match.group(2), match.group(3)
     if not needle or any(ch in needle for ch in ',()*"'):
         return None
-    from supabase_pipeline import OUTPUT_JSON_COLUMNS
-
-    if table_id == PLATFORM_OUTPUTS_TABLE and field in OUTPUT_JSON_COLUMNS:
-        return None
+    json_text = {
+        "Selected_Assets_JSON": "selected_assets_text",
+        "Creative_Render_Manifest_JSON": "creative_render_manifest_text",
+        "Render_Clip_List_JSON": "render_clip_list_text",
+        "Remotion_Props_JSON": "remotion_props_text",
+        "Platform_Publish_Response_JSON": "platform_publish_response_text",
+        "Insights_Platform_Metrics_JSON": "insights_metrics_text",
+    }
+    if table_id == PLATFORM_OUTPUTS_TABLE and field in json_text:
+        ref = json_text[field]
+        like = f"{ref}.like.*{needle}*"
+        if op == ">0":
+            return like
+        return f"or({ref}.is.null,{ref}.eq.,{ref}.not.like.*{needle}*)"
     ref = _field_ref(table_id, field)
     if not ref:
         return None
@@ -334,11 +344,11 @@ def _produce_link_filter(table_id: str, cleaned: str) -> str | None:
         if token.isdigit():
             return _link_param(f"content_items.content_number=eq.{token}")
         if re.fullmatch(_REC_ID, token):
-            return _link_param(f"content_items.airtable_record_id=eq.{token}")
+            return f"content_item_airtable_id.eq.{token}"
         return None
     match = _FIND_CONTENT_ITEM.match(cleaned)
     if match:
-        return _link_param(f"content_items.airtable_record_id=eq.{match.group(1)}")
+        return f"content_item_airtable_id.eq.{match.group(1)}"
     match = _FIND_REQUEST_OUTPUT.match(cleaned)
     if match:
         # Full-record rows store the linked Production Request Output rec ids

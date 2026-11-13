@@ -41,7 +41,12 @@ def _ref(table_id: str, node: dict) -> str | None:
     field = str(node.get("field") or "")
     kind = str(node.get("type") or "")
     if kind == "multipleRecordLinks":
-        return _LINKS.get(table_id, {}).get(field)
+        linked = _LINKS.get(table_id, {}).get(field)
+        if linked:
+            return linked
+        if table_id == CONTENT_ITEMS_TABLE:
+            return _field_ref(table_id, field)
+        return None
     if table_id == PLATFORM_OUTPUTS_TABLE and field in OUTPUT_JSON_COLUMNS:
         return OUTPUT_JSON_COLUMNS[field]
     return _field_ref(table_id, field)

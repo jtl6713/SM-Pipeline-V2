@@ -98,8 +98,12 @@ def try_list_supabase_records(
     sort_direction: str = "asc",
 ) -> list[dict] | None:
     """Airtable-shaped rows, or None when this call must use Airtable."""
+    from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
+    from queue_reads import try_list_queue_records
     from settings_store import list_settings
 
+    if table_id == MEDIA_TRANSFER_QUEUE_TABLE and not view:
+        return try_list_queue_records(settings, formula=formula, max_records=max_records)
     try:
         stored_settings = list_settings(settings, table_id, formula, max_records)
     except Exception as error:

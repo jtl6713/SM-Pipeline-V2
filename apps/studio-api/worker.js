@@ -1362,7 +1362,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.854-ttd2-unmarked-supabase-read",
+          version: "0.10.855-queue-attempt-columns",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5348,8 +5348,8 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // STUDIO_PHASE6_WRITE_SOURCE=supabase: Production Request, Media Asset, and
   // transfer-queue PATCH and POST commit to Supabase first. A successful
   // Airtable create still returns Airtable's rec id. A failed Airtable create
-  // keeps the Supabase row. A create missing the insert identity still
-  // requires Airtable. The half-hour copy inserts a missing Phase 6 row and
+  // keeps the Supabase row. A create uses the minted Supabase id when Airtable
+  // identity fields are absent. The half-hour copy inserts a missing Phase 6 row and
   // does not overwrite one. Retiring Airtable is not this change.
   let outputSorCommitted = false;
   if (legacyExport && mutationRecords.length) {
