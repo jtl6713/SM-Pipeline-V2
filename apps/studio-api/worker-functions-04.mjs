@@ -1137,7 +1137,9 @@ export async function studioReconcileTiktokProcessing(env, options = {}) {
       const currentId = String(f(row, "TikTok_Draft_Publish_ID") || "");
       const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
       const lastCheckedMs = Date.parse(String(f(row, "TikTok_Draft_Last_Checked_At") || ""));
-      if (!currentId || previousId !== currentId
+      // Lean list rows can omit bag publish_id while the reread has it. Only
+      // skip when both sides disagree on a non-empty id (not empty→present).
+      if (!currentId || (previousId && previousId !== currentId)
           || f(row, "Do_Not_Publish") === true
           || Boolean(f(row, "Published_At"))
           || !Boolean(f(row, "Auto_Publish_Enabled"))

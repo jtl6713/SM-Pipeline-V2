@@ -1101,3 +1101,5 @@ Deploy 2026-11-13 Worker 0.10.863-meta-republish: POST /api/outputs/:id/meta-rep
 Deploy 2026-11-13 Worker 0.10.864-tiktok-resend-reread: TikTok Resend / Meta Republish re-read the full SoR record before publish dispatch (Supabase archive PATCH bag was incomplete). Verify /health version 0.10.864-tiktok-resend-reread.
 
 Deploy 2026-11-13 Worker 0.10.865-meta-republish-phase2a: Allow POST /meta-republish through Phase 2A gate; keep schedule fields off Resend/Republish writers. Verify /health version 0.10.865-meta-republish-phase2a.
+
+Deploy 2026-11-13 Worker 0.10.866-ttd2-ungate-airtable: TTD2/TTD draft/missing-publish-id cron never gate on Airtable archive cooldown; Processing poll allows empty list publish_id when reread has it. Verify /health version 0.10.866-ttd2-ungate-airtable.
