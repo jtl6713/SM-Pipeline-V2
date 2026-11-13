@@ -163,7 +163,8 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
   const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
   assert.ok(independent > 0 && independent < mainWaitUntil && independent < heavy);
-  assert.match(scheduled.slice(independent - 200, independent), /!cadence.heavy/);
+  assert.match(scheduled.slice(independent - 280, independent), /airtableDataWaitMs/);
+  assert.doesNotMatch(scheduled.slice(independent - 120, independent), /!cadence\.heavy && airtableCooldownWaitMs/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
 });
 
@@ -177,7 +178,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
   assert.ok(draftLight > 0 && draftLight < mainWaitUntil && draftLight < heavy);
   assert.match(scheduled.slice(draftLight - 280, draftLight), /airtableDataWaitMs/);
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
-  assert.match(cron, /0\.10\.852-ttd-draft-datawait/);
+  assert.match(cron, /0\.10\.853-ttd2-last-checked-order/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);

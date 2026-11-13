@@ -1195,6 +1195,7 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
       pulse: studioPulseTtd2,
       formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
       requireAutoPublish: false,
+      sortDirection: "asc",
     },
     {
       stage: "ttd3",

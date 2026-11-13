@@ -1077,3 +1077,5 @@ Deploy 2026-11-13 Worker 0.10.850-ttd-missing-id-datawait: Define airtableDataWa
 Deploy 2026-11-13 Worker 0.10.851-ttd1-nullslast: TTD0/TTD1 desk lists order scheduled_post_date nullslast so blank-schedule Ready for Delivery rows cannot starve due dated drafts on light limit=2. Verify /health version 0.10.851-ttd1-nullslast.
 
 Deploy 2026-11-13 Worker 0.10.852-ttd-draft-datawait: Gate TTD0/TTD1/TTD3 draft reconcile on airtableDataWaitMs and run every cron tick so Airtable archive cooldown after heavy cannot skip Ready for Delivery init. Verify /health version 0.10.852-ttd-draft-datawait.
+
+Deploy 2026-11-13 Worker 0.10.853-ttd2-last-checked-order: Fair-queue TTD2 by TikTok_Draft_Last_Checked_At asc nullsfirst; run existing-draft polls on airtableDataWaitMs every tick so high Output_IDs cannot starve Processing fixtures. Verify /health version 0.10.853-ttd2-last-checked-order.
