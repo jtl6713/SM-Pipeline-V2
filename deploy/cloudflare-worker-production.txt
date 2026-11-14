@@ -1197,3 +1197,5 @@ Deploy 2026-11-14 Worker 0.10.908-closeout-queue-xfer-census: Transfer_ID queue 
 Deploy 2026-11-14 Worker 0.10.909-closeout-music-override: Platform Output Selected_Music_Asset_Override FIND prefers Supabase (music library usage scan). Record deletion is not started. Verify /health version 0.10.909-closeout-music-override.
 
 Deploy 2026-11-14 Worker 0.10.910-closeout-slide-rec: Carousel Slides OR(RECORD_ID()) list formulas prefer Supabase (native gallery / review readSlides). Record deletion is not started. Verify /health version 0.10.910-closeout-slide-rec.
+
+Deploy 2026-11-14 Worker 0.10.911-closeout-slide-space: Carousel Slides Is Cover / Deleted From Carousel / Review Status formulas prefer Supabase after tightenSideFormula space strip. Record deletion is not started. Verify /health version 0.10.911-closeout-slide-space.

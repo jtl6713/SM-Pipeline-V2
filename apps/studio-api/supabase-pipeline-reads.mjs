@@ -6821,15 +6821,41 @@ function slideFormulaFilter(formula) {
     }
     return filters.length === 1 ? filters[0] : `and(${filters.join(",")})`;
   }
-  const checkbox = cleaned.match(/^\{(Shared_Asset_Approved|Is Cover|Deleted From Carousel)\}=([01])$/);
+  // tightenSideFormula strips spaces inside {Field Name} → {FieldName}.
+  const slideField = {
+    Shared_Asset_Approved: "Shared_Asset_Approved",
+    IsCover: "Is Cover",
+    "Is Cover": "Is Cover",
+    DeletedFromCarousel: "Deleted From Carousel",
+    "Deleted From Carousel": "Deleted From Carousel",
+    ReviewStatus: "Review Status",
+    "Review Status": "Review Status",
+    Asset_4x5_Public_Status: "Asset_4x5_Public_Status",
+    FB_Photo_Status: "FB_Photo_Status",
+    FB_Photo_Package_Revision: "FB_Photo_Package_Revision",
+    Asset_4x5_Public_URL: "Asset_4x5_Public_URL",
+    FB_Photo_ID: "FB_Photo_ID",
+  };
+  const checkbox = cleaned.match(/^\{(Shared_Asset_Approved|IsCover|Is Cover|DeletedFromCarousel|Deleted From Carousel)\}=([01])$/);
   if (checkbox) {
-    const ref = `fields->>${checkbox[1]}`;
+    // Typed column for Deleted From Carousel; bag keys with spaces need quoting.
+    if (checkbox[1] === "DeletedFromCarousel" || checkbox[1] === "Deleted From Carousel") {
+      return checkbox[2] === "1"
+        ? "deleted_from_carousel.eq.true"
+        : "or(deleted_from_carousel.is.null,deleted_from_carousel.eq.false)";
+    }
+    const key = slideField[checkbox[1]];
+    const ref = key.includes(" ") ? `fields->>${JSON.stringify(key)}` : `fields->>${key}`;
     return checkbox[2] === "1"
       ? `or(${ref}.eq.true,${ref}.eq.1,${ref}.eq.True)`
       : `or(${ref}.is.null,${ref}.eq.false,${ref}.eq.0,${ref}.eq.False,${ref}.eq.)`;
   }
-  const eq = cleaned.match(/^\{(Asset_4x5_Public_Status|FB_Photo_Status|FB_Photo_Package_Revision|Review Status)\}="([^"]*)"$/);
-  if (eq) return `fields->>${eq[1]}.eq.${eq[2]}`;
+  const eq = cleaned.match(/^\{(Asset_4x5_Public_Status|FB_Photo_Status|FB_Photo_Package_Revision|ReviewStatus|Review Status)\}="([^"]*)"$/);
+  if (eq) {
+    const key = slideField[eq[1]];
+    const ref = key.includes(" ") ? `fields->>${JSON.stringify(key)}` : `fields->>${key}`;
+    return `${ref}.eq.${eq[2]}`;
+  }
   const blank = cleaned.match(/^\{(Asset_4x5_Public_URL|FB_Photo_ID|Asset_4x5_Public_Status)\}=BLANK\(\)$/);
   if (blank) return `or(fields->>${blank[1]}.is.null,fields->>${blank[1]}.eq.)`;
   const nonempty = cleaned.match(/^\{(Asset_4x5_Public_URL|FB_Photo_ID)\}!=BLANK\(\)$/);
