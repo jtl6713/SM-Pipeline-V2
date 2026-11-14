@@ -10492,6 +10492,19 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
         poId=found?.[0]?.id||null;
       }
     }
+    // Record-id reuse: seed always writes Production_Request_Output=[PRO rec].
+    // After Supabase PRO reads dropped Platform_Output, the name-id FIND above
+    // could not run and heal recreated the same destination every tick.
+    if(!poId){
+      const proRec=String(outputRow.id||"").replace(/'/g,"\\'");
+      if(/^rec[A-Za-z0-9]{14}$/.test(proRec)){
+        const found=await listRecords(env,STUDIO_PLATFORM_OUTPUT_TABLE,{
+          limit:1,
+          filterFormula:`FIND('${proRec}', ARRAYJOIN({Production_Request_Output})&'')`,
+        });
+        poId=found?.[0]?.id||null;
+      }
+    }
     if(!poId && finishedVideo){
       const destKey=canonicalFinishedDestinationKey(f(outputRow,"Platform"), f(outputRow,"Output_Type"));
       const existingPos=await listExistingFinishedPlatformOutputs(env, requestRecord, parent);

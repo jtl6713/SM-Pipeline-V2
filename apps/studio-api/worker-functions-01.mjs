@@ -4577,7 +4577,14 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
     includeInactive,
     limit: 500,
   }).catch(() => null);
-  if (Array.isArray(fromSupabase)) {
+  // Densified PRO rows omit Platform_Output (and platform_output_id is unset).
+  // studioHealPromotedMissingFanout treats blank Platform_Output as "create",
+  // which after #1907 flooded Platform Outputs every 5 minutes. Prefer Airtable
+  // until Platform_Output is densified onto production_request_outputs.
+  const supabaseHasPlatformOutputLinks = Array.isArray(fromSupabase)
+    && fromSupabase.length > 0
+    && fromSupabase.every((row) => Object.prototype.hasOwnProperty.call(row?.fields || {}, "Platform_Output"));
+  if (supabaseHasPlatformOutputLinks) {
     return fromSupabase.sort(
       (a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0),
     );

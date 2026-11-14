@@ -18,6 +18,7 @@ test("recover missing forward link by reusing exactly one verified inverse-linke
   assert.match(body,/String\(f\(inverse,"Studio_Output_Type"\)/);
   assert.match(body,/poId=inverse\.id/);
   assert.match(body,/if\(!poId && !onlyMissing\)/);
+  assert.match(body,/FIND\('\$\{proRec\}', ARRAYJOIN\(\{Production_Request_Output\}\)&''\)/);
 });
 
 test("schedule collision defers only booking; preserves original requested time and output",()=>{

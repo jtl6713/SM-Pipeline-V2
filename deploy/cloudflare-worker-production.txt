@@ -1257,3 +1257,5 @@ Deploy 2026-11-14 Worker 0.10.938-closeout-r2-view: R2 Available Classified Vide
 Deploy 2026-11-14 Worker 0.10.939-closeout-c6-view: C6 Active Small Branding Watermark view prefer Supabase. Record deletion is not started. Verify /health version 0.10.939-closeout-c6-view.
 
 Deploy 2026-11-14 Worker 0.10.940-closeout-r2-music: R2 Available Classified Music Assets view prefer Supabase. Record deletion is not started. Verify /health version 0.10.940-closeout-r2-music.
+
+Deploy 2026-11-14 Worker 0.10.941-fanout-pro-platform-output: stop duplicate Platform Output flood — Airtable PRO Platform_Output for fanout heal; reuse PO by PRO record id before create.
