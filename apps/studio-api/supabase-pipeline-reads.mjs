@@ -6515,6 +6515,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   Timing_Status: "error_messages->>Timing_Status",
   Publish_Error_Stage: "error_messages->>Publish_Error_Stage",
   Remotion_Job_ID: "remotion_job_id",
+  Final_File_Storage_Status: "error_messages->>Final_File_Storage_Status",
+  Publish_Method: "publish_method",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6579,6 +6581,12 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   YouTube_Scheduled_Publish_At: "youtube_scheduled_publish_at",
   IG_Carousel_Parent_Container_ID: "error_messages->>IG_Carousel_Parent_Container_ID",
   Remotion_Error_Message: "error_messages->>Remotion_Error_Message",
+  Output_Status: "output_status",
+  TikTok_Draft_Publish_ID: "error_messages->>TikTok_Draft_Publish_ID",
+  Publish_Error_Message: "error_messages->>Publish_Error_Message",
+  IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
+  Platform_Media_ID: "error_messages->>Platform_Media_ID",
+  IG_Carousel_Child_Count: "ig_carousel_child_count",
 };
 
 /** Text fields that support FIND("needle",{Field}&"") / >0 substring probes. */
@@ -6599,6 +6607,8 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   Studio_Output_Type: "studio_output_type",
   Format: "format",
   Platform_Output_Type: "platform_output_type",
+  Publish_Error_Message: "error_messages->>Publish_Error_Message",
+  IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
 };
 
 /** Cadence Output views Worker probes without filterByFormula trees. */
@@ -6745,6 +6755,12 @@ function outputSideLeafFilter(cleaned) {
   const gtNum = cleaned.match(/^\{([A-Za-z0-9_]+)\}>(\d+)$/);
   if (gtNum && gtNum[1] === "Render_Total_Frames") {
     return `render_total_frames.gt.${gtNum[2]}`;
+  }
+  if (gtNum && gtNum[1] === "IG_Carousel_Child_Count") {
+    return `ig_carousel_child_count.gt.${gtNum[2]}`;
+  }
+  if (gtNum && gtNum[1] === "Output_ID") {
+    return `output_number.gt.${gtNum[2]}`;
   }
   const ltNum = cleaned.match(/^\{([A-Za-z0-9_]+)\}<(\d+)$/);
   if (ltNum && OUTPUT_SIDE_BLANK_FIELDS[ltNum[1]]) {
