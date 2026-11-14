@@ -99,6 +99,12 @@ export const CONTENT_LIST_SYNC_FIELDS = Object.freeze([
   "Render_Status",
   "Review_Status",
   "Carousel_Review_Status",
+  // C1 - Ready for Carousel Planning view densify.
+  "Do_Not_Produce",
+  "Carousel_Image_Mode",
+  "Carousel_Slide_Count",
+  "Carousel_Target_Platforms",
+  "Carousel Slides",
   "Content_Duration",
   "Content_Themes",
   "Include_Voiceover",
@@ -7331,7 +7337,22 @@ const CONTENT_SIDE_VIEW_FILTERS = {
     + "or(extras->>Thumbnail_Prompt.is.null,extras->>Thumbnail_Prompt.eq.),"
     + "or(or(extras->>Script.is.null,extras->>Script.eq.),"
     + "extras->>Script_Status.eq.Not%20Started,extras->>Script_Status.eq.Ready))",
+  // Airtable Meta snapshot of viwT0B4SmJLL1qPlp.
+  viwT0B4SmJLL1qPlp:
+    "and(extras->>Content_Type.eq.Carousel,"
+    + "extras->>Render_Status.in.(Not%20Ready,Ready%20for%20Scene%20Planning),"
+    + "or(extras->>Do_Not_Produce.is.null,extras->>Do_Not_Produce.eq.false),"
+    + "and(extras->>Carousel_Image_Mode.not.is.null,extras->>Carousel_Image_Mode.neq.),"
+    + "and(extras->>Carousel_Slide_Count.not.is.null,extras->>Carousel_Slide_Count.neq.),"
+    + "and(extras->Carousel_Target_Platforms.not.is.null,"
+    + "extras->>Carousel_Target_Platforms.neq.,"
+    + "extras->>Carousel_Target_Platforms.neq.[]),"
+    + "or(extras->\"Carousel Slides\".is.null,"
+    + "extras->>\"Carousel Slides\".eq.,"
+    + "extras->>\"Carousel Slides\".eq.[]),"
+    + "content_status.in.(Ready%20for%20Voiceover,Script%20Generated,Needs%20Assets,Thumbnail%20Ready))",
 };
+CONTENT_SIDE_VIEW_FILTERS["C1 - Ready for Carousel Planning"] = CONTENT_SIDE_VIEW_FILTERS.viwT0B4SmJLL1qPlp;
 
 function outputSideBlankFilter(column) {
   return `or(${column}.is.null,${column}.eq.)`;

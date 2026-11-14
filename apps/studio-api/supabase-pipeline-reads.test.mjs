@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.932-closeout-c2m-slides/);
+  assert.match(worker, /0\.10\.933-closeout-c1-view/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.932-closeout-c2m-slides/);
+  assert.match(worker, /0\.10\.933-closeout-c1-view/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.932-closeout-c2m-slides/);
+  assert.match(worker, /0\.10\.933-closeout-c1-view/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.932-closeout-c2m-slides/);
+  assert.match(worker, /0\.10\.933-closeout-c1-view/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -5492,6 +5492,60 @@ test("Autonomous PR lists and published-library date/search prefer Supabase", as
   const search = translateOutputSideFormula(publishedLibraryFilterFormula("Instagram Reel"));
   assert.ok(search);
   assert.match(search, /output_title\.ilike\.\*instagram%20reel\*/);
+});
+
+test("C1 Ready for Carousel Planning view + Test_Run_ID blank prefer Supabase content", async () => {
+  const {
+    studioSideTableRead,
+    CONTENT_ITEMS_TABLE_ID,
+    CONTENT_LIST_SYNC_FIELDS,
+  } = await import("./supabase-pipeline-reads.mjs");
+  assert.ok(CONTENT_LIST_SYNC_FIELDS.includes("Carousel_Image_Mode"));
+  assert.ok(CONTENT_LIST_SYNC_FIELDS.includes("Carousel Slides"));
+  assert.ok(CONTENT_LIST_SYNC_FIELDS.includes("Do_Not_Produce"));
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_CONTENT_TABLE_ID: CONTENT_ITEMS_TABLE_ID,
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recContent00000001",
+        content_number: 100,
+        content_title: "Carousel plan",
+        content_status: "Ready for Voiceover",
+        extras: {
+          Content_Type: "Carousel",
+          Render_Status: "Not Ready",
+          Carousel_Image_Mode: "Manual Upload",
+          Carousel_Slide_Count: 5,
+          Carousel_Target_Platforms: ["Instagram"],
+        },
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const listed = await studioSideTableRead(
+      env,
+      CONTENT_ITEMS_TABLE_ID,
+      "?view=viwT0B4SmJLL1qPlp&filterByFormula=" + encodeURIComponent("{Test_Run_ID}=BLANK()") + "&maxRecords=1",
+    );
+    assert.equal(listed.records[0].id, "recContent00000001");
+    assert.match(urls[0], /content_items\?/);
+    assert.match(urls[0], /Content_Type\.eq\.Carousel/);
+    assert.match(urls[0], /Ready%20for%20Scene%20Planning/);
+    const unknown = await studioSideTableRead(
+      env,
+      CONTENT_ITEMS_TABLE_ID,
+      "?view=viwUnknownContentView0&filterByFormula=" + encodeURIComponent("{Test_Run_ID}=BLANK()") + "&maxRecords=1",
+    );
+    assert.equal(unknown, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("C2M Manual Uploads Ready view + Test_Run_ID blank prefer Supabase carousel_slides", async () => {
