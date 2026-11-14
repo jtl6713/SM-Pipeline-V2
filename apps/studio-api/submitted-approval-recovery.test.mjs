@@ -103,6 +103,7 @@ test("Submitted recovery persists failure diagnostics but never fabricates appro
   assert.match(body, /Studio_Approval_Recovery_Error: String\(error\?\.message \|\| error\)/);
   assert.match(body, /Studio_Approval_Recovery_Last_Attempt_At: new Date\(\)\.toISOString\(\)/);
   assert.match(body, /if \(attemptedSubmitted\) break/);
+  assert.match(body, /FIND\('\$\{proRec\}',ARRAYJOIN\(\{Production_Request_Output\}\)&""\)/);
   assert.doesNotMatch(body, /promoteProductionRequestViaI3I4\(/);
 });
 
