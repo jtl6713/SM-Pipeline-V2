@@ -1207,3 +1207,5 @@ Deploy 2026-11-14 Worker 0.10.913-closeout-idea-listen: Idea auto-listen photo_u
 Deploy 2026-11-14 Worker 0.10.914-closeout-exc-eventkey: Exception Recovery Event_Key + Quality Recovery Ledger Event_Key/reconciled lists prefer Supabase. Record deletion is not started. Verify /health version 0.10.914-closeout-exc-eventkey.
 
 Deploy 2026-11-14 Worker 0.10.915-closeout-exc-eventkey: Redeploy Exception Event_Key + QA Recovery Ledger SoR after 0.10.914 census verify timeout; harden failed-output-census deploy retries. Record deletion is not started. Verify /health version 0.10.915-closeout-exc-eventkey.
+
+Deploy 2026-11-14 Worker 0.10.916-closeout-yt-jobid: YouTube_Upload_Job_ID + IG Story container/post blank leaves prefer Supabase (YTS1/YTP1 + AP1-IGS light cron). Record deletion is not started. Verify /health version 0.10.916-closeout-yt-jobid.

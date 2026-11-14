@@ -7009,6 +7009,8 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   Published_At: "published_at",
   Publish_Next_Retry_At: "publish_next_retry_at",
   YouTube_Video_ID: "error_messages->>YouTube_Video_ID",
+  // YTS1/YTP1 light cron — job id lives in the lean bag, not a typed column.
+  YouTube_Upload_Job_ID: "error_messages->>YouTube_Upload_Job_ID",
   Platform_Post_URL: "platform_post_url",
   Manual_Published_URL: "error_messages->>Manual_Published_URL",
   Studio_Render_Review_Hold_ID: "error_messages->>Studio_Render_Review_Hold_ID",
@@ -7018,6 +7020,9 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",
   FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
   IG_Story_Status: "error_messages->>IG_Story_Status",
+  // AP1-IGS light cron — container/post ids are bag fields.
+  IG_Story_Container_ID: "error_messages->>IG_Story_Container_ID",
+  IG_Story_Post_ID: "error_messages->>IG_Story_Post_ID",
   IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
   Content_Item: "content_item_airtable_id",
   Render_Status: "render_status",
