@@ -1249,8 +1249,30 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   const transferMatch = cleaned.match(/^\{Studio_Transfer_ID\}=(["'])([^"']*)\1$/);
   // ASSET_LIBRARY_LIST_FORMULA — non-music Image/Graphic/Video, exclude fill-crop.
   // compactFormula collapses {Asset Name} → {AssetName}.
-  const assetLibrary = cleaned === "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({AssetName}&''))))"
-    || cleaned === 'AND(OR({Media_Class}="Image",{Media_Class}="Graphic",{Media_Class}="Video"),OR({Asset_Role}!="Music",{Asset_Role}=BLANK()),NOT(FIND("fill-crop",LOWER({AssetName}&""))))';
+  const assetLibraryCore =
+    "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({AssetName}&''))))";
+  const assetLibraryCoreDq =
+    'AND(OR({Media_Class}="Image",{Media_Class}="Graphic",{Media_Class}="Video"),OR({Asset_Role}!="Music",{Asset_Role}=BLANK()),NOT(FIND("fill-crop",LOWER({AssetName}&""))))';
+  const assetLibrary = cleaned === assetLibraryCore || cleaned === assetLibraryCoreDq;
+  // LIBRARY_CLASSIFY_PENDING_FORMULA = asset library + profile + pending/error/blank-keywords.
+  // compactFormula strips spaces inside quoted status literals (Needs Classification → NeedsClassification).
+  const classifyPending = cleaned === `AND(${assetLibraryCore},{Content_Profile}!=BLANK(),OR({Classification_Status}='NeedsClassification',{Classification_Status}='ClassificationError',AND(OR({Classification_Status}='Classified',{Classification_Status}=BLANK()),{Search_Keywords}=BLANK())))`
+    || cleaned === `AND(${assetLibraryCoreDq},{Content_Profile}!=BLANK(),OR({Classification_Status}="NeedsClassification",{Classification_Status}="ClassificationError",AND(OR({Classification_Status}="Classified",{Classification_Status}=BLANK()),{Search_Keywords}=BLANK())))`;
+  // Intake unfinished: AND(OR({Intake_Batch_ID}="…",…),OR({Classification_Status}=…))
+  const intakeBatch = cleaned.match(
+    /^AND\(OR\((.+)\),OR\(\{Classification_Status\}=(['"])NeedsClassification\2,\{Classification_Status\}=(['"])Processing\3\)\)$/,
+  );
+  const intakeIds = [];
+  if (intakeBatch) {
+    for (const part of splitQueueArgs(intakeBatch[1]) || []) {
+      const id = part.match(/^\{Intake_Batch_ID\}=(["'])([^"']+)\1$/);
+      if (!id) {
+        intakeIds.length = 0;
+        break;
+      }
+      intakeIds.push(id[2]);
+    }
+  }
   if (logo) {
     filter = "asset_role=eq.Logo&or=(do_not_use.is.null,do_not_use.eq.false)";
   } else if (music) {
@@ -1261,10 +1283,26 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   } else if (watermark) {
     filter = "asset_role=eq.Watermark&asset_status=eq.Available"
       + "&or=(do_not_use.is.null,do_not_use.eq.false)";
-  } else if (assetLibrary) {
+  } else if (assetLibrary || classifyPending) {
     filter = "media_class=in.(Image,Graphic,Video)"
       + "&or=(asset_role.is.null,asset_role.eq.,asset_role.neq.Music)"
       + "&asset_name=not.ilike.*fill-crop*";
+    if (classifyPending) {
+      filter += "&and=(metadata->>content_profile_airtable_id.not.is.null,"
+        + "metadata->>content_profile_airtable_id.neq.)"
+        + "&or=(metadata->>classification_status.eq.Needs%20Classification,"
+        + "metadata->>classification_status.eq.Classification%20Error,"
+        + "and(or(metadata->>classification_status.eq.Classified,"
+        + "metadata->>classification_status.is.null,metadata->>classification_status.eq.),"
+        + "or(metadata->>search_keywords.is.null,metadata->>search_keywords.eq.)))";
+    }
+  } else if (intakeIds.length) {
+    const orParts = intakeIds
+      .map((id) => `metadata->>intake_batch_id.eq.${encodeURIComponent(id)}`)
+      .join(",");
+    filter = `or=(${orParts})`
+      + "&or=(metadata->>classification_status.eq.Needs%20Classification,"
+      + "metadata->>classification_status.eq.Processing)";
   } else if (transferMatch) {
     filter = `metadata->>studio_transfer_id=eq.${encodeURIComponent(transferMatch[2])}`;
   } else if (nameMatch) {
