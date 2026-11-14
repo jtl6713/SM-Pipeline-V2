@@ -226,14 +226,20 @@ def try_list_supabase_records(
     order_column = "airtable_record_id"
     if sort_field:
         order_column = columns.get(sort_field) or ""
+        if not order_column and table_id == MEDIA_ASSETS_TABLE and sort_field == "Intake_Date":
+            order_column = "metadata->>intake_date"
         if not order_column:
             return None
     direction = "desc" if str(sort_direction or "").lower() == "desc" else "asc"
     limit = max(1, min(int(max_records or 10), 100))
     select = _list_select(table_id)
+    if "->>" in order_column:
+        order_clause = f"{order_column}.{direction}.nullslast"
+    else:
+        order_clause = f"{quote(order_column, safe='')}." + direction
     path = (
         f"{table}?select={quote(select, safe='(),*')}"
-        f"&order={quote(order_column, safe='')}.{direction}&limit={limit}"
+        f"&order={order_clause}&limit={limit}"
     )
     path = attach_formula_filter(path, formula_filter)
     try:

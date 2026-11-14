@@ -1218,8 +1218,16 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   // compactFormula removes spaces inside {Asset Name} → {AssetName}.
   const driveMatch = cleaned.match(/^\{GoogleDriveFileID\}=(["'])([^"']*)\1$/)
     || cleaned.match(/^AND\(\{GoogleDriveFileID\}=(["'])([^"']*)\1\)$/);
+  const watermark = cleaned === 'AND({Asset_Role}="Watermark",{Asset_Status}="Available")'
+    || cleaned === "AND({Asset_Role}='Watermark',{Asset_Status}='Available')";
+  const transferMatch = cleaned.match(/^\{Studio_Transfer_ID\}=(["'])([^"']*)\1$/);
   if (logo) {
     filter = "asset_role=eq.Logo&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (watermark) {
+    filter = "asset_role=eq.Watermark&asset_status=eq.Available"
+      + "&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (transferMatch) {
+    filter = `metadata->>studio_transfer_id=eq.${encodeURIComponent(transferMatch[2])}`;
   } else if (nameMatch) {
     filter = `asset_name.ilike.${encodeURIComponent(nameMatch[2])}`;
   } else if (driveMatch) {

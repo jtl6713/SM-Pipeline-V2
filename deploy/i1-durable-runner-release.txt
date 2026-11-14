@@ -73,3 +73,5 @@ Deploy 2026-11-08 ITS1 creative_first storyboard writer for Script a Short empty
 Deploy 2026-11-13 runner 2026-11-13-zcloseout-output-side: FALLBACK_STOPPED includes transfer queue so empty allowlisted queue lists do not call Airtable. Verify /health version 2026-11-13-zcloseout-output-side.
 
 Deploy 2026-11-13 runner 2026-11-13-zcloseout-az-profiles: Content Profiles GETs prefer Supabase under write SoR; FALLBACK_STOPPED. Verify /health version 2026-11-13-zcloseout-az-profiles.
+
+Deploy 2026-11-13 runner 2026-11-13-zcloseout-media-views: A3 classify + C6 watermark media views prefer Supabase. Verify /health version 2026-11-13-zcloseout-media-views.

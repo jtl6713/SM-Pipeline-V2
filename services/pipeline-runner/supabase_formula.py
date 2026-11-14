@@ -51,6 +51,9 @@ _MEDIA_COLUMNS = {
     "File_Extension": "file_extension",
     "File_Size_Bytes": "file_size_bytes",
     "Studio_Transfer_ID": "metadata->>studio_transfer_id",
+    "Classification_Status": "metadata->>classification_status",
+    "Rights_Status": "metadata->>rights_status",
+    "Intake_Date": "metadata->>intake_date",
 }
 
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')
