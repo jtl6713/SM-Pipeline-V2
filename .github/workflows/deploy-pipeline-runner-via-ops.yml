@@ -58,6 +58,7 @@ jobs:
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
             services/pipeline-runner/tests/test_ttd_email_text.py \
             services/pipeline-runner/tests/test_ttd3_atomic_email_claim.py \
+            services/pipeline-runner/tests/test_ttd_handoff_receipt_replay.py \
             services/pipeline-runner/tests/test_tiktok_photo_sound_guard.py \
             services/pipeline-runner/tests/test_ttd_eligibility.py \
             services/pipeline-runner/tests/test_ttd2_delivery_recovery.py \
