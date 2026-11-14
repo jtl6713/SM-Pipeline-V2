@@ -1159,3 +1159,5 @@ Deploy 2026-11-14 Worker 0.10.891-closeout-publish-find: publish reconcile blank
 Deploy 2026-11-14 Worker 0.10.892-closeout-ig-heal: IG carousel heal FIND + TikTok draft publish-id + FB story media-id prefer Supabase. Record deletion is not started. Verify /health version 0.10.892-closeout-ig-heal.
 
 Redeploy 2026-11-14 after 0.10.891 rollback: failed-output-census curl timed out (70s) during Factory batch verify; Worker source deploy itself succeeded then rolled back. 0.10.892 includes publish-find + IG heal and re-fires production Worker deploy.
+
+Deploy 2026-11-14 Worker 0.10.893-closeout-census-bound: bound failed-output census with PostgREST OR + LOWER FIND / past-due ISO / Published_At gte / CREATED_TIME leaves. Record deletion is not started. Verify /health version 0.10.893-closeout-census-bound.
