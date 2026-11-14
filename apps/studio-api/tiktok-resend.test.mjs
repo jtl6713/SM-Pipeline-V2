@@ -75,6 +75,11 @@ test("tiktokResendRearmFields clear auth park and arm Ready for Delivery", () =>
   assert.equal(fields.Publish_Attempt_Count, 0);
   assert.equal(fields.Studio_Publish_Dispatch_Count, 0);
   assert.equal(fields.TikTok_Draft_Publish_ID, "");
+  assert.equal(fields.TikTok_Draft_Delivered_At, null);
+  assert.equal(fields.TikTok_Draft_Email_Sent_At, null);
+  assert.equal(fields.TikTok_Draft_Response_JSON, "");
+  assert.equal(fields.Operational_Email_Key, "");
+  assert.equal(fields.Operational_Email_Sent_At, null);
   assert.equal(fields.Publish_Error_Message, "");
   assert.match(fields.Output_Notes, /prior note/);
   assert.match(fields.Output_Notes, /draft resend requested/);
@@ -185,4 +190,15 @@ test("TTD2 processing confirmation reread uses Supabase when write source is sup
   assert.match(moduleSource, /async function studioReadTiktokReconcileOutput/);
   assert.match(moduleSource, /readSupabaseShapedOutput\(env, recordId\)/);
   assert.match(moduleSource, /listSupabaseDeskHealOutputs\(env, \{\s*kind,/);
+});
+
+test("TikTok resend endpoint does not claim delivered or hide dispatch failure", async () => {
+  const moduleSource = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = moduleSource.indexOf("export async function resendStudioTiktokDraft");
+  const end = moduleSource.indexOf("/*__STUDIO_WORKER_END:resendStudioTiktokDraft__*/", start);
+  const body = moduleSource.slice(start, end);
+  assert.match(body, /dispatch\?\.ok === false \|\| dispatch\?\.skipped/);
+  assert.match(body, /delivery_confirmed: false/);
+  assert.match(body, /resent: false/);
+  assert.match(body, /new HttpError\(503/);
 });

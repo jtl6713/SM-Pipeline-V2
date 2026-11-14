@@ -17180,6 +17180,10 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
       held_until: scheduledPostDate || null,
       record: rearmed,
     };
+  if (dueNow && (dispatch?.ok === false || dispatch?.skipped)) {
+    throw new HttpError(503,
+      `TikTok resend was rearmed but delivery was not dispatched: ${dispatch?.message || dispatch?.skipped || "dispatch failed"}. Check output state before retrying.`);
+  }
   if (dueNow && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(studioDispatchApprovedPublishTail(env, rearmed, dispatch).catch((error) => {
       console.warn("tiktok-resend tail failed", match[1], error);
@@ -17188,7 +17192,9 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
   const refreshed = await studioReadOutputRecordForManualComplete(env, match[1]).catch(() => rearmed);
   return respond(request, env, {
     ok: true,
-    resent: true,
+    resent: false,
+    dispatch_accepted: dueNow && dispatch?.ok !== false,
+    delivery_confirmed: false,
     output_id: match[1],
     dispatch: {
       ok: dispatch?.ok !== false,

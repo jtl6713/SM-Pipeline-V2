@@ -62,7 +62,18 @@ export function tiktokResendRearmFields({
     Publish_Locked_At: null,
     Publish_Started_At: null,
     Publish_Next_Retry_At: null,
+    // A resend is a new delivery generation. Clear receipts from the previous
+    // SEND_TO_USER_INBOX so TTD2/TTD3 cannot mistake them for this attempt.
     TikTok_Draft_Publish_ID: "",
+    TikTok_Draft_Delivered_At: null,
+    TikTok_Draft_Last_Checked_At: null,
+    TikTok_Draft_Email_Sent_At: null,
+    TikTok_Draft_Response_JSON: "",
+    TikTok_Draft_Public_Post_IDs_JSON: "",
+    TikTok_Draft_Poll_Attempt_Count: 0,
+    Operational_Email_Key: "",
+    Operational_Email_Sent_At: null,
+    Platform_Publish_Response: "",
     Output_Notes: notes.slice(0, 10000),
   };
 }
