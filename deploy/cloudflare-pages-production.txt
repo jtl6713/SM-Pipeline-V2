@@ -777,3 +777,5 @@ Deploy 2026-11-13 UI 0.6.937-manual-action-red: Instagram/Facebook Manual Action
 Deploy 2026-11-13 UI 0.6.938-meta-republish: Instagram/Facebook Manual Action shows a confirmed Republish button that re-kicks Graph publish when the post is not live; URL paste stays for already-live posts. Hard-refresh UI 0.6.938.
 
 Deploy 2026-11-14 iPhone PWA TikTok actions viewport fit: wrap instructions, stack resend controls, constrain URL/music fields and eliminate horizontal clipping; CSS cache bust 0.6.939-iphone-tiktok-layout.
+
+Retry deploy 2026-11-14 Studio UI 0.6.939-iphone-tiktok-layout after release contract alignment PR #1918. Verify iPhone TikTok panel viewport clipping eliminated.
