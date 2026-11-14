@@ -1394,6 +1394,9 @@ export function airtableShapedProductionRequestFromSupabase(row) {
       Studio_Master_Asset_Status: bag.Studio_Master_Asset_Status || null,
       Studio_Master_Asset_Count: bag.Studio_Master_Asset_Count ?? null,
       Selected_Music_Asset: Array.isArray(bag.Selected_Music_Asset) ? bag.Selected_Music_Asset : [],
+      Studio_Master_Media_Assets: Array.isArray(bag.Studio_Master_Media_Assets)
+        ? bag.Studio_Master_Media_Assets
+        : [],
       Background_Music_Mode: bag.Background_Music_Mode || null,
       Active: bag.Active !== false,
       Master_Content_Type: bag.Master_Content_Type || null,
@@ -3902,6 +3905,9 @@ export function mapAirtableProductionRequestToSupabase(record, profileUuid = nul
       Studio_Master_Asset_Status: selectName(fields.Studio_Master_Asset_Status) || fields.Studio_Master_Asset_Status || null,
       Studio_Master_Asset_Count: fields.Studio_Master_Asset_Count ?? null,
       Selected_Music_Asset: Array.isArray(fields.Selected_Music_Asset) ? fields.Selected_Music_Asset : [],
+      Studio_Master_Media_Assets: Array.isArray(fields.Studio_Master_Media_Assets)
+        ? fields.Studio_Master_Media_Assets
+        : [],
       Background_Music_Mode: fields.Background_Music_Mode || null,
       Active: fields.Active !== false && fields.Active !== 0,
       Master_Content_Type: fields.Master_Content_Type || null,
@@ -6023,6 +6029,30 @@ export async function listSupabaseExceptionRecoveryMessages(env, outputRecordId,
   return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
 }
 
+/** History feed: OR({Exception_Signature}="…",…) allowlist. */
+export async function listSupabaseExceptionRecoveryBySignatures(env, signatures, {
+  limit = 100,
+  offset = 0,
+} = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const wanted = [...new Set((signatures || []).map((s) => String(s || "").trim()).filter(Boolean))];
+  if (!wanted.length) return null;
+  const cap = Math.max(1, Math.min(200, Number(limit) || 100));
+  const skip = Math.max(0, Number(offset) || 0);
+  const orParts = wanted
+    .map((sig) => `exception_signature.eq.${encodeDeskFilterValue(sig)}`)
+    .join(",");
+  const rows = await supabaseRest(
+    env,
+    `exception_recovery_messages?or=(${orParts})`
+      + `&select=airtable_record_id,event_key,output_record_id,exception_signature,role,message_text,actor,`
+      + `reply_to_event_key,intent_json,fields,created_at`
+      + `&order=created_at.desc&limit=${cap}&offset=${skip}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
+}
+
 /** Append Exception Recovery conversation rows (idempotent on event_key). */
 export async function createSupabaseExceptionRecoveryMessages(env, records) {
   if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
@@ -6103,6 +6133,36 @@ function ideaProfileIds(formula) {
     ids: [...new Set(ids)],
     openOnly: text.includes("{Promoted_Content_Record_ID}=BLANK()") && text.includes("{ContentItems}=BLANK()"),
   };
+}
+
+/** Map unscoped Idea list formulas onto listSupabaseIdeaLane kinds. */
+export function ideaLaneFromFormula(formula) {
+  const cleaned = compactFormula(formula);
+  if (!cleaned) return "";
+  // compactFormula strips spaces inside status literals ("On Hold" → "OnHold").
+  const waiting = cleaned.includes("{Studio_Photo_Wait_Status}='Waiting'")
+    || cleaned.includes('{Studio_Photo_Wait_Status}="Waiting"');
+  const ready = cleaned.includes("{Studio_Photo_Wait_Status}='Ready'")
+    || cleaned.includes('{Studio_Photo_Wait_Status}="Ready"');
+  const promotedBlank = cleaned.includes("{Promoted_Content_Record_ID}=BLANK()");
+  const notOnHold = cleaned.includes("{Candidate_Status}!='OnHold'")
+    || cleaned.includes('{Candidate_Status}!="OnHold"')
+    || cleaned.includes("{Candidate_Status}!='On Hold'")
+    || cleaned.includes('{Candidate_Status}!="On Hold"');
+  const notRejected = cleaned.includes("{Candidate_Status}!='Rejected'")
+    || cleaned.includes('{Candidate_Status}!="Rejected"');
+  const notPromoted = cleaned.includes("{Candidate_Status}!='Promoted'")
+    || cleaned.includes('{Candidate_Status}!="Promoted"');
+  if (waiting && promotedBlank) return "photo_waiting";
+  if (ready && promotedBlank) {
+    if (notRejected && notPromoted) return "ready_production";
+    return "photo_ready";
+  }
+  // Unfinished / quality: no wait status, promoted blank, exclude terminal statuses.
+  if (!waiting && !ready && promotedBlank && notOnHold && notRejected && notPromoted) {
+    return "photo_quality";
+  }
+  return "";
 }
 
 function settingActive(value) {
@@ -6238,14 +6298,15 @@ export function translateProductionRequestFormula(formula) {
       + "&or=(request_status.in.(Draft,Ready,Submitted),"
       + "and(production_job.not.is.null,or(production_job->>step.is.null,production_job->>step.neq.done)))";
   }
-  // Music library usage: FIND Selected_Music_Asset in publish_status bag.
-  const musicFind = cleaned.match(
-    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Selected_Music_Asset\}\)(?:&"")?\)(?:>0)?$/,
+  // Music / master-media usage FINDs in publish_status bag.
+  const linkFind = cleaned.match(
+    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{(Selected_Music_Asset|Studio_Master_Media_Assets)\}\)(?:&"")?\)(?:>0)?$/,
   );
-  if (musicFind) {
-    const id = musicFind[2];
-    const cs = `publish_status->Selected_Music_Asset.cs.${encodeURIComponent(JSON.stringify([id]))}`;
-    const text = `publish_status->>Selected_Music_Asset.ilike.*${id}*`;
+  if (linkFind) {
+    const id = linkFind[2];
+    const field = linkFind[3];
+    const cs = `publish_status->${field}.cs.${encodeURIComponent(JSON.stringify([id]))}`;
+    const text = `publish_status->>${field}.ilike.*${id}*`;
     return `or=(${cs},${text})`;
   }
   // Factory producer revision pending (Draft / Promoted).
@@ -7404,8 +7465,14 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   if (kind === "idea") {
     const profiles = ideaProfileIds(formula);
-    if (!profiles) return null;
-    const records = await readIdeasForProfiles(env, profiles.ids, profiles.openOnly, limit);
+    if (profiles) {
+      const records = await readIdeasForProfiles(env, profiles.ids, profiles.openOnly, limit);
+      return { records };
+    }
+    const lane = ideaLaneFromFormula(formula);
+    if (!lane) return null;
+    const records = await listSupabaseIdeaLane(env, { lane, limit }).catch(() => null);
+    if (!records) return null;
     return { records };
   }
   if (kind === "queue") {
@@ -7494,14 +7561,32 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (kind === "exception_messages") {
     if (studioWriteSource(env) !== "supabase") return null;
     const cleaned = compactFormula(formula);
-    const match = cleaned.match(/^\{Output_Record_ID\}=(["'])(rec[A-Za-z0-9]{14})\1$/);
-    if (!match) return null;
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
-    const records = await listSupabaseExceptionRecoveryMessages(env, match[2], { limit, offset });
-    if (!records) return null;
-    const body = { records };
-    if (records.length === limit) body.offset = String(offset + records.length);
-    return body;
+    const match = cleaned.match(/^\{Output_Record_ID\}=(["'])(rec[A-Za-z0-9]{14})\1$/);
+    if (match) {
+      const records = await listSupabaseExceptionRecoveryMessages(env, match[2], { limit, offset });
+      if (!records) return null;
+      const body = { records };
+      if (records.length === limit) body.offset = String(offset + records.length);
+      return body;
+    }
+    // OR({Exception_Signature}="a",{Exception_Signature}="b",...)
+    if (cleaned.startsWith("OR(") && cleaned.endsWith(")") && cleaned.includes("{Exception_Signature}=")) {
+      const parts = splitQueueArgs(cleaned.slice(3, -1)) || [];
+      const signatures = [];
+      for (const part of parts) {
+        const sig = part.match(/^\{Exception_Signature\}=(["'])([^"']*)\1$/);
+        if (!sig) return null;
+        signatures.push(sig[2]);
+      }
+      if (!signatures.length) return null;
+      const records = await listSupabaseExceptionRecoveryBySignatures(env, signatures, { limit, offset });
+      if (!records) return null;
+      const body = { records };
+      if (records.length === limit) body.offset = String(offset + records.length);
+      return body;
+    }
+    return null;
   }
   if (kind === "make_admin_queue") {
     if (studioWriteSource(env) !== "supabase") return null;
