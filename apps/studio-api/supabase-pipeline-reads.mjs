@@ -2912,6 +2912,38 @@ export function supabaseOutputMatchesHomeFailure(fields = {}) {
   return false;
 }
 
+/**
+ * Server-side PostgREST OR for the QA home failure candidate scan.
+ * Avoids paging every non-test Output (~10k) and client-filtering inside the
+ * deploy verify 70s budget.
+ */
+export function homeFailureCensusOrFilter() {
+  const parts = [];
+  const typed = [
+    "output_status", "render_status", "publish_status",
+    "ig_carousel_status", "tiktok_draft_status", "fb_publish_status",
+  ];
+  for (const col of typed) {
+    parts.push(`${col}.ilike.*failed*`, `${col}.ilike.*error*`);
+  }
+  const bagStatuses = [
+    "Asset_Selection_Status", "IG_Carousel_Status", "FB_Slideshow_Status",
+    "YouTube_Package_Status", "YouTube_Upload_Status", "YouTube_Processing_Status",
+  ];
+  for (const field of bagStatuses) {
+    parts.push(
+      `error_messages->>${field}.ilike.*failed*`,
+      `error_messages->>${field}.ilike.*error*`,
+    );
+  }
+  for (const field of HOME_FAILURE_ERRORS) {
+    parts.push(
+      `and(error_messages->>${field}.not.is.null,error_messages->>${field}.neq.)`,
+    );
+  }
+  return `or=(${parts.join(",")})`;
+}
+
 export async function readSupabaseShapedOutput(env, airtableId) {
   const id = String(airtableId || "").trim();
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
@@ -2933,17 +2965,25 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   const formula = String(filterFormula || "");
   const pastDue = formula.includes("{Scheduled_Post_Date}");
   const failure = formula.includes("FIND(");
-  let path = `platform_outputs?test_run_id=is.null&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
-  if (pastDue) {
+  const orderLimit = `select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+  let path = `platform_outputs?test_run_id=is.null&${orderLimit}`;
+  const translated = formula ? outputContentListFilter("output", formula) : null;
+  if (translated) {
+    path = `platform_outputs?${translated}&${orderLimit}`;
+  } else if (pastDue) {
     const iso = formula.match(/IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)/)?.[1];
     if (!iso) throw new Error("Supabase past-due census needs a clock");
     path = `platform_outputs?test_run_id=is.null&do_not_publish=eq.false&review_status=eq.Approved`
       + `&scheduled_post_date=lt.${encodeURIComponent(iso)}&scheduled_post_date=not.is.null`
-      + `&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+      + `&${orderLimit}`;
+  } else if (failure) {
+    path = `platform_outputs?test_run_id=is.null&${homeFailureCensusOrFilter()}&${orderLimit}`;
   }
   const rows = await supabaseRest(env, path);
   const batch = Array.isArray(rows) ? rows : [];
   let records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
+  // Translated / past-due paths already bound rows. Failure OR is a superset of
+  // the JS predicate; keep the shaped-row filter so bag/typed lag cannot widen.
   if (failure) records = records.filter((row) => supabaseOutputMatchesHomeFailure(row.fields));
   const next = start + capped;
   return { records, offset: batch.length === capped && next < 12000 ? String(next) : null };
@@ -6517,6 +6557,9 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   Remotion_Job_ID: "remotion_job_id",
   Final_File_Storage_Status: "error_messages->>Final_File_Storage_Status",
   Publish_Method: "publish_method",
+  YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
+  YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
+  YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6587,6 +6630,12 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
   Platform_Media_ID: "error_messages->>Platform_Media_ID",
   IG_Carousel_Child_Count: "ig_carousel_child_count",
+  Final_File_Error_Message: "error_messages->>Final_File_Error_Message",
+  Music_Error_Message: "error_messages->>Music_Error_Message",
+  FB_Slideshow_Error_Message: "error_messages->>FB_Slideshow_Error_Message",
+  YouTube_Error_Message: "error_messages->>YouTube_Error_Message",
+  YouTube_Processing_Failure_Reason: "error_messages->>YouTube_Processing_Failure_Reason",
+  YouTube_Rejection_Reason: "error_messages->>YouTube_Rejection_Reason",
 };
 
 /** Text fields that support FIND("needle",{Field}&"") / >0 substring probes. */
@@ -6609,7 +6658,22 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   Platform_Output_Type: "platform_output_type",
   Publish_Error_Message: "error_messages->>Publish_Error_Message",
   IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
+  Output_Status: "output_status",
+  Render_Status: "render_status",
+  Publish_Status: "publish_status",
+  Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
+  IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
+  TikTok_Draft_Status: "tiktok_draft_status",
+  FB_Publish_Status: "fb_publish_status",
+  FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
+  YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
+  YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
+  YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
 };
+
+function outputSideTextColumn(field) {
+  return OUTPUT_SIDE_FIND_FIELDS[field] || OUTPUT_SIDE_EQ_FIELDS[field] || null;
+}
 
 /** Cadence Output views Worker probes without filterByFormula trees. */
 const OUTPUT_SIDE_VIEW_FILTERS = {
@@ -6683,10 +6747,10 @@ function outputSideLeafFilter(cleaned) {
   const findText = cleaned.match(
     /^FIND\("([^"]+)",\{([A-Za-z0-9_]+)\}(?:&"")?\)(?:>0|=0)?$/,
   );
-  if (findText && OUTPUT_SIDE_FIND_FIELDS[findText[2]]) {
+  if (findText && outputSideTextColumn(findText[2])) {
     const needle = findText[1];
     if (needle && !/[,()*"]/.test(needle)) {
-      const col = OUTPUT_SIDE_FIND_FIELDS[findText[2]];
+      const col = outputSideTextColumn(findText[2]);
       const like = `${col}.like.*${needle}*`;
       if (cleaned.endsWith("=0")) {
         return `or(${col}.is.null,${col}.eq.,${col}.not.like.*${needle}*)`;
@@ -6698,10 +6762,25 @@ function outputSideLeafFilter(cleaned) {
   const findUpper = cleaned.match(
     /^FIND\("([^"]+)",UPPER\(\{([A-Za-z0-9_]+)\}(?:&"")?\)\)(?:>0|=0)?$/,
   );
-  if (findUpper && OUTPUT_SIDE_FIND_FIELDS[findUpper[2]]) {
+  if (findUpper && outputSideTextColumn(findUpper[2])) {
     const needle = findUpper[1];
     if (needle && !/[,()*"]/.test(needle)) {
-      const col = OUTPUT_SIDE_FIND_FIELDS[findUpper[2]];
+      const col = outputSideTextColumn(findUpper[2]);
+      const like = `${col}.ilike.*${needle}*`;
+      if (cleaned.endsWith("=0")) {
+        return `or(${col}.is.null,${col}.eq.,${col}.not.ilike.*${needle}*)`;
+      }
+      return like;
+    }
+  }
+  // Case-insensitive FIND via LOWER({Field}&"") — QA home failure status scan.
+  const findLower = cleaned.match(
+    /^FIND\("([^"]+)",LOWER\(\{([A-Za-z0-9_]+)\}(?:&"")?\)\)(?:>0|=0)?$/,
+  );
+  if (findLower && outputSideTextColumn(findLower[2])) {
+    const needle = findLower[1];
+    if (needle && !/[,()*"]/.test(needle)) {
+      const col = outputSideTextColumn(findLower[2]);
       const like = `${col}.ilike.*${needle}*`;
       if (cleaned.endsWith("=0")) {
         return `or(${col}.is.null,${col}.eq.,${col}.not.ilike.*${needle}*)`;
@@ -6770,6 +6849,23 @@ function outputSideLeafFilter(cleaned) {
   if (beforeNow) return "publish_next_retry_at.lte.now()";
   const beforeSched = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},NOW\(\)\)$/);
   if (beforeSched) return "scheduled_post_date.lte.now()";
+  // Past-due census clock: IS_BEFORE({Scheduled_Post_Date},"ISO").
+  const beforeSchedIso = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)$/);
+  if (beforeSchedIso) {
+    return `scheduled_post_date.lt.${encodeDeskFilterValue(beforeSchedIso[1])}`;
+  }
+  // Engagement / history floors: {Published_At}>="ISO".
+  const publishedGte = cleaned.match(/^\{Published_At\}>="([^"]+)"$/);
+  if (publishedGte) {
+    return `published_at.gte.${encodeDeskFilterValue(publishedGte[1])}`;
+  }
+  // Fresh-row windows: IS_AFTER(CREATED_TIME(), DATETIME_PARSE("ISO")).
+  const createdAfter = cleaned.match(
+    /^IS_AFTER\(CREATED_TIME\(\),\s*DATETIME_PARSE\("([^"]+)"\)\)$/,
+  );
+  if (createdAfter) {
+    return `created_at.gt.${encodeDeskFilterValue(createdAfter[1])}`;
+  }
   // TikTok inbox lead: due up to N minutes before Scheduled_Post_Date.
   const beforeLead = cleaned.match(
     /^IS_BEFORE\(\{Scheduled_Post_Date\},DATEADD\(NOW\(\),(\d+),'minutes'\)\)$/,
