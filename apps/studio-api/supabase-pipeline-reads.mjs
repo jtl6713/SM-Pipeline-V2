@@ -7114,6 +7114,8 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // FBS photo-id package leaf — bag-only.
   FB_Photo_IDs_JSON: "error_messages->>FB_Photo_IDs_JSON",
   YouTube_Privacy_Status: "error_messages->>YouTube_Privacy_Status",
+  // Render-heal / VO copy — densifies into render_heal_fields jsonb.
+  Voiceover_URL: "render_heal_fields->>Voiceover_URL",
   Timing_Status: "error_messages->>Timing_Status",
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",
@@ -7559,12 +7561,24 @@ const CONTENT_SIDE_EQ_FIELDS = {
   Primary_Location: "primary_location",
 };
 
+const CONTENT_SIDE_BLANK_FIELDS = {
+  // LIST sync packs Voiceover_URL into extras; typed column is status only.
+  Voiceover_URL: "extras->>Voiceover_URL",
+  Voiceover_Status: "voiceover_status",
+  Voiceover_Script: "extras->>Voiceover_Script",
+  Music_URL: "extras->>Music_URL",
+};
+
 const CONTENT_SIDE_FIND_LINK_FIELDS = {
   Preferred_Music_Asset: "extras",
   Selected_Music_Asset: "extras",
   Selected_Music_Asset_Override: "extras",
   Studio_Master_Media_Assets: "extras",
 };
+
+function contentSideBlankFilter(column) {
+  return `or(${column}.is.null,${column}.eq.)`;
+}
 
 function contentSideLeafFilter(cleaned) {
   const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
@@ -7574,6 +7588,24 @@ function contentSideLeafFilter(cleaned) {
   // content_items has no test_run_id column; treat blank as always-true.
   const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
   if (blank) return "id.not.is.null";
+  const blankField = cleaned.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
+  if (blankField && CONTENT_SIDE_BLANK_FIELDS[blankField[1]]) {
+    return contentSideBlankFilter(CONTENT_SIDE_BLANK_FIELDS[blankField[1]]);
+  }
+  const empty = cleaned.match(/^\{([A-Za-z0-9_]+)\}=""$/);
+  if (empty && CONTENT_SIDE_BLANK_FIELDS[empty[1]]) {
+    return contentSideBlankFilter(CONTENT_SIDE_BLANK_FIELDS[empty[1]]);
+  }
+  const notBlank = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=BLANK\(\)$/);
+  if (notBlank && CONTENT_SIDE_BLANK_FIELDS[notBlank[1]]) {
+    const col = CONTENT_SIDE_BLANK_FIELDS[notBlank[1]];
+    return `and(${col}.not.is.null,${col}.neq.)`;
+  }
+  const notEmpty = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=""$/);
+  if (notEmpty && CONTENT_SIDE_BLANK_FIELDS[notEmpty[1]]) {
+    const col = CONTENT_SIDE_BLANK_FIELDS[notEmpty[1]];
+    return `and(${col}.not.is.null,${col}.neq.)`;
+  }
   const eq = cleaned.match(/^\{([A-Za-z0-9_]+)\}="([^"]*)"$/);
   if (eq && CONTENT_SIDE_EQ_FIELDS[eq[1]]) {
     return `${CONTENT_SIDE_EQ_FIELDS[eq[1]]}.eq.${encodeDeskFilterValue(eq[2])}`;
