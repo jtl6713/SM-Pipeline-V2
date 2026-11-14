@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
+  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
+  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
+  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
+  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3563,6 +3563,26 @@ test("FB3/FBS4 Output side fields and A4 orphan view prefer Supabase", async () 
   assert.match(reads, /Platform_Post_ID: "error_messages->>Platform_Post_ID"/);
   assert.match(reads, /FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status"/);
   assert.match(views, /viwQv8PDtE8qXwMPk/);
+});
+
+test("R5 view and DATETIME_DIFF publish cooldown leaves prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const reads = await readFile(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "supabase-pipeline-reads.mjs"),
+    "utf8",
+  );
+  assert.match(reads, /OUTPUT_SIDE_VIEW_FILTERS/);
+  assert.match(reads, /R5 - Rendering Jobs to Poll/);
+  const cool = translateOutputSideFormula(
+    'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6)',
+  );
+  assert.ok(cool);
+  assert.match(cool, /Studio_Publish_Dispatch_At/);
+  const count = translateOutputSideFormula(
+    "OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8)",
+  );
+  assert.ok(count);
+  assert.match(count, /Studio_Publish_Dispatch_Count\.lt\.8/);
 });
 
 test("IG publish cadence and Scheduled_Post_Date leaves prefer Supabase", async () => {
