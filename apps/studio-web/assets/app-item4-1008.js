@@ -19025,9 +19025,13 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function submitMetaRepublish(recordId) {
+    // A timed-out POST may already have rearmed or dispatched publishing.
+    // Never automatically replay this non-idempotent operator action.
     return api(`/api/outputs/${encodeURIComponent(recordId)}/meta-republish`, {
       method: "POST",
       body: JSON.stringify({ confirmed_not_live: true }),
+      retries: 0,
+      timeoutMs: 45000,
     });
   }
 
@@ -28686,11 +28690,17 @@ function timedScriptAssetLabel(asset, index) {
         : `${metaPlatformLabel(record)} republish started.`);
       refreshPipelineOutputs({ silent: true }).catch(() => {});
     } catch (error) {
+      const uncertain = error?.name === "AbortError"
+        || /aborted|timeout|timed out|failed to fetch|networkerror|load failed/i.test(String(error?.message || ""));
+      const feedback = uncertain
+        ? "Republish response was interrupted. Publishing may have started. Refresh and reconcile the output and Instagram before retrying."
+        : (error.message || "Could not republish.");
       if (message) {
-        message.textContent = error.message || "Could not republish.";
+        message.textContent = feedback;
         message.classList.add("error-text");
       }
-      phase6Message(error.message || "Could not republish.", "error-text");
+      phase6Message(feedback, "error-text");
+      if (uncertain) refreshPipelineOutputs({ silent: true }).catch(() => {});
     } finally {
       button.disabled = false;
     }
