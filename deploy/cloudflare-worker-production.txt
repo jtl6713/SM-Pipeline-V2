@@ -1177,3 +1177,5 @@ Deploy 2026-11-14 Worker 0.10.898-closeout-profile-find: Content_Profile FIND sc
 Deploy 2026-11-14 Worker 0.10.899-closeout-sched-profile: fix profile-scope rest-drop; Scheduled_Post_Date DATETIME_PARSE IS_AFTER/IS_BEFORE prefer Supabase. Record deletion is not started. Verify /health version 0.10.899-closeout-sched-profile.
 
 Deploy 2026-11-14 Worker 0.10.900-closeout-idea-exc: idea photo lanes + Exception_Signature OR + Studio_Master_Media_Assets FIND prefer Supabase. Record deletion is not started. Verify /health version 0.10.900-closeout-idea-exc.
+
+Deploy 2026-11-14 Worker 0.10.901-closeout-ops-review: OPS review bare Do_Not_Publish + nested NOT(AND/OR) + Selected_Clip_Count + autonomous open-ideas lane prefer Supabase. Record deletion is not started. Verify /health version 0.10.901-closeout-ops-review.

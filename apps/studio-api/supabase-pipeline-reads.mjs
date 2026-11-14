@@ -1293,6 +1293,10 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
   } else if (lane === "photo_quality") {
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
     filter += "&status=neq.On Hold&status=neq.Rejected&status=neq.Promoted";
+  } else if (lane === "autonomous_open") {
+    // Match AUTONOMOUS_OPEN_IDEAS_FORMULA — do not drop Content Items rows.
+    filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
+    filter += "&status=neq.On Hold&status=neq.Rejected";
   } else {
     throw new Error("Unknown idea lane");
   }
@@ -1305,6 +1309,7 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
     .map((row) => airtableShapedIdeaFromSupabase(flattenIdeaRow(row)))
     .filter((row) => {
       if (!row?.id) return false;
+      if (lane === "autonomous_open") return true;
       const items = row.fields?.["Content Items"];
       if (Array.isArray(items) && items.length) return false;
       return true;
@@ -6162,6 +6167,10 @@ export function ideaLaneFromFormula(formula) {
   if (!waiting && !ready && promotedBlank && notOnHold && notRejected && notPromoted) {
     return "photo_quality";
   }
+  // Autonomous open-ideas cap: promoted blank, not Rejected/On Hold (Promoted status ok).
+  if (!waiting && !ready && promotedBlank && notOnHold && notRejected) {
+    return "autonomous_open";
+  }
   return "";
 }
 
@@ -6763,6 +6772,7 @@ const OUTPUT_SIDE_BOOL_FIELDS = {
   Do_Not_Publish: "do_not_publish",
   Publish_Retry_Eligible: "publish_retry_eligible",
   Auto_Publish_Enabled: "auto_publish_enabled",
+  Manual_Fallback_Required: "error_messages->>Manual_Fallback_Required",
 };
 
 const OUTPUT_SIDE_BLANK_FIELDS = {
@@ -6825,6 +6835,7 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   TikTok_Draft_Publish_ID: "error_messages->>TikTok_Draft_Publish_ID",
   Publish_Error_Message: "error_messages->>Publish_Error_Message",
   IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
+  IG_Carousel_Parent_Response_JSON: "error_messages->>IG_Carousel_Parent_Response_JSON",
   Platform_Media_ID: "error_messages->>Platform_Media_ID",
   IG_Carousel_Child_Count: "ig_carousel_child_count",
   Final_File_Error_Message: "error_messages->>Final_File_Error_Message",
@@ -7053,8 +7064,16 @@ function outputSideLeafFilter(cleaned) {
   if (gtNum && gtNum[1] === "IG_Carousel_Child_Count") {
     return `ig_carousel_child_count.gt.${gtNum[2]}`;
   }
+  if (gtNum && gtNum[1] === "Selected_Clip_Count") {
+    return `selected_clip_count.gt.${gtNum[2]}`;
+  }
   if (gtNum && gtNum[1] === "Output_ID") {
     return `output_number.gt.${gtNum[2]}`;
+  }
+  // Bare checkbox truthy: {Do_Not_Publish} inside nested AND (OPS review).
+  const boolTruthy = cleaned.match(/^\{([A-Za-z0-9_]+)\}$/);
+  if (boolTruthy && OUTPUT_SIDE_BOOL_FIELDS[boolTruthy[1]]) {
+    return `${OUTPUT_SIDE_BOOL_FIELDS[boolTruthy[1]]}.eq.true`;
   }
   const ltNum = cleaned.match(/^\{([A-Za-z0-9_]+)\}<(\d+)$/);
   if (ltNum && OUTPUT_SIDE_BLANK_FIELDS[ltNum[1]]) {
@@ -7178,6 +7197,18 @@ function outputContentListFilter(kind, formula) {
       filters.push(item);
     }
     return filters.length === 1 ? filters[0] : `or(${filters.join(",")})`;
+  }
+  if (cleaned.startsWith("NOT(") && cleaned.endsWith(")")) {
+    // Prefer leaf NOT({bool}) / NOT({field}="x") handlers first.
+    if (kind === "output") {
+      const leafNot = outputSideLeafFilter(cleaned);
+      if (leafNot) return leafNot;
+    }
+    const inner = outputContentListFilter(kind, cleaned.slice(4, -1));
+    if (!inner) return null;
+    if (inner.startsWith("and(")) return `not.and${inner.slice(3)}`;
+    if (inner.startsWith("or(")) return `not.or${inner.slice(2)}`;
+    return `not.${inner}`;
   }
   if (kind === "output") {
     return outputSideLeafFilter(cleaned);

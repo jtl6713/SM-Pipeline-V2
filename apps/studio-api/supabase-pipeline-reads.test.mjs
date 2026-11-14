@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.900-closeout-idea-exc/);
+  assert.match(worker, /0\.10\.901-closeout-ops-review/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.900-closeout-idea-exc/);
+  assert.match(worker, /0\.10\.901-closeout-ops-review/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.900-closeout-idea-exc/);
+  assert.match(worker, /0\.10\.901-closeout-ops-review/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.900-closeout-idea-exc/);
+  assert.match(worker, /0\.10\.901-closeout-ops-review/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4562,4 +4562,79 @@ test("Variant queue Media_Asset and PR-scoped Ready lists read from Supabase und
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open prefer Supabase", async () => {
+  const {
+    translateOutputSideFormula,
+    ideaLaneFromFormula,
+    studioSideTableRead,
+  } = await import("./supabase-pipeline-reads.mjs");
+  const { OPS_QUEUE_REVIEW_FORMULA } = await import("./ops-queue.mjs");
+  const { FAILED_OUTPUT_FORMULA } = await import("./failed-output-monitor.mjs");
+  const { PRE_FACTORY_READY_FORMULA } = await import("./pre-factory-ready-recovery.mjs");
+  const autoOpen =
+    "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
+
+  assert.equal(translateOutputSideFormula("{Do_Not_Publish}"), "do_not_publish.eq.true");
+  assert.match(
+    translateOutputSideFormula('NOT(AND({Output_Status}="Cancelled",{Review_Status}="Skipped"))'),
+    /^not\.and\(/,
+  );
+  assert.ok(translateOutputSideFormula(OPS_QUEUE_REVIEW_FORMULA));
+  assert.match(translateOutputSideFormula(OPS_QUEUE_REVIEW_FORMULA), /do_not_publish\.eq\.true/);
+  assert.ok(translateOutputSideFormula(FAILED_OUTPUT_FORMULA));
+  assert.match(translateOutputSideFormula(FAILED_OUTPUT_FORMULA), /not\.and\(/);
+  assert.match(translateOutputSideFormula(FAILED_OUTPUT_FORMULA), /Manual_Fallback_Required/);
+  assert.ok(translateOutputSideFormula(PRE_FACTORY_READY_FORMULA));
+  assert.match(translateOutputSideFormula(PRE_FACTORY_READY_FORMULA), /selected_clip_count\.gt\.0/);
+  assert.equal(ideaLaneFromFormula(autoOpen), "autonomous_open");
+
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblrlPeboBthkplH0",
+    AIRTABLE_IDEA_TABLE_ID: "tblTQapddqD47GOIG",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(OPS_QUEUE_REVIEW_FORMULA) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(FAILED_OUTPUT_FORMULA) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(PRE_FACTORY_READY_FORMULA) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblTQapddqD47GOIG",
+      "?filterByFormula=" + encodeURIComponent(autoOpen) + "&maxRecords=10",
+    ));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 4);
+  assert.match(calls[0], /platform_outputs\?/);
+  assert.match(calls[0], /do_not_publish/);
+  assert.match(calls[1], /platform_outputs\?/);
+  assert.match(calls[1], /not\.and|Manual_Fallback/);
+  assert.match(calls[2], /selected_clip_count/);
+  assert.match(calls[3], /idea_candidates\?/);
+  assert.match(calls[3], /status=neq\.Rejected/);
+  assert.doesNotMatch(calls[3], /status=neq\.Promoted/);
 });
