@@ -1231,10 +1231,20 @@ export async function listSupabaseUnfinishedIntakeBatches(env, batchIds, { limit
   return rows.map(airtableShapedLibraryAssetFromSupabase).filter((row) => row?.id);
 }
 
+/** Airtable Meta Media Assets views → PostgREST. Unknown views fail closed. */
+export const MEDIA_SIDE_VIEW_FILTERS = {
+  // Meta snapshot of viw51aAJeESaBpcL8 — Music (Media_Class=Audio).
+  viw51aAJeESaBpcL8: "media_class.eq.Audio",
+};
+MEDIA_SIDE_VIEW_FILTERS.Music = MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8;
+
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
-export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = {}) {
+export async function listSupabaseMediaByFormula(env, formula, { limit = 25, viewName = "" } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
   const cleaned = compactFormula(formula);
+  const viewKey = String(viewName || "").trim();
+  const viewFilter = viewKey ? (MEDIA_SIDE_VIEW_FILTERS[viewKey] || null) : null;
+  if (viewKey && !viewFilter) return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 25));
   let filter = "";
   const logo = cleaned === "AND({Asset_Role}='Logo',NOT({Do_Not_Use}))"
@@ -1324,9 +1334,13 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
     filter = `asset_name.ilike.${encodeURIComponent(nameMatch[2])}`;
   } else if (driveMatch) {
     filter = `google_drive_file_id=eq.${encodeURIComponent(driveMatch[2])}`;
+  } else if (viewFilter && !cleaned) {
+    // Catalog view with no formula (listMusic Music view).
+    filter = viewFilter;
   } else {
     return null;
   }
+  if (viewFilter && cleaned) filter = `${viewFilter}&${filter}`;
   const rows = await supabaseRest(
     env,
     `media_assets?${filter}&select=${MEDIA_LIBRARY_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
@@ -8130,7 +8144,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   if (kind === "media") {
     if (studioPhase6WriteSource(env) !== "supabase") return null;
-    const records = await listSupabaseMediaByFormula(env, formula, { limit });
+    const viewName = String(sideQuery(pathOrParams).get("view") || "").trim();
+    // Unknown Media Assets views must not collapse to formula-only.
+    if (viewName && !MEDIA_SIDE_VIEW_FILTERS[viewName]) return null;
+    const records = await listSupabaseMediaByFormula(env, formula, { limit, viewName });
     if (!records) return null;
     return { records };
   }

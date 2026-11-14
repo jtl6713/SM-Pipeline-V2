@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.934-closeout-c2-view/);
+  assert.match(worker, /0\.10\.935-closeout-music-view/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.934-closeout-c2-view/);
+  assert.match(worker, /0\.10\.935-closeout-music-view/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.934-closeout-c2-view/);
+  assert.match(worker, /0\.10\.935-closeout-music-view/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.934-closeout-c2-view/);
+  assert.match(worker, /0\.10\.935-closeout-music-view/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -5541,6 +5541,63 @@ test("C1 Ready for Carousel Planning view + Test_Run_ID blank prefer Supabase co
       env,
       CONTENT_ITEMS_TABLE_ID,
       "?view=viwUnknownContentView0&filterByFormula=" + encodeURIComponent("{Test_Run_ID}=BLANK()") + "&maxRecords=1",
+    );
+    assert.equal(unknown, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Music Media Assets view prefer Supabase media_assets", async () => {
+  const {
+    studioSideTableRead,
+    MEDIA_ASSETS_TABLE_ID,
+    MEDIA_SIDE_VIEW_FILTERS,
+  } = await import("./supabase-pipeline-reads.mjs");
+  assert.equal(MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8, "media_class.eq.Audio");
+  assert.equal(MEDIA_SIDE_VIEW_FILTERS.Music, "media_class.eq.Audio");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    AIRTABLE_MEDIA_TABLE_ID: MEDIA_ASSETS_TABLE_ID,
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recMusic000000001",
+        asset_name: "Love Nwantiti",
+        media_class: "Audio",
+        asset_role: "Music",
+        active: true,
+        do_not_use: false,
+        studio_favorite: true,
+        google_drive_file_id: "driveMusic1",
+        google_drive_url: "https://drive.google.com/file/d/driveMusic1",
+        mime_type: "audio/mpeg",
+        file_extension: "mp3",
+        file_size_bytes: 1024,
+        metadata: {},
+        created_at: "2026-11-14T00:00:00.000Z",
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const listed = await studioSideTableRead(
+      env,
+      MEDIA_ASSETS_TABLE_ID,
+      "?view=viw51aAJeESaBpcL8&maxRecords=100",
+    );
+    assert.equal(listed.records[0].id, "recMusic000000001");
+    assert.equal(listed.records[0].fields.Media_Class, "Audio");
+    assert.match(urls[0], /media_assets\?/);
+    assert.match(urls[0], /media_class\.eq\.Audio/);
+    const unknown = await studioSideTableRead(
+      env,
+      MEDIA_ASSETS_TABLE_ID,
+      "?view=viwUnknownMediaView01&maxRecords=1",
     );
     assert.equal(unknown, null);
   } finally {
