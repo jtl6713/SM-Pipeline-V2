@@ -6465,6 +6465,14 @@ export function translateProductionRequestFormula(formula) {
       + `&publish_status->>Studio_Master_Asset_Status=eq.Ready`
       + `&publish_status->Studio_Master_Asset_Count=gt.0`;
   }
+  // Ready vibe-cut drafts: exactly one master + ez-input=vibe-cut note.
+  if (cleaned === "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}=1,FIND('ez-input=vibe-cut',{Production_Notes})>0)"
+    || cleaned === 'AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted"),{Studio_Master_Asset_Status}="Ready",{Studio_Master_Asset_Count}=1,FIND("ez-input=vibe-cut",{Production_Notes})>0)') {
+    return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=in.(Draft,Ready,Submitted)`
+      + `&publish_status->>Studio_Master_Asset_Status=eq.Ready`
+      + `&publish_status->Studio_Master_Asset_Count=eq.1`
+      + `&production_notes.ilike.*ez-input=vibe-cut*`;
+  }
   if (cleaned === "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')"
     || cleaned === 'AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled")') {
     return `${REQUEST_TEST_RUN_QUIET}&request_status=neq.Cancelled`;

@@ -1215,3 +1215,5 @@ Deploy 2026-11-14 Worker 0.10.917-factory-global-profile-flush: Factory desk sta
 Deploy 2026-11-14 Worker 0.10.918-closeout-ig-ap4r: IG Carousel AP4R/AP5C Published_Media_ID + Error_Stage prefer Supabase (studioReconcileInstagramCarousels). Record deletion is not started. Verify /health version 0.10.918-closeout-ig-ap4r.
 
 Deploy 2026-11-14 Worker 0.10.919-closeout-tt-email: TikTok_Draft_Email_Sent_At blank leaf prefers Supabase (QA approved-past-due census). Record deletion is not started. Verify /health version 0.10.919-closeout-tt-email.
+
+Deploy 2026-11-14 Worker 0.10.920-closeout-vibe-pr: Vibe-cut Production Request discovery prefers Supabase (discoverReadyVibeProductionDrafts). Record deletion is not started. Verify /health version 0.10.920-closeout-vibe-pr.
