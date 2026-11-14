@@ -1223,3 +1223,5 @@ Deploy 2026-11-14 Worker 0.10.921-closeout-tt-delivered: TikTok_Draft_Delivered_
 Deploy 2026-11-14 Worker 0.10.922-closeout-slide-voice: P020-2 Slide_Voiceover_* + Slide_Voice_ID + Studio_Voice_Prep_Request_ID prefer Supabase (carousel_slides cadence). Record deletion is not started. Verify /health version 0.10.922-closeout-slide-voice.
 
 Deploy 2026-11-14 Worker 0.10.923-closeout-content-retry: Redeploy 922 Slide_Voiceover SoR after content/v2 404 flake; retry content download in deploy verify. Record deletion is not started. Verify /health version 0.10.923-closeout-content-retry.
+
+Deploy 2026-11-14 Worker 0.10.924-closeout-fb-yt-privacy: FB_Photo_IDs_JSON + YouTube_Privacy_Status bag leaves prefer Supabase. Record deletion is not started. Verify /health version 0.10.924-closeout-fb-yt-privacy.

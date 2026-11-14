@@ -7052,6 +7052,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
   YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
+  // YTS package / privacy leaf — bag-only (no typed column).
+  YouTube_Privacy_Status: "error_messages->>YouTube_Privacy_Status",
   Manual_Completion_Status: "error_messages->>Manual_Completion_Status",
   Music_Status: "error_messages->>Music_Status",
 };
@@ -7109,6 +7111,9 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // TTD2/TTD3 light cron — delivered + last-checked cooldown.
   TikTok_Draft_Delivered_At: "error_messages->>TikTok_Draft_Delivered_At",
   TikTok_Draft_Last_Checked_At: "error_messages->>TikTok_Draft_Last_Checked_At",
+  // FBS photo-id package leaf — bag-only.
+  FB_Photo_IDs_JSON: "error_messages->>FB_Photo_IDs_JSON",
+  YouTube_Privacy_Status: "error_messages->>YouTube_Privacy_Status",
   Timing_Status: "error_messages->>Timing_Status",
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",
