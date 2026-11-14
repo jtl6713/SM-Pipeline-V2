@@ -7079,6 +7079,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   Remotion_Job_ID: "remotion_job_id",
   Final_File_Storage_Status: "error_messages->>Final_File_Storage_Status",
   Publish_Method: "publish_method",
+  // QA-IG-STALE-UPLOAD lock owner eq.
+  Publish_Locked_By: "error_messages->>Publish_Locked_By",
   YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
   YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
@@ -7149,6 +7151,10 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // Insights due scan + R4 token selector — bag-only clocks / request ids.
   Insights_Next_Sync_At: "error_messages->>Insights_Next_Sync_At",
   Studio_Render_Request_ID: "error_messages->>Studio_Render_Request_ID",
+  // QA-IG-STALE-UPLOAD formula leaves — bag lock/start clocks.
+  Publish_Locked_By: "error_messages->>Publish_Locked_By",
+  Publish_Locked_At: "error_messages->>Publish_Locked_At",
+  Publish_Started_At: "error_messages->>Publish_Started_At",
   Timing_Status: "error_messages->>Timing_Status",
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",
@@ -7222,6 +7228,8 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
   YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
+  // QA-IG-STALE-UPLOAD guard-refusal note needle.
+  Output_Notes: "error_messages->>Output_Notes",
 };
 
 function outputSideTextColumn(field) {
@@ -7455,6 +7463,16 @@ function outputSideLeafFilter(cleaned) {
   // Insights due scan: bag ISO clock vs NOW().
   const beforeInsights = cleaned.match(/^IS_BEFORE\(\{Insights_Next_Sync_At\},NOW\(\)\)$/);
   if (beforeInsights) return "error_messages->>Insights_Next_Sync_At.lte.now()";
+  // R2B / asset-selection retry due clock.
+  const beforeAssetRetry = cleaned.match(/^IS_BEFORE\(\{Asset_Selection_Next_Retry_At\},NOW\(\)\)$/);
+  if (beforeAssetRetry) return "error_messages->>Asset_Selection_Next_Retry_At.lte.now()";
+  // Bag datetime cutoff: IS_BEFORE({Field},"ISO") for mapped blank fields.
+  const beforeBagIso = cleaned.match(/^IS_BEFORE\(\{([A-Za-z0-9_]+)\},"([^"]+)"\)$/);
+  if (beforeBagIso && OUTPUT_SIDE_BLANK_FIELDS[beforeBagIso[1]]
+    && beforeBagIso[1] !== "Scheduled_Post_Date"
+    && beforeBagIso[1] !== "Publish_Next_Retry_At") {
+    return `${OUTPUT_SIDE_BLANK_FIELDS[beforeBagIso[1]]}.lt.${encodeDeskFilterValue(beforeBagIso[2])}`;
+  }
   // Past-due census clock: IS_BEFORE({Scheduled_Post_Date},"ISO").
   const beforeSchedIso = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)$/);
   if (beforeSchedIso) {
