@@ -5150,3 +5150,52 @@ body.nav-collapsed .sidebar{
     justify-content:flex-start;
   }
 }
+
+
+/* iPhone PWA: prevent TikTok handoff copy, form controls and resend row
+   from establishing an intrinsic width larger than the viewport. */
+.creative-editor-shell,
+.creative-editor-body,
+.creative-top-grid,
+.creative-preview-card,
+#creativeTiktokComplete,
+#creativeTiktokComplete .creative-section-heading,
+#creativeTiktokComplete .creative-section-heading > div,
+#creativeTiktokComplete .tiktok-complete-form,
+#creativeTiktokComplete .form-field,
+#creativeTiktokResendWrap {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#creativeTiktokComplete .creative-section-heading p,
+#creativeTiktokComplete .creative-tiktok-music-requirement,
+#creativeTiktokComplete .creative-tiktok-music-requirement span,
+#creativeTiktokResendMessage {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+#creativeTiktokComplete input,
+#creativeTiktokComplete select,
+#creativeTiktokComplete button {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 640px) {
+  .creative-editor-body { padding: 10px; }
+  .creative-top-grid { grid-template-columns: minmax(0, 1fr); }
+  .creative-preview-card { padding: 10px; }
+  #creativeTiktokComplete { padding: 12px 10px; width: 100%; }
+  #creativeTiktokResendWrap {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #creativeTiktokResend,
+  #creativeTiktokCompleteSave { width: 100%; white-space: normal; }
+  #creativeTiktokResendMessage { display: block; width: 100%; }
+  #creativeTiktokComplete .creative-section-heading { display: block; }
+  #creativeTiktokComplete .form-field input,
+  #creativeTiktokComplete .form-field select { width: 100%; }
+}
