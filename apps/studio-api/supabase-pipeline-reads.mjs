@@ -1901,10 +1901,11 @@ export const CAROUSEL_SLIDE_COPY_FIELDS = Object.freeze([
   "IG_Child_Container_ID",
   "IG_Child_Container_Status",
   "IG_Child_Container_Status",
-  // C2M - Manual Uploads Ready view densify (cadence probe).
+  // C2M / C2 carousel cadence view densify.
   "Image Generation Mode",
   "Manual Upload Processed",
   "Manual Upload Image",
+  "AI Prompt",
   "Test_Run_ID",
   "Slide_Voiceover_Status",
   "Slide_Voiceover_Text",
@@ -6975,6 +6976,14 @@ const SLIDES_SIDE_VIEW_FILTERS = {
     + "or(deleted_from_carousel.is.null,deleted_from_carousel.eq.false))",
 };
 SLIDES_SIDE_VIEW_FILTERS["C2M - Manual Uploads Ready"] = SLIDES_SIDE_VIEW_FILTERS.viwPm4Pyk0BEzLvyE;
+// Airtable Meta snapshot of viwehZYNL17SAt7Pt.
+SLIDES_SIDE_VIEW_FILTERS.viwehZYNL17SAt7Pt =
+  "and(fields->>\"Image Generation Mode\".eq.Make%20AI%20Generated,"
+  + "fields->>\"Review Status\".eq.Generated,"
+  + "or(fields->>\"Current Image URL\".is.null,fields->>\"Current Image URL\".eq.),"
+  + "and(fields->>\"AI Prompt\".not.is.null,fields->>\"AI Prompt\".neq.),"
+  + "or(deleted_from_carousel.is.null,deleted_from_carousel.eq.false))";
+SLIDES_SIDE_VIEW_FILTERS["C2 - Ready for AI Image Generation"] = SLIDES_SIDE_VIEW_FILTERS.viwehZYNL17SAt7Pt;
 
 function slideFormulaFilter(formula) {
   const cleaned = tightenSideFormula(formula);
