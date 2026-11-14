@@ -6393,7 +6393,25 @@ async function readContentRow(env, id) {
 }
 
 function tightenSideFormula(text) {
-  return String(text || "").replace(/\s+/g, "");
+  // Drop whitespace outside quoted string literals only — cadence formulas
+  // carry values like "Ready for Review" / "Not Needed".
+  let out = "";
+  let quote = "";
+  for (const ch of String(text || "")) {
+    if (quote) {
+      out += ch;
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) continue;
+    out += ch;
+  }
+  return out;
 }
 
 function slideFormulaFilter(formula) {
@@ -6455,8 +6473,12 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   YouTube_Stage: "youtube_stage",
   Platform_Output_Type: "platform_output_type",
   Studio_Output_Type: "studio_output_type",
+  Format: "format",
   FB_Publish_Status: "fb_publish_status",
   FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
+  TikTok_Draft_Status: "tiktok_draft_status",
+  Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
+  Asset_Need_Status: "error_messages->>Asset_Need_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6476,6 +6498,14 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // Typed column never existed; densify stores the Graph id in the bag.
   Platform_Post_ID: "error_messages->>Platform_Post_ID",
   FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",
+  Content_Item: "content_item_airtable_id",
+  Render_Status: "render_status",
+  Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
+  Composition_ID: "error_messages->>Composition_ID",
+  Output_Filename: "output_filename",
+  // Prefer text mirror so empty jsonb `{}` does not count as present.
+  Selected_Assets_JSON: "selected_assets_text",
+  Render_Clip_List_JSON: "render_clip_list",
 };
 
 function outputSideBlankFilter(column) {
@@ -6493,9 +6523,19 @@ function outputSideLeafFilter(cleaned) {
   if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
   const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
   if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
+  const notBool = cleaned.match(/^NOT\(\{([A-Za-z0-9_]+)\}\)$/);
+  if (notBool && OUTPUT_SIDE_BOOL_FIELDS[notBool[1]]) {
+    const col = OUTPUT_SIDE_BOOL_FIELDS[notBool[1]];
+    return `or(${col}.is.null,${col}.eq.false)`;
+  }
   const blank = cleaned.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
   if (blank && OUTPUT_SIDE_BLANK_FIELDS[blank[1]]) {
     return outputSideBlankFilter(OUTPUT_SIDE_BLANK_FIELDS[blank[1]]);
+  }
+  const notBlank = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=BLANK\(\)$/);
+  if (notBlank && OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]]) {
+    const col = OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]];
+    return `and(${col}.not.is.null,${col}.neq.)`;
   }
   const empty = cleaned.match(/^\{([A-Za-z0-9_]+)\}=""$/);
   if (empty && OUTPUT_SIDE_BLANK_FIELDS[empty[1]]) {
@@ -6504,6 +6544,10 @@ function outputSideLeafFilter(cleaned) {
   const notEmpty = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=""$/);
   if (notEmpty && OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]];
+    // jsonb clip lists have no text mirror; presence is non-null.
+    if (col === "render_clip_list" || col === "selected_assets") {
+      return `${col}.not.is.null`;
+    }
     return `and(${col}.not.is.null,${col}.neq.)`;
   }
   const boolEq = cleaned.match(/^\{([A-Za-z0-9_]+)\}=([01])$/);
@@ -6512,15 +6556,24 @@ function outputSideLeafFilter(cleaned) {
   }
   const eq = cleaned.match(/^\{([A-Za-z0-9_]+)\}="([^"]*)"$/);
   if (eq && OUTPUT_SIDE_EQ_FIELDS[eq[1]]) {
-    return `${OUTPUT_SIDE_EQ_FIELDS[eq[1]]}.eq.${eq[2]}`;
+    return `${OUTPUT_SIDE_EQ_FIELDS[eq[1]]}.eq.${encodeDeskFilterValue(eq[2])}`;
   }
   const neq = cleaned.match(/^\{([A-Za-z0-9_]+)\}!="([^"]*)"$/);
   if (neq && OUTPUT_SIDE_EQ_FIELDS[neq[1]]) {
-    return `${OUTPUT_SIDE_EQ_FIELDS[neq[1]]}.neq.${neq[2]}`;
+    return `${OUTPUT_SIDE_EQ_FIELDS[neq[1]]}.neq.${encodeDeskFilterValue(neq[2])}`;
+  }
+  const gtNum = cleaned.match(/^\{([A-Za-z0-9_]+)\}>(\d+)$/);
+  if (gtNum && gtNum[1] === "Render_Total_Frames") {
+    return `render_total_frames.gt.${gtNum[2]}`;
   }
   const beforeNow = cleaned.match(/^IS_BEFORE\(\{Publish_Next_Retry_At\},NOW\(\)\)$/);
   if (beforeNow) return "publish_next_retry_at.lte.now()";
   return null;
+}
+
+/** Test/helper: translate an Output list formula to PostgREST (or null). */
+export function translateOutputSideFormula(formula) {
+  return outputContentListFilter("output", formula);
 }
 
 function outputContentListFilter(kind, formula) {

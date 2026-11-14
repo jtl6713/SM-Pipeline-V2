@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.885-closeout-fb3-a4/);
+  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.885-closeout-fb3-a4/);
+  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.885-closeout-fb3-a4/);
+  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.885-closeout-fb3-a4/);
+  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3562,6 +3562,32 @@ test("FB3/FBS4 Output side fields and A4 orphan view prefer Supabase", async () 
   assert.match(reads, /Platform_Post_ID: "error_messages->>Platform_Post_ID"/);
   assert.match(reads, /FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status"/);
   assert.match(views, /viwQv8PDtE8qXwMPk/);
+});
+
+test("cadence R2/R3/R4 and TikTok draft Output formulas prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const r2 = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")',
+  );
+  assert.ok(r2);
+  assert.match(r2, /do_not_publish/);
+  assert.match(r2, /content_item_airtable_id/);
+  assert.match(r2, /Asset_Need_Status/);
+  const r3 = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Reel")))',
+  );
+  assert.ok(r3);
+  assert.match(r3, /selected_assets_text/);
+  assert.match(r3, /format\.neq\.Story/);
+  const r4 = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Final_File_URL}=""))',
+  );
+  assert.ok(r4);
+  assert.match(r4, /Composition_ID/);
+  assert.match(r4, /render_total_frames\.gt\.0/);
+  const tt = translateOutputSideFormula('{TikTok_Draft_Status}="Ready for Delivery"');
+  assert.equal(tt, "tiktok_draft_status.eq.Ready%20for%20Delivery");
+  assert.match(r2, /Ready%20for%20Review/);
 });
 
 test("Watermark catalog and Studio_Transfer_ID media formulas prefer Supabase", async () => {
