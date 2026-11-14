@@ -6543,6 +6543,25 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // Prefer text mirror so empty jsonb `{}` does not count as present.
   Selected_Assets_JSON: "selected_assets_text",
   Render_Clip_List_JSON: "render_clip_list",
+  Remotion_Status_URL: "error_messages->>Remotion_Status_URL",
+  Studio_Publish_Dispatch_At: "error_messages->>Studio_Publish_Dispatch_At",
+  Studio_Publish_Dispatch_Count: "error_messages->>Studio_Publish_Dispatch_Count",
+  Last_Publish_Attempt_At: "error_messages->>Last_Publish_Attempt_At",
+  IG_Story_Last_Attempt_At: "error_messages->>IG_Story_Last_Attempt_At",
+  YouTube_Last_Checked_At: "error_messages->>YouTube_Last_Checked_At",
+  FB_Last_Checked_At: "error_messages->>FB_Last_Checked_At",
+};
+
+/** Cadence Output views Worker probes without filterByFormula trees. */
+const OUTPUT_SIDE_VIEW_FILTERS = {
+  "R5 - Rendering Jobs to Poll":
+    "and(render_status.eq.Rendering,"
+    + "and(error_messages->>Remotion_Status_URL.not.is.null,error_messages->>Remotion_Status_URL.neq.),"
+    + "or(final_file_url.is.null,final_file_url.eq.))",
+  viwNRXKHf0xX2GVDW:
+    "and(render_status.eq.Rendering,"
+    + "and(error_messages->>Remotion_Status_URL.not.is.null,error_messages->>Remotion_Status_URL.neq.),"
+    + "or(final_file_url.is.null,final_file_url.eq.))",
 };
 
 function outputSideBlankFilter(column) {
@@ -6603,6 +6622,10 @@ function outputSideLeafFilter(cleaned) {
   if (gtNum && gtNum[1] === "Render_Total_Frames") {
     return `render_total_frames.gt.${gtNum[2]}`;
   }
+  const ltNum = cleaned.match(/^\{([A-Za-z0-9_]+)\}<(\d+)$/);
+  if (ltNum && OUTPUT_SIDE_BLANK_FIELDS[ltNum[1]]) {
+    return `${OUTPUT_SIDE_BLANK_FIELDS[ltNum[1]]}.lt.${ltNum[2]}`;
+  }
   const beforeNow = cleaned.match(/^IS_BEFORE\(\{Publish_Next_Retry_At\},NOW\(\)\)$/);
   if (beforeNow) return "publish_next_retry_at.lte.now()";
   const beforeSched = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},NOW\(\)\)$/);
@@ -6617,6 +6640,18 @@ function outputSideLeafFilter(cleaned) {
       return `scheduled_post_date.lte.${encodeDeskFilterValue(
         new Date(Date.now() + minutes * 60_000).toISOString(),
       )}`;
+    }
+  }
+  // Cooldown: DATETIME_DIFF(NOW(),{Field},"minutes")>=N → Field older than N minutes.
+  const diffMin = cleaned.match(
+    /^DATETIME_DIFF\(NOW\(\),\{([A-Za-z0-9_]+)\},"minutes"\)>=(\d+)$/,
+  );
+  if (diffMin && OUTPUT_SIDE_BLANK_FIELDS[diffMin[1]]) {
+    const minutes = Number(diffMin[2]);
+    if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 1440) {
+      const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
+      const col = OUTPUT_SIDE_BLANK_FIELDS[diffMin[1]];
+      return `${col}.lte.${encodeDeskFilterValue(cutoff)}`;
     }
   }
   return null;
@@ -6664,15 +6699,23 @@ function outputContentListFilter(kind, formula) {
   return null;
 }
 
-async function readOutputContentListRows(env, kind, formula, limit, offset) {
+async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "") {
   const translated = outputContentListFilter(kind, formula);
-  if (!translated) return null;
+  const viewFilter = kind === "output" && viewName
+    ? (OUTPUT_SIDE_VIEW_FILTERS[viewName] || null)
+    : null;
+  if (viewName && kind === "output" && !viewFilter) return null;
+  if (!translated && !viewFilter) return null;
   if (kind === "output") {
+    const andParts = [viewFilter, translated].filter(Boolean);
+    const andClause = andParts.length === 1
+      ? andParts[0]
+      : `and(${andParts.join(",")})`;
     const rows = await supabaseRest(
       env,
       `platform_outputs?select=${OUTPUT_SELECT}`
         + `&order=output_number.desc.nullslast&limit=${limit}&offset=${offset}`
-        + `&and=(${translated})`,
+        + `&and=(${andClause})`,
     );
     if (!Array.isArray(rows)) return null;
     return rows.map((row) => shapeDeskHealRecord(row)).filter((row) => row?.id);
@@ -6929,7 +6972,14 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   if (kind === "output" || kind === "content") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
-    const records = await readOutputContentListRows(env, kind, formula, limit, offset);
+    const viewName = String(sideQuery(pathOrParams).get("view") || "").trim();
+    // Unknown Output views must not collapse to formula-only (false R5 probes).
+    if (kind === "output" && viewName && !OUTPUT_SIDE_VIEW_FILTERS[viewName]) {
+      return null;
+    }
+    // Content P1 still needs a view snapshot; fall through until densified.
+    if (kind === "content" && viewName) return null;
+    const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName);
     if (!records) return null;
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);
