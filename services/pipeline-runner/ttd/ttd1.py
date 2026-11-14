@@ -187,6 +187,10 @@ def process_request(
                 "Publish_Next_Retry_At": now,
                 "Publish_Retry_Eligible": False,
                 "TikTok_Draft_Publish_ID": publish_id,
+                # A genuinely new TikTok delivery may need a fresh handoff.
+                "Operational_Email_Key": "",
+                "Operational_Email_Sent_At": None,
+                "TikTok_Draft_Email_Sent_At": None,
                 "TikTok_Draft_Response_JSON": response_json(body),
                 "TikTok_Draft_Last_Checked_At": None,
                 "Platform_Publish_Response_JSON": response_json(body),
