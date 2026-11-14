@@ -184,7 +184,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
     /if \(airtableDataWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx\.waitUntil\(studioReconcileTiktokDrafts/,
   );
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
-  assert.match(cron, /0\.10\.896-closeout-pr-music-factory/);
+  assert.match(cron, /0\.10\.897-closeout-open-ops/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);
