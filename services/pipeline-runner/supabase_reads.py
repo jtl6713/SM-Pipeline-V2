@@ -400,6 +400,14 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Studio_Transfer_ID"] = meta.get("studio_transfer_id")
         if meta.get("google_drive_url") and "Google Drive URL" not in shaped["fields"]:
             shaped["fields"]["Google Drive URL"] = meta.get("google_drive_url")
+        if meta.get("classification_status") is not None and "Classification_Status" not in shaped["fields"]:
+            shaped["fields"]["Classification_Status"] = meta.get("classification_status")
+        if meta.get("drive_access_status") is not None and "Drive_Access_Status" not in shaped["fields"]:
+            shaped["fields"]["Drive_Access_Status"] = meta.get("drive_access_status")
+        if meta.get("raw_source_eligibility") is not None and "Raw_Source_Eligibility" not in shaped["fields"]:
+            shaped["fields"]["Raw_Source_Eligibility"] = meta.get("raw_source_eligibility")
+        if meta.get("exclusion_reasons") is not None and "Exclusion_Reasons" not in shaped["fields"]:
+            shaped["fields"]["Exclusion_Reasons"] = meta.get("exclusion_reasons")
     elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
         shaped["fields"]["Candidate_Status"] = row.get("status")
     elif table_id == CONTENT_PROFILES_TABLE:

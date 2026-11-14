@@ -44,6 +44,35 @@ _MEDIA_VIEW_FILTERS = {
         "and=(active.eq.true,or(do_not_use.is.null,do_not_use.eq.false),"
         "google_drive_file_id.neq.)"
     ),
+    # R2 classified candidates — client re-filters eligibility after densify.
+    "viwDawMj0aiPtSM4P": (
+        "and=(media_class.eq.Video,asset_role.eq.Raw%20Footage,asset_status.eq.Available,"
+        "metadata->>classification_status.eq.Classified,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),google_drive_url.neq.,"
+        "or(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
+        "metadata->>rights_status.eq.Public%20Domain))"
+    ),
+    "R2 - Available Classified Video Assets": (
+        "and=(media_class.eq.Video,asset_role.eq.Raw%20Footage,asset_status.eq.Available,"
+        "metadata->>classification_status.eq.Classified,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),google_drive_url.neq.,"
+        "or(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
+        "metadata->>rights_status.eq.Public%20Domain))"
+    ),
+    "viwQl0aLMi6xP3Rdp": (
+        "and=(media_class.eq.Audio,asset_role.eq.Music,asset_status.eq.Available,"
+        "metadata->>classification_status.eq.Classified,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),google_drive_url.neq.,"
+        "or(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
+        "metadata->>rights_status.eq.Public%20Domain))"
+    ),
+    "R2 - Available Classified Music Assets": (
+        "and=(media_class.eq.Audio,asset_role.eq.Music,asset_status.eq.Available,"
+        "metadata->>classification_status.eq.Classified,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),google_drive_url.neq.,"
+        "or(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
+        "metadata->>rights_status.eq.Public%20Domain))"
+    ),
 }
 
 _CHICAGO = ZoneInfo("America/Chicago")

@@ -54,6 +54,9 @@ _MEDIA_COLUMNS = {
     "Classification_Status": "metadata->>classification_status",
     "Rights_Status": "metadata->>rights_status",
     "Intake_Date": "metadata->>intake_date",
+    "Drive_Access_Status": "metadata->>drive_access_status",
+    "Raw_Source_Eligibility": "metadata->>raw_source_eligibility",
+    "Exclusion_Reasons": "metadata->>exclusion_reasons",
 }
 
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')

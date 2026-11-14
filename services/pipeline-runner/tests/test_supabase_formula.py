@@ -63,6 +63,10 @@ def test_snapshotted_runner_views():
     assert c6 and "Watermark_Small" in c6
     a4 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwQv8PDtE8qXwMPk")
     assert a4 and "google_drive_file_id.neq." in a4
+    r2v = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwDawMj0aiPtSM4P")
+    assert r2v and "Raw%20Footage" in r2v and "Classified" in r2v
+    r2m = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "R2 - Available Classified Music Assets")
+    assert r2m and "asset_role.eq.Music" in r2m
     legacy = view_to_postgrest_filter(CONTENT_ITEMS_TABLE, "viwwnVJVPqfy7iYJK")
     assert legacy is not None
     assert "platform_output_count" in legacy

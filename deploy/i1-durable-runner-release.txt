@@ -79,3 +79,5 @@ Deploy 2026-11-13 runner 2026-11-13-zcloseout-media-views: A3 classify + C6 wate
 Deploy 2026-11-13 runner 2026-11-13-zcloseout-fb3-a4: A4 orphan media view prefers Supabase (Active+Drive). Verify /health version 2026-11-13-zcloseout-fb3-a4.
 
 Deploy 2026-11-14 runner 2026-11-14-tiktok-handoff-claim-v1: TikTok TTD2 replay preserves email receipt; TTD3 uses atomic Supabase claim to prevent concurrent duplicate handoffs. Verify /health version and no duplicate emails.
+
+Deploy 2026-11-14 runner 2026-11-14-zcloseout-r2-publish: R2 classified video/music views prefer Supabase with eligibility densify. Verify /health version 2026-11-14-zcloseout-r2-publish.

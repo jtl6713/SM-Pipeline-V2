@@ -1145,3 +1145,5 @@ Deploy 2026-11-13 Worker 0.10.884-closeout-media-views: Watermark catalog + Stud
 Deploy 2026-11-13 Worker 0.10.885-closeout-fb3-a4: FB3/FBS4 Output side-table fields (FB_Publish_Status, Platform_Post_ID bag) prefer Supabase. Record deletion is not started. Verify /health version 0.10.885-closeout-fb3-a4.
 
 Deploy 2026-11-13 Worker 0.10.886-closeout-cadence-r2: cadence R2/R3/R4 + TikTok draft Output formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.886-closeout-cadence-r2.
+
+Deploy 2026-11-14 Worker 0.10.887-closeout-r2-publish: IG publish cadence + Scheduled_Post_Date + R2 media densify/views. Record deletion is not started. Verify /health version 0.10.887-closeout-r2-publish.
