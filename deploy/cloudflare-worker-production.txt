@@ -1141,3 +1141,5 @@ Deploy 2026-11-13 Worker 0.10.882-closeout-pro-request: Production Request Outpu
 Deploy 2026-11-13 Worker 0.10.883-closeout-az-profiles: AZ finished-video resume + densified Content Profile GETs (Worker+runner). Record deletion is not started. Verify /health version 0.10.883-closeout-az-profiles.
 
 Deploy 2026-11-13 Worker 0.10.884-closeout-media-views: Watermark catalog + Studio_Transfer_ID media formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.884-closeout-media-views.
+
+Deploy 2026-11-13 Worker 0.10.885-closeout-fb3-a4: FB3/FBS4 Output side-table fields (FB_Publish_Status, Platform_Post_ID bag) prefer Supabase. Record deletion is not started. Verify /health version 0.10.885-closeout-fb3-a4.

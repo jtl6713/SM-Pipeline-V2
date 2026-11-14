@@ -38,6 +38,12 @@ _MEDIA_VIEW_FILTERS = {
         "or(do_not_use.is.null,do_not_use.eq.false),"
         "asset_name.ilike.*Watermark_Small*,google_drive_file_id.neq.)"
     ),
+    # A4 orphan check — Active + Drive id present. Last_Match_Checked_On is not
+    # densified yet; client re-filters after Drive HEAD (bounded max_records).
+    "viwQv8PDtE8qXwMPk": (
+        "and=(active.eq.true,or(do_not_use.is.null,do_not_use.eq.false),"
+        "google_drive_file_id.neq.)"
+    ),
 }
 
 _CHICAGO = ZoneInfo("America/Chicago")
