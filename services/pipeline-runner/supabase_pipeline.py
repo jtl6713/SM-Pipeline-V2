@@ -911,6 +911,29 @@ def _media_row(record: dict) -> dict:
         raw_url = _queue_text(fields.get("Google Drive URL"))
         if raw_url:
             meta["google_drive_url"] = raw_url
+    if "Classification_Status" in fields:
+        meta["classification_status"] = _select(fields.get("Classification_Status")) or _queue_text(
+            fields.get("Classification_Status")
+        )
+    if "Drive_Access_Status" in fields:
+        meta["drive_access_status"] = _select(fields.get("Drive_Access_Status")) or _queue_text(
+            fields.get("Drive_Access_Status")
+        )
+    if "Raw_Source_Eligibility" in fields:
+        meta["raw_source_eligibility"] = _select(fields.get("Raw_Source_Eligibility")) or _queue_text(
+            fields.get("Raw_Source_Eligibility")
+        )
+    if "Exclusion_Reasons" in fields:
+        raw = fields.get("Exclusion_Reasons")
+        if raw in (None, ""):
+            meta["exclusion_reasons"] = None
+        elif isinstance(raw, list):
+            meta["exclusion_reasons"] = [
+                _select(item) or _queue_text(item) for item in raw if (_select(item) or _queue_text(item))
+            ]
+        else:
+            one = _select(raw) or _queue_text(raw)
+            meta["exclusion_reasons"] = [one] if one else None
     if meta:
         row["metadata"] = meta
     return row

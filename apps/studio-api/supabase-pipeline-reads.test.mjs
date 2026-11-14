@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
+  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
+  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
+  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.886-closeout-cadence-r2/);
+  assert.match(worker, /0\.10\.887-closeout-r2-publish/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3136,12 +3136,13 @@ test("studioSideTableRead serves slide and Output list formulas from Supabase", 
     );
     assert.equal(outputs.records[0].fields.Output_ID, 42);
     assert.ok(urls.some((url) => url.includes("output_number.eq.42")));
-    const refused = await studioSideTableRead(
+    const due = await studioSideTableRead(
       env,
       PLATFORM_OUTPUTS_TABLE_ID,
-      "?filterByFormula=" + encodeURIComponent("IS_BEFORE({Scheduled_Post_Date},NOW())"),
+      "?filterByFormula=" + encodeURIComponent("IS_BEFORE({Scheduled_Post_Date},NOW())") + "&maxRecords=5",
     );
-    assert.equal(refused, null);
+    assert.equal(due.records[0].fields.Output_ID, 42);
+    assert.ok(urls.some((url) => url.includes("scheduled_post_date.lte.now()")));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -3562,6 +3563,17 @@ test("FB3/FBS4 Output side fields and A4 orphan view prefer Supabase", async () 
   assert.match(reads, /Platform_Post_ID: "error_messages->>Platform_Post_ID"/);
   assert.match(reads, /FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status"/);
   assert.match(views, /viwQv8PDtE8qXwMPk/);
+});
+
+test("IG publish cadence and Scheduled_Post_Date leaves prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const ig = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"))',
+  );
+  assert.ok(ig);
+  assert.match(ig, /IG_Story_Status/);
+  const due = translateOutputSideFormula('IS_BEFORE({Scheduled_Post_Date},NOW())');
+  assert.equal(due, "scheduled_post_date.lte.now()");
 });
 
 test("cadence R2/R3/R4 and TikTok draft Output formulas prefer Supabase", async () => {

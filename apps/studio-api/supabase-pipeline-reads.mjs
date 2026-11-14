@@ -1009,6 +1009,9 @@ export function airtableShapedLibraryAssetFromSupabase(row) {
       Added_At: meta.added_at || row.created_at || null,
       Content_Profile: profileId ? [profileId] : [],
       Classification_Status: meta.classification_status || null,
+      Drive_Access_Status: meta.drive_access_status || null,
+      Raw_Source_Eligibility: meta.raw_source_eligibility || null,
+      Exclusion_Reasons: meta.exclusion_reasons || null,
       Intake_Status: meta.intake_status || null,
       Manual_Classification_JSON: meta.manual_classification_json || null,
       Manual_Classification_Audit: meta.manual_classification_audit || null,
@@ -5040,6 +5043,21 @@ function mediaAssetWriteThroughRow(record) {
     meta.classification_status = selectName(fields.Classification_Status)
       || text(fields.Classification_Status);
   }
+  if ("Drive_Access_Status" in fields) {
+    meta.drive_access_status = selectName(fields.Drive_Access_Status)
+      || text(fields.Drive_Access_Status);
+  }
+  if ("Raw_Source_Eligibility" in fields) {
+    meta.raw_source_eligibility = selectName(fields.Raw_Source_Eligibility)
+      || text(fields.Raw_Source_Eligibility);
+  }
+  if ("Exclusion_Reasons" in fields) {
+    const raw = fields.Exclusion_Reasons;
+    if (raw == null || raw === "") meta.exclusion_reasons = null;
+    else if (Array.isArray(raw)) {
+      meta.exclusion_reasons = raw.map((item) => selectName(item) || text(item)).filter(Boolean);
+    } else meta.exclusion_reasons = [selectName(raw) || text(raw)].filter(Boolean);
+  }
   if ("Manual_Classification_JSON" in fields) {
     const raw = fields.Manual_Classification_JSON;
     if (raw == null || raw === "") meta.manual_classification_json = null;
@@ -5130,6 +5148,19 @@ export function mediaAssetBackfillRow(record) {
     meta.duration_seconds = null;
   }
   meta.intake_date = text(fields.Intake_Date) || fields.Intake_Date || null;
+  meta.drive_access_status = selectName(fields.Drive_Access_Status)
+    || text(fields.Drive_Access_Status);
+  meta.raw_source_eligibility = selectName(fields.Raw_Source_Eligibility)
+    || text(fields.Raw_Source_Eligibility);
+  if ("Exclusion_Reasons" in fields) {
+    const raw = fields.Exclusion_Reasons;
+    if (raw == null || raw === "") meta.exclusion_reasons = null;
+    else if (Array.isArray(raw)) {
+      meta.exclusion_reasons = raw.map((item) => selectName(item) || text(item)).filter(Boolean);
+    } else meta.exclusion_reasons = [selectName(raw) || text(raw)].filter(Boolean);
+  } else {
+    meta.exclusion_reasons = null;
+  }
   return {
     airtable_record_id: record.id,
     asset_name: body.asset_name,
@@ -6477,6 +6508,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   FB_Publish_Status: "fb_publish_status",
   FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
   TikTok_Draft_Status: "tiktok_draft_status",
+  IG_Story_Status: "error_messages->>IG_Story_Status",
+  IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
   Asset_Need_Status: "error_messages->>Asset_Need_Status",
 };
@@ -6498,11 +6531,15 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // Typed column never existed; densify stores the Graph id in the bag.
   Platform_Post_ID: "error_messages->>Platform_Post_ID",
   FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",
+  FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
+  IG_Story_Status: "error_messages->>IG_Story_Status",
+  IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
   Content_Item: "content_item_airtable_id",
   Render_Status: "render_status",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
   Composition_ID: "error_messages->>Composition_ID",
   Output_Filename: "output_filename",
+  Scheduled_Post_Date: "scheduled_post_date",
   // Prefer text mirror so empty jsonb `{}` does not count as present.
   Selected_Assets_JSON: "selected_assets_text",
   Render_Clip_List_JSON: "render_clip_list",
@@ -6568,6 +6605,20 @@ function outputSideLeafFilter(cleaned) {
   }
   const beforeNow = cleaned.match(/^IS_BEFORE\(\{Publish_Next_Retry_At\},NOW\(\)\)$/);
   if (beforeNow) return "publish_next_retry_at.lte.now()";
+  const beforeSched = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},NOW\(\)\)$/);
+  if (beforeSched) return "scheduled_post_date.lte.now()";
+  // TikTok inbox lead: due up to N minutes before Scheduled_Post_Date.
+  const beforeLead = cleaned.match(
+    /^IS_BEFORE\(\{Scheduled_Post_Date\},DATEADD\(NOW\(\),(\d+),'minutes'\)\)$/,
+  );
+  if (beforeLead) {
+    const minutes = Number(beforeLead[1]);
+    if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 240) {
+      return `scheduled_post_date.lte.${encodeDeskFilterValue(
+        new Date(Date.now() + minutes * 60_000).toISOString(),
+      )}`;
+    }
+  }
   return null;
 }
 
