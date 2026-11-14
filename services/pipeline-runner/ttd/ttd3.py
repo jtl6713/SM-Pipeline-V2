@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from supabase_pipeline import _rest, supabase_configured
+
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_PROFILES_TABLE, PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc, stamp_minutes
@@ -69,6 +71,26 @@ def process_request(
     result["email_to"] = to_addr
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
+
+    # Unique Postgres claim serializes concurrent runner processes.
+    publish_id = field_str(output, "TikTok_Draft_Publish_ID")
+    if not publish_id:
+        return {"processed": False, "reason": "missing_draft_publish_id", **result}
+    if not supabase_configured(client._settings):
+        return {"processed": False, "reason": "email_claim_store_unavailable", **result}
+    claim_key = f"TTD3:{record_id}:{publish_id}"
+    try:
+        claim = _rest(
+            client._settings, "rpc/claim_tiktok_handoff", "POST",
+            {"p_claim_key": claim_key, "p_output_record_id": record_id,
+             "p_publish_id": publish_id},
+        )
+    except Exception as exc:
+        # Fail closed rather than risk duplicate email delivery.
+        return {"processed": False, "reason": "email_claim_failed",
+                "claim_error": str(exc), **result}
+    if claim is not True:
+        return {"processed": False, "reason": "email_claim_already_exists", **result}
 
     now = iso_utc()
     client.update_record(
@@ -154,7 +176,7 @@ def process_request(
                 ),
             },
         )
-        return {"processed": True, "retry": True, **result}
+        return {"processed": True, "retry": False, "manual_reconciliation_required": True, **result}
 
     status = (
         STATUS_MANUAL_RECEIVED
