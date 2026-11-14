@@ -6198,6 +6198,18 @@ export function translateProductionRequestFormula(formula) {
       + `&or=(variant_status.is.null,variant_status.eq.,variant_status.eq.None)`
       + `&or=(production_notes.ilike.*idea-vo-timeline=*,production_notes.ilike.*[timed-script]*)`;
   }
+  // Escalated produce inventory (job JSON step).
+  if (cleaned.includes("{Test_Run_ID}=BLANK()")
+    && cleaned.includes('{Studio_Production_Job_JSON}!=""')
+    && cleaned.includes('"step":"escalated"')
+    && (cleaned.includes('{Request_Status}!="Cancelled"')
+      || cleaned.includes("{Request_Status}!='Cancelled'"))) {
+    return deskRequestFilter("inventory_escalated");
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")'
+    || cleaned === "AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!=\"\")") {
+    return "production_job=not.is.null";
+  }
   return null;
 }
 
@@ -6991,6 +7003,11 @@ export function translateOutputSideFormula(formula) {
   return outputContentListFilter("output", formula);
 }
 
+/** Test/helper: translate a Content list formula to PostgREST (or null). */
+export function translateContentSideFormula(formula) {
+  return outputContentListFilter("content", formula);
+}
+
 function outputContentListFilter(kind, formula) {
   const cleaned = tightenSideFormula(formula);
   if (!cleaned) return null;
@@ -7020,11 +7037,50 @@ function outputContentListFilter(kind, formula) {
     return outputSideLeafFilter(cleaned);
   }
   if (kind === "content") {
-    const contentId = cleaned.match(/^\{Content_ID\}=(\d+)$/);
-    if (contentId) return `content_number.eq.${contentId[1]}`;
-    // content_items has no test_run_id column; treat blank as always-true.
-    const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
-    if (blank) return "id.not.is.null";
+    return contentSideLeafFilter(cleaned);
+  }
+  return null;
+}
+
+const CONTENT_SIDE_EQ_FIELDS = {
+  Content_Status: "content_status",
+  Voiceover_Status: "voiceover_status",
+  Primary_Location: "primary_location",
+};
+
+const CONTENT_SIDE_FIND_LINK_FIELDS = {
+  Preferred_Music_Asset: "extras",
+  Selected_Music_Asset: "extras",
+  Selected_Music_Asset_Override: "extras",
+  Studio_Master_Media_Assets: "extras",
+};
+
+function contentSideLeafFilter(cleaned) {
+  const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
+  if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  const contentId = cleaned.match(/^\{Content_ID\}=(\d+)$/);
+  if (contentId) return `content_number.eq.${contentId[1]}`;
+  // content_items has no test_run_id column; treat blank as always-true.
+  const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
+  if (blank) return "id.not.is.null";
+  const eq = cleaned.match(/^\{([A-Za-z0-9_]+)\}="([^"]*)"$/);
+  if (eq && CONTENT_SIDE_EQ_FIELDS[eq[1]]) {
+    return `${CONTENT_SIDE_EQ_FIELDS[eq[1]]}.eq.${encodeDeskFilterValue(eq[2])}`;
+  }
+  const neq = cleaned.match(/^\{([A-Za-z0-9_]+)\}!="([^"]*)"$/);
+  if (neq && CONTENT_SIDE_EQ_FIELDS[neq[1]]) {
+    return `${CONTENT_SIDE_EQ_FIELDS[neq[1]]}.neq.${encodeDeskFilterValue(neq[2])}`;
+  }
+  const findLink = cleaned.match(
+    /^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{([A-Za-z0-9_]+)\}\)(?:&"")?\)(?:>0)?$/,
+  );
+  if (findLink && CONTENT_SIDE_FIND_LINK_FIELDS[findLink[2]]) {
+    const id = findLink[1];
+    const field = findLink[2];
+    // Linked rec ids densify into extras as arrays or scalar text.
+    const cs = `extras->${field}.cs.${encodeURIComponent(JSON.stringify([id]))}`;
+    const text = `extras->>${field}.ilike.*${id}*`;
+    return `or(${cs},${text})`;
   }
   return null;
 }

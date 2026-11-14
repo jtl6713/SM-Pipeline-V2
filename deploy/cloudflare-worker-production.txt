@@ -1163,3 +1163,5 @@ Redeploy 2026-11-14 after 0.10.891 rollback: failed-output-census curl timed out
 Deploy 2026-11-14 Worker 0.10.893-closeout-census-bound: bound failed-output census with PostgREST OR + LOWER FIND / past-due ISO / Published_At gte / CREATED_TIME leaves. Record deletion is not started. Verify /health version 0.10.893-closeout-census-bound.
 
 Deploy 2026-11-14 Worker 0.10.894-closeout-pr-lists: Production Request Preparing/Error/Promoted/Submitted/master-ready/timed-script list formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.894-closeout-pr-lists.
+
+Deploy 2026-11-14 Worker 0.10.895-closeout-content-esc: escalated PR lists + Content RECORD_ID/status/Preferred_Music FIND prefer Supabase. Record deletion is not started. Verify /health version 0.10.895-closeout-content-esc.
