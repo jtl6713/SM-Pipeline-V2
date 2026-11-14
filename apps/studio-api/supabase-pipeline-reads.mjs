@@ -3635,6 +3635,22 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     }
   }
 
+  // Platform Output rows often omit content_profile_id while the linked Content
+  // Item still has one. Stamp Content_Profile so Factory desk cards carry a
+  // real rec id for global multi-profile Submit Approvals partitioning.
+  const stampProfileFromContent = (rows) => {
+    for (const row of rows || []) {
+      if (firstLink(row?.fields?.Content_Profile)) continue;
+      const contentId = firstLink(row?.fields?.Content_Item);
+      const content = contentId ? contentById.get(contentId) : null;
+      const profileId = firstLink(content?.fields?.Content_Profile);
+      if (profileId) row.fields.Content_Profile = [profileId];
+    }
+  };
+  stampProfileFromContent(outputs);
+  stampProfileFromContent(renderLaneOutputs);
+  stampProfileFromContent(reviewOutputs);
+
   const profiles = (profileRows || []).map((row) => ({
     id: row.airtable_record_id,
     fields: {
@@ -4901,24 +4917,58 @@ export function outputRecordHasDensifiedIdentity(record) {
   return Boolean(selectName(fields.Platform) || selectName(fields.Platform_Output_Type));
 }
 
+/**
+ * Resolve platform_outputs.content_profile_id for write-through.
+ * Content_Profile on Platform Outputs is an Airtable lookup that often returns
+ * display names, so firstLink() misses. Prefer a real rec id, otherwise inherit
+ * content_profile_id from the linked Content Item.
+ */
+export async function resolveOutputProfileForSupabaseSync(env, record) {
+  const contentUuidByAirtableId = new Map();
+  const contentAirtableId = firstLink(record?.fields?.Content_Item);
+  let contentRow = null;
+  if (contentAirtableId) {
+    const contentRows = await supabaseRest(
+      env,
+      `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}`
+        + `&select=id,airtable_record_id,content_profile_id,content_profiles(airtable_record_id)&limit=1`,
+    ).catch(() => []);
+    contentRow = Array.isArray(contentRows) && contentRows[0] ? contentRows[0] : null;
+    if (contentRow?.id) contentUuidByAirtableId.set(contentAirtableId, contentRow.id);
+  }
+  const directProfileAirtableId = firstLink(record?.fields?.Content_Profile);
+  if (directProfileAirtableId) {
+    const profileUuid = await resolveSupabaseProfileId(env, directProfileAirtableId);
+    if (profileUuid) {
+      return { profileUuid, contentUuidByAirtableId, profileAirtableId: directProfileAirtableId };
+    }
+  }
+  const inheritedAirtableId = contentRow?.content_profiles?.airtable_record_id || null;
+  const inheritedUuid = contentRow?.content_profile_id || null;
+  if (inheritedUuid) {
+    return {
+      profileUuid: inheritedUuid,
+      contentUuidByAirtableId,
+      profileAirtableId: inheritedAirtableId,
+    };
+  }
+  if (inheritedAirtableId) {
+    const profileUuid = await resolveSupabaseProfileId(env, inheritedAirtableId);
+    return {
+      profileUuid: profileUuid || null,
+      contentUuidByAirtableId,
+      profileAirtableId: inheritedAirtableId,
+    };
+  }
+  return { profileUuid: null, contentUuidByAirtableId, profileAirtableId: null };
+}
+
 export async function syncAirtableOutputRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
 
   if (options.create === true) {
-    const profileAirtableId = firstLink(record.fields?.Content_Profile);
-    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-    const contentAirtableId = firstLink(record.fields?.Content_Item);
-    const contentUuidByAirtableId = new Map();
-    if (contentAirtableId) {
-      const contentRows = await supabaseRest(
-        env,
-        `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
-      ).catch(() => []);
-      if (Array.isArray(contentRows) && contentRows[0]?.id) {
-        contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
-      }
-    }
+    const { profileUuid, contentUuidByAirtableId } = await resolveOutputProfileForSupabaseSync(env, record);
     const row = mapAirtableOutputToSupabase(record, {
       profileUuid: profileUuid || null,
       contentUuidByAirtableId,
@@ -4933,19 +4983,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
   }
 
   if (options.fullRecord === true && outputRecordHasDensifiedIdentity(record)) {
-    const profileAirtableId = firstLink(record.fields?.Content_Profile);
-    const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-    const contentAirtableId = firstLink(record.fields?.Content_Item);
-    const contentUuidByAirtableId = new Map();
-    if (contentAirtableId) {
-      const contentRows = await supabaseRest(
-        env,
-        `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
-      ).catch(() => []);
-      if (Array.isArray(contentRows) && contentRows[0]?.id) {
-        contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
-      }
-    }
+    const { profileUuid, contentUuidByAirtableId } = await resolveOutputProfileForSupabaseSync(env, record);
     let row = mapAirtableOutputToSupabase(record, {
       profileUuid,
       contentUuidByAirtableId,
@@ -4962,19 +5000,7 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
   // Partial mutations (dispatch stamps, promote, caption backfill, and sparse
   // approve/schedule responses): PATCH only the columns present on the field
   // patch so densified identity and schedule/status stay intact.
-  const profileAirtableId = firstLink(record.fields?.Content_Profile);
-  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-  const contentAirtableId = firstLink(record.fields?.Content_Item);
-  const contentUuidByAirtableId = new Map();
-  if (contentAirtableId) {
-    const contentRows = await supabaseRest(
-      env,
-      `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
-    ).catch(() => []);
-    if (Array.isArray(contentRows) && contentRows[0]?.id) {
-      contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
-    }
-  }
+  const { profileUuid, contentUuidByAirtableId } = await resolveOutputProfileForSupabaseSync(env, record);
   const { body } = buildPresentOutputColumnPatch(record, {
     profileUuid: profileUuid || null,
     contentUuidByAirtableId,

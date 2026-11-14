@@ -488,11 +488,34 @@
     updateFactoryBatchToolbar();
   }
 
+  function resolveFactoryCardProfileId(card) {
+    const id = String(card?.profile_id || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(id)) return id;
+    const name = String(card?.profile_name || "").trim().toLowerCase();
+    if (!name) return "";
+    const pools = [
+      ...($("studioProfileSelect")?.options || []),
+      ...($("factoryProfileFilter")?.options || []),
+    ];
+    for (const option of pools) {
+      if (!/^rec[A-Za-z0-9]+$/.test(option.value)) continue;
+      if (String(option.textContent || "").trim().toLowerCase() === name) return option.value;
+    }
+    return "";
+  }
+
+  function withResolvedFactoryProfile(card) {
+    const profileId = resolveFactoryCardProfileId(card);
+    if (!profileId || profileId === String(card?.profile_id || "").trim()) return card;
+    return { ...card, profile_id: profileId };
+  }
+
   function canSelectBatchOutput(card) {
     if (recentFactoryAccepted()[String(card?.id || "")] &&
         String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) {
+      if (!resolveFactoryCardProfileId(card)) return false;
       const platform = String(card?.platform || "").trim();
       // A lean Desk card may carry the output type in format while its
       // studio_output_type is a stale display alias. Accept either only when
@@ -574,7 +597,8 @@
     const hidden = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
     return (state.desk?.lanes?.needs_eyes || [])
       .filter((card) => !hidden.has(card.id) && (includeOtherProfiles || factoryMatchesProfile(card)) && card?.kind === "output"
-        && canReviewActions(card) && canSelectBatchOutput(card));
+        && canReviewActions(card) && canSelectBatchOutput(card))
+      .map(withResolvedFactoryProfile);
   }
 
   function planFactoryApprovalBatches(cards, maxTotal, maxPerProfile) {
@@ -1188,8 +1212,10 @@
       if (typeof batch.approvals_enabled === "boolean") {
         const before = JSON.stringify([state.batchRollout,state.batchGlobal]);
         state.batchApprovalsEnabled = batch.approvals_enabled;
-        state.batchRollout = batch.rollout || null;
-        state.batchGlobal = batch.global_rollout || null;
+        if ("rollout" in batch) state.batchRollout = batch.rollout || null;
+        // quality_only / exact-id activity payloads omit global_rollout; do not
+        // wipe an already-loaded Global Factory policy and block Submit Approvals.
+        if ("global_rollout" in batch) state.batchGlobal = batch.global_rollout || null;
         updateFactoryBatchToolbar();
         if (state.desk && before !== JSON.stringify([state.batchRollout,state.batchGlobal])) renderDesk(state.desk);
       }
@@ -1371,7 +1397,7 @@
     const waiting = new Set(waitingFactorySelection());
     for (const card of selected) if (recovering.has(card.id)) waiting.add(card.id);
     localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
-    const ready = selected.filter(card => !recovering.has(card.id));
+    const ready = selected.filter(card => !recovering.has(card.id)).map(withResolvedFactoryProfile);
     if (!ready.length) {
       updateFactoryBatchToolbar();
       setStatus(selected.length ? "Your submission is saved. Previously submitted outputs are being checked automatically; any not yet accepted will continue automatically." : "Select one or more review-ready outputs.");
@@ -1384,8 +1410,13 @@
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
     const global = state.batchGlobal?.enabled === true;
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
-    if (profiles.some(id=>!/^rec[A-Za-z0-9]+$/.test(id)) || (!global && profiles.length!==1)) {
-      setStatus("Global approvals are not enabled for this selection; select one authorized profile.", true);
+    const missingProfile = profiles.some((id) => !/^rec[A-Za-z0-9]+$/.test(id));
+    if (missingProfile) {
+      setStatus("Some selected outputs are missing a Content Profile id, so multi-profile Submit Approvals cannot partition them safely. Refresh Factory, then reselect. Individual Approve still works.", true);
+      return;
+    }
+    if (!global && profiles.length !== 1) {
+      setStatus("Global multi-profile approvals are not enabled for this selection. Choose one city profile, or wait for Global Factory to load, then submit again.", true);
       return;
     }
     if (global) {
@@ -1517,6 +1548,9 @@
     if (state.batchApprovalsEnabled === false) return "Batch approvals are disabled by the server; individual approval is available.";
     if (canSelectBatchOutput(card)) return "";
     if (state.batchGlobal?.enabled) {
+      if (!resolveFactoryCardProfileId(card)) {
+        return "Content Profile is missing on this output; refresh Factory or use individual Approve.";
+      }
       const platform = String(card?.platform || "").trim();
       const allowed = state.batchGlobal.allowed_platforms || [];
       if (!allowed.includes(platform)) return `${platform || "This platform"} is not enabled for batch approval; use individual Approve.`;

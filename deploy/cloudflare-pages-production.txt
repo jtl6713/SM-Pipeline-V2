@@ -783,3 +783,5 @@ Retry deploy 2026-11-14 Studio UI 0.6.939-iphone-tiktok-layout after release con
 Deploy 2026-11-14 Studio UI 0.6.940-meta-republish-safety. Disable automatic retries on ambiguous Meta republish POST, show reconciliation guidance on aborted iPhone requests. Airtable remains authoritative; Supabase Phase 7 migration untouched.
 
 Deploy 2026-11-14 Studio UI 0.6.941-tiktok-place-reviews. Engagement Place Reviews tab: discover visited places from published TikTok content, draft reviews, Open Place manual workflow. Verify footer UI build 0.6.941.
+
+Deploy 2026-11-14 Studio UI 0.6.942-factory-global-profile-flush. Factory multi-profile Submit Approvals: resolve Content Profile lookup names, keep Global Factory policy across activity polls, require/resolvable profile ids before flush. Verify footer UI build 0.6.942.

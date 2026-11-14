@@ -11385,12 +11385,33 @@ export function firstOpsLinkedId(value) {
 
 export function mapOpsQueueProfileName(profileMap, linked) {
   const id = firstOpsLinkedId(linked);
-  if (!id) return { profile_id: null, profile_name: "" };
-  const profile = profileMap.get(id);
-  return {
-    profile_id: id,
-    profile_name: profile ? String(f(profile, "Profile_Name") || "") : "",
-  };
+  if (id) {
+    const profile = profileMap.get(id);
+    return {
+      profile_id: id,
+      profile_name: profile ? String(f(profile, "Profile_Name") || "") : "",
+    };
+  }
+  // Platform Outputs.Content_Profile is a lookup. Airtable REST often returns
+  // Profile_Name display strings ("NYC - New York City") instead of rec ids.
+  // Match those names so Factory global submit can partition multi-city batches.
+  const names = (Array.isArray(linked) ? linked : linked != null ? [linked] : [])
+    .map((item) => String(
+      typeof item === "string" ? item : (item?.name || item?.id || ""),
+    ).trim())
+    .filter(Boolean);
+  const map = profileMap instanceof Map ? profileMap : new Map();
+  for (const name of names) {
+    const needle = name.toLowerCase();
+    for (const [profileId, profile] of map.entries()) {
+      if (!/^rec[A-Za-z0-9]+$/.test(String(profileId || ""))) continue;
+      const profileName = String(f(profile, "Profile_Name") || "").trim();
+      if (profileName && profileName.toLowerCase() === needle) {
+        return { profile_id: profileId, profile_name: profileName };
+      }
+    }
+  }
+  return { profile_id: null, profile_name: names[0] || "" };
 }
 /*__STUDIO_WORKER_END:mapOpsQueueProfileName__*/
 
