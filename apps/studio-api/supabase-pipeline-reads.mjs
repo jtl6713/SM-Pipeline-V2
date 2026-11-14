@@ -1244,9 +1244,15 @@ export const MEDIA_SIDE_VIEW_FILTERS = {
     + "&metadata->>drive_access_status.eq.Public"
     + "&google_drive_url=neq."
     + "&media_class=in.(Video,Image,Audio,Graphic)",
+  // Runner + Meta A4 orphan check — Active + Drive id; Last_Match_Checked_On stays client-side.
+  viwQv8PDtE8qXwMPk:
+    "active.eq.true"
+    + "&or=(do_not_use.is.null,do_not_use.eq.false)"
+    + "&google_drive_file_id=neq.",
 };
 MEDIA_SIDE_VIEW_FILTERS.Music = MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8;
 MEDIA_SIDE_VIEW_FILTERS["A3 - Needs Classification"] = MEDIA_SIDE_VIEW_FILTERS.viwf6dxUJrMx2yNoe;
+MEDIA_SIDE_VIEW_FILTERS["A4 - Check for orphaned media assets"] = MEDIA_SIDE_VIEW_FILTERS.viwQv8PDtE8qXwMPk;
 
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
 export async function listSupabaseMediaByFormula(env, formula, { limit = 25, viewName = "" } = {}) {
