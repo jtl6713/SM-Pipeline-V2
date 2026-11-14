@@ -1151,3 +1151,5 @@ Deploy 2026-11-14 Worker 0.10.887-closeout-r2-publish: IG publish cadence + Sche
 Deploy 2026-11-14 Worker 0.10.888-closeout-p1-r5-diff: R5 view honor + DATETIME_DIFF publish cooldown Output leaves prefer Supabase. Record deletion is not started. Verify /health version 0.10.888-closeout-p1-r5-diff.
 
 Deploy 2026-11-14 Worker 0.10.889-closeout-p1-t1: P1 Content view + T1/continuation Output leaves prefer Supabase. Record deletion is not started. Verify /health version 0.10.889-closeout-p1-t1.
+
+Deploy 2026-11-14 Worker 0.10.890-closeout-rfr-rr1: RR1/RFR-cover/M1 Output leaves + R2B view + LAST_MODIFIED_TIME prefer Supabase. Record deletion is not started. Verify /health version 0.10.890-closeout-rfr-rr1.
