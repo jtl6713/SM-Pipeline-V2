@@ -6479,6 +6479,23 @@ export function translateProductionRequestFormula(formula) {
     || cleaned === "AND({Test_Run_ID}=BLANK(),{Request_Status}='Promoted')") {
     return deskRequestFilter("inventory_promoted");
   }
+  // Desk autonomous open / promoted PR lists (formula path; desk heal already covers).
+  if ((cleaned.includes("FIND('origin=autonomous',{Production_Notes}")
+      || cleaned.includes('FIND("origin=autonomous",{Production_Notes}'))
+    && cleaned.includes("{Test_Run_ID}=BLANK()")) {
+    const openStatuses = cleaned.includes("{Request_Status}='Draft'")
+      || cleaned.includes('{Request_Status}="Draft"');
+    const promoted = cleaned.includes("{Request_Status}='Promoted'")
+      || cleaned.includes('{Request_Status}="Promoted"');
+    if (openStatuses
+      && (cleaned.includes("{Request_Status}='Ready'") || cleaned.includes('{Request_Status}="Ready"'))
+      && (cleaned.includes("{Request_Status}='Submitted'") || cleaned.includes('{Request_Status}="Submitted"'))) {
+      return deskRequestFilter("inventory_autonomous");
+    }
+    if (promoted && !openStatuses) {
+      return deskRequestFilter("inventory_autonomous_promoted");
+    }
+  }
   if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Submitted")'
     || cleaned === "AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}='Submitted')") {
     return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=eq.Submitted`;
@@ -7495,6 +7512,41 @@ function outputSideLeafFilter(cleaned) {
   const publishedGte = cleaned.match(/^\{Published_At\}>="([^"]+)"$/);
   if (publishedGte) {
     return `published_at.gte.${encodeDeskFilterValue(publishedGte[1])}`;
+  }
+  // Asset Manager published-library day leaves (OR-composed by formula trees).
+  const publishedSameDay = cleaned.match(
+    /^IS_SAME\(\{Published_At\},DATETIME_PARSE\("(\d{4}-\d{2}-\d{2})"\),"day"\)$/,
+  );
+  if (publishedSameDay) {
+    const day = publishedSameDay[1];
+    const [y, m, d] = day.split("-").map(Number);
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    const nextDay = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
+    return `and(published_at.gte.${day},published_at.lt.${nextDay})`;
+  }
+  const publishedAfterDay = cleaned.match(
+    /^IS_AFTER\(\{Published_At\},DATETIME_PARSE\("(\d{4}-\d{2}-\d{2})"\)\)$/,
+  );
+  if (publishedAfterDay) {
+    return `published_at.gt.${publishedAfterDay[1]}`;
+  }
+  const publishedBeforeDay = cleaned.match(
+    /^IS_BEFORE\(\{Published_At\},DATETIME_PARSE\("(\d{4}-\d{2}-\d{2})"\)\)$/,
+  );
+  if (publishedBeforeDay) {
+    return `published_at.lt.${publishedBeforeDay[1]}`;
+  }
+  // Published-library search: FIND(needle, LOWER(CONCATENATE(title/platform/...))).
+  // compactFormula collapses "' '" separators to '' inside CONCATENATE.
+  const publishedSearch = cleaned.match(
+    /^FIND\("([^"]+)",LOWER\(CONCATENATE\(\{Output_Title\},' ',\{Platform\},' ',\{Platform_Output_Type\},' ',\{Studio_Output_Type\},' ',\{Output_Filename\}\)\)\)$/,
+  );
+  if (publishedSearch) {
+    const needle = publishedSearch[1];
+    if (needle && !/[,()*"]/.test(needle) && needle.length <= 80) {
+      const like = encodeDeskFilterValue(`*${needle}*`);
+      return `or(output_title.ilike.${like},platform.ilike.${like},platform_output_type.ilike.${like},studio_output_type.ilike.${like},output_filename.ilike.${like})`;
+    }
   }
   // Fresh-row windows: IS_AFTER(CREATED_TIME(), DATETIME_PARSE("ISO")).
   const createdAfter = cleaned.match(
