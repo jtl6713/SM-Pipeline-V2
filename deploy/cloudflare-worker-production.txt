@@ -1255,3 +1255,5 @@ Deploy 2026-11-14 Worker 0.10.937-closeout-a4-view: A4 orphan media view prefer 
 Deploy 2026-11-14 Worker 0.10.938-closeout-r2-view: R2 Available Classified Video Assets view prefer Supabase. Record deletion is not started. Verify /health version 0.10.938-closeout-r2-view.
 
 Deploy 2026-11-14 Worker 0.10.939-closeout-c6-view: C6 Active Small Branding Watermark view prefer Supabase. Record deletion is not started. Verify /health version 0.10.939-closeout-c6-view.
+
+Deploy 2026-11-14 Worker 0.10.940-closeout-r2-music: R2 Available Classified Music Assets view prefer Supabase. Record deletion is not started. Verify /health version 0.10.940-closeout-r2-music.
