@@ -1189,3 +1189,5 @@ Deploy 2026-11-14 Worker 0.10.904-closeout-admin-lib: Make Admin Pending + ASSET
 Deploy 2026-11-14 Worker 0.10.905-closeout-classify: LIBRARY_CLASSIFY_PENDING + intake batch Classification_Status lists prefer Supabase. Record deletion is not started. Verify /health version 0.10.905-closeout-classify.
 
 Deploy 2026-11-14 Worker 0.10.906-closeout-oversized: oversized video File_Size_MB media list formula prefers Supabase. Record deletion is not started. Verify /health version 0.10.906-closeout-oversized.
+
+Deploy 2026-11-14 Worker 0.10.907-closeout-render-hold: Studio_Render_Review hold TRUE/ID/Session leaves so rendering-review workspace Reel hold list prefers Supabase. Record deletion is not started. Verify /health version 0.10.907-closeout-render-hold.

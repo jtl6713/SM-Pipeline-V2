@@ -6861,6 +6861,7 @@ const OUTPUT_SIDE_BOOL_FIELDS = {
   Publish_Retry_Eligible: "publish_retry_eligible",
   Auto_Publish_Enabled: "auto_publish_enabled",
   Manual_Fallback_Required: "error_messages->>Manual_Fallback_Required",
+  Studio_Render_Review_Hold_Active: "error_messages->>Studio_Render_Review_Hold_Active",
 };
 
 const OUTPUT_SIDE_BLANK_FIELDS = {
@@ -6872,6 +6873,8 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   YouTube_Video_ID: "error_messages->>YouTube_Video_ID",
   Platform_Post_URL: "platform_post_url",
   Manual_Published_URL: "error_messages->>Manual_Published_URL",
+  Studio_Render_Review_Hold_ID: "error_messages->>Studio_Render_Review_Hold_ID",
+  Studio_Render_Review_Session_ID: "error_messages->>Studio_Render_Review_Session_ID",
   // Typed column never existed; densify stores the Graph id in the bag.
   Platform_Post_ID: "error_messages->>Platform_Post_ID",
   FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",
@@ -7138,6 +7141,10 @@ function outputSideLeafFilter(cleaned) {
   const boolEq = cleaned.match(/^\{([A-Za-z0-9_]+)\}=([01])$/);
   if (boolEq && OUTPUT_SIDE_BOOL_FIELDS[boolEq[1]]) {
     return `${OUTPUT_SIDE_BOOL_FIELDS[boolEq[1]]}.eq.${boolEq[2] === "1" ? "true" : "false"}`;
+  }
+  const boolTrueFalse = cleaned.match(/^\{([A-Za-z0-9_]+)\}=(TRUE|FALSE)\(\)$/);
+  if (boolTrueFalse && OUTPUT_SIDE_BOOL_FIELDS[boolTrueFalse[1]]) {
+    return `${OUTPUT_SIDE_BOOL_FIELDS[boolTrueFalse[1]]}.eq.${boolTrueFalse[2] === "TRUE" ? "true" : "false"}`;
   }
   const eq = cleaned.match(/^\{([A-Za-z0-9_]+)\}="([^"]*)"$/);
   if (eq && OUTPUT_SIDE_EQ_FIELDS[eq[1]]) {
