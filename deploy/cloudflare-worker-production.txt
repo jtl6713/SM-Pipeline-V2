@@ -1165,3 +1165,5 @@ Deploy 2026-11-14 Worker 0.10.893-closeout-census-bound: bound failed-output cen
 Deploy 2026-11-14 Worker 0.10.894-closeout-pr-lists: Production Request Preparing/Error/Promoted/Submitted/master-ready/timed-script list formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.894-closeout-pr-lists.
 
 Deploy 2026-11-14 Worker 0.10.895-closeout-content-esc: escalated PR lists + Content RECORD_ID/status/Preferred_Music FIND prefer Supabase. Record deletion is not started. Verify /health version 0.10.895-closeout-content-esc.
+
+Deploy 2026-11-14 Worker 0.10.896-closeout-pr-music-factory: PR Selected_Music FIND + factory-revision pending lists, Output Content_Item quote/&"" FIND, media Music library formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.896-closeout-pr-music-factory.
