@@ -2719,7 +2719,7 @@ export function deskHealOutputFilter(kind, options = {}) {
     const required = encodeDeskFilterValue("Required");
     const hasVideo = "error_messages->>YouTube_Video_ID.not.is.null";
     const hasUrl = "and(platform_post_url.not.is.null,platform_post_url.neq.)";
-    const hasPostId = "and(platform_post_id.not.is.null,platform_post_id.neq.)";
+    const hasPostId = "and(error_messages->>Platform_Post_ID.not.is.null,error_messages->>Platform_Post_ID.neq.)";
     return `${quiet}&platform.eq.YouTube`
       + `&publish_status.neq.Published&publish_status.neq.${encodeDeskFilterValue("Published Privately")}`
       + `&output_status.neq.Published`
@@ -6453,6 +6453,10 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   Review_Status: "review_status",
   Render_Status: "render_status",
   YouTube_Stage: "youtube_stage",
+  Platform_Output_Type: "platform_output_type",
+  Studio_Output_Type: "studio_output_type",
+  FB_Publish_Status: "fb_publish_status",
+  FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6469,7 +6473,9 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   Publish_Next_Retry_At: "publish_next_retry_at",
   YouTube_Video_ID: "error_messages->>YouTube_Video_ID",
   Platform_Post_URL: "platform_post_url",
-  Platform_Post_ID: "platform_post_id",
+  // Typed column never existed; densify stores the Graph id in the bag.
+  Platform_Post_ID: "error_messages->>Platform_Post_ID",
+  FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",
 };
 
 function outputSideBlankFilter(column) {
