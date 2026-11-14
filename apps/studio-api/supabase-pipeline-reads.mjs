@@ -7006,6 +7006,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   TikTok_Draft_Status: "tiktok_draft_status",
   IG_Story_Status: "error_messages->>IG_Story_Status",
   IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
+  // AP4R parent-publishing reconcile — stage lives in the lean bag.
+  IG_Carousel_Error_Stage: "error_messages->>IG_Carousel_Error_Stage",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
   Asset_Need_Status: "error_messages->>Asset_Need_Status",
   Timing_Status: "error_messages->>Timing_Status",
@@ -7050,6 +7052,8 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   IG_Story_Container_ID: "error_messages->>IG_Story_Container_ID",
   IG_Story_Post_ID: "error_messages->>IG_Story_Post_ID",
   IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
+  // AP4R/AP5C — published media id is bag-only (no typed column).
+  IG_Carousel_Published_Media_ID: "error_messages->>IG_Carousel_Published_Media_ID",
   Content_Item: "content_item_airtable_id",
   Render_Status: "render_status",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
