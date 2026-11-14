@@ -6220,6 +6220,24 @@ export function translateProductionRequestFormula(formula) {
     || cleaned === "AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!=\"\")") {
     return "production_job=not.is.null";
   }
+  // Open Draft/Ready/Submitted requests (idea draft fanout).
+  if (cleaned === 'OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted")'
+    || cleaned === "OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted')") {
+    return "request_status=in.(Draft,Ready,Submitted)";
+  }
+  // Ops / Factory request queue: quiet + not Cancelled + open status OR unfinished job.
+  if (cleaned.includes("{Test_Run_ID}=BLANK()")
+    && (cleaned.includes('{Request_Status}!="Cancelled"')
+      || cleaned.includes("{Request_Status}!='Cancelled'"))
+    && cleaned.includes('{Request_Status}="Draft"')
+    && cleaned.includes('{Request_Status}="Ready"')
+    && cleaned.includes('{Request_Status}="Submitted"')
+    && cleaned.includes('{Studio_Production_Job_JSON}!=""')
+    && cleaned.includes('"step":"done"')) {
+    return `${REQUEST_TEST_RUN_QUIET}&request_status=neq.Cancelled`
+      + "&or=(request_status.in.(Draft,Ready,Submitted),"
+      + "and(production_job.not.is.null,or(production_job->>step.is.null,production_job->>step.neq.done)))";
+  }
   // Music library usage: FIND Selected_Music_Asset in publish_status bag.
   const musicFind = cleaned.match(
     /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Selected_Music_Asset\}\)(?:&"")?\)(?:>0)?$/,
