@@ -1895,6 +1895,11 @@ export const CAROUSEL_SLIDE_COPY_FIELDS = Object.freeze([
   "IG_Child_Container_ID",
   "IG_Child_Container_Status",
   "IG_Child_Container_Status",
+  // C2M - Manual Uploads Ready view densify (cadence probe).
+  "Image Generation Mode",
+  "Manual Upload Processed",
+  "Manual Upload Image",
+  "Test_Run_ID",
   "Slide_Voiceover_Status",
   "Slide_Voiceover_Text",
   "Slide_Voiceover_URL",
@@ -6950,11 +6955,30 @@ function tightenSideFormula(text) {
   return out;
 }
 
+/** Cadence C2M view — Airtable Meta snapshot of viwPm4Pyk0BEzLvyE. */
+const SLIDES_SIDE_VIEW_FILTERS = {
+  viwPm4Pyk0BEzLvyE:
+    "and(fields->>\"Image Generation Mode\".eq.Manual%20Upload,"
+    + "or(fields->>\"Manual Upload Processed\".is.null,"
+    + "fields->>\"Manual Upload Processed\".eq.false,"
+    + "fields->>\"Manual Upload Processed\".eq.0,"
+    + "fields->>\"Manual Upload Processed\".eq.False),"
+    + "and(fields->\"Manual Upload Image\".not.is.null,"
+    + "fields->>\"Manual Upload Image\".neq.,"
+    + "fields->>\"Manual Upload Image\".neq.[]),"
+    + "or(deleted_from_carousel.is.null,deleted_from_carousel.eq.false))",
+};
+SLIDES_SIDE_VIEW_FILTERS["C2M - Manual Uploads Ready"] = SLIDES_SIDE_VIEW_FILTERS.viwPm4Pyk0BEzLvyE;
+
 function slideFormulaFilter(formula) {
   const cleaned = tightenSideFormula(formula);
   if (!cleaned) return null;
   const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
   if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  // Cadence quiet filter on slides (bag-only Test_Run_ID).
+  if (cleaned === "{Test_Run_ID}=BLANK()") {
+    return "or(fields->>Test_Run_ID.is.null,fields->>Test_Run_ID.eq.)";
+  }
   // Native gallery / reviewListRecords: OR(RECORD_ID()="rec…",RECORD_ID()="rec…")
   if (cleaned.startsWith("OR(") && cleaned.endsWith(")")) {
     const parts = splitQueueArgs(cleaned.slice(3, -1));
@@ -7058,15 +7082,20 @@ function slideFormulaFilter(formula) {
   return null;
 }
 
-async function readSlideRows(env, formula, limit, offset) {
-  const translated = slideFormulaFilter(formula);
-  if (!translated) return null;
+async function readSlideRows(env, formula, limit, offset, viewName = "") {
+  const viewFilter = viewName ? (SLIDES_SIDE_VIEW_FILTERS[viewName] || null) : null;
+  if (viewName && !viewFilter) return null;
+  const translated = formula ? slideFormulaFilter(formula) : null;
+  if (formula && !translated) return null;
+  if (!translated && !viewFilter) return null;
+  const andParts = [viewFilter, translated].filter(Boolean);
+  const andClause = andParts.length === 1 ? andParts[0] : `and(${andParts.join(",")})`;
   const select = "airtable_record_id,current_order,deleted_from_carousel,ig_child_container_id,voiceover,creative_directives,fields";
   const rows = await supabaseRest(
     env,
     `carousel_slides?select=${select}`
       + `&order=current_order.asc.nullslast&limit=${limit}&offset=${offset}`
-      + `&and=(${translated})`,
+      + `&and=(${andClause})`,
   );
   if (!Array.isArray(rows)) return null;
   return rows.map(airtableShapedCarouselSlide).filter((row) => row?.id);
@@ -8143,7 +8172,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   if (kind === "slides") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
-    const records = await readSlideRows(env, formula, limit, offset);
+    const viewName = String(sideQuery(pathOrParams).get("view") || "").trim();
+    // Unknown Carousel Slides views must not collapse to formula-only.
+    if (viewName && !SLIDES_SIDE_VIEW_FILTERS[viewName]) return null;
+    const records = await readSlideRows(env, formula, limit, offset, viewName);
     if (!records) return null;
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);

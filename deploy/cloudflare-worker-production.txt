@@ -1239,3 +1239,5 @@ Deploy 2026-11-14 Worker 0.10.929-closeout-lib-pr: Autonomous PR lists + publish
 Deploy 2026-11-14 Worker 0.10.930-closeout-idea-lib: Autonomous idea-library harvest pages Supabase media_assets; QA recovery ledger POST/PATCH commit skips Airtable under write SoR. Record deletion is not started. Verify /health version 0.10.930-closeout-idea-lib.
 
 Deploy 2026-11-14 Worker 0.10.931-closeout-sched-regen: Schedule-regen LOWER(Platform) + schedule DATETIME_PARSE windows + Meta Studio_Output_Notes FIND prefer Supabase. Record deletion is not started. Verify /health version 0.10.931-closeout-sched-regen.
+
+Deploy 2026-11-14 Worker 0.10.932-closeout-c2m-slides: C2M Manual Uploads Ready view + Test_Run_ID blank prefer Supabase carousel_slides. Record deletion is not started. Verify /health version 0.10.932-closeout-c2m-slides.
