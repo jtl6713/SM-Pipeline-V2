@@ -1157,3 +1157,5 @@ Deploy 2026-11-14 Worker 0.10.890-closeout-rfr-rr1: RR1/RFR-cover/M1 Output leav
 Deploy 2026-11-14 Worker 0.10.891-closeout-publish-find: publish reconcile blanks + FBS UPPER FIND + schedule DATEADD prefer Supabase. Record deletion is not started. Verify /health version 0.10.891-closeout-publish-find.
 
 Deploy 2026-11-14 Worker 0.10.892-closeout-ig-heal: IG carousel heal FIND + TikTok draft publish-id + FB story media-id prefer Supabase. Record deletion is not started. Verify /health version 0.10.892-closeout-ig-heal.
+
+Redeploy 2026-11-14 after 0.10.891 rollback: failed-output-census curl timed out (70s) during Factory batch verify; Worker source deploy itself succeeded then rolled back. 0.10.892 includes publish-find + IG heal and re-fires production Worker deploy.
