@@ -1149,3 +1149,5 @@ Deploy 2026-11-13 Worker 0.10.886-closeout-cadence-r2: cadence R2/R3/R4 + TikTok
 Deploy 2026-11-14 Worker 0.10.887-closeout-r2-publish: IG publish cadence + Scheduled_Post_Date + R2 media densify/views. Record deletion is not started. Verify /health version 0.10.887-closeout-r2-publish.
 
 Deploy 2026-11-14 Worker 0.10.888-closeout-p1-r5-diff: R5 view honor + DATETIME_DIFF publish cooldown Output leaves prefer Supabase. Record deletion is not started. Verify /health version 0.10.888-closeout-p1-r5-diff.
+
+Deploy 2026-11-14 Worker 0.10.889-closeout-p1-t1: P1 Content view + T1/continuation Output leaves prefer Supabase. Record deletion is not started. Verify /health version 0.10.889-closeout-p1-t1.

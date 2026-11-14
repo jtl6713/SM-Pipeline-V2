@@ -6512,6 +6512,7 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
   Asset_Need_Status: "error_messages->>Asset_Need_Status",
+  Timing_Status: "error_messages->>Timing_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6550,6 +6551,10 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   IG_Story_Last_Attempt_At: "error_messages->>IG_Story_Last_Attempt_At",
   YouTube_Last_Checked_At: "error_messages->>YouTube_Last_Checked_At",
   FB_Last_Checked_At: "error_messages->>FB_Last_Checked_At",
+  Timing_Status: "error_messages->>Timing_Status",
+  Music_URL: "error_messages->>Music_URL",
+  Selected_Music_URL: "error_messages->>Selected_Music_URL",
+  Production_Request_Output: "production_request_output_text",
 };
 
 /** Cadence Output views Worker probes without filterByFormula trees. */
@@ -6562,6 +6567,25 @@ const OUTPUT_SIDE_VIEW_FILTERS = {
     "and(render_status.eq.Rendering,"
     + "and(error_messages->>Remotion_Status_URL.not.is.null,error_messages->>Remotion_Status_URL.neq.),"
     + "or(final_file_url.is.null,final_file_url.eq.))",
+};
+
+/** Cadence Content views (runner snapshot, PostgREST-ready). */
+const CONTENT_SIDE_VIEW_FILTERS = {
+  "P1 - Ready for Package Generation":
+    "and(or(content_status.eq.Idea%20Approved,content_status.eq.Ready%20for%20Script),"
+    + "and(content_title.not.is.null,content_title.neq.),"
+    + "and(extras->>Idea_Summary.not.is.null,extras->>Idea_Summary.neq.),"
+    + "content_profile_id.not.is.null,"
+    + "and(extras->>Source_Candidate.not.is.null,extras->>Source_Candidate.neq.),"
+    + "or(extras->>Do_Not_Produce.is.null,extras->>Do_Not_Produce.eq.false),"
+    + "or(extras->>Script.is.null,extras->>Script.eq.),"
+    + "or(extras->>Voiceover_Script.is.null,extras->>Voiceover_Script.eq.),"
+    + "or(extras->>Caption.is.null,extras->>Caption.eq.),"
+    + "or(extras->>Hashtags.is.null,extras->>Hashtags.eq.),"
+    + "or(extras->>Thumbnail_Concept.is.null,extras->>Thumbnail_Concept.eq.),"
+    + "or(extras->>Thumbnail_Prompt.is.null,extras->>Thumbnail_Prompt.eq.),"
+    + "or(or(extras->>Script.is.null,extras->>Script.eq.),"
+    + "extras->>Script_Status.eq.Not%20Started,extras->>Script_Status.eq.Ready))",
 };
 
 function outputSideBlankFilter(column) {
@@ -6583,6 +6607,10 @@ function outputSideLeafFilter(cleaned) {
   if (notBool && OUTPUT_SIDE_BOOL_FIELDS[notBool[1]]) {
     const col = OUTPUT_SIDE_BOOL_FIELDS[notBool[1]];
     return `or(${col}.is.null,${col}.eq.false)`;
+  }
+  const notEq = cleaned.match(/^NOT\(\{([A-Za-z0-9_]+)\}="([^"]*)"\)$/);
+  if (notEq && OUTPUT_SIDE_EQ_FIELDS[notEq[1]]) {
+    return `${OUTPUT_SIDE_EQ_FIELDS[notEq[1]]}.neq.${encodeDeskFilterValue(notEq[2])}`;
   }
   const blank = cleaned.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
   if (blank && OUTPUT_SIDE_BLANK_FIELDS[blank[1]]) {
@@ -6693,18 +6721,26 @@ function outputContentListFilter(kind, formula) {
   if (kind === "content") {
     const contentId = cleaned.match(/^\{Content_ID\}=(\d+)$/);
     if (contentId) return `content_number.eq.${contentId[1]}`;
+    // content_items has no test_run_id column; treat blank as always-true.
     const blank = cleaned.match(/^\{Test_Run_ID\}=BLANK\(\)$/);
-    if (blank) return "or(test_run_id.is.null,test_run_id.eq.)";
+    if (blank) return "id.not.is.null";
   }
   return null;
 }
 
 async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "") {
   const translated = outputContentListFilter(kind, formula);
-  const viewFilter = kind === "output" && viewName
-    ? (OUTPUT_SIDE_VIEW_FILTERS[viewName] || null)
+  const viewFilter = viewName
+    ? (
+      kind === "output"
+        ? (OUTPUT_SIDE_VIEW_FILTERS[viewName] || null)
+        : kind === "content"
+          ? (CONTENT_SIDE_VIEW_FILTERS[viewName] || null)
+          : null
+    )
     : null;
   if (viewName && kind === "output" && !viewFilter) return null;
+  if (viewName && kind === "content" && !viewFilter) return null;
   if (!translated && !viewFilter) return null;
   if (kind === "output") {
     const andParts = [viewFilter, translated].filter(Boolean);
@@ -6720,11 +6756,15 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
     if (!Array.isArray(rows)) return null;
     return rows.map((row) => shapeDeskHealRecord(row)).filter((row) => row?.id);
   }
+  const andParts = [viewFilter, translated].filter(Boolean);
+  const andClause = andParts.length === 1
+    ? andParts[0]
+    : `and(${andParts.join(",")})`;
   const rows = await supabaseRest(
     env,
     `content_items?select=${CONTENT_SELECT}`
       + `&order=content_number.desc.nullslast&limit=${limit}&offset=${offset}`
-      + `&and=(${translated})`,
+      + `&and=(${andClause})`,
   );
   if (!Array.isArray(rows)) return null;
   return rows
@@ -6973,12 +7013,13 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (kind === "output" || kind === "content") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
     const viewName = String(sideQuery(pathOrParams).get("view") || "").trim();
-    // Unknown Output views must not collapse to formula-only (false R5 probes).
+    // Unknown Output/Content views must not collapse to formula-only (false probes).
     if (kind === "output" && viewName && !OUTPUT_SIDE_VIEW_FILTERS[viewName]) {
       return null;
     }
-    // Content P1 still needs a view snapshot; fall through until densified.
-    if (kind === "content" && viewName) return null;
+    if (kind === "content" && viewName && !CONTENT_SIDE_VIEW_FILTERS[viewName]) {
+      return null;
+    }
     const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName);
     if (!records) return null;
     const body = { records };
