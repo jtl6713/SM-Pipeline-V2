@@ -6145,6 +6145,76 @@ export async function listSupabaseAutonomousDraftRequests(env, { limit = 50 } = 
   return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
 }
 
+const REQUEST_TEST_RUN_QUIET =
+  "or=(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.)";
+const REQUEST_ACTIVE =
+  "or=(publish_status->>Active.is.null,publish_status->>Active.eq.true)";
+
+/** Translate allowlisted Production Request list formulas to PostgREST. */
+export function translateProductionRequestFormula(formula) {
+  const cleaned = compactFormula(formula);
+  if (!cleaned) return null;
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")') {
+    return `${REQUEST_TEST_RUN_QUIET}&variant_status=eq.Preparing`;
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Error")') {
+    return `${REQUEST_TEST_RUN_QUIET}&variant_status=eq.Error`;
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),OR({Studio_Variant_Status}="Preparing",{Studio_Variant_Status}="Error"))') {
+    return deskRequestFilter("inventory_preparing");
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Request_Status}="Promoted")'
+    || cleaned === "AND({Test_Run_ID}=BLANK(),{Request_Status}='Promoted')") {
+    return deskRequestFilter("inventory_promoted");
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Submitted")'
+    || cleaned === "AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}='Submitted')") {
+    return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=eq.Submitted`;
+  }
+  if (cleaned === 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Promoted",{Promoted_Content_Item}!=BLANK())'
+    || cleaned === "AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}='Promoted',{Promoted_Content_Item}!=BLANK())") {
+    return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=eq.Promoted`
+      + "&and=(publish_status->>promoted_content_airtable_id.not.is.null,"
+      + "publish_status->>promoted_content_airtable_id.neq.)";
+  }
+  if (cleaned === "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0)"
+    || cleaned === 'AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted"),{Studio_Master_Asset_Status}="Ready",{Studio_Master_Asset_Count}>0)') {
+    return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=in.(Draft,Ready,Submitted)`
+      + `&publish_status->>Studio_Master_Asset_Status=eq.Ready`
+      + `&publish_status->Studio_Master_Asset_Count=gt.0`;
+  }
+  if (cleaned === "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')"
+    || cleaned === 'AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled")') {
+    return `${REQUEST_TEST_RUN_QUIET}&request_status=neq.Cancelled`;
+  }
+  // Timed-script / idea-vo ready-for-variant harvest.
+  if (cleaned.includes("{Test_Run_ID}=BLANK()")
+    && cleaned.includes('{Request_Status}="Draft"')
+    && cleaned.includes('{Request_Status}="Ready"')
+    && cleaned.includes('{Studio_Output_Plan_Status}="Ready"')
+    && (cleaned.includes("idea-vo-timeline=") || cleaned.includes("[timed-script]"))) {
+    return `${REQUEST_TEST_RUN_QUIET}&request_status=in.(Draft,Ready)`
+      + `&output_plan_status=eq.Ready`
+      + `&or=(variant_status.is.null,variant_status.eq.,variant_status.eq.None)`
+      + `&or=(production_notes.ilike.*idea-vo-timeline=*,production_notes.ilike.*[timed-script]*)`;
+  }
+  return null;
+}
+
+/** Allowlisted Production Request list formulas under Phase6 SoR. */
+export async function listSupabaseProductionRequestsByFormula(env, formula, { limit = 50 } = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const filter = translateProductionRequestFormula(formula);
+  if (!filter) return null;
+  const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const rows = await supabaseRest(
+    env,
+    `production_requests?${filter}&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+}
+
 async function readSettingRows(env, source, filter, limit) {
   const parts = [`payload->>source=eq.${source}`, `select=airtable_record_id,payload`, `limit=${limit}`];
   if (filter.name) parts.push(`payload->>Setting_Name=eq.${encodeURIComponent(filter.name)}`);
@@ -7181,8 +7251,12 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       && cleaned.includes("{Request_Status}='Draft'")
       && cleaned.includes("{Request_Status}='Ready'")
       && cleaned.includes("{Request_Status}='Submitted'");
-    if (!autonomousDraft) return null;
-    const records = await listSupabaseAutonomousDraftRequests(env, { limit });
+    if (autonomousDraft) {
+      const records = await listSupabaseAutonomousDraftRequests(env, { limit });
+      if (!records) return null;
+      return { records };
+    }
+    const records = await listSupabaseProductionRequestsByFormula(env, formula, { limit });
     if (!records) return null;
     return { records };
   }
