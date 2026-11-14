@@ -1247,6 +1247,10 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   const watermark = cleaned === 'AND({Asset_Role}="Watermark",{Asset_Status}="Available")'
     || cleaned === "AND({Asset_Role}='Watermark',{Asset_Status}='Available')";
   const transferMatch = cleaned.match(/^\{Studio_Transfer_ID\}=(["'])([^"']*)\1$/);
+  // ASSET_LIBRARY_LIST_FORMULA — non-music Image/Graphic/Video, exclude fill-crop.
+  // compactFormula collapses {Asset Name} → {AssetName}.
+  const assetLibrary = cleaned === "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({AssetName}&''))))"
+    || cleaned === 'AND(OR({Media_Class}="Image",{Media_Class}="Graphic",{Media_Class}="Video"),OR({Asset_Role}!="Music",{Asset_Role}=BLANK()),NOT(FIND("fill-crop",LOWER({AssetName}&""))))';
   if (logo) {
     filter = "asset_role=eq.Logo&or=(do_not_use.is.null,do_not_use.eq.false)";
   } else if (music) {
@@ -1257,6 +1261,10 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   } else if (watermark) {
     filter = "asset_role=eq.Watermark&asset_status=eq.Available"
       + "&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (assetLibrary) {
+    filter = "media_class=in.(Image,Graphic,Video)"
+      + "&or=(asset_role.is.null,asset_role.eq.,asset_role.neq.Music)"
+      + "&asset_name=not.ilike.*fill-crop*";
   } else if (transferMatch) {
     filter = `metadata->>studio_transfer_id=eq.${encodeURIComponent(transferMatch[2])}`;
   } else if (nameMatch) {
@@ -5955,6 +5963,10 @@ function makeAdminQueueBodyFromFields(id, fields = {}) {
 
 function makeAdminQueueListFilter(formula) {
   const cleaned = compactFormula(formula);
+  // Pending drain (STUDIO_MAKE_ADMIN_PENDING_FORMULA).
+  if (cleaned === '{Status}="Pending"' || cleaned === "{Status}='Pending'") {
+    return "status=eq.Pending";
+  }
   if (!cleaned.includes('{Status}="Processing"') && !cleaned.includes("{Status}='Processing'")) {
     return null;
   }

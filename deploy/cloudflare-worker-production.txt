@@ -1183,3 +1183,5 @@ Deploy 2026-11-14 Worker 0.10.901-closeout-ops-review: OPS review bare Do_Not_Pu
 Deploy 2026-11-14 Worker 0.10.902-closeout-yt-quota: YouTube Error_Message FIND + Manual_Completion_Status + LEN Platform_Post_ID prefer Supabase for YTS2 quota/live heal lists. Record deletion is not started. Verify /health version 0.10.902-closeout-yt-quota.
 
 Deploy 2026-11-14 Worker 0.10.903-closeout-manual-home: Manual_Published_URL + Music_Status so Manual Action home list prefers Supabase. Record deletion is not started. Verify /health version 0.10.903-closeout-manual-home.
+
+Deploy 2026-11-14 Worker 0.10.904-closeout-admin-lib: Make Admin Pending + ASSET_LIBRARY_LIST_FORMULA prefer Supabase. Record deletion is not started. Verify /health version 0.10.904-closeout-admin-lib.
