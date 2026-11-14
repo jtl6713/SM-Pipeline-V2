@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
+  assert.match(worker, /0\.10\.931-closeout-sched-regen/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
+  assert.match(worker, /0\.10\.931-closeout-sched-regen/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
+  assert.match(worker, /0\.10\.931-closeout-sched-regen/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
+  assert.match(worker, /0\.10\.931-closeout-sched-regen/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -5492,4 +5492,75 @@ test("Autonomous PR lists and published-library date/search prefer Supabase", as
   const search = translateOutputSideFormula(publishedLibraryFilterFormula("Instagram Reel"));
   assert.ok(search);
   assert.match(search, /output_title\.ilike\.\*instagram%20reel\*/);
+});
+
+test("Schedule-regen LOWER(Platform) and Meta Studio_Output_Notes FIND prefer Supabase", async () => {
+  const { translateOutputSideFormula, studioSideTableRead } = await import("./supabase-pipeline-reads.mjs");
+  const { scheduleRegenCandidateFilterFormula } = await import("./schedule-regen-batch.mjs");
+  const { META_SPAM_HELD_CANDIDATES } = await import("./meta-spam-autonomous-schedule.mjs");
+
+  const leaf = translateOutputSideFormula('LOWER({Platform})="instagram"');
+  assert.ok(leaf);
+  assert.match(leaf, /platform\.ilike\.instagram/);
+
+  const ytWindow = translateOutputSideFormula(
+    'AND({YouTube_Scheduled_Publish_At}!="",IS_AFTER({YouTube_Scheduled_Publish_At},DATETIME_PARSE("2026-11-14T20:00:00.000Z")),IS_BEFORE({YouTube_Scheduled_Publish_At},DATETIME_PARSE("2026-12-14T20:00:00.000Z")))',
+  );
+  assert.ok(ytWindow);
+  assert.match(ytWindow, /youtube_scheduled_publish_at\.gt\./);
+  assert.match(ytWindow, /youtube_scheduled_publish_at\.lt\./);
+
+  const noscope = scheduleRegenCandidateFilterFormula({
+    nowMs: Date.parse("2026-11-14T20:00:00.000Z"),
+    horizonDays: 30,
+    platform: "Instagram",
+    outputType: "Reel",
+  });
+  const translated = translateOutputSideFormula(noscope);
+  assert.ok(translated);
+  assert.match(translated, /platform\.ilike\.instagram/);
+  assert.match(translated, /studio_scheduled_at/);
+
+  const spam = translateOutputSideFormula(META_SPAM_HELD_CANDIDATES);
+  assert.ok(spam);
+  assert.match(spam, /Studio_Output_Notes/);
+
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      urls.push(href);
+      if (href.includes("content_profiles")) {
+        return new Response(JSON.stringify([{
+          id: "uuid-profile-1",
+          airtable_record_id: "recProfile0000001",
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const formula = scheduleRegenCandidateFilterFormula({
+      nowMs: Date.parse("2026-11-14T20:00:00.000Z"),
+      horizonDays: 30,
+      profileFormula: 'FIND("recProfile0000001",ARRAYJOIN({Content_Profile})&"")',
+      platform: "Instagram",
+      outputType: "Reel",
+    });
+    const listed = await studioSideTableRead(
+      env,
+      "tblOutputs",
+      `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`,
+    );
+    assert.ok(Array.isArray(listed.records));
+    assert.ok(urls.some((url) => url.includes("platform.ilike.instagram")));
+    assert.ok(urls.some((url) => url.includes("content_profile_id.eq.")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

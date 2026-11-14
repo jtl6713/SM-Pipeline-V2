@@ -7247,6 +7247,8 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
   // QA-IG-STALE-UPLOAD guard-refusal note needle.
   Output_Notes: "error_messages->>Output_Notes",
+  // Meta 368 / QA-1050 hold markers densify into the notes bag.
+  Studio_Output_Notes: "error_messages->>Studio_Output_Notes",
 };
 
 function outputSideTextColumn(field) {
@@ -7314,6 +7316,14 @@ function outputSideLeafFilter(cleaned) {
   }
   const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
   if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  // Schedule-regen / repair occupancy: LOWER({Platform})="instagram".
+  const lowerPlatform = cleaned.match(/^LOWER\(\{Platform\}\)="([^"]*)"$/);
+  if (lowerPlatform) {
+    const raw = String(lowerPlatform[1] || "").trim();
+    if (raw && !/[,()*]/.test(raw)) {
+      return `platform.ilike.${encodeDeskFilterValue(raw)}`;
+    }
+  }
   const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
   if (outputId) return `output_number.eq.${outputId[1]}`;
   const outputIdGte = cleaned.match(/^\{Output_ID\}>=(\d+)$/);
@@ -7495,18 +7505,18 @@ function outputSideLeafFilter(cleaned) {
   if (beforeSchedIso) {
     return `scheduled_post_date.lt.${encodeDeskFilterValue(beforeSchedIso[1])}`;
   }
-  // Schedule grid windows: IS_AFTER/IS_BEFORE(..., DATETIME_PARSE("ISO")).
+  // Schedule grid / regen windows: IS_AFTER/IS_BEFORE({Field}, DATETIME_PARSE("ISO")).
   const afterSchedParse = cleaned.match(
-    /^IS_AFTER\(\{Scheduled_Post_Date\},DATETIME_PARSE\("([^"]+)"\)\)$/,
+    /^IS_AFTER\(\{([A-Za-z0-9_]+)\},DATETIME_PARSE\("([^"]+)"\)\)$/,
   );
-  if (afterSchedParse) {
-    return `scheduled_post_date.gt.${encodeDeskFilterValue(afterSchedParse[1])}`;
+  if (afterSchedParse && OUTPUT_SIDE_BLANK_FIELDS[afterSchedParse[1]]) {
+    return `${OUTPUT_SIDE_BLANK_FIELDS[afterSchedParse[1]]}.gt.${encodeDeskFilterValue(afterSchedParse[2])}`;
   }
   const beforeSchedParse = cleaned.match(
-    /^IS_BEFORE\(\{Scheduled_Post_Date\},DATETIME_PARSE\("([^"]+)"\)\)$/,
+    /^IS_BEFORE\(\{([A-Za-z0-9_]+)\},DATETIME_PARSE\("([^"]+)"\)\)$/,
   );
-  if (beforeSchedParse) {
-    return `scheduled_post_date.lt.${encodeDeskFilterValue(beforeSchedParse[1])}`;
+  if (beforeSchedParse && OUTPUT_SIDE_BLANK_FIELDS[beforeSchedParse[1]]) {
+    return `${OUTPUT_SIDE_BLANK_FIELDS[beforeSchedParse[1]]}.lt.${encodeDeskFilterValue(beforeSchedParse[2])}`;
   }
   // Engagement / history floors: {Published_At}>="ISO".
   const publishedGte = cleaned.match(/^\{Published_At\}>="([^"]+)"$/);
