@@ -1260,11 +1260,20 @@ export const MEDIA_SIDE_VIEW_FILTERS = {
     + "&google_drive_url=neq."
     + "&or=(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
     + "metadata->>rights_status.eq.Public%20Domain)",
+  // Runner C6 small branding watermark.
+  viwokn4fYjXHScEos:
+    "asset_role.eq.Watermark"
+    + "&asset_status.eq.Available"
+    + "&active.eq.true"
+    + "&or=(do_not_use.is.null,do_not_use.eq.false)"
+    + "&asset_name.ilike.*Watermark_Small*"
+    + "&google_drive_file_id=neq.",
 };
 MEDIA_SIDE_VIEW_FILTERS.Music = MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8;
 MEDIA_SIDE_VIEW_FILTERS["A3 - Needs Classification"] = MEDIA_SIDE_VIEW_FILTERS.viwf6dxUJrMx2yNoe;
 MEDIA_SIDE_VIEW_FILTERS["A4 - Check for orphaned media assets"] = MEDIA_SIDE_VIEW_FILTERS.viwQv8PDtE8qXwMPk;
 MEDIA_SIDE_VIEW_FILTERS["R2 - Available Classified Video Assets"] = MEDIA_SIDE_VIEW_FILTERS.viwDawMj0aiPtSM4P;
+MEDIA_SIDE_VIEW_FILTERS["C6 - Active Small Branding Watermark"] = MEDIA_SIDE_VIEW_FILTERS.viwokn4fYjXHScEos;
 
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
 export async function listSupabaseMediaByFormula(env, formula, { limit = 25, viewName = "" } = {}) {
