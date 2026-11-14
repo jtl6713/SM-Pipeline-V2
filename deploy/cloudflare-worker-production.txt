@@ -1205,3 +1205,5 @@ Deploy 2026-11-14 Worker 0.10.912-tiktok-place-reviews: Place Reviews discover/l
 Deploy 2026-11-14 Worker 0.10.913-closeout-idea-listen: Idea auto-listen photo_unconfigured lane prefers Supabase (autoListenOpenPhotoIdeas). Record deletion is not started. Verify /health version 0.10.913-closeout-idea-listen.
 
 Deploy 2026-11-14 Worker 0.10.914-closeout-exc-eventkey: Exception Recovery Event_Key + Quality Recovery Ledger Event_Key/reconciled lists prefer Supabase. Record deletion is not started. Verify /health version 0.10.914-closeout-exc-eventkey.
+
+Deploy 2026-11-14 Worker 0.10.915-closeout-exc-eventkey: Redeploy Exception Event_Key + QA Recovery Ledger SoR after 0.10.914 census verify timeout; harden failed-output-census deploy retries. Record deletion is not started. Verify /health version 0.10.915-closeout-exc-eventkey.
