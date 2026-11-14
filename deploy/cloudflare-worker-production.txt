@@ -1201,3 +1201,5 @@ Deploy 2026-11-14 Worker 0.10.910-closeout-slide-rec: Carousel Slides OR(RECORD_
 Deploy 2026-11-14 Worker 0.10.911-closeout-slide-space: Carousel Slides spaced-field formulas prefer Supabase (native gallery / review readSlides). Record deletion is not started. Verify /health version 0.10.911-closeout-slide-space.
 
 Deploy 2026-11-14 Worker 0.10.912-tiktok-place-reviews: Place Reviews discover/list/actions API (Open Place only; no TikTok place-review publish). Record deletion is not started. Verify /health version 0.10.912-tiktok-place-reviews.
+
+Deploy 2026-11-14 Worker 0.10.913-closeout-idea-listen: Idea auto-listen photo_unconfigured lane prefers Supabase (autoListenOpenPhotoIdeas). Record deletion is not started. Verify /health version 0.10.913-closeout-idea-listen.

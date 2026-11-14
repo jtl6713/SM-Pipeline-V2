@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.912-tiktok-place-reviews/);
+  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.912-tiktok-place-reviews/);
+  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.912-tiktok-place-reviews/);
+  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.912-tiktok-place-reviews/);
+  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4639,6 +4639,9 @@ test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open pre
   assert.ok(translateOutputSideFormula(PRE_FACTORY_READY_FORMULA));
   assert.match(translateOutputSideFormula(PRE_FACTORY_READY_FORMULA), /selected_clip_count\.gt\.0/);
   assert.equal(ideaLaneFromFormula(autoOpen), "autonomous_open");
+  const autoListen =
+    "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Production Requests}=BLANK(),{Test_Run_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'),{Production_Content_Type}=BLANK(),{Production_Carousel_Image_Mode}=BLANK(),{Production_Carousel_Slide_Count_Mode}=BLANK(),{Production_Carousel_Slide_Count}=BLANK(),{Production_Carousel_Slide_Count_Min}=BLANK(),{Production_Carousel_Slide_Count_Max}=BLANK())";
+  assert.equal(ideaLaneFromFormula(autoListen), "photo_unconfigured");
 
   const calls = [];
   const env = {
@@ -4675,10 +4678,15 @@ test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open pre
       "tblTQapddqD47GOIG",
       "?filterByFormula=" + encodeURIComponent(autoOpen) + "&maxRecords=10",
     ));
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblTQapddqD47GOIG",
+      "?filterByFormula=" + encodeURIComponent(autoListen) + "&maxRecords=10",
+    ));
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
   assert.match(calls[0], /platform_outputs\?/);
   assert.match(calls[0], /do_not_publish/);
   assert.match(calls[1], /platform_outputs\?/);
@@ -4687,6 +4695,10 @@ test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open pre
   assert.match(calls[3], /idea_candidates\?/);
   assert.match(calls[3], /status=neq\.Rejected/);
   assert.doesNotMatch(calls[3], /status=neq\.Promoted/);
+  assert.match(calls[4], /idea_candidates\?/);
+  assert.match(calls[4], /status=in\.\(Generated,Sent%20for%20Review\)/);
+  assert.match(calls[4], /Studio_Photo_Wait_Status/);
+  assert.match(calls[4], /Production_Content_Type/);
 });
 
 test("YouTube quota FIND, Manual_Completion_Status, and LEN Platform_Post_ID prefer Supabase", async () => {

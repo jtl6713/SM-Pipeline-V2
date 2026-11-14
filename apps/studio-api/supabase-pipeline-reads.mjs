@@ -1370,6 +1370,21 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
     // Match AUTONOMOUS_OPEN_IDEAS_FORMULA — do not drop Content Items rows.
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
     filter += "&status=neq.On Hold&status=neq.Rejected";
+  } else if (lane === "photo_unconfigured") {
+    // autoListenOpenPhotoIdeas — wait blank, no promote links, no production config.
+    filter += "&or=(payload->>Studio_Photo_Wait_Status.is.null,payload->>Studio_Photo_Wait_Status.eq.)";
+    filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
+    filter += "&status=in.(Generated,Sent%20for%20Review)";
+    for (const field of [
+      "Production_Content_Type",
+      "Production_Carousel_Image_Mode",
+      "Production_Carousel_Slide_Count_Mode",
+      "Production_Carousel_Slide_Count",
+      "Production_Carousel_Slide_Count_Min",
+      "Production_Carousel_Slide_Count_Max",
+    ]) {
+      filter += `&or=(payload->>${field}.is.null,payload->>${field}.eq.)`;
+    }
   } else {
     throw new Error("Unknown idea lane");
   }
@@ -1385,6 +1400,10 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
       if (lane === "autonomous_open") return true;
       const items = row.fields?.["Content Items"];
       if (Array.isArray(items) && items.length) return false;
+      if (lane === "photo_unconfigured") {
+        const requests = row.fields?.["Production Requests"];
+        if (Array.isArray(requests) && requests.length) return false;
+      }
       return true;
     });
 }
@@ -1437,6 +1456,7 @@ export function airtableShapedIdeaFromSupabase(row) {
   fields.Candidate_Status = row.status || bag.Candidate_Status || null;
   fields.Content_Profile = profileId ? [profileId] : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []);
   fields["Content Items"] = Array.isArray(bag["Content Items"]) ? bag["Content Items"] : [];
+  fields["Production Requests"] = Array.isArray(bag["Production Requests"]) ? bag["Production Requests"] : [];
   fields.Promoted_Content_Record_ID = bag.Promoted_Content_Record_ID || null;
   fields.Create_Date = bag.Create_Date || row.created_at || null;
   fields.Studio_Photo_Wait_Status = bag.Studio_Photo_Wait_Status || null;
@@ -6259,6 +6279,24 @@ export function ideaLaneFromFormula(formula) {
   // Autonomous open-ideas cap: promoted blank, not Rejected/On Hold (Promoted status ok).
   if (!waiting && !ready && promotedBlank && notOnHold && notRejected) {
     return "autonomous_open";
+  }
+  // Legacy auto-listen: wait blank + unconfigured production + Generated/Sent for Review.
+  // compactFormula collapses {Content Items} → {ContentItems}.
+  if (
+    cleaned.includes("{Studio_Photo_Wait_Status}=BLANK()")
+    && promotedBlank
+    && cleaned.includes("{ContentItems}=BLANK()")
+    && cleaned.includes("{Production_Content_Type}=BLANK()")
+    && cleaned.includes("{Production_Carousel_Image_Mode}=BLANK()")
+    && (cleaned.includes("{Candidate_Status}='Generated'")
+      || cleaned.includes('{Candidate_Status}="Generated"'))
+    // compactFormula also strips spaces inside quotes → SentforReview.
+    && (cleaned.includes("{Candidate_Status}='SentforReview'")
+      || cleaned.includes('{Candidate_Status}="SentforReview"')
+      || cleaned.includes("{Candidate_Status}='Sent for Review'")
+      || cleaned.includes('{Candidate_Status}="Sent for Review"'))
+  ) {
+    return "photo_unconfigured";
   }
   return "";
 }
