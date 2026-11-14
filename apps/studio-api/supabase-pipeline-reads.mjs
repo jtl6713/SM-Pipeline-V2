@@ -1249,10 +1249,22 @@ export const MEDIA_SIDE_VIEW_FILTERS = {
     "active.eq.true"
     + "&or=(do_not_use.is.null,do_not_use.eq.false)"
     + "&google_drive_file_id=neq.",
+  // Runner R2 classified video candidates — client re-filters eligibility after densify.
+  viwDawMj0aiPtSM4P:
+    "media_class.eq.Video"
+    + "&asset_role.eq.Raw%20Footage"
+    + "&asset_status.eq.Available"
+    + "&metadata->>classification_status.eq.Classified"
+    + "&active.eq.true"
+    + "&or=(do_not_use.is.null,do_not_use.eq.false)"
+    + "&google_drive_url=neq."
+    + "&or=(metadata->>rights_status.eq.Owned,metadata->>rights_status.eq.Licensed,"
+    + "metadata->>rights_status.eq.Public%20Domain)",
 };
 MEDIA_SIDE_VIEW_FILTERS.Music = MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8;
 MEDIA_SIDE_VIEW_FILTERS["A3 - Needs Classification"] = MEDIA_SIDE_VIEW_FILTERS.viwf6dxUJrMx2yNoe;
 MEDIA_SIDE_VIEW_FILTERS["A4 - Check for orphaned media assets"] = MEDIA_SIDE_VIEW_FILTERS.viwQv8PDtE8qXwMPk;
+MEDIA_SIDE_VIEW_FILTERS["R2 - Available Classified Video Assets"] = MEDIA_SIDE_VIEW_FILTERS.viwDawMj0aiPtSM4P;
 
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
 export async function listSupabaseMediaByFormula(env, formula, { limit = 25, viewName = "" } = {}) {

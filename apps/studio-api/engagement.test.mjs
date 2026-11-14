@@ -423,5 +423,5 @@ test("place review service never exposes an automated publish path", () => {
   assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
   assert.match(worker, /\/api\/engagement\/place-reviews/);
   assert.match(worker, /studio_place_reviews_v1/);
-  assert.match(worker, /0\.10\.937-closeout-a4-view/);
+  assert.match(worker, /0\.10\.938-closeout-r2-view/);
 });
