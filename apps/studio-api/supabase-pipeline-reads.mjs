@@ -6766,6 +6766,7 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   YouTube_Package_Status: "error_messages->>YouTube_Package_Status",
   YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
+  Manual_Completion_Status: "error_messages->>Manual_Completion_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6865,6 +6866,7 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   Format: "format",
   Platform_Output_Type: "platform_output_type",
   Publish_Error_Message: "error_messages->>Publish_Error_Message",
+  YouTube_Error_Message: "error_messages->>YouTube_Error_Message",
   IG_Carousel_Error_Message: "error_messages->>IG_Carousel_Error_Message",
   Output_Status: "output_status",
   Render_Status: "render_status",
@@ -7069,6 +7071,16 @@ function outputSideLeafFilter(cleaned) {
   }
   if (gtNum && gtNum[1] === "Output_ID") {
     return `output_number.gt.${gtNum[2]}`;
+  }
+  // LEN({Field}&"")=N — exact text length via LIKE single-char wildcards.
+  const lenEq = cleaned.match(/^LEN\(\{([A-Za-z0-9_]+)\}(?:&"")?\)=(\d+)$/);
+  if (lenEq && OUTPUT_SIDE_BLANK_FIELDS[lenEq[1]]) {
+    const n = Number(lenEq[2]);
+    if (Number.isFinite(n) && n >= 1 && n <= 64) {
+      const col = OUTPUT_SIDE_BLANK_FIELDS[lenEq[1]];
+      const pattern = "_".repeat(n);
+      return `and(${col}.not.is.null,${col}.neq.,${col}.like.${pattern})`;
+    }
   }
   // Bare checkbox truthy: {Do_Not_Publish} inside nested AND (OPS review).
   const boolTruthy = cleaned.match(/^\{([A-Za-z0-9_]+)\}$/);

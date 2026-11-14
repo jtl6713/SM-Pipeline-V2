@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.901-closeout-ops-review/);
+  assert.match(worker, /0\.10\.902-closeout-yt-quota/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.901-closeout-ops-review/);
+  assert.match(worker, /0\.10\.902-closeout-yt-quota/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.901-closeout-ops-review/);
+  assert.match(worker, /0\.10\.902-closeout-yt-quota/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.901-closeout-ops-review/);
+  assert.match(worker, /0\.10\.902-closeout-yt-quota/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4637,4 +4637,58 @@ test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open pre
   assert.match(calls[3], /idea_candidates\?/);
   assert.match(calls[3], /status=neq\.Rejected/);
   assert.doesNotMatch(calls[3], /status=neq\.Promoted/);
+});
+
+test("YouTube quota FIND, Manual_Completion_Status, and LEN Platform_Post_ID prefer Supabase", async () => {
+  const { translateOutputSideFormula, studioSideTableRead } = await import("./supabase-pipeline-reads.mjs");
+  const { YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA } =
+    await import("./youtube-manual-publish.mjs");
+
+  assert.match(
+    translateOutputSideFormula('FIND("quota",LOWER({YouTube_Error_Message}&""))>0'),
+    /YouTube_Error_Message\.ilike\.\*quota\*/,
+  );
+  assert.equal(
+    translateOutputSideFormula('{Manual_Completion_Status}="Required"'),
+    "error_messages->>Manual_Completion_Status.eq.Required",
+  );
+  assert.match(
+    translateOutputSideFormula('LEN({Platform_Post_ID}&"")=11'),
+    /Platform_Post_ID\.like\.___________/,
+  );
+  assert.ok(translateOutputSideFormula(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA));
+  assert.match(translateOutputSideFormula(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA), /YouTube_Error_Message/);
+  assert.ok(translateOutputSideFormula(YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA));
+  assert.match(translateOutputSideFormula(YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA), /Manual_Completion_Status/);
+
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblrlPeboBthkplH0",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA) + "&maxRecords=10",
+    ));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /YouTube_Error_Message/);
+  assert.match(calls[1], /Manual_Completion_Status|Platform_Post_ID/);
 });
