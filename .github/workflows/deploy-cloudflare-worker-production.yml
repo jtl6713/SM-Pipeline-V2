@@ -515,7 +515,18 @@ jobs:
           print('postdeploy_binding_contract=PASS')
           PY
 
-          curl -fsS "$API/content/v2" -H "$AUTH" -D /tmp/worker-after-headers.txt -o /tmp/worker-after-body.bin
+          # content/v2 can 404 briefly right after activate (0.10.922 class).
+          # Retry before treating the deploy as failed / rolling back.
+          content_ok=0
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$API/content/v2" -H "$AUTH" -D /tmp/worker-after-headers.txt -o /tmp/worker-after-body.bin; then
+              content_ok=1
+              break
+            fi
+            echo "worker content/v2 attempt $i failed; retrying"
+            sleep 3
+          done
+          test "$content_ok" = "1"
           python - <<'PY'
           from email.parser import BytesParser
           from email.policy import default
