@@ -1166,4 +1166,6 @@ Deploy 2026-11-14 Worker 0.10.894-closeout-pr-lists: Production Request Preparin
 
 Deploy 2026-11-14 Worker 0.10.895-closeout-content-esc: escalated PR lists + Content RECORD_ID/status/Preferred_Music FIND prefer Supabase. Record deletion is not started. Verify /health version 0.10.895-closeout-content-esc.
 
+2026-11-14 TikTok resend #10104: clear stale inbox/email receipts, report dispatch acceptance rather than false delivery success. Supabase SoR Phase 7 respected. No automatic TikTok resends.
+
 Deploy 2026-11-14 Worker 0.10.896-closeout-pr-music-factory: PR Selected_Music FIND + factory-revision pending lists, Output Content_Item quote/&"" FIND, media Music library formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.896-closeout-pr-music-factory.
