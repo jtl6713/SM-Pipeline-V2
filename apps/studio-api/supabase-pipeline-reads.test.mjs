@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.898-closeout-profile-find/);
+  assert.match(worker, /0\.10\.899-closeout-sched-profile/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.898-closeout-profile-find/);
+  assert.match(worker, /0\.10\.899-closeout-sched-profile/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.898-closeout-profile-find/);
+  assert.match(worker, /0\.10\.899-closeout-sched-profile/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.898-closeout-profile-find/);
+  assert.match(worker, /0\.10\.899-closeout-sched-profile/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3709,6 +3709,66 @@ test("escalated PR and Content RECORD_ID/Preferred_Music formulas prefer Supabas
   }
   assert.equal(calls.length, 1);
   assert.match(calls[0], /step=eq\.escalated/);
+});
+
+test("profile-scoped schedule DATETIME_PARSE windows prefer Supabase", async () => {
+  const {
+    translateOutputSideFormula,
+    studioSideTableRead,
+  } = await import("./supabase-pipeline-reads.mjs");
+  assert.equal(
+    translateOutputSideFormula('IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("2026-01-01T00:00:00.000Z"))'),
+    "scheduled_post_date.gt.2026-01-01T00%3A00%3A00.000Z",
+  );
+  assert.equal(
+    translateOutputSideFormula('IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("2026-12-01T00:00:00.000Z"))'),
+    "scheduled_post_date.lt.2026-12-01T00%3A00%3A00.000Z",
+  );
+  const pid = "recProf0000000001";
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblrlPeboBthkplH0",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    calls.push(href);
+    if (href.includes("content_profiles?")) {
+      return new Response(JSON.stringify([{
+        id: "uuid-profile-1",
+        airtable_record_id: pid,
+      }]), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(
+        `AND(FIND("${pid}",ARRAYJOIN({Content_Profile})&""),{Scheduled_Post_Date}!="",IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("2026-01-01T00:00:00.000Z")),IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("2026-12-01T00:00:00.000Z")))`,
+      ) + "&maxRecords=10",
+    );
+    const unknown = await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(
+        `AND(FIND("${pid}",ARRAYJOIN({Content_Profile})&""),{Totally_Unknown_Field}="x")`,
+      ) + "&maxRecords=10",
+    );
+    assert.equal(unknown, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 3);
+  assert.match(calls[1], /scheduled_post_date\.gt\./);
+  assert.match(calls[1], /scheduled_post_date\.lt\./);
+  assert.match(calls[1], /content_profile_id\.eq\.uuid-profile-1/);
+  assert.match(calls[2], /content_profiles\?/);
 });
 
 test("Content_Profile FIND scope and Studio_Pipeline_Open prefer Supabase", async () => {

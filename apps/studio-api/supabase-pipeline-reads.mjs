@@ -7008,6 +7008,19 @@ function outputSideLeafFilter(cleaned) {
   if (beforeSchedIso) {
     return `scheduled_post_date.lt.${encodeDeskFilterValue(beforeSchedIso[1])}`;
   }
+  // Schedule grid windows: IS_AFTER/IS_BEFORE(..., DATETIME_PARSE("ISO")).
+  const afterSchedParse = cleaned.match(
+    /^IS_AFTER\(\{Scheduled_Post_Date\},DATETIME_PARSE\("([^"]+)"\)\)$/,
+  );
+  if (afterSchedParse) {
+    return `scheduled_post_date.gt.${encodeDeskFilterValue(afterSchedParse[1])}`;
+  }
+  const beforeSchedParse = cleaned.match(
+    /^IS_BEFORE\(\{Scheduled_Post_Date\},DATETIME_PARSE\("([^"]+)"\)\)$/,
+  );
+  if (beforeSchedParse) {
+    return `scheduled_post_date.lt.${encodeDeskFilterValue(beforeSchedParse[1])}`;
+  }
   // Engagement / history floors: {Published_At}>="ISO".
   const publishedGte = cleaned.match(/^\{Published_At\}>="([^"]+)"$/);
   if (publishedGte) {
@@ -7217,6 +7230,9 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
   const translated = formulaForTranslate
     ? outputContentListFilter(kind, formulaForTranslate)
     : null;
+  // Never drop untranslated AND leaves after stripping Content_Profile FIND —
+  // that would over-match (profile-only) vs Airtable.
+  if (profileScope?.restFormula && !translated) return null;
   const viewFilter = viewName
     ? (
       kind === "output"

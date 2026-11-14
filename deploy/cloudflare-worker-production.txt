@@ -1173,3 +1173,5 @@ Deploy 2026-11-14 Worker 0.10.896-closeout-pr-music-factory: PR Selected_Music F
 Deploy 2026-11-14 Worker 0.10.897-closeout-open-ops: OPEN Draft/Ready/Submitted + OPS Factory request-queue formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.897-closeout-open-ops.
 
 Deploy 2026-11-14 Worker 0.10.898-closeout-profile-find: Content_Profile FIND scope resolve + Studio_Pipeline_Open=1 Output leaf prefer Supabase. Record deletion is not started. Verify /health version 0.10.898-closeout-profile-find.
+
+Deploy 2026-11-14 Worker 0.10.899-closeout-sched-profile: fix profile-scope rest-drop; Scheduled_Post_Date DATETIME_PARSE IS_AFTER/IS_BEFORE prefer Supabase. Record deletion is not started. Verify /health version 0.10.899-closeout-sched-profile.
