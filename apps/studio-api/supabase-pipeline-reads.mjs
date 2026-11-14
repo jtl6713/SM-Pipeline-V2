@@ -1303,6 +1303,15 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
     filter = `or=(${orParts})`
       + "&or=(metadata->>classification_status.eq.Needs%20Classification,"
       + "metadata->>classification_status.eq.Processing)";
+  } else if (
+    // Ops oversized video: Active video > ~95.36 MB with a Drive file id.
+    // compactFormula strips spaces in {Google Drive File ID}.
+    cleaned === 'AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),{GoogleDriveFileID}!="")'
+    || cleaned === "AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}='Video',LEFT({MIME_Type}&'',6)='video/'),{GoogleDriveFileID}!='')"
+  ) {
+    const minBytes = Math.ceil(95.36 * 1024 * 1024);
+    filter = `active=eq.true&file_size_bytes=gt.${minBytes}`
+      + "&google_drive_file_id=neq.&or=(media_class.eq.Video,mime_type.like.video/*)";
   } else if (transferMatch) {
     filter = `metadata->>studio_transfer_id=eq.${encodeURIComponent(transferMatch[2])}`;
   } else if (nameMatch) {
