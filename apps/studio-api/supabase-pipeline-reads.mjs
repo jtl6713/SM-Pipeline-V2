@@ -3157,6 +3157,34 @@ export async function readSupabaseQualityRecoveryEvent(env, airtableId) {
   return { id: row.airtable_record_id, fields: isPlainObject(row.fields) ? row.fields : {} };
 }
 
+/** QA ledger idempotency: {Event_Key}="…". */
+export async function listSupabaseQualityRecoveryByEventKey(env, eventKey, {
+  limit = 3,
+  offset = 0,
+} = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const key = String(eventKey || "").trim();
+  if (!key) return null;
+  const cap = Math.max(1, Math.min(20, Number(limit) || 3));
+  const skip = Math.max(0, Number(offset) || 0);
+  const rows = await supabaseRest(
+    env,
+    `quality_agent_recovery_events?event_key=eq.${encodeURIComponent(key)}`
+      + `&select=airtable_record_id,event_key,outcome,output_record_id,fields,created_at`
+      + `&order=created_at.desc.nullslast&limit=${cap}&offset=${skip}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.filter((row) => row?.airtable_record_id).map((row) => ({
+    id: row.airtable_record_id,
+    fields: {
+      ...(isPlainObject(row.fields) ? row.fields : {}),
+      Event_Key: row.event_key || row.fields?.Event_Key || null,
+      Outcome: row.outcome || row.fields?.Outcome || null,
+      Output_Record_ID: row.output_record_id || row.fields?.Output_Record_ID || null,
+    },
+  }));
+}
+
 export function mergeMaeOccupancyRows(airtableRows, supabaseRows) {
   const byId = new Map();
   for (const row of airtableRows || []) {
@@ -5943,6 +5971,7 @@ function sideTableKind(env, tableId) {
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   if (table === "Exception Recovery Messages") return "exception_messages";
+  if (table === "Quality Agent Recovery Ledger") return "recovery_ledger";
   if (table === MAKE_ADMIN_QUEUE_TABLE_ID || table === "Make Admin Queue") return "make_admin_queue";
   if (table === "Production Request Outputs") return "pro_output";
   if (phase6TableKind(env, table) === "request") return "request";
@@ -6138,6 +6167,27 @@ export async function listSupabaseExceptionRecoveryMessages(env, outputRecordId,
       + `&select=airtable_record_id,event_key,output_record_id,exception_signature,role,message_text,actor,`
       + `reply_to_event_key,intent_json,fields,created_at`
       + `&order=created_at.asc&limit=${cap}&offset=${skip}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
+}
+
+/** Audit idempotency: {Event_Key}="…". */
+export async function listSupabaseExceptionRecoveryByEventKey(env, eventKey, {
+  limit = 2,
+  offset = 0,
+} = {}) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") return null;
+  const key = String(eventKey || "").trim();
+  if (!key) return null;
+  const cap = Math.max(1, Math.min(20, Number(limit) || 2));
+  const skip = Math.max(0, Number(offset) || 0);
+  const rows = await supabaseRest(
+    env,
+    `exception_recovery_messages?event_key=eq.${encodeURIComponent(key)}`
+      + `&select=airtable_record_id,event_key,output_record_id,exception_signature,role,message_text,actor,`
+      + `reply_to_event_key,intent_json,fields,created_at`
+      + `&order=created_at.desc&limit=${cap}&offset=${skip}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
   return rows.map(shapeExceptionRecoveryMessage).filter(Boolean);
@@ -7806,6 +7856,14 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       if (records.length === limit) body.offset = String(offset + records.length);
       return body;
     }
+    const eventKeyMatch = cleaned.match(/^\{Event_Key\}=(["'])([^"']+)\1$/);
+    if (eventKeyMatch) {
+      const records = await listSupabaseExceptionRecoveryByEventKey(env, eventKeyMatch[2], { limit, offset });
+      if (!records) return null;
+      const body = { records };
+      if (records.length === limit) body.offset = String(offset + records.length);
+      return body;
+    }
     // OR({Exception_Signature}="a",{Exception_Signature}="b",...)
     if (cleaned.startsWith("OR(") && cleaned.endsWith(")") && cleaned.includes("{Exception_Signature}=")) {
       const parts = splitQueueArgs(cleaned.slice(3, -1)) || [];
@@ -7820,6 +7878,28 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       if (!records) return null;
       const body = { records };
       if (records.length === limit) body.offset = String(offset + records.length);
+      return body;
+    }
+    return null;
+  }
+  if (kind === "recovery_ledger") {
+    if (studioWriteSource(env) !== "supabase") return null;
+    const cleaned = compactFormula(formula);
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const eventKeyMatch = cleaned.match(/^\{Event_Key\}=(["'])([^"']+)\1$/);
+    if (eventKeyMatch) {
+      const records = await listSupabaseQualityRecoveryByEventKey(env, eventKeyMatch[2], { limit, offset });
+      if (!records) return null;
+      const body = { records };
+      if (records.length === limit) body.offset = String(offset + records.length);
+      return body;
+    }
+    if (cleaned.includes('Outcome}="reconciled_published"') || cleaned.includes("Outcome}='reconciled_published'")) {
+      const page = await listSupabaseQualityRecoveryPage(env, { limit, offset, filterFormula: formula })
+        .catch(() => null);
+      if (!page) return null;
+      const body = { records: page.records || [] };
+      if (page.offset != null) body.offset = String(page.offset);
       return body;
     }
     return null;

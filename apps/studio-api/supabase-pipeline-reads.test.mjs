@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
+  assert.match(worker, /0\.10\.914-closeout-exc-eventkey/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
+  assert.match(worker, /0\.10\.914-closeout-exc-eventkey/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
+  assert.match(worker, /0\.10\.914-closeout-exc-eventkey/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.913-closeout-idea-listen/);
+  assert.match(worker, /0\.10\.914-closeout-exc-eventkey/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4532,7 +4532,59 @@ test("Exception Recovery Messages and Pipeline Settings names read from Supabase
       '?filterByFormula={Output_Record_ID}="recOutput00000001"&maxRecords=50',
     );
     assert.equal(side.records[0].id, "recExMsg0000000001");
+    const byKey = await studioSideTableRead(
+      env,
+      "Exception Recovery Messages",
+      '?filterByFormula={Event_Key}="erc:recOutput00000001:client1:administrator"&maxRecords=2',
+    );
+    assert.equal(byKey.records[0].fields.Event_Key, "erc:recOutput00000001:client1:administrator");
     assert.ok(urls.some((url) => url.includes("exception_recovery_messages")));
+    assert.ok(urls.some((url) => url.includes("event_key=eq.")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Quality Agent Recovery Ledger Event_Key and reconciled lists prefer Supabase", async () => {
+  const { studioSideTableRead } = await import("./supabase-pipeline-reads.mjs");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recQaLed0000000001",
+        event_key: "QA-AUTOVERIFY:recOutput00000001:reconciled_published",
+        outcome: "reconciled_published",
+        output_record_id: "recOutput00000001",
+        fields: {
+          Event_Key: "QA-AUTOVERIFY:recOutput00000001:reconciled_published",
+          Outcome: "reconciled_published",
+          Reconciled_At: "2026-11-14T00:00:00.000Z",
+        },
+        created_at: "2026-11-14T00:00:00.000Z",
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const byKey = await studioSideTableRead(
+      env,
+      "Quality Agent Recovery Ledger",
+      '?filterByFormula={Event_Key}="QA-AUTOVERIFY:recOutput00000001:reconciled_published"&maxRecords=3',
+    );
+    assert.equal(byKey.records[0].id, "recQaLed0000000001");
+    assert.match(urls[0], /quality_agent_recovery_events\?/);
+    assert.match(urls[0], /event_key=eq\./);
+    const reconciled = await studioSideTableRead(
+      env,
+      "Quality Agent Recovery Ledger",
+      '?filterByFormula=AND({Outcome}="reconciled_published",{Reconciled_At}!="")&maxRecords=100',
+    );
+    assert.equal(reconciled.records[0].fields.Outcome, "reconciled_published");
+    assert.ok(urls.some((url) => url.includes("outcome=eq.reconciled_published")));
   } finally {
     globalThis.fetch = originalFetch;
   }
