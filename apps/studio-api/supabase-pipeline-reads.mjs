@@ -6555,6 +6555,32 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",
   Production_Request_Output: "production_request_output_text",
+  Review_Email_Sent_At: "error_messages->>Review_Email_Sent_At",
+  Review_Status: "review_status",
+  Studio_Preview_URL: "studio_preview_url",
+  Thumbnail_URL: "thumbnail_url",
+  Output_Caption: "output_caption",
+  Render_Server_URL: "error_messages->>Render_Server_URL",
+  Remotion_Props_JSON: "remotion_props_text",
+  Output_URL: "error_messages->>Output_URL",
+  Final_File_ID: "error_messages->>Final_File_ID",
+  Asset_Selection_Attempt_Count: "error_messages->>Asset_Selection_Attempt_Count",
+  Asset_Selection_Next_Retry_At: "error_messages->>Asset_Selection_Next_Retry_At",
+  Asset_Need_Status: "error_messages->>Asset_Need_Status",
+};
+
+/** Text fields that support FIND("needle",{Field}&"") / >0 substring probes. */
+const OUTPUT_SIDE_FIND_FIELDS = {
+  Thumbnail_URL: "thumbnail_url",
+  Output_Caption: "output_caption",
+  Studio_Preview_URL: "studio_preview_url",
+  Final_File_URL: "final_file_url",
+  Remotion_Status_URL: "error_messages->>Remotion_Status_URL",
+  Render_Server_URL: "error_messages->>Render_Server_URL",
+  Output_URL: "error_messages->>Output_URL",
+  Selected_Assets_JSON: "selected_assets_text",
+  Studio_Publish_Dispatch_Note: "error_messages->>Studio_Publish_Dispatch_Note",
+  Publish_Error_Stage: "error_messages->>Publish_Error_Stage",
 };
 
 /** Cadence Output views Worker probes without filterByFormula trees. */
@@ -6567,6 +6593,24 @@ const OUTPUT_SIDE_VIEW_FILTERS = {
     "and(render_status.eq.Rendering,"
     + "and(error_messages->>Remotion_Status_URL.not.is.null,error_messages->>Remotion_Status_URL.neq.),"
     + "or(final_file_url.is.null,final_file_url.eq.))",
+  "R2B - Retry Asset Selection":
+    "and(or(do_not_publish.is.null,do_not_publish.eq.false),"
+    + "content_item_airtable_id.not.is.null,"
+    + "output_status.eq.Ready%20for%20Review,"
+    + "error_messages->>Asset_Selection_Status.in.(Partial%20Match,Selection%20Error),"
+    + "error_messages->>Asset_Need_Status.in.(Sent%20to%20Team,Partially%20Fulfilled,Fulfilled),"
+    + "or(error_messages->>Asset_Selection_Attempt_Count.is.null,"
+    + "error_messages->>Asset_Selection_Attempt_Count.lt.5),"
+    + "or(error_messages->>Asset_Selection_Next_Retry_At.is.null,"
+    + "error_messages->>Asset_Selection_Next_Retry_At.eq.,"
+    + "error_messages->>Asset_Selection_Next_Retry_At.lte.now()),"
+    + "or(render_status.is.null,render_status.eq.),"
+    + "or(render_clip_list.is.null,render_clip_list.eq.),"
+    + "or(remotion_props_text.is.null,remotion_props_text.eq.),"
+    + "or(error_messages->>Output_URL.is.null,error_messages->>Output_URL.eq.),"
+    + "or(final_file_url.is.null,final_file_url.eq.),"
+    + "or(error_messages->>Final_File_ID.is.null,error_messages->>Final_File_ID.eq.),"
+    + "format.in.(Vertical%20Short%20Video,Story))",
 };
 
 /** Cadence Content views (runner snapshot, PostgREST-ready). */
@@ -6597,12 +6641,31 @@ function outputSideLeafFilter(cleaned) {
   if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
   const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
   if (outputId) return `output_number.eq.${outputId[1]}`;
+  const outputIdGte = cleaned.match(/^\{Output_ID\}>=(\d+)$/);
+  if (outputIdGte) return `output_number.gte.${outputIdGte[1]}`;
+  const outputIdGt = cleaned.match(/^\{Output_ID\}>(\d+)$/);
+  if (outputIdGt) return `output_number.gt.${outputIdGt[1]}`;
   const contentNumber = cleaned.match(/^FIND\(",(\d+),",","&ARRAYJOIN\(\{Content_Item\}\)&","\)>0$/);
   if (contentNumber) return `content_number.eq.${contentNumber[1]}`;
   const contentRec = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Item\}\)\)(?:>0)?$/);
   if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
   const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
   if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
+  // Substring FIND on typed/bag text fields (bare FIND is truthy when >0).
+  const findText = cleaned.match(
+    /^FIND\("([^"]+)",\{([A-Za-z0-9_]+)\}(?:&"")?\)(?:>0|=0)?$/,
+  );
+  if (findText && OUTPUT_SIDE_FIND_FIELDS[findText[2]]) {
+    const needle = findText[1];
+    if (needle && !/[,()*"]/.test(needle)) {
+      const col = OUTPUT_SIDE_FIND_FIELDS[findText[2]];
+      const like = `${col}.like.*${needle}*`;
+      if (cleaned.endsWith("=0")) {
+        return `or(${col}.is.null,${col}.eq.,${col}.not.like.*${needle}*)`;
+      }
+      return like;
+    }
+  }
   const notBool = cleaned.match(/^NOT\(\{([A-Za-z0-9_]+)\}\)$/);
   if (notBool && OUTPUT_SIDE_BOOL_FIELDS[notBool[1]]) {
     const col = OUTPUT_SIDE_BOOL_FIELDS[notBool[1]];
@@ -6680,6 +6743,17 @@ function outputSideLeafFilter(cleaned) {
       const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
       const col = OUTPUT_SIDE_BLANK_FIELDS[diffMin[1]];
       return `${col}.lte.${encodeDeskFilterValue(cutoff)}`;
+    }
+  }
+  // Stale watchdog: LAST_MODIFIED_TIME older than N minutes → updated_at.
+  const lastMod = cleaned.match(
+    /^IS_BEFORE\(LAST_MODIFIED_TIME\(\),DATEADD\(NOW\(\),-(\d+),"minutes"\)\)$/,
+  );
+  if (lastMod) {
+    const minutes = Number(lastMod[1]);
+    if (Number.isFinite(minutes) && minutes >= 1 && minutes <= 1440) {
+      const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
+      return `updated_at.lt.${encodeDeskFilterValue(cutoff)}`;
     }
   }
   return null;
