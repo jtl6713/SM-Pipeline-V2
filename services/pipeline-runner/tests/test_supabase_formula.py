@@ -55,6 +55,12 @@ def test_snapshotted_runner_views():
     assert "lt.2026-11-13T06:00:00Z" in retry
     assert "render_clip_list" in retry
     assert view_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, "Ready Queue") is None
+    from airtable.constants import MEDIA_ASSETS_TABLE
+
+    a3 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwf6dxUJrMx2yNoe")
+    assert a3 and "classification_status" in a3
+    c6 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "C6 - Active Small Branding Watermark")
+    assert c6 and "Watermark_Small" in c6
     legacy = view_to_postgrest_filter(CONTENT_ITEMS_TABLE, "viwwnVJVPqfy7iYJK")
     assert legacy is not None
     assert "platform_output_count" in legacy

@@ -15,9 +15,30 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_ASSETS_TABLE, PLATFORM_OUTPUTS_TABLE
 from supabase_formula import _blank_filter, _field_ref, _join_filters, _literal_filter, _nonempty_filter
 from supabase_pipeline import OUTPUT_JSON_COLUMNS
+
+# Media views that always fall through view snapshots. Mirror Worker Ops filters.
+_MEDIA_VIEW_FILTERS = {
+    # A3 classify drain — Needs Classification | Classification Error.
+    "viwf6dxUJrMx2yNoe": (
+        "and=(or(metadata->>classification_status.eq.Needs Classification,"
+        "metadata->>classification_status.eq.Classification Error),"
+        "active.eq.true,or(do_not_use.is.null,do_not_use.eq.false))"
+    ),
+    # C6 small branding watermark (view id + display name).
+    "viwokn4fYjXHScEos": (
+        "and=(asset_role.eq.Watermark,asset_status.eq.Available,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),"
+        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.neq.)"
+    ),
+    "C6 - Active Small Branding Watermark": (
+        "and=(asset_role.eq.Watermark,asset_status.eq.Available,active.eq.true,"
+        "or(do_not_use.is.null,do_not_use.eq.false),"
+        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.neq.)"
+    ),
+}
 
 _CHICAGO = ZoneInfo("America/Chicago")
 _UTC = ZoneInfo("UTC")
@@ -168,6 +189,8 @@ def view_to_postgrest_filter(table_id: str, view: str | None, *, now: datetime |
     """PostgREST filter for a snapshotted view, or None when the view stays on Airtable."""
     if not view:
         return ""
+    if table_id == MEDIA_ASSETS_TABLE:
+        return _MEDIA_VIEW_FILTERS.get(str(view))
     if table_id not in (PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE):
         return None
     name = _VIEW_IDS.get(view, view)
