@@ -218,14 +218,13 @@ def process_request(
                 "TikTok_Draft_Status": STATUS_DELIVERED,
                 "Manual_Completion_At": None,
                 "Manual_Published_URL": "",
-                "Operational_Email_Key": "",
+                # Preserve the existing handoff receipt on a replay of this same publish ID.
+                # Clearing it here causes repeated TTD3 email delivery.
                 "Publish_Error_Message": "",
                 "Publish_Next_Retry_At": None,
                 "Publish_Retry_Eligible": False,
                 "Manual_Completion_Status": MANUAL_REQUIRED,
-                "Operational_Email_Sent_At": None,
                 "TikTok_Draft_Delivered_At": now,
-                "TikTok_Draft_Email_Sent_At": None,
                 "TikTok_Draft_Response_JSON": response_json(body),
                 "TikTok_Draft_Last_Checked_At": now,
                 "TikTok_Manual_Completion_URL": form_url,
