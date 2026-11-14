@@ -20,7 +20,8 @@ function between(start, end) {
 }
 const src = [
   between("  function canReviewActions(", "  function canDelete("),
-  between("  function canSelectBatchOutput(", "  function factoryProfileId("),
+  // Global Factory selection resolves lookup display names via these helpers.
+  between("  function resolveFactoryCardProfileId(", "  function factoryProfileId("),
   between("  function factoryBatchSelectionReason(", "  function contentGroupKey("),
 ].join("\n");
 
@@ -46,6 +47,7 @@ function setup() {
     canPreview: () => true, canDelete: () => false,
     cardLabel: card => card.title || String(card.id),
     esc: value => String(value ?? "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"),
+    $: () => ({ options: [] }),
   };
   const renderCard = vm.runInNewContext(src + "\nrenderCard", ctx);
   return { state, renderCard, accept: (id) => { accepted = {[id]: Date.now()}; } };

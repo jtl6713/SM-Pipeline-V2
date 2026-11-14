@@ -42,7 +42,7 @@ test("Factory counts and Quality Agent appear as compact metrics; no raw IDs in 
 });
 
 test("Profile-scoped writes still use canonical submission and unchanged rollout rules", () => {
- assert.match(desk,/!global && profiles\.length!==1/);
+ assert.match(desk,/!global && profiles\.length !== 1/);
  assert.match(desk,/if \(global\) \{\s*return submitFactoryGlobalApprovalBatches\(ready\);\s*\}/);
  assert.match(desk,/action: "start_group"/);
  assert.match(desk,/action: "start"/);

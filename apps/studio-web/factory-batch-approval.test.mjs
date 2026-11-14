@@ -224,7 +224,8 @@ test("Factory preserves server Needs Eyes counts and rows while pending/accepted
 });
 
 test("Global Factory selects Instagram Stories with backend-normalized metadata", () => {
-  const fn = extractNamedFunction(js, "canSelectBatchOutput");
+  const helpers = ["resolveFactoryCardProfileId", "withResolvedFactoryProfile", "canSelectBatchOutput"]
+    .map((name) => extractNamedFunction(js, name)).join("\n");
   const state = {
     batchApprovalsEnabled: true,
     batchGlobal: {
@@ -236,9 +237,12 @@ test("Global Factory selects Instagram Stories with backend-normalized metadata"
       },
     },
   };
-  const eligible = new Function("state", "recentFactoryAccepted",
-    `${fn}; return canSelectBatchOutput;`)(state, () => ({}));
-  const story = {id: "recStory9393", platform: "Instagram ", studio_output_type: "Story "};
+  const eligible = new Function("state", "recentFactoryAccepted", "$",
+    `${helpers}; return canSelectBatchOutput;`)(state, () => ({}), () => ({ options: [] }));
+  const story = {
+    id: "recStory9393", profile_id: "recChicago",
+    platform: "Instagram ", studio_output_type: "Story ",
+  };
   assert.equal(eligible(story), true, "Story #9393 must be selectable like the backend's trimmed fields");
   assert.equal(eligible({...story, studio_output_type: "Reel"}), true);
   assert.equal(eligible({...story, studio_output_type: "Unsupported"}), false);
@@ -489,7 +493,8 @@ function automaticRecoveryHarness(saved, response) {
   const state = {submittingBatch:false, selectedOutputs:new Set(['recExistingA','recNewChicago']),
     batchApprovalsEnabled:true,batchGlobal:{enabled:true,max_total:20},desk:null};
   const submitted=[],messages=[];
-  const functions = ['pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
+  const functions = ['resolveFactoryCardProfileId','withResolvedFactoryProfile',
+    'pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
     'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan','factoryTerminalEligibilityError',
     'dropFactoryRecoveryEntry'].map(n=>extractNamedFunction(js,n)).join('\n');
@@ -499,6 +504,7 @@ function automaticRecoveryHarness(saved, response) {
     const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
       FACTORY_WAITING_SELECTION_KEY='waiting', FACTORY_PENDING_MISSING_GRACE_MS=90000;
     let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
+    const $=()=>({options:[]});
     const setBatchSubmissionError=message=>messages.push(message),setStatus=message=>messages.push(message),
       updateFactoryBatchToolbar=()=>{},
       saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
