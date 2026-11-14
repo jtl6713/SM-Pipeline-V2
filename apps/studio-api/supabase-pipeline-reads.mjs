@@ -6865,6 +6865,11 @@ function outputSideBlankFilter(column) {
 }
 
 function outputSideLeafFilter(cleaned) {
+  // Airtable formula field mirrored by platform_outputs_pipeline_open_idx.
+  if (cleaned === "{Studio_Pipeline_Open}=1") {
+    return "and(do_not_publish.eq.false,or(test_run_id.is.null,test_run_id.eq.),"
+      + "output_status.neq.Published,output_status.neq.Cancelled)";
+  }
   const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
   if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
   const outputId = cleaned.match(/^\{Output_ID\}=(\d+)$/);
@@ -7152,8 +7157,66 @@ function contentSideLeafFilter(cleaned) {
   return null;
 }
 
+/** Rec ids from FIND(..., ARRAYJOIN({Content_Profile})). */
+function contentProfileRecIdsFromFormula(formula) {
+  return [...compactFormula(formula).matchAll(
+    /FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Profile\}\)(?:&"")?\)/g,
+  )].map((match) => match[1]);
+}
+
+/**
+ * Split AND(...)/bare Content_Profile FIND so the profile scope can resolve to
+ * content_profile_id while the remaining leaves stay on the sync translator.
+ */
+function splitContentProfileScope(formula) {
+  const cleaned = compactFormula(formula);
+  const ids = contentProfileRecIdsFromFormula(cleaned);
+  if (!ids.length) return null;
+  if (!cleaned.includes("ARRAYJOIN({Content_Profile})")) return null;
+  // Profile-only (single FIND or OR of id+name FINDs).
+  if (
+    /^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Profile\}\)(?:&"")?\)$/.test(cleaned)
+    || (/^OR\(/.test(cleaned) && cleaned.endsWith(")")
+      && splitQueueArgs(cleaned.slice(3, -1))?.every((part) => part.includes("ARRAYJOIN({Content_Profile})")))
+  ) {
+    return { profileRecId: ids[0], restFormula: "" };
+  }
+  if (!(cleaned.startsWith("AND(") && cleaned.endsWith(")"))) return null;
+  const parts = splitQueueArgs(cleaned.slice(4, -1));
+  if (!parts?.length) return null;
+  const rest = [];
+  let sawProfile = false;
+  for (const part of parts) {
+    if (part.includes("ARRAYJOIN({Content_Profile})")) {
+      sawProfile = true;
+      continue;
+    }
+    rest.push(part);
+  }
+  if (!sawProfile) return null;
+  return {
+    profileRecId: ids[0],
+    restFormula: rest.length === 0
+      ? ""
+      : rest.length === 1
+        ? rest[0]
+        : `AND(${rest.join(",")})`,
+  };
+}
+
 async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "") {
-  const translated = outputContentListFilter(kind, formula);
+  const profileScope = splitContentProfileScope(formula);
+  let profileFilter = null;
+  let formulaForTranslate = formula;
+  if (profileScope) {
+    const uuid = await resolveSupabaseProfileId(env, profileScope.profileRecId).catch(() => null);
+    if (!uuid) return null;
+    profileFilter = `content_profile_id.eq.${uuid}`;
+    formulaForTranslate = profileScope.restFormula;
+  }
+  const translated = formulaForTranslate
+    ? outputContentListFilter(kind, formulaForTranslate)
+    : null;
   const viewFilter = viewName
     ? (
       kind === "output"
@@ -7165,9 +7228,9 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
     : null;
   if (viewName && kind === "output" && !viewFilter) return null;
   if (viewName && kind === "content" && !viewFilter) return null;
-  if (!translated && !viewFilter) return null;
+  if (!translated && !viewFilter && !profileFilter) return null;
   if (kind === "output") {
-    const andParts = [viewFilter, translated].filter(Boolean);
+    const andParts = [viewFilter, translated, profileFilter].filter(Boolean);
     const andClause = andParts.length === 1
       ? andParts[0]
       : `and(${andParts.join(",")})`;
@@ -7180,7 +7243,7 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
     if (!Array.isArray(rows)) return null;
     return rows.map((row) => shapeDeskHealRecord(row)).filter((row) => row?.id);
   }
-  const andParts = [viewFilter, translated].filter(Boolean);
+  const andParts = [viewFilter, translated, profileFilter].filter(Boolean);
   const andClause = andParts.length === 1
     ? andParts[0]
     : `and(${andParts.join(",")})`;
