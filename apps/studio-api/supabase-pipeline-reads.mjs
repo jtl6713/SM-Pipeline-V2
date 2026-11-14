@@ -7057,6 +7057,16 @@ function outputSideLeafFilter(cleaned) {
     /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Content_Item\}\)(?:&"")?\)(?:>0)?$/,
   );
   if (contentRec) return `content_item_airtable_id.eq.${contentRec[2]}`;
+  // Music override link on Platform Outputs (error_messages bag).
+  const musicOverride = cleaned.match(
+    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Selected_Music_Asset_Override\}\)(?:&"")?\)(?:>0)?$/,
+  );
+  if (musicOverride) {
+    const id = musicOverride[2];
+    const cs = `error_messages->Selected_Music_Asset_Override.cs.${encodeURIComponent(JSON.stringify([id]))}`;
+    const textLike = `error_messages->>Selected_Music_Asset_Override.ilike.*${id}*`;
+    return `or(${cs},${textLike})`;
+  }
   // FIND(',rec…,',','&ARRAYJOIN({Production_Request_Output})&',')
   const requestOutPad = cleaned.match(
     /^FIND\((["']),(rec[A-Za-z0-9]{14}),\1,\1,\1&ARRAYJOIN\(\{Production_Request_Output\}\)&\1,\1\)(?:>0)?$/,

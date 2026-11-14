@@ -1193,3 +1193,5 @@ Deploy 2026-11-14 Worker 0.10.906-closeout-oversized: oversized video File_Size_
 Deploy 2026-11-14 Worker 0.10.907-closeout-render-hold: Studio_Render_Review hold TRUE/ID/Session leaves so rendering-review workspace Reel hold list prefers Supabase. Record deletion is not started. Verify /health version 0.10.907-closeout-render-hold.
 
 Deploy 2026-11-14 Worker 0.10.908-closeout-queue-xfer-census: Transfer_ID queue list prefers Supabase; restore bounded QA failure census OR (skip full translated FIND) and drop Airtable recovery-ledger fallback so deploy verify stays under 70s. Record deletion is not started. Verify /health version 0.10.908-closeout-queue-xfer-census.
+
+Deploy 2026-11-14 Worker 0.10.909-closeout-music-override: Platform Output Selected_Music_Asset_Override FIND prefers Supabase (music library usage scan). Record deletion is not started. Verify /health version 0.10.909-closeout-music-override.
