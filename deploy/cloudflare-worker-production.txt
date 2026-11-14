@@ -1171,3 +1171,5 @@ Deploy 2026-11-14 Worker 0.10.895-closeout-content-esc: escalated PR lists + Con
 Deploy 2026-11-14 Worker 0.10.896-closeout-pr-music-factory: PR Selected_Music FIND + factory-revision pending lists, Output Content_Item quote/&"" FIND, media Music library formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.896-closeout-pr-music-factory.
 
 Deploy 2026-11-14 Worker 0.10.897-closeout-open-ops: OPEN Draft/Ready/Submitted + OPS Factory request-queue formulas prefer Supabase. Record deletion is not started. Verify /health version 0.10.897-closeout-open-ops.
+
+Deploy 2026-11-14 Worker 0.10.898-closeout-profile-find: Content_Profile FIND scope resolve + Studio_Pipeline_Open=1 Output leaf prefer Supabase. Record deletion is not started. Verify /health version 0.10.898-closeout-profile-find.
