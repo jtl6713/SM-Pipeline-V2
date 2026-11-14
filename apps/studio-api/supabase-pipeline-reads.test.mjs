@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.890-closeout-rfr-rr1/);
+  assert.match(worker, /0\.10\.891-closeout-publish-find/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.890-closeout-rfr-rr1/);
+  assert.match(worker, /0\.10\.891-closeout-publish-find/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.890-closeout-rfr-rr1/);
+  assert.match(worker, /0\.10\.891-closeout-publish-find/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.890-closeout-rfr-rr1/);
+  assert.match(worker, /0\.10\.891-closeout-publish-find/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3610,6 +3610,37 @@ test("P1 Content view and T1/continuation Output formulas prefer Supabase", asyn
   assert.match(cont, /production_request_output_text/);
   assert.match(cont, /output_status\.neq\.Published/);
   assert.match(cont, /Approved%20for%20Publishing/);
+});
+
+test("publish reconcile/FBS UPPER FIND and schedule DATEADD prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const pub = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Output_Status}="Approved for Publishing",OR({Publish_Status}=BLANK(),{Publish_Status}="Not Ready",{Publish_Status}="Ready",{Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish"),OR({IG_Story_Status}=BLANK(),{IG_Story_Status}="Not Needed",{IG_Story_Status}="Ready"),OR({IG_Carousel_Status}=BLANK(),{IG_Carousel_Status}="Not Selected",{IG_Carousel_Status}="Ready for Asset Prep",{IG_Carousel_Status}="Assets Ready",{IG_Carousel_Status}="Children Processing",{IG_Carousel_Status}="Children Ready",{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Status}="Publishing"),OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule"),OR({FB_Slideshow_Status}=BLANK(),{FB_Slideshow_Status}="Not Required",{FB_Slideshow_Status}="Ready to Render"),OR({FB_Publish_Status}=BLANK(),{FB_Publish_Status}="Ready for Assets"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))',
+  );
+  assert.ok(pub);
+  assert.match(pub, /publish_status/);
+  assert.match(pub, /tiktok_draft_status/);
+  assert.match(pub, /fb_publish_status/);
+  const fbs1 = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({FB_Slideshow_Status}="Ready to Render",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS1",UPPER({Publish_Error_Stage}&""))>0)))',
+  );
+  assert.ok(fbs1);
+  assert.match(fbs1, /Publish_Error_Stage\.ilike\.\*FBS1\*/);
+  const cover = translateOutputSideFormula(
+    'FIND("facebook-cover=attached",{Studio_Publish_Dispatch_Note}&"")=0',
+  );
+  assert.ok(cover);
+  assert.match(cover, /not\.like\.\*facebook-cover=attached\*/);
+  const days = translateOutputSideFormula(
+    'IS_BEFORE({Scheduled_Post_Date},DATEADD(NOW(),7,"days"))',
+  );
+  assert.ok(days);
+  assert.match(days, /scheduled_post_date\.lte\./);
+  const clip = translateOutputSideFormula(
+    'FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0',
+  );
+  assert.ok(clip);
+  assert.match(clip, /render_clip_list_text\.like/);
 });
 
 test("RR1/RFR-cover/M1 leaves, R2B view, and LAST_MODIFIED_TIME prefer Supabase", async () => {
