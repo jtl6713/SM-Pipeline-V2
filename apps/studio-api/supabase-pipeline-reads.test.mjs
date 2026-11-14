@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.895-closeout-content-esc/);
+  assert.match(worker, /0\.10\.896-closeout-pr-music-factory/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.895-closeout-content-esc/);
+  assert.match(worker, /0\.10\.896-closeout-pr-music-factory/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.895-closeout-content-esc/);
+  assert.match(worker, /0\.10\.896-closeout-pr-music-factory/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.895-closeout-content-esc/);
+  assert.match(worker, /0\.10\.896-closeout-pr-music-factory/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3709,6 +3709,90 @@ test("escalated PR and Content RECORD_ID/Preferred_Music formulas prefer Supabas
   }
   assert.equal(calls.length, 1);
   assert.match(calls[0], /step=eq\.escalated/);
+});
+
+test("PR music FIND, factory revision, Content_Item quotes, and media Music prefer Supabase", async () => {
+  const {
+    translateProductionRequestFormula,
+    translateOutputSideFormula,
+    studioSideTableRead,
+    listSupabaseMediaByFormula,
+  } = await import("./supabase-pipeline-reads.mjs");
+  const prMusic = translateProductionRequestFormula(
+    'FIND("recMusicAsset0001", ARRAYJOIN({Selected_Music_Asset}))',
+  );
+  assert.ok(prMusic);
+  assert.match(prMusic, /Selected_Music_Asset/);
+  const factory = translateProductionRequestFormula(
+    'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
+  );
+  assert.ok(factory);
+  assert.match(factory, /request_status=eq\.Draft/);
+  assert.match(factory, /factory-producer-revision id=/);
+  const factoryPromoted = translateProductionRequestFormula(
+    'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
+  );
+  assert.ok(factoryPromoted);
+  assert.match(factoryPromoted, /request_status=eq\.Promoted/);
+  assert.equal(
+    translateOutputSideFormula("FIND('recContent0000001',ARRAYJOIN({Content_Item}))>0"),
+    "content_item_airtable_id.eq.recContent0000001",
+  );
+  assert.equal(
+    translateOutputSideFormula('FIND("recContent0000001",ARRAYJOIN({Content_Item})&"")'),
+    "content_item_airtable_id.eq.recContent0000001",
+  );
+  assert.equal(
+    translateOutputSideFormula('FIND(",101,",","&ARRAYJOIN({Content_Item})&",")>0'),
+    "content_number.eq.101",
+  );
+  assert.match(
+    translateOutputSideFormula("FIND(',recProOutput00001,',','&ARRAYJOIN({Production_Request_Output})&',')>0"),
+    /production_request_output_text\.like\.\*recProOutput00001\*/,
+  );
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_PRODUCTION_REQUEST_TABLE_ID: "tblProductionRequests",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblrlPeboBthkplH0",
+    AIRTABLE_MEDIA_TABLE_ID: "tblMediaAssets00001",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await studioSideTableRead(
+      env,
+      "tblProductionRequests",
+      "?filterByFormula=" + encodeURIComponent(
+        'FIND("recMusicAsset0001", ARRAYJOIN({Selected_Music_Asset}))',
+      ) + "&maxRecords=10",
+    );
+    await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(
+        "FIND('recContent0000001',ARRAYJOIN({Content_Item}))>0",
+      ) + "&maxRecords=10",
+    );
+    await listSupabaseMediaByFormula(
+      env,
+      "AND({Asset_Role}='Music',OR(FIND('studio/music-library',{Google Drive URL}),FIND('MUSIC-',{Studio_Transfer_ID})))",
+      { limit: 10 },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 3);
+  assert.match(calls[0], /Selected_Music_Asset/);
+  assert.match(calls[1], /content_item_airtable_id\.eq\.recContent0000001/);
+  assert.match(calls[2], /asset_role=eq\.Music/);
+  assert.match(calls[2], /studio\/music-library/);
 });
 
 test("Production Request Preparing/Error/Promoted list formulas prefer Supabase", async () => {

@@ -1215,6 +1215,11 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   let filter = "";
   const logo = cleaned === "AND({Asset_Role}='Logo',NOT({Do_Not_Use}))"
     || cleaned === 'AND({Asset_Role}="Logo",NOT({Do_Not_Use}))';
+  const music = cleaned === "AND({Asset_Role}='Music',NOT({Do_Not_Use}))"
+    || cleaned === 'AND({Asset_Role}="Music",NOT({Do_Not_Use}))';
+  // compactFormula strips spaces in {Google Drive URL} → {GoogleDriveURL}.
+  const musicLibrary = cleaned === "AND({Asset_Role}='Music',OR(FIND('studio/music-library',{GoogleDriveURL}),FIND('MUSIC-',{Studio_Transfer_ID})))"
+    || cleaned === 'AND({Asset_Role}="Music",OR(FIND("studio/music-library",{GoogleDriveURL}),FIND("MUSIC-",{Studio_Transfer_ID})))';
   const nameMatch = cleaned.match(/^LOWER\(\{AssetName\}&""\)=(["'])([^"']*)\1$/i)
     || cleaned.match(/^LOWER\(\{AssetName\}&\"\"\)=(["'])([^"']*)\1$/i)
     || cleaned.match(/^\{AssetName\}=(["'])([^"']*)\1$/i);
@@ -1226,6 +1231,11 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25 } = 
   const transferMatch = cleaned.match(/^\{Studio_Transfer_ID\}=(["'])([^"']*)\1$/);
   if (logo) {
     filter = "asset_role=eq.Logo&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (music) {
+    filter = "asset_role=eq.Music&or=(do_not_use.is.null,do_not_use.eq.false)";
+  } else if (musicLibrary) {
+    filter = "asset_role=eq.Music"
+      + "&or=(google_drive_url.ilike.*studio/music-library*,metadata->>studio_transfer_id.ilike.*MUSIC-*)";
   } else if (watermark) {
     filter = "asset_role=eq.Watermark&asset_status=eq.Available"
       + "&or=(do_not_use.is.null,do_not_use.eq.false)";
@@ -6210,6 +6220,32 @@ export function translateProductionRequestFormula(formula) {
     || cleaned === "AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!=\"\")") {
     return "production_job=not.is.null";
   }
+  // Music library usage: FIND Selected_Music_Asset in publish_status bag.
+  const musicFind = cleaned.match(
+    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Selected_Music_Asset\}\)(?:&"")?\)(?:>0)?$/,
+  );
+  if (musicFind) {
+    const id = musicFind[2];
+    const cs = `publish_status->Selected_Music_Asset.cs.${encodeURIComponent(JSON.stringify([id]))}`;
+    const text = `publish_status->>Selected_Music_Asset.ilike.*${id}*`;
+    return `or=(${cs},${text})`;
+  }
+  // Factory producer revision pending (Draft / Promoted).
+  // compactFormula strips spaces inside FIND needles, so match loosely then
+  // query the real spaced marker substrings in production_notes.
+  if (cleaned.includes("[factory-producer-revision")
+    && cleaned.includes("state=pending]")
+    && cleaned.includes("{Production_Notes}")) {
+    const draft = cleaned.includes('{Request_Status}="Draft"')
+      || cleaned.includes("{Request_Status}='Draft'");
+    const promoted = cleaned.includes('{Request_Status}="Promoted"')
+      || cleaned.includes("{Request_Status}='Promoted'");
+    if (draft !== promoted) {
+      return `request_status=eq.${draft ? "Draft" : "Promoted"}`
+        + `&production_notes.ilike.*[factory-producer-revision id=*`
+        + `&production_notes.ilike.*state=pending]*`;
+    }
+  }
   return null;
 }
 
@@ -6819,12 +6855,25 @@ function outputSideLeafFilter(cleaned) {
   if (outputIdGte) return `output_number.gte.${outputIdGte[1]}`;
   const outputIdGt = cleaned.match(/^\{Output_ID\}>(\d+)$/);
   if (outputIdGt) return `output_number.gt.${outputIdGt[1]}`;
-  const contentNumber = cleaned.match(/^FIND\(",(\d+),",","&ARRAYJOIN\(\{Content_Item\}\)&","\)>0$/);
-  if (contentNumber) return `content_number.eq.${contentNumber[1]}`;
-  const contentRec = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Content_Item\}\)\)(?:>0)?$/);
-  if (contentRec) return `content_item_airtable_id.eq.${contentRec[1]}`;
-  const requestOut = cleaned.match(/^FIND\("(rec[A-Za-z0-9]{14})",ARRAYJOIN\(\{Production_Request_Output\}\)\)(?:>0)?$/);
-  if (requestOut) return `production_request_output_text.like.*${requestOut[1]}*`;
+  // FIND(",123,",","&ARRAYJOIN({Content_Item})&",") — padded content number.
+  const contentNumber = cleaned.match(
+    /^FIND\((["']),(\d+),\1,\1,\1&ARRAYJOIN\(\{Content_Item\}\)&\1,\1\)(?:>0)?$/,
+  );
+  if (contentNumber) return `content_number.eq.${contentNumber[2]}`;
+  // Double- or single-quoted rec FIND; optional ARRAYJOIN&"" suffix (Worker variants).
+  const contentRec = cleaned.match(
+    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Content_Item\}\)(?:&"")?\)(?:>0)?$/,
+  );
+  if (contentRec) return `content_item_airtable_id.eq.${contentRec[2]}`;
+  // FIND(',rec…,',','&ARRAYJOIN({Production_Request_Output})&',')
+  const requestOutPad = cleaned.match(
+    /^FIND\((["']),(rec[A-Za-z0-9]{14}),\1,\1,\1&ARRAYJOIN\(\{Production_Request_Output\}\)&\1,\1\)(?:>0)?$/,
+  );
+  if (requestOutPad) return `production_request_output_text.like.*${requestOutPad[2]}*`;
+  const requestOut = cleaned.match(
+    /^FIND\((["'])(rec[A-Za-z0-9]{14})\1,ARRAYJOIN\(\{Production_Request_Output\}\)(?:&"")?\)(?:>0)?$/,
+  );
+  if (requestOut) return `production_request_output_text.like.*${requestOut[2]}*`;
   // Substring FIND on typed/bag text fields (bare FIND is truthy when >0).
   const findText = cleaned.match(
     /^FIND\("([^"]+)",\{([A-Za-z0-9_]+)\}(?:&"")?\)(?:>0|=0)?$/,
