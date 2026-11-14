@@ -6982,6 +6982,32 @@ function slideFormulaFilter(formula) {
   if (blank) return `or(fields->>${blank[1]}.is.null,fields->>${blank[1]}.eq.)`;
   const nonempty = cleaned.match(/^\{(Asset_4x5_Public_URL|FB_Photo_ID)\}!=BLANK\(\)$/);
   if (nonempty) return `and(fields->>${nonempty[1]}.not.is.null,fields->>${nonempty[1]}.neq.)`;
+  // P020-2 media cadence — voiceover bag lives on the typed voiceover jsonb.
+  const voiceEq = cleaned.match(/^\{Slide_Voiceover_Status\}="([^"]*)"$/);
+  if (voiceEq) return `voiceover->>status.eq.${encodeDeskFilterValue(voiceEq[1])}`;
+  const voicePresent = cleaned.match(
+    /^\{(Slide_Voiceover_Text|Slide_Voice_ID|Studio_Voice_Prep_Request_ID)\}(?:!=""|!=BLANK\(\))$/,
+  );
+  if (voicePresent) {
+    const col = {
+      Slide_Voiceover_Text: "text",
+      Slide_Voice_ID: "voice_id",
+      Studio_Voice_Prep_Request_ID: "prep_request_id",
+    }[voicePresent[1]];
+    return `and(voiceover->>${col}.not.is.null,voiceover->>${col}.neq.)`;
+  }
+  const voiceBlank = cleaned.match(
+    /^\{(Slide_Voiceover_Text|Slide_Voice_ID|Studio_Voice_Prep_Request_ID|Slide_Voiceover_URL)\}(?:=BLANK\(\)|="")$/,
+  );
+  if (voiceBlank) {
+    const col = {
+      Slide_Voiceover_Text: "text",
+      Slide_Voice_ID: "voice_id",
+      Studio_Voice_Prep_Request_ID: "prep_request_id",
+      Slide_Voiceover_URL: "url",
+    }[voiceBlank[1]];
+    return `or(voiceover->>${col}.is.null,voiceover->>${col}.eq.)`;
+  }
   return null;
 }
 
