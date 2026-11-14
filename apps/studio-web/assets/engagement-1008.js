@@ -1,12 +1,16 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const state = {
+    mode: "posts",
     settings: null,
     capabilities: null,
     recommendations: [],
     history: [],
     insights: null,
+    weeklyCap: 5,
+    weeklyCompleted: null,
     loading: false,
+    loadRequestId: 0,
     selected: new Set(),
   };
 
@@ -21,6 +25,10 @@
 
   function currentProfileId() {
     return String($("studioProfileSelect")?.value || "").trim();
+  }
+
+  function isPlacesMode() {
+    return state.mode === "places";
   }
 
   function setStatus(message, isError = false) {
@@ -70,21 +78,77 @@
     if ($("engagementEnabled")) $("engagementEnabled").checked = settings.enabled !== false;
   }
 
+  function applyModeChrome() {
+    const places = isPlacesMode();
+    $("engagementModePosts")?.classList?.toggle?.("is-active", !places);
+    $("engagementModePlaces")?.classList?.toggle?.("is-active", places);
+    if (typeof $("engagementModePosts")?.setAttribute === "function") {
+      $("engagementModePosts").setAttribute("aria-selected", places ? "false" : "true");
+    }
+    if (typeof $("engagementModePlaces")?.setAttribute === "function") {
+      $("engagementModePlaces").setAttribute("aria-selected", places ? "true" : "false");
+    }
+    if ($("engagementFiltersPanel")) $("engagementFiltersPanel").hidden = places;
+    if ($("engagementPlaceNotePanel")) $("engagementPlaceNotePanel").hidden = !places;
+    if ($("engagementPlatformFilter")) $("engagementPlatformFilter").hidden = places;
+    if ($("engagementInsightsPanel")) $("engagementInsightsPanel").hidden = places;
+    if ($("engagementDiscover")) {
+      $("engagementDiscover").textContent = places ? "Discover places" : "Discover now";
+    }
+    if ($("engagementQueueHeading")) {
+      $("engagementQueueHeading").textContent = places ? "Place review queue" : "Recommended posts";
+    }
+    if ($("engagementQueueHint")) {
+      $("engagementQueueHint").textContent = places
+        ? "Visited places from published TikTok content. Open Place, leave the review in TikTok, then Mark reviewed."
+        : "Approval queue. Bulk skip is allowed; mass unreviewed commenting is not.";
+    }
+    if ($("engagementHistoryHeading")) {
+      $("engagementHistoryHeading").textContent = places ? "Place review history" : "Engagement history";
+    }
+    if ($("engagementHistoryHint")) {
+      $("engagementHistoryHint").textContent = places
+        ? "Ledger of Open Place, Mark reviewed, and Skip actions. Never claims an API review submit."
+        : "Ledger of approvals, publishes, skips, and manual Open Post actions.";
+    }
+  }
+
   function renderCapabilityNote(capabilities) {
     state.capabilities = capabilities || {};
     const note = $("engagementCapabilityNote");
-    if (!note) return;
-    const bits = Object.entries(state.capabilities).map(([platform, row]) => {
-      const comment = row.stage_b_comment ? "comment API" : "comment manual";
-      const like = row.stage_b_like ? "like API" : "like manual";
-      return `${platform}: discover=${row.discover}, ${comment}, ${like}`;
-    });
-    note.textContent = bits.join(" · ");
+    if (note) {
+      const bits = Object.entries(state.capabilities).map(([platform, row]) => {
+        const comment = row.stage_b_comment ? "comment API" : "comment manual";
+        const like = row.stage_b_like ? "like API" : "like manual";
+        const place = row.place_review === "unsupported" ? "place review Open Place" : `place review ${row.place_review || "n/a"}`;
+        return `${platform}: discover=${row.discover}, ${comment}, ${like}, ${place}`;
+      });
+      note.textContent = bits.join(" · ");
+    }
+    const placeNote = $("engagementPlaceCapabilityNote");
+    if (placeNote) {
+      const tiktok = state.capabilities.tiktok || {};
+      placeNote.textContent = tiktok.manual_open_place
+        ? "TikTok place reviews: Open Place only — no official publish API."
+        : "TikTok place-review capability loads with the matrix.";
+    }
   }
 
   function renderKpis(insights) {
     const root = $("engagementKpis");
     if (!root) return;
+    if (isPlacesMode()) {
+      const cards = [
+        ["Queued places", state.recommendations.length],
+        ["Weekly done", state.weeklyCompleted ?? 0],
+        ["Weekly cap", state.weeklyCap ?? 5],
+        ["History rows", state.history.length],
+      ];
+      root.innerHTML = cards.map(([label, value]) => (
+        `<div class="engagement-kpi"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`
+      )).join("");
+      return;
+    }
     const cards = [
       ["Discovered", insights?.discovered ?? 0],
       ["Suggestions", insights?.suggestions_generated ?? 0],
@@ -122,6 +186,7 @@
     if (!row) return "unknown";
     if (action === "comment") return row.stage_b_comment ? "API" : "Manual";
     if (action === "like") return row.stage_b_like ? "API" : "Manual";
+    if (action === "place_review") return row.manual_open_place ? "Open Place" : "Unsupported";
     return row.discover || "unknown";
   }
 
@@ -133,18 +198,24 @@
     if (existing.length >= 3) {
       return { ...row, suggested_comments: existing.slice(0, 3) };
     }
-    const caption = String(row?.content_summary || row?.caption || "").trim();
+    const caption = String(row?.content_summary || row?.caption || row?.location || "").trim();
     const tokens = caption
       .replace(/#[\w]+/g, "")
       .split(/[\s,.;:!?\-/]+/)
       .map((part) => part.trim())
       .filter((part) => part.length > 3);
-    const subject = tokens.slice(0, 4).join(" ").slice(0, 48) || "this shot";
-    const fallbacks = [
-      `Love how you framed ${subject}. Really strong composition.`,
-      `Great eye for detail on ${subject}. Beautifully captured.`,
-      `The mood in this one stands out. Thanks for sharing such a thoughtful frame.`,
-    ];
+    const subject = tokens.slice(0, 4).join(" ").slice(0, 48) || "this place";
+    const fallbacks = isPlacesMode()
+      ? [
+        `${subject} always delivers — strong atmosphere and easy to recommend.`,
+        `Spent time at ${subject} for a shoot. Clean sightlines and a mood that photographs well.`,
+        `Reliable stop at ${subject}. Friendly energy and a location that holds up in real light.`,
+      ]
+      : [
+        `Love how you framed ${subject}. Really strong composition.`,
+        `Great eye for detail on ${subject}. Beautifully captured.`,
+        `The mood in this one stands out. Thanks for sharing such a thoughtful frame.`,
+      ];
     const merged = [...existing];
     for (const candidate of fallbacks) {
       if (merged.length >= 3) break;
@@ -162,7 +233,62 @@
     };
   }
 
+  function renderPlaceRecommendations() {
+    const root = $("engagementRecommendations");
+    if (!root) return;
+    if (!state.recommendations.length) {
+      root.innerHTML = `<p class="subtle">No open place reviews. Run Discover places for the current profile (or all profiles).</p>`;
+      return;
+    }
+    root.innerHTML = state.recommendations.map((raw) => {
+      const row = ensureThreeComments(raw);
+      const comments = Array.isArray(row.suggested_comments) ? row.suggested_comments : [];
+      const selected = row.selected_comment || comments[0] || "";
+      const checked = state.selected.has(row.target_id) ? "checked" : "";
+      const label = row.creator_name || row.location || "Place";
+      const rating = Number(row.star_rating) || 5;
+      return `
+        <article class="engagement-card engagement-place-card" data-target-id="${esc(row.target_id)}">
+          <header class="engagement-card-head">
+            <label class="engagement-select"><input type="checkbox" data-select-target="${esc(row.target_id)}" ${checked}> Select</label>
+            <div>
+              <strong>${esc(label)}</strong>
+              <span class="engagement-meta">${esc(row.profile)} · TikTok · ${esc(row.approval_status || row.eligibility_status)} · Open Place only</span>
+            </div>
+          </header>
+          <p class="engagement-caption">${esc(row.content_summary || row.content_title || "")}</p>
+          <p class="subtle">${esc(row.recommend_reason || "")}</p>
+          <p class="engagement-link"><a href="${esc(row.post_url)}" target="_blank" rel="noopener noreferrer">Open TikTok place search</a>
+            · Review path: ${esc(capabilityBadge("tiktok", "place_review"))}</p>
+          <label class="form-field"><span>Star rating</span>
+            <select data-rating-for="${esc(row.target_id)}">
+              ${[5, 4, 3, 2, 1].map((n) => `<option value="${n}" ${n === rating ? "selected" : ""}>${n} stars</option>`).join("")}
+            </select>
+          </label>
+          <label class="form-field"><span>Review draft</span>
+            <textarea data-comment-for="${esc(row.target_id)}" rows="3">${esc(selected)}</textarea>
+          </label>
+          ${comments.length > 1 ? `<div class="engagement-alts">${comments.map((text, index) => (
+            `<button type="button" class="chip-button" data-use-comment="${esc(row.target_id)}" data-comment-index="${index}">Use #${index + 1}</button>`
+          )).join("")}</div>` : ""}
+          <div class="engagement-actions">
+            <button type="button" class="primary-button" data-action="open_place" data-target-id="${esc(row.target_id)}">Open Place</button>
+            <button type="button" class="secondary-button" data-action="copy_draft" data-target-id="${esc(row.target_id)}">Copy draft</button>
+            <button type="button" class="secondary-button" data-action="mark_reviewed" data-target-id="${esc(row.target_id)}">Mark reviewed</button>
+            <button type="button" class="secondary-button" data-action="regenerate" data-target-id="${esc(row.target_id)}">Regenerate</button>
+            <button type="button" class="secondary-button" data-action="edit" data-target-id="${esc(row.target_id)}">Save draft</button>
+            <button type="button" class="secondary-button" data-action="skip" data-target-id="${esc(row.target_id)}">Skip</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+
   function renderRecommendations() {
+    if (isPlacesMode()) {
+      renderPlaceRecommendations();
+      return;
+    }
     const root = $("engagementRecommendations");
     if (!root) return;
     if (!state.recommendations.length) {
@@ -211,22 +337,25 @@
     const root = $("engagementHistory");
     if (!root) return;
     if (!state.history.length) {
-      root.innerHTML = `<p class="subtle">No engagement actions for this profile yet. Comment publishes where the API supports it (YouTube with Stage B). Otherwise use Open Post.</p>`;
+      root.innerHTML = isPlacesMode()
+        ? `<p class="subtle">No place-review actions yet. Discover places, Open Place in TikTok, then Mark reviewed.</p>`
+        : `<p class="subtle">No engagement actions for this profile yet. Comment publishes where the API supports it (YouTube with Stage B). Otherwise use Open Post.</p>`;
       return;
     }
-    root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Platform</th><th>Status</th><th>Post</th><th>Detail</th></tr></thead><tbody>${
+    const placeCols = isPlacesMode();
+    root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>${placeCols ? "Place" : "Channel"}</th><th>Type</th><th>${placeCols ? "Profile" : "Platform"}</th><th>Status</th><th>${placeCols ? "TikTok" : "Post"}</th><th>Detail</th></tr></thead><tbody>${
       state.history.map((row) => {
-        const channel = row.creator_name || row.creator_id || "—";
+        const channel = row.creator_name || row.location || row.creator_id || "—";
         const postUrl = String(row.post_url || "").trim();
         const postCell = postUrl
-          ? `<a href="${esc(postUrl)}" target="_blank" rel="noopener noreferrer">Open post</a>`
+          ? `<a href="${esc(postUrl)}" target="_blank" rel="noopener noreferrer">${placeCols ? "Open search" : "Open post"}</a>`
           : "—";
         return `
         <tr>
           <td>${esc(String(row.executed_at || row.approved_at || row.created_at || "").replace("T", " ").slice(0, 16))}</td>
           <td>${esc(channel)}</td>
           <td>${esc(row.action_type)}</td>
-          <td>${esc(row.platform)}</td>
+          <td>${esc(placeCols ? row.profile : row.platform)}</td>
           <td>${esc(row.execution_status || row.approval_status)}</td>
           <td>${postCell}</td>
           <td>${esc(row.error_details || row.edited_comment || row.suggested_comment || row.published_comment_id || "")}</td>
@@ -238,6 +367,11 @@
   function commentFor(targetId) {
     const area = document.querySelector(`textarea[data-comment-for="${targetId}"]`);
     return String(area?.value || "").trim();
+  }
+
+  function ratingFor(targetId) {
+    const select = document.querySelector(`select[data-rating-for="${targetId}"]`);
+    return Number(select?.value || 5) || 5;
   }
 
   function stageBChecked() {
@@ -261,12 +395,30 @@
     if (history) history.prepend(note);
   }
 
+  async function copyDraft(targetId) {
+    const text = commentFor(targetId);
+    if (!text) {
+      setStatus("Nothing to copy.", true);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Review draft copied.");
+    } catch {
+      setStatus("Could not copy — select the draft and copy manually.", true);
+    }
+  }
+
   async function runAction(action, targetId) {
+    if (action === "copy_draft") {
+      await copyDraft(targetId);
+      return;
+    }
     const payload = {
       action,
       target_id: targetId,
       comment: commentFor(targetId),
-      // Send checkbox state so Miami/etc Stage B is persisted even if Save was skipped.
+      star_rating: ratingFor(targetId),
       stage_b_enabled: stageBChecked(),
     };
     const button = document.querySelector(
@@ -281,18 +433,18 @@
     let message = "";
     let failed = false;
     let result = null;
+    const endpoint = isPlacesMode() ? "/api/engagement/place-reviews/actions" : "/api/engagement/actions";
     try {
-      result = await fetchJson("/api/engagement/actions", {
+      result = await fetchJson(endpoint, {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      if (action === "open_post" && (result.post_url || result.target?.post_url)) {
-        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      const openUrl = result.place_url || result.post_url || result.target?.post_url;
+      if ((action === "open_post" || action === "open_place") && openUrl) {
+        window.open(openUrl, "_blank", "noopener,noreferrer");
       }
-      // Platform-unsupported opens the post for manual work. Stage B off must not —
-      // that looked like success while no YouTube API call ran.
-      if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
-        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      if (result.unsupported && !result.stage_b_disabled && openUrl) {
+        window.open(openUrl, "_blank", "noopener,noreferrer");
       }
       message = result.message || (result.ok === false ? "Engagement action did not complete." : "Done.");
       failed = result.ok === false;
@@ -304,9 +456,9 @@
     setStatus(message, failed);
     const subtitle = $("engagementSubtitle");
     if (subtitle && message) subtitle.textContent = message;
-    if (failed || action === "comment" || action === "like") pinEngagementResult(targetId, message, failed);
-    // The card may remain in the queue after an API failure. Never leave its
-    // action disabled indefinitely when no new DOM card replaces it.
+    if (failed || action === "comment" || action === "like" || action === "mark_reviewed") {
+      pinEngagementResult(targetId, message, failed);
+    }
     if (button && button.isConnected) {
       button.disabled = false;
       button.textContent = originalButtonText;
@@ -333,6 +485,17 @@
   }
 
   async function discover() {
+    if (isPlacesMode()) {
+      setStatus("Discovering visited places…");
+      const allProfiles = Boolean($("engagementPlaceAllProfiles")?.checked);
+      const result = await fetchJson("/api/engagement/place-reviews/discover", {
+        method: "POST",
+        body: JSON.stringify({ force: true, all_profiles: allProfiles }),
+      });
+      setStatus(result.message || "Place discovery finished.");
+      await loadEngagement(true);
+      return;
+    }
     setStatus("Discovering relevant posts…");
     const result = await fetchJson("/api/engagement/discover", {
       method: "POST",
@@ -347,13 +510,59 @@
     state.loading = true;
     const requestId = (state.loadRequestId || 0) + 1;
     state.loadRequestId = requestId;
-    const platform = String($("engagementPlatform")?.value || "all");
     const subtitle = $("engagementSubtitle");
-    if (subtitle) subtitle.textContent = "Loading engagement queue…";
+    if (subtitle) subtitle.textContent = isPlacesMode() ? "Loading place reviews…" : "Loading engagement queue…";
+    applyModeChrome();
     try {
+      if (isPlacesMode()) {
+        const allProfiles = Boolean($("engagementPlaceAllProfiles")?.checked);
+        const query = allProfiles ? "?all_profiles=1" : "";
+        const [queueResult, capabilitiesResult] = await Promise.allSettled([
+          fetchJson("/api/engagement/place-reviews" + query),
+          fetchJson("/api/engagement/capabilities"),
+        ]);
+        if (requestId !== state.loadRequestId) return;
+        if (queueResult.status === "rejected" || queueResult.value?.ok === false) {
+          const reason = queueResult.status === "rejected"
+            ? queueResult.reason
+            : new Error(queueResult.value?.error || queueResult.value?.message || "Unknown queue error");
+          state.recommendations = [];
+          state.history = [];
+          state.selected.clear();
+          renderRecommendations();
+          renderHistory();
+          renderKpis(null);
+          if (subtitle) subtitle.textContent = "Could not load place reviews.";
+          setStatus(`Place reviews unavailable: ${reason?.message || String(reason)}`, true);
+          return;
+        }
+        const bundle = queueResult.value || {};
+        fillSettingsForm(bundle.settings || state.settings || {});
+        state.recommendations = Array.isArray(bundle.recommendations) ? bundle.recommendations : [];
+        state.history = Array.isArray(bundle.history) ? bundle.history : [];
+        state.weeklyCap = bundle.weekly_cap || 5;
+        state.weeklyCompleted = bundle.weekly_completed;
+        state.selected.clear();
+        renderRecommendations();
+        renderHistory();
+        renderKpis(null);
+        if (capabilitiesResult.status === "fulfilled") {
+          renderCapabilityNote(capabilitiesResult.value?.matrix || bundle.capabilities || {});
+        } else {
+          renderCapabilityNote(bundle.capabilities || {});
+        }
+        if (subtitle) {
+          const weekly = state.weeklyCompleted == null
+            ? ""
+            : ` · ${state.weeklyCompleted}/${state.weeklyCap} reviewed this week`;
+          subtitle.textContent = `${state.recommendations.length} open place review(s)${weekly}`;
+        }
+        if (!force || $("engagementStatus")?.classList.contains("is-error")) setStatus("");
+        return;
+      }
+
+      const platform = String($("engagementPlatform")?.value || "all");
       const query = platform && platform !== "all" ? `?platform=${encodeURIComponent(platform)}` : "";
-      // Recommendations are the primary workflow. A failed Insights or
-      // capabilities request must never make a healthy queue disappear.
       const [queueResult, insightsResult, capabilitiesResult] = await Promise.allSettled([
         fetchJson("/api/engagement/recommendations" + query),
         fetchJson("/api/engagement/insights"),
@@ -414,6 +623,13 @@
     }
   }
 
+  function setMode(mode) {
+    state.mode = mode === "places" ? "places" : "posts";
+    state.selected.clear();
+    applyModeChrome();
+    loadEngagement(true).catch((error) => setStatus(error.message || String(error), true));
+  }
+
   function pageActive() {
     return $("page-engagement")?.classList.contains("active");
   }
@@ -428,6 +644,11 @@
     saveSettings().catch((error) => setStatus(error.message || String(error), true));
   });
   $("engagementPlatform")?.addEventListener("change", () => loadEngagement(true));
+  $("engagementPlaceAllProfiles")?.addEventListener("change", () => {
+    if (isPlacesMode()) loadEngagement(true);
+  });
+  $("engagementModePosts")?.addEventListener("click", () => setMode("posts"));
+  $("engagementModePlaces")?.addEventListener("click", () => setMode("places"));
   $("studioProfileSelect")?.addEventListener("change", () => {
     if (pageActive()) loadEngagement(true);
   });
@@ -471,6 +692,8 @@
     const targetId = button.getAttribute("data-target-id");
     runAction(action, targetId).catch((error) => setStatus(error.message || String(error), true));
   });
+
+  applyModeChrome();
 
   window.StudioEngagement = {
     load: loadEngagement,

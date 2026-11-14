@@ -12,6 +12,8 @@ import {
   ENGAGEMENT_PROFILES,
   DEFAULT_PROFILE_TOPICS,
   PLATFORM_CAPABILITIES,
+  PLACE_REVIEW_STORE_SETTING,
+  PLACE_REVIEW_WEEKLY_CAP,
   capabilityMatrixResponse,
   parseEngagementStore,
   parseEngagementSettingsMap,
@@ -39,6 +41,20 @@ import {
   computeEngagementInsights,
   mapYoutubeSearchItem,
   nearIdenticalComment,
+  parsePlaceReviewStore,
+  emptyPlaceReviewStore,
+  prunePlaceReviewStore,
+  aggregateVisitedPlaces,
+  buildPlaceReviewTargetRecord,
+  buildPlaceReviewActionRecord,
+  buildPlaceReviewGenerationPrompt,
+  normalizePlaceReviewDrafts,
+  fallbackPlaceReviewDrafts,
+  sanitizePlaceReviewDraft,
+  weeklyPlaceReviewCount,
+  placeReviewDedupeKey,
+  placeReviewLabel,
+  normalizePlaceKey,
 } from "./engagement.mjs";
 
 export const ENGAGEMENT_TARGETS_TABLE = "tblhE7YHDnj2lxJPC";
@@ -50,6 +66,8 @@ export {
   ENGAGEMENT_SETTINGS_SETTING,
   ENGAGEMENT_DISCOVERY_LAST_SETTING,
   ENGAGEMENT_DISCOVERY_CRON_TTL_MS,
+  PLACE_REVIEW_STORE_SETTING,
+  PLACE_REVIEW_WEEKLY_CAP,
   capabilityMatrixResponse,
   PLATFORM_CAPABILITIES,
 };
@@ -813,4 +831,363 @@ export async function studioEngagementCron(env, depsOrFactory) {
     }
   }
   return { ok: true, results };
+}
+
+export async function studioLoadPlaceReviewStore(env, deps) {
+  const row = await deps.studioSettingsByName(env, PLACE_REVIEW_STORE_SETTING).catch(() => null);
+  return parsePlaceReviewStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}");
+}
+
+export async function studioSavePlaceReviewStore(env, store, deps) {
+  const pruned = prunePlaceReviewStore(store || emptyPlaceReviewStore());
+  await deps.studioUpsertSetting(
+    env,
+    PLACE_REVIEW_STORE_SETTING,
+    JSON.stringify(pruned),
+    "TikTok Place Reviews queue and manual-completion ledger (Open Place only)."
+  );
+  return pruned;
+}
+
+function fieldValue(record, name) {
+  return record?.fields?.[name] ?? record?.[name];
+}
+
+function firstLinkedId(value) {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    if (first && typeof first === "object") return String(first.id || first).trim();
+    return String(first || "").trim();
+  }
+  return String(value || "").trim();
+}
+
+function escapeAirtableFormula(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
+  const theme = normalizeEngagementProfile(profile);
+  if (!deps.listRecords || !deps.listContentProfileRecords) {
+    return { ok: false, places: [], message: "Place review discovery is missing Airtable list helpers." };
+  }
+  const profiles = await deps.listContentProfileRecords(env).catch(() => []);
+  const match = (profiles || []).find((row) => {
+    const key = typeof deps.studioThemeForProfile === "function"
+      ? deps.studioThemeForProfile(row)
+      : normalizeEngagementProfile(fieldValue(row, "Market_Name") || fieldValue(row, "Profile_Name"));
+    return normalizeEngagementProfile(key) === theme;
+  });
+  if (!match?.id) {
+    return { ok: false, places: [], message: `No Content Profile found for ${theme}.` };
+  }
+  const profileFormula = typeof deps.contentProfileFilterFormula === "function"
+    ? deps.contentProfileFilterFormula(match)
+    : `FIND("${escapeAirtableFormula(match.id)}", ARRAYJOIN({Content_Profile})&"")`;
+  const formula = `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,OR({Output_Status}="Published",{Publish_Status}="Published",{Published_At}!=""),${profileFormula})`;
+  const outputs = await deps.listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 120,
+    filterFormula: formula,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    fields: [
+      "Output_ID",
+      "Platform",
+      "Output_Status",
+      "Publish_Status",
+      "Published_At",
+      "Content_Item",
+      "Content_Profile",
+      "Content_Title",
+      "Thumbnail_URL",
+      "Studio_Preview_URL",
+    ],
+  }).catch(() => []);
+
+  const contentCache = new Map();
+  const rows = [];
+  for (const output of outputs || []) {
+    const contentId = firstLinkedId(fieldValue(output, "Content_Item"));
+    if (!contentId) continue;
+    let content = contentCache.get(contentId);
+    if (!content && deps.airtableFetch && env.AIRTABLE_CONTENT_TABLE_ID) {
+      content = await deps.airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+      contentCache.set(contentId, content);
+    }
+    const placeName = String(
+      fieldValue(content, "Primary_Location")
+      || fieldValue(content, "Neighborhood_or_Area")
+      || ""
+    ).trim();
+    if (!placeName) continue;
+    const market = String(
+      fieldValue(content, "Market_Name")
+      || fieldValue(match, "Market_Name")
+      || theme
+    ).trim();
+    const neighborhood = String(fieldValue(content, "Neighborhood_or_Area") || "").trim();
+    rows.push({
+      place_name: placeName,
+      market: Array.isArray(market) ? String(market[0] || "").trim() : market,
+      neighborhood: neighborhood && neighborhood !== placeName ? neighborhood : "",
+      content_title: String(
+        fieldValue(content, "Content_Title")
+        || fieldValue(output, "Content_Title")
+        || ""
+      ).trim(),
+      content_item_id: contentId,
+      output_id: output.id,
+      published_at: fieldValue(output, "Published_At") || null,
+      preview_url: String(
+        fieldValue(output, "Thumbnail_URL")
+        || fieldValue(output, "Studio_Preview_URL")
+        || fieldValue(content, "Thumbnail_URL")
+        || ""
+      ).trim(),
+    });
+  }
+  return {
+    ok: true,
+    places: aggregateVisitedPlaces(rows, theme),
+    profile_id: match.id,
+    scanned_outputs: (outputs || []).length,
+  };
+}
+
+export async function studioGeneratePlaceReviewDrafts(env, place, settings) {
+  const maxSuggestions = 3;
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return fallbackPlaceReviewDrafts(place, maxSuggestions);
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const prompt = buildPlaceReviewGenerationPrompt(place, settings, maxSuggestions);
+  try {
+    const response = await fetch(runnerUrl + "/jobs/autonomous-pick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: JSON.stringify({ prompt }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return fallbackPlaceReviewDrafts(place, maxSuggestions);
+    const parsed = body?.parsed && typeof body.parsed === "object" ? body.parsed : body;
+    const normalized = normalizePlaceReviewDrafts(parsed, maxSuggestions);
+    if (!normalized.reviews.length) return fallbackPlaceReviewDrafts(place, maxSuggestions);
+    return normalized;
+  } catch {
+    return fallbackPlaceReviewDrafts(place, maxSuggestions);
+  }
+}
+
+export async function studioRunPlaceReviewDiscovery(env, options, deps) {
+  const profiles = options.all_profiles
+    ? [...ENGAGEMENT_PROFILES]
+    : [normalizeEngagementProfile(options.profile || "chicago")];
+  const store = await studioLoadPlaceReviewStore(env, deps);
+  const added = [];
+  const notes = [];
+  for (const profile of profiles) {
+    const settings = await studioLoadEngagementSettings(env, profile, deps);
+    const collected = await studioCollectVisitedPlacesForProfile(env, profile, deps);
+    notes.push({
+      profile,
+      ok: collected.ok !== false,
+      scanned_outputs: collected.scanned_outputs || 0,
+      place_count: (collected.places || []).length,
+      message: collected.message || null,
+    });
+    if (!collected.places?.length) continue;
+    const remainingCap = Math.max(
+      0,
+      PLACE_REVIEW_WEEKLY_CAP - weeklyPlaceReviewCount(store.actions, profile)
+    );
+    if (!remainingCap) {
+      notes[notes.length - 1].message = `Weekly place-review cap (${PLACE_REVIEW_WEEKLY_CAP}) reached for ${profile}.`;
+      continue;
+    }
+    const existingKeys = new Set(
+      (store.targets || [])
+        .filter((row) => row.profile === profile)
+        .map((row) => row.dedupe_key || placeReviewDedupeKey(row.profile, row.location, row.market))
+    );
+    let addedForProfile = 0;
+    for (const place of collected.places) {
+      if (addedForProfile >= remainingCap) break;
+      const key = place.dedupe_key || placeReviewDedupeKey(profile, place.place_name, place.market);
+      if (existingKeys.has(key)) continue;
+      const reviewed = (store.actions || []).some(
+        (action) =>
+          action.profile === profile
+          && action.action_type === "mark_reviewed"
+          && action.execution_status === "manual_completed"
+          && (action.idempotency_key === makeIdempotencyKey(profile, "tiktok", "mark_reviewed", normalizePlaceKey(place.place_name))
+            || normalizePlaceKey(action.location) === normalizePlaceKey(place.place_name))
+      );
+      if (reviewed) continue;
+      const generated = await studioGeneratePlaceReviewDrafts(env, place, settings);
+      const drafts = generated.reviews || [];
+      if (!drafts.length) continue;
+      const target = buildPlaceReviewTargetRecord(place, settings, drafts, 5);
+      store.targets.unshift(target);
+      existingKeys.add(target.dedupe_key);
+      added.push(target);
+      addedForProfile += 1;
+    }
+  }
+  store.updated_at = new Date().toISOString();
+  await studioSavePlaceReviewStore(env, store, deps);
+  return {
+    ok: true,
+    status: "ok",
+    added,
+    added_count: added.length,
+    profiles: notes,
+    weekly_cap: PLACE_REVIEW_WEEKLY_CAP,
+    message: added.length
+      ? `Queued ${added.length} TikTok place review(s) for manual Open Place.`
+      : "No new visited places to queue. Places come from published TikTok Content Items with Primary_Location.",
+  };
+}
+
+export async function studioListPlaceReviews(env, options, deps) {
+  const profile = options.all_profiles ? null : normalizeEngagementProfile(options.profile || "chicago");
+  const store = await studioLoadPlaceReviewStore(env, deps);
+  let rows = store.targets || [];
+  if (profile) rows = rows.filter((row) => row.profile === profile);
+  if (options.status) {
+    const status = String(options.status).toLowerCase();
+    rows = rows.filter((row) =>
+      String(row.approval_status || "").toLowerCase() === status
+      || String(row.eligibility_status || "").toLowerCase() === status
+    );
+  } else {
+    rows = rows.filter((row) => !["Skipped", "Reviewed", "Blocked Creator"].includes(row.eligibility_status));
+  }
+  rows.sort((a, b) => String(b.discovered_at || "").localeCompare(String(a.discovered_at || "")));
+  const history = (store.actions || [])
+    .filter((row) => !profile || row.profile === profile)
+    .slice(0, 100);
+  const settings = profile
+    ? await studioLoadEngagementSettings(env, profile, deps)
+    : defaultEngagementSettings("chicago");
+  return {
+    ok: true,
+    profile: profile || "all",
+    settings,
+    capabilities: PLATFORM_CAPABILITIES,
+    weekly_cap: PLACE_REVIEW_WEEKLY_CAP,
+    weekly_completed: profile ? weeklyPlaceReviewCount(store.actions, profile) : null,
+    recommendations: rows.slice(0, 100),
+    history,
+    note: "TikTok has no place-review publish API — Open Place only.",
+  };
+}
+
+export async function studioApplyPlaceReviewAction(env, payload, deps) {
+  const profile = normalizeEngagementProfile(payload.profile || "chicago");
+  const actionType = String(payload.action || payload.action_type || "").trim().toLowerCase();
+  const targetId = String(payload.target_id || "").trim();
+  if (!targetId) throw new Error("target_id is required");
+  if (!["open_place", "mark_reviewed", "skip", "regenerate", "edit"].includes(actionType)) {
+    throw new Error("Unsupported place-review action");
+  }
+
+  const store = await studioLoadPlaceReviewStore(env, deps);
+  const settings = await studioLoadEngagementSettings(env, profile, deps);
+  const target = store.targets.find((row) => row.target_id === targetId && row.profile === profile);
+  if (!target) throw new Error("Place review target not found for this profile");
+
+  if (actionType === "edit") {
+    const edited = sanitizePlaceReviewDraft(payload.comment || payload.edited_comment || "");
+    if (!edited) throw new Error("Edited place review failed safety checks");
+    const rating = Number(payload.star_rating);
+    if (Number.isFinite(rating)) target.star_rating = Math.max(1, Math.min(5, rating));
+    target.selected_comment = edited;
+    target.approval_status = "edited";
+    if (!target.suggested_comments.includes(edited)) {
+      target.suggested_comments = [edited, ...target.suggested_comments].slice(0, 3);
+    }
+    await studioSavePlaceReviewStore(env, store, deps);
+    return { ok: true, target, message: "Place review draft updated. Open Place in TikTok to post manually." };
+  }
+
+  if (actionType === "regenerate") {
+    const generated = await studioGeneratePlaceReviewDrafts(env, {
+      place_name: target.location,
+      market: target.market,
+      neighborhood: target.neighborhood,
+      content_title: target.content_title || target.content_summary,
+    }, settings);
+    const drafts = generated.reviews || [];
+    if (!drafts.length) throw new Error("Could not regenerate place-review drafts");
+    target.suggested_comments = drafts;
+    target.selected_comment = drafts[0];
+    target.approval_status = "pending";
+    target.eligibility_status = "Suggested";
+    await studioSavePlaceReviewStore(env, store, deps);
+    return { ok: true, target, message: "Regenerated place-review drafts." };
+  }
+
+  if (actionType === "skip") {
+    target.eligibility_status = "Skipped";
+    target.approval_status = "skipped";
+    const action = buildPlaceReviewActionRecord({
+      target,
+      actionType: "skip",
+      approvalStatus: "skipped",
+      executionStatus: "manual",
+    });
+    store.actions.unshift(action);
+    await studioSavePlaceReviewStore(env, store, deps);
+    return { ok: true, target, action, message: "Place review skipped." };
+  }
+
+  if (actionType === "open_place") {
+    const action = buildPlaceReviewActionRecord({
+      target,
+      actionType: "open_place",
+      comment: payload.comment || target.selected_comment,
+      approvalStatus: "approved",
+      executionStatus: "opened",
+    });
+    store.actions.unshift(action);
+    await studioSavePlaceReviewStore(env, store, deps);
+    return {
+      ok: true,
+      target,
+      action,
+      manual: true,
+      post_url: target.post_url,
+      place_url: target.post_url,
+      message: `Open TikTok and leave a review for ${placeReviewLabel(target.location, target.market)}. No automated review was submitted.`,
+    };
+  }
+
+  // mark_reviewed — operator confirms they posted in the TikTok app
+  if (weeklyPlaceReviewCount(store.actions, profile) >= PLACE_REVIEW_WEEKLY_CAP) {
+    throw new Error(`Weekly place-review cap (${PLACE_REVIEW_WEEKLY_CAP}) reached for ${profile}.`);
+  }
+  const comment = sanitizePlaceReviewDraft(payload.comment || target.selected_comment || "");
+  if (comment) target.selected_comment = comment;
+  const rating = Number(payload.star_rating);
+  if (Number.isFinite(rating)) target.star_rating = Math.max(1, Math.min(5, rating));
+  target.eligibility_status = "Reviewed";
+  target.approval_status = "approved";
+  const action = buildPlaceReviewActionRecord({
+    target,
+    actionType: "mark_reviewed",
+    comment: target.selected_comment,
+    approvalStatus: "approved",
+    executionStatus: "manual_completed",
+  });
+  store.actions.unshift(action);
+  await studioSavePlaceReviewStore(env, store, deps);
+  return {
+    ok: true,
+    target,
+    action,
+    manual: true,
+    message: `Marked ${placeReviewLabel(target.location, target.market)} as reviewed (manual). TikTok was not called.`,
+  };
 }

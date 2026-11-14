@@ -5,7 +5,7 @@ Verified against official platform documentation and existing Studio integration
 TikTok Content Posting, Meta Graph publish paths). **No browser bots, scraping,
 unofficial private APIs, or simulated human interaction.**
 
-Last reviewed: 2026-10-08.
+Last reviewed: 2026-11-14.
 
 ## Capability matrix
 
@@ -15,7 +15,8 @@ Last reviewed: 2026-10-08.
 | Read public captions/content | **Partial** — caption + metadata via `business_discovery` when permission is granted. Comment *lists* on third-party media are not readable through discovery. | **Unsupported** for arbitrary third-party posts with current Page tokens. | **Unsupported** for arbitrary third-party posts. | **Supported** — `videos.list` / `search.list` snippet (title, description). |
 | Like third-party content | **Partial / gated** — Instagram Login `/{ig-user-id}/user_likes` can like media when the app uses Instagram Login scopes. Studio Meta tokens today are Facebook-Login Graph paths used for *owned* publishing; third-party like is not enabled until Instagram Login + app review. | **Unsupported** for arbitrary public posts (User Likes deprecated for this use). | **Unsupported** — Content Posting API has no like-others endpoint. | **Supported** — `videos.rate` (`like`/`none`) with OAuth (`youtube.force-ssl` already in uploader scopes). |
 | Comment on third-party content | **Unsupported** for others’ media — `/{ig-media-id}/comments` requires a token for the media owner. Outbound comments on third-party posts → **manual Open Post**. | **Unsupported** as a general automation path for arbitrary creators. Page engagement APIs do not authorize mass third-party commenting. | **Unsupported** — no official comment-on-others API. | **Supported** — `commentThreads.insert` with OAuth (`youtube.force-ssl`). Subject to quota and spam policies. |
-| Retrieve engagement history | **Partial** — own-media comment moderation only; no reliable outbound “comments we left on others” history API. Studio persists its own Engagement Actions ledger. | Same — Studio ledger only. | Same — Studio ledger only. | **Partial** — can list own channel comments via Data API; Studio also persists Engagement Actions. |
+| Publish place (POI) review | **Unsupported** — no Meta place-review publish path for Studio. | **Unsupported** — no Facebook place-review publish path for Studio. | **Unsupported** — Content Posting and Business APIs have no place-review submit endpoint. Business `/business/publish/location/` only lists tags for video posts. Studio Place Reviews is **Open Place** only (operator leaves the review in the TikTok app). | **Unsupported** — YouTube has no place-review product. |
+| Retrieve engagement history | **Partial** — own-media comment moderation only; no reliable outbound “comments we left on others” history API. Studio persists its own Engagement Actions ledger. | Same — Studio ledger only. | Same — Studio ledger only (including Place Review manual completions). | **Partial** — can list own channel comments via Data API; Studio also persists Engagement Actions. |
 
 ## Permissions, quotas, review, and prohibitions
 
@@ -31,6 +32,7 @@ Last reviewed: 2026-10-08.
 - Content Posting API: inbox drafts for *our* content only.
 - No official third-party discover / like / comment for growth engagement.
 - All TikTok engagement recommendations are **manual Open Post** only.
+- **Place reviews:** no official API to publish star/text reviews on TikTok Places. Studio discovers visited places from our published TikTok Content Items (`Primary_Location`), drafts review copy, and opens TikTok search for the operator. Never mark a place review Completed without operator confirmation.
 
 ### YouTube
 
@@ -50,3 +52,5 @@ Last reviewed: 2026-10-08.
 ## Unsupported → manual workflow
 
 When an action is Unsupported or Partial-unavailable, the Engagement UI offers **Open Post** with the original URL and records the operator decision (Skipped / Manual) without claiming the platform action completed.
+
+**Place Reviews** use **Open Place** the same way: copy the draft, leave the review in the TikTok app, then **Mark reviewed**. Studio never claims TikTok accepted a place review via API.

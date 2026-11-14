@@ -51,6 +51,20 @@ test("capability matrix documents unsupported automation honestly", () => {
   assert.match(matrix, /Open Post/);
   assert.match(matrix, /business_discovery/);
   assert.match(matrix, /commentThreads\.insert/);
+  assert.match(matrix, /Publish place \(POI\) review/);
+  assert.match(matrix, /Open Place/);
+});
+
+test("Engagement Place Reviews tab is Open Place only", () => {
+  assert.match(html, /id="engagementModePlaces"/);
+  assert.match(html, /id="engagementPlaceNotePanel"/);
+  assert.match(html, /id="engagementPlaceAllProfiles"/);
+  assert.match(js, /data-action="open_place"/);
+  assert.match(js, /data-action="mark_reviewed"/);
+  assert.match(js, /\/api\/engagement\/place-reviews/);
+  assert.match(js, /Open Place only/);
+  assert.doesNotMatch(js, /publish.?place.?review|submitPlaceReview/i);
+  assert.match(css, /\.engagement-mode-tabs/);
 });
 
 test("Engagement still loads recommendations when optional reads fail", () => {
@@ -66,8 +80,9 @@ test("Engagement queue survives optional Insights failure at runtime", async () 
   const elements = new Map();
   function el(id) {
     if (!elements.has(id)) elements.set(id, {
-      value: "", textContent: "", innerHTML: "", checked: false,
+      value: "", textContent: "", innerHTML: "", checked: false, hidden: false,
       addEventListener: () => {},
+      setAttribute: () => {},
       classList: { contains: () => false, toggle: () => {}, add: () => {} },
     });
     return elements.get(id);

@@ -781,3 +781,5 @@ Deploy 2026-11-14 iPhone PWA TikTok actions viewport fit: wrap instructions, sta
 Retry deploy 2026-11-14 Studio UI 0.6.939-iphone-tiktok-layout after release contract alignment PR #1918. Verify iPhone TikTok panel viewport clipping eliminated.
 
 Deploy 2026-11-14 Studio UI 0.6.940-meta-republish-safety. Disable automatic retries on ambiguous Meta republish POST, show reconciliation guidance on aborted iPhone requests. Airtable remains authoritative; Supabase Phase 7 migration untouched.
+
+Deploy 2026-11-14 Studio UI 0.6.941-tiktok-place-reviews. Engagement Place Reviews tab: discover visited places from published TikTok content, draft reviews, Open Place manual workflow. Verify footer UI build 0.6.941.

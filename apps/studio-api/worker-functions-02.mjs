@@ -429,11 +429,14 @@ import {
 import {
   capabilityMatrixResponse,
   studioApplyEngagementAction,
+  studioApplyPlaceReviewAction,
   studioEngagementCron,
   studioEngagementInsights,
   studioListEngagementRecommendations,
+  studioListPlaceReviews,
   studioLoadEngagementSettings,
   studioRunEngagementDiscovery,
+  studioRunPlaceReviewDiscovery,
   studioSaveEngagementSettings,
 } from "./engagement-service.mjs";
 import {
@@ -10074,6 +10077,9 @@ export function engagementDeps(theme = "chicago") {
     studioActivePipelineSettings: (env, names) => studioActivePipelineSettings(env, names, contextRecord),
     airtableFetch,
     listRecords,
+    listContentProfileRecords,
+    contentProfileFilterFormula,
+    studioThemeForProfile,
   };
 }
 /*__STUDIO_WORKER_END:engagementDeps__*/
@@ -10151,6 +10157,49 @@ export async function getEngagementInsights(request, env, url, authorization) {
   return respond(request, env, result);
 }
 /*__STUDIO_WORKER_END:getEngagementInsights__*/
+
+export async function postPlaceReviewsDiscover(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const allProfiles = payload.all_profiles === true || String(url.searchParams.get("all_profiles") || "") === "1";
+  const profile = allProfiles
+    ? "chicago"
+    : await resolveEngagementProfile(env, url, authorization, payload);
+  const result = await studioRunPlaceReviewDiscovery(env, {
+    profile,
+    all_profiles: allProfiles,
+    force: payload.force !== false,
+  }, engagementDeps(profile));
+  return respond(request, env, result);
+}
+/*__STUDIO_WORKER_END:postPlaceReviewsDiscover__*/
+
+export async function getPlaceReviews(request, env, url, authorization) {
+  const allProfiles = String(url.searchParams.get("all_profiles") || "") === "1";
+  const profile = allProfiles
+    ? "chicago"
+    : await resolveEngagementProfile(env, url, authorization);
+  const result = await studioListPlaceReviews(env, {
+    profile,
+    all_profiles: allProfiles,
+    status: url.searchParams.get("status") || "",
+  }, engagementDeps(profile));
+  return respond(request, env, result);
+}
+/*__STUDIO_WORKER_END:getPlaceReviews__*/
+
+export async function postPlaceReviewAction(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const profile = await resolveEngagementProfile(env, url, authorization, payload);
+  try {
+    const result = await studioApplyPlaceReviewAction(env, { ...payload, profile }, engagementDeps(profile));
+    return respond(request, env, result, 200);
+  } catch (error) {
+    throw new HttpError(400, error?.message || String(error));
+  }
+}
+/*__STUDIO_WORKER_END:postPlaceReviewAction__*/
 
 export async function studioSweepSimilarAccountTimes(env, options = {}) {
   const limit = Math.max(1, Math.min(10, Number(options.limit) || 3));

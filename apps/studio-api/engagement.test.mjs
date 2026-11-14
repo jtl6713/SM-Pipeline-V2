@@ -30,6 +30,15 @@ import {
   dailyActionCount,
   nearIdenticalComment,
   backoffMs,
+  placeReviewDedupeKey,
+  aggregateVisitedPlaces,
+  buildPlaceReviewTargetRecord,
+  buildPlaceReviewActionRecord,
+  sanitizePlaceReviewDraft,
+  fallbackPlaceReviewDrafts,
+  weeklyPlaceReviewCount,
+  tiktokPlaceSearchUrl,
+  capabilityMatrixResponse,
 } from "./engagement.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +58,9 @@ test("capability matrix marks YouTube comment/like supported and TikTok unsuppor
   assert.equal(actionSupported("tiktok", "comment"), false);
   assert.equal(actionSupported("instagram", "comment"), false);
   assert.equal(PLATFORM_CAPABILITIES.facebook.discover, "unsupported");
+  assert.equal(PLATFORM_CAPABILITIES.tiktok.place_review, "unsupported");
+  assert.equal(PLATFORM_CAPABILITIES.tiktok.manual_open_place, true);
+  assert.equal(actionSupported("tiktok", "place_review"), false);
 });
 
 test("profile-specific relevance prefers Chicago architecture over unrelated travel", () => {
@@ -326,7 +338,7 @@ test("history rows expose channel name and clickable post URL", () => {
   assert.equal(legacy[0].post_url, "https://www.youtube.com/watch?v=qH7IQboSKuc");
 
   const ui = fs.readFileSync(path.join(here, "../studio-web/assets/engagement-1008.js"), "utf8");
-  assert.match(ui, /<th>Channel<\/th>/);
+  assert.match(ui, /placeCols \? "Place" : "Channel"/);
   assert.match(ui, /Open post/);
   assert.match(ui, /row\.post_url/);
   const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
@@ -360,4 +372,56 @@ test("YouTube engage probes uploader health for engagement build before comment"
   assert.match(service, /\/youtube\/engage\/comment/);
   assert.match(service, /YouTube did not return a comment id/);
   assert.match(service, /actionType === "comment" \|\| actionType === "like"/);
+});
+
+test("place review helpers dedupe visits and keep Open Place only", () => {
+  const places = aggregateVisitedPlaces([
+    { place_name: "Millennium Park", market: "Chicago", published_at: "2026-11-01T12:00:00Z", content_title: "Bean morning" },
+    { place_name: "Millennium Park", market: "Chicago", published_at: "2026-11-10T12:00:00Z", content_title: "Bean dusk" },
+    { place_name: "Navy Pier", market: "Chicago", published_at: "2026-11-08T12:00:00Z", content_title: "Pier walk" },
+  ], "chicago");
+  assert.equal(places.length, 2);
+  assert.equal(places[0].place_name, "Millennium Park");
+  assert.equal(places[0].content_title, "Bean dusk");
+  assert.equal(
+    placeReviewDedupeKey("chicago", "Millennium Park", "Chicago"),
+    placeReviewDedupeKey("Chicago", "millennium park", "chicago")
+  );
+  assert.match(tiktokPlaceSearchUrl("Millennium Park", "Chicago"), /tiktok\.com\/search\?q=/);
+  assert.equal(sanitizePlaceReviewDraft("Great spot https://spam.example"), "");
+  assert.match(sanitizePlaceReviewDraft("Came through for a shoot — strong light and easy to recommend."), /Came through/);
+  const drafts = fallbackPlaceReviewDrafts({ place_name: "Navy Pier", market: "Chicago", content_title: "Pier walk" });
+  assert.ok(drafts.reviews.length >= 2);
+  const target = buildPlaceReviewTargetRecord(
+    places[0],
+    defaultEngagementSettings("chicago"),
+    drafts.reviews
+  );
+  assert.equal(target.platform, "tiktok");
+  assert.equal(target.execution_mode, "open_place");
+  assert.equal(target.target_kind, "place_review");
+  const action = buildPlaceReviewActionRecord({
+    target,
+    actionType: "mark_reviewed",
+    approvalStatus: "approved",
+    executionStatus: "manual_completed",
+  });
+  assert.equal(action.execution_status, "manual_completed");
+  assert.equal(weeklyPlaceReviewCount([action], "chicago"), 1);
+  const matrix = capabilityMatrixResponse();
+  assert.equal(matrix.matrix.tiktok.place_review, "unsupported");
+  assert.equal(matrix.place_reviews.mode, "open_place");
+});
+
+test("place review service never exposes an automated publish path", () => {
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  assert.match(service, /studioRunPlaceReviewDiscovery/);
+  assert.match(service, /studioApplyPlaceReviewAction/);
+  assert.match(service, /open_place/);
+  assert.match(service, /manual_completed/);
+  assert.match(service, /No automated review was submitted/);
+  assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
+  assert.match(worker, /\/api\/engagement\/place-reviews/);
+  assert.match(worker, /studio_place_reviews_v1/);
+  assert.match(worker, /0\.10\.911-tiktok-place-reviews/);
 });

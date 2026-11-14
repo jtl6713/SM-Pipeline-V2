@@ -1198,4 +1198,6 @@ Deploy 2026-11-14 Worker 0.10.909-closeout-music-override: Platform Output Selec
 
 Deploy 2026-11-14 Worker 0.10.910-closeout-slide-rec: Carousel Slides OR(RECORD_ID()) list formulas prefer Supabase (native gallery / review readSlides). Record deletion is not started. Verify /health version 0.10.910-closeout-slide-rec.
 
-Deploy 2026-11-14 Worker 0.10.911-closeout-slide-space: Carousel Slides Is Cover / Deleted From Carousel / Review Status formulas prefer Supabase after tightenSideFormula space strip. Record deletion is not started. Verify /health version 0.10.911-closeout-slide-space.
+Deploy 2026-11-14 Worker 0.10.911-closeout-slide-space: Carousel Slides spaced-field formulas prefer Supabase (native gallery / review readSlides). Record deletion is not started. Verify /health version 0.10.911-closeout-slide-space.
+
+Deploy 2026-11-14 Worker 0.10.912-tiktok-place-reviews: Place Reviews discover/list/actions API (Open Place only; no TikTok place-review publish). Record deletion is not started. Verify /health version 0.10.912-tiktok-place-reviews.

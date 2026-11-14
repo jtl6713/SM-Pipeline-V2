@@ -616,11 +616,14 @@ import {
 import {
   capabilityMatrixResponse,
   studioApplyEngagementAction,
+  studioApplyPlaceReviewAction,
   studioEngagementCron,
   studioEngagementInsights,
   studioListEngagementRecommendations,
+  studioListPlaceReviews,
   studioLoadEngagementSettings,
   studioRunEngagementDiscovery,
+  studioRunPlaceReviewDiscovery,
   studioSaveEngagementSettings,
 } from "./engagement-service.mjs";
 import {
@@ -1101,6 +1104,9 @@ export default {
       const isEngagementActionsRoute = url.pathname === "/api/engagement/actions";
       const isEngagementInsightsRoute = url.pathname === "/api/engagement/insights";
       const isEngagementHistoryRoute = url.pathname === "/api/engagement/history";
+      const isPlaceReviewsDiscoverRoute = url.pathname === "/api/engagement/place-reviews/discover";
+      const isPlaceReviewsRoute = url.pathname === "/api/engagement/place-reviews";
+      const isPlaceReviewsActionsRoute = url.pathname === "/api/engagement/place-reviews/actions";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -1208,6 +1214,8 @@ export default {
       const isEngagementSettingsWrite = isEngagementSettingsRoute && (request.method === "POST" || request.method === "PATCH");
       const isEngagementDiscoverWrite = isEngagementDiscoverRoute && request.method === "POST";
       const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
+      const isPlaceReviewsDiscoverWrite = isPlaceReviewsDiscoverRoute && request.method === "POST";
+      const isPlaceReviewsActionsWrite = isPlaceReviewsActionsRoute && request.method === "POST";
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isInternalIgPublishLeasePost = request.method === "POST" &&
@@ -1330,11 +1338,14 @@ export default {
         isEngagementSettingsWrite ||
         isEngagementDiscoverWrite ||
         isEngagementActionsWrite ||
+        isPlaceReviewsDiscoverWrite ||
+        isPlaceReviewsActionsWrite ||
         (isEngagementCapabilitiesRoute && request.method === "GET") ||
         (isEngagementSettingsRoute && request.method === "GET") ||
         (isEngagementRecommendationsRoute && request.method === "GET") ||
         (isEngagementInsightsRoute && request.method === "GET") ||
         (isEngagementHistoryRoute && request.method === "GET") ||
+        (isPlaceReviewsRoute && request.method === "GET") ||
         (isR5DoneHookRoute && request.method === "POST") ||
         (isRr2HookRoute && (request.method === "GET" || request.method === "POST"));
       if (!allowedMethod) {
@@ -1371,7 +1382,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.911-closeout-slide-space",
+          version: "0.10.912-tiktok-place-reviews",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -1447,6 +1458,7 @@ export default {
           studio_approve_all_enqueue_ids_v1: true,
           studio_home_overview_budget_v1: true,
           studio_engagement_v1: true,
+          studio_place_reviews_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_horizon_days_v1: true,
           studio_mae_output_type_lanes_v1: true,
@@ -3608,6 +3620,23 @@ export default {
       if (isEngagementInsightsRoute) {
         requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
         return getEngagementInsights(request, env, url, authorization);
+      }
+
+      if (isPlaceReviewsDiscoverRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return postPlaceReviewsDiscover(request, env, url, authorization);
+      }
+
+      if (isPlaceReviewsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getPlaceReviews(request, env, url, authorization);
+      }
+
+      if (isPlaceReviewsActionsRoute) {
+        requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
+        assertWriteRequest(request, env);
+        return postPlaceReviewAction(request, env, url, authorization);
       }
 
       if (isVoicePreviewRoute) {
@@ -7055,6 +7084,9 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:getEngagementRecommendations__*/
 /*__STUDIO_WORKER_EXTRACT:postEngagementAction__*/
 /*__STUDIO_WORKER_EXTRACT:getEngagementInsights__*/
+/*__STUDIO_WORKER_EXTRACT:postPlaceReviewsDiscover__*/
+/*__STUDIO_WORKER_EXTRACT:getPlaceReviews__*/
+/*__STUDIO_WORKER_EXTRACT:postPlaceReviewAction__*/
 /*__STUDIO_WORKER_EXTRACT:studioSweepSimilarAccountTimes__*/
 /*__STUDIO_WORKER_EXTRACT:restoreParentContentItemFromStudioUmbrella__*/
 /*__STUDIO_WORKER_EXTRACT:markParentContentItemAsStudioUmbrella__*/

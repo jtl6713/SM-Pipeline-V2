@@ -8,6 +8,10 @@ export const ENGAGEMENT_STORE_SETTING = "ENGAGEMENT_STORE_V1";
 export const ENGAGEMENT_SETTINGS_SETTING = "ENGAGEMENT_SETTINGS_V1";
 export const ENGAGEMENT_DISCOVERY_LAST_SETTING = "ENGAGEMENT_DISCOVERY_LAST_RUN";
 export const ENGAGEMENT_DISCOVERY_CRON_TTL_MS = 24 * 60 * 60 * 1000;
+export const PLACE_REVIEW_SCHEMA = "studio.place_review.1";
+export const PLACE_REVIEW_STORE_SETTING = "PLACE_REVIEW_STORE_V1";
+export const PLACE_REVIEW_WEEKLY_CAP = 5;
+export const PLACE_REVIEW_TARGET_KIND = "place_review";
 
 export const ENGAGEMENT_PROFILES = Object.freeze(["chicago", "nyc", "la", "miami"]);
 export const ENGAGEMENT_PLATFORMS = Object.freeze(["instagram", "facebook", "tiktok", "youtube"]);
@@ -19,46 +23,55 @@ export const PLATFORM_CAPABILITIES = Object.freeze({
     read_public: "partial",
     like: "partial",
     comment: "unsupported",
+    place_review: "unsupported",
     history: "partial",
     notes:
       "business_discovery needs Meta permission #10 (currently blocked). Third-party comments unsupported. Likes need Instagram Login user_likes + app review.",
     stage_b_like: false,
     stage_b_comment: false,
     manual_open_post: true,
+    manual_open_place: false,
   },
   facebook: {
     discover: "unsupported",
     read_public: "unsupported",
     like: "unsupported",
     comment: "unsupported",
+    place_review: "unsupported",
     history: "partial",
     notes: "No official third-party discover/like/comment path for arbitrary creators. Open Post only.",
     stage_b_like: false,
     stage_b_comment: false,
     manual_open_post: true,
+    manual_open_place: false,
   },
   tiktok: {
     discover: "unsupported",
     read_public: "unsupported",
     like: "unsupported",
     comment: "unsupported",
+    place_review: "unsupported",
     history: "partial",
-    notes: "Content Posting API is for our drafts only. All third-party engagement is manual Open Post.",
+    notes:
+      "Content Posting API is for our drafts only. All third-party engagement is manual Open Post. Place reviews have no official publish API — Open Place only.",
     stage_b_like: false,
     stage_b_comment: false,
     manual_open_post: true,
+    manual_open_place: true,
   },
   youtube: {
     discover: "supported",
     read_public: "supported",
     like: "supported",
     comment: "supported",
+    place_review: "unsupported",
     history: "partial",
     notes:
       "search.list for discovery (API key). videos.rate + commentThreads.insert via uploader OAuth (youtube.force-ssl). Quota-aware; approval required.",
     stage_b_like: true,
     stage_b_comment: true,
     manual_open_post: true,
+    manual_open_place: false,
   },
 });
 
@@ -189,7 +202,13 @@ export function actionSupported(platform, actionType) {
   if (!cap) return false;
   if (actionType === "like") return cap.stage_b_like === true;
   if (actionType === "comment") return cap.stage_b_comment === true;
+  if (actionType === "place_review") return false;
   return false;
+}
+
+export function placeReviewSupported(platform) {
+  const cap = capabilityFor(platform);
+  return Boolean(cap?.manual_open_place);
 }
 
 export function defaultEngagementSettings(profile = "chicago") {
@@ -882,8 +901,297 @@ export function capabilityMatrixResponse() {
       B: "Approved like/comment only where stage_b_* is true (YouTube).",
       C: "Scheduled daily discovery; still requires human approval before publish.",
     },
+    place_reviews: {
+      mode: "open_place",
+      note: "TikTok has no official place-review publish API. Studio drafts copy and opens TikTok for manual posting only.",
+    },
     documentation: "docs/engagement-capability-matrix.md",
   };
+}
+
+export function emptyPlaceReviewStore() {
+  return {
+    schema_version: PLACE_REVIEW_SCHEMA,
+    updated_at: null,
+    targets: [],
+    actions: [],
+  };
+}
+
+export function parsePlaceReviewStore(raw) {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw || "{}") : raw;
+    if (!parsed || typeof parsed !== "object") return emptyPlaceReviewStore();
+    return {
+      schema_version: PLACE_REVIEW_SCHEMA,
+      updated_at: parsed.updated_at || null,
+      targets: Array.isArray(parsed.targets) ? parsed.targets : [],
+      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+    };
+  } catch {
+    return emptyPlaceReviewStore();
+  }
+}
+
+export function normalizePlaceKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function placeReviewDedupeKey(profile, placeName, market = "") {
+  return [
+    normalizeEngagementProfile(profile),
+    "tiktok",
+    "place_review",
+    normalizePlaceKey(placeName),
+    normalizePlaceKey(market),
+  ].join(":");
+}
+
+export function tiktokPlaceSearchUrl(placeName, market = "") {
+  const query = [String(placeName || "").trim(), String(market || "").trim()].filter(Boolean).join(" ");
+  if (!query) return "https://www.tiktok.com/search";
+  return `https://www.tiktok.com/search?q=${encodeURIComponent(query)}`;
+}
+
+export function placeReviewLabel(placeName, market = "") {
+  const name = String(placeName || "").trim();
+  const city = String(market || "").trim();
+  if (name && city && !name.toLowerCase().includes(city.toLowerCase())) return `${name}, ${city}`;
+  return name || city;
+}
+
+export function sanitizePlaceReviewDraft(text) {
+  let value = String(text || "").trim().replace(/\s+/g, " ");
+  if (!value) return "";
+  if (value.length > 280) value = value.slice(0, 277).trimEnd() + "…";
+  if (/https?:\/\/|www\./i.test(value)) return "";
+  if (/\b(follow me|link in bio|check out my|subscribe|dm me|follow4follow)\b/i.test(value)) return "";
+  if ((value.match(/#/g) || []).length > 2) return "";
+  if (GENERIC_PRAISE_PATTERN.test(value)) return "";
+  return value;
+}
+
+export function normalizePlaceReviewDrafts(parsed, maxSuggestions = 3) {
+  const list = Array.isArray(parsed?.reviews)
+    ? parsed.reviews
+    : Array.isArray(parsed?.comments)
+      ? parsed.comments
+      : Array.isArray(parsed)
+        ? parsed
+        : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of list) {
+    const text = sanitizePlaceReviewDraft(item);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(text);
+    if (cleaned.length >= maxSuggestions) break;
+  }
+  return {
+    reviews: cleaned,
+    skip_reason: cleaned.length ? null : String(parsed?.skip_reason || "No safe place-review drafts").slice(0, 240),
+  };
+}
+
+export function fallbackPlaceReviewDrafts(place, maxSuggestions = 3) {
+  const label = placeReviewLabel(place?.place_name || place?.location, place?.market);
+  const title = String(place?.content_title || "").trim();
+  const subject = title ? title.replace(/[^\w\s'-]+/g, " ").trim().slice(0, 48) : label;
+  const candidates = [
+    `${label} always delivers — strong atmosphere and easy to recommend after shooting here.`,
+    title
+      ? `Came through for ${subject}. ${label} is worth the stop if you care about the frame.`
+      : `Spent time at ${label} for a shoot. Clean sightlines and a mood that photographs well.`,
+    `Reliable stop at ${label}. Friendly energy and a location that holds up in real light.`,
+  ];
+  return normalizePlaceReviewDrafts({ reviews: candidates }, maxSuggestions);
+}
+
+export function buildPlaceReviewGenerationPrompt(place, settings, maxSuggestions = 3) {
+  const profileLabel = engagementProfileLabel(settings.profile);
+  const label = placeReviewLabel(place?.place_name || place?.location, place?.market);
+  return [
+    `You write short first-person TikTok Place reviews for the ${profileLabel} brand.`,
+    "Return JSON: { \"reviews\": [string, ...], \"skip_reason\": string|null }",
+    `Generate up to ${maxSuggestions} candidate place reviews.`,
+    "Rules:",
+    "- First person is allowed because this place comes from our own published shoot list.",
+    "- Short, specific, natural. No spam, no links, no engagement bait.",
+    "- Do not invent amenities, prices, or hours you cannot verify from the title/location.",
+    "- Do not claim a star rating in the text; stars are selected separately.",
+    "- If the place name is empty or unsafe, set reviews to [] and explain in skip_reason.",
+    "- Do not publish; suggestions only for an operator to paste in the TikTok app.",
+    "",
+    `Place: ${label}`,
+    `Market: ${place?.market || "unknown"}`,
+    `Last content title: ${String(place?.content_title || "").slice(0, 200)}`,
+    `Neighborhood: ${place?.neighborhood || ""}`,
+  ].join("\n");
+}
+
+export function weeklyPlaceReviewCount(actions, profile, nowMs = Date.now()) {
+  const theme = normalizeEngagementProfile(profile);
+  const cutoff = nowMs - 7 * 24 * 60 * 60 * 1000;
+  return (actions || []).filter((action) => {
+    if (normalizeEngagementProfile(action.profile) !== theme) return false;
+    if (action.action_type !== "mark_reviewed") return false;
+    if (action.execution_status !== "manual_completed") return false;
+    const ts = Date.parse(action.executed_at || action.approved_at || action.created_at || "");
+    return Number.isFinite(ts) && ts >= cutoff;
+  }).length;
+}
+
+export function prunePlaceReviewStore(store, limits = {}) {
+  const maxTargets = limits.maxTargets || 120;
+  const maxActions = limits.maxActions || 300;
+  const keepPerProfile = limits.keepPerProfile || 20;
+  const sortedTargets = [...(store.targets || [])].sort((a, b) =>
+    String(b.discovered_at || "").localeCompare(String(a.discovered_at || ""))
+  );
+  const seen = new Map();
+  const protectedTargets = [];
+  const extra = [];
+  for (const target of sortedTargets) {
+    const key = String(target.profile || "");
+    const count = seen.get(key) || 0;
+    if (count < keepPerProfile) {
+      seen.set(key, count + 1);
+      protectedTargets.push(target);
+    } else {
+      extra.push(target);
+    }
+  }
+  return {
+    ...store,
+    schema_version: PLACE_REVIEW_SCHEMA,
+    updated_at: new Date().toISOString(),
+    targets: [...protectedTargets, ...extra].slice(0, maxTargets),
+    actions: [...(store.actions || [])]
+      .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
+      .slice(0, maxActions),
+  };
+}
+
+export function buildPlaceReviewTargetRecord(place, settings, drafts, starRating = 5) {
+  const now = new Date().toISOString();
+  const profile = normalizeEngagementProfile(settings.profile);
+  const placeName = String(place.place_name || place.location || "").trim();
+  const market = String(place.market || "").trim();
+  const reviews = Array.isArray(drafts) ? drafts.map(sanitizePlaceReviewDraft).filter(Boolean) : [];
+  return {
+    target_id: `pr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    target_kind: PLACE_REVIEW_TARGET_KIND,
+    profile,
+    platform: "tiktok",
+    execution_mode: "open_place",
+    creator_id: placeName,
+    creator_name: placeReviewLabel(placeName, market),
+    post_id: normalizePlaceKey(placeName) || `place_${Date.now().toString(36)}`,
+    post_url: tiktokPlaceSearchUrl(placeName, market),
+    discovered_at: now,
+    content_summary: String(place.content_title || placeName).slice(0, 180),
+    caption: String(place.content_title || "").slice(0, 320),
+    content_title: String(place.content_title || "").slice(0, 180),
+    content_item_id: String(place.content_item_id || "").trim(),
+    output_id: String(place.output_id || "").trim(),
+    relevance_score: 1,
+    recommend_reason: "Published TikTok content for this place — eligible for a manual Place review.",
+    eligibility_status: reviews.length ? "Suggested" : "Ineligible",
+    suggested_comments: reviews,
+    selected_comment: reviews[0] || "",
+    star_rating: Math.max(1, Math.min(5, Number(starRating) || 5)),
+    hashtags: [],
+    location: placeName,
+    market,
+    neighborhood: String(place.neighborhood || "").trim(),
+    preview_url: String(place.preview_url || "").trim(),
+    dedupe_key: place.dedupe_key || placeReviewDedupeKey(profile, placeName, market),
+    approval_status: "pending",
+    published_at: place.published_at || null,
+  };
+}
+
+export function buildPlaceReviewActionRecord({
+  target,
+  actionType,
+  comment = "",
+  approvalStatus = "pending",
+  executionStatus = "pending",
+  error = null,
+}) {
+  const now = new Date().toISOString();
+  return {
+    action_id: `pra_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    target_id: target.target_id,
+    target_kind: PLACE_REVIEW_TARGET_KIND,
+    profile: target.profile,
+    platform: "tiktok",
+    creator_id: target.creator_id,
+    creator_name: target.creator_name,
+    post_id: target.post_id,
+    post_url: target.post_url,
+    location: target.location,
+    market: target.market,
+    action_type: actionType,
+    suggested_comment: target.selected_comment || (target.suggested_comments || [])[0] || "",
+    edited_comment: comment || "",
+    star_rating: target.star_rating || 5,
+    approval_status: approvalStatus,
+    execution_status: executionStatus,
+    published_comment_id: null,
+    error_details: error,
+    idempotency_key: makeIdempotencyKey(target.profile, "tiktok", actionType, target.post_id),
+    created_at: now,
+    approved_at: ["approved", "skipped"].includes(approvalStatus) ? now : null,
+    executed_at: ["manual", "manual_completed", "opened"].includes(executionStatus) ? now : null,
+    classification: error ? classifyEngagementFailure(error) : null,
+  };
+}
+
+export function aggregateVisitedPlaces(rows = [], profile = "chicago") {
+  const theme = normalizeEngagementProfile(profile);
+  const byKey = new Map();
+  for (const row of rows || []) {
+    const placeName = String(row.place_name || row.location || "").trim();
+    if (!placeName) continue;
+    const market = String(row.market || "").trim();
+    const key = placeReviewDedupeKey(theme, placeName, market);
+    const publishedAt = row.published_at || null;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, {
+        ...row,
+        place_name: placeName,
+        market,
+        dedupe_key: key,
+        profile: theme,
+      });
+      continue;
+    }
+    const existingTs = Date.parse(existing.published_at || "") || 0;
+    const nextTs = Date.parse(publishedAt || "") || 0;
+    if (nextTs >= existingTs) {
+      byKey.set(key, {
+        ...existing,
+        ...row,
+        place_name: placeName,
+        market,
+        dedupe_key: key,
+        profile: theme,
+        published_at: publishedAt || existing.published_at,
+      });
+    }
+  }
+  return [...byKey.values()].sort((a, b) =>
+    String(b.published_at || "").localeCompare(String(a.published_at || ""))
+  );
 }
 
 function uniqueStrings(values) {
