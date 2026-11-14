@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.891-closeout-publish-find/);
+  assert.match(worker, /0\.10\.892-closeout-ig-heal/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.891-closeout-publish-find/);
+  assert.match(worker, /0\.10\.892-closeout-ig-heal/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.891-closeout-publish-find/);
+  assert.match(worker, /0\.10\.892-closeout-ig-heal/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.891-closeout-publish-find/);
+  assert.match(worker, /0\.10\.892-closeout-ig-heal/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3610,6 +3610,48 @@ test("P1 Content view and T1/continuation Output formulas prefer Supabase", asyn
   assert.match(cont, /production_request_output_text/);
   assert.match(cont, /output_status\.neq\.Published/);
   assert.match(cont, /Approved%20for%20Publishing/);
+});
+
+test("IG carousel heal, TikTok draft publish-id, and FB story media-id prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const ig = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Parent_Container_ID}="",OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
+  );
+  assert.ok(ig);
+  assert.match(ig, /IG_Carousel_Error_Message/);
+  assert.match(ig, /ig_carousel_child_count\.gt\.10/);
+  const ap1c = translateOutputSideFormula(
+    'FIND("AP1C child-ID verification mismatch",{IG_Carousel_Error_Message}&"")>0',
+  );
+  assert.ok(ap1c);
+  assert.match(ap1c, /like\.\*AP1C child-ID verification mismatch\*/);
+  const tt = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Status}="Processing",{TikTok_Draft_Publish_ID}=BLANK(),{Published_At}=BLANK())',
+  );
+  assert.ok(tt);
+  assert.match(tt, /TikTok_Draft_Publish_ID/);
+  const ttd0 = translateOutputSideFormula(
+    'FIND("TTD0 found neither",{Publish_Error_Message}&"")>0',
+  );
+  assert.ok(ttd0);
+  assert.match(ttd0, /Publish_Error_Message/);
+  const fb = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",OR({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Publish_Error_Stage}="FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"),{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")',
+  );
+  assert.ok(fb);
+  assert.match(fb, /Platform_Media_ID/);
+  const blankOut = translateOutputSideFormula('{Output_Status}=BLANK()');
+  assert.equal(blankOut, "or(output_status.is.null,output_status.eq.)");
+  const storage = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_URL}!="",{Final_File_Storage_Status}="Uploaded",OR({Output_Status}="In Production",{Output_Status}="Rendering"))',
+  );
+  assert.ok(storage);
+  assert.match(storage, /Final_File_Storage_Status/);
+  const igReel = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Publish_Method}="Automated",{Platform_Post_ID}="",{Platform_Media_ID}!="",{Platform_Output_Type}="Instagram Reel",OR({Publish_Status}="Publishing",AND({Publish_Status}="Ready to Publish",{Publish_Retry_Eligible}=1)),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Last_Publish_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{Last_Publish_Attempt_At},"minutes")>=2))',
+  );
+  assert.ok(igReel);
+  assert.match(igReel, /publish_method\.eq\.Automated/);
 });
 
 test("publish reconcile/FBS UPPER FIND and schedule DATEADD prefer Supabase", async () => {
