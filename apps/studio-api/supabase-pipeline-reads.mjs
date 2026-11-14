@@ -6794,6 +6794,7 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   YouTube_Upload_Status: "error_messages->>YouTube_Upload_Status",
   YouTube_Processing_Status: "error_messages->>YouTube_Processing_Status",
   Manual_Completion_Status: "error_messages->>Manual_Completion_Status",
+  Music_Status: "error_messages->>Music_Status",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6811,6 +6812,7 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   Publish_Next_Retry_At: "publish_next_retry_at",
   YouTube_Video_ID: "error_messages->>YouTube_Video_ID",
   Platform_Post_URL: "platform_post_url",
+  Manual_Published_URL: "error_messages->>Manual_Published_URL",
   // Typed column never existed; densify stores the Graph id in the bag.
   Platform_Post_ID: "error_messages->>Platform_Post_ID",
   FB_Slideshow_Meta_Video_ID: "error_messages->>FB_Slideshow_Meta_Video_ID",

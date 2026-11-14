@@ -1181,3 +1181,5 @@ Deploy 2026-11-14 Worker 0.10.900-closeout-idea-exc: idea photo lanes + Exceptio
 Deploy 2026-11-14 Worker 0.10.901-closeout-ops-review: OPS review bare Do_Not_Publish + nested NOT(AND/OR) + Selected_Clip_Count + autonomous open-ideas lane prefer Supabase. Record deletion is not started. Verify /health version 0.10.901-closeout-ops-review.
 
 Deploy 2026-11-14 Worker 0.10.902-closeout-yt-quota: YouTube Error_Message FIND + Manual_Completion_Status + LEN Platform_Post_ID prefer Supabase for YTS2 quota/live heal lists. Record deletion is not started. Verify /health version 0.10.902-closeout-yt-quota.
+
+Deploy 2026-11-14 Worker 0.10.903-closeout-manual-home: Manual_Published_URL + Music_Status so Manual Action home list prefers Supabase. Record deletion is not started. Verify /health version 0.10.903-closeout-manual-home.
