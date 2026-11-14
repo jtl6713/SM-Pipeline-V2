@@ -6513,6 +6513,8 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
   Asset_Need_Status: "error_messages->>Asset_Need_Status",
   Timing_Status: "error_messages->>Timing_Status",
+  Publish_Error_Stage: "error_messages->>Publish_Error_Stage",
+  Remotion_Job_ID: "remotion_job_id",
 };
 
 const OUTPUT_SIDE_BOOL_FIELDS = {
@@ -6567,6 +6569,16 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   Asset_Selection_Attempt_Count: "error_messages->>Asset_Selection_Attempt_Count",
   Asset_Selection_Next_Retry_At: "error_messages->>Asset_Selection_Next_Retry_At",
   Asset_Need_Status: "error_messages->>Asset_Need_Status",
+  Publish_Status: "publish_status",
+  TikTok_Draft_Status: "tiktok_draft_status",
+  FB_Publish_Status: "fb_publish_status",
+  Publish_Error_Stage: "error_messages->>Publish_Error_Stage",
+  Publish_Asset_URL: "publish_asset_url",
+  FB_Slideshow_Public_URL: "error_messages->>FB_Slideshow_Public_URL",
+  Studio_Scheduled_At: "studio_scheduled_at",
+  YouTube_Scheduled_Publish_At: "youtube_scheduled_publish_at",
+  IG_Carousel_Parent_Container_ID: "error_messages->>IG_Carousel_Parent_Container_ID",
+  Remotion_Error_Message: "error_messages->>Remotion_Error_Message",
 };
 
 /** Text fields that support FIND("needle",{Field}&"") / >0 substring probes. */
@@ -6579,8 +6591,14 @@ const OUTPUT_SIDE_FIND_FIELDS = {
   Render_Server_URL: "error_messages->>Render_Server_URL",
   Output_URL: "error_messages->>Output_URL",
   Selected_Assets_JSON: "selected_assets_text",
+  Render_Clip_List_JSON: "render_clip_list_text",
+  Remotion_Props_JSON: "remotion_props_text",
+  Remotion_Error_Message: "error_messages->>Remotion_Error_Message",
   Studio_Publish_Dispatch_Note: "error_messages->>Studio_Publish_Dispatch_Note",
   Publish_Error_Stage: "error_messages->>Publish_Error_Stage",
+  Studio_Output_Type: "studio_output_type",
+  Format: "format",
+  Platform_Output_Type: "platform_output_type",
 };
 
 /** Cadence Output views Worker probes without filterByFormula trees. */
@@ -6666,6 +6684,21 @@ function outputSideLeafFilter(cleaned) {
       return like;
     }
   }
+  // Case-insensitive FIND via UPPER({Field}&"").
+  const findUpper = cleaned.match(
+    /^FIND\("([^"]+)",UPPER\(\{([A-Za-z0-9_]+)\}(?:&"")?\)\)(?:>0|=0)?$/,
+  );
+  if (findUpper && OUTPUT_SIDE_FIND_FIELDS[findUpper[2]]) {
+    const needle = findUpper[1];
+    if (needle && !/[,()*"]/.test(needle)) {
+      const col = OUTPUT_SIDE_FIND_FIELDS[findUpper[2]];
+      const like = `${col}.ilike.*${needle}*`;
+      if (cleaned.endsWith("=0")) {
+        return `or(${col}.is.null,${col}.eq.,${col}.not.ilike.*${needle}*)`;
+      }
+      return like;
+    }
+  }
   const notBool = cleaned.match(/^NOT\(\{([A-Za-z0-9_]+)\}\)$/);
   if (notBool && OUTPUT_SIDE_BOOL_FIELDS[notBool[1]]) {
     const col = OUTPUT_SIDE_BOOL_FIELDS[notBool[1]];
@@ -6730,6 +6763,18 @@ function outputSideLeafFilter(cleaned) {
     if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 240) {
       return `scheduled_post_date.lte.${encodeDeskFilterValue(
         new Date(Date.now() + minutes * 60_000).toISOString(),
+      )}`;
+    }
+  }
+  // Near-term schedule window: due within N days.
+  const beforeDays = cleaned.match(
+    /^IS_BEFORE\(\{Scheduled_Post_Date\},DATEADD\(NOW\(\),(\d+),"days"\)\)$/,
+  );
+  if (beforeDays) {
+    const days = Number(beforeDays[1]);
+    if (Number.isFinite(days) && days >= 1 && days <= 30) {
+      return `scheduled_post_date.lte.${encodeDeskFilterValue(
+        new Date(Date.now() + days * 86_400_000).toISOString(),
       )}`;
     }
   }
