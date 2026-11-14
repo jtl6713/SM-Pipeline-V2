@@ -9759,12 +9759,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
     );
     const pageLedger = async (options) => {
       if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-        const page = await listSupabaseQualityRecoveryPage(env, options);
-        if ((page.records || []).length || options.offset) return page;
-        // An empty Supabase copy must not report zero recovered events.
-        const airtable = await listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options);
-        if ((airtable?.records || []).length) return airtable;
-        return page;
+        // Under write SoR the ledger lives in Supabase. Do not fall back to an
+        // Airtable full-table scan — that path hung deploy verify (70s, 0 bytes).
+        return listSupabaseQualityRecoveryPage(env, options);
       }
       return listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options);
     };

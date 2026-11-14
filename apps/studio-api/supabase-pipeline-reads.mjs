@@ -3055,11 +3055,16 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   if (start >= 12000) return { records: [], offset: null };
   const formula = String(filterFormula || "");
   const pastDue = formula.includes("{Scheduled_Post_Date}");
+  // QA home failure uses many FIND/LOWER leaves. Prefer the bounded PostgREST
+  // OR probe even when translateOutputSideFormula succeeds — the full
+  // translated AND/OR string times out deploy verify (~70s, 0 bytes).
   const failure = formula.includes("FIND(");
   const orderLimit = `select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
   let path = `platform_outputs?test_run_id=is.null&${orderLimit}`;
   const translated = formula ? outputContentListFilter("output", formula) : null;
-  if (translated) {
+  if (failure) {
+    path = `platform_outputs?test_run_id=is.null&${homeFailureCensusOrFilter()}&${orderLimit}`;
+  } else if (translated) {
     path = `platform_outputs?${translated}&${orderLimit}`;
   } else if (pastDue) {
     const iso = formula.match(/IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)/)?.[1];
@@ -3067,8 +3072,6 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
     path = `platform_outputs?test_run_id=is.null&do_not_publish=eq.false&review_status=eq.Approved`
       + `&scheduled_post_date=lt.${encodeURIComponent(iso)}&scheduled_post_date=not.is.null`
       + `&${orderLimit}`;
-  } else if (failure) {
-    path = `platform_outputs?test_run_id=is.null&${homeFailureCensusOrFilter()}&${orderLimit}`;
   }
   const rows = await supabaseRest(env, path);
   const batch = Array.isArray(rows) ? rows : [];
@@ -6508,6 +6511,7 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
 
 const QUEUE_FILTER_FIELDS = {
   Transfer_Status: "status",
+  Transfer_ID: "payload->>transfer_id",
   Asset_Kind: "payload->>asset_kind",
   Preview_Status: "payload->>preview_status",
   Test_Run_ID: "payload->>test_run_id",

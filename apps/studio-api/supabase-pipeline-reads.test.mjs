@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.907-closeout-render-hold/);
+  assert.match(worker, /0\.10\.908-closeout-queue-xfer-census/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.907-closeout-render-hold/);
+  assert.match(worker, /0\.10\.908-closeout-queue-xfer-census/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.907-closeout-render-hold/);
+  assert.match(worker, /0\.10\.908-closeout-queue-xfer-census/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.907-closeout-render-hold/);
+  assert.match(worker, /0\.10\.908-closeout-queue-xfer-census/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4146,6 +4146,8 @@ test("failed-output census bounds via PostgREST OR and LOWER FIND leaves", async
   }
   assert.equal(calls.length, 1);
   assert.match(calls[0], /output_status\.ilike/);
+  // Full translated FIND/LOWER string must not drive the census page.
+  assert.match(calls[0], /test_run_id=is\.null&or=/);
   assert.doesNotMatch(calls[0], /platform_outputs\?test_run_id=is\.null&select=/);
 });
 
@@ -4535,6 +4537,7 @@ test("Variant queue Media_Asset and PR-scoped Ready lists read from Supabase und
         last_attempt_at: null,
         updated_at: "2026-11-13T00:00:00.000Z",
         payload: {
+          transfer_id: "TQ-100",
           production_request_record_id: "recRequest0000001",
           media_asset_record_id: "recMedia000000005",
           preview_status: "Pending",
@@ -4559,6 +4562,14 @@ test("Variant queue Media_Asset and PR-scoped Ready lists read from Supabase und
     assert.equal(scopedReady.records[0].fields.Transfer_Status, "Ready");
     assert.equal(scopedReady.records[0].fields.Preview_Status, "Pending");
     assert.ok(urls.some((url) => url.includes("production_request_record_id")));
+    urls.length = 0;
+    const byTransfer = await studioSideTableRead(
+      env,
+      "tblBZLXPd1p2NRWRK",
+      '?filterByFormula={Transfer_ID}="TQ-100"&maxRecords=3',
+    );
+    assert.equal(byTransfer.records[0].id, "recQueue0000000001");
+    assert.ok(urls.some((url) => url.includes("transfer_id")));
   } finally {
     globalThis.fetch = originalFetch;
   }
