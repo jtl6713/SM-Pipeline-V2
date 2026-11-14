@@ -19,6 +19,7 @@ from urllib.parse import quote
 from airtable.constants import (
     CAROUSEL_SLIDES_TABLE,
     CONTENT_ITEMS_TABLE,
+    CONTENT_PROFILES_TABLE,
     MEDIA_ASSETS_TABLE,
     MEDIA_TRANSFER_QUEUE_TABLE,
     PIPELINE_SETTINGS_TABLE,
@@ -52,6 +53,7 @@ FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset({
     MEDIA_TRANSFER_QUEUE_TABLE,
     PIPELINE_SETTINGS_TABLE,
     ENGAGEMENT_SETTINGS_TABLE,
+    CONTENT_PROFILES_TABLE,
 })
 
 _OUTPUT_FIELDS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
@@ -105,6 +107,8 @@ def runner_table_read_source(settings: dict | None, table_id: str) -> str:
     if table_id in {PRODUCTION_REQUESTS_TABLE, MEDIA_ASSETS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE}:
         if studio_phase6_write_source(settings) == "supabase":
             return "supabase"
+    if table_id == CONTENT_PROFILES_TABLE and studio_write_source(settings) == "supabase":
+        return "supabase"
     return "airtable"
 
 
@@ -133,6 +137,8 @@ def _supabase_table(table_id: str) -> str:
         return "carousel_slides"
     if table_id == SOURCE_CANDIDATES_TABLE:
         return "idea_candidates"
+    if table_id == CONTENT_PROFILES_TABLE:
+        return "content_profiles"
     return ""
 
 
@@ -212,8 +218,8 @@ def try_list_supabase_records(
     if not table:
         return None
     columns = _columns_for(table_id)
-    # Carousel/idea lists shape from payload bags; typed-column maps may be empty.
-    if not columns and table_id not in {CAROUSEL_SLIDES_TABLE, SOURCE_CANDIDATES_TABLE}:
+    # Carousel/idea/profile lists shape from payload bags; typed-column maps may be empty.
+    if not columns and table_id not in {CAROUSEL_SLIDES_TABLE, SOURCE_CANDIDATES_TABLE, CONTENT_PROFILES_TABLE}:
         return None
     if fields and columns and any(name not in columns for name in fields):
         return None
@@ -283,6 +289,8 @@ def _list_select(table_id: str) -> str:
         )
     if table_id == SOURCE_CANDIDATES_TABLE:
         return "airtable_record_id,candidate_title,idea_summary,status,payload"
+    if table_id == CONTENT_PROFILES_TABLE:
+        return "airtable_record_id,profile_name,brand_name,market_name,active,platform_setup"
     return base
 
 
@@ -333,6 +341,14 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             "Idea_Summary": "idea_summary",
             "Candidate_Status": "status",
         }
+    elif table_id == CONTENT_PROFILES_TABLE:
+        bag = row.get("platform_setup") if isinstance(row.get("platform_setup"), dict) else {}
+        columns = {
+            "Profile_Name": "profile_name",
+            "Brand_Name": "brand_name",
+            "Market_Name": "market_name",
+            "Active": "active",
+        }
     else:
         return None
     # Full densify still stamps _runner_record_projection=v1. Rejecting
@@ -380,6 +396,17 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Google Drive URL"] = meta.get("google_drive_url")
     elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
         shaped["fields"]["Candidate_Status"] = row.get("status")
+    elif table_id == CONTENT_PROFILES_TABLE:
+        if row.get("profile_name") is not None:
+            shaped["fields"]["Profile_Name"] = row.get("profile_name")
+        if row.get("brand_name") is not None:
+            shaped["fields"]["Brand_Name"] = row.get("brand_name")
+        if row.get("market_name") is not None:
+            shaped["fields"]["Market_Name"] = row.get("market_name")
+        if "Active" not in shaped["fields"]:
+            shaped["fields"]["Active"] = row.get("active") is True
+        elif row.get("active") is not None:
+            shaped["fields"]["Active"] = bool(row.get("active"))
     elif table_id == CAROUSEL_SLIDES_TABLE:
         if row.get("current_order") is not None and "Current Order" not in shaped["fields"]:
             shaped["fields"]["Current Order"] = row.get("current_order")

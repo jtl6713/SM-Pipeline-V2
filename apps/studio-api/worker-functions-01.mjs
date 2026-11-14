@@ -35,6 +35,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
   listSupabaseContentProfiles,
+  listSupabaseDeskInventoryRequests,
   listSupabaseProductionRequestOutputs,
   listSupabaseProductionRequestsByIds,
   listSupabaseRequestsWithProductionJob,
@@ -11342,12 +11343,18 @@ export async function opsForceAzNavyPierTitle(env, options = {}) {
 /*__STUDIO_WORKER_END:opsForceAzNavyPierTitle__*/
 
 export async function resumeAzFinishedVideoRequests(env, ctx = null) {
-  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 20,
-    sortField: "Created_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
-  }).catch(() => []);
+  let rows = null;
+  if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    rows = await listSupabaseDeskInventoryRequests(env, { kind: "inventory_az", limit: 20 }).catch(() => null);
+  }
+  if (!Array.isArray(rows)) {
+    rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 20,
+      sortField: "Created_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
+    }).catch(() => []);
+  }
   if (!rows.length) return { resumed: 0 };
   const auth = await resolveStudioCronAuthorization(env).catch(() => null);
   const results = [];
