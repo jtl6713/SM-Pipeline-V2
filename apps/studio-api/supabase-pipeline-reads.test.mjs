@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.918-closeout-ig-ap4r/);
+  assert.match(worker, /0\.10\.919-closeout-tt-email/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.918-closeout-ig-ap4r/);
+  assert.match(worker, /0\.10\.919-closeout-tt-email/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.918-closeout-ig-ap4r/);
+  assert.match(worker, /0\.10\.919-closeout-tt-email/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.918-closeout-ig-ap4r/);
+  assert.match(worker, /0\.10\.919-closeout-tt-email/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4751,6 +4751,44 @@ test("OPS review, FAILED nested NOT, pre-factory clip count, autonomous open pre
   assert.match(calls[4], /status=in\.\(Generated,Sent%20for%20Review\)/);
   assert.match(calls[4], /Studio_Photo_Wait_Status/);
   assert.match(calls[4], /Production_Content_Type/);
+});
+
+test("TikTok Draft Email_Sent_At blank leaf unlocks approved-past-due Supabase", async () => {
+  const { translateOutputSideFormula, studioSideTableRead } = await import("./supabase-pipeline-reads.mjs");
+  const { approvedPastDueFormula } = await import("./approved-past-due-quality.mjs");
+  assert.match(
+    translateOutputSideFormula('{TikTok_Draft_Email_Sent_At}!=BLANK()'),
+    /TikTok_Draft_Email_Sent_At/,
+  );
+  const pastDue = approvedPastDueFormula(Date.parse("2026-11-14T12:00:00.000Z"));
+  const translated = translateOutputSideFormula(pastDue);
+  assert.ok(translated);
+  assert.match(translated, /TikTok_Draft_Email_Sent_At/);
+
+  const calls = [];
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    AIRTABLE_OUTPUT_TABLE_ID: "tblrlPeboBthkplH0",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    assert.ok(await studioSideTableRead(
+      env,
+      "tblrlPeboBthkplH0",
+      "?filterByFormula=" + encodeURIComponent(pastDue) + "&maxRecords=100",
+    ));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /platform_outputs\?/);
+  assert.match(calls[0], /TikTok_Draft_Email_Sent_At/);
 });
 
 test("IG Carousel AP4R/AP5C Published_Media_ID and Error_Stage prefer Supabase", async () => {

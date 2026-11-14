@@ -7070,6 +7070,8 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   IG_Story_Last_Attempt_At: "error_messages->>IG_Story_Last_Attempt_At",
   YouTube_Last_Checked_At: "error_messages->>YouTube_Last_Checked_At",
   FB_Last_Checked_At: "error_messages->>FB_Last_Checked_At",
+  // QA approved-past-due — TikTok emailed-handoff exclude leaf.
+  TikTok_Draft_Email_Sent_At: "error_messages->>TikTok_Draft_Email_Sent_At",
   Timing_Status: "error_messages->>Timing_Status",
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",

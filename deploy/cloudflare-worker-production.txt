@@ -1213,3 +1213,5 @@ Deploy 2026-11-14 Worker 0.10.916-closeout-yt-jobid: YouTube_Upload_Job_ID + IG 
 Deploy 2026-11-14 Worker 0.10.917-factory-global-profile-flush: Factory desk stamps Content_Profile from Content Item; mapOpsQueueProfileName resolves Airtable lookup display names; output Supabase sync inherits content_profile_id. Verify /health version 0.10.917-factory-global-profile-flush.
 
 Deploy 2026-11-14 Worker 0.10.918-closeout-ig-ap4r: IG Carousel AP4R/AP5C Published_Media_ID + Error_Stage prefer Supabase (studioReconcileInstagramCarousels). Record deletion is not started. Verify /health version 0.10.918-closeout-ig-ap4r.
+
+Deploy 2026-11-14 Worker 0.10.919-closeout-tt-email: TikTok_Draft_Email_Sent_At blank leaf prefers Supabase (QA approved-past-due census). Record deletion is not started. Verify /health version 0.10.919-closeout-tt-email.
