@@ -6784,6 +6784,26 @@ function tightenSideFormula(text) {
 function slideFormulaFilter(formula) {
   const cleaned = tightenSideFormula(formula);
   if (!cleaned) return null;
+  const recordId = cleaned.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
+  if (recordId) return `airtable_record_id.eq.${recordId[1]}`;
+  // Native gallery / reviewListRecords: OR(RECORD_ID()="rec…",RECORD_ID()="rec…")
+  if (cleaned.startsWith("OR(") && cleaned.endsWith(")")) {
+    const parts = splitQueueArgs(cleaned.slice(3, -1));
+    if (!parts?.length) return null;
+    const ids = [];
+    for (const part of parts) {
+      const id = part.match(/^RECORD_ID\(\)="(rec[A-Za-z0-9]{14})"$/);
+      if (!id) {
+        ids.length = 0;
+        break;
+      }
+      ids.push(id[1]);
+    }
+    if (ids.length === 1) return `airtable_record_id.eq.${ids[0]}`;
+    if (ids.length > 1) {
+      return `airtable_record_id.in.(${ids.map(encodeURIComponent).join(",")})`;
+    }
+  }
   const find = cleaned.match(/^FIND\("([^"]+)",ARRAYJOIN\(\{PO_Output_ID\}\)\)(?:>0)?$/);
   if (find) {
     const token = find[1];
