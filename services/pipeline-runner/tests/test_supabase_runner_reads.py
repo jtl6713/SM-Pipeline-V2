@@ -468,6 +468,9 @@ def test_empty_output_list_stays_on_supabase(monkeypatch):
     assert MEDIA_TRANSFER_QUEUE_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert PIPELINE_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
     assert ENGAGEMENT_SETTINGS_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    from airtable.constants import CONTENT_PROFILES_TABLE
+
+    assert CONTENT_PROFILES_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
 
     def fake_get(url, *, headers, params, timeout):
         raise AssertionError("airtable list")

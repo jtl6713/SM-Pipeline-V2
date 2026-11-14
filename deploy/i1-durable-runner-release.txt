@@ -71,3 +71,5 @@ Deploy 2026-11-08 ITS1 creative_first storyboard writer for Script a Short empty
 2026-11-13 runner 2026-11-13-zcloseout-mae-desk-orch: Orch Ready/retry views on Supabase via snapshotted filters and due-now expansion. Auto_Publish_Enabled / Publish_Retry_Eligible checkbox and LEFT(Publish_Error_Stage) translate. Unknown Output views keep allowlisted formulas on Supabase. Record deletion is not started. Verify /health version 2026-11-13-zcloseout-mae-desk-orch.
 
 Deploy 2026-11-13 runner 2026-11-13-zcloseout-output-side: FALLBACK_STOPPED includes transfer queue so empty allowlisted queue lists do not call Airtable. Verify /health version 2026-11-13-zcloseout-output-side.
+
+Deploy 2026-11-13 runner 2026-11-13-zcloseout-az-profiles: Content Profiles GETs prefer Supabase under write SoR; FALLBACK_STOPPED. Verify /health version 2026-11-13-zcloseout-az-profiles.

@@ -3528,11 +3528,31 @@ function profileLinkIds(value) {
     .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id));
 }
 
+function profileText(value) {
+  if (value == null) return "";
+  if (typeof value === "object" && value.name != null) return String(value.name);
+  return String(value);
+}
+
+function profileMulti(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === "object" && item?.name != null ? String(item.name) : String(item || "")))
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  const text = profileText(value).trim();
+  return text ? [text] : [];
+}
+
 export function mapAirtableProfileToSupabase(record, { organizationId = null, brandId = null } = {}) {
   const f = (name) => record?.fields?.[name];
   const platformSetup = {
     Brand: profileLinkIds(f("Brand")),
     Organization: profileLinkIds(f("Organization")),
+    Market: profileLinkIds(f("Market")),
+    Content_Vertical: profileLinkIds(f("Content_Vertical")),
+    AI_Persona: profileLinkIds(f("AI_Persona")),
+    Production_Profile: profileLinkIds(f("Production_Profile")),
     Idea_Generation_Enabled: Boolean(f("Idea_Generation_Enabled")),
     Autonomous_Produce_Enabled: Boolean(f("Autonomous_Produce_Enabled")),
     Daily_Idea_Limit: f("Daily_Idea_Limit") ?? null,
@@ -3540,6 +3560,21 @@ export function mapAirtableProfileToSupabase(record, { organizationId = null, br
     Default_Narration_Voice_Name: String(f("Default_Narration_Voice_Name") || ""),
     Autonomous_Music_Pool: profileLinkIds(f("Autonomous_Music_Pool")),
     Studio_Background_Color: String(f("Studio_Background_Color") || ""),
+    Asset_Filter_Tag: profileText(f("Asset_Filter_Tag")),
+    Priority_Locations: profileText(f("Priority_Locations")),
+    Avoid_Topics: profileText(f("Avoid_Topics")),
+    Local_Context: profileText(f("Local_Context")),
+    State_Region: profileText(f("State_Region")),
+    Country: profileText(f("Country")),
+    Timezone: profileText(f("Timezone")),
+    Primary_Audience: profileText(f("Primary_Audience")),
+    Brand_Voice: profileText(f("Brand_Voice")),
+    Default_Platforms: profileMulti(f("Default_Platforms")),
+    Default_Formats: profileMulti(f("Default_Formats")),
+    Allowed_Content_Themes: profileMulti(f("Allowed_Content_Themes")),
+    Default_Hashtags: profileText(f("Default_Hashtags")),
+    TikTok_Handle: profileText(f("TikTok_Handle")),
+    Profile_Key: profileText(f("Profile_Key")),
   };
   return {
     airtable_record_id: record.id,
@@ -3553,25 +3588,43 @@ export function mapAirtableProfileToSupabase(record, { organizationId = null, br
   };
 }
 
-/** Airtable-shaped Content Profile from the lean content_profiles row + platform_setup bag. */
+/** Airtable-shaped Content Profile from typed columns + full platform_setup bag. */
 export function airtableShapedContentProfileFromSupabase(row) {
   if (!row?.airtable_record_id) return null;
   const setup = isPlainObject(row.platform_setup) ? row.platform_setup : {};
-  const fields = {
-    Profile_Name: row.profile_name || "",
-    Brand_Name: row.brand_name || "",
-    Market_Name: row.market_name || "",
-    Active: row.active === true,
-    Brand: Array.isArray(setup.Brand) ? setup.Brand : [],
-    Organization: Array.isArray(setup.Organization) ? setup.Organization : [],
-    Idea_Generation_Enabled: setup.Idea_Generation_Enabled === true,
-    Autonomous_Produce_Enabled: setup.Autonomous_Produce_Enabled === true,
-    Daily_Idea_Limit: setup.Daily_Idea_Limit ?? null,
-    Default_Narration_Voice_ID: setup.Default_Narration_Voice_ID || "",
-    Default_Narration_Voice_Name: setup.Default_Narration_Voice_Name || "",
-    Autonomous_Music_Pool: Array.isArray(setup.Autonomous_Music_Pool) ? setup.Autonomous_Music_Pool : [],
-    Studio_Background_Color: setup.Studio_Background_Color || "",
-  };
+  const fields = { ...setup };
+  fields.Profile_Name = row.profile_name || setup.Profile_Name || "";
+  fields.Brand_Name = row.brand_name || setup.Brand_Name || "";
+  fields.Market_Name = row.market_name || setup.Market_Name || "";
+  fields.Active = row.active === true;
+  fields.Brand = Array.isArray(setup.Brand) ? setup.Brand : [];
+  fields.Organization = Array.isArray(setup.Organization) ? setup.Organization : [];
+  fields.Market = Array.isArray(setup.Market) ? setup.Market : [];
+  fields.Content_Vertical = Array.isArray(setup.Content_Vertical) ? setup.Content_Vertical : [];
+  fields.AI_Persona = Array.isArray(setup.AI_Persona) ? setup.AI_Persona : [];
+  fields.Production_Profile = Array.isArray(setup.Production_Profile) ? setup.Production_Profile : [];
+  fields.Idea_Generation_Enabled = setup.Idea_Generation_Enabled === true;
+  fields.Autonomous_Produce_Enabled = setup.Autonomous_Produce_Enabled === true;
+  fields.Daily_Idea_Limit = setup.Daily_Idea_Limit ?? null;
+  fields.Default_Narration_Voice_ID = setup.Default_Narration_Voice_ID || "";
+  fields.Default_Narration_Voice_Name = setup.Default_Narration_Voice_Name || "";
+  fields.Autonomous_Music_Pool = Array.isArray(setup.Autonomous_Music_Pool) ? setup.Autonomous_Music_Pool : [];
+  fields.Studio_Background_Color = setup.Studio_Background_Color || "";
+  fields.Asset_Filter_Tag = setup.Asset_Filter_Tag || "";
+  fields.Priority_Locations = setup.Priority_Locations || "";
+  fields.Avoid_Topics = setup.Avoid_Topics || "";
+  fields.Local_Context = setup.Local_Context || "";
+  fields.State_Region = setup.State_Region || "";
+  fields.Country = setup.Country || "";
+  fields.Timezone = setup.Timezone || "";
+  fields.Primary_Audience = setup.Primary_Audience || "";
+  fields.Brand_Voice = setup.Brand_Voice || "";
+  fields.Default_Platforms = Array.isArray(setup.Default_Platforms) ? setup.Default_Platforms : [];
+  fields.Default_Formats = Array.isArray(setup.Default_Formats) ? setup.Default_Formats : [];
+  fields.Allowed_Content_Themes = Array.isArray(setup.Allowed_Content_Themes) ? setup.Allowed_Content_Themes : [];
+  fields.Default_Hashtags = setup.Default_Hashtags || "";
+  fields.TikTok_Handle = setup.TikTok_Handle || "";
+  fields.Profile_Key = setup.Profile_Key || "";
   return { id: row.airtable_record_id, fields };
 }
 
@@ -6679,6 +6732,15 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       || cleaned === "AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!=\"\")";
     if (withJob) {
       const records = await listSupabaseRequestsWithProductionJob(env, { limit });
+      if (!records) return null;
+      return { records };
+    }
+    const azFinished = cleaned.includes("origin=az-finished-video")
+      && cleaned.includes("{Request_Status}!=\"Cancelled\"")
+      && cleaned.includes("{Test_Run_ID}=BLANK()");
+    if (azFinished) {
+      const records = await listSupabaseDeskInventoryRequests(env, { kind: "inventory_az", limit })
+        .catch(() => null);
       if (!records) return null;
       return { records };
     }
