@@ -10495,8 +10495,9 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     // Record-id reuse: seed always writes Production_Request_Output=[PRO rec].
     // After Supabase PRO reads dropped Platform_Output, the name-id FIND above
     // could not run and heal recreated the same destination every tick.
+    // Interpolate only after the rec-id charset guard (no quote/backslash).
     if(!poId){
-      const proRec=String(outputRow.id||"").replace(/'/g,"\\'");
+      const proRec=String(outputRow.id||"").trim();
       if(/^rec[A-Za-z0-9]{14}$/.test(proRec)){
         const found=await listRecords(env,STUDIO_PLATFORM_OUTPUT_TABLE,{
           limit:1,
