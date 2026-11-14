@@ -6092,6 +6092,13 @@ function makeAdminQueueListFilter(formula) {
   if (cleaned === '{Status}="Pending"' || cleaned === "{Status}='Pending'") {
     return "status=eq.Pending";
   }
+  // Blueprint hardening probe: Scenario + Action + Processing (no lease note).
+  const blueprint = cleaned.match(
+    /^AND\(\{Scenario_ID\}=(\d+),\{Action\}=(["'])([^"']*)\2,\{Status\}=(["'])Processing\4\)$/,
+  );
+  if (blueprint) {
+    return `scenario_id=eq.${blueprint[1]}&action=eq.${encodeURIComponent(blueprint[3])}&status=eq.Processing`;
+  }
   if (!cleaned.includes('{Status}="Processing"') && !cleaned.includes("{Status}='Processing'")) {
     return null;
   }
@@ -6296,6 +6303,10 @@ function compactFormula(formula) {
 
 function settingsListFilter(formula) {
   const text = compactFormula(formula);
+  // Active-only list (destination / secret scanners).
+  if (text === "{Active}=1" || text === "AND({Active}=1)") {
+    return { name: "", active: true, prefix: "", names: [] };
+  }
   let match = text.match(/^\{Setting_Name\}=(["'])([^"']*)\1$/);
   if (match) return { name: match[2], active: false, prefix: "", names: [] };
   match = text.match(/^AND\(\{Active\}=1,\{Setting_Name\}=(["'])([^"']*)\1\)$/);

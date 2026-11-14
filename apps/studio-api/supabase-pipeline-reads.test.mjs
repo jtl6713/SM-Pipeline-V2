@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.925-closeout-vo-url/);
+  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.925-closeout-vo-url/);
+  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.925-closeout-vo-url/);
+  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.925-closeout-vo-url/);
+  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3443,6 +3443,13 @@ test("Pipeline Settings single-quote and OR name packs read from Supabase", asyn
       ),
     );
     assert.equal(orPack.records.length, 2);
+    const activeOnly = await studioSideTableRead(
+      env,
+      PIPELINE_SETTINGS_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent("{Active}=1") + "&maxRecords=50",
+    );
+    assert.equal(activeOnly.records.length, 2);
+    assert.ok(urls.some((url) => url.includes("engagement_settings") && url.includes("payload->>source=eq.pipeline")));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -5040,6 +5047,8 @@ test("Make Admin Pending and ASSET_LIBRARY list prefer Supabase", async () => {
   } = await import("./supabase-pipeline-reads.mjs");
   const asset =
     "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
+  const blueprint =
+    'AND({Scenario_ID}=5569495,{Action}="GET_BLUEPRINT",{Status}="Processing")';
   const calls = [];
   const env = {
     STUDIO_WRITE_SOURCE: "supabase",
@@ -5061,18 +5070,27 @@ test("Make Admin Pending and ASSET_LIBRARY list prefer Supabase", async () => {
     ));
     assert.ok(await studioSideTableRead(
       env,
+      MAKE_ADMIN_QUEUE_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent(blueprint) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
       MEDIA_ASSETS_TABLE_ID,
       "?filterByFormula=" + encodeURIComponent(asset) + "&maxRecords=10",
     ));
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.match(calls[0], /make_admin_queue\?/);
   assert.match(calls[0], /status=eq\.Pending/);
-  assert.match(calls[1], /media_assets\?/);
-  assert.match(calls[1], /media_class=in\.\(Image,Graphic,Video\)/);
-  assert.match(calls[1], /fill-crop/);
+  assert.match(calls[1], /make_admin_queue\?/);
+  assert.match(calls[1], /scenario_id=eq\.5569495/);
+  assert.match(calls[1], /action=eq\.GET_BLUEPRINT/);
+  assert.match(calls[1], /status=eq\.Processing/);
+  assert.match(calls[2], /media_assets\?/);
+  assert.match(calls[2], /media_class=in\.\(Image,Graphic,Video\)/);
+  assert.match(calls[2], /fill-crop/);
 });
 
 test("LIBRARY_CLASSIFY_PENDING and intake batch classification prefer Supabase", async () => {
