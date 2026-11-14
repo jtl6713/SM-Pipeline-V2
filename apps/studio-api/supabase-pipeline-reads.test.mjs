@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
+  assert.match(worker, /0\.10\.889-closeout-p1-t1/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
+  assert.match(worker, /0\.10\.889-closeout-p1-t1/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
+  assert.match(worker, /0\.10\.889-closeout-p1-t1/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.888-closeout-p1-r5-diff/);
+  assert.match(worker, /0\.10\.889-closeout-p1-t1/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3583,6 +3583,33 @@ test("R5 view and DATETIME_DIFF publish cooldown leaves prefer Supabase", async 
   );
   assert.ok(count);
   assert.match(count, /Studio_Publish_Dispatch_Count\.lt\.8/);
+});
+
+test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const reads = await readFile(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "supabase-pipeline-reads.mjs"),
+    "utf8",
+  );
+  assert.match(reads, /CONTENT_SIDE_VIEW_FILTERS/);
+  assert.match(reads, /P1 - Ready for Package Generation/);
+  assert.match(reads, /content_status\.eq\.Idea%20Approved/);
+  assert.doesNotMatch(reads, /kind === "content" && viewName\) return null/);
+  const t1 = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))',
+  );
+  assert.ok(t1);
+  assert.match(t1, /Timing_Status/);
+  assert.match(t1, /Music_URL/);
+  assert.match(t1, /Selected_Music_URL/);
+  assert.match(t1, /Waiting%20in%20Render%20Queue/);
+  const cont = translateOutputSideFormula(
+    'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))',
+  );
+  assert.ok(cont);
+  assert.match(cont, /production_request_output_text/);
+  assert.match(cont, /output_status\.neq\.Published/);
+  assert.match(cont, /Approved%20for%20Publishing/);
 });
 
 test("IG publish cadence and Scheduled_Post_Date leaves prefer Supabase", async () => {
