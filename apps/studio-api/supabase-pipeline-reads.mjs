@@ -1198,14 +1198,14 @@ export async function listSupabaseAssetLibraryRecords(env, {
   };
 }
 
-/** Ops / intake A3 classify view — Needs Classification or Classification Error. */
+/** Ops / intake A3 classify — Meta view viwf6dxUJrMx2yNoe gates. */
 export async function listSupabaseA3ClassifyMedia(env, { limit = 25 } = {}) {
   if (!studioSupabaseConfigured(env)) return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 25));
+  const filter = MEDIA_SIDE_VIEW_FILTERS.viwf6dxUJrMx2yNoe;
   const rows = await supabaseRest(
     env,
-    `media_assets?or=(metadata->>classification_status.eq.Needs%20Classification,`
-      + `metadata->>classification_status.eq.Classification%20Error)`
+    `media_assets?${filter}`
       + `&select=${MEDIA_LIBRARY_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
@@ -1235,8 +1235,18 @@ export async function listSupabaseUnfinishedIntakeBatches(env, batchIds, { limit
 export const MEDIA_SIDE_VIEW_FILTERS = {
   // Meta snapshot of viw51aAJeESaBpcL8 — Music (Media_Class=Audio).
   viw51aAJeESaBpcL8: "media_class.eq.Audio",
+  // Meta snapshot of viwf6dxUJrMx2yNoe — A3 Needs Classification.
+  viwf6dxUJrMx2yNoe:
+    "metadata->>classification_status.eq.Needs%20Classification"
+    + "&active.eq.true"
+    + "&or=(do_not_use.is.null,do_not_use.eq.false)"
+    + "&asset_status.eq.Available"
+    + "&metadata->>drive_access_status.eq.Public"
+    + "&google_drive_url=neq."
+    + "&media_class=in.(Video,Image,Audio,Graphic)",
 };
 MEDIA_SIDE_VIEW_FILTERS.Music = MEDIA_SIDE_VIEW_FILTERS.viw51aAJeESaBpcL8;
+MEDIA_SIDE_VIEW_FILTERS["A3 - Needs Classification"] = MEDIA_SIDE_VIEW_FILTERS.viwf6dxUJrMx2yNoe;
 
 /** Exact Asset Name / Logo role / Drive file id media lookups used by Studio. */
 export async function listSupabaseMediaByFormula(env, formula, { limit = 25, viewName = "" } = {}) {

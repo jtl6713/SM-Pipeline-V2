@@ -1247,3 +1247,5 @@ Deploy 2026-11-14 Worker 0.10.933-closeout-c1-view: C1 Ready for Carousel Planni
 Deploy 2026-11-14 Worker 0.10.934-closeout-c2-view: C2 Ready for AI Image Generation slides view prefer Supabase. Record deletion is not started. Verify /health version 0.10.934-closeout-c2-view.
 
 Deploy 2026-11-14 Worker 0.10.935-closeout-music-view: Media Assets Music view prefer Supabase. Record deletion is not started. Verify /health version 0.10.935-closeout-music-view.
+
+Deploy 2026-11-14 Worker 0.10.936-closeout-a3-view: A3 Needs Classification media view prefer Supabase. Record deletion is not started. Verify /health version 0.10.936-closeout-a3-view.
