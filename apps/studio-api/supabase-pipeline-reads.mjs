@@ -790,6 +790,24 @@ export function retainProjectionKeys(existing, next, options = {}) {
   return bag;
 }
 
+/**
+ * Supabase is the Platform Output write authority in Phase 7. Re-arm PATCHes
+ * intentionally clear stale TikTok publish IDs, inbox receipts and email keys.
+ * packOutputListFields omits blanks for full-record projection, but a partial
+ * PATCH must honor explicitly present empty/null fields as deletions.
+ *
+ * Never wipe unrelated runner-projection metadata or empty fields which were
+ * simply absent from the PATCH.
+ */
+export function mergePresentOutputBagFields(existing, fields = {}) {
+  const merged = retainProjectionKeys(existing, packOutputListFields(fields), { merge: true });
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!key || key.startsWith("_") || TYPED_OUTPUT_FIELD_KEYS.has(key) || OUTPUT_EXCLUDE.has(key)) continue;
+    if (value === "" || value == null) delete merged[key];
+  }
+  return merged;
+}
+
 async function applyStoredProjection(env, table, rows, column) {
   const ids = [...new Set(rows.map((row) => row?.airtable_record_id).filter(Boolean))];
   if (!ids.length) return rows;
@@ -4851,16 +4869,25 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
     }
   }
-  const { body, bagPatch } = buildPresentOutputColumnPatch(record, {
+  const { body } = buildPresentOutputColumnPatch(record, {
     profileUuid: profileUuid || null,
     contentUuidByAirtableId,
   });
-  if (Object.keys(bagPatch).length) {
+  // A TikTok resend may be *only* explicit clears of prior draft receipts.
+  // Do not skip those keys because packOutputListFields omits null/"".
+  const presentBagKeys = Object.keys(record.fields || {}).filter((key) =>
+    key && !key.startsWith("_") && !TYPED_OUTPUT_FIELD_KEYS.has(key) && !OUTPUT_EXCLUDE.has(key));
+  if (presentBagKeys.length) {
+    // Fail closed on a failed read instead of replacing the complete runner
+    // projection bag with an empty object.
     const existing = await supabaseRest(
       env,
       `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=error_messages&limit=1`,
-    ).catch(() => []);
-    body.error_messages = retainProjectionKeys(existing?.[0]?.error_messages, bagPatch, { merge: true });
+    );
+    if (!Array.isArray(existing) || existing.length !== 1) {
+      throw new Error("Platform Output bag readback failed; refusing partial merge");
+    }
+    body.error_messages = mergePresentOutputBagFields(existing[0].error_messages, record.fields);
   }
   if (!Object.keys(body).length) return { skipped: true, reason: "no_present_fields" };
   body.updated_at = new Date().toISOString();
