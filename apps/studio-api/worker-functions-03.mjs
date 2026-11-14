@@ -9632,9 +9632,26 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
       const enabled = (await outputRowsForProductionRequest(env, requestRecord.id))
         .filter((row) => Boolean(f(row, "Enabled")));
       if (!enabled.length) continue;
-      const missing = enabled.filter((row) =>
-        !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
-      );
+      // Densified PRO reads omit Platform_Output even when Airtable is linked.
+      // Confirm missing against existing Platform Outputs by PRO record id
+      // (same FIND shape as fanout reuse) before POSTing duplicates.
+      const missing = [];
+      for (const row of enabled) {
+        const linked = arrayOrEmpty(f(row, "Platform_Output"))
+          .some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+        if (linked) continue;
+        const proRec = String(row.id || "").trim();
+        if (!/^rec[A-Za-z0-9]{14}$/.test(proRec)) {
+          missing.push(row);
+          continue;
+        }
+        const existing = await listRecords(env, STUDIO_PLATFORM_OUTPUT_TABLE, {
+          limit: 1,
+          filterFormula: `FIND('${proRec}',ARRAYJOIN({Production_Request_Output})&"")`,
+        }).catch(() => []);
+        if (existing?.[0]?.id) continue;
+        missing.push(row);
+      }
       const job = parseStudioProductionJob(requestRecord);
       const forceRemount = Boolean(job?.heal?.force_multiclip_remount)
         || (studioIsVibeCut(requestRecord) && /remount/i.test(String(job?.detail || "")));
