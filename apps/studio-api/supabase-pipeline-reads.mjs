@@ -6099,6 +6099,22 @@ function makeAdminQueueListFilter(formula) {
   if (blueprint) {
     return `scenario_id=eq.${blueprint[1]}&action=eq.${encodeURIComponent(blueprint[3])}&status=eq.Processing`;
   }
+  // P3 single-parent queue: UPDATE_BLUEPRINT still open (Pending/Queued/Processing).
+  const updateOpen = cleaned.match(
+    /^AND\(\{Scenario_ID\}=(\d+),\{Action\}=(["'])UPDATE_BLUEPRINT\2,\{Correlation_ID\}=(["'])([^"']*)\3,OR\(\{Status\}=(["'])Pending\5,\{Status\}=(["'])Queued\6,\{Status\}=(["'])Processing\7\)\)$/,
+  );
+  if (updateOpen) {
+    return `scenario_id=eq.${updateOpen[1]}&action=eq.UPDATE_BLUEPRINT`
+      + `&correlation_id=eq.${encodeURIComponent(updateOpen[4])}`
+      + `&status=in.(Pending,Queued,Processing)`;
+  }
+  // Latest successful GET_BLUEPRINT with a Result_JSON payload.
+  const blueprintDone = cleaned.match(
+    /^AND\(\{Scenario_ID\}=(\d+),\{Action\}=(["'])GET_BLUEPRINT\2,\{Status\}=(["'])Succeeded\3,\{Result_JSON\}!=BLANK\(\)\)$/,
+  );
+  if (blueprintDone) {
+    return `scenario_id=eq.${blueprintDone[1]}&action=eq.GET_BLUEPRINT&status=eq.Succeeded&result_json=not.is.null`;
+  }
   if (!cleaned.includes('{Status}="Processing"') && !cleaned.includes("{Status}='Processing'")) {
     return null;
   }
@@ -6132,11 +6148,14 @@ export async function listSupabaseMakeAdminQueue(env, formula, { limit = 50 } = 
   const filter = makeAdminQueueListFilter(formula);
   if (!filter) return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  // Successful GET_BLUEPRINT lookups want newest Completed_At first.
+  const order = filter.includes("status=eq.Succeeded")
+    ? "completed_at.desc.nullslast"
+    : "requested_at.desc.nullslast";
   const rows = await supabaseRest(
     env,
     `make_admin_queue?${filter}&select=${MAKE_ADMIN_QUEUE_SELECT}`
-      + `&order=requested_at.desc.nullslast&limit=${cap}`,
-  ).catch(() => null);
+      + `&order=${order}&limit=${cap}`,  ).catch(() => null);
   if (!Array.isArray(rows)) return null;
   return rows.map(shapeMakeAdminQueueRow).filter(Boolean);
 }
@@ -7127,6 +7146,9 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   YouTube_Privacy_Status: "error_messages->>YouTube_Privacy_Status",
   // Render-heal / VO copy — densifies into render_heal_fields jsonb.
   Voiceover_URL: "render_heal_fields->>Voiceover_URL",
+  // Insights due scan + R4 token selector — bag-only clocks / request ids.
+  Insights_Next_Sync_At: "error_messages->>Insights_Next_Sync_At",
+  Studio_Render_Request_ID: "error_messages->>Studio_Render_Request_ID",
   Timing_Status: "error_messages->>Timing_Status",
   Music_URL: "error_messages->>Music_URL",
   Selected_Music_URL: "error_messages->>Selected_Music_URL",
@@ -7430,6 +7452,9 @@ function outputSideLeafFilter(cleaned) {
   if (beforeNow) return "publish_next_retry_at.lte.now()";
   const beforeSched = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},NOW\(\)\)$/);
   if (beforeSched) return "scheduled_post_date.lte.now()";
+  // Insights due scan: bag ISO clock vs NOW().
+  const beforeInsights = cleaned.match(/^IS_BEFORE\(\{Insights_Next_Sync_At\},NOW\(\)\)$/);
+  if (beforeInsights) return "error_messages->>Insights_Next_Sync_At.lte.now()";
   // Past-due census clock: IS_BEFORE({Scheduled_Post_Date},"ISO").
   const beforeSchedIso = cleaned.match(/^IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)$/);
   if (beforeSchedIso) {

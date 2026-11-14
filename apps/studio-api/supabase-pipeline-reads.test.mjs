@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
+  assert.match(worker, /0\.10\.927-closeout-admin-p3/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
+  assert.match(worker, /0\.10\.927-closeout-admin-p3/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
+  assert.match(worker, /0\.10\.927-closeout-admin-p3/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.926-closeout-settings-admin/);
+  assert.match(worker, /0\.10\.927-closeout-admin-p3/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -5049,6 +5049,10 @@ test("Make Admin Pending and ASSET_LIBRARY list prefer Supabase", async () => {
     "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
   const blueprint =
     'AND({Scenario_ID}=5569495,{Action}="GET_BLUEPRINT",{Status}="Processing")';
+  const updateOpen =
+    'AND({Scenario_ID}=5531703,{Action}="UPDATE_BLUEPRINT",{Correlation_ID}="ITEM4-SINGLE-PARENT-P3",OR({Status}="Pending",{Status}="Queued",{Status}="Processing"))';
+  const blueprintDone =
+    'AND({Scenario_ID}=5531703,{Action}="GET_BLUEPRINT",{Status}="Succeeded",{Result_JSON}!=BLANK())';
   const calls = [];
   const env = {
     STUDIO_WRITE_SOURCE: "supabase",
@@ -5075,22 +5079,38 @@ test("Make Admin Pending and ASSET_LIBRARY list prefer Supabase", async () => {
     ));
     assert.ok(await studioSideTableRead(
       env,
+      MAKE_ADMIN_QUEUE_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent(updateOpen) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
+      MAKE_ADMIN_QUEUE_TABLE_ID,
+      "?filterByFormula=" + encodeURIComponent(blueprintDone) + "&maxRecords=10",
+    ));
+    assert.ok(await studioSideTableRead(
+      env,
       MEDIA_ASSETS_TABLE_ID,
       "?filterByFormula=" + encodeURIComponent(asset) + "&maxRecords=10",
     ));
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
   assert.match(calls[0], /make_admin_queue\?/);
   assert.match(calls[0], /status=eq\.Pending/);
   assert.match(calls[1], /make_admin_queue\?/);
   assert.match(calls[1], /scenario_id=eq\.5569495/);
   assert.match(calls[1], /action=eq\.GET_BLUEPRINT/);
   assert.match(calls[1], /status=eq\.Processing/);
-  assert.match(calls[2], /media_assets\?/);
-  assert.match(calls[2], /media_class=in\.\(Image,Graphic,Video\)/);
-  assert.match(calls[2], /fill-crop/);
+  assert.match(calls[2], /action=eq\.UPDATE_BLUEPRINT/);
+  assert.match(calls[2], /correlation_id=eq\.ITEM4-SINGLE-PARENT-P3/);
+  assert.match(calls[2], /status=in\.\(Pending,Queued,Processing\)/);
+  assert.match(calls[3], /status=eq\.Succeeded/);
+  assert.match(calls[3], /result_json=not\.is\.null/);
+  assert.match(calls[3], /order=completed_at\.desc/);
+  assert.match(calls[4], /media_assets\?/);
+  assert.match(calls[4], /media_class=in\.\(Image,Graphic,Video\)/);
+  assert.match(calls[4], /fill-crop/);
 });
 
 test("LIBRARY_CLASSIFY_PENDING and intake batch classification prefer Supabase", async () => {
@@ -5342,4 +5362,20 @@ test("Content Voiceover_URL blank and Output heal Voiceover_URL prefer Supabase"
   assert.match(calls[0], /content_items\?/);
   assert.match(calls[0], /Voiceover_URL/);
   assert.match(calls[0], /voiceover_status/);
+});
+
+test("Insights_Next_Sync_At due and Studio_Render_Request_ID leaves prefer Supabase", async () => {
+  const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
+  const insights =
+    'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))';
+  const renderReq =
+    'AND({Studio_Render_Request_ID}!="",{Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)';
+  const insightsFilter = translateOutputSideFormula(insights);
+  const renderFilter = translateOutputSideFormula(renderReq);
+  assert.ok(insightsFilter);
+  assert.match(insightsFilter, /Insights_Next_Sync_At/);
+  assert.match(insightsFilter, /Insights_Next_Sync_At\.lte\.now\(\)/);
+  assert.ok(renderFilter);
+  assert.match(renderFilter, /Studio_Render_Request_ID/);
+  assert.match(renderFilter, /render_status\.eq\.Ready%20for%20Render|render_status\.eq\."Ready for Render"|Ready%20for%20Render/);
 });
