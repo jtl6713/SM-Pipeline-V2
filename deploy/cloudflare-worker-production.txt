@@ -1235,3 +1235,5 @@ Deploy 2026-11-14 Worker 0.10.927-closeout-admin-p3: Make Admin P3 UPDATE/GET_BL
 Deploy 2026-11-14 Worker 0.10.928-closeout-ig-stale: QA-IG-STALE-UPLOAD formula leaves + Asset_Selection_Next_Retry_At IS_BEFORE prefer Supabase. Record deletion is not started. Verify /health version 0.10.928-closeout-ig-stale.
 
 Deploy 2026-11-14 Worker 0.10.929-closeout-lib-pr: Autonomous PR lists + published-library date/search prefer Supabase. Record deletion is not started. Verify /health version 0.10.929-closeout-lib-pr.
+
+Deploy 2026-11-14 Worker 0.10.930-closeout-idea-lib: Autonomous idea-library harvest pages Supabase media_assets; QA recovery ledger POST/PATCH commit skips Airtable under write SoR. Record deletion is not started. Verify /health version 0.10.930-closeout-idea-lib.

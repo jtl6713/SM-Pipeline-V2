@@ -7940,6 +7940,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       if (studioWriteSource(env) !== "supabase") return null;
       return await readMakeAdminQueueRow(env, id);
     }
+    if (kind === "recovery_ledger") {
+      if (studioWriteSource(env) !== "supabase") return null;
+      return await readSupabaseQualityRecoveryEvent(env, id);
+    }
     return null;
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
@@ -8262,6 +8266,20 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       records = await createSupabaseExceptionRecoveryMessages(env, parsed);
     } else if (kind === "make_admin_queue") {
       records = await commitMakeAdminQueueRecords(env, parsed, { insert: verb === "POST" });
+    } else if (kind === "recovery_ledger") {
+      records = [];
+      for (const row of parsed) {
+        if (!row?.id) continue;
+        const prior = verb === "PATCH"
+          ? await readSupabaseQualityRecoveryEvent(env, row.id).catch(() => null)
+          : null;
+        const fields = {
+          ...(isPlainObject(prior?.fields) ? prior.fields : {}),
+          ...(isPlainObject(row.fields) ? row.fields : {}),
+        };
+        await mirrorQualityRecoveryEvent(env, { id: row.id, fields });
+        records.push({ id: row.id, fields, createdTime: new Date().toISOString() });
+      }
     }
     if (!records) return { ok: false, reason: "missing_row" };
     return { ok: records.length === parsed.length, records };

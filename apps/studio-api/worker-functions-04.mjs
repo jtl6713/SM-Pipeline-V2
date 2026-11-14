@@ -104,7 +104,10 @@ import {
   studioFactoryOpsReadSource,
   studioHomeReadSource,
   studioWriteSource,
+  studioAssetsReadSource,
+  studioPhase6WriteSource,
   studioSupabaseConfigured,
+  listSupabaseAssetLibraryRecords,
   readSupabaseMaeOutput,
   readSupabaseCreativeMasterContent,
   listSupabaseOutputCensusPage,
@@ -14336,34 +14339,67 @@ export async function harvestAutonomousLibraryCatalog(env, subject = "", profile
   const pin = autonomousPreferredSubject(subject);
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: false });
-  let records = [];
-  try {
-    records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-      limit: AUTONOMOUS_LIBRARY_SCAN_CAP,
-      sortField: LIBRARY_ADDED_AT_FIELD,
-      sortDirection: "desc",
-      fields: [
-        "Asset Name",
-        "Location",
-        "Topic",
-        "Subtopic",
-        "Media_Class",
-        "MIME_Type",
-        "Classification_Status",
-        "Raw_Source_Eligibility",
-        "Asset_Status",
-        "Do_Not_Use",
-        "Active",
-        "Google Drive File ID",
-        "Google Drive URL",
-        LIBRARY_ADDED_AT_FIELD,
-        "Intake_Date",
-      ],
-      filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
-    });
-  } catch (error) {
-    console.warn("autonomous library catalog failed", profileId, error);
-    throw error;
+  let records = null;
+  if (studioSupabaseConfigured(env) && (
+    studioAssetsReadSource(env) === "supabase"
+    || (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase")
+  )) {
+    try {
+      // Asset-library SoR pages at 500; autonomous harvest still wants up to
+      // AUTONOMOUS_LIBRARY_SCAN_CAP rows, so walk offsets until exhausted.
+      const want = Math.max(1, Number(AUTONOMOUS_LIBRARY_SCAN_CAP) || 500);
+      const pageSize = 500;
+      const collected = [];
+      let pageOffset = null;
+      while (collected.length < want) {
+        const packed = await listSupabaseAssetLibraryRecords(env, {
+          limit: Math.min(pageSize, want - collected.length),
+          offset: pageOffset,
+          kind: "photo",
+          profileId: crossScope ? "" : (profileId || ""),
+          query: pin ? String(pin).toLowerCase() : "",
+          sortField: "Added_At",
+          sortDirection: "desc",
+        });
+        if (!Array.isArray(packed?.records)) break;
+        collected.push(...packed.records);
+        if (!packed.has_more || !packed.offset) break;
+        pageOffset = packed.offset;
+      }
+      if (collected.length) records = collected;
+    } catch (error) {
+      console.warn("supabase autonomous library catalog failed; falling back to Airtable", profileId, error);
+    }
+  }
+  if (!records) {
+    try {
+      records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+        limit: AUTONOMOUS_LIBRARY_SCAN_CAP,
+        sortField: LIBRARY_ADDED_AT_FIELD,
+        sortDirection: "desc",
+        fields: [
+          "Asset Name",
+          "Location",
+          "Topic",
+          "Subtopic",
+          "Media_Class",
+          "MIME_Type",
+          "Classification_Status",
+          "Raw_Source_Eligibility",
+          "Asset_Status",
+          "Do_Not_Use",
+          "Active",
+          "Google Drive File ID",
+          "Google Drive URL",
+          LIBRARY_ADDED_AT_FIELD,
+          "Intake_Date",
+        ],
+        filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
+      });
+    } catch (error) {
+      console.warn("autonomous library catalog failed", profileId, error);
+      throw error;
+    }
   }
   const rows = [];
   for (const record of records || []) {

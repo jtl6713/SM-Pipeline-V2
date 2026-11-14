@@ -903,7 +903,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.929-closeout-lib-pr/);
+  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1007,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.929-closeout-lib-pr/);
+  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2764,7 +2764,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.929-closeout-lib-pr/);
+  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3064,7 +3064,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.929-closeout-lib-pr/);
+  assert.match(worker, /0\.10\.930-closeout-idea-lib/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -4614,6 +4614,70 @@ test("Idea library media scans prefer Supabase asset library under assets-read o
   assert.match(wf03, /supabase idea photo-wait stills failed/);
   assert.match(wf03, /supabase idea scripted-short videos failed/);
   assert.match(reads, /Math\.min\(500, Number\(limit\)/);
+});
+
+test("Autonomous idea-library harvest prefers paged Supabase asset library under assets-read or Phase6", async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const wf04 = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = wf04.indexOf("export async function harvestAutonomousLibraryCatalog");
+  const end = wf04.indexOf("/*__STUDIO_WORKER_END:harvestAutonomousLibraryCatalog__*/", start);
+  const harvest = wf04.slice(start, end);
+  assert.match(harvest, /listSupabaseAssetLibraryRecords/);
+  assert.match(harvest, /studioAssetsReadSource\(env\) === "supabase"/);
+  assert.match(harvest, /AUTONOMOUS_LIBRARY_SCAN_CAP/);
+  assert.match(harvest, /pageOffset = packed\.offset/);
+  assert.match(harvest, /supabase autonomous library catalog failed; falling back to Airtable/);
+});
+
+test("Quality Agent Recovery Ledger POST/PATCH commit via studioSideTableCommit under write SoR", async () => {
+  const { studioSideTableCommit } = await import("./supabase-pipeline-reads.mjs");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      urls.push(href);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (method === "POST" || method === "PATCH") {
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify([{
+        airtable_record_id: "recQaLed000000001",
+        fields: {
+          Event_Key: "QA-IG-STALE:recOutput00000001",
+          Outcome: "pending",
+        },
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const created = await studioSideTableCommit(
+      env,
+      "Quality Agent Recovery Ledger",
+      "POST",
+      "",
+      JSON.stringify({ fields: { Event_Key: "QA-IG-STALE:recOutput00000001", Outcome: "healed" } }),
+    );
+    assert.equal(created.ok, true);
+    assert.equal(created.records[0].fields.Outcome, "healed");
+    assert.match(created.records[0].id, /^rec/);
+    assert.ok(urls.some((url) => url.includes("quality_agent_recovery_events")));
+    const patched = await studioSideTableCommit(
+      env,
+      "Quality Agent Recovery Ledger",
+      "PATCH",
+      "recQaLed000000001",
+      JSON.stringify({ fields: { Outcome: "reconciled_published" } }),
+    );
+    assert.equal(patched.ok, true);
+    assert.equal(patched.records[0].fields.Outcome, "reconciled_published");
+    assert.equal(patched.records[0].fields.Event_Key, "QA-IG-STALE:recOutput00000001");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Variant queue Media_Asset and PR-scoped Ready lists read from Supabase under Phase6", async () => {
