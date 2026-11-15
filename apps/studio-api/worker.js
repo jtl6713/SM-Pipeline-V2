@@ -1391,7 +1391,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.954-phase6-get-archive-closed",
+          version: "0.10.955-archive-mut-closed",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5576,18 +5576,14 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       ? archiveRecords[0]
       : { records: archiveRecords };
   } else if (
-    // Live wrangler tail after 0.10.951 still showed Platform Output GET 200/404
-    // against the frozen archive. Under STUDIO_WRITE_SOURCE=supabase, Output and
-    // Content GETs must never touch Airtable — record miss → 404, untranslated
-    // list/view → empty page. Hardcoded Content table ids count too.
-    // Post-0.10.953 table_kind tail: remaining GETs were Phase 6 transfer-queue
-    // (tblBZLXPd1p2NRWRK) fallthrough when queueFormulaFilter returned null.
+    // Quiet-window closeout: under STUDIO_WRITE_SOURCE=supabase the Airtable
+    // archive is frozen. Side/SoR reads already ran above. Any remaining GET
+    // (review jobs, gallery, settings miss, Phase 6 miss, etc.) must not
+    // touch Airtable — record miss → 404, list/view → empty page.
+    // Phase 6 keep their own write-source gate when Output SoR is still airtable.
     method === "GET"
     && (
-      (
-        studioWriteSource(env) === "supabase"
-        && studioAirtableOutputOrContentTable(env, tableId)
-      )
+      studioWriteSource(env) === "supabase"
       || (
         studioPhase6WriteSource(env) === "supabase"
         && Boolean(phase6TableKind(env, tableId))
@@ -5607,6 +5603,39 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       side_read_attempted: sideReadAttempted,
     });
     body = { records: [] };
+  } else if (
+    // Residual Worker PATCH (~5–10/hr at 6 AM CT) was review/gallery/other
+    // mutations that never set archiveRecords and fell through to Airtable.
+    // Under write SoR, skip the archive WRITE and return a local echo so
+    // callers soft-continue without egress.
+    method !== "GET"
+    && studioWriteSource(env) === "supabase"
+  ) {
+    const tableKind = studioAirtableEgressTableKind(env, tableId);
+    console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
+      table_kind: tableKind,
+      method,
+    });
+    const raw = String(options?.body || "");
+    let parsed = {};
+    try { parsed = raw ? JSON.parse(raw) : {}; } catch { parsed = {}; }
+    if (Array.isArray(parsed?.records)) {
+      body = { records: parsed.records };
+    } else {
+      const recordId = studioAirtableRecordIdPath(pathOrParams);
+      if (recordId && parsed && typeof parsed === "object" && parsed.fields) {
+        body = {
+          id: recordId,
+          fields: parsed.fields,
+          createdTime: new Date().toISOString(),
+        };
+      } else if (recordId && method === "DELETE") {
+        body = { id: recordId, deleted: true };
+      } else {
+        body = parsed && typeof parsed === "object" ? parsed : {};
+      }
+    }
+    airtableCommitted = false;
   } else {
   await airtableRequestSlot();
   try {

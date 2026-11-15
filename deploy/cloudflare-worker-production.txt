@@ -1285,3 +1285,5 @@ Deploy 2026-11-15 Worker 0.10.952-output-get-archive-closed: under STUDIO_WRITE_
 Deploy 2026-11-15 Worker 0.10.953-other-get-attr: recognize Platform Outputs/Content Items table names for archive-closed GETs; expand egress table_kind for named tables still labeled other. Record deletion is not started. Verify /health version 0.10.953-other-get-attr.
 
 Deploy 2026-11-15 Worker 0.10.954-phase6-get-archive-closed: Phase 6 request/media/queue GETs fail-closed under STUDIO_PHASE6_WRITE_SOURCE=supabase (kills transfer-queue fallthrough). Fix egress table_kind for tblBZLXPd1p2NRWRK=queue. Record deletion is not started. Verify /health version 0.10.954-phase6-get-archive-closed.
+
+Deploy 2026-11-15 Worker 0.10.955-archive-mut-closed: under STUDIO_WRITE_SOURCE=supabase, fail-closed all remaining Airtable GETs and mutations that SoR did not absorb (kills residual Worker PATCH/GET). Record deletion is not started. Verify /health version 0.10.955-archive-mut-closed.
