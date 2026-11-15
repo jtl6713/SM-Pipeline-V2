@@ -22,7 +22,7 @@ describe("library upload overlay errors", () => {
   });
 
   test("release versions bumped for this fix", () => {
-    assert.match(worker, /0\.10\.963-library-upload-overlay-errors/);
+    assert.match(worker, /0\.10\.964-library-upload-overlay-errors/);
     assert.match(ui, /item4-0\.6\.953-library-upload-overlay-errors/);
   });
 });
