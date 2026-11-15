@@ -1,5 +1,75 @@
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { isTikTokEmailedManualHandoff } from "./tiktok-emailed-handoff.mjs";
+import {
+  evaluateReviewPackage,
+  factoryReviewVisibility,
+  formalFactoryApprovalReady,
+} from "./review-package-readiness.mjs";
+
+/**
+ * Adapt overview / mapOutput rows (or raw Airtable records) for the shared
+ * Factory Needs eyes package gate. Home Awaiting Approval must use the same
+ * predicate as the Factory lane the Overview link opens.
+ */
+export function homeMappedApprovalRecord(row) {
+  if (!row) return null;
+  if (row.fields && typeof row.fields === "object") return row;
+  return {
+    id: row.id,
+    fields: {
+      Output_Status: row.output_status,
+      Review_Status: row.review_status,
+      Publish_Status: row.publish_status,
+      Render_Status: row.render_status,
+      Do_Not_Publish: row.do_not_publish === true,
+      Studio_Render_Review_Hold_Active: row.review_hold_active === true
+        || row.studio_render_review_hold_active === true,
+      Test_Run_ID: row.test_run_id,
+      Published_At: row.published_at,
+      Platform_Post_ID: row.platform_post_id,
+      Platform_Post_URL: row.platform_post_url,
+      Final_File_URL: row.final_file_url,
+      Final_File_ID: row.final_file_id,
+      Thumbnail_URL: row.thumbnail_url,
+      Studio_Preview_URL: row.studio_preview_url,
+      Output_Caption: row.output_caption,
+      Studio_Output_Type: row.studio_output_type || row.format,
+      Format: row.format,
+      Platform: row.platform,
+      Platform_Output_Type: row.platform_output_type,
+      Selected_Clip_Count: row.selected_clip_count,
+      Selected_Assets_JSON: row.selected_assets_json || row.selected_assets,
+      "Carousel Slides": row.carousel_slides || row.carousel_slide_links || row.carousel_slide_ids,
+      Remotion_Job_ID: row.remotion_job_id,
+      Output_Notes: row.output_notes,
+      Production_Notes: row.production_notes,
+    },
+  };
+}
+
+/** True when Overview should count this output as Awaiting Approval (= Factory Needs eyes). */
+export function homeAwaitingApprovalVisible(row) {
+  if (!row) return false;
+  // Prefer the Factory-computed gate when present (ops queue cards).
+  if (row.review_package_ready === false) return false;
+  if (row.review_package_ready === true && row.kind === "output") {
+    // Still honor terminal / AZ exclusions below via formal visibility.
+  }
+  const notes = `${row.output_notes || ""}\n${row.production_notes || ""}`;
+  if (/origin=az-finished-video/i.test(notes)) return false;
+  if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
+  const record = homeMappedApprovalRecord(row);
+  if (!record) return false;
+  const readiness = evaluateReviewPackage(record);
+  // Approve-ready package (same as Factory Approve eligibility). Do not require
+  // studio_state === Ready for Review — Overview lean maps often label complete
+  // RFR rows as Preparing Assets when CDN fields are projected lightly.
+  if (formalFactoryApprovalReady(record, readiness)) return true;
+  const studioState = String(row.studio_state || "").trim() || "Ready for Review";
+  const creativeAvailable = row.creative_available !== false;
+  // Also count Needs eyes held / hold-release rows Factory still shows.
+  return factoryReviewVisibility(record, readiness, studioState, creativeAvailable).visible === true;
+}
 
 export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", "YouTube"]);
 export const HOME_METRIC_KEYS = Object.freeze([
@@ -144,25 +214,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.active_outputs = Number(!failed && !["Published", "Skipped"].includes(state));
   if (isQueuedForPlatformDispatch(row)) result.scheduled[row.platform] = 1;
 
-  const output = String(row.output_status || "").trim().toLowerCase();
-  const render = String(row.render_status || "").trim().toLowerCase();
-  const review = String(row.review_status || "").trim().toLowerCase();
-  const publish = String(row.publish_status || "").trim().toLowerCase();
-  // Home's lean Supabase page omits caption and file URLs, so the shared
-  // Pipeline label falls through to Preparing Assets. All Profiles still
-  // counts Ready for Review status. Factory Needs eyes keeps the package gate.
-  const reviewLabeled = state === "Ready for Review" || state === "Awaiting Approval";
-  const statusLabeled = output === "ready for review"
-    && !["Published", "Skipped", "Failed", "Approved", "Scheduled", "Changes Requested", "Review Held", "Manual Action Required", "Draft Delivered", "Uploading", "Platform Processing"].includes(state);
-  if (!reviewLabeled && !statusLabeled) return result;
-  if (["approved", "rejected", "skipped"].includes(review)) return result;
-  if (["in production", "rendering", "ready for render", "approved", "approved for publishing", "published"].includes(output)) return result;
-  if (/ready for render|waiting in render queue|rendering|queued|pending render|^processing$|^preparing$|^failed$|^blocked$/.test(render)) return result;
-  if (/^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish)) return result;
-  if (row.do_not_publish) return result;
-  const notes = String(row.output_notes || "") + "\n" + String(row.production_notes || "");
-  if (/origin=az-finished-video/i.test(notes)) return result;
-  if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return result;
+  // Awaiting Approval must equal Factory Needs eyes: package-complete outputs
+  // Joseph can open from the Overview link and Approve. Incomplete Ready for
+  // Review status alone belongs in Repair, not this count.
+  if (!homeAwaitingApprovalVisible(row)) return result;
   result.awaiting_approval = 1;
   if (knownPlatform) result.awaiting_final_by_platform[row.platform] = 1;
   return result;

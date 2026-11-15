@@ -2841,6 +2841,11 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     output_caption: f(record, "Output_Caption"),
     output_notes: f(record, "Output_Notes"),
     output_hashtags: f(record, "Output_Hashtags"),
+    selected_clip_count: (() => {
+      const raw = Number(f(record, "Selected_Clip_Count"));
+      return Number.isFinite(raw) && raw > 0 ? raw : null;
+    })(),
+    selected_assets_json: f(record, "Selected_Assets_JSON") || null,
     thumbnail_url: f(record, "Thumbnail_URL"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
     scheduled_at: f(record, "Studio_Scheduled_At"),

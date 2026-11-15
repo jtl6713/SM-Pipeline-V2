@@ -272,10 +272,11 @@ function isAutoHigh(row) {
  * Priority: needs_eyes (package-ready) → manual → needs_assets → auto_high.
  *
  * Package-ready Ready for Review is Joseph's Approve gate. It must win over an
- * inherited parent produce stuck_kind so complete siblings stay in Needs eyes
- * while Studio overview still counts them as Awaiting Approval. Incomplete
- * packages keep review_package_ready=false, fail isReadyForReview, and land in
- * Manual via stuck_kind=review_package_incomplete.
+ * inherited parent produce stuck_kind so complete siblings stay in Needs eyes.
+ * Studio overview Awaiting Approval uses the same package gate
+ * (homeAwaitingApprovalVisible). Incomplete packages keep
+ * review_package_ready=false, fail isReadyForReview, and land in Manual via
+ * stuck_kind=review_package_incomplete.
  */
 export function classifyFactoryLane(row) {
   if (!row?.id) return null;
