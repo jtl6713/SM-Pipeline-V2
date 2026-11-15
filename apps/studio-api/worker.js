@@ -186,6 +186,7 @@ import {
   studioPhase5WritesMode,
   studioPhase6WriteSource,
   studioPhase6WritesMode,
+  phase6TableKind,
   studioLegacyExportEnabled,
   studioPhase6LegacyExportEnabled,
   studioSupabaseCommitPhase6First,
@@ -1390,7 +1391,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.953-other-get-attr",
+          version: "0.10.954-phase6-get-archive-closed",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5435,11 +5436,16 @@ function studioAirtableEgressTableKind(env, tableId) {
   if (table === "tblb6LfRv7CemHHN6" || /insights.?learned/i.test(table)) {
     return "insights_learned";
   }
-  if (
-    table === "tblBZLXPd1p2NRWRK"
-    || table === "Production Requests"
-    || table === "tblRT9xwcYJ8A5z4e"
-  ) return "requests";
+  // Phase 6 tables — prefer phase6TableKind so transfer-queue id is not
+  // mistaken for Production Requests.
+  const phase6 = phase6TableKind(env, table);
+  if (phase6 === "queue" || table === "tblBZLXPd1p2NRWRK" || table === "Studio Media Transfer Queue") {
+    return "queue";
+  }
+  if (phase6 === "request" || table === "Production Requests" || table === "tblRT9xwcYJ8A5z4e") {
+    return "requests";
+  }
+  if (phase6 === "media") return "media";
   if (table === "Exception Recovery Messages") return "exception_messages";
   if (table === "Quality Agent Recovery Ledger") return "recovery_ledger";
   if (table === "Brands") return "brands";
@@ -5574,9 +5580,19 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     // against the frozen archive. Under STUDIO_WRITE_SOURCE=supabase, Output and
     // Content GETs must never touch Airtable — record miss → 404, untranslated
     // list/view → empty page. Hardcoded Content table ids count too.
+    // Post-0.10.953 table_kind tail: remaining GETs were Phase 6 transfer-queue
+    // (tblBZLXPd1p2NRWRK) fallthrough when queueFormulaFilter returned null.
     method === "GET"
-    && studioWriteSource(env) === "supabase"
-    && studioAirtableOutputOrContentTable(env, tableId)
+    && (
+      (
+        studioWriteSource(env) === "supabase"
+        && studioAirtableOutputOrContentTable(env, tableId)
+      )
+      || (
+        studioPhase6WriteSource(env) === "supabase"
+        && Boolean(phase6TableKind(env, tableId))
+      )
+    )
   ) {
     const tableKind = studioAirtableEgressTableKind(env, tableId);
     if (studioAirtableRecordIdPath(pathOrParams)) {
