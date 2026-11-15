@@ -13,7 +13,6 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any
 
 import requests
 
