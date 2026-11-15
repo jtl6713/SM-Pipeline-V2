@@ -2803,12 +2803,35 @@ export function deskHealOutputFilter(kind, options = {}) {
       + "&and(error_messages->>Composition_ID.not.is.null,error_messages->>Composition_ID.neq.)";
   }
   if (kind === "render_stale_final") {
+    // Match Airtable: uploaded final + live Remotion status, OR blank/Rendered
+    // Render_Status with Final_File_URL while Output_Status is still In Production.
+    const live = ["Rendering", "Ready for Render", "Ready to Render", "Waiting in Render Queue"]
+      .map(encodeDeskFilterValue)
+      .join(",");
+    const withJobUploaded = `and(render_status.in.(${live}),remotion_job_id.not.is.null,remotion_job_id.neq.,final_file_storage_status.eq.Uploaded)`;
+    const blankOrRendered = "or(render_status.is.null,render_status.eq.,render_status.eq.Rendered)";
     return "test_run_id=is.null&published_at=is.null&do_not_publish=eq.false"
-      + `&render_status=in.(Rendering,${encodeDeskFilterValue("Ready for Render")},${encodeDeskFilterValue("Ready to Render")},${encodeDeskFilterValue("Waiting in Render Queue")})`
-      + "&and(remotion_job_id.not.is.null,remotion_job_id.neq.)"
       + "&and(final_file_url.not.is.null,final_file_url.neq.)"
-      + "&final_file_storage_status=eq.Uploaded"
-      + `&output_status=in.(${encodeDeskFilterValue("In Production")},Rendering)`;
+      + `&output_status=in.(${encodeDeskFilterValue("In Production")},Rendering)`
+      + `&or=(${withJobUploaded},${blankOrRendered})`;
+  }
+  if (kind === "shared_render_strand") {
+    const types = ["Reel", "Short", "Video Draft"].map(encodeDeskFilterValue).join(",");
+    return `${quiet}&published_at=is.null`
+      + `&output_status=in.(${encodeDeskFilterValue("In Production")},Rendering)`
+      + "&or=(final_file_url.is.null,final_file_url.eq.)"
+      + `&studio_output_type=in.(${types})`;
+  }
+  if (kind === "shared_render_source") {
+    const contentId = String(options.contentAirtableId || "").trim();
+    if (!/^rec[A-Za-z0-9]{14}$/.test(contentId)) {
+      throw new Error("shared_render_source needs contentAirtableId");
+    }
+    const types = ["Reel", "Short", "Video Draft"].map(encodeDeskFilterValue).join(",");
+    const finished = `or=(render_status.eq.Rendered,output_status.eq.${encodeDeskFilterValue("Ready for Review")},output_status.eq.${encodeDeskFilterValue("Approved for Publishing")})`;
+    return `${quiet}&content_item_airtable_id=eq.${encodeURIComponent(contentId)}`
+      + "&and(final_file_url.not.is.null,final_file_url.neq.)"
+      + `&studio_output_type=in.(${types})&${finished}`;
   }
   if (kind === "render_failed") {
     return "test_run_id=is.null&render_status=eq.Failed"
@@ -2967,6 +2990,7 @@ export async function listSupabaseDeskHealOutputs(env, {
   nowMs = undefined,
   requireAutoPublish = undefined,
   cutoffIso = "",
+  contentAirtableId = "",
 } = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(80, Number(limit) || 30));
@@ -2984,7 +3008,7 @@ export async function listSupabaseDeskHealOutputs(env, {
         ? `order=error_messages->>TikTok_Draft_Last_Checked_At.${direction}.nullsfirst`
         : `order=output_number.${direction}.nullslast`;
   const select = deskHealSelect(kind);
-  const filterOptions = { nowMs, requireAutoPublish, cutoffIso };
+  const filterOptions = { nowMs, requireAutoPublish, cutoffIso, contentAirtableId };
   if (kind === "render_unfetchable" || kind === "inventory_unfetchable") {
     const matches = [];
     const pageSize = 40;

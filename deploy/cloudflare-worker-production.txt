@@ -1291,3 +1291,5 @@ Deploy 2026-11-15 Worker 0.10.955-archive-mut-closed: under STUDIO_WRITE_SOURCE=
 Deploy 2026-11-15 Worker 0.10.956-place-open-sync: refresh Place Review open URLs with Places-intent search + paste hint on list.
 
 Deploy 2026-11-15 Worker 0.10.957-shared-render-strand: heal stranded shared 9:16 siblings + blank-Render Final_File_URL promote.
+
+Deploy 2026-11-15 Worker 0.10.958-shared-render-supabase: register shared_render_strand/source + broaden render_stale_final under STUDIO_WRITE_SOURCE=supabase (heal was empty unknown-kind).

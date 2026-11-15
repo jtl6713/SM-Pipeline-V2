@@ -12752,11 +12752,23 @@ function studioDeskHealAutoPublishEnabled(record) {
 
 async function studioListDeskHealOutputs(env, kind, airtableList) {
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    return listSupabaseDeskHealOutputs(env, {
-      kind,
-      limit: airtableList.limit,
-      sortDirection: airtableList.sortDirection,
-    });
+    try {
+      return await listSupabaseDeskHealOutputs(env, {
+        kind,
+        limit: airtableList.limit,
+        sortDirection: airtableList.sortDirection,
+        contentAirtableId: airtableList.contentAirtableId || "",
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // Unknown kind must not silent-no-op (.catch([])). Fall back to the
+      // Airtable formula so a missing Supabase mapping cannot strand heals.
+      if (/Unknown desk heal candidate list/i.test(msg) && airtableList?.filterFormula) {
+        console.warn("supabase desk heal kind missing; Airtable formula fallback", kind);
+        return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
+      }
+      throw error;
+    }
   }
   return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
 }
@@ -12901,6 +12913,7 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
         limit: 12,
         sortField: "Output_ID",
         sortDirection: "asc",
+        contentAirtableId: contentId,
         filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
       }).catch(() => []);
       sourceCache.set(contentId, sources || []);
