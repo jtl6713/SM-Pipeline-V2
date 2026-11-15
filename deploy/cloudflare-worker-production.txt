@@ -1301,3 +1301,5 @@ Deploy 2026-11-15 Worker 0.10.960-edit-classification-description: Manual classi
 Deploy 2026-11-15 Worker 0.10.961-library-classify-timeout: heal stale Processing library assets; small uploads classify inline.
 
 Deploy 2026-11-15 Worker 0.10.962-library-batch-name-supabase: Asset Manager multi-upload name sequencing reads existing names from Supabase under Phase 6 SoR (Airtable archive returns empty).
+
+2026-11-15: Deploy Worker 0.10.963-library-upload-overlay-errors — provenance overlay holds stay 422; stop labeling them Drive 502.

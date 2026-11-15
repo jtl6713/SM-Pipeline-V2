@@ -801,3 +801,5 @@ Deploy 2026-11-15 UI 0.6.948-place-open-sync: Open Place copies draft + opens Ti
 Deploy 2026-11-15 UI 0.6.950-pipeline-rendering-strand: Rendering tab no longer pulls Ready-for-Review siblings; finished Final_File_URL leaves Rendering.
 Deploy 2026-11-15 UI 0.6.951-edit-classification: Edit classification prefills existing values and can replace Asset_Description prose.
 Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires at 60s with retry guidance.
+
+2026-11-15: Deploy Pages UI 0.6.953-library-upload-overlay-errors — summarize overlay vs Drive/pipeline upload failures.
