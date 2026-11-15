@@ -659,6 +659,8 @@
     detail.setAttribute("role", "tabpanel");
     detail.setAttribute("aria-labelledby", "engagementFolderPosts");
     $("engagementStatus")?.insertAdjacentElement("afterend", detail);
+    const actions = heading.querySelector(".engagement-heading-actions");
+    if (actions) detail.appendChild(actions);
     for (const id of ["engagementFiltersPanel", "engagementPlaceNotePanel", "engagementKpis"]) {
       const node = $(id); if (node) detail.appendChild(node);
     }
