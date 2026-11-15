@@ -98,6 +98,40 @@ test("Real rendering, queue wait, and rerendering records stay visible", () => {
   }
 });
 
+test("Ready for Review and finished-file rows leave Rendering even with stranded siblings", () => {
+  const ready = {
+    id: "ready-ig",
+    content_item_links: ["content2127"],
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    final_file_url: "https://drive.google.com/file/d/ready/view",
+  };
+  const stranded = {
+    id: "strand-fb",
+    content_item_links: ["content2127"],
+    studio_state: "Preparing Assets",
+    output_status: "In Production",
+    render_status: "",
+  };
+  const finishedBlank = {
+    id: "finished-blank",
+    content_item_links: ["content2117"],
+    studio_state: "Preparing Assets",
+    output_status: "In Production",
+    render_status: "",
+    final_file_url: "https://drive.google.com/file/d/finished/view",
+  };
+  assert.equal(runtime.pipelineOutputRenderInFlight(ready), false);
+  assert.equal(runtime.pipelineRecordMatchesFilter(ready, "rendering"), false);
+  assert.equal(runtime.pipelineOutputRenderComplete(finishedBlank), true);
+  assert.equal(runtime.pipelineOutputRenderInFlight(finishedBlank), false);
+  assert.equal(runtime.pipelineRecordMatchesFilter(finishedBlank, "rendering"), false);
+  assert.equal(runtime.pipelineOutputRenderInFlight(stranded), true);
+  const selected = runtime.filteredPipelineRecords([ready, stranded, finishedBlank]);
+  assert.deepEqual(selected.map((row) => row.id), ["strand-fb"]);
+});
+
 test("Unpublished sibling of archived content can render without importing a fully published group", () => {
   const live = { id: "live", content_item_links: ["other-content"], studio_state: "Rendering", render_status: "Rendering", output_status: "In Production" };
   const published = { ...published825 };

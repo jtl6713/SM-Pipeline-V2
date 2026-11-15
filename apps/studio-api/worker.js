@@ -714,6 +714,7 @@ import {
   studioHealNativePhotoReviewStrands,
   studioHealAwaitingApprovalStaleRfr,
   studioHealPhantomRerender,
+  studioHealSharedRenderStrand,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
   studioHealTtdProcessingMissingPublishId,
@@ -1391,7 +1392,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.956-place-open-sync",
+          version: "0.10.957-shared-render-strand",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4857,6 +4858,13 @@ export default {
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
       }
+      // Shared 9:16 siblings left Preparing Assets after the canonical finished
+      // (Adler Point 2127 FB/TikTok; Content 2117 FB/YT/TikTok). Propagate Final_File_URL.
+      try {
+        await studioHealSharedRenderStrand(env, { limit: 12 });
+      } catch (error) {
+        console.warn("shared-render strand heal failed", error);
+      }
       // On heavy ticks only, examine bounded canonical pre-Factory candidates.
       // Do not regenerate assets or approve: this repairs a stale In Production
       // status only after complete review deliverables and safe Airtable readback.
@@ -6534,6 +6542,8 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:studioHealAwaitingApprovalStaleRfr__*/
 /** Rerendering badge with a finished file and no render running → back to Ready for Review. */
 /*__STUDIO_WORKER_EXTRACT:studioHealPhantomRerender__*/
+/** Shared 9:16 Reel/Short/Video Draft stranded without Final_File_URL after canonical finished. */
+/*__STUDIO_WORKER_EXTRACT:studioHealSharedRenderStrand__*/
 /** Publish_Status=Failed while Platform_Post_ID / Published_At already prove live. */
 /*__STUDIO_WORKER_EXTRACT:studioHealLiveFailedPublishStatus__*/
 /** TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type. */

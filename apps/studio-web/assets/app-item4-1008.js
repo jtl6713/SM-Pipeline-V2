@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.949-home-factory-review";
+  const BUILD_ID = "item4-0.6.950-pipeline-rendering-strand";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1740,6 +1740,9 @@
     if (pipelineOutputIsPublished(record)) return true;
     if (pipelineMixRerenderInProgress(record)) return false;
     if (pipelineIsRetryingRender(record)) return false;
+    // Finished Drive/CDN media wins over stale Preparing Assets / blank Render_Status
+    // (Content 2117 IG Reel 10501 kept Final_File_URL while Output_Status stayed In Production).
+    if (String(record?.final_file_url || "").trim()) return true;
     const state = String(record?.studio_state || "").trim();
     return [
       "Ready for Review",
@@ -1757,6 +1760,9 @@
     // Publication and terminal delivery always override obsolete render labels.
     if (pipelineOutputIsPublished(record)) return false;
     if (/^(Skipped|Draft Delivered)$/i.test(String(record?.studio_state || "").trim())) return false;
+    // Ready for Review / Scheduled / finished-file rows must leave Rendering even when
+    // Airtable still says In Production or a sibling package is incomplete.
+    if (pipelineOutputRenderComplete(record)) return false;
     if (pipelineMixRerenderInProgress(record)) return true;
     if (pipelineIsRetryingRender(record)) return true;
     const state = String(record?.studio_state || "").trim();
@@ -22398,7 +22404,8 @@ function timedScriptAssetLabel(asset, index) {
       // Never pull fully published content (or all its group siblings) into the
       // Rendering view because one historic Render_Status was left queued.
       if (pipelineOutputIsPublished(record)) return false;
-      return pipelineOutputRenderInFlight(record) || /rendering|processing|queued/i.test(render);
+      if (pipelineOutputRenderComplete(record)) return false;
+      return pipelineOutputRenderInFlight(record);
     }
     if (filter === "scheduled") return pipelineRecordIsScheduled(record) || /scheduled/i.test(publish);
     if (filter === "approved") {
@@ -22513,8 +22520,15 @@ function timedScriptAssetLabel(asset, index) {
 
   function filteredPipelineRecords(records) {
     const all = records || [];
-    // Home exception totals count outputs, not their nonmatching package siblings.
-    if (pipelineViewFilter === "approved_past_due" || pipelineViewFilter === "approved_missing_date") {
+    // Home exception totals and Rendering count outputs, not package siblings.
+    // Sibling expansion on Rendering pulled Ready for Review / future-dated rows
+    // into the tab whenever one stranded Preparing Assets sibling remained
+    // (Adler Point 2127: 4 Ready for Review + 2 blank-render In Production).
+    if (
+      pipelineViewFilter === "approved_past_due"
+      || pipelineViewFilter === "approved_missing_date"
+      || pipelineViewFilter === "rendering"
+    ) {
       return all.filter((record) => pipelineRecordMatchesFilter(record)
         && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, all));
     }

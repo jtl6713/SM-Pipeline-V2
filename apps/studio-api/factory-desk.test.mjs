@@ -426,11 +426,15 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /await studioHealApprovedMissingSchedule\(env, \{ limit: 16 \}\)/);
   assert.match(worker, /async function studioHealPhantomRerender/);
   assert.match(worker, /await studioHealPhantomRerender\(env, \{ limit: 8 \}\)/);
+  assert.match(worker, /async function studioHealSharedRenderStrand/);
+  assert.match(worker, /await studioHealSharedRenderStrand\(env, \{ limit: 12 \}\)/);
   const phantomHeal = worker.slice(
     worker.indexOf("async function studioHealPhantomRerender"),
-    worker.indexOf("async function studioHealLiveFailedPublishStatus") >= 0
-      ? worker.indexOf("async function studioHealLiveFailedPublishStatus")
-      : worker.indexOf("async function studioHealFailedStatuses"),
+    worker.indexOf("async function studioHealSharedRenderStrand") >= 0
+      ? worker.indexOf("async function studioHealSharedRenderStrand")
+      : worker.indexOf("async function studioHealLiveFailedPublishStatus") >= 0
+        ? worker.indexOf("async function studioHealLiveFailedPublishStatus")
+        : worker.indexOf("async function studioHealFailedStatuses"),
   );
   assert.match(phantomHeal, /Output_Status: "Ready for Review"/);
   assert.match(phantomHeal, /Review_Status: "Review Sent"/);
