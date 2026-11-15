@@ -55,6 +55,7 @@ import {
   placeReviewDedupeKey,
   placeReviewLabel,
   normalizePlaceKey,
+  tiktokPlaceSearchUrl,
 } from "./engagement.mjs";
 
 export const ENGAGEMENT_TARGETS_TABLE = "tblhE7YHDnj2lxJPC";
@@ -1259,6 +1260,18 @@ export async function studioListPlaceReviews(env, options, deps) {
   const settings = profile
     ? await studioLoadEngagementSettings(env, profile, deps)
     : defaultEngagementSettings("chicago");
+  const recommendations = rows.slice(0, 100).map((row) => {
+    const location = String(row.location || row.place_name || "").trim();
+    const market = String(row.market || "").trim();
+    const refreshedUrl = location ? tiktokPlaceSearchUrl(location, market) : "";
+    return {
+      ...row,
+      post_url: refreshedUrl || row.post_url || "",
+      place_url: refreshedUrl || row.place_url || row.post_url || "",
+      open_place_hint:
+        "Draft is copied when you tap Open Place. In TikTok: Search → Places tab → open the place → paste your review.",
+    };
+  });
   return {
     ok: true,
     profile: profile || "all",
@@ -1266,9 +1279,9 @@ export async function studioListPlaceReviews(env, options, deps) {
     capabilities: PLATFORM_CAPABILITIES,
     weekly_cap: PLACE_REVIEW_WEEKLY_CAP,
     weekly_completed: profile ? weeklyPlaceReviewCount(store.actions, profile) : null,
-    recommendations: rows.slice(0, 100),
+    recommendations,
     history,
-    note: "TikTok has no place-review publish API — Open Place only.",
+    note: "TikTok has no place-review publish API — Open Place only. Open Place copies the draft and opens TikTok search; use the Places tab in the app, then paste.",
   };
 }
 
@@ -1341,14 +1354,16 @@ export async function studioApplyPlaceReviewAction(env, payload, deps) {
     });
     store.actions.unshift(action);
     await studioSavePlaceReviewStore(env, store, deps);
+    const openUrl = tiktokPlaceSearchUrl(target.location, target.market) || target.post_url;
+    target.post_url = openUrl;
     return {
       ok: true,
       target,
       action,
       manual: true,
-      post_url: target.post_url,
-      place_url: target.post_url,
-      message: `Open TikTok and leave a review for ${placeReviewLabel(target.location, target.market)}. No automated review was submitted.`,
+      post_url: openUrl,
+      place_url: openUrl,
+      message: `Draft ready for ${placeReviewLabel(target.location, target.market)}. In TikTok: Search → Places → open the place → paste. No automated review was submitted.`,
     };
   }
 

@@ -954,7 +954,11 @@ export function placeReviewDedupeKey(profile, placeName, market = "") {
 export function tiktokPlaceSearchUrl(placeName, market = "") {
   const query = [String(placeName || "").trim(), String(market || "").trim()].filter(Boolean).join(" ");
   if (!query) return "https://www.tiktok.com/search";
-  return `https://www.tiktok.com/search?q=${encodeURIComponent(query)}`;
+  // Universal/https search link. On phones with TikTok installed this usually
+  // hands off into the app. Place reviews live under Search → Places (app), not
+  // a dedicated web review composer — operators paste the Studio draft there.
+  // `t=place` is a soft Places-intent hint when TikTok honors it.
+  return `https://www.tiktok.com/search?q=${encodeURIComponent(query)}&t=place`;
 }
 
 export function placeReviewLabel(placeName, market = "") {
