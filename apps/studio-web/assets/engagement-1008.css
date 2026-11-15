@@ -127,3 +127,24 @@
   margin-bottom: 0.75rem;
 }
 .engagement-select { font-size: 0.8rem; color: var(--muted, #5b6570); white-space: nowrap; }
+
+/* Unified Engagement overview: accessible table with responsive stacked rows. */
+.engagement-mode-tabs[hidden] { display: none !important; }
+.engagement-overview { margin-bottom: 1rem; overflow: hidden; }
+.engagement-overview-scroll { padding: 0 1.15rem 1rem; }
+.engagement-overview-table { width: 100%; }
+.engagement-overview-table th, .engagement-overview-table td { padding: .9rem .75rem; vertical-align: middle; }
+.engagement-overview-table tbody th { font-weight: 750; }
+.engagement-overview-table tbody th small { display: block; font-size: .78rem; font-weight: 400; color: var(--muted, #5b6570); margin-top: .25rem; }
+.engagement-overview-table tr.is-active { background: rgba(15, 76, 129, .06); }
+.engagement-overview-table button { white-space: nowrap; }
+.engagement-detail[hidden] { display: none !important; }
+@media (max-width: 640px) {
+  .engagement-overview-scroll { padding: 0 .8rem .8rem; }
+  .engagement-overview-table thead { display: none; }
+  .engagement-overview-table, .engagement-overview-table tbody, .engagement-overview-table tr,
+  .engagement-overview-table th, .engagement-overview-table td { display: block; width: 100%; box-sizing: border-box; }
+  .engagement-overview-table tbody tr { padding: .75rem .5rem; border-bottom: 1px solid rgba(15,23,42,.1); }
+  .engagement-overview-table th, .engagement-overview-table td { padding: .2rem .35rem; border: 0; }
+  .engagement-overview-table td:last-child { margin-top: .45rem; }
+}
