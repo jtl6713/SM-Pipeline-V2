@@ -1,0 +1,113 @@
+name: One-shot Airtable egress table_kind tail
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Tail duration seconds
+        required: false
+        default: "180"
+permissions:
+  contents: read
+  actions: write
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Tail production Worker for studio_airtable_egress_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS_TAIL="${{ github.event.inputs.seconds || '180' }}"
+          mkdir -p /tmp/egress-tail
+          npm install --prefix /tmp/egress-tail --no-save --silent wrangler@4.123.0
+          set +e
+          timeout -s INT "${SECONDS_TAIL}s" /tmp/egress-tail/node_modules/.bin/wrangler tail chicagoshining-studio-api --format json \
+            >/tmp/egress-tail.jsonl 2>/tmp/egress-tail.err
+          RC=$?
+          set -e
+          echo "tail_exit=$RC"
+          python3 - <<'PY'
+          import json, re
+          from collections import Counter
+          from pathlib import Path
+          data = Path("/tmp/egress-tail.jsonl").read_text(errors="replace")
+          decoder = json.JSONDecoder()
+          pos = 0
+          counts = Counter()
+          samples = []
+          events = 0
+          while pos < len(data):
+              while pos < len(data) and data[pos].isspace():
+                  pos += 1
+              if pos >= len(data):
+                  break
+              try:
+                  event, end = decoder.raw_decode(data, pos)
+              except json.JSONDecodeError:
+                  nl = data.find("\n", pos)
+                  if nl < 0:
+                      break
+                  pos = nl + 1
+                  continue
+              pos = end
+              if not isinstance(event, dict):
+                  continue
+              events += 1
+              for log in event.get("logs") or []:
+                  msg = log.get("message", "") if isinstance(log, dict) else str(log)
+                  if isinstance(msg, list):
+                      msg = " ".join(str(v) for v in msg)
+                  msg = str(msg)
+                  if "studio_airtable_egress_v1" not in msg:
+                      continue
+                  m = re.search(r"studio_airtable_egress_v1\s+(\{.*\})", msg)
+                  if not m:
+                      continue
+                  try:
+                      payload = json.loads(m.group(1))
+                  except json.JSONDecodeError:
+                      continue
+                  key = (
+                      str(payload.get("table_kind") or "?"),
+                      str(payload.get("method") or "?"),
+                      str(payload.get("status") or "?"),
+                      str(payload.get("source") or "?"),
+                  )
+                  counts[key] += int(payload.get("request_count") or 1)
+                  if len(samples) < 40:
+                      samples.append(payload)
+          print("decoded_tail_events=", events)
+          print("egress_events=", sum(counts.values()))
+          print("-- by table_kind/method/status/source --")
+          for key, n in counts.most_common(40):
+              print(f"{n:5}  table={key[0]} method={key[1]} status={key[2]} source={key[3]}")
+          print("-- samples --")
+          for row in samples[:20]:
+              print(json.dumps(row, ensure_ascii=True)[:400])
+          Path("/tmp/egress-table-kind-summary.json").write_text(json.dumps({
+              "events": events,
+              "egress_total": sum(counts.values()),
+              "counts": [
+                  {"n": n, "table_kind": k[0], "method": k[1], "status": k[2], "source": k[3]}
+                  for k, n in counts.most_common()
+              ],
+              "samples": samples[:40],
+          }, indent=2))
+          PY
+          if grep -Eiq 'authentication|permission|unauthorized|forbidden' /tmp/egress-tail.err; then
+            echo "tail_permission_unavailable=true"
+            cat /tmp/egress-tail.err >&2 || true
+            exit 1
+          fi
+      - name: Upload table_kind summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: airtable-egress-table-kind-${{ github.run_id }}
+          path: |
+            /tmp/egress-table-kind-summary.json
+            /tmp/egress-tail.err
+          if-no-files-found: warn
