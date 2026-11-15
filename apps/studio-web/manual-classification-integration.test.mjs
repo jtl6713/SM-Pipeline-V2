@@ -10,8 +10,8 @@ test("Issue 1716 server routes are authenticated, profile-scoped and gated", () 
   assert.match(worker, /assertWriteRequest\(request, env\);\s*return await manualLibraryClassificationRoute/);
   assert.match(funcs, /requirePermission\(authorization, "production_configure"\)/);
   assert.match(funcs, /owner !== profileId/);
-  assert.match(funcs, /Manual_Classification_JSON: JSON\.stringify\(applied\.manual\)/);
-  assert.match(funcs, /Manual_Classification_Audit: JSON\.stringify\(events\)/);
+  assert.match(funcs, /fields\.Manual_Classification_JSON = JSON\.stringify\(applied\.manual\)/);
+  assert.match(funcs, /fields\.Manual_Classification_Audit = JSON\.stringify\(events\)/);
   assert.match(funcs, /\{Manual_Classification_JSON\}/);
 });
 test("Issue 1716 Studio editor is connected and publishes matching version", () => {
@@ -29,4 +29,17 @@ test("Issue 1716 Studio editor is connected and publishes matching version", () 
   assert.match(ui, /MutationObserver/);
   assert.match(ui, /record_ids/);
   assert.match(ui, /manual-classification/);
+  assert.match(ui, /effective_classification/);
+  assert.match(ui, /data-classification-apply="description"/);
+  assert.match(ui, /Replace selected fields \(edit existing\)/);
+  assert.match(ui, /payload\.description/);
+});
+test("Issue 1716 route can persist Asset_Description edits", () => {
+  const funcs = read("../studio-api/worker-functions-03.mjs");
+  const domain = read("../studio-api/manual-classification.mjs");
+  assert.match(domain, /validateAssetDescription/);
+  assert.match(domain, /MAX_DESCRIPTION/);
+  assert.match(funcs, /validateAssetDescription/);
+  assert.match(funcs, /descriptionRequested/);
+  assert.match(funcs, /fields\.Asset_Description = nextDescription/);
 });

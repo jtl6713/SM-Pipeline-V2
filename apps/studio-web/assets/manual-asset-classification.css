@@ -14,6 +14,7 @@
 #libraryManualFeedback:not(:empty) { padding:9px 12px; margin:6px 0 12px; border-radius:8px; border:1px solid #d89a46; background:#fff7eb; color:#6a430e; }
 .library-manual-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; margin:14px 0 20px; }
 .library-manual-field { display:flex; flex-direction:column; gap:5px; border:1px solid var(--border,#d1d5db); border-radius:10px; padding:10px; min-width:0; }
+.library-manual-description { grid-column:1 / -1; }
 .library-manual-field-title { display:flex; align-items:center; gap:8px; }
 .library-manual-field-title input { width:17px; height:17px; accent-color:#2367ae; flex-shrink:0; }
 .library-manual-field input[type=text], .library-manual-field textarea { width:100%; min-width:0; background:var(--surface,#fff); border:1px solid #afb8c7; border-radius:6px; padding:8px; color:inherit; font:inherit; }

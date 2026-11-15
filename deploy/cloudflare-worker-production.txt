@@ -1297,3 +1297,4 @@ Deploy 2026-11-15 Worker 0.10.958-shared-render-supabase: register shared_render
 Deploy 2026-11-15 Worker 0.10.958-shared-render-supabase retry: prior production canary failed on overview snapshot_at race after successful refresh; redeploy same Worker heal mapping.
 
 Deploy 2026-11-15 Worker 0.10.959-story-strand-heal: shared-render heal covers Story strands; native RFR no longer paints Preparing Assets without formal caption.
+Deploy 2026-11-15 Worker 0.10.960-edit-classification-description: Manual classification PATCH can persist Asset_Description edits.

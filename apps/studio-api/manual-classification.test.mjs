@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyManualClassification, effectiveClassification, validateClassificationPatch, airtableAiClassification, parseManualClassification, parseClassificationAudit, appendClassificationAudit } from "./manual-classification.mjs";
+import { applyManualClassification, effectiveClassification, validateClassificationPatch, validateAssetDescription, MAX_DESCRIPTION, airtableAiClassification, parseManualClassification, parseClassificationAudit, appendClassificationAudit } from "./manual-classification.mjs";
 
 test("manual overrides survive a later AI reclassification", () => {
   const changed = applyManualClassification({ ai: { city: "Chicago" }, patch: { city: "Miami" }, mode: "override", actor: "editor", at: "2026-11-08T21:00:00Z" });
@@ -19,6 +19,14 @@ test("reject unknown fields and invalid values", () => {
   assert.throws(() => validateClassificationPatch({ published: true }));
   assert.throws(() => validateClassificationPatch({ keywords: "not an array" }));
   assert.throws(() => validateClassificationPatch({ city: "x".repeat(121) }));
+});
+test("asset description accepts long prose and rejects control characters", () => {
+  const prose = "A dimly lit bar with a checkered floor, creating a cozy and nostalgic atmosphere, A 1920s Chicago speakeasy during prohibition, grunge, with white tones";
+  assert.equal(validateAssetDescription(prose), prose);
+  assert.equal(validateAssetDescription("  trimmed  "), "trimmed");
+  assert.equal(validateAssetDescription(""), "");
+  assert.throws(() => validateAssetDescription("x".repeat(MAX_DESCRIPTION + 1)));
+  assert.throws(() => validateAssetDescription("bad\u0000text"));
 });
 
 test("maps legacy Airtable AI fields without mutating them", () => {

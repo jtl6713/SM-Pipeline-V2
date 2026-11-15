@@ -22,6 +22,7 @@
   const profile = () => String(bridge()?.profileId?.() || "").trim();
   const message = text => { const el = $("libraryManualFeedback"); if (el) el.textContent = text || ""; };
   const labelText = value => Array.isArray(value) ? value.join(", ") : String(value ?? "");
+  const isUploadStubDescription = value => /studio asset manager upload stored in google drive\.?/i.test(String(value || "").trim());
 
   function setup() {
     const list = $("libraryList");
@@ -36,7 +37,7 @@
     backdrop.id = "libraryManualBackdrop";
     backdrop.hidden = true;
     backdrop.className = "library-manual-backdrop";
-    backdrop.innerHTML = '<div class="library-manual-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryManualHeading"><div class="library-manual-head"><div><h2 id="libraryManualHeading">Edit classification</h2><p id="libraryManualSubtitle" class="subtle"></p></div><button type="button" class="secondary-button" id="libraryManualClose">Close</button></div><div id="libraryManualFeedback" role="status" aria-live="polite"></div><form id="libraryManualForm"><label class="form-field"><span>Save mode</span><select id="libraryManualMode"><option value="add">Add tags; preserve existing entries</option><option value="override">Replace selected fields</option></select></label><p class="subtle">Check each field you want to change. For an intentional blank override, select the field and leave its value empty. AI data is never deleted.</p><div id="libraryManualFields" class="library-manual-fields"></div><section class="library-manual-audit"><h3>Recent manual classification changes</h3><div id="libraryManualHistory" class="subtle">No manual changes yet.</div></section><div class="library-manual-footer"><button class="secondary-button" type="button" id="libraryManualCancel">Cancel</button><button class="primary-button" type="submit" id="libraryManualSave">Save classification</button></div></form></div>';
+    backdrop.innerHTML = '<div class="library-manual-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryManualHeading"><div class="library-manual-head"><div><h2 id="libraryManualHeading">Edit classification</h2><p id="libraryManualSubtitle" class="subtle"></p></div><button type="button" class="secondary-button" id="libraryManualClose">Close</button></div><div id="libraryManualFeedback" role="status" aria-live="polite"></div><form id="libraryManualForm"><label class="form-field"><span>Save mode</span><select id="libraryManualMode"><option value="override">Replace selected fields (edit existing)</option><option value="add">Add tags; preserve existing entries</option></select></label><p class="subtle">Existing values are loaded so you can edit them. Check each field you want to save. For an intentional blank override, select the field and leave its value empty. AI source data is never deleted.</p><div id="libraryManualFields" class="library-manual-fields"></div><section class="library-manual-audit"><h3>Recent manual classification changes</h3><div id="libraryManualHistory" class="subtle">No manual changes yet.</div></section><div class="library-manual-footer"><button class="secondary-button" type="button" id="libraryManualCancel">Cancel</button><button class="primary-button" type="submit" id="libraryManualSave">Save classification</button></div></form></div>';
     document.body.appendChild(backdrop);
     $("libraryManualClose").addEventListener("click", close);
     $("libraryManualCancel").addEventListener("click", close);
@@ -121,6 +122,42 @@
     container.replaceChildren();
     const manual = bulk ? {} : (record?.manual_classification || {});
     const ai = bulk ? {} : (record?.ai_classification || {});
+    const effective = bulk ? {} : (record?.effective_classification || {});
+
+    // Description is the card prose (Asset_Description) — edit existing text in place.
+    const descWrap = document.createElement("label");
+    descWrap.className = "library-manual-field library-manual-description";
+    const descHeading = document.createElement("span");
+    descHeading.className = "library-manual-field-title";
+    const descCheck = document.createElement("input");
+    descCheck.type = "checkbox";
+    descCheck.dataset.classificationApply = "description";
+    const descName = document.createElement("strong");
+    descName.textContent = "Description";
+    descHeading.append(descCheck, descName);
+    const descInput = document.createElement("textarea");
+    descInput.dataset.classificationInput = "description";
+    descInput.rows = 4;
+    descInput.placeholder = bulk
+      ? "Shared description for each selected asset"
+      : "Describe the scene — this is the text shown on the asset card";
+    const rawDescription = bulk ? "" : String(record?.description || "");
+    if (!bulk && rawDescription && !isUploadStubDescription(rawDescription)) {
+      descInput.value = rawDescription;
+      descCheck.checked = true;
+    } else if (!bulk && isUploadStubDescription(rawDescription)) {
+      descInput.placeholder = "Replace the upload stub with a real scene description";
+    }
+    descInput.addEventListener("input", () => { descCheck.checked = true; });
+    const descInfo = document.createElement("small");
+    descInfo.textContent = bulk
+      ? "Replaces the description on each selected asset"
+      : (isUploadStubDescription(rawDescription)
+        ? "Current card text is still the upload stub — edit and save to replace it."
+        : (rawDescription ? "Loaded from the current Asset Description — edit in place." : "No description yet."));
+    descWrap.append(descHeading, descInput, descInfo);
+    container.append(descWrap);
+
     DEFINITIONS.forEach(([key, title, multiple]) => {
       const wrap = document.createElement("label");
       wrap.className = "library-manual-field";
@@ -137,10 +174,20 @@
       input.dataset.classificationInput = key;
       input.placeholder = multiple ? "Comma-separated values" : "Enter classification";
       if (multiple) input.rows = 2;
-      if (Object.prototype.hasOwnProperty.call(manual, key)) input.value = labelText(manual[key]);
+      // Prefill with effective (manual override, else AI) so existing text is editable.
+      const current = Object.prototype.hasOwnProperty.call(manual, key)
+        ? manual[key]
+        : (Object.prototype.hasOwnProperty.call(effective, key) ? effective[key] : ai[key]);
+      if (current != null && labelText(current)) {
+        input.value = labelText(current);
+        if (!bulk) check.checked = true;
+      }
       input.addEventListener("input", () => { check.checked = true; });
       const info = document.createElement("small");
-      info.textContent = bulk ? "Apply to each selected asset" : "AI: " + (labelText(ai[key]) || "not classified") + (Object.prototype.hasOwnProperty.call(manual, key) ? " · manual override saved" : "");
+      const source = Object.prototype.hasOwnProperty.call(manual, key)
+        ? "manual override saved"
+        : (Object.prototype.hasOwnProperty.call(ai, key) && labelText(ai[key]) ? "from AI — edit to override" : "not classified");
+      info.textContent = bulk ? "Apply to each selected asset" : "AI: " + (labelText(ai[key]) || "not classified") + " · " + source;
       wrap.append(heading, input, info);
       container.append(wrap);
     });
@@ -188,26 +235,37 @@
         message(error?.message || "Unable to load the classification.");
       } finally { busy = false; }
     }
-    $("libraryManualFields")?.querySelector("input,textarea")?.focus();
+    $("libraryManualFields")?.querySelector("textarea,input")?.focus();
   }
   async function save(event) {
     event.preventDefault();
     if (busy || !editingIds.length) return;
     const patch = {};
-    DEFINITIONS.forEach(([key, title, multiple]) => {
+    let description;
+    let descriptionSelected = false;
+    DEFINITIONS.forEach(([key, , multiple]) => {
       if (!$("libraryManualFields").querySelector('[data-classification-apply="' + key + '"]')?.checked) return;
       const raw = $("libraryManualFields").querySelector('[data-classification-input="' + key + '"]')?.value || "";
       patch[key] = multiple ? raw.split(/[,;\n]+/).map(v => v.trim()).filter(Boolean) : raw.trim();
     });
-    if (!Object.keys(patch).length) { message("Select at least one field to save."); return; }
+    if ($("libraryManualFields").querySelector('[data-classification-apply="description"]')?.checked) {
+      descriptionSelected = true;
+      description = $("libraryManualFields").querySelector('[data-classification-input="description"]')?.value || "";
+    }
+    if (!Object.keys(patch).length && !descriptionSelected) {
+      message("Select at least one field to save.");
+      return;
+    }
     const currentProfile = profile();
     const bulk = editingIds.length > 1;
     const url = bulk ? "/api/library/manual-classification" : "/api/library/" + encodeURIComponent(editingIds[0]) + "/manual-classification";
     busy = true; updateToolbar();
     $("libraryManualSave").disabled = true;
-    message("Saving manual classification to Airtable…");
+    message("Saving manual classification…");
     try {
-      const payload = {patch, mode: $("libraryManualMode").value};
+      const payload = {mode: $("libraryManualMode").value};
+      if (Object.keys(patch).length) payload.patch = patch;
+      if (descriptionSelected) payload.description = description;
       if (bulk) payload.record_ids = editingIds.slice();
       const result = await bridge().api(url + "?profile=" + encodeURIComponent(currentProfile), {
         method: bulk ? "POST" : "PATCH",
