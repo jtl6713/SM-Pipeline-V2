@@ -8133,7 +8133,7 @@ export async function studioInsightsFindLearned(env, learnedKey) {
   }
   const rows = await listRecords(env, studioInsightsLearnedTable(env), {
     limit: 1,
-    filterFormula: `{Learned_Key}='${key.replace(/'/g, "\\'")}'`,
+    filterFormula: `{Learned_Key}='${key.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`,
   }).catch(() => []);
   return rows[0] || null;
 }
