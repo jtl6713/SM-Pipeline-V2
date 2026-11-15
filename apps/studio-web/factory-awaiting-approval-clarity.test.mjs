@@ -25,6 +25,8 @@ test("Home Awaiting Approval navigates to Factory review rather than Pipeline st
   assert.ok(route, "dedicated approval action route exists");
   assert.match(route[1], /data-page="factory"/);
   assert.match(route[1], /factoryProfileFilter/);
-  assert.match(route[1], /factoryLaneNeedsEyes/);
+  assert.match(route[1], /factoryLaneNeedsEyesHeading/);
+  assert.match(route[1], /aria-expanded/);
+  assert.match(route[1], /toggle\.click\(\)/);
   assert.doesNotMatch(route[1], /studioOpenPipelineFilter|\/api\/airtable/i);
 });
