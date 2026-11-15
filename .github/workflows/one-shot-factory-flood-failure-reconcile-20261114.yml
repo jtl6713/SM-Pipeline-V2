@@ -1,0 +1,233 @@
+name: One-shot Factory flood failure ledger reconcile (2026-11-14)
+
+# Clears Active Approvals "Needs attention" for 19 LA Factory items whose
+# Platform Outputs were flood duplicates already deleted from Airtable.
+# R2 ledger only — no approvals, schedules, or publishes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-factory-flood-failure-reconcile-20261114.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-shot-factory-flood-failure-reconcile-20261114
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Mark flood-deleted Factory failures skipped_removed in R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          API="$ROOT/workers/scripts/chicagoshining-studio-api"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="factory-flood-reconcile-${GITHUB_RUN_ID}"
+          cleanup() {
+            curl -sS --max-time 20 -X DELETE "$ROOT/workers/scripts/$NAME" -H "$AUTH" >/dev/null || true
+          }
+          trap cleanup EXIT
+
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments.json
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/worker-version.json
+          BUCKET=$(jq -er '[.result.resources.bindings[]|select(.name=="STUDIO_MEDIA")][0]|.bucket_name//.bucket' /tmp/worker-version.json)
+          TOKEN=$(openssl rand -hex 32)
+          export TOKEN BUCKET
+
+          cat > /tmp/factory-flood-reconcile-worker.js <<'JS'
+          const prefix = "studio/state/factory-approvals/v2";
+          const reason = "Flood duplicate Platform Output already deleted from Airtable (2026-11-14 cleanup); Factory ledger reconciled to skipped_removed; no retry/approve/publish";
+          const children = [
+            {
+              profile_id: "recF7UAn0LkMZZrWZ",
+              request_id: "fgc_508c935b805295943cfd230aa05bfeb3680c29e2e71dc993037c4803497e1be4",
+              group_request_id: "f02f0372-cb05-4a73-9fb2-adaf7df11071",
+              expected_failed: 9,
+            },
+            {
+              profile_id: "recF7UAn0LkMZZrWZ",
+              request_id: "fgc_edf7e5041d3a48fcc7895629653fab2d52dc8f77c4264df8d4ef49d33f3e1fa9",
+              group_request_id: "bc949d22-1fa3-45c1-b1ab-1a1d158966be",
+              expected_failed: 10,
+            },
+          ];
+          const targetIds = new Set([
+            "recAHDlwa8NaIgxhH","recAsNo0VvYwt59pp","recgeu6Qp2S89Fkww","recIwbTP2RBJ7VDVZ",
+            "reclsXYUxbRM0wdsN","recMK7VT79pkvaoPw","recRz2IxiFM21vq2K","recxeySCmRZZVWLZb",
+            "recxuVXLIh8iO5K6F","rec4NKxilhl5xUiNy","reccnG3iBk6BYqddL","recG1IDA45GU77fdl",
+            "rechRc9Bxofhk70qN","reckTcpKn0iUgB6Ob","recMcwFlvagPudEEu","reco0dybcDTe1EJNS",
+            "recspvDzLPDTzVklA","recwkp03BtCDne6s6","recyGBq2wjz8HOF4H",
+          ]);
+          function counts(items) {
+            const n = { approved: 0, skipped: 0, failed: 0, pending: 0, total: items.length };
+            for (const row of items) {
+              if (row.status === "approved") n.approved++;
+              else if (row.status === "already_satisfied" || row.status === "skipped_removed" || row.status === "superseded_duplicate") n.skipped++;
+              else if (row.status === "failed") n.failed++;
+              else n.pending++;
+            }
+            return n;
+          }
+          function needsAttention(job) {
+            const c = counts(job.items || []);
+            return c.pending > 0 ||
+              (job.items || []).some(item => item.status === "failed" && !(item.exception_recovery?.state === "routed")) ||
+              !["completed", "failed"].includes(job.status);
+          }
+          async function reconcileChild(env, child) {
+            const key = `${prefix}/jobs/${child.profile_id}/${child.request_id}.json`;
+            const original = await env.STUDIO_MEDIA.get(key);
+            if (!original) return { ok: false, error: "child_missing", child };
+            const job = await original.json();
+            if (job.schema !== "studio.factory-batch.2" ||
+                job.profile_id !== child.profile_id ||
+                job.request_id !== child.request_id ||
+                job.group_request_id !== child.group_request_id) {
+              return { ok: false, error: "identity_mismatch", child, observed: {
+                schema: job.schema, profile_id: job.profile_id, request_id: job.request_id,
+                group_request_id: job.group_request_id,
+              }};
+            }
+            const before = counts(job.items || []);
+            const failedTargets = (job.items || []).filter(row =>
+              targetIds.has(row.id) && (row.status === "failed" || row.status === "skipped_removed"));
+            if (failedTargets.length !== child.expected_failed) {
+              return { ok: false, error: "unexpected_failed_target_count", child, before,
+                failed_targets: failedTargets.map(r => ({ id: r.id, status: r.status, output_id: r.output_id ?? null })) };
+            }
+            for (const row of failedTargets) {
+              if (row.status === "failed") {
+                const err = String(row.error || "");
+                if (!/INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND|not found|missing/i.test(err)) {
+                  return { ok: false, error: "unexpected_failure_reason", id: row.id, err: err.slice(0, 200) };
+                }
+              }
+            }
+            const at = new Date().toISOString();
+            let changed = 0;
+            const items = (job.items || []).map(row => {
+              if (!targetIds.has(row.id) || row.status !== "failed") return row;
+              changed++;
+              return {
+                ...row,
+                status: "skipped_removed",
+                removed_original_error: row.error || null,
+                error: null,
+                next_attempt_ms: 0,
+                removed_reason: reason,
+                removed_verified_by: "flood-cleanup-one-shot-20261114",
+                removed_verified_at: at,
+                timeline: [...(row.timeline || []), {
+                  state: "skipped_removed", at, attempt: row.total_attempts || 0, reason,
+                }].slice(-180),
+              };
+            });
+            const count = counts(items);
+            const status = count.pending ? "running"
+              : count.failed && !count.approved && !count.skipped ? "failed" : "completed";
+            const next = { ...job, items, status, updated_at: at };
+            if (changed) {
+              const result = await env.STUDIO_MEDIA.put(key, JSON.stringify(next), {
+                onlyIf: { etagMatches: original.etag },
+                httpMetadata: { contentType: "application/json" },
+                customMetadata: {
+                  factory_status: status,
+                  factory_failed: String(count.failed),
+                  factory_active: String(needsAttention(next)),
+                  factory_group: String(job.group_request_id || ""),
+                },
+              });
+              if (!result) return { ok: false, error: "cas_conflict", child };
+            }
+            const reread = await env.STUDIO_MEDIA.get(key);
+            const current = await reread.json();
+            const after = counts(current.items || []);
+            const stillFailed = (current.items || []).filter(row =>
+              targetIds.has(row.id) && row.status === "failed");
+            if (stillFailed.length) {
+              return { ok: false, error: "targets_still_failed", stillFailed: stillFailed.map(r => r.id), after };
+            }
+            return {
+              ok: true, child, changed, before, after,
+              status: current.status, active: needsAttention(current),
+              reconciled_ids: failedTargets.map(r => r.id),
+            };
+          }
+          export default {
+            async fetch(request, env) {
+              if (request.method !== "POST" || request.headers.get("x-qa-token") !== env.AUDIT_TOKEN) {
+                return new Response("Not found", { status: 404 });
+              }
+              const results = [];
+              for (const child of children) {
+                results.push(await reconcileChild(env, child));
+              }
+              const ok = results.every(row => row.ok === true);
+              const reconciled = results.reduce((n, row) => n + Number(row.changed || 0), 0);
+              return Response.json({
+                ok, reconciled, results,
+                schema: "studio.factory-flood-failure-reconcile.1",
+                reason,
+              }, { status: ok ? 200 : 409 });
+            }
+          };
+          JS
+
+          node --check /tmp/factory-flood-reconcile-worker.js
+          python - <<'PY'
+          import os, json
+          meta = {
+            "main_module": "worker.js",
+            "compatibility_date": "2026-08-02",
+            "bindings": [
+              {"type": "r2_bucket", "name": "STUDIO_MEDIA", "bucket_name": os.environ["BUCKET"]},
+              {"type": "plain_text", "name": "AUDIT_TOKEN", "text": os.environ["TOKEN"]},
+            ],
+          }
+          open("/tmp/reconcile-metadata.json", "w").write(json.dumps(meta))
+          PY
+
+          code=$(curl -sS --max-time 90 -o /tmp/worker-upload.json -w '%{http_code}' \
+            -X PUT "$ROOT/workers/scripts/$NAME/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/reconcile-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/factory-flood-reconcile-worker.js;type=application/javascript+module;filename=worker.js')
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            jq '{errors,success}' /tmp/worker-upload.json
+            exit 1
+          fi
+          curl -fsS -X POST "$ROOT/workers/scripts/$NAME/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/reconcile-subdomain.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          for i in $(seq 1 10); do
+            code=$(curl -sS --max-time 60 -o /tmp/reconcile-response.json -w '%{http_code}' \
+              -X POST -H "x-qa-token: $TOKEN" "https://$NAME.$SUB.workers.dev/" || true)
+            if [[ "$code" == "200" ]]; then
+              echo "FACTORY_FLOOD_RECONCILE=PASS"
+              jq -c '{ok,reconciled,results:[.results[]|{ok,changed,before,after,status,active,request_id:.child.request_id,group:.child.group_request_id}]}' /tmp/reconcile-response.json
+              exit 0
+            fi
+            if [[ "$code" == "409" ]]; then
+              echo "FACTORY_FLOOD_RECONCILE=CONFLICT"
+              jq -c . /tmp/reconcile-response.json
+              exit 2
+            fi
+            sleep 3
+          done
+          echo "FACTORY_FLOOD_RECONCILE=FAIL http=$code"
+          jq -c . /tmp/reconcile-response.json 2>/dev/null || true
+          exit 1
