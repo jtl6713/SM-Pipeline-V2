@@ -246,7 +246,12 @@
           scope.dispatchEvent(new Event("change", { bubbles: true }));
         }
       }
-      document.getElementById("factoryLaneNeedsEyes")?.scrollIntoView({ block: "start" });
+      // Open the real Factory review band, which is collapsed by default.
+      const heading = document.getElementById("factoryLaneNeedsEyesHeading");
+      const band = heading?.closest(".factory-band");
+      const toggle = band?.querySelector("[data-factory-band-toggle]");
+      if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+      heading?.scrollIntoView({ block: "start" });
       return;
     }
     if (kind === "ideas") {
