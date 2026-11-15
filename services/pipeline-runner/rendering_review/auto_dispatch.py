@@ -82,14 +82,6 @@ def eligible_candidate(row: dict, now: datetime) -> dict | None:
     return {"row_id": row["id"], "job_id": job_id, "output_id": output_id}
 
 
-def _airtable_archive_poll_closed(client: Any | None = None) -> bool:
-    """Quiet-window closeout: do not 30s-poll the frozen Airtable Jobs table."""
-    from supabase_pipeline import studio_write_source, supabase_configured
-
-    settings = getattr(client, "_settings", None) if client is not None else None
-    return studio_write_source(settings) == "supabase" and supabase_configured(settings)
-
-
 def sweep_once(*, client=None, now=None, sender=None, authority=None) -> dict:
     """At most one existing job, at most one POST, no automatic replay.
 
@@ -102,7 +94,9 @@ def sweep_once(*, client=None, now=None, sender=None, authority=None) -> dict:
     sender = sender or requests.post
     authority = authority or require_unlaunched_authority
     client = client or AirtableClient()
-    if _airtable_archive_poll_closed(client):
+    from rendering_review.archive_poll import airtable_archive_poll_closed
+
+    if airtable_archive_poll_closed(getattr(client, "_settings", None)):
         _update(
             last_scan_utc=now.isoformat(),
             last_error_code=None,
