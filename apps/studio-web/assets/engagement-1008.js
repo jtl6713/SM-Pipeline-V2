@@ -628,12 +628,13 @@
   // Unified overview reuses the existing queues, actions, settings and history.
   function updateEngagementOverview() {
     const detail = $("engagementDetail");
-    for (const row of document.querySelectorAll("[data-engagement-row]")) {
-      const active = row.dataset.engagementRow === state.mode && !detail?.hidden;
-      row.classList.toggle("is-active", active);
-      const button = row.querySelector("button");
-      if (button) { button.textContent = active ? "Hide details" : "Open"; button.setAttribute("aria-expanded", String(active)); }
+    for (const tab of document.querySelectorAll("[data-engagement-open]")) {
+      const active = tab.dataset.engagementOpen === state.mode;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.setAttribute("tabindex", active ? "0" : "-1");
     }
+    if (detail) detail.setAttribute("aria-labelledby", state.mode === "places" ? "engagementFolderPlaces" : "engagementFolderPosts");
     const counter = $(state.mode === "places" ? "engagementPlacesCount" : "engagementPostsCount");
     if (counter && !state.loading) counter.textContent = state.recommendations.length + (state.mode === "places" ? " places" : " posts");
   }
@@ -641,24 +642,25 @@
   function installEngagementOverview() {
     const page = $("page-engagement"), heading = page?.querySelector?.(".page-heading");
     if (!page || !heading || $("engagementOverview")) return;
-    const tabs = page.querySelector(".engagement-mode-tabs");
-    if (tabs) tabs.hidden = true;
+    const legacyTabs = page.querySelector(".engagement-mode-tabs");
+    if (legacyTabs) legacyTabs.hidden = true;
+    page.classList.add("engagement-folder-layout");
     const section = document.createElement("section");
     section.id = "engagementOverview";
-    section.className = "panel engagement-overview";
-    section.innerHTML = `<div class="panel-heading"><div><h2>Engagement workflows</h2><p>Choose a row to work with its queue, settings, and history.</p></div></div>
-    <div class="engagement-overview-scroll"><table class="engagement-table engagement-overview-table">
-    <thead><tr><th scope="col">Activity</th><th scope="col">Purpose</th><th scope="col">Queue</th><th scope="col">Details</th></tr></thead><tbody>
-    <tr data-engagement-row="posts"><th scope="row">Creator comments<small>Public posts</small></th><td>Discover posts, draft comments, and approve actions</td><td id="engagementPostsCount">Open to load</td><td><button type="button" class="secondary-button" data-engagement-open="posts" aria-controls="engagementDetail" aria-expanded="true">Hide details</button></td></tr>
-    <tr data-engagement-row="places"><th scope="row">Place reviews<small>TikTok places</small></th><td>Prepare reviews and record manual completion</td><td id="engagementPlacesCount">Open to load</td><td><button type="button" class="secondary-button" data-engagement-open="places" aria-controls="engagementDetail" aria-expanded="false">Open</button></td></tr>
-    </tbody></table></div>`;
+    section.className = "engagement-folder-navigation";
+    section.innerHTML = `<div class="engagement-folder-tabs" role="tablist" aria-label="Engagement workflows">
+      <button type="button" role="tab" id="engagementFolderPosts" class="engagement-folder-tab is-active" data-engagement-open="posts" aria-controls="engagementDetail" aria-selected="true">Creator Comments <span id="engagementPostsCount" class="engagement-folder-count">Open to load</span></button>
+      <button type="button" role="tab" id="engagementFolderPlaces" class="engagement-folder-tab" data-engagement-open="places" aria-controls="engagementDetail" aria-selected="false" tabindex="-1">Place Reviews <span id="engagementPlacesCount" class="engagement-folder-count">Open to load</span></button>
+    </div>`;
     heading.insertAdjacentElement("afterend", section);
     const detail = document.createElement("div");
     detail.id = "engagementDetail";
-    detail.className = "engagement-detail";
-    detail.setAttribute("role", "region");
-    detail.setAttribute("aria-label", "Selected engagement workflow");
+    detail.className = "engagement-detail engagement-folder-content";
+    detail.setAttribute("role", "tabpanel");
+    detail.setAttribute("aria-labelledby", "engagementFolderPosts");
     $("engagementStatus")?.insertAdjacentElement("afterend", detail);
+    const actions = heading.querySelector(".engagement-heading-actions");
+    if (actions) detail.appendChild(actions);
     for (const id of ["engagementFiltersPanel", "engagementPlaceNotePanel", "engagementKpis"]) {
       const node = $(id); if (node) detail.appendChild(node);
     }
@@ -667,11 +669,16 @@
     const insights = $("engagementInsightsPanel");
     if (insights) detail.appendChild(insights);
     section.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-engagement-open]");
-      if (!button) return;
-      const mode = button.dataset.engagementOpen;
-      if (mode === state.mode) { detail.hidden = !detail.hidden; updateEngagementOverview(); }
-      else { detail.hidden = false; setMode(mode); }
+      const tab = event.target.closest("[data-engagement-open]");
+      if (!tab) return;
+      if (tab.dataset.engagementOpen !== state.mode) setMode(tab.dataset.engagementOpen);
+    });
+    section.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const mode = event.key === "Home" ? "posts" : event.key === "End" ? "places" : state.mode === "posts" ? "places" : "posts";
+      setMode(mode);
+      $(mode === "places" ? "engagementFolderPlaces" : "engagementFolderPosts")?.focus();
     });
     updateEngagementOverview();
   }
