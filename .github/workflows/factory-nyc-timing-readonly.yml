@@ -126,6 +126,15 @@ jobs:
           fi
           jq -e '.schema=="studio.factory-claims-readonly.1" and .read_only==true and (.profiles|length)==4' /tmp/factory-claims-readonly.json >/dev/null
           jq -c '{schema,read_only,group_objects_first_page,group_objects_more,unbacked_recent_owners,profiles:[.profiles[]|{name,profile_id,registry_present,registry_error,historical_jobs_first_page,historical_jobs_more,total_claims,recent_claims,recent_owners,checked_recent_owners,latest_claim_at,recent_unbacked_owners}]}' /tmp/factory-claims-readonly.json
+          # Targeted incident forensic report; reads only R2 job history.
+          INCIDENT_HTTP="$(curl -sS --max-time 55 -o /tmp/factory-incident-10355.json -w '%{http_code}' -H "Authorization: Bearer $REPORT_TOKEN" "https://$AUDITOR_WORKER.$SUBDOMAIN.workers.dev/incident-10355" || true)"
+          if [[ "$INCIDENT_HTTP" != "200" ]]; then
+            echo "::error::Factory incident timing diagnostic failed HTTP $INCIDENT_HTTP"
+            exit 1
+          fi
+          jq -e '.schema=="studio.factory-incident-10355-timing.1" and .read_only==true' /tmp/factory-incident-10355.json >/dev/null
+          jq -c '{schema,read_only,observed_at,searched_profiles,match_count,coverage,matching_batches}' /tmp/factory-incident-10355.json
+          echo "factory_incident_10355_readonly=PASS"
           echo "factory_claims_readonly=PASS"
           echo "factory_real_r2_timing_readonly=PASS"
       - name: Upload sanitized performance report
@@ -136,5 +145,6 @@ jobs:
           path: |
             /tmp/factory-timing-result.json
             /tmp/factory-claims-readonly.json
+            /tmp/factory-incident-10355.json
           if-no-files-found: ignore
           retention-days: 14
