@@ -4,7 +4,7 @@
  * It does not import any Airtable, publishing, scheduling, or write code.
  */
 import { factoryBatchList } from "./factory-approval-queue.mjs";
-import { factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
+import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 import { factoryApprovalGroupList } from "./factory-approval-groups.mjs";
 
 const NYC_PROFILE_ID = "recgtK8Z7eNADNtVy";
@@ -176,6 +176,36 @@ export async function readFactoryClaimsDiagnostic(bucket, nowMs = Date.now()) {
   };
 }
 
+/** Read-only forensic timing for the Nov 14 Factory incident, output 10355.
+ * Searches recent jobs in all four profiles and reports the entire matching
+ * batch, including item timelines and stage durations. No mutation paths.
+ */
+export async function readFactoryIncident10355(bucket) {
+  if (!bucket?.list || !bucket?.get) throw Error("Read-only Factory R2 bucket unavailable");
+  const profiles = Object.entries(FACTORY_CLAIM_AUDIT_PROFILES);
+  const results = await Promise.all(profiles.map(async ([name, profileId]) => ({
+    name, profileId, jobs: await factoryBatchList(bucket, profileId, {limit:40,maxScan:2500}),
+  })));
+  const matching = results.flatMap(({name,profileId,jobs}) => jobs
+    .filter(job => (job.items || []).some(item => String(item.output_id || "") === "10355"))
+    .map(job => ({
+      profile:name,profile_id:profileId,job_id:job.id,request_id:job.request_id,
+      created_at:job.created_at,updated_at:job.updated_at,status:job.status,
+      timing_report:factoryApprovalTimingReport(job.items || []),
+      items:(job.items || []).map(item => ({
+        id:item.id,output_id:item.output_id,platform:item.platform,format:item.format,
+        status:item.status,error:item.error,attempts:item.attempts,
+        total_attempts:item.total_attempts,next_attempt_ms:item.next_attempt_ms,
+        timing:factoryApprovalItemTiming(item),
+      })),
+    })));
+  return {schema:"studio.factory-incident-10355-timing.1",read_only:true,
+    observed_at:new Date().toISOString(),
+    searched_profiles:results.map(({name,jobs})=>({name,jobs_scanned:jobs.length})),
+    matching_batches:matching,match_count:matching.length,
+    coverage:"recent_40_jobs_per_profile; not exhaustive historical search"};
+}
+
 export default {
   async fetch(request, env) {
     if (!env.REPORT_TOKEN ||
@@ -183,11 +213,13 @@ export default {
       return new Response("Unauthorized", { status: 401 });
     }
     const path = new URL(request.url).pathname;
-    if (request.method !== "GET" || !["/report", "/claims"].includes(path)) return new Response("Not found", { status: 404 });
+    if (request.method !== "GET" || !["/report", "/claims", "/incident-10355"].includes(path)) return new Response("Not found", { status: 404 });
     try {
       const result = path === "/claims"
         ? await readFactoryClaimsDiagnostic(env.STUDIO_MEDIA)
-        : await readFactoryTimingReport(env.STUDIO_MEDIA);
+        : path === "/incident-10355"
+          ? await readFactoryIncident10355(env.STUDIO_MEDIA)
+          : await readFactoryTimingReport(env.STUDIO_MEDIA);
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       });
