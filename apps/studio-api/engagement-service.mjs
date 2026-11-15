@@ -947,7 +947,7 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
         "Platform_Post_URL",
         "Content_Item",
         "Content_Profile",
-        // Platform Outputs uses Output_Title (lookup Content_Title is not a field).
+        // Platform Outputs title field (not a content-item title lookup).
         "Output_Title",
         "Thumbnail_URL",
         "Studio_Preview_URL",

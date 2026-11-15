@@ -444,7 +444,7 @@ test("place review discovery matches profile in JS and surfaces located Publishe
   assert.match(service, /recordMatchesContentProfile/);
   assert.match(service, /matched_profile_outputs/);
   assert.match(service, /"Output_Title"/);
-  assert.doesNotMatch(service, /fields: \[[^\]]*Content_Title/s);
+  assert.doesNotMatch(service, /fields:\s*\[[^\]]*"Content_Title"/s);
   assert.doesNotMatch(
     service,
     /const formula = `AND\(\{Test_Run_ID\}=BLANK\(\),\{Platform\}="TikTok".*\$\{profileFormula\}/
