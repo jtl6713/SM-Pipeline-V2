@@ -3626,6 +3626,8 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
     } catch (error) {
       console.warn("library upload stamp Processing failed", error?.message || String(error));
     }
+    // Single / small uploads classify inline (no background queue). A hung A3
+    // background worker previously parked Studio on "Classifying" for 5+ minutes.
     const classify = (async () => {
       try {
         const { response, payload } = await item4PulsePipelineStage(env, "a3", {
@@ -3634,7 +3636,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
             trigger_a4: false,
             wait_for_next: false,
             drain: false,
-            background: true,
+            background: uploadedIds.length > 3,
           },
         }, "A3");
         if (!response.ok || payload?.status === "error") {
@@ -3889,6 +3891,50 @@ export async function pulseLibraryAssetClassification(env, recordId) {
   return payload;
 }
 /*__STUDIO_WORKER_END:pulseLibraryAssetClassification__*/
+
+/** Soft SLA: Asset Manager must not stay on Classifying beyond ~1 minute. */
+export const LIBRARY_CLASSIFY_STALE_MS = 60_000;
+
+export async function studioHealStaleLibraryClassification(env, { limit = 5, staleMs = LIBRARY_CLASSIFY_STALE_MS } = {}) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) return [];
+  const cap = Math.max(1, Math.min(10, Number(limit) || 5));
+  const ageMs = Math.max(30_000, Number(staleMs) || LIBRARY_CLASSIFY_STALE_MS);
+  const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: Math.max(cap * 4, 20),
+    sortField: "Added_At",
+    sortDirection: "desc",
+    filterFormula: "AND({Content_Profile}!=BLANK(),{Classification_Status}='Processing')",
+    fields: ["Asset Name", "Classification_Status", "Content_Profile", "Intake_Date", "Added_At", "Potential_Match_Notes"],
+  }).catch(() => []);
+  const now = Date.now();
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= cap) break;
+    if (!/^rec[A-Za-z0-9]+$/.test(record?.id || "")) continue;
+    const stamped = Date.parse(String(f(record, "Intake_Date") || f(record, "Added_At") || record?.createdTime || "")) || 0;
+    if (!stamped || now - stamped < ageMs) continue;
+    const notes = String(f(record, "Potential_Match_Notes") || "").trim();
+    try {
+      await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Classification_Status: "Needs Classification",
+            Potential_Match_Notes: [notes, `A3 stalled in Processing >${Math.round(ageMs / 1000)}s; Worker re-queued classification.`].filter(Boolean).join("\n").slice(0, 1500),
+          },
+          typecast: true,
+        }),
+      });
+      await pulseLibraryAssetClassification(env, record.id);
+      healed.push({ id: record.id, key: "STALE_LIBRARY_CLASSIFY" });
+    } catch (error) {
+      healed.push({ id: record.id, key: "STALE_LIBRARY_CLASSIFY", error: error?.message || String(error) });
+    }
+  }
+  if (healed.length) console.info("stale library classification heal", JSON.stringify({ healed: healed.length, ids: healed.map((row) => row.id) }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealStaleLibraryClassification__*/
 
 
 /*__STUDIO_MANUAL_ASSET_CLASSIFICATION_1716__*/

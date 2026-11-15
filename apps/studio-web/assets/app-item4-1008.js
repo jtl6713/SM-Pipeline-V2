@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.951-edit-classification";
+  const BUILD_ID = "item4-0.6.952-library-classify-timeout";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24448,7 +24448,8 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   const LIBRARY_CLASSIFY_WATCH_KEY = "studioLibraryClassifyWatch";
-  const LIBRARY_CLASSIFY_WATCH_MAX_AGE_MS = 15 * 60 * 1000;
+  // Soft SLA: a single photo should never sit on Classifying longer than a minute.
+  const LIBRARY_CLASSIFY_WATCH_MAX_AGE_MS = 60 * 1000;
   const libraryClassifyWatch = { ids: new Set(), total: 0, startedAt: 0 };
 
   function libraryClassifyWatchIsFresh(startedAt = libraryClassifyWatch.startedAt) {
@@ -24541,6 +24542,14 @@ function timedScriptAssetLabel(asset, index) {
     const left = Math.max(0, Number(remaining) || 0);
     const total = Math.max(libraryClassifyWatch.total || 0, left);
     if (left > 0) {
+      if (!libraryClassifyWatchIsFresh()) {
+        setLibraryUploadMessage(
+          "Classification is taking too long. Use Classify all or Edit classification — do not wait on Classifying.",
+          "partial",
+        );
+        clearLibraryClassificationWatch();
+        return;
+      }
       setLibraryUploadMessage(
         total
           ? `Classifying ${left} of ${total} remaining.`

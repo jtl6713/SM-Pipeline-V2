@@ -95,3 +95,4 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-15: Runner 2026-11-15-zcloseout-runner-nuke — under STUDIO_WRITE_SOURCE=supabase, AirtableClient never HTTP to Airtable (GET miss→404/[], WRITE miss→local echo). Kills residual media/other drip. Quiet closeout; no record deletion.
 
 2026-11-15: Preserve TikTok manual completion tokens across repeated status polls.
+2026-11-15: Runner 2026-11-15-a3-classify-timeout — A3 OpenAI timeout 45s; never leave Processing parked on skip/miss. Soft SLA: Asset Manager Classifying <60s.

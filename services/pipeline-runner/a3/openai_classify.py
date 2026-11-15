@@ -48,6 +48,8 @@ def classify_asset(prompt: str, *, image_urls: list[str] | None = None, max_outp
     for url in (image_urls or [])[:8]:
         if url:
             content.append({"type": "input_image", "image_url": url})
+    # Asset Manager expects a single still to finish well under a minute.
+    # A 300s hang left Studio uploads stuck on "Classifying" for 5+ minutes.
     response = post_responses(
         settings,
         {
@@ -58,7 +60,7 @@ def classify_asset(prompt: str, *, image_urls: list[str] | None = None, max_outp
             "max_output_tokens": max_output_tokens,
             "text": {"format": {"type": "json_object"}},
         },
-        timeout=300,
+        timeout=45,
         stage="A3",
     )
     if not response.ok:
