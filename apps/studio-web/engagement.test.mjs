@@ -63,6 +63,9 @@ test("Engagement Place Reviews tab is Open Place only", () => {
   assert.match(js, /data-action="mark_reviewed"/);
   assert.match(js, /\/api\/engagement\/place-reviews/);
   assert.match(js, /Open Place only/);
+  assert.match(js, /openExternalUrl/);
+  assert.match(js, /copyTextSync/);
+  assert.match(js, /Search → Places/);
   assert.doesNotMatch(js, /publish.?place.?review|submitPlaceReview/i);
   assert.match(css, /\.engagement-mode-tabs/);
 });

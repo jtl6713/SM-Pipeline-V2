@@ -258,7 +258,8 @@
           </header>
           <p class="engagement-caption">${esc(row.content_summary || row.content_title || "")}</p>
           <p class="subtle">${esc(row.recommend_reason || "")}</p>
-          <p class="engagement-link"><a href="${esc(row.post_url)}" target="_blank" rel="noopener noreferrer">Open TikTok place search</a>
+          <p class="engagement-link"><a href="${esc(row.post_url || row.place_url || "#")}" target="_blank" rel="noopener noreferrer">Open TikTok search</a>
+            · In the app: Search → <strong>Places</strong> → open the place → paste
             · Review path: ${esc(capabilityBadge("tiktok", "place_review"))}</p>
           <label class="form-field"><span>Star rating</span>
             <select data-rating-for="${esc(row.target_id)}">
@@ -395,24 +396,99 @@
     if (history) history.prepend(note);
   }
 
+  function copyTextSync(text) {
+    const value = String(text || "");
+    if (!value) return false;
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+
   async function copyDraft(targetId) {
     const text = commentFor(targetId);
     if (!text) {
       setStatus("Nothing to copy.", true);
-      return;
+      return false;
+    }
+    if (copyTextSync(text)) {
+      setStatus("Review draft copied.");
+      return true;
     }
     try {
       await navigator.clipboard.writeText(text);
       setStatus("Review draft copied.");
+      return true;
     } catch {
       setStatus("Could not copy — select the draft and copy manually.", true);
+      return false;
     }
+  }
+
+  function recommendationOpenUrl(targetId) {
+    const row = state.recommendations.find((item) => item.target_id === targetId);
+    return String(row?.place_url || row?.post_url || "").trim();
+  }
+
+  function openExternalUrl(url) {
+    const href = String(url || "").trim();
+    if (!href || href === "#") return false;
+    // Safari/iOS blanks tabs when window.open runs after an await (user gesture
+    // expired). Prefer a synchronous about:blank handoff, then set location.
+    let popup = null;
+    try {
+      popup = window.open("about:blank", "_blank");
+    } catch {
+      popup = null;
+    }
+    if (popup) {
+      try { popup.opener = null; } catch { /* ignore */ }
+      try {
+        popup.location.href = href;
+        return true;
+      } catch {
+        try { popup.close(); } catch { /* ignore */ }
+      }
+    }
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return true;
   }
 
   async function runAction(action, targetId) {
     if (action === "copy_draft") {
       await copyDraft(targetId);
       return;
+    }
+    // Open Place / Open Post must copy + navigate synchronously from the click
+    // path. Waiting on the API first is what produced blank Safari tabs.
+    let openedSync = false;
+    let copiedDraft = false;
+    if (action === "open_place" || action === "open_post") {
+      if (action === "open_place") {
+        const draft = commentFor(targetId);
+        copiedDraft = Boolean(draft) && copyTextSync(draft);
+        if (copiedDraft) setStatus("Review draft copied.");
+      }
+      const knownUrl = recommendationOpenUrl(targetId);
+      if (knownUrl) openedSync = openExternalUrl(knownUrl);
     }
     const payload = {
       action,
@@ -429,7 +505,9 @@
       button.disabled = true;
       button.textContent = `Sending ${action}…`;
     }
-    setStatus(`Sending ${action}…`);
+    if (!(action === "open_place" && copiedDraft)) {
+      setStatus(`Sending ${action}…`);
+    }
     let message = "";
     let failed = false;
     let result = null;
@@ -439,18 +517,30 @@
         method: "POST",
         body: JSON.stringify(payload),
       });
-      const openUrl = result.place_url || result.post_url || result.target?.post_url;
-      if ((action === "open_post" || action === "open_place") && openUrl) {
-        window.open(openUrl, "_blank", "noopener,noreferrer");
+      const openUrl = result.place_url || result.post_url || result.target?.post_url || recommendationOpenUrl(targetId);
+      if (!openedSync && (action === "open_post" || action === "open_place") && openUrl) {
+        openExternalUrl(openUrl);
       }
-      if (result.unsupported && !result.stage_b_disabled && openUrl) {
-        window.open(openUrl, "_blank", "noopener,noreferrer");
+      if (!openedSync && result.unsupported && !result.stage_b_disabled && openUrl) {
+        openExternalUrl(openUrl);
       }
-      message = result.message || (result.ok === false ? "Engagement action did not complete." : "Done.");
+      if (action === "open_place") {
+        message = copiedDraft
+          ? "Draft copied. In TikTok: Search → Places → open the place → paste your review."
+          : (result.message || "Opened TikTok search. Copy the draft, open Places in the app, then paste.");
+      } else {
+        message = result.message || (result.ok === false ? "Engagement action did not complete." : "Done.");
+      }
       failed = result.ok === false;
     } catch (error) {
       message = error.message || String(error);
       failed = true;
+      if (action === "open_place" && openedSync) {
+        message = copiedDraft
+          ? "Draft copied and TikTok opened. Ledger save failed — you can still paste the review, then Mark reviewed."
+          : "TikTok opened, but ledger save failed. Paste manually if needed, then Mark reviewed.";
+        failed = true;
+      }
     }
     await loadEngagement(true);
     setStatus(message, failed);

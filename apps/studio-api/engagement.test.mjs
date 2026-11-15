@@ -387,7 +387,7 @@ test("place review helpers dedupe visits and keep Open Place only", () => {
     placeReviewDedupeKey("chicago", "Millennium Park", "Chicago"),
     placeReviewDedupeKey("Chicago", "millennium park", "chicago")
   );
-  assert.match(tiktokPlaceSearchUrl("Millennium Park", "Chicago"), /tiktok\.com\/search\?q=/);
+  assert.match(tiktokPlaceSearchUrl("Millennium Park", "Chicago"), /tiktok\.com\/search\?q=.*t=place/);
   assert.equal(sanitizePlaceReviewDraft("Great spot https://spam.example"), "");
   assert.match(sanitizePlaceReviewDraft("Came through for a shoot — strong light and easy to recommend."), /Came through/);
   const drafts = fallbackPlaceReviewDrafts({ place_name: "Navy Pier", market: "Chicago", content_title: "Pier walk" });
@@ -426,7 +426,7 @@ test("place review service never exposes an automated publish path", () => {
   assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
   assert.match(worker, /\/api\/engagement\/place-reviews/);
   assert.match(worker, /studio_place_reviews_v1/);
-  assert.match(worker, /0\.10\.955-archive-mut-closed/);
+  assert.match(worker, /0\.10\.956-place-open-sync/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.
