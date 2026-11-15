@@ -232,6 +232,23 @@
   }
 
   function openOverviewAction(profileId, kind) {
+    // Approval links must open the same Factory queue that owns selectable review
+    // outputs. Do not independently query Pipeline/Airtable for a broader status list.
+    if (kind === "approval") {
+      const nav = document.querySelector('[data-page="factory"]');
+      nav?.click();
+      activateStudioPage("factory");
+      const scope = document.getElementById("factoryProfileFilter");
+      if (scope) {
+        const next = profileId || "";
+        if (scope.value !== next) {
+          scope.value = next;
+          scope.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+      document.getElementById("factoryLaneNeedsEyes")?.scrollIntoView({ block: "start" });
+      return;
+    }
     if (kind === "ideas") {
       const profile = document.getElementById("studioProfileSelect");
       if (profile && profileId && profile.value !== profileId) {
