@@ -1354,14 +1354,16 @@ export async function studioApplyPlaceReviewAction(env, payload, deps) {
     });
     store.actions.unshift(action);
     await studioSavePlaceReviewStore(env, store, deps);
+    const openUrl = tiktokPlaceSearchUrl(target.location, target.market) || target.post_url;
+    target.post_url = openUrl;
     return {
       ok: true,
       target,
       action,
       manual: true,
-      post_url: target.post_url,
-      place_url: target.post_url,
-      message: `Open TikTok and leave a review for ${placeReviewLabel(target.location, target.market)}. No automated review was submitted.`,
+      post_url: openUrl,
+      place_url: openUrl,
+      message: `Draft ready for ${placeReviewLabel(target.location, target.market)}. In TikTok: Search → Places → open the place → paste. No automated review was submitted.`,
     };
   }
 
