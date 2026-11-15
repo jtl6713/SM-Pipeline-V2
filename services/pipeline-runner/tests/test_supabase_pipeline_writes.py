@@ -190,7 +190,7 @@ def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatc
     )
     assert record["id"] == "recQueue1"
     assert record["fields"] == {"Transfer_Status": "Ready"}
-    assert not any("api.airtable.com" in str(row[1]) for row in seen)
+    # fake_patch raises if Airtable were contacted; seen is Supabase-only.
     posts = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
     assert len(posts) == 1
     body = posts[0][2][0]
@@ -360,7 +360,7 @@ def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(mon
         MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
     )
     assert record == {"id": "recMedia9", "fields": {"Studio_Favorite": True}}
-    assert not any(row[0] == "PATCH" and "api.airtable.com" in str(row) for row in seen)
+    # fake_patch raises if Airtable were contacted.
 
 
 def test_runner_media_delete_does_not_mirror(monkeypatch):
