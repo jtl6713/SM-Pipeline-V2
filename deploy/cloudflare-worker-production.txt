@@ -1263,3 +1263,5 @@ Deploy 2026-11-14 Worker 0.10.941-fanout-pro-platform-output: stop duplicate Pla
 Deploy 2026-11-14 Worker 0.10.942-fanout-pro-find-reuse: stop duplicate flood — FIND PRO record-id reuse via Supabase translator; heal missing checks existing POs before fanout.
 
 Deploy 2026-11-14 Worker 0.10.943-place-reviews-imports: wire missing postPlaceReviewsDiscover/getPlaceReviews/postPlaceReviewAction imports so Engagement Place Reviews Discover and list work.
+
+Deploy 2026-11-15 Worker 0.10.944-place-reviews-discovery: Place Reviews Discover no longer filters Airtable with fragile Content_Profile FIND on lookup fields; matches profile in JS and treats Platform Post ID/URL as published.

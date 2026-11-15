@@ -866,6 +866,49 @@ function escapeAirtableFormula(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function linkedRecordIds(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      if (entry && typeof entry === "object") return String(entry.id || "").trim();
+      return String(entry || "").trim();
+    }).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  }
+  if (value && typeof value === "object") {
+    const nested = value.linkedRecordIds || value.valuesByLinkedRecordId;
+    if (Array.isArray(nested)) return linkedRecordIds(nested);
+    if (nested && typeof nested === "object") {
+      return Object.values(nested).flatMap((entry) => linkedRecordIds(entry));
+    }
+    if (value.id) return linkedRecordIds([value]);
+  }
+  const text = String(value || "").trim();
+  return /^rec[A-Za-z0-9]+$/.test(text) ? [text] : [];
+}
+
+function recordMatchesContentProfile(record, profileId, profileName = "") {
+  const id = String(profileId || "").trim();
+  const name = String(profileName || "").trim().toLowerCase();
+  const raw = fieldValue(record, "Content_Profile");
+  const ids = linkedRecordIds(raw);
+  if (id && ids.includes(id)) return true;
+  // Lookup fields often stringify as profile display names, not rec ids.
+  const blob = JSON.stringify(raw || "").toLowerCase();
+  if (id && blob.includes(id.toLowerCase())) return true;
+  if (name && blob.includes(name)) return true;
+  return false;
+}
+
+function tiktokOutputLooksPublished(output) {
+  const outputStatus = String(fieldValue(output, "Output_Status") || "").trim().toLowerCase();
+  const publishStatus = String(fieldValue(output, "Publish_Status") || "").trim().toLowerCase();
+  if (outputStatus === "published" || publishStatus === "published") return true;
+  if (fieldValue(output, "Published_At")) return true;
+  if (String(fieldValue(output, "Platform_Post_ID") || "").trim()) return true;
+  if (String(fieldValue(output, "Platform_Post_URL") || "").trim()) return true;
+  return false;
+}
+
 export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
   const theme = normalizeEngagementProfile(profile);
   if (!deps.listRecords || !deps.listContentProfileRecords) {
@@ -881,39 +924,61 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
   if (!match?.id) {
     return { ok: false, places: [], message: `No Content Profile found for ${theme}.` };
   }
-  const profileFormula = typeof deps.contentProfileFilterFormula === "function"
-    ? deps.contentProfileFilterFormula(match)
-    : `FIND("${escapeAirtableFormula(match.id)}", ARRAYJOIN({Content_Profile})&"")`;
-  const formula = `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,OR({Output_Status}="Published",{Publish_Status}="Published",{Published_At}!=""),${profileFormula})`;
-  const outputs = await deps.listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 120,
-    filterFormula: formula,
-    sortField: "Published_At",
-    sortDirection: "desc",
-    fields: [
-      "Output_ID",
-      "Platform",
-      "Output_Status",
-      "Publish_Status",
-      "Published_At",
-      "Content_Item",
-      "Content_Profile",
-      "Content_Title",
-      "Thumbnail_URL",
-      "Studio_Preview_URL",
-    ],
-  }).catch(() => []);
+  const profileName = String(fieldValue(match, "Profile_Name") || "").trim();
+  // Do NOT put Content_Profile FIND in the Airtable formula. On Platform Outputs
+  // Content_Profile is a lookup-of-link; FIND/ARRAYJOIN on that field often 422s
+  // or returns zero rows even when Published TikToks have Primary_Location.
+  // Keep the Airtable filter lean, then match the profile in JS after fetch.
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",OR({Do_Not_Publish}=BLANK(),{Do_Not_Publish}=0),OR({Output_Status}="Published",{Publish_Status}="Published",NOT({Published_At}=BLANK()),NOT({Platform_Post_ID}=BLANK()),NOT({Platform_Post_URL}=BLANK())))';
+  let outputs = [];
+  try {
+    outputs = await deps.listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 200,
+      filterFormula: formula,
+      sortField: "Published_At",
+      sortDirection: "desc",
+      fields: [
+        "Output_ID",
+        "Platform",
+        "Output_Status",
+        "Publish_Status",
+        "Published_At",
+        "Platform_Post_ID",
+        "Platform_Post_URL",
+        "Content_Item",
+        "Content_Profile",
+        "Content_Title",
+        "Thumbnail_URL",
+        "Studio_Preview_URL",
+        "Do_Not_Publish",
+      ],
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      places: [],
+      profile_id: match.id,
+      scanned_outputs: 0,
+      message: "TikTok place scan failed: " + String(error?.message || error).slice(0, 220),
+    };
+  }
 
   const contentCache = new Map();
   const rows = [];
+  let matchedProfile = 0;
   for (const output of outputs || []) {
+    if (!tiktokOutputLooksPublished(output)) continue;
     const contentId = firstLinkedId(fieldValue(output, "Content_Item"));
     if (!contentId) continue;
     let content = contentCache.get(contentId);
-    if (!content && deps.airtableFetch && env.AIRTABLE_CONTENT_TABLE_ID) {
+    if (content === undefined && deps.airtableFetch && env.AIRTABLE_CONTENT_TABLE_ID) {
       content = await deps.airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
       contentCache.set(contentId, content);
     }
+    const onProfile = recordMatchesContentProfile(output, match.id, profileName)
+      || recordMatchesContentProfile(content, match.id, profileName);
+    if (!onProfile) continue;
+    matchedProfile += 1;
     const placeName = String(
       fieldValue(content, "Primary_Location")
       || fieldValue(content, "Neighborhood_or_Area")
@@ -951,6 +1016,8 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
     places: aggregateVisitedPlaces(rows, theme),
     profile_id: match.id,
     scanned_outputs: (outputs || []).length,
+    matched_profile_outputs: matchedProfile,
+    located_outputs: rows.length,
   };
 }
 
@@ -994,9 +1061,12 @@ export async function studioRunPlaceReviewDiscovery(env, options, deps) {
       profile,
       ok: collected.ok !== false,
       scanned_outputs: collected.scanned_outputs || 0,
+      matched_profile_outputs: collected.matched_profile_outputs || 0,
+      located_outputs: collected.located_outputs || 0,
       place_count: (collected.places || []).length,
       message: collected.message || null,
     });
+    if (collected.ok === false) continue;
     if (!collected.places?.length) continue;
     const remainingCap = Math.max(
       0,
@@ -1046,8 +1116,26 @@ export async function studioRunPlaceReviewDiscovery(env, options, deps) {
     weekly_cap: PLACE_REVIEW_WEEKLY_CAP,
     message: added.length
       ? `Queued ${added.length} TikTok place review(s) for manual Open Place.`
-      : "No new visited places to queue. Places come from published TikTok Content Items with Primary_Location.",
+      : buildEmptyPlaceDiscoveryMessage(notes),
   };
+}
+
+function buildEmptyPlaceDiscoveryMessage(notes = []) {
+  const failed = (notes || []).find((row) => row?.ok === false && row?.message);
+  if (failed?.message) return String(failed.message);
+  const scanned = (notes || []).reduce((sum, row) => sum + Number(row?.scanned_outputs || 0), 0);
+  const matched = (notes || []).reduce((sum, row) => sum + Number(row?.matched_profile_outputs || 0), 0);
+  const located = (notes || []).reduce((sum, row) => sum + Number(row?.located_outputs || 0), 0);
+  if (scanned > 0 && matched === 0) {
+    return `Scanned ${scanned} published TikTok output(s), but none matched this Content Profile. Try Discover all profiles.`;
+  }
+  if (matched > 0 && located === 0) {
+    return `Found ${matched} published TikTok output(s) for this profile, but none have Primary_Location (or Neighborhood) on the Content Item.`;
+  }
+  if (located > 0) {
+    return `Found ${located} located TikTok place(s), but they are already queued, already reviewed, or blocked by the weekly cap.`;
+  }
+  return "No published TikTok outputs found to scan. Places come from TikTok outputs that are Published (or already have a Platform Post ID/URL) whose Content Item has Primary_Location.";
 }
 
 export async function studioListPlaceReviews(env, options, deps) {
