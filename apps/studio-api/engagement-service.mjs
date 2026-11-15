@@ -909,12 +909,62 @@ function tiktokOutputLooksPublished(output) {
   return false;
 }
 
-export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
+const PLACE_REVIEW_OUTPUT_SCAN_FIELDS = Object.freeze([
+  "Output_ID",
+  "Platform",
+  "Output_Status",
+  "Publish_Status",
+  "Published_At",
+  "Platform_Post_ID",
+  "Platform_Post_URL",
+  "Content_Item",
+  "Content_Profile",
+  // Platform Outputs title field (not a content-item title lookup).
+  "Output_Title",
+  "Thumbnail_URL",
+  "Studio_Preview_URL",
+  "Do_Not_Publish",
+]);
+
+const PLACE_REVIEW_OUTPUT_SCAN_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",OR({Do_Not_Publish}=BLANK(),{Do_Not_Publish}=0),OR({Output_Status}="Published",{Publish_Status}="Published",NOT({Published_At}=BLANK()),NOT({Platform_Post_ID}=BLANK()),NOT({Platform_Post_URL}=BLANK())))';
+
+function contentProfileLookupEmpty(record) {
+  const raw = fieldValue(record, "Content_Profile");
+  if (raw == null) return true;
+  if (Array.isArray(raw)) return raw.length === 0;
+  if (typeof raw === "string") return !raw.trim();
+  if (typeof raw === "object") {
+    const ids = linkedRecordIds(raw);
+    if (ids.length) return false;
+    const blob = JSON.stringify(raw).replace(/[{}\[\]",:\s]/g, "");
+    return !blob;
+  }
+  return false;
+}
+
+export async function studioListPublishedTikTokOutputsForPlaceReviews(env, deps) {
+  if (!deps.listRecords) {
+    throw new Error("Place review discovery is missing Airtable list helpers.");
+  }
+  // Do NOT put Content_Profile FIND in the Airtable formula. On Platform Outputs
+  // Content_Profile is a lookup-of-link; FIND/ARRAYJOIN on that field often 422s
+  // or returns zero rows even when Published TikToks have Primary_Location.
+  return deps.listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 120,
+    filterFormula: PLACE_REVIEW_OUTPUT_SCAN_FORMULA,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    fields: [...PLACE_REVIEW_OUTPUT_SCAN_FIELDS],
+  });
+}
+
+export async function studioCollectVisitedPlacesForProfile(env, profile, deps, options = {}) {
   const theme = normalizeEngagementProfile(profile);
   if (!deps.listRecords || !deps.listContentProfileRecords) {
     return { ok: false, places: [], message: "Place review discovery is missing Airtable list helpers." };
   }
-  const profiles = await deps.listContentProfileRecords(env).catch(() => []);
+  const profiles = options.profile_records
+    || await deps.listContentProfileRecords(env).catch(() => []);
   const match = (profiles || []).find((row) => {
     const key = typeof deps.studioThemeForProfile === "function"
       ? deps.studioThemeForProfile(row)
@@ -925,60 +975,59 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
     return { ok: false, places: [], message: `No Content Profile found for ${theme}.` };
   }
   const profileName = String(fieldValue(match, "Profile_Name") || "").trim();
-  // Do NOT put Content_Profile FIND in the Airtable formula. On Platform Outputs
-  // Content_Profile is a lookup-of-link; FIND/ARRAYJOIN on that field often 422s
-  // or returns zero rows even when Published TikToks have Primary_Location.
-  // Keep the Airtable filter lean, then match the profile in JS after fetch.
-  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",OR({Do_Not_Publish}=BLANK(),{Do_Not_Publish}=0),OR({Output_Status}="Published",{Publish_Status}="Published",NOT({Published_At}=BLANK()),NOT({Platform_Post_ID}=BLANK()),NOT({Platform_Post_URL}=BLANK())))';
-  let outputs = [];
-  try {
-    outputs = await deps.listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 200,
-      filterFormula: formula,
-      sortField: "Published_At",
-      sortDirection: "desc",
-      fields: [
-        "Output_ID",
-        "Platform",
-        "Output_Status",
-        "Publish_Status",
-        "Published_At",
-        "Platform_Post_ID",
-        "Platform_Post_URL",
-        "Content_Item",
-        "Content_Profile",
-        // Platform Outputs title field (not a content-item title lookup).
-        "Output_Title",
-        "Thumbnail_URL",
-        "Studio_Preview_URL",
-        "Do_Not_Publish",
-      ],
-    });
-  } catch (error) {
-    return {
-      ok: false,
-      places: [],
-      profile_id: match.id,
-      scanned_outputs: 0,
-      message: "TikTok place scan failed: " + String(error?.message || error).slice(0, 220),
-    };
+  let outputs = Array.isArray(options.outputs) ? options.outputs : null;
+  if (!outputs) {
+    try {
+      outputs = await studioListPublishedTikTokOutputsForPlaceReviews(env, deps);
+    } catch (error) {
+      return {
+        ok: false,
+        places: [],
+        profile_id: match.id,
+        scanned_outputs: 0,
+        message: "TikTok place scan failed: " + String(error?.message || error).slice(0, 220),
+      };
+    }
   }
 
-  const contentCache = new Map();
+  const placeBudget = Math.max(1, Number(options.place_budget || PLACE_REVIEW_WEEKLY_CAP) || PLACE_REVIEW_WEEKLY_CAP);
+  const contentCache = options.content_cache instanceof Map ? options.content_cache : new Map();
   const rows = [];
+  const seenPlaces = new Set();
   let matchedProfile = 0;
+  let contentFetches = 0;
+
+  async function loadContent(contentId) {
+    if (contentCache.has(contentId)) return contentCache.get(contentId);
+    if (!deps.airtableFetch || !env.AIRTABLE_CONTENT_TABLE_ID) {
+      contentCache.set(contentId, null);
+      return null;
+    }
+    contentFetches += 1;
+    const content = await deps.airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+    contentCache.set(contentId, content);
+    return content;
+  }
+
   for (const output of outputs || []) {
+    if (seenPlaces.size >= placeBudget) break;
     if (!tiktokOutputLooksPublished(output)) continue;
     const contentId = firstLinkedId(fieldValue(output, "Content_Item"));
     if (!contentId) continue;
-    let content = contentCache.get(contentId);
-    if (content === undefined && deps.airtableFetch && env.AIRTABLE_CONTENT_TABLE_ID) {
-      content = await deps.airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
-      contentCache.set(contentId, content);
+
+    const outputOnProfile = recordMatchesContentProfile(output, match.id, profileName);
+    let content = null;
+    if (outputOnProfile) {
+      content = await loadContent(contentId);
+    } else if (contentProfileLookupEmpty(output)) {
+      // Blank lookup — resolve via Content Item link as a fallback.
+      content = await loadContent(contentId);
+      if (!recordMatchesContentProfile(content, match.id, profileName)) continue;
+    } else {
+      // Output clearly belongs to another profile; skip the content fetch.
+      continue;
     }
-    const onProfile = recordMatchesContentProfile(output, match.id, profileName)
-      || recordMatchesContentProfile(content, match.id, profileName);
-    if (!onProfile) continue;
+
     matchedProfile += 1;
     const placeName = String(
       fieldValue(content, "Primary_Location")
@@ -986,6 +1035,9 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
       || ""
     ).trim();
     if (!placeName) continue;
+    const placeKey = normalizePlaceKey(placeName);
+    if (seenPlaces.has(placeKey)) continue;
+    seenPlaces.add(placeKey);
     const market = String(
       fieldValue(content, "Market_Name")
       || fieldValue(match, "Market_Name")
@@ -1019,6 +1071,7 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
     scanned_outputs: (outputs || []).length,
     matched_profile_outputs: matchedProfile,
     located_outputs: rows.length,
+    content_fetches: contentFetches,
   };
 }
 
@@ -1055,28 +1108,64 @@ export async function studioRunPlaceReviewDiscovery(env, options, deps) {
   const store = await studioLoadPlaceReviewStore(env, deps);
   const added = [];
   const notes = [];
+  const profileRecords = await deps.listContentProfileRecords(env).catch(() => []);
+  let sharedOutputs = null;
+  let sharedOutputsError = null;
+  try {
+    // One TikTok scan for the whole Discover click (especially all-profiles).
+    sharedOutputs = await studioListPublishedTikTokOutputsForPlaceReviews(env, deps);
+  } catch (error) {
+    sharedOutputsError = error;
+  }
+  const contentCache = new Map();
   for (const profile of profiles) {
     const settings = await studioLoadEngagementSettings(env, profile, deps);
-    const collected = await studioCollectVisitedPlacesForProfile(env, profile, deps);
+    const remainingCap = Math.max(
+      0,
+      PLACE_REVIEW_WEEKLY_CAP - weeklyPlaceReviewCount(store.actions, profile)
+    );
+    if (sharedOutputsError) {
+      notes.push({
+        profile,
+        ok: false,
+        scanned_outputs: 0,
+        matched_profile_outputs: 0,
+        located_outputs: 0,
+        place_count: 0,
+        message: "TikTok place scan failed: " + String(sharedOutputsError?.message || sharedOutputsError).slice(0, 220),
+      });
+      continue;
+    }
+    if (!remainingCap) {
+      notes.push({
+        profile,
+        ok: true,
+        scanned_outputs: (sharedOutputs || []).length,
+        matched_profile_outputs: 0,
+        located_outputs: 0,
+        place_count: 0,
+        message: `Weekly place-review cap (${PLACE_REVIEW_WEEKLY_CAP}) reached for ${profile}.`,
+      });
+      continue;
+    }
+    const collected = await studioCollectVisitedPlacesForProfile(env, profile, deps, {
+      outputs: sharedOutputs,
+      profile_records: profileRecords,
+      content_cache: contentCache,
+      place_budget: remainingCap,
+    });
     notes.push({
       profile,
       ok: collected.ok !== false,
       scanned_outputs: collected.scanned_outputs || 0,
       matched_profile_outputs: collected.matched_profile_outputs || 0,
       located_outputs: collected.located_outputs || 0,
+      content_fetches: collected.content_fetches || 0,
       place_count: (collected.places || []).length,
       message: collected.message || null,
     });
     if (collected.ok === false) continue;
     if (!collected.places?.length) continue;
-    const remainingCap = Math.max(
-      0,
-      PLACE_REVIEW_WEEKLY_CAP - weeklyPlaceReviewCount(store.actions, profile)
-    );
-    if (!remainingCap) {
-      notes[notes.length - 1].message = `Weekly place-review cap (${PLACE_REVIEW_WEEKLY_CAP}) reached for ${profile}.`;
-      continue;
-    }
     const existingKeys = new Set(
       (store.targets || [])
         .filter((row) => row.profile === profile)
@@ -1096,7 +1185,9 @@ export async function studioRunPlaceReviewDiscovery(env, options, deps) {
             || normalizePlaceKey(action.location) === normalizePlaceKey(place.place_name))
       );
       if (reviewed) continue;
-      const generated = await studioGeneratePlaceReviewDrafts(env, place, settings);
+      // Discover must stay inside the Worker wall clock. Use local fallback drafts
+      // here; Regenerate still calls the runner for stronger copy.
+      const generated = fallbackPlaceReviewDrafts(place, 3);
       const drafts = generated.reviews || [];
       if (!drafts.length) continue;
       const target = buildPlaceReviewTargetRecord(place, settings, drafts, 5);

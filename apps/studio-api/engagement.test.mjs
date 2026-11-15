@@ -423,7 +423,7 @@ test("place review service never exposes an automated publish path", () => {
   assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
   assert.match(worker, /\/api\/engagement\/place-reviews/);
   assert.match(worker, /studio_place_reviews_v1/);
-  assert.match(worker, /0\.10\.945-place-reviews-output-title/);
+  assert.match(worker, /0\.10\.946-place-reviews-discover-fast/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.
@@ -459,6 +459,44 @@ test("place review discovery matches profile in JS and surfaces located Publishe
     AIRTABLE_CONTENT_TABLE_ID: "tblContent",
   };
   let capturedFormula = "";
+  let listCalls = 0;
+  const fetchedContent = [];
+  const sampleOutputs = [
+    {
+      id: "recOutPublished",
+      fields: {
+        Platform: "TikTok",
+        Output_Status: "Published",
+        Publish_Status: "Published",
+        Published_At: "2026-11-15T03:54:07.000Z",
+        Content_Item: ["recContentChi"],
+        // Lookup fields often return display names, not rec ids.
+        Content_Profile: ["ChicagoShining - Chicago"],
+        Output_Title: "Dim Sum Starter Tour",
+      },
+    },
+    {
+      id: "recOutOtherCity",
+      fields: {
+        Platform: "TikTok",
+        Output_Status: "Published",
+        Content_Item: ["recContentMia"],
+        Content_Profile: ["Miami - Miami"],
+      },
+    },
+    {
+      id: "recOutLiveUrl",
+      fields: {
+        Platform: "TikTok",
+        Output_Status: "Approved for Publishing",
+        Publish_Status: "Ready to Schedule",
+        Platform_Post_URL: "https://www.tiktok.com/@x/video/1",
+        Content_Item: ["recContentChi2"],
+        Content_Profile: ["ChicagoShining - Chicago"],
+        Output_Title: "Lakefront Trail Etiquette",
+      },
+    },
+  ];
   const deps = {
     listContentProfileRecords: async () => [chicagoProfile],
     studioThemeForProfile: () => "chicago",
@@ -466,48 +504,15 @@ test("place review discovery matches profile in JS and surfaces located Publishe
       throw new Error("contentProfileFilterFormula must not be used for place discovery");
     },
     listRecords: async (_env, _table, options) => {
+      listCalls += 1;
       capturedFormula = String(options?.filterFormula || "");
       assert.doesNotMatch(capturedFormula, /Content_Profile|FIND\(|ARRAYJOIN/);
       assert.match(capturedFormula, /Platform}="TikTok"/);
       assert.match(capturedFormula, /Output_Status}="Published"/);
-      return [
-        {
-          id: "recOutPublished",
-          fields: {
-            Platform: "TikTok",
-            Output_Status: "Published",
-            Publish_Status: "Published",
-            Published_At: "2026-11-15T03:54:07.000Z",
-            Content_Item: ["recContentChi"],
-            // Lookup fields often return display names, not rec ids.
-            Content_Profile: ["ChicagoShining - Chicago"],
-            Output_Title: "Dim Sum Starter Tour",
-          },
-        },
-        {
-          id: "recOutOtherCity",
-          fields: {
-            Platform: "TikTok",
-            Output_Status: "Published",
-            Content_Item: ["recContentMia"],
-            Content_Profile: ["Miami - Miami"],
-          },
-        },
-        {
-          id: "recOutLiveUrl",
-          fields: {
-            Platform: "TikTok",
-            Output_Status: "Approved for Publishing",
-            Publish_Status: "Ready to Schedule",
-            Platform_Post_URL: "https://www.tiktok.com/@x/video/1",
-            Content_Item: ["recContentChi2"],
-            Content_Profile: ["ChicagoShining - Chicago"],
-            Output_Title: "Lakefront Trail Etiquette",
-          },
-        },
-      ];
+      return sampleOutputs;
     },
     airtableFetch: async (_env, _table, id) => {
+      fetchedContent.push(id);
       if (id === "recContentChi") {
         return {
           id,
@@ -554,13 +559,86 @@ test("place review discovery matches profile in JS and surfaces located Publishe
   assert.equal(collected.places.length, 2);
   assert.equal(collected.places[0].place_name, "Chinatown Square");
   assert.ok(collected.places.some((row) => row.place_name === "Lakefront Trail"));
+  assert.equal(collected.content_fetches, 2);
+  assert.deepEqual(fetchedContent, ["recContentChi", "recContentChi2"]);
 
+  listCalls = 0;
+  fetchedContent.length = 0;
   const discovery = await studioRunPlaceReviewDiscovery(env, { profile: "chicago" }, deps);
   assert.equal(discovery.ok, true);
+  assert.equal(listCalls, 1);
   assert.ok(discovery.added_count >= 1);
   assert.match(discovery.message, /Queued \d+ TikTok place review/);
   assert.equal(discovery.profiles[0].matched_profile_outputs, 2);
   assert.equal(discovery.profiles[0].located_outputs, 2);
+  assert.ok(!fetchedContent.includes("recContentMia"));
+});
+
+test("place review all-profiles discover scans TikTok outputs once", async () => {
+  const { studioRunPlaceReviewDiscovery } = await import("./engagement-service.mjs");
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  assert.match(service, /fallbackPlaceReviewDrafts\(place, 3\)/);
+  assert.match(service, /studioListPublishedTikTokOutputsForPlaceReviews/);
+
+  const profiles = [
+    { id: "recChicagoProfile01", fields: { Profile_Name: "ChicagoShining - Chicago", Market_Name: "Chicago" } },
+    { id: "recNycProfile01", fields: { Profile_Name: "NYC - New York City", Market_Name: "New York" } },
+    { id: "recLaProfile01", fields: { Profile_Name: "LA - Los Angeles", Market_Name: "Los Angeles" } },
+    { id: "recMiaProfile01", fields: { Profile_Name: "Miami - Miami", Market_Name: "Miami" } },
+  ];
+  let listCalls = 0;
+  const env = { AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs", AIRTABLE_CONTENT_TABLE_ID: "tblContent" };
+  const deps = {
+    listContentProfileRecords: async () => profiles,
+    studioThemeForProfile: (row) => {
+      const name = String(row?.fields?.Profile_Name || "");
+      if (/chicago/i.test(name)) return "chicago";
+      if (/nyc|new york/i.test(name)) return "nyc";
+      if (/los angeles|\bla\b/i.test(name)) return "la";
+      if (/miami/i.test(name)) return "miami";
+      return "chicago";
+    },
+    listRecords: async () => {
+      listCalls += 1;
+      return [
+        {
+          id: "recChi",
+          fields: {
+            Platform: "TikTok",
+            Output_Status: "Published",
+            Published_At: "2026-11-15T03:00:00.000Z",
+            Content_Item: ["recC1"],
+            Content_Profile: ["ChicagoShining - Chicago"],
+            Output_Title: "Chicago place",
+          },
+        },
+        {
+          id: "recNyc",
+          fields: {
+            Platform: "TikTok",
+            Output_Status: "Published",
+            Published_At: "2026-11-15T02:00:00.000Z",
+            Content_Item: ["recN1"],
+            Content_Profile: ["NYC - New York City"],
+            Output_Title: "NYC place",
+          },
+        },
+      ];
+    },
+    airtableFetch: async (_env, _table, id) => ({
+      id,
+      fields: {
+        Primary_Location: id === "recC1" ? "Chinatown Square" : "Grand Central Terminal",
+        Content_Profile: id === "recC1" ? ["recChicagoProfile01"] : ["recNycProfile01"],
+        Market_Name: id === "recC1" ? "Chicago" : "New York",
+      },
+    }),
+    studioSettingsByName: async () => null,
+    studioUpsertSetting: async () => null,
+  };
+  const discovery = await studioRunPlaceReviewDiscovery(env, { all_profiles: true }, deps);
+  assert.equal(listCalls, 1);
+  assert.ok(discovery.added_count >= 2);
 });
 
 test("place review empty discovery message distinguishes scan vs location gaps", async () => {

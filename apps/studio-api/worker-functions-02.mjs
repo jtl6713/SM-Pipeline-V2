@@ -10165,12 +10165,23 @@ export async function postPlaceReviewsDiscover(request, env, url, authorization)
   const profile = allProfiles
     ? "chicago"
     : await resolveEngagementProfile(env, url, authorization, payload);
-  const result = await studioRunPlaceReviewDiscovery(env, {
-    profile,
-    all_profiles: allProfiles,
-    force: payload.force !== false,
-  }, engagementDeps(profile));
-  return respond(request, env, result);
+  try {
+    const result = await studioRunPlaceReviewDiscovery(env, {
+      profile,
+      all_profiles: allProfiles,
+      force: payload.force !== false,
+    }, engagementDeps(profile));
+    return respond(request, env, result);
+  } catch (error) {
+    return respond(request, env, {
+      ok: false,
+      status: "error",
+      added: [],
+      added_count: 0,
+      error: String(error?.message || error).slice(0, 240),
+      message: "Place discovery failed: " + String(error?.message || error).slice(0, 220),
+    }, 500);
+  }
 }
 /*__STUDIO_WORKER_END:postPlaceReviewsDiscover__*/
 
