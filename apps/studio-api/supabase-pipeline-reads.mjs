@@ -2816,7 +2816,7 @@ export function deskHealOutputFilter(kind, options = {}) {
       + `&or=(${withJobUploaded},${blankOrRendered})`;
   }
   if (kind === "shared_render_strand") {
-    const types = ["Reel", "Short", "Video Draft"].map(encodeDeskFilterValue).join(",");
+    const types = ["Reel", "Short", "Video Draft", "Story"].map(encodeDeskFilterValue).join(",");
     return `${quiet}&published_at=is.null`
       + `&output_status=in.(${encodeDeskFilterValue("In Production")},Rendering)`
       + "&or=(final_file_url.is.null,final_file_url.eq.)"
@@ -2827,7 +2827,7 @@ export function deskHealOutputFilter(kind, options = {}) {
     if (!/^rec[A-Za-z0-9]{14}$/.test(contentId)) {
       throw new Error("shared_render_source needs contentAirtableId");
     }
-    const types = ["Reel", "Short", "Video Draft"].map(encodeDeskFilterValue).join(",");
+    const types = ["Reel", "Short", "Video Draft", "Story"].map(encodeDeskFilterValue).join(",");
     const finished = `or=(render_status.eq.Rendered,output_status.eq.${encodeDeskFilterValue("Ready for Review")},output_status.eq.${encodeDeskFilterValue("Approved for Publishing")})`;
     return `${quiet}&content_item_airtable_id=eq.${encodeURIComponent(contentId)}`
       + "&and(final_file_url.not.is.null,final_file_url.neq.)"

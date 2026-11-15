@@ -329,3 +329,27 @@ test("shared-render strand helpers copy finished sibling media", () => {
   assert.equal(fields.Final_File_URL, "https://drive.google.com/file/d/canonical/view");
   assert.equal(fields.Remotion_Job_ID, "");
 });
+
+test("shared-render strand heals scheduled Story from finished Story sibling", () => {
+  const source = row({
+    Studio_Output_Type: "Story",
+    Output_Status: "Approved for Publishing",
+    Review_Status: "Approved",
+    Publish_Status: "Ready to Schedule",
+    Final_File_URL: "https://drive.google.com/file/d/story/view",
+    Final_File_ID: "story",
+    Thumbnail_URL: "https://media.chicagoshining.com/studio/previews/thumbnails/x/cover-9x16.png",
+  });
+  const strand = row({
+    Studio_Output_Type: "Story",
+    Format: "Story",
+    Output_Status: "In Production",
+    Scheduled_Post_Date: "2026-11-04T20:10:00.000Z",
+  });
+  assert.equal(isSharedRenderStrandCandidate(strand), true);
+  const fields = sharedRenderPropagateFields(source, undefined, strand);
+  assert.equal(fields.Output_Status, "Approved for Publishing");
+  assert.equal(fields.Review_Status, "Approved");
+  assert.equal(fields.Publish_Status, "Ready to Schedule");
+  assert.equal(fields.Final_File_URL, "https://drive.google.com/file/d/story/view");
+});

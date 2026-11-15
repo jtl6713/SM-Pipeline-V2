@@ -95,8 +95,8 @@ export function completedRenderRecoveryFields(record, field = (row, name) => row
   return fields;
 }
 
-/** Copy a finished shared 9:16 short onto stranded Reel/Short/Video Draft siblings. */
-export function sharedRenderPropagateFields(source, field = (row, name) => row?.fields?.[name]) {
+/** Copy a finished shared 9:16 short onto stranded Reel/Short/Video Draft/Story siblings. */
+export function sharedRenderPropagateFields(source, field = (row, name) => row?.fields?.[name], target = null) {
   if (!source || !String(field(source, "Final_File_URL") || "").trim()) return null;
   const fields = {
     Final_File_URL: field(source, "Final_File_URL") || null,
@@ -115,6 +115,24 @@ export function sharedRenderPropagateFields(source, field = (row, name) => row?.
     Remotion_Status_URL: "",
     Remotion_Props_JSON: "",
   };
+  // Stories that already carry a schedule should rejoin the armed package, not
+  // bounce back through Ready for Review (FB Story 9422 / Content 1864).
+  const targetSched = target ? String(field(target, "Scheduled_Post_Date") || "").trim() : "";
+  const sourceOut = String(field(source, "Output_Status") || "").trim();
+  const sourceReview = String(field(source, "Review_Status") || "").trim();
+  const sourcePublish = String(field(source, "Publish_Status") || "").trim();
+  if (
+    targetSched
+    && (
+      ["Approved for Publishing", "Published"].includes(sourceOut)
+      || sourceReview === "Approved"
+      || ["Ready to Schedule", "Scheduled", "Published"].includes(sourcePublish)
+    )
+  ) {
+    fields.Output_Status = "Approved for Publishing";
+    fields.Review_Status = "Approved";
+    fields.Publish_Status = sourcePublish || "Ready to Schedule";
+  }
   const server = field(source, "Render_Server_URL");
   if (server) fields.Render_Server_URL = server;
   const clipJson = field(source, "Render_Clip_List_JSON");
@@ -123,17 +141,24 @@ export function sharedRenderPropagateFields(source, field = (row, name) => row?.
   if (totalFrames !== undefined && totalFrames !== null && totalFrames !== "") {
     fields.Render_Total_Frames = totalFrames;
   }
+  const thumb = field(source, "Thumbnail_URL");
+  if (thumb && target && /^story$/i.test(String(field(target, "Studio_Output_Type") || field(target, "Format") || ""))) {
+    if (!String(field(target, "Thumbnail_URL") || "").trim()) fields.Thumbnail_URL = thumb;
+  }
   return fields;
 }
 
 export function isSharedRenderStrandCandidate(record, field = (row, name) => row?.fields?.[name]) {
   const outputType = String(field(record, "Studio_Output_Type") || field(record, "Output_Type") || "").trim();
-  if (!SHARED_RENDER_OUTPUT_TYPES.has(outputType)) return false;
-  if (/^story$/i.test(outputType) || /^story$/i.test(String(field(record, "Format") || ""))) return false;
+  const isStory = /^story$/i.test(outputType) || /^story$/i.test(String(field(record, "Format") || ""));
+  if (!SHARED_RENDER_OUTPUT_TYPES.has(outputType) && !isStory) return false;
   if (String(field(record, "Render_Status") || "").trim() === "Native Photo Route") return false;
   // Blank Aspect_Ratio still heals Reel/Short/Video Draft strands (Adler Point 2127).
-  const ratio = String(field(record, "Aspect_Ratio") || "").trim().replace(/x/gi, ":");
-  if (ratio && ratio !== "9:16") return false;
+  // Stories are always 9:16 vertical; do not require Aspect_Ratio.
+  if (!isStory) {
+    const ratio = String(field(record, "Aspect_Ratio") || "").trim().replace(/x/gi, ":");
+    if (ratio && ratio !== "9:16") return false;
+  }
   const output = String(field(record, "Output_Status") || "").trim();
   if (!["In Production", "Rendering"].includes(output)) return false;
   if (String(field(record, "Final_File_URL") || "").trim()) return false;
