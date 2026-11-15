@@ -1279,3 +1279,5 @@ Deploy 2026-11-15 Worker 0.10.949-insights-learned-settings: Insights Learned mo
 Deploy 2026-11-15 Worker 0.10.950-insights-observations-settings: Insights Observations in Pipeline Settings under STUDIO_WRITE_SOURCE=supabase (kill Observation GET/PATCH/POST). Record deletion is not started. Verify /health version 0.10.950-insights-observations-settings.
 
 Deploy 2026-11-15 Worker 0.10.951-settings-miss-closed: studioSettingsByName SoR miss skips Airtable. Runner 2026-11-15-zcloseout-settings-get: translate single-quote/FIND/OR settings formulas; settings GET miss fail-closed. Record deletion is not started.
+
+Deploy 2026-11-15 Worker 0.10.952-output-get-archive-closed: under STUDIO_WRITE_SOURCE=supabase, Output/Content GETs never hit Airtable (record miss 404, untranslated list empty). Expanded table_kind labels. Record deletion is not started. Verify /health version 0.10.952-output-get-archive-closed.

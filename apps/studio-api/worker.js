@@ -214,6 +214,10 @@ import {
   STUDIO_SUPABASE_MUSIC_READ_ROUTES,
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
+  PLATFORM_OUTPUTS_TABLE_ID,
+  CONTENT_ITEMS_TABLE_ID,
+  CONTENT_PROFILES_TABLE_ID,
+  MAKE_ADMIN_QUEUE_TABLE_ID,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -1385,7 +1389,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.951-settings-miss-closed",
+          version: "0.10.952-output-get-archive-closed",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5377,6 +5381,43 @@ function studioAirtableRecordIdPath(pathOrParams) {
   return /^rec[A-Za-z0-9]{14}$/.test(id) ? id : "";
 }
 
+function studioAirtableOutputOrContentTable(env, tableId) {
+  const table = String(tableId || "");
+  const outputs = String(env?.AIRTABLE_OUTPUT_TABLE_ID || PLATFORM_OUTPUTS_TABLE_ID);
+  const content = String(env?.AIRTABLE_CONTENT_TABLE_ID || CONTENT_ITEMS_TABLE_ID);
+  return table === outputs
+    || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === content
+    || table === CONTENT_ITEMS_TABLE_ID;
+}
+
+function studioAirtableEgressTableKind(env, tableId) {
+  const table = String(tableId || "");
+  if (table === String(env?.AIRTABLE_OUTPUT_TABLE_ID || "") || table === PLATFORM_OUTPUTS_TABLE_ID) {
+    return "outputs";
+  }
+  if (table === String(env?.AIRTABLE_CONTENT_TABLE_ID || "") || table === CONTENT_ITEMS_TABLE_ID) {
+    return "content";
+  }
+  if (table === String(env?.AIRTABLE_IDEA_TABLE_ID || "")) return "ideas";
+  if (table === String(env?.AIRTABLE_MEDIA_TABLE_ID || "")) return "media";
+  if (table === String(env?.AIRTABLE_PROFILE_TABLE_ID || "") || table === CONTENT_PROFILES_TABLE_ID) {
+    return "profiles";
+  }
+  if (table === MAKE_ADMIN_QUEUE_TABLE_ID) return "make_admin";
+  if (/slide/i.test(table) || table === "tblcnQDBvUngpjDED") return "slides";
+  if (/setting/i.test(table) || table === "Pipeline Settings" || table === "Engagement Settings") {
+    return "settings";
+  }
+  if (/make admin/i.test(table)) return "make_admin";
+  if (table === "tblhE7YHDnj2lxJPC" || table === "tbl1bjkyC2jAgt3tl") return "engagement";
+  if (table === "tblcDNIZs125iVi2B") return "insights_observations";
+  if (table === "tblb6LfRv7CemHHN6") return "insights_learned";
+  if (table === "tblBZLXPd1p2NRWRK") return "requests";
+  if (table === "tblSITCujCsJTNcDe") return "media";
+  return "other";
+}
+
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const method = String(options?.method || "GET").toUpperCase();
@@ -5498,21 +5539,27 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       ? archiveRecords[0]
       : { records: archiveRecords };
   } else if (
-    // Live wrangler tail after 0.10.947: bursts of Platform Output GET 404 were
-    // Supabase misses falling through to the frozen Airtable archive. Output and
-    // Content record GETs must fail closed — do not count archive 404s as activity.
-    sideReadAttempted
-    && method === "GET"
-    && studioAirtableRecordIdPath(pathOrParams)
-    && (
-      String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID)
-      || String(tableId) === String(env.AIRTABLE_CONTENT_TABLE_ID)
-    )
+    // Live wrangler tail after 0.10.951 still showed Platform Output GET 200/404
+    // against the frozen archive. Under STUDIO_WRITE_SOURCE=supabase, Output and
+    // Content GETs must never touch Airtable — record miss → 404, untranslated
+    // list/view → empty page. Hardcoded Content table ids count too.
+    method === "GET"
+    && studioWriteSource(env) === "supabase"
+    && studioAirtableOutputOrContentTable(env, tableId)
   ) {
-    console.info("supabase SoR record miss; skipping Airtable archive GET", {
-      table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs" : "content",
+    const tableKind = studioAirtableEgressTableKind(env, tableId);
+    if (studioAirtableRecordIdPath(pathOrParams)) {
+      console.info("supabase SoR record miss; skipping Airtable archive GET", {
+        table_kind: tableKind,
+        side_read_attempted: sideReadAttempted,
+      });
+      throw new HttpError(404, "NOT_FOUND");
+    }
+    console.info("supabase SoR list miss; skipping Airtable archive GET", {
+      table_kind: tableKind,
+      side_read_attempted: sideReadAttempted,
     });
-    throw new HttpError(404, "NOT_FOUND");
+    body = { records: [] };
   } else {
   await airtableRequestSlot();
   try {
@@ -5527,19 +5574,10 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   } finally {
     // One event for each attempted outbound request, including network failures.
     // No record ID, filter formula, Airtable token or full URL is logged.
-    const tableIdText = String(tableId || "");
     const egressEvent = {
       source,
       // Keep this coarse and non-secret: enough to kill remaining Airtable burn.
-      table_kind: tableIdText === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
-        : tableIdText === String(env.AIRTABLE_CONTENT_TABLE_ID) ? "content"
-        : tableIdText === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas"
-        : tableIdText === String(env.AIRTABLE_MEDIA_TABLE_ID || "") ? "media"
-        : /slide/i.test(tableIdText) ? "slides"
-        : /setting/i.test(tableIdText) ? "settings"
-        : /make admin/i.test(tableIdText) ? "make_admin"
-        : tableIdText === "tblhE7YHDnj2lxJPC" || tableIdText === "tbl1bjkyC2jAgt3tl" ? "engagement"
-        : "other",
+      table_kind: studioAirtableEgressTableKind(env, tableId),
       method,
       status: response?.status ?? 0,
       duration_ms: Date.now() - airtableRequestStarted,
