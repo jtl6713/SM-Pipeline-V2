@@ -1,6 +1,8 @@
 name: Pulse Speakeasy A3 Classify
 
-# Classify only Calle Ocho 6/10/11/14 via Studio profile→A3 (not Classify All).
+# Classify Chicago Speakeasy 1 via runner A3 (profile already on SoR).
+# Do not use /api/library/.../profile — ChicagoShining assign watermarks and
+# exceeds the temporary bridge Worker wall clock (500).
 on:
   push:
     branches: [main]
@@ -19,110 +21,77 @@ concurrency:
 jobs:
   pulse:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TARGET_WORKER: chicagoshining-studio-api
-      BRIDGE_WORKER: chicagoshining-speakeasy-a3
-      MIAMI_PROFILE_ID: recpNlNn6U6eq0M9r
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      PIPELINE_RUNNER_SHARED_SECRET: ${{ secrets.PIPELINE_RUNNER_SHARED_SECRET }}
+      RUNNER_URL: https://pipeline.chicagoshining.com
+      SPEAKEASY_ID: recEaYEwG1EGgLAmm
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Capture production Worker identity
+      - name: Pulse Speakeasy through runner A3
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
-          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
-
-      - name: Build bridge that classifies Chicago Speakeasy assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, secrets
-          from pathlib import Path
-          token = secrets.token_urlsafe(36)
-          Path("/tmp/token").write_text(token)
-          ids = [
-              "recEaYEwG1EGgLAmm",  # Chicago Speakeasy 1 stuck Processing
-          ]
-          # ChicagoShining - Chicago (not NYC recgtK8Z7eNADNtVy)
-          profile = "recT2rbKX3MF7cVFU"
-          specs = [
-              {
-                  "name": rid,
-                  "method": "POST",
-                  "path": f"/api/library/{rid}/profile",
-                  "body": {"content_profile_id": profile, "classify": True},
-              }
-              for rid in ids
-          ]
-          js = '''export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname===ROUTE+"/ready")return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});if(u.pathname!==ROUTE)return new Response("Not found",{status:404});const specs=SPECS,results=[];for(const s of specs){const m=String(s.method||"GET").toUpperCase(),h=new Headers({"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Accept":"application/json","Origin":"https://studio.chicagoshining.com"});let b;if(m!=="GET"){h.set("Content-Type","application/json");b=JSON.stringify(s.body??{});}const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+s.path,{method:m,headers:h,body:b}));const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}}results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,classifying:Boolean(p&&p.classifying),message:p&&p.message||null,body:p});}return Response.json({ok:results.every(x=>x.ok),results},{headers:{"Cache-Control":"no-store"}})}};'''
-          js = js.replace("ROUTE", json.dumps("/" + token)).replace("SPECS", json.dumps(specs, separators=(",", ":")))
-          Path("/tmp/worker.js").write_text(js)
-          PY
-          node --check /tmp/worker.js
-          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
-          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
-          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -F 'metadata=@/tmp/meta.json;type=application/json' \
-            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
-          echo "bridge_upload_http=$code"
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '.success==true' /tmp/upload.json >/dev/null
-          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
-            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/sub.json
-          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-sub.json
-          jq -er '.result.subdomain' /tmp/account-sub.json >/tmp/subdomain
-
-      - name: Pulse Chicago Speakeasy profile classify calls
-        shell: bash
-        run: |
-          set -euo pipefail
-          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
-          ready=000
-          for i in $(seq 1 12); do
-            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
-            echo "bridge_ready_attempt=$i/12 http=$ready"
-            [[ "$ready" == "200" ]] && break
-            if [[ "$i" -eq 12 ]]; then
-              echo "bridge gave up"
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          test -n "${PIPELINE_RUNNER_SHARED_SECRET:-}"
+          health=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "$RUNNER_URL/health" || true)
+          echo "runner_health_http=$health"
+          test "$health" -eq 200
+          jq -e '.ok==true and .service=="pipeline-runner"' /tmp/health.json >/dev/null
+          version=$(jq -er '.version' /tmp/health.json)
+          echo "runner_version=$version"
+          case "$version" in
+            *a3-media-content-profile*|*a3-classify-timeout*) ;;
+            *)
+              echo "runner version missing Content_Profile shape fix: $version" >&2
               exit 1
-            fi
-            sleep 3
-          done
-          code=$(curl -sS --max-time 300 -o /tmp/result.json -w '%{http_code}' \
-            -H 'Content-Type: application/json' -d '{}' "$URL" || true)
-          echo "bridge_http=$code"
+              ;;
+          esac
+          body=$(jq -cn --arg id "$SPEAKEASY_ID" '{
+            extra: {
+              record_ids: [$id],
+              background: false,
+              trigger_a4: false,
+              wait_for_next: false,
+              drain: false
+            }
+          }')
+          code=$(curl -sS --max-time 180 -o /tmp/a3.json -w '%{http_code}' \
+            -X POST "$RUNNER_URL/stages/a3" \
+            -H "Content-Type: application/json" \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" \
+            -d "$body" || true)
+          echo "a3_http=$code"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw = Path("/tmp/a3.json").read_text(encoding="utf-8", errors="replace")
+          print("a3_body_prefix=" + raw[:2000].replace("\n", " "))
+          try:
+              payload = json.loads(raw) if raw.strip() else {}
+          except Exception:
+              raise SystemExit("a3 response was not JSON")
+          status = str(payload.get("status") or payload.get("ok") or "")
+          print("a3_status=" + status)
+          details = payload.get("details") or payload.get("result") or payload
+          print("a3_details=" + json.dumps(details, sort_keys=True)[:1500])
+          PY
           test "$code" -eq 200
-          jq '{ok,results:[.results[]|{name,path,status,ok,classifying,message}]}' /tmp/result.json
-          jq -e '.ok==true and ([.results[]|select(.ok!=true)]|length)==0' /tmp/result.json >/dev/null
-
-      - name: Delete temporary bridge
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/delete.json || true
-
-      - name: Verify production Worker unchanged
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          BEFORE=$(cat /tmp/active-before.txt)
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
-          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
-          echo "production_unchanged=$([[ "$BEFORE" == "$AFTER" ]] && echo true || echo false)"
-          test "$BEFORE" = "$AFTER"
+          # Foreground classify returns status=ok; a concurrent Studio classify-all
+          # returns skipped/already_running and queues the Speakeasy id.
+          jq -e '
+            (.status=="ok" or .status=="skipped")
+            and (
+              (.details.already_running==true)
+              or (.details.classified_count // 0) >= 0
+              or (.details.processed==true)
+              or (.message|tostring|length) > 0
+            )
+          ' /tmp/a3.json >/dev/null
