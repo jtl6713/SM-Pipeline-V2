@@ -789,3 +789,5 @@ Deploy 2026-11-14 Studio UI 0.6.942-factory-global-profile-flush. Factory multi-
 Deploy 2026-11-14 Studio UI 0.6.943 Engagement unified table from PR #1980 (merge 7521758e). Trigger controlled Cloudflare Pages production workflow; verify custom-domain UI release contract and mobile Engagement rows.
 
 Deploy 2026-11-14 Studio UI 0.6.944 Engagement manila file-folder tabs from PR #1982 (merge c13aa033). Trigger controlled Cloudflare Pages production workflow; verify custom-domain release and mobile folder navigation.
+
+Deploy 2026-11-14 Studio UI 0.6.945 Factory approval overall and per-batch progress from PR #1984 (merge 80facd0c). Trigger controlled Cloudflare Pages production workflow; verify custom-domain release version and progress layout.
