@@ -423,7 +423,7 @@ test("place review service never exposes an automated publish path", () => {
   assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
   assert.match(worker, /\/api\/engagement\/place-reviews/);
   assert.match(worker, /studio_place_reviews_v1/);
-  assert.match(worker, /0\.10\.944-place-reviews-discovery/);
+  assert.match(worker, /0\.10\.945-place-reviews-output-title/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.
@@ -443,6 +443,8 @@ test("place review discovery matches profile in JS and surfaces located Publishe
   assert.match(service, /Do NOT put Content_Profile FIND in the Airtable formula/);
   assert.match(service, /recordMatchesContentProfile/);
   assert.match(service, /matched_profile_outputs/);
+  assert.match(service, /"Output_Title"/);
+  assert.doesNotMatch(service, /fields:\s*\[[^\]]*"Content_Title"/s);
   assert.doesNotMatch(
     service,
     /const formula = `AND\(\{Test_Run_ID\}=BLANK\(\),\{Platform\}="TikTok".*\$\{profileFormula\}/
@@ -479,7 +481,7 @@ test("place review discovery matches profile in JS and surfaces located Publishe
             Content_Item: ["recContentChi"],
             // Lookup fields often return display names, not rec ids.
             Content_Profile: ["ChicagoShining - Chicago"],
-            Content_Title: "Dim Sum Starter Tour",
+            Output_Title: "Dim Sum Starter Tour",
           },
         },
         {
@@ -500,6 +502,7 @@ test("place review discovery matches profile in JS and surfaces located Publishe
             Platform_Post_URL: "https://www.tiktok.com/@x/video/1",
             Content_Item: ["recContentChi2"],
             Content_Profile: ["ChicagoShining - Chicago"],
+            Output_Title: "Lakefront Trail Etiquette",
           },
         },
       ];
