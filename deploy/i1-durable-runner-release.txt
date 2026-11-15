@@ -82,4 +82,4 @@ Deploy 2026-11-14 runner 2026-11-14-tiktok-handoff-claim-v1: TikTok TTD2 replay 
 
 Deploy 2026-11-14 runner 2026-11-14-zcloseout-r2-publish: R2 classified video/music views prefer Supabase with eligibility densify. Verify /health version 2026-11-14-zcloseout-r2-publish.
 
-Deploy 2026-11-15 runner 2026-11-15-zcloseout-get-miss: FALLBACK_STOPPED SoR GET miss skips Airtable archive (Worker 0.10.948 parity). Egress logs+hourly include table_kind. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-get-miss.
+Deploy 2026-11-15 runner 2026-11-15-zcloseout-get-miss: FALLBACK_STOPPED SoR GET miss skips Airtable archive (Worker 0.10.948 parity). Egress logs+hourly include table_kind. Ready queue lists no longer require a 5000-row Airtable depth probe. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-get-miss.

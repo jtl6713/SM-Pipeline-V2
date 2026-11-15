@@ -1,5 +1,25 @@
 from item4.constants import SMV1_PENDING_CROP_FORMULA, SMV1_PRODUCTION_FORMULA
-from queue_reads import queue_formula_filter
+from queue_reads import queue_formula_filter, try_list_queue_records
+
+
+def test_ready_lists_do_not_require_airtable_depth_probe(monkeypatch):
+    """Phase6 SoR Ready selectors must not fall through for a short Ready copy."""
+    seen = []
+
+    def fake_rest(settings, path, method):
+        seen.append(path)
+        assert "offset=4999" not in path
+        return [{"airtable_record_id": "recQ1", "status": "Ready", "payload": {}}]
+
+    monkeypatch.setattr("queue_reads._rest", fake_rest)
+    rows = try_list_queue_records(
+        {"studio_phase6_write_source": "supabase", "supabase_url": "https://example.supabase.co", "supabase_service_role_key": "x"},
+        formula='AND({Test_Run_ID}=BLANK(),{Transfer_Status}="Ready")',
+        max_records=5,
+    )
+    assert rows is not None
+    assert rows[0]["id"] == "recQ1"
+    assert not any("offset=4999" in p for p in seen)
 
 
 def test_crop_and_variant_selectors_translate():

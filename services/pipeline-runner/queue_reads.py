@@ -2,9 +2,9 @@
 
 Attempt_Count and Last_Attempt_At are stored columns. The SMV1 selectors
 translate when every clause is a status, kind, preview, test-run, request,
-source, or aspect comparison. Anything else stays on Airtable. An empty
-Supabase page stays on Airtable because the queue copy is still short of
-the Airtable total. Record deletion is not started.
+source, or aspect comparison. Anything else stays on Airtable. Under Phase6
+SoR an empty Supabase page is the answer (no Airtable Ready-depth probe).
+Record deletion is not started.
 """
 
 from __future__ import annotations
@@ -194,23 +194,12 @@ def _shape(row: dict) -> dict | None:
 def try_list_queue_records(settings: dict | None, *, formula: str | None, max_records: int) -> list[dict] | None:
     if studio_phase6_write_source(settings) != "supabase":
         return None
-    tight = _tighten(str(formula or ""))
     translated = queue_formula_filter(formula)
     if not translated:
         return None
-    if '{Transfer_Status}="Ready"' in tight or "{Transfer_Status}='Ready'" in tight:
-        # A short Ready copy would hide rows. Stay on Airtable until the backfill
-        # has at least 5000 Ready rows.
-        try:
-            probe = _rest(
-                settings or {},
-                "studio_media_transfer_queue?select=airtable_record_id&status=eq.Ready&limit=1&offset=4999",
-                "GET",
-            )
-        except Exception:
-            return None
-        if not isinstance(probe, list) or not probe:
-            return None
+    # Ready lists use Supabase under Phase6 SoR. Do not probe Airtable depth —
+    # an empty/short Ready copy is the answer (FALLBACK_STOPPED parity with
+    # Worker queue reads). The old offset=4999 gate forced Airtable forever.
     limit = max(1, min(int(max_records or 10), 100))
     safe = "(),.=*_->>"
     path = (
