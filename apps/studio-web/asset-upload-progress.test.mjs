@@ -197,7 +197,9 @@ test("classification polling cannot overwrite an unresolved upload failure", () 
   let message="Upload confirmation timed out";
   const panel={dataset:{state:"partial"}};
   const context=vm.createContext({$:()=>panel,libraryUploadMessageBusy:()=>false,
-    setLibraryUploadMessage:value=>{message=value;},libraryClassifyWatch:{total:1},
+    setLibraryUploadMessage:value=>{message=value;},
+    libraryClassifyWatch:{total:1,startedAt:Date.now()},
+    libraryClassifyWatchIsFresh:()=>true,
     clearLibraryClassificationWatch:()=>{}});
   vm.runInContext(source.slice(start,end),context);
   context.syncLibraryClassifyStatusMessage(1);
@@ -205,4 +207,24 @@ test("classification polling cannot overwrite an unresolved upload failure", () 
   panel.dataset.state="complete";
   context.syncLibraryClassifyStatusMessage(1);
   assert.equal(message,"Classifying 1 of 1 remaining.");
+});
+test("classification watch expires after one minute without overwriting upload failures", () => {
+  const start=source.indexOf("function syncLibraryClassifyStatusMessage(");
+  const end=source.indexOf("function libraryPreviewUrl(",start);
+  let message="Upload confirmation timed out";
+  let cleared=false;
+  const panel={dataset:{state:"partial"}};
+  const context=vm.createContext({$:()=>panel,libraryUploadMessageBusy:()=>false,
+    setLibraryUploadMessage:(value,kind)=>{message=value; panel.dataset.lastKind=kind||"";},
+    libraryClassifyWatch:{total:1,startedAt:0},
+    libraryClassifyWatchIsFresh:()=>false,
+    clearLibraryClassificationWatch:()=>{cleared=true;}});
+  vm.runInContext(source.slice(start,end),context);
+  context.syncLibraryClassifyStatusMessage(1);
+  assert.equal(message,"Upload confirmation timed out");
+  assert.equal(cleared,false);
+  panel.dataset.state="complete";
+  context.syncLibraryClassifyStatusMessage(1);
+  assert.match(message,/Classification is taking too long/);
+  assert.equal(cleared,true);
 });
