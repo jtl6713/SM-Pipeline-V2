@@ -136,7 +136,11 @@ def process_request(
     status = draft_status_from(body).upper()
     result["http_status"] = status_code
     result["tiktok_status"] = status
-    token = hash_completion_token(completion_token_material(record_id, publish_id))
+    # Completion links are output-scoped bearer credentials. Re-polling must
+    # not revoke the link already delivered by TTD3 (whose email is deduplicated).
+    token = field_str(output, "TikTok_Manual_Completion_Token") or hash_completion_token(
+        completion_token_material(record_id, publish_id)
+    )
     form_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
     public_ids = public_post_ids_from(body)
 

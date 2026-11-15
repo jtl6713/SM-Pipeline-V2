@@ -16,3 +16,50 @@ def test_ttd1_rearms_receipt_only_for_new_publish_id():
     source = (ROOT / "ttd1.py").read_text()
     assert '"TikTok_Draft_Publish_ID": publish_id' in source
     assert '"TikTok_Draft_Email_Sent_At": None' in source
+
+
+import pytest
+from ttd import ttd2
+from ttd.eligibility import ttd4_form_eligibility_reason
+
+
+@pytest.mark.parametrize("provider_status", ["SEND_TO_USER_INBOX", "PUBLISH_COMPLETE"])
+@pytest.mark.parametrize("existing_token", ["emailed-token", ""])
+def test_repeated_poll_keeps_completion_link_valid(monkeypatch, provider_status, existing_token):
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "TikTok_Draft_Publish_ID": "draft-123",
+        "TikTok_Draft_Type": "Video",
+        "TikTok_Manual_Completion_Token": existing_token,
+        "TikTok_Draft_Email_Sent_At": "2026-11-15T12:00:00Z",
+    }}
+    class Client:
+        def get_record(self, *args):
+            return record
+        def update_record(self, table, record_id, fields):
+            record["fields"].update(fields)
+    class Settings:
+        def __init__(self, client):
+            pass
+        def get(self, key):
+            return "https://example.com/hooks/ttd4" if key == "TTD4_WEBHOOK_URL" else None
+    class TikTok:
+        def __init__(self, **kwargs):
+            pass
+        def draft_status(self, publish_id):
+            return 200, {}
+    monkeypatch.setattr(ttd2, "AirtableClient", Client)
+    monkeypatch.setattr(ttd2, "PipelineSettings", Settings)
+    monkeypatch.setattr(ttd2, "TikTokDraftClient", TikTok)
+    monkeypatch.setattr(ttd2, "ttd2_eligibility_reason", lambda *a, **k: None)
+    monkeypatch.setattr(ttd2, "load_tiktok_settings", lambda *a, **k: {"url": "", "secret": ""})
+    monkeypatch.setattr(ttd2, "draft_status_from", lambda body: provider_status)
+    monkeypatch.setattr(ttd2, "public_post_ids_from", lambda body: [])
+    ttd2.process_request(output_record_id=record["id"])
+    token = record["fields"]["TikTok_Manual_Completion_Token"]
+    url = record["fields"]["TikTok_Manual_Completion_URL"]
+    assert token and (not existing_token or token == existing_token)
+    ttd2.process_request(output_record_id=record["id"])
+    assert record["fields"]["TikTok_Manual_Completion_URL"] == url
+    assert ttd4_form_eligibility_reason(record, token=token) is None
+    assert ttd4_form_eligibility_reason(record, token="wrong-token") == "token_mismatch"
+    assert record["fields"]["TikTok_Draft_Email_Sent_At"] == "2026-11-15T12:00:00Z"
