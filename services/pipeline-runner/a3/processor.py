@@ -114,6 +114,20 @@ def attach_content_profile(client: AirtableClient, record: dict[str, Any]) -> di
 
 def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
     if not content_profile_id(record):
+        # Upload stamps Processing before A3 runs. Leaving that status parks the
+        # Asset Manager "Classifying" badge forever when the profile is missing.
+        try:
+            client.update_record(
+                MEDIA_ASSETS_TABLE,
+                record["id"],
+                {
+                    "Classification_Status": "Needs Classification",
+                    "Potential_Match_Notes": "A3 skipped: Content_Profile is required before classification.",
+                },
+                typecast=True,
+            )
+        except Exception:
+            pass
         return {
             "id": record["id"],
             "status": "skipped_no_profile",
@@ -273,6 +287,20 @@ def process_request(
                 rows.append(client.get_record(MEDIA_ASSETS_TABLE, record_id))
             except Exception as exc:
                 classified.append({"id": record_id, "status": "missing", "error": str(exc)})
+                # Targeted Studio uploads stamp Processing before the pulse. A miss
+                # must not leave the card stuck on Classifying.
+                try:
+                    client.update_record(
+                        MEDIA_ASSETS_TABLE,
+                        record_id,
+                        {
+                            "Classification_Status": "Classification Error",
+                            "Potential_Match_Notes": f"A3 could not load asset: {exc}"[:1500],
+                        },
+                        typecast=True,
+                    )
+                except Exception:
+                    pass
         preview["candidate_ids"] = [row["id"] for row in rows]
         preview["requested_ids"] = targeted
         preview["routes"] = [

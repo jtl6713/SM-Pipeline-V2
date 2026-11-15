@@ -807,6 +807,7 @@ import {
   storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
   classifyAllLibraryAssets,
+  studioHealStaleLibraryClassification,
   renameAssetLibraryItem,
   deleteAssetLibraryItem,
   patchAssetLibraryDuration,
@@ -1392,7 +1393,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.960-edit-classification-description",
+          version: "0.10.961-library-classify-timeout",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4865,6 +4866,12 @@ export default {
       } catch (error) {
         console.warn("shared-render strand heal failed", error);
       }
+      // Asset Manager Classifying badge must not park beyond ~60s for a still.
+      try {
+        await studioHealStaleLibraryClassification(env, { limit: 5 });
+      } catch (error) {
+        console.warn("stale library classification heal failed", error);
+      }
       // On heavy ticks only, examine bounded canonical pre-Factory candidates.
       // Do not regenerate assets or approve: this repairs a stale In Production
       // status only after complete review deliverables and safe Airtable readback.
@@ -7592,6 +7599,7 @@ const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIB
 // Needs Classification / Classification Error goes to A3 in one background run.
 /*__STUDIO_WORKER_EXTRACT:classifyAllLibraryAssets__*/
 /*__STUDIO_WORKER_EXTRACT:pulseLibraryAssetClassification__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealStaleLibraryClassification__*/
 /*__STUDIO_WORKER_EXTRACT:manualLibraryClassificationRoute__*/
 /*__STUDIO_WORKER_EXTRACT:renameAssetLibraryItem__*/
 /*__STUDIO_WORKER_EXTRACT:deleteAssetLibraryItem__*/

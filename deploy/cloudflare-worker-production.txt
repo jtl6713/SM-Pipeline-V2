@@ -1298,3 +1298,4 @@ Deploy 2026-11-15 Worker 0.10.958-shared-render-supabase retry: prior production
 
 Deploy 2026-11-15 Worker 0.10.959-story-strand-heal: shared-render heal covers Story strands; native RFR no longer paints Preparing Assets without formal caption.
 Deploy 2026-11-15 Worker 0.10.960-edit-classification-description: Manual classification PATCH can persist Asset_Description edits.
+Deploy 2026-11-15 Worker 0.10.961-library-classify-timeout: heal stale Processing library assets; small uploads classify inline.
