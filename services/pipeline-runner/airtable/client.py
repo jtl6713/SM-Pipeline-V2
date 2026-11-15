@@ -22,9 +22,26 @@ class AirtableClient:
         }
         self._api_root = "https://api.airtable.com/v0"
 
+    def _archive_closed(self) -> bool:
+        """Quiet-window closeout: never hit Airtable when write SoR is supabase."""
+        from supabase_pipeline import studio_write_source, supabase_configured
+
+        return (
+            studio_write_source(self._settings) == "supabase"
+            and supabase_configured(self._settings)
+        )
+
     def _request(self, method: str, url: str, *, table_id: str, **kwargs):
         """Use the verb-specific requests API; runner-wide Session.send records egress."""
         import requests
+
+        if self._archive_closed():
+            # Belt-and-suspenders: no Airtable HTTP under write SoR, even if a
+            # caller forgot the soft miss path. Egress monitor must stay at zero.
+            raise RuntimeError(
+                f"Airtable archive closed under STUDIO_WRITE_SOURCE=supabase "
+                f"({str(method or '').upper()} {table_id})"
+            )
         return getattr(requests, method.lower())(url, **kwargs)
 
     def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
@@ -88,6 +105,19 @@ class AirtableClient:
             raise err from None
         if supabase_row is not None:
             return supabase_row
+
+        if self._archive_closed():
+            logger.info(
+                "supabase SoR record miss; skipping Airtable archive GET %s %s",
+                table_id,
+                record_id,
+            )
+            err = requests.HTTPError(
+                f"404 Client Error: Not Found for url: "
+                f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
+            )
+            err.response = type("R", (), {"status_code": 404, "reason": "Not Found", "ok": False})()
+            raise err
 
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
         response = self._request("GET", url, table_id=table_id, headers=self._headers, timeout=60)
@@ -165,6 +195,13 @@ class AirtableClient:
                     record_id,
                 )
                 return pending
+        if self._archive_closed():
+            logger.info(
+                "supabase SoR mutation miss; skipping Airtable archive WRITE %s %s",
+                table_id,
+                record_id,
+            )
+            return {"id": record_id, "fields": fields}
         record = self._patch_record(table_id, record_id, fields, typecast=typecast)
         self._mirror(table_id, [record])
         return record
@@ -207,6 +244,13 @@ class AirtableClient:
         if supabase_rows is not None:
             return supabase_rows
 
+        if self._archive_closed():
+            logger.info(
+                "supabase SoR list miss; skipping Airtable archive GET %s",
+                table_id,
+            )
+            return []
+
         params: dict = {"maxRecords": max_records}
         if formula:
             params["filterByFormula"] = formula
@@ -238,6 +282,13 @@ class AirtableClient:
     def delete_record(self, table_id: str, record_id: str) -> dict[str, Any]:
         import requests
 
+        if self._archive_closed():
+            logger.info(
+                "supabase SoR mutation miss; skipping Airtable archive DELETE %s %s",
+                table_id,
+                record_id,
+            )
+            return {"id": record_id, "deleted": True}
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
         response = self._request("DELETE", url, table_id=table_id, headers=self._headers, timeout=60)
         response.raise_for_status()
@@ -281,6 +332,17 @@ class AirtableClient:
             if committed:
                 logger.info("Airtable archive kept the Supabase create and did not export %s", table_id)
                 created.extend(minted)
+                continue
+            if self._archive_closed():
+                logger.info(
+                    "supabase SoR create miss; skipping Airtable archive POST %s",
+                    table_id,
+                )
+                if minted:
+                    created.extend(minted)
+                else:
+                    created.extend({"id": f"recArchiveClosed{i:07d}", "fields": dict(item)}
+                                   for i, item in enumerate(chunk))
                 continue
             body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
             if typecast:
@@ -403,6 +465,16 @@ class AirtableClient:
                         for item in chunk
                     )
                     continue
+            if self._archive_closed():
+                logger.info(
+                    "supabase SoR batch mutation miss; skipping Airtable archive WRITE %s",
+                    table_id,
+                )
+                updated.extend(
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                )
+                continue
             if typecast:
                 body["typecast"] = True
             response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
@@ -449,6 +521,12 @@ class AirtableClient:
         key = str(fields.get(merge_field) or "").strip()
         if not key:
             raise ValueError(f"{merge_field} must be set for atomic upsert")
+        if self._archive_closed():
+            logger.info(
+                "supabase SoR upsert miss; skipping Airtable archive WRITE %s",
+                table_id,
+            )
+            return {"id": f"recArchiveClosedUpsert", "fields": fields}, True
         url = f"{self._api_root}/{self._base_id}/{table_id}"
         body = {
             "records": [{"fields": fields}],

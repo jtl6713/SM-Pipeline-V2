@@ -23,9 +23,24 @@ def test_default_output_list_stays_on_airtable(monkeypatch):
 
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
-    rows = _client(studio_write_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE, max_records=5)
+    # Write SoR still airtable → archive open; default runner output read is Airtable.
+    rows = _client().list_records(PLATFORM_OUTPUTS_TABLE, max_records=5)
     assert rows[0]["id"] == "recOutput1"
     assert airtable
+
+
+def test_write_sor_closes_output_list_without_read_flag(monkeypatch):
+    """STUDIO_WRITE_SOURCE=supabase freezes the archive even without read flags."""
+
+    def fake_get(*_a, **_k):
+        raise AssertionError("airtable list")
+
+    def fake_request(*_a, **_k):
+        raise AssertionError("unexpected supabase")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    assert _client(studio_write_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE) == []
 
 
 def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
@@ -149,6 +164,7 @@ def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
 
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
+    # Archive still open (write SoR airtable); untranslated view falls through.
     client = _client(studio_runner_output_read_source="supabase")
     find_rows = client.list_records(
         PLATFORM_OUTPUTS_TABLE,
@@ -160,6 +176,29 @@ def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
     assert "publish_next_retry_at.lt." in supabase[0]
     assert view_rows[0]["fields"]["Platform"] == "TikTok"
     assert airtable == ["Ready Queue"]
+
+
+def test_unsupported_view_empty_when_fallback_stopped(monkeypatch):
+    """FALLBACK_STOPPED + untranslated view → [] (no Airtable), matching Worker nuke."""
+
+    def fake_get(*_a, **_k):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        return Response([{
+            "airtable_record_id": "recRetry1",
+            "platform": "TikTok",
+            "publish_next_retry_at": "2020-01-01T00:00:00Z",
+            "error_messages": {"_runner_record_projection": "v1"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    client = _client(
+        studio_write_source="supabase",
+        studio_runner_output_read_source="supabase",
+    )
+    assert client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue") == []
 
 
 def test_snapshotted_view_reads_supabase(monkeypatch):
@@ -631,3 +670,24 @@ def test_carousel_slide_patch_skips_airtable_archive(monkeypatch):
     assert body["airtable_record_id"] == "recSlidePatch1"
     assert body["fields"]["C3 Review Email Sent At"] == "2026-11-15T10:00:00Z"
     assert body["fields"]["PO_Output_ID"] == [1]
+
+
+def test_write_sor_archive_closed_blocks_any_airtable_http(monkeypatch):
+    """Nuclear quiet-window gate: write SoR means zero Airtable HTTP."""
+    from airtable.constants import MEDIA_ASSETS_TABLE
+
+    def boom(*_a, **_k):
+        raise AssertionError("airtable http")
+
+    monkeypatch.setattr(requests, "get", boom)
+    monkeypatch.setattr(requests, "patch", boom)
+    monkeypatch.setattr(requests, "post", boom)
+    monkeypatch.setattr(requests, "delete", boom)
+    monkeypatch.setattr(requests, "request", boom)
+
+    client = _client(studio_write_source="supabase", studio_phase6_write_source="supabase")
+    # Untranslated media formula used to fall through to Airtable.
+    assert client.list_records(MEDIA_ASSETS_TABLE, formula='{Bogus_Field}="x"') == []
+    assert client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True}) == {
+        "id": "recMediaNuke00001", "fields": {"Active": True},
+    }

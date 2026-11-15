@@ -195,18 +195,25 @@ def try_list_supabase_records(
     # lock gates the same way. An unknown Airtable view name must not force
     # Airtable when that formula translates.
     view_filter = ""
+    archive_closed = (
+        table_id in FALLBACK_STOPPED_TABLES
+        and studio_write_source(settings) == "supabase"
+    )
     if view:
         view_filter = view_to_postgrest_filter(table_id, view)
         if view_filter is None:
             if table_id in {CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE} and formula:
                 view_filter = ""
             else:
-                return None
+                # Untranslated view under write SoR: empty answer (no Airtable).
+                return [] if archive_closed else None
     formula_filter = None
     if formula:
         formula_filter = formula_to_postgrest_filter(table_id, formula)
         if formula_filter is None:
-            return None
+            # Untranslated formula was the drip that kept GET:media alive after
+            # FALLBACK_STOPPED. Under write SoR the empty list is the answer.
+            return [] if archive_closed else None
     if view_filter and formula_filter:
         from supabase_formula import _join_filters
 
