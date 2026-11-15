@@ -49,6 +49,12 @@ def queued_candidates(client: Any, *, limit: int = 3) -> list[dict]:
     """Read at most three queued review Jobs. Never scan the ordinary R4 queue."""
     if type(limit) is not int or limit < 1 or limit > 3:
         _deny("review_claim_scan_limit_invalid")
+    from supabase_pipeline import studio_write_source, supabase_configured
+
+    settings = getattr(client, "_settings", None)
+    if studio_write_source(settings) == "supabase" and supabase_configured(settings):
+        # Quiet-window closeout: do not poll the frozen Airtable Jobs archive.
+        return []
     rows = client.list_records(
         REVIEW_JOBS, formula='{Job_State}="queued"',
         max_records=limit, fields=FIELDS,

@@ -60,6 +60,18 @@ class DispatchTest(unittest.TestCase):
     def test_disabled_without_explicit_two_flags(self):
         with patch.dict(os.environ, {"RENDERING_REVIEW_AUTO_DISPATCH_ENABLED": "false"}):
             self.assertEqual(d.sweep_once()["status"], "disabled")
+
+    def test_supabase_write_sor_skips_airtable_job_poll(self):
+        client = Airtable(candidate())
+        client._settings = {
+            "studio_write_source": "supabase",
+            "supabase_url": "https://example.supabase.co",
+            "supabase_service_role_key": "secret",
+        }
+        out = d.sweep_once(client=client, now=self.now)
+        self.assertEqual(out["status"], "airtable_archive_closed")
+        self.assertFalse(out["dispatched"])
+        self.assertEqual(client.reads, [])
     def test_guard_rejects_young_claimed_attempted_and_ambiguous_rows(self):
         for row in [
             candidate(minutes=1),

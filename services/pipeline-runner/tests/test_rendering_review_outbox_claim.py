@@ -60,6 +60,16 @@ class OutboxClaimTests(unittest.TestCase):
         with self.assertRaisesRegex(ReviewOutboxClaimDenied, "scan_limit"):
             queued_candidates(db, limit=30)
 
+    def test_supabase_write_sor_skips_airtable_queued_poll(self):
+        db = Airtable()
+        db._settings = {
+            "studio_write_source": "supabase",
+            "supabase_url": "https://example.supabase.co",
+            "supabase_service_role_key": "secret",
+        }
+        self.assertEqual(queued_candidates(db), [])
+        self.assertEqual(db.calls, [])
+
     def test_exact_one_claim_and_deterministic_request_id(self):
         calls = []
         def send(url, body, headers, timeout):

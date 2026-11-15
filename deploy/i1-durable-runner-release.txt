@@ -89,3 +89,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-settings-get: Pipeline Settings si
 Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATCH/POST commit to Supabase under STUDIO_WRITE_SOURCE=supabase and skip Airtable archive export (kills ~54/hr slides PATCH). FALLBACK_STOPPED includes slides. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-slides-patch.
 
 2026-11-15: Runner 2026-11-15-zcloseout-ref-cache — seed org/brand/market/vertical/persona/production/prompt GETs off Airtable; expand table_kind for reference + review tables.
+
+2026-11-15: Runner 2026-11-15-zcloseout-review-poll — stop 30s Rendering Review Jobs Airtable poll under STUDIO_WRITE_SOURCE=supabase (quiet closeout).
