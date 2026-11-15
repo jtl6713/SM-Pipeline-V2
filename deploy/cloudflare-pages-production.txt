@@ -793,3 +793,5 @@ Deploy 2026-11-14 Studio UI 0.6.944 Engagement manila file-folder tabs from PR #
 Deploy 2026-11-14 Studio UI 0.6.945 Factory approval overall and per-batch progress from PR #1984 (merge 80facd0c). Trigger controlled Cloudflare Pages production workflow; verify custom-domain release version and progress layout.
 
 Deploy 2026-11-14 Studio UI 0.6.946 Factory stuck selection recovery (Clear drops poisoned recovery + RFR accepted fence) from cursor/factory-stuck-selection-recovery-08eb. Trigger controlled Cloudflare Pages production workflow; verify custom-domain release and Submit Approvals for remaining Tribune RFR rows.
+
+Deploy 2026-11-15 UI 0.6.947-ai-footer-contrast: raise AI API footer standby/current contrast on navy (OpenAI Standby readable).
