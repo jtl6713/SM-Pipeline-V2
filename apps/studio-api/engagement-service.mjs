@@ -947,7 +947,8 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
         "Platform_Post_URL",
         "Content_Item",
         "Content_Profile",
-        "Content_Title",
+        // Platform Outputs uses Output_Title (lookup Content_Title is not a field).
+        "Output_Title",
         "Thumbnail_URL",
         "Studio_Preview_URL",
         "Do_Not_Publish",
@@ -997,7 +998,7 @@ export async function studioCollectVisitedPlacesForProfile(env, profile, deps) {
       neighborhood: neighborhood && neighborhood !== placeName ? neighborhood : "",
       content_title: String(
         fieldValue(content, "Content_Title")
-        || fieldValue(output, "Content_Title")
+        || fieldValue(output, "Output_Title")
         || ""
       ).trim(),
       content_item_id: contentId,
