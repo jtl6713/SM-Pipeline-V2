@@ -101,11 +101,16 @@ test("a finished file alone or stale Review Sent cannot advertise formal review"
     video({ Output_Status: "Ready for Review", Thumbnail_URL: "" }),
     video({ Output_Status: "Ready for Review", Render_Status: "Waiting in Render Queue" }),
     video({ Output_Status: "Ready for Review", Test_Run_ID: "test-123" }),
-    native({ Output_Status: "Ready for Review", Output_Caption: "" }),
   ]) {
     assert.equal(formalFactoryApprovalReady(row), false, String(row.fields.Output_Status));
     assert.notEqual(normalize(row), "Ready for Review", JSON.stringify(row.fields));
   }
+  // Native Photo Route with public CDN preview may paint Pipeline Ready for Review
+  // so Rendering does not park on Preparing Assets (Content 1938). Approve still
+  // requires formalFactoryApprovalReady (caption + full package).
+  const nativeBlankCaption = native({ Output_Status: "Ready for Review", Output_Caption: "" });
+  assert.equal(formalFactoryApprovalReady(nativeBlankCaption), false);
+  assert.equal(normalize(nativeBlankCaption), "Ready for Review");
 });
 test("held or returned review does not appear as Pipeline Ready for Review; held outputs remain discoverable for explicit operator release", () => {
   for (const held of [
