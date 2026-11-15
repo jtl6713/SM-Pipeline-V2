@@ -1,3 +1,5 @@
 2026-11-15: Re-pulse A3 for Chicago Speakeasy 1 recEaYEwG1EGgLAmm after stale Processing hang.
 
 2026-11-15: Re-pulse Chicago Speakeasy 1 with ChicagoShining profile after A3 Content_Profile Supabase shape fix.
+
+2026-11-15: Pulse Speakeasy via runner A3 directly (skip Chicago watermark bridge timeout).
