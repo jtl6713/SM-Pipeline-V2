@@ -2359,6 +2359,22 @@ export function normalizedOutputState(record) {
       return "Waiting in Render Queue";
     }
     if (has("Render_Status", "rendering")) return "Rendering";
+    // Native Photo Route + Ready for Review with a public preview must not fall
+    // through to Preparing Assets / Pipeline Rendering (Content 1938 Carousel
+    // 9850 when Output_Caption was briefly blank). Factory still uses
+    // formalFactoryApprovalReady for the Approve gate.
+    if (
+      has("Render_Status", "native photo route")
+      && (
+        studioOutputHasReviewableDeliverable(record)
+        || (
+          Number(f(record, "Selected_Clip_Count") || 0) > 0
+          && Boolean(studioClipPublicCdnUrl(f(record, "Studio_Preview_URL")))
+        )
+      )
+    ) {
+      return "Ready for Review";
+    }
     return "Preparing Assets";
   }
   if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
@@ -12895,7 +12911,7 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
     limit: Math.max(limit * 4, 40),
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Output_Status}="In Production",{Output_Status}="Rendering"),{Final_File_URL}="",OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Output_Status}="In Production",{Output_Status}="Rendering"),{Final_File_URL}="",OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft",{Studio_Output_Type}="Story"))',
   }).catch(() => []);
   const healed = [];
   const sourceCache = new Map();
@@ -12914,18 +12930,31 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
         sortField: "Output_ID",
         sortDirection: "asc",
         contentAirtableId: contentId,
-        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
+        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft",{Studio_Output_Type}="Story"))`,
       }).catch(() => []);
       sourceCache.set(contentId, sources || []);
     }
+    const destIsStory = /^story$/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim());
     const source = (sources || []).find((row) => {
       if (row.id === record.id) return false;
       const type = String(f(row, "Studio_Output_Type") || f(row, "Output_Type") || "").trim();
-      if (!["Reel", "Short", "Video Draft"].includes(type)) return false;
+      if (destIsStory) {
+        if (!["Story", "Reel", "Short", "Video Draft"].includes(type)) return false;
+      } else if (!["Reel", "Short", "Video Draft"].includes(type)) {
+        return false;
+      }
       return Boolean(String(f(row, "Final_File_URL") || "").trim());
     });
     if (!source) continue;
-    const fields = sharedRenderPropagateFields(source, f);
+    // Prefer a finished Story source for Story destinations when both exist.
+    const preferred = destIsStory
+      ? (sources || []).find((row) => (
+        row.id !== record.id
+        && /^story$/i.test(String(f(row, "Studio_Output_Type") || "").trim())
+        && Boolean(String(f(row, "Final_File_URL") || "").trim())
+      )) || source
+      : source;
+    const fields = sharedRenderPropagateFields(preferred, f, record);
     if (!fields) continue;
     try {
       await airtableFetch(env, outputTable, record.id, {
