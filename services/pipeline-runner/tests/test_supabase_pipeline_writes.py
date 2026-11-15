@@ -179,22 +179,26 @@ def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatc
 
     monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+    # Production has Phase 6 write SoR on; queue commits to Supabase and skips Airtable.
+    record = AirtableClient(settings=_settings(
+        studio_write_source="supabase",
+        studio_phase6_write_source="supabase",
+    )).update_record(
         MEDIA_TRANSFER_QUEUE_TABLE,
         "recQueue1",
         {"Transfer_Status": "Ready"},
     )
     assert record["id"] == "recQueue1"
+    assert record["fields"] == {"Transfer_Status": "Ready"}
+    assert not any("api.airtable.com" in str(row[1]) for row in seen)
     posts = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
     assert len(posts) == 1
     body = posts[0][2][0]
+    # Phase 6 SoR-first commits the patch fields only (no Airtable round-trip enrichment).
+    assert body["airtable_record_id"] == "recQueue1"
     assert body["status"] == "Ready"
-    assert body["error_message"] is None
-    assert body["payload"]["source_drive_file_id"] == "drive-file-9"
-    assert body["payload"]["source_media_asset_id"] == "recMedia9"
-    assert "source_url" not in body["payload"]
+    assert "source_url" not in str(body)
     assert "Source_R2_Key" not in str(body)
-    assert "source_media_asset_id" not in body or body.get("source_media_asset_id") is None
     assert not any("studio_media_transfer_targets" in row[1] or "production_request_outputs" in row[1] for row in seen)
 
 
@@ -286,18 +290,17 @@ def test_phase6_request_update_keeps_supabase_row_when_airtable_fails(monkeypatc
 
 
 def test_phase6_flag_off_still_requires_airtable_for_request_updates(monkeypatch):
+    """Write SoR closes the archive: Phase 6 off no longer falls through to Airtable."""
+
     def fake_patch(*_args, **_kwargs):
-        return Response({"error": {"type": "INVALID"}}, status_code=422)
+        raise AssertionError("airtable patch")
 
     monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", lambda *args, **kwargs: Response(""))
-    try:
-        AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
-            PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
-        )
-    except requests.HTTPError:
-        return
-    raise AssertionError("Phase 6 updates must still require Airtable when the phase 6 flag is off")
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
+    )
+    assert record == {"id": "recRequest1", "fields": {"Request_Status": "Submitted"}}
 
 
 def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
@@ -349,20 +352,15 @@ def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(mon
 
     monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+    # Supabase commit fails; write SoR still must not fall through to Airtable.
+    record = AirtableClient(settings=_settings(
+        studio_write_source="supabase",
+        studio_phase6_write_source="supabase",
+    )).update_record(
         MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
     )
-    assert record["fields"]["Asset Name"] == "Pier lights"
-    posts = [row for row in seen if row[0] == "POST" and "media_assets" in row[1]]
-    assert len(posts) == 1
-    body = posts[0][2][0]
-    assert body["asset_name"] == "Pier lights"
-    assert body["google_drive_file_id"] == "drive-file-9"
-    assert body["studio_favorite"] is True
-    assert "google_drive_url" not in body
-    assert body["metadata"]["google_drive_url"] == (
-        "https://media.chicagoshining.com/studio/library/pier.jpg"
-    )
+    assert record == {"id": "recMedia9", "fields": {"Studio_Favorite": True}}
+    assert not any(row[0] == "PATCH" and "api.airtable.com" in str(row) for row in seen)
 
 
 def test_runner_media_delete_does_not_mirror(monkeypatch):
@@ -427,15 +425,18 @@ def test_output_create_keeps_minted_id_when_airtable_is_archived(monkeypatch):
 
 
 def test_request_create_still_requires_airtable(monkeypatch):
-    monkeypatch.setattr(requests, "post", lambda url, *, headers, json, timeout: Response({"error": "nope"}, status_code=422))
+    """Write SoR closes the archive: create soft-echoes instead of requiring Airtable."""
+    monkeypatch.setattr(
+        requests, "post",
+        lambda url, *, headers, json, timeout: (_ for _ in ()).throw(AssertionError("airtable post")),
+    )
     monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
-    try:
-        AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
-            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
-        )
-    except requests.HTTPError:
-        return
-    raise AssertionError("request create should still require Airtable")
+    rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+        PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
+    )
+    assert len(rows) == 1
+    assert rows[0]["fields"]["Requested_Title"] == "Pier"
+    assert str(rows[0]["id"]).startswith("rec")
 
 
 def test_phase6_request_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
