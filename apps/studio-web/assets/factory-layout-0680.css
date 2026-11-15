@@ -781,3 +781,36 @@
   white-space:normal;
   overflow-wrap:anywhere;
 }
+
+/* Factory approval activity: clear aggregate and individual progress on mobile. */
+#page-factory .factory-batch-overall-progress{
+  display:grid;gap:7px;margin:12px 0 18px;padding:12px 14px;
+  border:1px solid #c6d6e7;border-radius:12px;background:#f2f7fd;color:#173657;
+}
+#page-factory .factory-batch-overall-progress[hidden]{display:none}
+#page-factory .factory-batch-progress-label{
+  display:flex;justify-content:space-between;align-items:baseline;
+  flex-wrap:wrap;gap:4px 12px;font-size:.88rem;
+}
+#page-factory .factory-batch-overall-progress small{color:#465b73;font-size:.78rem}
+#page-factory .factory-batch-overall-progress progress,
+#page-factory .factory-batch-row-progress{
+  display:block;width:100%;height:14px;appearance:none;
+  border:0;border-radius:9px;overflow:hidden;background:#dbe5f0;
+  accent-color:#2866a7;
+}
+#page-factory .factory-batch-overall-progress progress::-webkit-progress-bar,
+#page-factory .factory-batch-row-progress::-webkit-progress-bar{background:#dbe5f0;border-radius:9px}
+#page-factory .factory-batch-overall-progress progress::-webkit-progress-value,
+#page-factory .factory-batch-row-progress::-webkit-progress-value{background:#2866a7;border-radius:9px}
+#page-factory .factory-batch-overall-progress progress::-moz-progress-bar,
+#page-factory .factory-batch-row-progress::-moz-progress-bar{background:#2866a7;border-radius:9px}
+#page-factory .factory-batch-activity-choice .factory-batch-progress-caption{
+  grid-area:progress;align-self:end;font-size:.77rem;font-weight:600;color:#375371;
+}
+#page-factory .factory-batch-activity-choice .factory-batch-row-progress{
+  grid-area:progress;margin-top:21px;height:11px;
+}
+@media(max-width:560px){
+  #page-factory .factory-batch-activity-choice .factory-batch-row-progress{margin-top:20px}
+}
