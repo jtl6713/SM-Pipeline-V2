@@ -3,8 +3,9 @@ import unittest
 from unittest.mock import patch
 
 import requests
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import BRANDS_TABLE, PLATFORM_OUTPUTS_TABLE
 from airtable.egress_monitor import install_airtable_egress_monitor, table_kind_from_airtable_url
+from settings_store import ENGAGEMENT_SETTINGS_TABLE
 
 
 class MonitorTests(unittest.TestCase):
@@ -41,6 +42,18 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(
             table_kind_from_airtable_url("https://api.airtable.com/v0/appe33zkZn35yirTL/tblUnknown"),
             "other",
+        )
+        self.assertEqual(
+            table_kind_from_airtable_url(
+                f"https://api.airtable.com/v0/appe33zkZn35yirTL/{BRANDS_TABLE}/recX"
+            ),
+            "brands",
+        )
+        self.assertEqual(
+            table_kind_from_airtable_url(
+                f"https://api.airtable.com/v0/appe33zkZn35yirTL/{ENGAGEMENT_SETTINGS_TABLE}"
+            ),
+            "engagement_settings",
         )
 
     def test_unrelated_request_does_not_count(self):

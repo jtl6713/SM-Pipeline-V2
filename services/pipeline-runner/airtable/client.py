@@ -62,6 +62,7 @@ class AirtableClient:
     def get_record(self, table_id: str, record_id: str) -> dict:
         import requests
 
+        from reference_cache import get_reference_record, reference_cache_enabled
         from settings_store import get_setting
         from supabase_reads import SupabaseRecordMiss, try_get_supabase_record
 
@@ -69,6 +70,12 @@ class AirtableClient:
             setting = get_setting(self._settings, table_id, record_id)
             if setting is not None:
                 return setting
+            cached = get_reference_record(self._settings, table_id, record_id)
+            if cached is not None:
+                return cached
+            if reference_cache_enabled(self._settings, table_id):
+                # Seed miss must not GET the frozen archive for reference tables.
+                raise SupabaseRecordMiss(table_id, record_id)
             supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
         except SupabaseRecordMiss:
             # Match Airtable's missing-record shape so stage callers keep their
@@ -175,7 +182,17 @@ class AirtableClient:
     ) -> list[dict[str, Any]]:
         import requests
 
+        from reference_cache import list_reference_records
         from supabase_reads import try_list_supabase_records
+
+        cached_rows = list_reference_records(
+            self._settings,
+            table_id,
+            view=view,
+            max_records=max_records,
+        )
+        if cached_rows is not None:
+            return cached_rows
 
         supabase_rows = try_list_supabase_records(
             self._settings,

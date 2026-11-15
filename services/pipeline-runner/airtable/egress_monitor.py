@@ -16,18 +16,29 @@ from urllib.parse import unquote, urlsplit
 import requests
 
 from airtable.constants import (
+    AI_PERSONAS_TABLE,
+    ASSET_REQUESTS_TABLE,
+    ASSET_REQUEST_SHOTS_TABLE,
+    BRANDS_TABLE,
     CAROUSEL_SLIDES_TABLE,
     CONTENT_ITEMS_TABLE,
     CONTENT_PROFILES_TABLE,
+    CONTENT_VERTICALS_TABLE,
     IDEA_BATCHES_TABLE,
     MAKE_ADMIN_QUEUE_TABLE,
+    MARKETS_TABLE,
     MEDIA_ASSETS_TABLE,
     MEDIA_TRANSFER_QUEUE_TABLE,
+    ORGANIZATIONS_TABLE,
     PIPELINE_SETTINGS_TABLE,
+    PLATFORM_OUTPUT_MAPPINGS_TABLE,
     PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_PROFILES_TABLE,
     PRODUCTION_REQUESTS_TABLE,
+    PROMPTS_TABLE,
     SOURCE_CANDIDATES_TABLE,
 )
+from settings_store import ENGAGEMENT_SETTINGS_TABLE
 
 logger = logging.getLogger("pipeline-runner.airtable.egress")
 
@@ -42,12 +53,29 @@ _TABLE_KIND_BY_ID = {
     SOURCE_CANDIDATES_TABLE: "ideas",
     CONTENT_PROFILES_TABLE: "profiles",
     PIPELINE_SETTINGS_TABLE: "settings",
+    ENGAGEMENT_SETTINGS_TABLE: "engagement_settings",
     IDEA_BATCHES_TABLE: "idea_batches",
     MAKE_ADMIN_QUEUE_TABLE: "make_admin",
+    ORGANIZATIONS_TABLE: "organizations",
+    BRANDS_TABLE: "brands",
+    MARKETS_TABLE: "markets",
+    CONTENT_VERTICALS_TABLE: "verticals",
+    AI_PERSONAS_TABLE: "personas",
+    PRODUCTION_PROFILES_TABLE: "production_profiles",
+    PLATFORM_OUTPUT_MAPPINGS_TABLE: "output_mappings",
+    PROMPTS_TABLE: "prompts",
+    ASSET_REQUESTS_TABLE: "asset_requests",
+    ASSET_REQUEST_SHOTS_TABLE: "asset_shots",
     "tblcDNIZs125iVi2B": "insights_observations",
     "tblb6LfRv7CemHHN6": "insights_learned",
     "tblhE7YHDnj2lxJPC": "engagement",
     "tbl1bjkyC2jAgt3tl": "engagement",
+    # Rendering review / native gallery side tables
+    "tblHX3UdoNszkoquG": "review_sessions",
+    "tblUkZB6SMtf9Ib6I": "review_jobs",
+    "tbl7wPOAE26o2coMU": "review_attempts",
+    "tblalFXUJyYg5PBrz": "review_plans",
+    "tbl5sq9xBrF6bgPph": "native_gallery_jobs",
 }
 
 
