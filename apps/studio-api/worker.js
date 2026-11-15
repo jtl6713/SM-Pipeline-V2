@@ -1385,7 +1385,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.949-insights-learned-settings",
+          version: "0.10.950-insights-observations-settings",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -6844,6 +6844,10 @@ const STUDIO_INSIGHTS_LEARNED_TABLE = "tblb6LfRv7CemHHN6";
 // Learned post-time/caption models — Pipeline Settings JSON SoR while Airtable
 // archive is frozen (kills the exact 24 PATCH/hr heavy-cron stream).
 const STUDIO_INSIGHTS_LEARNED_SETTING = "STUDIO_INSIGHTS_LEARNED_V1";
+// First-party + similar-account observation rows — same Settings SoR pattern
+// (kills remaining Insights Observation GET/PATCH/POST burn).
+const STUDIO_INSIGHTS_OBSERVATIONS_SETTING = "STUDIO_INSIGHTS_OBSERVATIONS_V1";
+const STUDIO_INSIGHTS_OBSERVATIONS_MAX_PER_PROFILE = 400;
 const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
 const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment|share|visit|book|dm|click|learn more|tag a friend)\b/i;
 
@@ -6864,6 +6868,9 @@ const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment
 /*__STUDIO_WORKER_EXTRACT:studioInsightsPlatformMatches__*/
 /*__STUDIO_WORKER_EXTRACT:studioInsightsOutputTypeMatches__*/
 /*__STUDIO_WORKER_EXTRACT:studioInsightsSeasonFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsObservationsStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsPruneObservationStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsSaveObservationsStore__*/
 /*__STUDIO_WORKER_EXTRACT:studioInsightsFindObservation__*/
 /*__STUDIO_WORKER_EXTRACT:studioInsightsUpsertObservation__*/
 /*__STUDIO_WORKER_EXTRACT:studioInsightsUpsertObservations__*/
@@ -8824,6 +8831,8 @@ export {
   STUDIO_INSIGHTS_OBSERVATIONS_TABLE,
   STUDIO_INSIGHTS_LEARNED_TABLE,
   STUDIO_INSIGHTS_LEARNED_SETTING,
+  STUDIO_INSIGHTS_OBSERVATIONS_SETTING,
+  STUDIO_INSIGHTS_OBSERVATIONS_MAX_PER_PROFILE,
   STUDIO_INSIGHTS_SEASONS,
   STUDIO_INSIGHTS_CTA_PATTERN,
   STUDIO_HEATMAP_DAYS,

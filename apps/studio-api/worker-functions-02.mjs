@@ -502,6 +502,8 @@ import {
   STUDIO_INSIGHTS_OBSERVATIONS_TABLE,
   STUDIO_INSIGHTS_LEARNED_TABLE,
   STUDIO_INSIGHTS_LEARNED_SETTING,
+  STUDIO_INSIGHTS_OBSERVATIONS_SETTING,
+  STUDIO_INSIGHTS_OBSERVATIONS_MAX_PER_PROFILE,
   STUDIO_INSIGHTS_SEASONS,
   STUDIO_INSIGHTS_CTA_PATTERN,
   STUDIO_HEATMAP_DAYS,
@@ -7869,10 +7871,60 @@ export function studioInsightsSeasonFilterFormula(season) {
 }
 /*__STUDIO_WORKER_END:studioInsightsSeasonFilterFormula__*/
 
+export async function studioInsightsObservationsStore(env) {
+  const row = await studioSettingsByName(env, STUDIO_INSIGHTS_OBSERVATIONS_SETTING).catch(() => null);
+  let store = {};
+  try {
+    const parsed = JSON.parse(String(f(row, "Setting_Value") || f(row, "Value") || "{}"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) store = parsed;
+  } catch { /* empty store */ }
+  return store;
+}
+/*__STUDIO_WORKER_END:studioInsightsObservationsStore__*/
+
+export function studioInsightsPruneObservationStore(store, maxPerProfile = STUDIO_INSIGHTS_OBSERVATIONS_MAX_PER_PROFILE) {
+  const byProfile = new Map();
+  for (const [key, fields] of Object.entries(store || {})) {
+    if (!fields || typeof fields !== "object") continue;
+    const profile = studioNormalizeSimilarProfile(fields.Profile || "chicago");
+    if (!byProfile.has(profile)) byProfile.set(profile, []);
+    byProfile.get(profile).push([key, fields]);
+  }
+  const next = {};
+  for (const rows of byProfile.values()) {
+    rows.sort((a, b) => String(b[1]?.Published_At || "").localeCompare(String(a[1]?.Published_At || "")));
+    for (const [key, fields] of rows.slice(0, Math.max(20, Number(maxPerProfile) || 400))) {
+      next[key] = fields;
+    }
+  }
+  return next;
+}
+/*__STUDIO_WORKER_END:studioInsightsPruneObservationStore__*/
+
+export async function studioInsightsSaveObservationsStore(env, store) {
+  const pruned = studioInsightsPruneObservationStore(store);
+  await studioUpsertSetting(
+    env,
+    STUDIO_INSIGHTS_OBSERVATIONS_SETTING,
+    JSON.stringify(pruned),
+    "Studio Insights observation rows (Airtable archive frozen).",
+  );
+  return pruned;
+}
+/*__STUDIO_WORKER_END:studioInsightsSaveObservationsStore__*/
+
 export async function studioInsightsFindObservation(env, observationKey) {
+  const key = String(observationKey || "").trim();
+  if (!key) return null;
+  if (studioWriteSource(env) === "supabase") {
+    const store = await studioInsightsObservationsStore(env);
+    const fields = store[key];
+    if (!fields || typeof fields !== "object") return null;
+    return { id: `settings:${key}`, fields: { ...fields, Observation_Key: key } };
+  }
   const rows = await listRecords(env, studioInsightsObservationsTable(env), {
     limit: 1,
-    filterFormula: `{Observation_Key}='${String(observationKey || "").replace(/'/g, "\\'")}'`,
+    filterFormula: `{Observation_Key}='${key.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`,
   }).catch(() => []);
   return rows[0] || null;
 }
@@ -7881,6 +7933,12 @@ export async function studioInsightsFindObservation(env, observationKey) {
 export async function studioInsightsUpsertObservation(env, fields) {
   const key = String(fields?.Observation_Key || "").trim();
   if (!key) return null;
+  if (studioWriteSource(env) === "supabase") {
+    const store = await studioInsightsObservationsStore(env);
+    store[key] = { ...fields, Observation_Key: key, Active: fields?.Active !== false };
+    await studioInsightsSaveObservationsStore(env, store);
+    return { id: `settings:${key}`, fields: store[key] };
+  }
   const existing = await studioInsightsFindObservation(env, key);
   if (existing?.id) {
     return airtableFetch(env, studioInsightsObservationsTable(env), existing.id, {
@@ -7902,7 +7960,16 @@ export async function studioInsightsUpsertObservations(env, posts, meta = {}) {
     .map((post) => studioInsightsObservationFields(post, meta))
     .filter((fields) => String(fields?.Observation_Key || "").trim());
   if (!prepared.length) return { upserted: 0 };
-  const keyClauses = prepared.map((fields) => `{Observation_Key}='${String(fields.Observation_Key).replace(/'/g, "\\'")}'`);
+  if (studioWriteSource(env) === "supabase") {
+    const store = await studioInsightsObservationsStore(env);
+    for (const fields of prepared) {
+      const key = fields.Observation_Key;
+      store[key] = { ...fields, Observation_Key: key, Active: fields?.Active !== false };
+    }
+    await studioInsightsSaveObservationsStore(env, store);
+    return { upserted: prepared.length };
+  }
+  const keyClauses = prepared.map((fields) => `{Observation_Key}='${String(fields.Observation_Key).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
   const existingRows = await listRecords(env, studioInsightsObservationsTable(env), {
     limit: prepared.length,
     filterFormula: prepared.length === 1 ? keyClauses[0] : `OR(${keyClauses.join(",")})`,
@@ -7948,16 +8015,32 @@ export async function studioInsightsUpsertObservations(env, posts, meta = {}) {
 export async function studioInsightsLoadObservations(env, options = {}) {
   if (!studioInsightsDbEnabled(env)) return [];
   const profile = studioNormalizeSimilarProfile(options.profile || "chicago");
-  const parts = [`{Active}=1`, `{Profile}='${profile}'`];
-  const seasonFormula = studioInsightsSeasonFilterFormula(options.season);
-  if (seasonFormula) parts.push(seasonFormula);
-  if (options.source) parts.push(`{Source}='${String(options.source).replace(/'/g, "\\'")}'`);
-  const rows = await listRecords(env, studioInsightsObservationsTable(env), {
-    limit: Math.max(20, Math.min(500, Number(options.limit) || 250)),
-    sortField: "Published_At",
-    sortDirection: "desc",
-    filterFormula: `AND(${parts.join(",")})`,
-  }).catch(() => []);
+  const limit = Math.max(20, Math.min(500, Number(options.limit) || 250));
+  let rows = [];
+  if (studioWriteSource(env) === "supabase") {
+    const store = await studioInsightsObservationsStore(env);
+    const seasonWanted = studioNormalizeInsightsSeason(options.season, "all");
+    const sourceWanted = String(options.source || "").trim().toLowerCase();
+    rows = Object.entries(store)
+      .map(([key, fields]) => ({ id: `settings:${key}`, fields: { ...fields, Observation_Key: key } }))
+      .filter((row) => f(row, "Active") !== false)
+      .filter((row) => studioNormalizeSimilarProfile(f(row, "Profile")) === profile)
+      .filter((row) => seasonWanted === "all" || studioNormalizeInsightsSeason(f(row, "Chicago_Season")) === seasonWanted)
+      .filter((row) => !sourceWanted || String(f(row, "Source") || "").trim().toLowerCase() === sourceWanted)
+      .sort((a, b) => String(f(b, "Published_At") || "").localeCompare(String(f(a, "Published_At") || "")))
+      .slice(0, limit);
+  } else {
+    const parts = [`{Active}=1`, `{Profile}='${profile}'`];
+    const seasonFormula = studioInsightsSeasonFilterFormula(options.season);
+    if (seasonFormula) parts.push(seasonFormula);
+    if (options.source) parts.push(`{Source}='${String(options.source).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
+    rows = await listRecords(env, studioInsightsObservationsTable(env), {
+      limit,
+      sortField: "Published_At",
+      sortDirection: "desc",
+      filterFormula: `AND(${parts.join(",")})`,
+    }).catch(() => []);
+  }
   const filtered = (rows || [])
     .map(studioInsightsObservationToPost)
     .filter((row) => row.published_at)
