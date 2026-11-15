@@ -1303,3 +1303,4 @@ Deploy 2026-11-15 Worker 0.10.961-library-classify-timeout: heal stale Processin
 Deploy 2026-11-15 Worker 0.10.962-library-batch-name-supabase: Asset Manager multi-upload name sequencing reads existing names from Supabase under Phase 6 SoR (Airtable archive returns empty).
 
 Deploy 2026-11-15 Worker 0.10.963-purge-fanout-dupes: Strip/purge Content 1861/1862/1864 Oct-31 IG fanout orphans from Pipeline snapshots (SoR rows already deleted in Supabase).
+2026-11-15: Deploy Worker 0.10.964-library-upload-overlay-errors — provenance overlay holds stay 422; stop labeling them Drive 502.

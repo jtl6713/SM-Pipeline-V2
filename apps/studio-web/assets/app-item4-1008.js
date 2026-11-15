@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.952-library-classify-timeout";
+  const BUILD_ID = "item4-0.6.953-library-upload-overlay-errors";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25411,6 +25411,31 @@ function timedScriptAssetLabel(asset, index) {
    if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transferred${phase==="verifying"?"; confirmation pending":""}`);}
   }
 
+  function summarizeLibraryUploadErrors(errors, { uploaded = 0, total = 0 } = {}) {
+    const rows = (errors || []).map((row) => String(row || "").trim()).filter(Boolean);
+    if (!rows.length) return "";
+    const overlay = rows.filter((row) => /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(row));
+    const infra = rows.filter((row) => !overlay.includes(row));
+    const parts = [];
+    if (overlay.length) {
+      parts.push(
+        `${overlay.length} file${overlay.length === 1 ? "" : "s"} blocked: photographer/credit watermark or other third-party overlay. Use a clean source (no corner credit).`,
+      );
+      parts.push(overlay.slice(0, 3).join(" · "));
+      if (overlay.length > 3) parts.push(`(+${overlay.length - 3} more overlay holds)`);
+    }
+    if (infra.length) {
+      const timedOut = infra.filter((row) => /timeout|interrupted|50[023]|unreachable|Drive\/pipeline/i.test(row));
+      parts.push(
+        timedOut.length === infra.length
+          ? `${infra.length} file${infra.length === 1 ? "" : "s"} failed while talking to Drive/pipeline (timeout or gateway). Check the asset list before retrying.`
+          : `${infra.length} file${infra.length === 1 ? "" : "s"} failed to save. ${infra.slice(0, 2).join(" · ")}`,
+      );
+    }
+    if (uploaded > 0 && total > 0) parts.unshift(`${uploaded} of ${total} assets confirmed saved.`);
+    return parts.join(" ");
+  }
+
   function uploadLibraryFileWithProgress(form,{profileId,file,onTransfer}={}){
    return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();let settled=false,lastStage="";
@@ -25530,16 +25555,14 @@ function timedScriptAssetLabel(asset, index) {
         } catch (error) {
           completedFiles += chunk.length;
           const raw = String(error?.message || "upload failed");
-          const hint = /Request failed \(50[023]\)|failed to fetch|networkerror|aborted|timeout/i.test(raw)
-            ? " Drive/pipeline may be slow or unreachable. Check the asset list before retrying to avoid duplicates."
-            : "";
           const label = chunk[0]?.name || "file";
-          errors.push(`${label}: ${raw}${hint}`);
-          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: `${label}: ${raw}. Check the asset list before retrying to avoid duplicates.` });
+          errors.push(`${label}: ${raw}`);
+          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: summarizeLibraryUploadErrors([`${label}: ${raw}`], { uploaded, total: files.length }) });
         }
       }
       inputs.forEach((input) => { input.value = ""; });
-      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: errors.length ? `${uploaded} of ${files.length} assets confirmed saved. ${errors.join(" ")} Check the asset list before retrying to avoid duplicates.` : "" });
+      const errorSummary = summarizeLibraryUploadErrors(errors, { uploaded, total: files.length });
+      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: errors.length ? errorSummary : "" });
       if (zone) delete zone.dataset.busy;
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1
@@ -25549,13 +25572,13 @@ function timedScriptAssetLabel(asset, index) {
           : "");
       if (item4OversizedClipNotice) {
         const extra = errors.length
-          ? `${uploaded ? `${uploaded} added. ` : ""}${errors.join(" ")}`
+          ? `${uploaded ? `${uploaded} added. ` : ""}${errorSummary}`
           : (uploaded ? `${uploaded === 1 ? "The other asset was added" : `The other ${uploaded} assets were added`} to the library.` : "");
         setLibraryUploadMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
       } else if (uploaded && errors.length) {
-        setLibraryUploadMessage(`${namedSummary || `${uploaded} added.`} ${errors.join(" ")}`.trim(), "error-text");
+        setLibraryUploadMessage(`${namedSummary || `${uploaded} added.`} ${errorSummary}`.trim(), "error-text");
       } else if (!uploaded) {
-        setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
+        setLibraryUploadMessage(errorSummary || "Could not add those assets.", "error-text");
       }
       if (uploadedClassifyIds.length) {
         watchLibraryClassification(uploadedClassifyIds);

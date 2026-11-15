@@ -3446,9 +3446,18 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
   const fileId = String(payload?.google_drive_file_id || "").trim();
   const driveUrl = String(payload?.google_drive_url || "").trim();
   if (!response.ok || !fileId || !driveUrl) {
+    const detail = String(payload?.error || payload?.message || "").trim();
+    const overlayHeld = /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(detail);
+    // Provenance holds are client errors (runner 422). Do not report them as a
+    // Drive/gateway 502 — that made a 10-file blocked batch look like an outage.
+    const status = overlayHeld
+      ? 422
+      : (response.status >= 400 ? response.status : 502);
     throw new HttpError(
-      response.status >= 400 ? response.status : 502,
-      payload?.error || payload?.message || `Google Drive asset upload failed (${response.status})`
+      status,
+      detail || (overlayHeld
+        ? "Asset held for third-party overlay review. Use a clean source."
+        : `Google Drive asset upload failed (${response.status || "unknown"})`),
     );
   }
   return payload;
