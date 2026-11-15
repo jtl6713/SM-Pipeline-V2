@@ -62,23 +62,87 @@ export function completedRenderRecoveryFields(record, field = (row, name) => row
   const render = String(field(record, "Render_Status") || "").trim();
   const output = String(field(record, "Output_Status") || "").trim();
   const review = String(field(record, "Review_Status") || "").trim();
-  if (!["Rendering", "Ready for Render", "Ready to Render", RENDER_STATUS_WAITING_QUEUE].includes(render) ||
+  const finalUrl = String(field(record, "Final_File_URL") || "").trim();
+  const storage = String(field(record, "Final_File_Storage_Status") || "").trim();
+  const jobId = String(field(record, "Remotion_Job_ID") || "").trim();
+  const classicRender = ["Rendering", "Ready for Render", "Ready to Render", RENDER_STATUS_WAITING_QUEUE].includes(render);
+  // Blank/Rendered + Final_File_URL (IG Reel 10501) never matched the classic
+  // Remotion-job gate, so Pipeline kept the package under Rendering forever.
+  const strandedFinal = (!render || render === "Rendered") && Boolean(finalUrl);
+  if ((!classicRender && !strandedFinal) ||
       !["In Production", "Rendering"].includes(output) ||
-      !String(field(record, "Remotion_Job_ID") || "").trim() ||
-      !String(field(record, "Final_File_URL") || "").trim() ||
-      String(field(record, "Final_File_Storage_Status") || "").trim() !== "Uploaded" ||
+      !finalUrl ||
       String(field(record, "Test_Run_ID") || "").trim() ||
       String(field(record, "Published_At") || "").trim() ||
       Boolean(field(record, "Do_Not_Publish")) ||
       ["Approved", "Changes Requested", "Rejected"].includes(review)) {
     return null;
   }
-  return {
+  if (classicRender) {
+    if (!jobId || storage !== "Uploaded") return null;
+  } else if (storage && storage !== "Uploaded") {
+    return null;
+  }
+  const fields = {
     Render_Status: "Rendered",
     Output_Status: "Ready for Review",
     Remotion_Error_Message: "",
     Final_File_Error_Message: "",
   };
+  if (strandedFinal && (!review || review === "Review Sent")) {
+    fields.Review_Status = "Review Sent";
+  }
+  return fields;
+}
+
+/** Copy a finished shared 9:16 short onto stranded Reel/Short/Video Draft siblings. */
+export function sharedRenderPropagateFields(source, field = (row, name) => row?.fields?.[name]) {
+  if (!source || !String(field(source, "Final_File_URL") || "").trim()) return null;
+  const fields = {
+    Final_File_URL: field(source, "Final_File_URL") || null,
+    Final_File_ID: field(source, "Final_File_ID") || null,
+    Output_URL: field(source, "Output_URL") || null,
+    Studio_Preview_URL: field(source, "Studio_Preview_URL") || null,
+    Studio_Preview_R2_Key: field(source, "Studio_Preview_R2_Key") || null,
+    Studio_Preview_Updated_At: field(source, "Studio_Preview_Updated_At") || null,
+    Render_Status: "Rendered",
+    Output_Status: "Ready for Review",
+    Review_Status: "Review Sent",
+    Final_File_Storage_Status: String(field(source, "Final_File_Storage_Status") || "").trim() || "Uploaded",
+    Final_File_Error_Message: "",
+    Remotion_Error_Message: "",
+    Remotion_Job_ID: "",
+    Remotion_Status_URL: "",
+    Remotion_Props_JSON: "",
+  };
+  const server = field(source, "Render_Server_URL");
+  if (server) fields.Render_Server_URL = server;
+  const clipJson = field(source, "Render_Clip_List_JSON");
+  if (clipJson) fields.Render_Clip_List_JSON = clipJson;
+  const totalFrames = field(source, "Render_Total_Frames");
+  if (totalFrames !== undefined && totalFrames !== null && totalFrames !== "") {
+    fields.Render_Total_Frames = totalFrames;
+  }
+  return fields;
+}
+
+export function isSharedRenderStrandCandidate(record, field = (row, name) => row?.fields?.[name]) {
+  const outputType = String(field(record, "Studio_Output_Type") || field(record, "Output_Type") || "").trim();
+  if (!SHARED_RENDER_OUTPUT_TYPES.has(outputType)) return false;
+  if (/^story$/i.test(outputType) || /^story$/i.test(String(field(record, "Format") || ""))) return false;
+  if (String(field(record, "Render_Status") || "").trim() === "Native Photo Route") return false;
+  // Blank Aspect_Ratio still heals Reel/Short/Video Draft strands (Adler Point 2127).
+  const ratio = String(field(record, "Aspect_Ratio") || "").trim().replace(/x/gi, ":");
+  if (ratio && ratio !== "9:16") return false;
+  const output = String(field(record, "Output_Status") || "").trim();
+  if (!["In Production", "Rendering"].includes(output)) return false;
+  if (String(field(record, "Final_File_URL") || "").trim()) return false;
+  if (String(field(record, "Test_Run_ID") || "").trim()) return false;
+  if (String(field(record, "Published_At") || "").trim()) return false;
+  if (Boolean(field(record, "Do_Not_Publish"))) return false;
+  const review = String(field(record, "Review_Status") || "").trim();
+  if (["Approved", "Changes Requested", "Rejected"].includes(review)) return false;
+  return true;
 }
 
 export function isActiveRemotionHold(record, field = (row, name) => row?.fields?.[name]) {

@@ -1,7 +1,7 @@
 import { evaluateReviewPackage, verifyReviewImages, safeReviewPromotion } from "./review-package-readiness.mjs";
 
 export const PRE_FACTORY_READY_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="In Production",OR(AND({Render_Status}="Native Photo Route",{Selected_Clip_Count}>0,{Studio_Preview_URL}!=""),AND({Render_Status}="Rendered",{Final_File_URL}!="")))';
+  'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="In Production",OR(AND({Render_Status}="Native Photo Route",{Selected_Clip_Count}>0,{Studio_Preview_URL}!=""),AND({Final_File_URL}!="",OR({Render_Status}="Rendered",{Render_Status}=BLANK()))))';
 
 /**
  * Bounded pre-Factory recovery. Never starts a render, approves a proposal, or

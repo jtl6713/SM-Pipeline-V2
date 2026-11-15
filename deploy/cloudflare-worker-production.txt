@@ -1289,3 +1289,5 @@ Deploy 2026-11-15 Worker 0.10.954-phase6-get-archive-closed: Phase 6 request/med
 Deploy 2026-11-15 Worker 0.10.955-archive-mut-closed: under STUDIO_WRITE_SOURCE=supabase, fail-closed all remaining Airtable GETs and mutations that SoR did not absorb (kills residual Worker PATCH/GET). Record deletion is not started. Verify /health version 0.10.955-archive-mut-closed.
 
 Deploy 2026-11-15 Worker 0.10.956-place-open-sync: refresh Place Review open URLs with Places-intent search + paste hint on list.
+
+Deploy 2026-11-15 Worker 0.10.957-shared-render-strand: heal stranded shared 9:16 siblings + blank-Render Final_File_URL promote.

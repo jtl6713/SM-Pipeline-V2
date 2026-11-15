@@ -15,8 +15,10 @@ import {
   completedRenderRecoveryFields,
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
+  isSharedRenderStrandCandidate,
   remotionHealthLooksBusy,
   sharedRenderGroupKey,
+  sharedRenderPropagateFields,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
 
@@ -288,4 +290,42 @@ test("P0 #1542: completed Story status regression recovers existing job/file but
   ]) {
     assert.equal(completedRenderRecoveryFields(row(invalid)), null);
   }
+});
+
+test("blank Render_Status + Final_File_URL recovers without Remotion job (IG Reel 10501)", () => {
+  const stranded = {
+    Render_Status: "",
+    Output_Status: "In Production",
+    Final_File_URL: "https://drive.google.com/file/d/1NS_ref0Svy9tTsRTkoXs6gjeeAabolaj/view",
+  };
+  assert.deepEqual(completedRenderRecoveryFields(row(stranded)), {
+    Render_Status: "Rendered",
+    Output_Status: "Ready for Review",
+    Remotion_Error_Message: "",
+    Final_File_Error_Message: "",
+    Review_Status: "Review Sent",
+  });
+});
+
+test("shared-render strand helpers copy finished sibling media", () => {
+  const source = row({
+    Final_File_URL: "https://drive.google.com/file/d/canonical/view",
+    Final_File_ID: "canonical",
+    Studio_Preview_URL: "https://media.chicagoshining.com/preview.mp4",
+    Final_File_Storage_Status: "Uploaded",
+    Render_Clip_List_JSON: "[]",
+    Render_Total_Frames: 900,
+  });
+  const strand = row({
+    Studio_Output_Type: "Reel",
+    Output_Status: "In Production",
+    Aspect_Ratio: "9:16",
+  });
+  assert.equal(isSharedRenderStrandCandidate(strand), true);
+  assert.equal(isSharedRenderStrandCandidate(row({ ...strand.fields, Final_File_URL: "https://x" })), false);
+  const fields = sharedRenderPropagateFields(source);
+  assert.equal(fields.Render_Status, "Rendered");
+  assert.equal(fields.Output_Status, "Ready for Review");
+  assert.equal(fields.Final_File_URL, "https://drive.google.com/file/d/canonical/view");
+  assert.equal(fields.Remotion_Job_ID, "");
 });

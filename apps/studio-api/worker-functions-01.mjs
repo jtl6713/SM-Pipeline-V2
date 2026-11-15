@@ -308,6 +308,8 @@ import {
   isRenderQueueCandidateStatus,
   isRenderQueueWaitingStatus,
   completedRenderRecoveryFields,
+  isSharedRenderStrandCandidate,
+  sharedRenderPropagateFields,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
@@ -2374,7 +2376,14 @@ export function normalizedOutputState(record) {
     const remotionStarted = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
     if (has("Render_Status", "ready for render") && !remotionStarted) return "Waiting in Render Queue";
     if (remotionStarted && has("Render_Status", "rendering")) return "Rendering";
-    if (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim())) return "Rendering";
+    // Preview-only without a Final_File_URL is still an active render.
+    if (!hasFinishedFile && Boolean(String(f(record, "Studio_Preview_URL") || "").trim())) return "Rendering";
+  }
+  // Final_File_URL already on disk means Remotion finished even when Render_Status
+  // was left blank and Output_Status stayed In Production (IG Reel 10501 / CI 2117).
+  // Do not paint Preparing Assets / keep Pipeline Rendering forever.
+  if (inProduction && hasFinishedFile && !studioMixRerenderInProgress(record)) {
+    return studioOutputHasReviewableDeliverable(record) ? "Ready for Review" : "Rendered";
   }
   const studioAssetPrep = has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting");
   const publisherAssetPrep = has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets");
@@ -12514,7 +12523,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "asc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_URL}!="",{Final_File_Storage_Status}="Uploaded",OR({Output_Status}="In Production",{Output_Status}="Rendering"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering"),OR(AND(OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_Storage_Status}="Uploaded"),OR({Render_Status}=BLANK(),{Render_Status}="Rendered")))',
   }).catch(() => []);
   for (const row of staleRenderingDone || []) {
     try {
@@ -12860,6 +12869,78 @@ export async function studioHealPhantomRerender(env, options = {}) {
   return healed;
 }
 /*__STUDIO_WORKER_END:studioHealPhantomRerender__*/
+
+/**
+ * Shared 9:16 Reel/Short/Video Draft siblings left In Production with blank
+ * Render_Status after the canonical finished (Adler Point 2127 FB Reel 10539 /
+ * TikTok 10541 while IG Reel 10536 was Ready for Review). Copy the finished
+ * Final_File_URL and promote to Ready for Review — never Approve.
+ */
+export async function studioHealSharedRenderStrand(env, options = {}) {
+  const limit = Math.max(1, Math.min(24, Number(options.limit || 12)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await studioListDeskHealOutputs(env, "shared_render_strand", {
+    limit: Math.max(limit * 4, 40),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Output_Status}="In Production",{Output_Status}="Rendering"),{Final_File_URL}="",OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))',
+  }).catch(() => []);
+  const healed = [];
+  const sourceCache = new Map();
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    if (!isSharedRenderStrandCandidate(record, f)) continue;
+    const contentLinks = f(record, "Content_Item") || [];
+    const contentId = Array.isArray(contentLinks)
+      ? String(contentLinks[0]?.id || contentLinks[0] || "").trim()
+      : String(contentLinks || "").trim();
+    if (!contentId) continue;
+    let sources = sourceCache.get(contentId);
+    if (!sources) {
+      sources = await studioListDeskHealOutputs(env, "shared_render_source", {
+        limit: 12,
+        sortField: "Output_ID",
+        sortDirection: "asc",
+        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
+      }).catch(() => []);
+      sourceCache.set(contentId, sources || []);
+    }
+    const source = (sources || []).find((row) => {
+      if (row.id === record.id) return false;
+      const type = String(f(row, "Studio_Output_Type") || f(row, "Output_Type") || "").trim();
+      if (!["Reel", "Short", "Video Draft"].includes(type)) return false;
+      return Boolean(String(f(row, "Final_File_URL") || "").trim());
+    });
+    if (!source) continue;
+    const fields = sharedRenderPropagateFields(source, f);
+    if (!fields) continue;
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      healed.push({
+        key: "SHARED_RENDER_STRAND",
+        id: record.id,
+        output_id: f(record, "Output_ID") || null,
+        source_id: source.id,
+        source_output_id: f(source, "Output_ID") || null,
+        repaired: true,
+      });
+    } catch (error) {
+      healed.push({
+        key: "SHARED_RENDER_STRAND",
+        id: record.id,
+        output_id: f(record, "Output_ID") || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const repaired = healed.filter((row) => row.repaired);
+  if (repaired.length) console.log("Studio shared-render strand heal", JSON.stringify({ count: repaired.length, healed: repaired }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealSharedRenderStrand__*/
 
 export async function studioHealLiveFailedPublishStatus(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
