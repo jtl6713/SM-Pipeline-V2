@@ -1385,7 +1385,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.948-output-get-404-closed",
+          version: "0.10.949-insights-learned-settings",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -6841,6 +6841,9 @@ const STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING = "YOUTUBE_AUTONOMOUS_HARVEST_CA
 const STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_TTL_MS = 12 * 60 * 60 * 1000;
 const STUDIO_INSIGHTS_OBSERVATIONS_TABLE = "tblcDNIZs125iVi2B";
 const STUDIO_INSIGHTS_LEARNED_TABLE = "tblb6LfRv7CemHHN6";
+// Learned post-time/caption models — Pipeline Settings JSON SoR while Airtable
+// archive is frozen (kills the exact 24 PATCH/hr heavy-cron stream).
+const STUDIO_INSIGHTS_LEARNED_SETTING = "STUDIO_INSIGHTS_LEARNED_V1";
 const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
 const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment|share|visit|book|dm|click|learn more|tag a friend)\b/i;
 
@@ -8820,6 +8823,7 @@ export {
   STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_TTL_MS,
   STUDIO_INSIGHTS_OBSERVATIONS_TABLE,
   STUDIO_INSIGHTS_LEARNED_TABLE,
+  STUDIO_INSIGHTS_LEARNED_SETTING,
   STUDIO_INSIGHTS_SEASONS,
   STUDIO_INSIGHTS_CTA_PATTERN,
   STUDIO_HEATMAP_DAYS,

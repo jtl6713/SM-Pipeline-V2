@@ -1273,3 +1273,5 @@ Deploy 2026-11-15 Worker 0.10.946-place-reviews-discover-fast: Place Reviews Dis
 Deploy 2026-11-15 Worker 0.10.947-place-review-dnp-blank: Place Reviews Do_Not_Publish=BLANK SoR + stop engagement Airtable mirrors under STUDIO_WRITE_SOURCE=supabase. Record deletion is not started. Verify /health version 0.10.947-place-review-dnp-blank.
 
 Deploy 2026-11-15 Worker 0.10.948-output-get-404-closed: Output/Content record GET miss skips frozen Airtable archive (stop GET 404 burn). Record deletion is not started. Verify /health version 0.10.948-output-get-404-closed.
+
+Deploy 2026-11-15 Worker 0.10.949-insights-learned-settings: Insights Learned models in Pipeline Settings under STUDIO_WRITE_SOURCE=supabase (kill exact 24 PATCH/hr). Record deletion is not started. Verify /health version 0.10.949-insights-learned-settings.

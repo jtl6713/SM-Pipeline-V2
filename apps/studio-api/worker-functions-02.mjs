@@ -501,6 +501,7 @@ import {
   STUDIO_YOUTUBE_DISCOVERY_CRON_TTL_MS,
   STUDIO_INSIGHTS_OBSERVATIONS_TABLE,
   STUDIO_INSIGHTS_LEARNED_TABLE,
+  STUDIO_INSIGHTS_LEARNED_SETTING,
   STUDIO_INSIGHTS_SEASONS,
   STUDIO_INSIGHTS_CTA_PATTERN,
   STUDIO_HEATMAP_DAYS,
@@ -7628,6 +7629,8 @@ export function studioInsightsLearnedTable(env) {
 /*__STUDIO_WORKER_END:studioInsightsLearnedTable__*/
 
 export function studioInsightsDbEnabled(env) {
+  // Learned models can live in Pipeline Settings under write SoR without PAT.
+  if (studioWriteSource(env) === "supabase") return true;
   return Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID);
 }
 /*__STUDIO_WORKER_END:studioInsightsDbEnabled__*/
@@ -8113,9 +8116,24 @@ export function studioInsightsLearnedFromHeatmap(heatmap, source, season, platfo
 /*__STUDIO_WORKER_END:studioInsightsLearnedFromHeatmap__*/
 
 export async function studioInsightsFindLearned(env, learnedKey) {
+  const key = String(learnedKey || "").trim();
+  if (!key) return null;
+  // Keep helpers inside this extract so the split Worker rebuild includes them.
+  const preferSettings = studioWriteSource(env) === "supabase";
+  if (preferSettings) {
+    const row = await studioSettingsByName(env, STUDIO_INSIGHTS_LEARNED_SETTING).catch(() => null);
+    let store = {};
+    try {
+      const parsed = JSON.parse(String(f(row, "Setting_Value") || f(row, "Value") || "{}"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) store = parsed;
+    } catch { /* empty store */ }
+    const fields = store[key];
+    if (!fields || typeof fields !== "object") return null;
+    return { id: `settings:${key}`, fields: { ...fields, Learned_Key: key } };
+  }
   const rows = await listRecords(env, studioInsightsLearnedTable(env), {
     limit: 1,
-    filterFormula: `{Learned_Key}='${String(learnedKey || "").replace(/'/g, "\\'")}'`,
+    filterFormula: `{Learned_Key}='${key.replace(/'/g, "\\'")}'`,
   }).catch(() => []);
   return rows[0] || null;
 }
@@ -8139,6 +8157,22 @@ export async function studioInsightsUpsertLearned(env, payload) {
     Source: payload.source || "blended",
     As_Of: new Date().toISOString(),
   };
+  if (studioWriteSource(env) === "supabase") {
+    const row = await studioSettingsByName(env, STUDIO_INSIGHTS_LEARNED_SETTING).catch(() => null);
+    let store = {};
+    try {
+      const parsed = JSON.parse(String(f(row, "Setting_Value") || f(row, "Value") || "{}"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) store = parsed;
+    } catch { /* empty store */ }
+    store[key] = fields;
+    await studioUpsertSetting(
+      env,
+      STUDIO_INSIGHTS_LEARNED_SETTING,
+      JSON.stringify(store),
+      "Studio Insights learned post-time/caption models (Airtable archive frozen).",
+    );
+    return { id: `settings:${key}`, fields };
+  }
   const existing = await studioInsightsFindLearned(env, key);
   if (existing?.id) {
     return airtableFetch(env, studioInsightsLearnedTable(env), existing.id, {
