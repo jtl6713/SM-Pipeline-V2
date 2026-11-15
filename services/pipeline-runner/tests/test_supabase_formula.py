@@ -59,6 +59,11 @@ def test_snapshotted_runner_views():
 
     a3 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwf6dxUJrMx2yNoe")
     assert a3 and "classification_status" in a3
+    profile_blank = formula_to_postgrest_filter(
+        MEDIA_ASSETS_TABLE, "{Content_Profile}!=BLANK()",
+    )
+    assert profile_blank and "content_profile_airtable_id" in profile_blank
+    assert "metadata->>Content_Profile" not in (profile_blank or "")
     c6 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "C6 - Active Small Branding Watermark")
     assert c6 and "Watermark_Small" in c6
     a4 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwQv8PDtE8qXwMPk")

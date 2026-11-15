@@ -594,6 +594,40 @@ def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
     assert any("request_status.eq.Ready" in url for url in seen)
 
 
+def test_media_shapes_content_profile_from_metadata(monkeypatch):
+    """A3 needs Content_Profile; library densify stores it only in metadata."""
+    from airtable.constants import MEDIA_ASSETS_TABLE
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable get")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        assert "media_assets" in url
+        return Response([{
+            "airtable_record_id": "recEaYEwG1EGgLAmm",
+            "asset_name": "Chicago Speakeasy 1",
+            "mime_type": "image/jpeg",
+            "metadata": {
+                "content_profile_airtable_id": "recT2rbKX3MF7cVFU",
+                "classification_status": "Needs Classification",
+                "potential_match_notes": "QA note",
+                "search_keywords": "speakeasy,jazz",
+                "asset_description": "Dim speakeasy bar",
+            },
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    row = _client(studio_phase6_write_source="supabase").get_record(
+        MEDIA_ASSETS_TABLE, "recEaYEwG1EGgLAmm",
+    )
+    assert row["fields"]["Content_Profile"] == ["recT2rbKX3MF7cVFU"]
+    assert row["fields"]["Classification_Status"] == "Needs Classification"
+    assert row["fields"]["Potential_Match_Notes"] == "QA note"
+    assert row["fields"]["Search_Keywords"] == "speakeasy,jazz"
+    assert row["fields"]["Asset_Description"] == "Dim speakeasy bar"
+
+
 def test_carousel_po_output_list_reads_supabase(monkeypatch):
     from airtable.constants import CAROUSEL_SLIDES_TABLE
 

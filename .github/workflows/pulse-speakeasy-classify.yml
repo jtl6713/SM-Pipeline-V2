@@ -49,7 +49,8 @@ jobs:
           ids = [
               "recEaYEwG1EGgLAmm",  # Chicago Speakeasy 1 stuck Processing
           ]
-          profile = "recgtK8Z7eNADNtVy"
+          # ChicagoShining - Chicago (not NYC recgtK8Z7eNADNtVy)
+          profile = "recT2rbKX3MF7cVFU"
           specs = [
               {
                   "name": rid,
