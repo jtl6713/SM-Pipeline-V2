@@ -218,6 +218,7 @@ import {
   CONTENT_ITEMS_TABLE_ID,
   CONTENT_PROFILES_TABLE_ID,
   MAKE_ADMIN_QUEUE_TABLE_ID,
+  IDEA_CANDIDATES_TABLE_ID,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -1389,7 +1390,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.952-output-get-archive-closed",
+          version: "0.10.953-other-get-attr",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5387,34 +5388,64 @@ function studioAirtableOutputOrContentTable(env, tableId) {
   const content = String(env?.AIRTABLE_CONTENT_TABLE_ID || CONTENT_ITEMS_TABLE_ID);
   return table === outputs
     || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === "Platform Outputs"
     || table === content
-    || table === CONTENT_ITEMS_TABLE_ID;
+    || table === CONTENT_ITEMS_TABLE_ID
+    || table === "Content Items";
 }
 
 function studioAirtableEgressTableKind(env, tableId) {
   const table = String(tableId || "");
-  if (table === String(env?.AIRTABLE_OUTPUT_TABLE_ID || "") || table === PLATFORM_OUTPUTS_TABLE_ID) {
-    return "outputs";
+  if (
+    table === String(env?.AIRTABLE_OUTPUT_TABLE_ID || "")
+    || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === "Platform Outputs"
+  ) return "outputs";
+  if (
+    table === String(env?.AIRTABLE_CONTENT_TABLE_ID || "")
+    || table === CONTENT_ITEMS_TABLE_ID
+    || table === "Content Items"
+  ) return "content";
+  if (
+    table === String(env?.AIRTABLE_IDEA_TABLE_ID || "")
+    || table === IDEA_CANDIDATES_TABLE_ID
+    || table === "Idea Candidates"
+  ) return "ideas";
+  if (table === String(env?.AIRTABLE_MEDIA_TABLE_ID || "") || table === "tblSITCujCsJTNcDe") {
+    return "media";
   }
-  if (table === String(env?.AIRTABLE_CONTENT_TABLE_ID || "") || table === CONTENT_ITEMS_TABLE_ID) {
-    return "content";
+  if (
+    table === String(env?.AIRTABLE_PROFILE_TABLE_ID || "")
+    || table === CONTENT_PROFILES_TABLE_ID
+    || table === "Content Profiles"
+  ) return "profiles";
+  if (table === MAKE_ADMIN_QUEUE_TABLE_ID || /make admin/i.test(table)) return "make_admin";
+  if (/slide/i.test(table) || table === "tblcnQDBvUngpjDED" || table === "Carousel Slides") {
+    return "slides";
   }
-  if (table === String(env?.AIRTABLE_IDEA_TABLE_ID || "")) return "ideas";
-  if (table === String(env?.AIRTABLE_MEDIA_TABLE_ID || "")) return "media";
-  if (table === String(env?.AIRTABLE_PROFILE_TABLE_ID || "") || table === CONTENT_PROFILES_TABLE_ID) {
-    return "profiles";
-  }
-  if (table === MAKE_ADMIN_QUEUE_TABLE_ID) return "make_admin";
-  if (/slide/i.test(table) || table === "tblcnQDBvUngpjDED") return "slides";
   if (/setting/i.test(table) || table === "Pipeline Settings" || table === "Engagement Settings") {
     return "settings";
   }
-  if (/make admin/i.test(table)) return "make_admin";
-  if (table === "tblhE7YHDnj2lxJPC" || table === "tbl1bjkyC2jAgt3tl") return "engagement";
-  if (table === "tblcDNIZs125iVi2B") return "insights_observations";
-  if (table === "tblb6LfRv7CemHHN6") return "insights_learned";
-  if (table === "tblBZLXPd1p2NRWRK") return "requests";
-  if (table === "tblSITCujCsJTNcDe") return "media";
+  if (table === "tblhE7YHDnj2lxJPC" || table === "tbl1bjkyC2jAgt3tl" || table === "Engagement") {
+    return "engagement";
+  }
+  if (table === "tblcDNIZs125iVi2B" || /insights.?observation/i.test(table)) {
+    return "insights_observations";
+  }
+  if (table === "tblb6LfRv7CemHHN6" || /insights.?learned/i.test(table)) {
+    return "insights_learned";
+  }
+  if (
+    table === "tblBZLXPd1p2NRWRK"
+    || table === "Production Requests"
+    || table === "tblRT9xwcYJ8A5z4e"
+  ) return "requests";
+  if (table === "Exception Recovery Messages") return "exception_messages";
+  if (table === "Quality Agent Recovery Ledger") return "recovery_ledger";
+  if (table === "Brands") return "brands";
+  if (table === "Markets") return "markets";
+  if (table === "Idea Batches") return "idea_batches";
+  if (table === "Production Request Outputs") return "pro_outputs";
   return "other";
 }
 

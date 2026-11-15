@@ -6059,9 +6059,19 @@ function sideTableKind(env, tableId) {
   const outputs = String(env?.AIRTABLE_OUTPUT_TABLE_ID || PLATFORM_OUTPUTS_TABLE_ID);
   const content = String(env?.AIRTABLE_CONTENT_TABLE_ID || CONTENT_ITEMS_TABLE_ID);
   const profiles = String(env?.AIRTABLE_PROFILE_TABLE_ID || CONTENT_PROFILES_TABLE_ID);
-  if (table === outputs || table === PLATFORM_OUTPUTS_TABLE_ID) return "output";
-  if (table === content || table === CONTENT_ITEMS_TABLE_ID) return "content";
-  if (table === idea || table === IDEA_CANDIDATES_TABLE_ID) return "idea";
+  if (
+    table === outputs
+    || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === "Platform Outputs"
+  ) return "output";
+  if (
+    table === content
+    || table === CONTENT_ITEMS_TABLE_ID
+    || table === "Content Items"
+  ) return "content";
+  if (table === idea || table === IDEA_CANDIDATES_TABLE_ID || table === "Idea Candidates") {
+    return "idea";
+  }
   if (table === profiles || table === CONTENT_PROFILES_TABLE_ID || table === "Content Profiles") {
     return "profile";
   }
