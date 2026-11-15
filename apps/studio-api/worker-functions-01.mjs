@@ -12523,7 +12523,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "asc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering"),OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue",{Render_Status}="Rendered",{Render_Status}=BLANK()))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering"),OR(AND(OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_Storage_Status}="Uploaded"),OR({Render_Status}=BLANK(),{Render_Status}="Rendered")))',
   }).catch(() => []);
   for (const row of staleRenderingDone || []) {
     try {
@@ -12901,7 +12901,7 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
         limit: 12,
         sortField: "Output_ID",
         sortDirection: "asc",
-        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${String(contentId).replace(/"/g, '\\"')}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
+        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
       }).catch(() => []);
       sourceCache.set(contentId, sources || []);
     }

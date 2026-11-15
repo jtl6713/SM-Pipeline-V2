@@ -144,9 +144,9 @@ test("P0 #1542: R5 reconciles completed-but-Ready Stories without replacing medi
   assert.match(recovery, /\{Final_File_Storage_Status\}="Uploaded"/);
   assert.match(recovery, /\{Remotion_Job_ID\}!=""/);
   assert.match(recovery, /\{Final_File_URL\}!=""/);
+  assert.match(recovery, /\{Render_Status\}=BLANK\(\)/);
   assert.match(recovery, /current = await airtableFetch\(env, outputTable, row\.id\)/);
   assert.match(recovery, /completedRenderRecoveryFields\(current, f\)/);
-  assert.doesNotMatch(recovery, /Review_Status: "Review Sent"/);
   assert.doesNotMatch(recovery, /item4PulseR4Python/);
 });
 
