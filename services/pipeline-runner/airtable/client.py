@@ -54,10 +54,10 @@ class AirtableClient:
         from settings_store import get_setting
         from supabase_reads import SupabaseRecordMiss, try_get_supabase_record
 
-        setting = get_setting(self._settings, table_id, record_id)
-        if setting is not None:
-            return setting
         try:
+            setting = get_setting(self._settings, table_id, record_id)
+            if setting is not None:
+                return setting
             supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
         except SupabaseRecordMiss:
             # Match Airtable's missing-record shape so stage callers keep their

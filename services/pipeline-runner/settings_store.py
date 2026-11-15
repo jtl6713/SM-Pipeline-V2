@@ -24,18 +24,49 @@ def _compact(formula: str) -> str:
 
 
 def settings_filter(formula: str) -> dict | None:
+    """Translate allowlisted Setting_Name formulas. Single or double quotes."""
     text = _compact(formula)
-    named = re.fullmatch(r'\{Setting_Name\}="([^"]*)"', text)
+    named = re.fullmatch(r"\{Setting_Name\}=['\"]([^'\"]*)['\"]", text)
     if named:
-        return {"name": named.group(1), "active": False, "prefix": ""}
-    active = re.fullmatch(r'AND\(\{Active\}=1,\{Setting_Name\}="([^"]*)"\)', text)
+        return {"name": named.group(1), "active": False, "prefix": "", "names": []}
+    active = re.fullmatch(
+        r"AND\(\{Active\}=1,\{Setting_Name\}=['\"]([^'\"]*)['\"]\)",
+        text,
+    )
     if active:
-        return {"name": active.group(1), "active": True, "prefix": ""}
+        return {"name": active.group(1), "active": True, "prefix": "", "names": []}
+    # Bootstrap / alternate clause order.
+    active_alt = re.fullmatch(
+        r"AND\(\{Setting_Name\}=['\"]([^'\"]*)['\"],\{Active\}=1\)",
+        text,
+    )
+    if active_alt:
+        return {"name": active_alt.group(1), "active": True, "prefix": "", "names": []}
     if text in {
         "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
         'AND({Active}=1,FIND("A1_JOB_",{Setting_Name})=1)',
+        "FIND('A1_JOB_',{Setting_Name})=1",
+        'FIND("A1_JOB_",{Setting_Name})=1',
     }:
-        return {"name": "", "active": True, "prefix": "A1_JOB_"}
+        # Prefix lists may include inactive failed_ rows (A1S job-state scan).
+        return {
+            "name": "",
+            "active": text.startswith("AND({Active}=1,"),
+            "prefix": "A1_JOB_",
+            "names": [],
+        }
+    # RR2 Make API base+token pair.
+    make_or = re.fullmatch(
+        r"AND\(\{Active\}=1,OR\(\{Setting_Name\}=['\"]([^'\"]*)['\"],\{Setting_Name\}=['\"]([^'\"]*)['\"]\)\)",
+        text,
+    )
+    if make_or:
+        return {
+            "name": "",
+            "active": True,
+            "prefix": "",
+            "names": [make_or.group(1), make_or.group(2)],
+        }
     return None
 
 
@@ -65,6 +96,12 @@ def list_settings(settings: dict, table_id: str, formula: str | None, limit: int
         parts.append(f"payload->>Setting_Name=eq.{quote(parsed['name'], safe='')}")
     if parsed["prefix"]:
         parts.append(f"payload->>Setting_Name=like.{quote(parsed['prefix'], safe='')}*")
+    if parsed.get("names"):
+        named = ",".join(
+            f"payload->>Setting_Name.eq.{quote(name, safe='')}" for name in parsed["names"] if name
+        )
+        if named:
+            parts.append(f"or=({named})")
     rows = _rest(settings, "engagement_settings?" + "&".join(parts), "GET")
     if not isinstance(rows, list):
         return None
@@ -82,6 +119,7 @@ def list_settings(settings: dict, table_id: str, formula: str | None, limit: int
 
 def get_setting(settings: dict, table_id: str, record_id: str) -> dict | None:
     from supabase_pipeline import _rest, studio_write_source, supabase_configured
+    from supabase_reads import SupabaseRecordMiss
 
     source = settings_source(table_id)
     if not source or studio_write_source(settings) != "supabase" or not supabase_configured(settings):
@@ -92,8 +130,11 @@ def get_setting(settings: dict, table_id: str, record_id: str) -> dict | None:
         f"&payload->>source=eq.{source}&select=airtable_record_id,payload&limit=1",
         "GET",
     )
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         return None
+    if not rows:
+        # Settings SoR miss must not GET the frozen Airtable archive.
+        raise SupabaseRecordMiss(table_id, record_id)
     return _shaped(rows[0])
 
 

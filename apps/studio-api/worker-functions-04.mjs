@@ -9496,6 +9496,9 @@ export async function studioSettingsByName(env, name) {
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
     const row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
     if (row?.id) return row;
+    // SoR miss: do not GET the frozen Airtable settings archive (Learned /
+    // Observations upserts look up settings every heavy-cron tick).
+    return null;
   }
   const rows = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
     limit: 5,
