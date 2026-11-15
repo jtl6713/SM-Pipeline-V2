@@ -5860,6 +5860,8 @@ const DELETED_DUPLICATE_PROFILE_IDS = [
   "recpNlNn6U6eq0M9r",
   // NYC — DUMBO Pebble Beach Sunset (content 2051) orphan mirror rows 10236/10238/10240.
   "recgtK8Z7eNADNtVy",
+  // Chicago — Content 1861/1862/1864 fanout orphans purged 2026-11-15.
+  "recT2rbKX3MF7cVFU",
 ];
 // Ghost Platform Outputs that no longer exist in Airtable. Strip/purge by Output_ID
 // when the Airtable record id is unknown (Supabase MCP unavailable).
@@ -5867,6 +5869,20 @@ const DELETED_DUPLICATE_OUTPUT_NUMBERS = [
   10236, 10238, 10240,
   // Content 2094 Battery Park View Guide mirror ghosts (10409/11/13/17/19/21).
   10409, 10411, 10413, 10417, 10419, 10421,
+  // Content 1861 IG Story fanout orphans (keep approved 9398).
+  9406, 9412, 9414, 9417, 9418, 9420, 9423, 9424, 9425, 9426,
+  // Content 1864 IG Reel/Story fanout orphans (keep approved 9404/9411).
+  9405, 9407, 9413, 9415, 9416, 9419, 9421,
+  // Content 1862 IG Reel fanout orphans (keep approved 9399 + scheduled siblings).
+  9428, 9429, 9430, 9431, 9432, 9433, 9434, 9435, 9436, 9442, 9443, 9444, 9445, 9448, 9449, 9450,
+  9454, 9455, 9456, 9457, 9461, 9465, 9472, 9473, 9474, 9475, 9476, 9477, 9478, 9479, 9480, 9481,
+  9482, 9483, 9484, 9485, 9486, 9487, 9488, 9489, 9490, 9491, 9492, 9493, 9494, 9495, 9496, 9497,
+  9498, 9499, 9500, 9501, 9502, 9503, 9504, 9505, 9506, 9507, 9508, 9509, 9510, 9511, 9512, 9513,
+  9514, 9515, 9516, 9517, 9518, 9519, 9520, 9521, 9522, 9523, 9524, 9525, 9526, 9527, 9528, 9529,
+  9530, 9531, 9532, 9533, 9534, 9535, 9536, 9537, 9538, 9539, 9540, 9541, 9542, 9543, 9544, 9545,
+  9546, 9547, 9548, 9549, 9550, 9551, 9552, 9553, 9554, 9555, 9556, 9557, 9558, 9559, 9560, 9561,
+  9562, 9563, 9564, 9565, 9566, 9567, 9568, 9569, 9570, 9571, 9572, 9573, 9574, 9575, 9576, 9577,
+  9578, 9579, 9580, 9581, 9582, 9583, 9584, 9585, 9586, 9587, 9588, 9589, 9590, 9591, 9592, 9599,
 ];
 const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
 const deletedDuplicateContentIdSet = new Set(DELETED_DUPLICATE_CONTENT_IDS);
