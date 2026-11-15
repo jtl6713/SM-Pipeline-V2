@@ -454,6 +454,7 @@ def test_due_now_formula_lists_supabase(monkeypatch):
 def test_empty_output_list_stays_on_supabase(monkeypatch):
     import supabase_reads
     from airtable.constants import (
+        CAROUSEL_SLIDES_TABLE,
         MEDIA_ASSETS_TABLE,
         MEDIA_TRANSFER_QUEUE_TABLE,
         PIPELINE_SETTINGS_TABLE,
@@ -471,6 +472,7 @@ def test_empty_output_list_stays_on_supabase(monkeypatch):
     from airtable.constants import CONTENT_PROFILES_TABLE
 
     assert CONTENT_PROFILES_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
+    assert CAROUSEL_SLIDES_TABLE in supabase_reads.FALLBACK_STOPPED_TABLES
 
     def fake_get(url, *, headers, params, timeout):
         raise AssertionError("airtable list")
@@ -591,3 +593,41 @@ def test_carousel_po_output_list_reads_supabase(monkeypatch):
     assert rows[0]["fields"]["PO_Output_ID"] == [9172]
     assert "fields->>PO_Output_ID.like.*9172*" in seen[0]
     assert "carousel_slides?" in seen[0]
+
+
+def test_carousel_slide_patch_skips_airtable_archive(monkeypatch):
+    """Under STUDIO_WRITE_SOURCE=supabase, slide PATCH must not hit Airtable."""
+    from airtable.constants import CAROUSEL_SLIDES_TABLE
+
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        raise AssertionError(f"airtable patch {url}")
+
+    def fake_request(method, url, *, headers, json, timeout, prefer=None):
+        seen.append((method, url, json))
+        if method == "GET" and "carousel_slides" in url:
+            return Response([{
+                "airtable_record_id": "recSlidePatch1",
+                "fields": {"PO_Output_ID": [1], "Current Order": 2},
+                "current_order": 2,
+                "deleted_from_carousel": False,
+            }])
+        if method == "POST" and "carousel_slides" in url:
+            return Response("")
+        raise AssertionError(f"unexpected {method} {url}")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    out = _client(studio_write_source="supabase").update_record(
+        CAROUSEL_SLIDES_TABLE,
+        "recSlidePatch1",
+        {"C3 Review Email Sent At": "2026-11-15T10:00:00Z"},
+    )
+    assert out["id"] == "recSlidePatch1"
+    posts = [row for row in seen if row[0] == "POST" and "carousel_slides" in row[1]]
+    assert posts, seen
+    body = posts[0][2][0]
+    assert body["airtable_record_id"] == "recSlidePatch1"
+    assert body["fields"]["C3 Review Email Sent At"] == "2026-11-15T10:00:00Z"
+    assert body["fields"]["PO_Output_ID"] == [1]

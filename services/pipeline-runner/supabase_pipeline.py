@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from airtable.constants import (
+    CAROUSEL_SLIDES_TABLE,
     CONTENT_ITEMS_TABLE,
     MEDIA_ASSETS_TABLE,
     MEDIA_TRANSFER_QUEUE_TABLE,
@@ -155,6 +157,18 @@ def table_kind(table_id: str) -> str:
 
 def legacy_export_enabled(settings: dict | None, table_id: str) -> bool:
     return studio_write_source(settings) == "supabase" and bool(table_kind(table_id))
+
+
+def side_table_kind(table_id: str) -> str:
+    """Side tables under STUDIO_WRITE_SOURCE=supabase (not Output/Content/Phase6)."""
+    if str(table_id or "") == CAROUSEL_SLIDES_TABLE:
+        return "slides"
+    return ""
+
+
+def side_table_export_enabled(settings: dict | None, table_id: str) -> bool:
+    """Carousel Slides (and later ideas) commit to Supabase and skip Airtable export."""
+    return studio_write_source(settings) == "supabase" and bool(side_table_kind(table_id))
 
 
 def studio_phase6_write_source(settings: dict | None) -> str:
@@ -1094,18 +1108,118 @@ def release_minted_record_ids(settings: dict | None, table_id: str, record_ids: 
         logger.warning("supabase minted-id release failed for %s: %s", table, error)
 
 
+def _checkbox_on(value: Any) -> bool:
+    if value is True or value == 1:
+        return True
+    if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "checked"}:
+        return True
+    return False
+
+
+def _parse_creative_directives(raw: Any) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _map_carousel_slide(record: dict) -> dict | None:
+    record_id = str(record.get("id") or "").strip()
+    if not record_id:
+        return None
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+    order_raw = fields.get("Current Order")
+    try:
+        order = float(order_raw) if order_raw is not None and order_raw != "" else None
+    except (TypeError, ValueError):
+        order = None
+    return {
+        "airtable_record_id": record_id,
+        "current_order": int(order) if order is not None and order == int(order) else order,
+        "deleted_from_carousel": _checkbox_on(fields.get("Deleted From Carousel")),
+        "ig_child_container_id": str(fields.get("IG_Child_Container_ID") or "").strip() or None,
+        "voiceover": {
+            "status": fields.get("Slide_Voiceover_Status"),
+            "text": fields.get("Slide_Voiceover_Text"),
+            "url": fields.get("Slide_Voiceover_URL"),
+            "duration_seconds": fields.get("Slide_Voiceover_Duration_Seconds"),
+            "voice_id": fields.get("Slide_Voice_ID"),
+            "voice_name": fields.get("Slide_Voice_Name"),
+            "voice": fields.get("Slide_Voice"),
+            "prep_request_id": fields.get("Studio_Voice_Prep_Request_ID"),
+        },
+        "creative_directives": _parse_creative_directives(fields.get("Creative_Directives_JSON")),
+        "fields": dict(fields),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def commit_carousel_slides(settings: dict | None, records: list[dict], *, partial: bool = True) -> dict:
+    """Commit Carousel Slide PATCH/POST rows to Supabase; skip Airtable archive export."""
+    if not side_table_export_enabled(settings, CAROUSEL_SLIDES_TABLE):
+        return {"ok": False, "reason": "disabled"}
+    if not records:
+        return {"ok": False, "reason": "no_records"}
+    cfg = settings or {}
+    saved = 0
+    for record in records:
+        if not isinstance(record, dict) or not record.get("id"):
+            continue
+        record_id = str(record["id"])
+        patch_fields = dict(record.get("fields") or {})
+        prior: dict[str, Any] = {}
+        if partial:
+            existing = _rest(
+                cfg,
+                f"carousel_slides?airtable_record_id=eq.{record_id}"
+                "&select=fields,current_order,deleted_from_carousel,ig_child_container_id,"
+                "voiceover,creative_directives&limit=1",
+                "GET",
+                prefer="return=representation",
+            ) or []
+            row0 = existing[0] if isinstance(existing, list) and existing else None
+            if isinstance(row0, dict) and isinstance(row0.get("fields"), dict):
+                prior = dict(row0["fields"])
+        merged = {**prior, **patch_fields}
+        mapped = _map_carousel_slide({"id": record_id, "fields": merged})
+        if not mapped:
+            continue
+        _rest(
+            cfg,
+            "carousel_slides?on_conflict=airtable_record_id",
+            "POST",
+            [mapped],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        saved += 1
+    return {"ok": saved == len(records), "kind": "slides", "count": saved}
+
+
 def mirror_airtable_records(settings: dict | None, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
-    """Mirror Output, Content Item, request, media, or transfer-queue rows. Never raises."""
+    """Mirror Output, Content Item, request, media, transfer-queue, or slide rows. Never raises."""
     table = str(table_id or "")
     kind = {
         MEDIA_TRANSFER_QUEUE_TABLE: "queue",
         PRODUCTION_REQUESTS_TABLE: "request",
         MEDIA_ASSETS_TABLE: "media",
+        CAROUSEL_SLIDES_TABLE: "slides",
     }.get(table) or table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
     if not supabase_configured(settings):
         return {"skipped": True, "reason": "supabase_not_configured"}
+    if kind == "slides":
+        try:
+            return commit_carousel_slides(settings, records or [], partial=partial)
+        except Exception as error:
+            logger.warning("supabase slides write-through failed: %s", error)
+            return {"ok": False, "kind": "slides", "count": 0, "error": type(error).__name__}
     mirrored = 0
     for record in records or []:
         if not isinstance(record, dict) or not record.get("id"):

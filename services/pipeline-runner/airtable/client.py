@@ -42,7 +42,18 @@ class AirtableClient:
 
         return phase6_legacy_export_enabled(self._settings, table_id)
 
+    def _side_table_export(self, table_id: str) -> bool:
+        from supabase_pipeline import side_table_export_enabled
+
+        return side_table_export_enabled(self._settings, table_id)
+
     def _commit_phase6(self, table_id: str, records: list[dict]) -> bool:
+        from supabase_pipeline import mirror_airtable_records
+
+        result = mirror_airtable_records(self._settings, table_id, records, partial=True)
+        return bool(result.get("ok")) and result.get("count") == len(records)
+
+    def _commit_side_table(self, table_id: str, records: list[dict]) -> bool:
         from supabase_pipeline import mirror_airtable_records
 
         result = mirror_airtable_records(self._settings, table_id, records, partial=True)
@@ -127,6 +138,22 @@ class AirtableClient:
             else:
                 logger.info(
                     "Airtable archive kept the Supabase phase6 commit and did not export %s %s",
+                    table_id,
+                    record_id,
+                )
+                return pending
+        if self._side_table_export(table_id):
+            pending = {"id": record_id, "fields": fields}
+            committed = self._commit_side_table(table_id, [pending])
+            if not committed:
+                logger.warning(
+                    "supabase side-table update commit failed for %s %s; Airtable remains required",
+                    table_id,
+                    record_id,
+                )
+            else:
+                logger.info(
+                    "Airtable archive kept the Supabase side-table commit and did not export %s %s",
                     table_id,
                     record_id,
                 )
@@ -332,6 +359,26 @@ class AirtableClient:
                 else:
                     logger.info(
                         "Airtable archive kept the Supabase phase6 batch and did not export %s",
+                        table_id,
+                    )
+                    updated.extend(
+                        {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                        for item in chunk
+                    )
+                    continue
+            if not legacy and not phase6_committed and self._side_table_export(table_id):
+                side_committed = self._commit_side_table(table_id, [
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                ])
+                if not side_committed:
+                    logger.warning(
+                        "supabase side-table batch update commit failed for %s; Airtable remains required",
+                        table_id,
+                    )
+                else:
+                    logger.info(
+                        "Airtable archive kept the Supabase side-table batch and did not export %s",
                         table_id,
                     )
                     updated.extend(

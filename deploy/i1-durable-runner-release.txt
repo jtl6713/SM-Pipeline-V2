@@ -85,3 +85,5 @@ Deploy 2026-11-14 runner 2026-11-14-zcloseout-r2-publish: R2 classified video/mu
 Deploy 2026-11-15 runner 2026-11-15-zcloseout-get-miss: FALLBACK_STOPPED SoR GET miss skips Airtable archive (Worker 0.10.948 parity). Egress logs+hourly include table_kind. Ready queue lists no longer require a 5000-row Airtable depth probe. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-get-miss.
 
 Deploy 2026-11-15 runner 2026-11-15-zcloseout-settings-get: Pipeline Settings single-quote/FIND/OR formulas prefer Supabase; settings record GET miss skips Airtable archive. Verify /health version 2026-11-15-zcloseout-settings-get.
+
+Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATCH/POST commit to Supabase under STUDIO_WRITE_SOURCE=supabase and skip Airtable archive export (kills ~54/hr slides PATCH). FALLBACK_STOPPED includes slides. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-slides-patch.
