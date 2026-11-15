@@ -1385,7 +1385,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.947-place-review-dnp-blank",
+          version: "0.10.948-output-get-404-closed",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5370,6 +5370,13 @@ function studioMarkMappedListDirty() {
 /*__STUDIO_WORKER_EXTRACT:studioSupabaseWriteThroughAirtableMutation__*/
 /*__STUDIO_WORKER_EXTRACT:studioInvalidateHotReads__*/
 /*__STUDIO_WORKER_EXTRACT:studioReadCoalesce__*/
+function studioAirtableRecordIdPath(pathOrParams) {
+  const raw = String(pathOrParams || "").trim();
+  if (!raw || raw.startsWith("?")) return "";
+  const id = raw.replace(/^\//, "").split("?")[0];
+  return /^rec[A-Za-z0-9]{14}$/.test(id) ? id : "";
+}
+
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const method = String(options?.method || "GET").toUpperCase();
@@ -5447,7 +5454,9 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     }
   }
   let sideRead = null;
+  let sideReadAttempted = false;
   if (method === "GET" && studioWriteSource(env) === "supabase") {
+    sideReadAttempted = true;
     sideRead = await studioSideTableRead(env, tableId, pathOrParams).catch((error) => {
       console.warn("supabase side-table read failed; Airtable remains required", error);
       return null;
@@ -5488,6 +5497,22 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     body = archiveRecords.length === 1 && !raw.includes('"records"')
       ? archiveRecords[0]
       : { records: archiveRecords };
+  } else if (
+    // Live wrangler tail after 0.10.947: bursts of Platform Output GET 404 were
+    // Supabase misses falling through to the frozen Airtable archive. Output and
+    // Content record GETs must fail closed — do not count archive 404s as activity.
+    sideReadAttempted
+    && method === "GET"
+    && studioAirtableRecordIdPath(pathOrParams)
+    && (
+      String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID)
+      || String(tableId) === String(env.AIRTABLE_CONTENT_TABLE_ID)
+    )
+  ) {
+    console.info("supabase SoR record miss; skipping Airtable archive GET", {
+      table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs" : "content",
+    });
+    throw new HttpError(404, "NOT_FOUND");
   } else {
   await airtableRequestSlot();
   try {
