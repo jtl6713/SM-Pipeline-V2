@@ -184,6 +184,56 @@
       .test(text);
   }
 
+  // Flood/deleted Platform Outputs return a durable 409 from global preflight.
+  // Those browser recovery fences must not keep "awaiting server acceptance"
+  // forever or starve a later Ready-for-Review selection.
+  function factoryUnrecoverableSubmitError(message) {
+    const text = String(message || "");
+    return /could not be loaded for global batch approval/i.test(text)
+      || /INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND/i.test(text)
+      || /requested model was not found/i.test(text)
+      || /record does not exist/i.test(text)
+      || /Exact output absent/i.test(text);
+  }
+
+  function clearFactoryRecoveryFences(options) {
+    const onlyUnrecoverable = Boolean(options && options.onlyUnrecoverable);
+    let dropped = 0;
+    for (const { key, saved } of factoryRecoveryEntries()) {
+      const unrecoverable = factoryUnrecoverableSubmitError(saved?.last_error)
+        || saved?.terminal_eligibility === true;
+      if (onlyUnrecoverable && !unrecoverable) continue;
+      try { localStorage.removeItem(key); } catch {}
+      dropped += 1;
+    }
+    if (!onlyUnrecoverable) {
+      try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
+    } else {
+      const pending = pendingFactoryApproval();
+      if (pending && (factoryUnrecoverableSubmitError(pending.last_error)
+          || pending.terminal_eligibility === true)) {
+        try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
+        dropped += 1;
+      }
+    }
+    return dropped;
+  }
+
+  function pruneFactorySelectionToNeedsEyes() {
+    const live = new Set((state.desk?.lanes?.needs_eyes || [])
+      .filter((card) => card?.kind === "output" && /^rec[A-Za-z0-9]+$/.test(String(card.id || "")))
+      .map((card) => String(card.id)));
+    let removed = 0;
+    for (const id of [...state.selectedOutputs]) {
+      if (live.size && !live.has(id)) {
+        state.selectedOutputs.delete(id);
+        removed += 1;
+      }
+    }
+    if (removed) saveFactorySelection();
+    return removed;
+  }
+
   function factoryBlockingRequestIdsFromMessage(message) {
     const match = String(message || "").match(/\(([A-Za-z0-9_,. -]{12,400})\)/);
     if (!match) return [];
@@ -594,10 +644,20 @@
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
   }
   function readyFactoryOutputs(includeOtherProfiles=false) {
-    const hidden = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
+    // Hide only accepted outputs that left Ready for Review. A UX fence must
+    // not zero the selection counter while Needs Eyes still shows RFR checkboxes.
+    const accepted = recentFactoryAccepted();
+    const submitting = state.submittingOutputIds || new Set();
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => !hidden.has(card.id) && (includeOtherProfiles || factoryMatchesProfile(card)) && card?.kind === "output"
-        && canReviewActions(card) && canSelectBatchOutput(card))
+      .filter((card) => {
+        if (!(includeOtherProfiles || factoryMatchesProfile(card)) || card?.kind !== "output") return false;
+        if (submitting.has(card.id)) return false;
+        if (accepted[String(card.id || "")]
+            && String(card?.output_status || "").trim().toLowerCase() !== "ready for review") {
+          return false;
+        }
+        return canReviewActions(card) && canSelectBatchOutput(card);
+      })
       .map(withResolvedFactoryProfile);
   }
 
@@ -994,6 +1054,16 @@
     factoryPendingReconcileRunning = true;
     try {
       archiveFactoryPending();
+      // Flood/deleted IDs already stamped with an unrecoverable last_error must
+      // leave the browser queue before any network reconcile. Otherwise the
+      // toolbar keeps "N awaiting server acceptance" and a later RFR selection
+      // looks permanently stuck even when Clear/Submit should work.
+      const droppedPoison = clearFactoryRecoveryFences({ onlyUnrecoverable: true });
+      if (droppedPoison) {
+        setBatchSubmissionError(null);
+        setStatus(`Cleared ${droppedPoison} stuck saved submission${droppedPoison === 1 ? "" : "s"} that referenced outputs Airtable can no longer load.`);
+      }
+      pruneFactorySelectionToNeedsEyes();
       // Independent of Desk/Activity success; one failed request cannot starve others.
       const entries = factoryRecoveryEntries().sort((a,b) =>
         Number((b.saved.ids || []).some(id => state.selectedOutputs.has(id))) -
@@ -1011,6 +1081,12 @@
           dropFactoryRecoveryEntry(key, saved,
             "Output already left Ready for Review (" + result.message
             + "). Removed from the browser approval queue so other selections can submit.");
+          continue;
+        }
+        if (!result?.resolved && result?.message && factoryUnrecoverableSubmitError(result.message)) {
+          dropFactoryRecoveryEntry(key, saved,
+            "Saved approval referenced outputs that are gone from Airtable (" + result.message
+            + "). Cleared the browser queue so your current Ready for Review selection can submit.");
           continue;
         }
         if (!result?.resolved && result?.message && touchesSelection) {
@@ -1069,7 +1145,8 @@
       saved.last_error = String(error.message || error);
       saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
       saved.next_retry_ms = Math.max(saved.next_retry_ms, Date.now() + Number(error.retryAfterSeconds || 0) * 1000);
-      if (factoryTerminalEligibilityError(saved.last_error)) {
+      if (factoryTerminalEligibilityError(saved.last_error)
+          || factoryUnrecoverableSubmitError(saved.last_error)) {
         saved.terminal_eligibility = true;
       }
       localStorage.setItem(recoveryKey, JSON.stringify(saved));
@@ -1145,20 +1222,29 @@
           const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
           if (!accepted) {
             const failure = saved.last_error || "Submission is saved and will retry automatically.";
-            if (saved.terminal_eligibility || factoryTerminalEligibilityError(failure)) {
+            if (saved.terminal_eligibility || factoryTerminalEligibilityError(failure)
+              || factoryUnrecoverableSubmitError(failure)) {
               return dropFactoryRecoveryEntry(recoveryKey, saved,
-                "Output already left Ready for Review (" + failure
-                + "). Removed from the browser approval queue so other selections can submit.");
+                factoryUnrecoverableSubmitError(failure)
+                  ? ("Saved approval referenced outputs that are gone from Airtable (" + failure
+                    + "). Cleared the browser queue so your current Ready for Review selection can submit.")
+                  : ("Output already left Ready for Review (" + failure
+                    + "). Removed from the browser approval queue so other selections can submit."));
             }
             return { resolved: false, message: failure };
           }
           committed.push(...plan.ids);
           continue;
         }
-        if (saved.terminal_eligibility || factoryTerminalEligibilityError(saved.last_error)) {
+        if (saved.terminal_eligibility || factoryTerminalEligibilityError(saved.last_error)
+            || factoryUnrecoverableSubmitError(saved.last_error)) {
           return dropFactoryRecoveryEntry(recoveryKey, saved,
-            "Output already left Ready for Review (" + (saved.last_error || "past_review")
-            + "). Removed from the browser approval queue so other selections can submit.");
+            factoryUnrecoverableSubmitError(saved.last_error)
+              ? ("Saved approval referenced outputs that are gone from Airtable ("
+                + (saved.last_error || "missing")
+                + "). Cleared the browser queue so your current Ready for Review selection can submit.")
+              : ("Output already left Ready for Review (" + (saved.last_error || "past_review")
+                + "). Removed from the browser approval queue so other selections can submit."));
         }
         if (!graceExpired) {
           return { resolved: false, message: "Saved approval " + requestId
@@ -3333,9 +3419,16 @@
     if (state.submittingBatch) return;
     localStorage.removeItem(FACTORY_WAITING_SELECTION_KEY);
     state.selectedOutputs.clear();
+    const dropped = clearFactoryRecoveryFences({ onlyUnrecoverable: false });
+    // Operator Clear is an explicit reset: drop the local "already accepted"
+    // UX fence so still-Ready-for-Review checkboxes can count toward Submit.
+    try { localStorage.removeItem(FACTORY_ACCEPTED_OUTPUTS_KEY); } catch {}
     setBatchSubmissionError(null);
-    setStatus("Selection cleared.");
+    setStatus(dropped
+      ? `Selection cleared. Removed ${dropped} stuck saved submission${dropped === 1 ? "" : "s"} from this browser.`
+      : "Selection cleared.");
     saveFactorySelection();
+    updateFactoryBatchToolbar();
     if (state.desk) renderDesk(state.desk);
   });
   $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity(true).catch(() => {}); });

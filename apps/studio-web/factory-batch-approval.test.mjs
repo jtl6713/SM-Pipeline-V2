@@ -273,6 +273,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
   const matchesFn = extractNamedFunction(js, "factoryActivityMatchesPlan");
   const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
   const terminalFn = extractNamedFunction(js, "factoryTerminalEligibilityError");
+  const unrecoverableFn = extractNamedFunction(js, "factoryUnrecoverableSubmitError");
   const dropFn = extractNamedFunction(js, "dropFactoryRecoveryEntry");
   // The generic extractor starts at "function" and omits the async modifier.
   const recoveryFn = "async " + extractNamedFunction(js, "reconcileFactorySubmissionFence");
@@ -282,6 +283,8 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
   const missing = new Function(missingFn + "; return factoryActivityProvesPlanMissing;")();
   const factoryTerminalEligibilityError = new Function(
     terminalFn + "; return factoryTerminalEligibilityError;")();
+  const factoryUnrecoverableSubmitError = new Function(
+    unrecoverableFn + "; return factoryUnrecoverableSubmitError;")();
   const dropFactoryRecoveryEntry = new Function(
     "localStorage", "FACTORY_WAITING_SELECTION_KEY", "waitingFactorySelection",
     "state", "saveFactorySelection", "factoryRecoveryEntries", "setBatchSubmissionError",
@@ -294,7 +297,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     "rememberFactoryAccepted", "state", "saveFactorySelection",
     "setBatchSubmissionError", "renderDesk", "updateFactoryBatchToolbar", "setStatus",
     "factorySavedPayloadMatchesPlan", "retrySavedFactoryPlan", "factoryRecoveryEntries",
-    "factoryTerminalEligibilityError", "dropFactoryRecoveryEntry",
+    "factoryTerminalEligibilityError", "factoryUnrecoverableSubmitError", "dropFactoryRecoveryEntry",
     recoveryFn + "; return reconcileFactorySubmissionFence;",
   )(
     () => stored ? JSON.parse(stored) : null, 90_000,
@@ -302,7 +305,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     localStorage, "pending", matches, missing,
     ids => accepted.push(...ids), state, () => {},
     () => {}, () => {}, () => {}, message => messages.push(message), () => false, async () => null, () => [],
-    factoryTerminalEligibilityError, dropFactoryRecoveryEntry,
+    factoryTerminalEligibilityError, factoryUnrecoverableSubmitError, dropFactoryRecoveryEntry,
   );
   return { reconcile, state, calls, accepted, messages, pending: () => stored ? JSON.parse(stored) : null };
 }
@@ -497,6 +500,7 @@ function automaticRecoveryHarness(saved, response) {
     'pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
     'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan','factoryTerminalEligibilityError',
+    'factoryUnrecoverableSubmitError','clearFactoryRecoveryFences','pruneFactorySelectionToNeedsEyes',
     'dropFactoryRecoveryEntry'].map(n=>extractNamedFunction(js,n)).join('\n');
   const asyncFunctions=['retrySavedFactoryPlan','reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
     'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
@@ -511,7 +515,8 @@ function automaticRecoveryHarness(saved, response) {
     const refreshFactoryApprovalPolicy=async()=>{};
     const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
     ${functions}\n${asyncFunctions}
-    return {archiveFactoryPending,factoryRecoveryEntries,reconcilePersistedFactoryPending,submitFactoryBatchApprovals};
+    return {archiveFactoryPending,factoryRecoveryEntries,reconcilePersistedFactoryPending,submitFactoryBatchApprovals,
+      factoryUnrecoverableSubmitError,clearFactoryRecoveryFences};
   `);
   const api=compile(localStorage,state,response,async rows=>{submitted.push(rows.map(x=>x.id));},messages);
   return {...api,store,state,submitted,messages};
@@ -631,4 +636,57 @@ test('past_review recovery is dropped so a new Ready-for-Review selection can su
   h.state.selectedOutputs.add('recNewChicago');
   await h.submitFactoryBatchApprovals();
   assert.deepEqual(h.submitted,[['recNewChicago']]);
+});
+
+test('deleted-output global preflight 409 is dropped so remaining RFR selection can submit',async()=>{
+  const saved=savedGlobalEnvelope();let posts=0;
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method==='POST'){
+      posts++;
+      throw Object.assign(Error(
+        'At least one selected output could not be loaded for global batch approval'),{status:409});
+    }
+    return {ok:true,exact_request_id:saved.batches[0].request_id,batches:[]};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts,1);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+  assert.ok(h.factoryUnrecoverableSubmitError(
+    'At least one selected output could not be loaded for global batch approval'));
+  h.state.selectedOutputs.add('recNewChicago');
+  await h.submitFactoryBatchApprovals();
+  assert.deepEqual(h.submitted,[['recNewChicago']]);
+});
+
+test('stale unrecoverable recovery fences clear without another POST',async()=>{
+  const saved={...savedGlobalEnvelope(), last_error:
+    'At least one selected output could not be loaded for global batch approval',
+    retry_blocked:true, terminal_eligibility:true};
+  const h=automaticRecoveryHarness(saved,async()=>{
+    throw new Error('network should not be required to drop poisoned recovery');
+  });
+  h.archiveFactoryPending();
+  assert.equal(h.factoryRecoveryEntries().length,1);
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+  assert.ok(h.messages.some(message=>/Cleared 1 stuck saved submission/i.test(String(message||''))));
+});
+
+test('readyFactoryOutputs keeps Ready-for-Review rows despite local accepted fence',()=>{
+  assert.match(js,/Hide only accepted outputs that left Ready for Review/);
+  assert.match(js,/output_status \|\| ""\)\.trim\(\)\.toLowerCase\(\) !== "ready for review"/);
+  assert.match(js,/clearFactoryRecoveryFences\(\{ onlyUnrecoverable: false \}\)/);
+  assert.match(js,/localStorage\.removeItem\(FACTORY_ACCEPTED_OUTPUTS_KEY\)/);
+  assert.match(js,/factoryUnrecoverableSubmitError/);
+  const readyFn=extractNamedFunction(js,'readyFactoryOutputs');
+  const compile=new Function('state','recentFactoryAccepted','factoryMatchesProfile',
+    'canReviewActions','canSelectBatchOutput','withResolvedFactoryProfile',
+    readyFn+'; return readyFactoryOutputs;');
+  const card={id:'recTribune',kind:'output',output_status:'Ready for Review',profile_id:'recChicago'};
+  const state={desk:{lanes:{needs_eyes:[card]}},submittingOutputIds:new Set()};
+  const ready=compile(state,()=>({recTribune:Date.now()}),()=>true,()=>true,()=>true,c=>c);
+  assert.deepEqual(ready(true).map(row=>row.id),['recTribune']);
+  const gone={...card,output_status:'Approved for Publishing'};
+  state.desk.lanes.needs_eyes=[gone];
+  assert.deepEqual(ready(true).map(row=>row.id),[]);
 });
