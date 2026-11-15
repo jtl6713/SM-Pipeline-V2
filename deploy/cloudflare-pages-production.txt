@@ -785,3 +785,5 @@ Deploy 2026-11-14 Studio UI 0.6.940-meta-republish-safety. Disable automatic ret
 Deploy 2026-11-14 Studio UI 0.6.941-tiktok-place-reviews. Engagement Place Reviews tab: discover visited places from published TikTok content, draft reviews, Open Place manual workflow. Verify footer UI build 0.6.941.
 
 Deploy 2026-11-14 Studio UI 0.6.942-factory-global-profile-flush. Factory multi-profile Submit Approvals: resolve Content Profile lookup names, keep Global Factory policy across activity polls, require/resolvable profile ids before flush. Verify footer UI build 0.6.942.
+
+Deploy 2026-11-14 Studio UI 0.6.943 Engagement unified table from PR #1980 (merge 7521758e). Trigger controlled Cloudflare Pages production workflow; verify custom-domain UI release contract and mobile Engagement rows.
