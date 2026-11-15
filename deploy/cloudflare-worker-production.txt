@@ -1267,3 +1267,5 @@ Deploy 2026-11-14 Worker 0.10.943-place-reviews-imports: wire missing postPlaceR
 Deploy 2026-11-15 Worker 0.10.944-place-reviews-discovery: Place Reviews Discover no longer filters Airtable with fragile Content_Profile FIND on lookup fields; matches profile in JS and treats Platform Post ID/URL as published.
 
 Deploy 2026-11-15 Worker 0.10.945-place-reviews-output-title: Place Reviews Discover requests Output_Title (not Content_Title) on Platform Outputs so Airtable listRecords stops UNKNOWN_FIELD_NAME.
+
+Deploy 2026-11-15 Worker 0.10.946-place-reviews-discover-fast: Place Reviews Discover one TikTok scan, skip other-profile content fetches, fallback drafts (no runner) so Safari Load failed timeouts stop.
