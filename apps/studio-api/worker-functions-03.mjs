@@ -56,6 +56,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseMusicRecords,
   listSupabaseAssetLibraryRecords,
+  listSupabaseLibraryBatchExistingNames,
   listSupabaseIdeaLane,
   listSupabaseUnfinishedIntakeBatches,
   listSupabasePipelineSettingsByNames,
@@ -3454,7 +3455,19 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
 }
 /*__STUDIO_WORKER_END:promoteStudioAssetToDrive__*/
 
-export async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null) {
+export async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null, {
+  profileId = "",
+} = {}) {
+  // Under Phase 6 SoR the catalog lives in Supabase. Archive-closed Airtable
+  // listRecords return [] and would restart every upload at "Name 1".
+  if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const names = await listSupabaseLibraryBatchExistingNames(env, baseName, {
+      profileId,
+      limit: 500,
+    }).catch(() => null);
+    if (Array.isArray(names)) return names;
+    if (studioWriteSource(env) === "supabase") return [];
+  }
   const filterFormula = combineAirtableFormulas(libraryBatchNameFilterFormula(baseName), scopeFormula);
   if (!filterFormula) return [];
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
@@ -3504,10 +3517,13 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       includeUnscoped: false,
       profileName: f(uploadProfile, "Profile_Name") || "",
     });
-    const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula);
+    const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula, {
+      profileId: uploadProfile.id,
+    });
     // A name such as "Lurie 5" starts at 5; do not strip it and append a second number.
-    // Large batches are sent as single-file requests, so Airtable's existing
-    // names also let later requests advance 5, 6, 7 without duplicate titles.
+    // Large batches are sent as single-file requests, so the catalog's existing
+    // names (Supabase under Phase 6 SoR) also let later requests advance 5, 6, 7
+    // without duplicate titles.
     batchNames = allocateLibraryUploadNames(rawBatchName, files.length, existingNames);
     if (batchNames.length !== files.length) {
       throw new HttpError(500, "Could not allocate sequential asset names");

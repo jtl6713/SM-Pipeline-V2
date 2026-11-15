@@ -20,7 +20,7 @@ test("Worker heals stale library Processing and classifies small uploads inline"
   assert.match(funcs, /studioHealStaleLibraryClassification/);
   assert.match(funcs, /background: uploadedIds\.length > 3/);
   assert.match(worker, /studioHealStaleLibraryClassification\(env/);
-  assert.match(worker, /0\.10\.961-library-classify-timeout/);
+  assert.match(worker, /0\.10\.962-library-batch-name-supabase/);
 });
 
 test("Asset Manager Classifying watch expires at 60 seconds", () => {

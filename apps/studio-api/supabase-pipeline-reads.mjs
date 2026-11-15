@@ -1198,6 +1198,35 @@ export async function listSupabaseAssetLibraryRecords(env, {
   };
 }
 
+/**
+ * Existing Asset Manager names for upload sequencing (batch_name / AI base).
+ * Prefix-scans media_assets, then keeps only exact / "base N" / contiguous baseN
+ * stems — same membership as libraryBatchNameFilterFormula.
+ */
+export async function listSupabaseLibraryBatchExistingNames(env, baseName, {
+  profileId = "",
+  limit = 500,
+} = {}) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const { matchesLibraryBatchName, stripLibraryAssetExtension } = await import("./asset-library.mjs");
+  const base = stripLibraryAssetExtension(baseName);
+  if (!base) return [];
+  const cap = Math.max(1, Math.min(500, Number(limit) || 500));
+  const filters = [`asset_name.ilike.${encodePostgrestValue(`${base}*`)}`];
+  const scopedProfile = String(profileId || "").trim();
+  if (/^rec[A-Za-z0-9]+$/.test(scopedProfile)) {
+    filters.push(`metadata->>content_profile_airtable_id=eq.${encodePostgrestValue(scopedProfile)}`);
+  }
+  const rows = await supabaseRest(
+    env,
+    `media_assets?${filters.join("&")}&select=asset_name&limit=${cap}`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows
+    .map((row) => stripLibraryAssetExtension(row?.asset_name))
+    .filter((name) => name && matchesLibraryBatchName(name, base));
+}
+
 /** Ops / intake A3 classify — Meta view viwf6dxUJrMx2yNoe gates. */
 export async function listSupabaseA3ClassifyMedia(env, { limit = 25 } = {}) {
   if (!studioSupabaseConfigured(env)) return null;

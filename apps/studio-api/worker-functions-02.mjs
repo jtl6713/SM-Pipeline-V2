@@ -5843,7 +5843,9 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
     includeUnscoped: false,
     profileName: f(productionProfile, "Profile_Name") || "",
   });
-  const catalogNames = await listLibraryBatchExistingNames(env, assetBase, profileScope);
+  const catalogNames = await listLibraryBatchExistingNames(env, assetBase, profileScope, {
+    profileId: productionProfile.id,
+  });
   const manifestNames = assets
     .map((asset) => String(asset?.library_asset_name || asset?.name || "").trim())
     .filter(Boolean);

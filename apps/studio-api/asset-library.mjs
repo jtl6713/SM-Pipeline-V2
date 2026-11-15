@@ -426,6 +426,21 @@ export function libraryBatchNameFilterFormula(baseName) {
   return `OR(REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}[0-9]+${ext}$"))`;
 }
 
+/**
+ * Same membership as libraryBatchNameFilterFormula, for Supabase prefix scans.
+ * Exact base, "base N", or contiguous "baseN" (Route66) — optional file extension.
+ */
+export function matchesLibraryBatchName(assetName, baseName) {
+  const name = stripLibraryAssetExtension(assetName).toLowerCase();
+  const base = stripLibraryAssetExtension(baseName).toLowerCase();
+  if (!name || !base) return false;
+  if (name === base) return true;
+  const escaped = escapeRegExp(base);
+  if (new RegExp(`^${escaped}\\s+\\d+$`).test(name)) return true;
+  if (new RegExp(`^${escaped}\\d+$`).test(name)) return true;
+  return false;
+}
+
 export function libraryDriveFilename(stem, extension) {
   const safe = String(stem || "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, LIBRARY_ASSET_NAME_MAX) || "asset";
   const ext = String(extension || "").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 8);

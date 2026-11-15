@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   allocateLibraryBatchNames,
   allocateLibraryUploadNames,
+  matchesLibraryBatchName,
   collectJsonDriveIds,
   coerceLibraryDurationSeconds,
   libraryBatchNameFilterFormula,
@@ -230,6 +231,14 @@ test("library batch sequence continues after existing Airtable names", () => {
   assert.deepEqual(allocateLibraryBatchNames("Space Museum", 2, []), ["Space Museum 1", "Space Museum 2"]);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /space museum/);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /REGEX_MATCH/);
+});
+
+test("matchesLibraryBatchName mirrors Airtable REGEX membership for sequencing", () => {
+  assert.equal(matchesLibraryBatchName("Space Museum", "Space Museum"), true);
+  assert.equal(matchesLibraryBatchName("Space Museum 12.jpg", "Space Museum"), true);
+  assert.equal(matchesLibraryBatchName("Route66.mp4", "Route"), true);
+  assert.equal(matchesLibraryBatchName("Space Museum Annex", "Space Museum"), false);
+  assert.equal(matchesLibraryBatchName("Other Beach 9", "Space Museum"), false);
 });
 
 test("library batch numbering continues from highest number no matter the file extension", () => {
