@@ -6,6 +6,7 @@ import {
   appendClassificationAudit,
   applyManualClassification,
   validateClassificationPatch,
+  validateAssetDescription,
 } from "./manual-classification.mjs";
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
 import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
@@ -3923,10 +3924,16 @@ export async function manualLibraryClassificationRoute(request, env, url, author
   try { payload = await request.json(); } catch { throw new HttpError(400, "Valid JSON is required"); }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new HttpError(400, "Invalid classification payload");
   const mode = String(payload.mode || "add");
-  let patch;
+  const hasPatch = payload.patch != null && typeof payload.patch === "object" && !Array.isArray(payload.patch)
+    && Object.keys(payload.patch).length > 0;
+  const descriptionRequested = Object.prototype.hasOwnProperty.call(payload, "description");
+  let patch = null;
+  let nextDescription = null;
   try {
-    patch = validateClassificationPatch(payload.patch);
     if (!["add", "override"].includes(mode)) throw new TypeError("Invalid classification mode");
+    if (hasPatch) patch = validateClassificationPatch(payload.patch);
+    if (descriptionRequested) nextDescription = validateAssetDescription(payload.description);
+    if (!hasPatch && !descriptionRequested) throw new TypeError("Empty classification patch");
   } catch (error) {
     throw new HttpError(400, error.message || "Invalid classification patch");
   }
@@ -3949,18 +3956,36 @@ export async function manualLibraryClassificationRoute(request, env, url, author
         throw new HttpError(409, "Stored classification history needs review before editing");
       }
       const ai = airtableAiClassification(record, f(profile, "Profile_Name") || "");
-      const applied = applyManualClassification({
-        ai, manual: previous, patch, mode, actor, at: new Date().toISOString(),
-      });
-      const auditEvent = {...applied.audit, asset_id: id, profile_id: profileId};
-      const events = appendClassificationAudit(history, auditEvent);
+      const at = new Date().toISOString();
+      let appliedManual = previous;
+      let events = history;
+      const fields = { Classification_Status: "Classified" };
+      if (hasPatch) {
+        const applied = applyManualClassification({
+          ai, manual: previous, patch, mode, actor, at,
+        });
+        appliedManual = applied.manual;
+        const auditEvent = {...applied.audit, asset_id: id, profile_id: profileId};
+        events = appendClassificationAudit(history, auditEvent);
+        fields.Manual_Classification_JSON = JSON.stringify(applied.manual);
+        fields.Manual_Classification_Audit = JSON.stringify(events);
+      }
+      if (descriptionRequested) {
+        const beforeDescription = String(f(record, "Asset_Description") || "");
+        fields.Asset_Description = nextDescription;
+        const descAudit = {
+          actor, at, source: "manual", mode: "override", fields: ["description"],
+          before: { description: beforeDescription },
+          after: { description: nextDescription },
+          asset_id: id, profile_id: profileId,
+        };
+        events = appendClassificationAudit(events, descAudit);
+        fields.Manual_Classification_Audit = JSON.stringify(events);
+        if (!hasPatch) fields.Manual_Classification_JSON = JSON.stringify(appliedManual);
+      }
       const saved = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id, {
         method: "PATCH",
-        body: JSON.stringify({fields: {
-          Manual_Classification_JSON: JSON.stringify(applied.manual),
-          Manual_Classification_Audit: JSON.stringify(events),
-          Classification_Status: "Classified",
-        }}),
+        body: JSON.stringify({fields}),
       });
       results.push({id, ok: true, record: mapLibraryAsset(saved || record, {[profile.id]: profile})});
     } catch (error) {

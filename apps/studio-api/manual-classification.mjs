@@ -5,6 +5,7 @@ export const CLASSIFICATION_FIELDS = Object.freeze([
   "objects", "scene_type", "time_of_day", "weather", "keywords",
 ]);
 export const MULTI_VALUE_FIELDS = new Set(["landmarks", "subjects", "objects", "keywords"]);
+export const MAX_DESCRIPTION = 2000;
 const MAX_VALUE = 120;
 const MAX_ITEMS = 40;
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -12,6 +13,16 @@ function clean(value) {
   if (typeof value !== "string") throw new TypeError("Classification values must be strings");
   const v = value.trim().replace(/\s+/g, " ");
   if (v.length > MAX_VALUE || /[\u0000-\u001f]/.test(v)) throw new RangeError("Invalid classification value");
+  return v;
+}
+/** Asset_Description is freeform prose shown on library cards — not a tag field. */
+export function validateAssetDescription(value) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new TypeError("Description must be a string");
+  const v = value.replace(/\r\n/g, "\n").trim();
+  if (v.length > MAX_DESCRIPTION || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)) {
+    throw new RangeError("Invalid asset description");
+  }
   return v;
 }
 function list(value) {
