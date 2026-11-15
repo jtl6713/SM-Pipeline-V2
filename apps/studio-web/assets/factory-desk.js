@@ -299,7 +299,18 @@
   // prove which output failed or whether another batch was accepted.
   function factoryRejectedOutputId(saved, message = saved?.last_error) {
     const text = String(message || "");
-    if (!/No new batch was accepted[.!]?/i.test(text)) return null;
+    const ids = [...new Set((saved?.ids || []).filter(id =>
+      /^rec[A-Za-z0-9]+$/.test(String(id))))];
+    // Both errors are thrown by the global preflight before reserving any
+    // batch claim. If there is only one selected ID, it is unambiguous even
+    // when an old Worker returns the generic "could not be loaded" message.
+    const definiteNoAccept = /No new batch was accepted[.!]?/i.test(text);
+    const missingBeforeAccept = /At least one selected output could not be loaded for global batch approval/i.test(text);
+    if (!definiteNoAccept && !missingBeforeAccept) return null;
+    if (ids.length === 1) return ids[0];
+    // For multi-output batches, ONLY the precise server-confirmed output
+    // number can be skipped. Never infer an ID from list order or stale UI.
+    if (!definiteNoAccept) return null;
     const match = text.match(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/i);
     if (!match) return null;
     const member = (saved?.batches || []).flatMap(plan =>
@@ -308,7 +319,7 @@
         && /^rec[A-Za-z0-9]+$/.test(String(item?.id || "")));
     if (member.length !== 1) return null;
     const id = String(member[0].id);
-    return (saved?.ids || []).filter(candidate => candidate === id).length === 1 ? id : null;
+    return ids.includes(id) ? id : null;
   }
 
   function dropFactoryRecoveryEntry(recoveryKey, saved, reason) {
