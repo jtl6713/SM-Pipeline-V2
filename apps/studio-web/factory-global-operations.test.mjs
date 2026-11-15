@@ -83,18 +83,17 @@ test("Factory batch counts and status never overlap the full-width progress rail
   assert.ok(renderer.includes('class="factory-batch-recent-info"'));
   const counts = renderer.indexOf('${Number(row.approved_count)||0} approved');
   const status = renderer.indexOf('class="factory-batch-recent-result"');
-  const progress = renderer.indexOf('class="factory-batch-mini-progress"');
-  assert.ok(counts > 0 && counts < status && status < progress,
-    "counts, status and progress must be separate siblings in DOM order");
-  assert.match(layout, /\.factory-batch-recent-row\.factory-batch-activity-choice\{[^}]*display:grid;grid-template-columns:minmax\(0,1fr\) max-content/);
-  assert.match(layout, /grid-template-areas:"info status" "progress progress"/);
+  const caption = renderer.indexOf('class="factory-batch-progress-caption"');
+  const progress = renderer.indexOf('class="factory-batch-row-progress"');
+  assert.ok(counts > 0 && counts < status && status < caption && caption < progress,
+    "counts, status, caption and native progress must be separate siblings in DOM order");
+  assert.match(layout, /grid-template-areas:"info status" "progresslabel progresslabel" "progress progress"/);
+  assert.match(layout, /grid-template-areas:"info" "status" "progresslabel" "progress"/);
   assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-info\{[^}]*grid-area:info/);
   assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-result\{[^}]*grid-area:status/);
-  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{[^}]*grid-area:progress;[^}]*position:static/);
-  assert.match(layout, /width:100%;max-width:none;height:5px/);
-  assert.match(layout, /grid-template-areas:"info" "status" "progress"/);
-  assert.doesNotMatch(layout, /max-width:260px|position:absolute;left:10px/);
-  assert.match(desk, /style="width:\$\{percent\}%"/);
+  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-progress-caption\{grid-area:progresslabel/);
+  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-row-progress\{margin-top:0/);
+  assert.match(renderer, /<progress class="factory-batch-row-progress" max="/);
 });
 
 test("Factory Quality Agent starts collapsed, expands via native accessible disclosure, and keeps metric visible", () => {

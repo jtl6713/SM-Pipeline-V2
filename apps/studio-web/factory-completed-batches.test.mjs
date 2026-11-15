@@ -27,7 +27,7 @@ function viewHarness() {
   ];
   const nodes = Object.fromEntries(ids.map(id => [id, {
     innerHTML: "", textContent: "", hidden: false,
-    setAttribute() {}, addEventListener() {}, querySelector() { return null; },
+    setAttribute() {}, addEventListener() {}, insertAdjacentElement(position, element) { if (position === "afterend") nodes[element.id] = element; }, querySelector() { return null; },
     querySelectorAll() { return []; },
   }]));
   nodes.factoryBatchRecentList.querySelectorAll = (selector) => {
@@ -49,6 +49,7 @@ function viewHarness() {
   const context = {
     state,
     $: id => nodes[id],
+    document: { createElement: () => ({ id: "", className: "", innerHTML: "", hidden: false }) },
     esc: val => String(val ?? ""),
     factoryProfileLabel: profile => profile || "All Profiles",
     navigator: { clipboard: { writeText: () => Promise.resolve() } },

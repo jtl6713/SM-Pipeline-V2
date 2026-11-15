@@ -747,6 +747,26 @@
       page.textContent = "Page " + (1 + Math.floor(state.completedOffset / 20));
     }
     summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
+    // Aggregate the selected batch snapshot, not the profile's output queue.
+    // Failed/skipped outputs count as processed, never as successfully approved.
+    const aggregateTotal = batches.reduce((sum, row) => sum + Math.max(0, Number(row.total) || 0), 0);
+    const aggregateDone = batches.reduce((sum, row) => {
+      const total = Math.max(0, Number(row.total) || 0);
+      const pending = Math.max(0, Number(row.pending_count) || 0);
+      return sum + Math.min(total, Math.max(0, Number(row.done_count ?? (total - pending)) || 0));
+    }, 0);
+    const aggregatePercent = aggregateTotal ? Math.round(100 * aggregateDone / aggregateTotal) : 0;
+    let overall = $("factoryBatchOverallProgress");
+    if (!overall) {
+      overall = document.createElement("div");
+      overall.id = "factoryBatchOverallProgress";
+      overall.className = "factory-batch-overall-progress";
+      summary.insertAdjacentElement("afterend", overall);
+    }
+    overall.hidden = !batches.length || (!state.completedOpen && !Number(totals.active));
+    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : "Overall active approval progress"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
+      <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
+      <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>`;
     if (updated) updated.textContent = state.completedOpen
       ? (state.completedLoading ? "Loading completed batches…" : "Loaded only on request")
       : "Live · batches needing action";
@@ -780,7 +800,8 @@
           <span class="factory-batch-recent-result">
             <strong>${esc(stateLabel)}</strong><span>${Number(row.failed_count)||0} failed</span>
           </span>
-          <span class="factory-batch-mini-progress" aria-hidden="true"><span style="width:${percent}%"></span></span>
+          <span class="factory-batch-progress-caption">${completed} of ${Number(row.total)||0} processed · ${percent}%</span>
+          <progress class="factory-batch-row-progress" max="${Number(row.total)||1}" value="${Math.min(Math.max(0,completed),Number(row.total)||1)}" aria-label="${esc(label)} processing progress">${percent}%</progress>
         </button>`;
       }).join("")
       : '<p class="subtle">' + (state.completedOpen
