@@ -501,7 +501,7 @@ function automaticRecoveryHarness(saved, response) {
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
     'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan','factoryTerminalEligibilityError',
     'factoryUnrecoverableSubmitError','clearFactoryRecoveryFences','pruneFactorySelectionToNeedsEyes',
-    'dropFactoryRecoveryEntry'].map(n=>extractNamedFunction(js,n)).join('\n');
+    'dropFactoryRecoveryEntry','factoryRejectedOutputId'].map(n=>extractNamedFunction(js,n)).join('\n');
   const asyncFunctions=['retrySavedFactoryPlan','reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
     'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
   const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches','messages',`

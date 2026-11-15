@@ -203,6 +203,15 @@
       const unrecoverable = factoryUnrecoverableSubmitError(saved?.last_error)
         || saved?.terminal_eligibility === true;
       if (onlyUnrecoverable && !unrecoverable) continue;
+      if (onlyUnrecoverable) {
+        // A stale member is not permission to discard the rest of a saved batch.
+        // Continue only if the backend identified exactly which output failed
+        // BEFORE acceptance; otherwise preserve the fence for inspection.
+        const recovered = dropFactoryRecoveryEntry(key, saved,
+          "The identified stale output was skipped; remaining approvals are preserved.");
+        if (recovered.dropped) dropped += 1;
+        continue;
+      }
       try { localStorage.removeItem(key); } catch {}
       dropped += 1;
     }
@@ -212,8 +221,9 @@
       const pending = pendingFactoryApproval();
       if (pending && (factoryUnrecoverableSubmitError(pending.last_error)
           || pending.terminal_eligibility === true)) {
-        try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
-        dropped += 1;
+        const recovered = dropFactoryRecoveryEntry(FACTORY_PENDING_REQUEST_KEY, pending,
+          "The identified stale output was skipped; remaining approvals are preserved.");
+        if (recovered.dropped) dropped += 1;
       }
     }
     return dropped;
@@ -284,21 +294,70 @@
     }
   }
 
+  // Only a *specific* pre-acceptance 409 proves that one member may be
+  // excluded safely. Generic 409/503/timeouts and absent-record errors do not
+  // prove which output failed or whether another batch was accepted.
+  function factoryRejectedOutputId(saved, message = saved?.last_error) {
+    const text = String(message || "");
+    const ids = [...new Set((saved?.ids || []).filter(id =>
+      /^rec[A-Za-z0-9]+$/.test(String(id))))];
+    // Both errors are thrown by the global preflight before reserving any
+    // batch claim. If there is only one selected ID, it is unambiguous even
+    // when an old Worker returns the generic "could not be loaded" message.
+    const definiteNoAccept = /No new batch was accepted[.!]?/i.test(text);
+    const missingBeforeAccept = /At least one selected output could not be loaded for global batch approval/i.test(text);
+    if (!definiteNoAccept && !missingBeforeAccept) return null;
+    if (ids.length === 1) return ids[0];
+    // For multi-output batches, ONLY the precise server-confirmed output
+    // number can be skipped. Never infer an ID from list order or stale UI.
+    if (!definiteNoAccept) return null;
+    const match = text.match(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/i);
+    if (!match) return null;
+    const member = (saved?.batches || []).flatMap(plan =>
+      Array.isArray(plan?.payload?.items) ? plan.payload.items : [])
+      .filter(item => String(item?.output_id || "") === match[1]
+        && /^rec[A-Za-z0-9]+$/.test(String(item?.id || "")));
+    if (member.length !== 1) return null;
+    const id = String(member[0].id);
+    return ids.includes(id) ? id : null;
+  }
+
   function dropFactoryRecoveryEntry(recoveryKey, saved, reason) {
-    try { localStorage.removeItem(recoveryKey); } catch {}
-    for (const id of saved?.ids || []) state.selectedOutputs.delete(id);
+    const rejectedId = factoryRejectedOutputId(saved);
+    if (!rejectedId) {
+      return {
+        resolved: false, dropped: false,
+        message: "Factory could not identify a single rejected output before acceptance. " +
+          "All saved output IDs and request IDs are preserved; inspect Activity rather than discarding or resubmitting the batch.",
+      };
+    }
+    // Persist the surviving selection BEFORE releasing its old rejected
+    // request ID. The next ordinary submission allocates a fresh idempotency
+    // key; never reuse the invalid plan's original key for a different set.
+    const survivors = (saved.ids || []).filter(id =>
+      id !== rejectedId && state.selectedOutputs.has(id));
+    const waiting = [...new Set([...waitingFactorySelection(), ...survivors])]
+      .filter(id => id !== rejectedId);
     try {
-      const waiting = waitingFactorySelection().filter((id) => state.selectedOutputs.has(id));
       localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
-    } catch {}
+      localStorage.removeItem(recoveryKey);
+    } catch {
+      return {
+        resolved: false, dropped: false,
+        message: "Could not preserve the remaining Factory approval selection in browser storage. No IDs were discarded.",
+      };
+    }
+    state.selectedOutputs.delete(rejectedId);
     saveFactorySelection();
     if (!factoryRecoveryEntries().some(({ saved: row }) =>
-      (row.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+      (row.ids || []).some(id => state.selectedOutputs.has(id)))) {
       setBatchSubmissionError(null);
     }
     return {
-      resolved: true, count: 0, dropped: true,
-      message: reason || "Removed an already-finished Factory approval from the browser queue.",
+      resolved: true, count: 0, dropped: true, skipped_output_id: rejectedId,
+      remaining: survivors.length,
+      message: (reason || "A stale Factory approval was removed.") +
+        " Preserved " + survivors.length + " other selected output(s) for automatic safe resubmission.",
     };
   }
 
