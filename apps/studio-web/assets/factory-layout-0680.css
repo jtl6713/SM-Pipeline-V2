@@ -814,3 +814,16 @@
 @media(max-width:560px){
   #page-factory .factory-batch-activity-choice .factory-batch-row-progress{margin-top:20px}
 }
+
+#page-factory .factory-batch-recent-row.factory-batch-activity-choice{
+  grid-template-areas:"info status" "progresslabel progresslabel" "progress progress";
+  row-gap:5px;
+}
+#page-factory .factory-batch-activity-choice .factory-batch-progress-caption{grid-area:progresslabel}
+#page-factory .factory-batch-activity-choice .factory-batch-row-progress{margin-top:0}
+@media(max-width:560px){
+  #page-factory .factory-batch-recent-row.factory-batch-activity-choice{
+    grid-template-areas:"info" "status" "progresslabel" "progress";
+  }
+  #page-factory .factory-batch-activity-choice .factory-batch-row-progress{margin-top:0}
+}
