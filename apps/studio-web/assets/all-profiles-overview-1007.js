@@ -232,6 +232,17 @@
   }
 
   function openOverviewAction(profileId, kind) {
+    if (kind === "ideas") {
+      const profile = document.getElementById("studioProfileSelect");
+      if (profile && profileId && profile.value !== profileId) {
+        profile.value = profileId;
+        profile.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      document.querySelector('[data-page="ideas"]')?.click();
+      activateStudioPage("ideas");
+      document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
+      return;
+    }
     // Approval links must open the same Factory queue that owns selectable review
     // outputs. Do not independently query Pipeline/Airtable for a broader status list.
     if (kind === "approval") {
@@ -252,17 +263,6 @@
       const toggle = band?.querySelector("[data-factory-band-toggle]");
       if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
       heading?.scrollIntoView({ block: "start" });
-      return;
-    }
-    if (kind === "ideas") {
-      const profile = document.getElementById("studioProfileSelect");
-      if (profile && profileId && profile.value !== profileId) {
-        profile.value = profileId;
-        profile.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      document.querySelector('[data-page="ideas"]')?.click();
-      activateStudioPage("ideas");
-      document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
       return;
     }
     const view = ["approved_past_due", "approved_missing_date"].includes(kind) ? kind
