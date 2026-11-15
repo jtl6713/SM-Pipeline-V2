@@ -443,12 +443,22 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     return shaped
 
 
+class SupabaseRecordMiss(LookupError):
+    """Supabase SoR answered empty for a FALLBACK_STOPPED table.
+
+    AirtableClient must not GET the frozen archive for these misses — same
+    fail-closed posture as Worker 0.10.948 Output/Content record GETs.
+    """
+
+
 def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str) -> dict | None:
     """One Airtable-shaped record, or None when this call must use Airtable.
 
     Lean Worker stamps may omit _runner_record_projection; the bag and typed
     columns are still authoritative when this table's runner read source is
-    Supabase. A missing row or a Supabase error stays on Airtable.
+    Supabase. A Supabase transport/schema error still returns None so the
+    caller can use Airtable. An empty SoR miss on FALLBACK_STOPPED_TABLES
+    raises SupabaseRecordMiss instead of counting an archive GET.
     """
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
@@ -474,5 +484,12 @@ def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str
         logger.warning("supabase runner get failed for %s %s; using Airtable: %s", table_id, record_id, error)
         return None
     if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
+        if table_id in FALLBACK_STOPPED_TABLES:
+            logger.info(
+                "supabase SoR record miss; skipping Airtable archive GET %s %s",
+                table_id,
+                record_id,
+            )
+            raise SupabaseRecordMiss(table_id, record_id)
         return None
     return _record_from_row(payload[0], table_id)

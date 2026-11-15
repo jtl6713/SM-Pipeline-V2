@@ -11,11 +11,55 @@ import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import requests
 
+from airtable.constants import (
+    CAROUSEL_SLIDES_TABLE,
+    CONTENT_ITEMS_TABLE,
+    CONTENT_PROFILES_TABLE,
+    IDEA_BATCHES_TABLE,
+    MAKE_ADMIN_QUEUE_TABLE,
+    MEDIA_ASSETS_TABLE,
+    MEDIA_TRANSFER_QUEUE_TABLE,
+    PIPELINE_SETTINGS_TABLE,
+    PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+    SOURCE_CANDIDATES_TABLE,
+)
+
 logger = logging.getLogger("pipeline-runner.airtable.egress")
+
+# Coarse non-secret labels for quiet-window attribution. Unknown stays "other".
+_TABLE_KIND_BY_ID = {
+    PLATFORM_OUTPUTS_TABLE: "outputs",
+    CONTENT_ITEMS_TABLE: "content",
+    PRODUCTION_REQUESTS_TABLE: "requests",
+    MEDIA_ASSETS_TABLE: "media",
+    MEDIA_TRANSFER_QUEUE_TABLE: "queue",
+    CAROUSEL_SLIDES_TABLE: "slides",
+    SOURCE_CANDIDATES_TABLE: "ideas",
+    CONTENT_PROFILES_TABLE: "profiles",
+    PIPELINE_SETTINGS_TABLE: "settings",
+    IDEA_BATCHES_TABLE: "idea_batches",
+    MAKE_ADMIN_QUEUE_TABLE: "make_admin",
+    "tblcDNIZs125iVi2B": "insights_observations",
+    "tblb6LfRv7CemHHN6": "insights_learned",
+    "tblhE7YHDnj2lxJPC": "engagement",
+    "tbl1bjkyC2jAgt3tl": "engagement",
+}
+
+
+def table_kind_from_airtable_url(url: str) -> str:
+    """Map /v0/{base}/{tableId}... to a coarse table_kind. Never return the raw id."""
+    path = unquote(urlsplit(str(url or "")).path or "")
+    parts = [p for p in path.split("/") if p]
+    # ["v0", baseId, tableId, optionalRecordId]
+    if len(parts) < 3 or parts[0] != "v0":
+        return "other"
+    table_id = parts[2]
+    return _TABLE_KIND_BY_ID.get(table_id, "other")
 
 
 def _metrics_path():
@@ -23,22 +67,52 @@ def _metrics_path():
     return os.environ.get("AIRTABLE_EGRESS_SQLITE_PATH", "/scratch/metrics/airtable-egress.sqlite").strip()
 
 
-def persist_airtable_egress(method: str, status: int, at=None) -> bool:
+def _ensure_hourly_schema(db: sqlite3.Connection) -> None:
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS hourly ("
+        "hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, "
+        "status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY(hour_utc,source,method,status_class))"
+    )
+    cols = {row[1] for row in db.execute("PRAGMA table_info(hourly)").fetchall()}
+    if "table_kind" in cols:
+        return
+    db.execute("ALTER TABLE hourly RENAME TO hourly_legacy")
+    db.execute(
+        "CREATE TABLE hourly ("
+        "hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, "
+        "status_class TEXT NOT NULL, table_kind TEXT NOT NULL DEFAULT 'unknown', "
+        "attempts INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY(hour_utc,source,method,status_class,table_kind))"
+    )
+    db.execute(
+        "INSERT INTO hourly (hour_utc,source,method,status_class,table_kind,attempts) "
+        "SELECT hour_utc,source,method,status_class,'unknown',attempts FROM hourly_legacy"
+    )
+    db.execute("DROP TABLE hourly_legacy")
+
+
+def persist_airtable_egress(method: str, status: int, at=None, *, table_kind: str = "unknown") -> bool:
     target = _metrics_path()
     if not target:
         return False
     at = at or datetime.now(timezone.utc)
+    kind = str(table_kind or "unknown").strip() or "unknown"
     try:
         path = Path(target)
         path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(str(path), timeout=3)
         try:
             db.execute("PRAGMA busy_timeout=3000")
-            db.execute("CREATE TABLE IF NOT EXISTS hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))")
+            _ensure_hourly_schema(db)
             hour = at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
             cls = "429" if status == 429 else (str(status // 100) + "xx" if status else "network")
-            db.execute("INSERT INTO hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1",
-                       (hour, "pipeline_runner_http", method.upper(), cls))
+            db.execute(
+                "INSERT INTO hourly (hour_utc,source,method,status_class,table_kind,attempts) "
+                "VALUES (?,?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class,table_kind) "
+                "DO UPDATE SET attempts=attempts+1",
+                (hour, "pipeline_runner_http", method.upper(), cls, kind),
+            )
             db.commit()
         finally:
             db.close()
@@ -79,14 +153,20 @@ def read_airtable_egress(hours: int = 48) -> dict:
     since = (datetime.now(timezone.utc) - timedelta(hours=window)).strftime("%Y-%m-%dT%H:00:00Z")
     db = sqlite3.connect(path, timeout=3)
     try:
-        rows = db.execute("SELECT hour_utc,source,method,status_class,attempts FROM hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class", (since,)).fetchall()
+        _ensure_hourly_schema(db)
+        rows = db.execute(
+            "SELECT hour_utc,source,method,status_class,table_kind,attempts "
+            "FROM hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class,table_kind",
+            (since,),
+        ).fetchall()
     finally:
         db.close()
     # A live exporter read is a collector heartbeat, not proof that every
     # independent process emitted its requests. Never backfill missing hours.
     observed_at = datetime.now(timezone.utc).isoformat()
     hourly = [
-        dict(zip(("hour_utc","source","method","status_class","attempts"), row)) for row in rows
+        dict(zip(("hour_utc", "source", "method", "status_class", "table_kind", "attempts"), row))
+        for row in rows
     ]
     return {"ok": True, "source": "pipeline_runner_sqlite",
             "collector_heartbeat": {"observed_at": observed_at, "ok": True,
@@ -106,14 +186,19 @@ def install_airtable_egress_monitor() -> None:
             return _original_send(session, request, **kwargs)
         started = time.monotonic()
         response = None
+        kind = table_kind_from_airtable_url(request.url)
         try:
             response = _original_send(session, request, **kwargs)
             return response
         finally:
-            persist_airtable_egress(request.method, response.status_code if response is not None else 0)
+            persist_airtable_egress(
+                request.method,
+                response.status_code if response is not None else 0,
+                table_kind=kind,
+            )
             logger.info("studio_airtable_egress_v1 %s", json.dumps({
                 "source": "pipeline_runner_http",
-                "table_kind": "unknown",
+                "table_kind": kind,
                 "method": request.method.upper(),
                 "status": response.status_code if response is not None else 0,
                 "duration_ms": round((time.monotonic() - started) * 1000),

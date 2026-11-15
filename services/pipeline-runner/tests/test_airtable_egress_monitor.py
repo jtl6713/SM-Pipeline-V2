@@ -3,7 +3,8 @@ import unittest
 from unittest.mock import patch
 
 import requests
-from airtable.egress_monitor import install_airtable_egress_monitor
+from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.egress_monitor import install_airtable_egress_monitor, table_kind_from_airtable_url
 
 
 class MonitorTests(unittest.TestCase):
@@ -15,7 +16,9 @@ class MonitorTests(unittest.TestCase):
 
         fake = requests.Response()
         fake.status_code = 200
-        prepared = requests.Request("GET", "https://api.airtable.com/v0/base/table/record").prepare()
+        prepared = requests.Request(
+            "GET", f"https://api.airtable.com/v0/appe33zkZn35yirTL/{PLATFORM_OUTPUTS_TABLE}/recX"
+        ).prepare()
         with patch("airtable.egress_monitor._original_send", return_value=fake) as send, \
              self.assertLogs("pipeline-runner.airtable.egress", level="INFO") as captured:
             out = requests.Session().send(prepared)
@@ -24,7 +27,21 @@ class MonitorTests(unittest.TestCase):
         events = [line for line in captured.output if "studio_airtable_egress_v1" in line]
         self.assertEqual(len(events), 1)
         self.assertIn("pipeline_runner_http", events[0])
-        self.assertNotIn("/base/table/record", events[0])
+        self.assertIn('"table_kind":"outputs"', events[0])
+        self.assertNotIn(PLATFORM_OUTPUTS_TABLE, events[0])
+        self.assertNotIn("/recX", events[0])
+
+    def test_table_kind_from_url(self):
+        self.assertEqual(
+            table_kind_from_airtable_url(
+                f"https://api.airtable.com/v0/appe33zkZn35yirTL/{PLATFORM_OUTPUTS_TABLE}"
+            ),
+            "outputs",
+        )
+        self.assertEqual(
+            table_kind_from_airtable_url("https://api.airtable.com/v0/appe33zkZn35yirTL/tblUnknown"),
+            "other",
+        )
 
     def test_unrelated_request_does_not_count(self):
         install_airtable_egress_monitor()

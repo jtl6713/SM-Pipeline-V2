@@ -484,6 +484,26 @@ def test_empty_output_list_stays_on_supabase(monkeypatch):
     assert rows == []
 
 
+def test_output_get_miss_skips_airtable_archive(monkeypatch):
+    """Supabase SoR miss must not GET the frozen Airtable archive (Worker 948 parity)."""
+
+    def fake_get(url, *, headers, timeout):
+        raise AssertionError(f"airtable get {url}")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        return Response([])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    try:
+        _client(studio_runner_output_read_source="supabase").get_record(
+            PLATFORM_OUTPUTS_TABLE, "recMissingArchive1",
+        )
+        raise AssertionError("expected HTTPError 404")
+    except requests.HTTPError as err:
+        assert getattr(err.response, "status_code", None) == 404
+
+
 def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
     from airtable.constants import MEDIA_ASSETS_TABLE, PRODUCTION_REQUESTS_TABLE
     import supabase_reads

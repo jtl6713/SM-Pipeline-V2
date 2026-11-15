@@ -16,14 +16,15 @@ class DurableEgressTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             target = os.path.join(folder, "metrics.sqlite")
             with patch.dict(os.environ, {"AIRTABLE_EGRESS_SQLITE_PATH": target}):
-                self.assertTrue(persist_airtable_egress("GET", 200))
-                self.assertTrue(persist_airtable_egress("GET", 429))
-                self.assertTrue(persist_airtable_egress("GET", 403))
-                self.assertTrue(persist_airtable_egress("GET", 200))
+                self.assertTrue(persist_airtable_egress("GET", 200, table_kind="outputs"))
+                self.assertTrue(persist_airtable_egress("GET", 429, table_kind="outputs"))
+                self.assertTrue(persist_airtable_egress("GET", 403, table_kind="media"))
+                self.assertTrue(persist_airtable_egress("GET", 200, table_kind="outputs"))
                 out = read_airtable_egress(24)
                 self.assertTrue(out["ok"])
                 self.assertEqual(sum(x["attempts"] for x in out["hourly"]), 4)
                 self.assertEqual({x["status_class"] for x in out["hourly"]}, {"2xx", "429", "4xx"})
+                self.assertEqual({x["table_kind"] for x in out["hourly"]}, {"outputs", "media"})
                 self.assertTrue(out["activity"]["any_read"])
                 self.assertFalse(out["activity"]["any_write"])
 

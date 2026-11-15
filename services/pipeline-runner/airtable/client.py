@@ -52,12 +52,22 @@ class AirtableClient:
         import requests
 
         from settings_store import get_setting
-        from supabase_reads import try_get_supabase_record
+        from supabase_reads import SupabaseRecordMiss, try_get_supabase_record
 
         setting = get_setting(self._settings, table_id, record_id)
         if setting is not None:
             return setting
-        supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
+        try:
+            supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
+        except SupabaseRecordMiss:
+            # Match Airtable's missing-record shape so stage callers keep their
+            # existing 404 / HTTPError handling without archive egress.
+            err = requests.HTTPError(
+                f"404 Client Error: Not Found for url: "
+                f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
+            )
+            err.response = type("R", (), {"status_code": 404, "reason": "Not Found", "ok": False})()
+            raise err from None
         if supabase_row is not None:
             return supabase_row
 
