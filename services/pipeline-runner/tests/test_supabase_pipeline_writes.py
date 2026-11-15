@@ -330,6 +330,51 @@ def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
     assert patches[0][2] == {"request_status": "Submitted"}
 
 
+def test_runner_media_patch_densifies_content_profile_and_notes(monkeypatch):
+    """A3 Classification_Status + Content_Profile must land in metadata densify."""
+    seen = []
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "media_assets" in url and method == "GET":
+            return Response([{
+                "metadata": {
+                    "studio_transfer_id": "LIB-1",
+                    "content_profile_airtable_id": "recOldProfile00001",
+                },
+            }])
+        return Response("")
+
+    monkeypatch.setattr(
+        requests,
+        "patch",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("airtable")),
+    )
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(
+        studio_write_source="supabase",
+        studio_phase6_write_source="supabase",
+    )).update_record(
+        MEDIA_ASSETS_TABLE,
+        "recMediaProfile01",
+        {
+            "Content_Profile": ["recT2rbKX3MF7cVFU"],
+            "Classification_Status": "Processing",
+            "Potential_Match_Notes": "A3 stalled; re-queued",
+            "Search_Keywords": "speakeasy",
+        },
+    )
+    assert record["id"] == "recMediaProfile01"
+    patches = [row for row in seen if row[0] == "PATCH" and "media_assets" in row[1]]
+    assert patches
+    meta = patches[0][2]["metadata"]
+    assert meta["content_profile_airtable_id"] == "recT2rbKX3MF7cVFU"
+    assert meta["classification_status"] == "Processing"
+    assert meta["potential_match_notes"] == "A3 stalled; re-queued"
+    assert meta["search_keywords"] == "speakeasy"
+    assert meta["studio_transfer_id"] == "LIB-1"
+
+
 def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(monkeypatch):
     seen = []
 

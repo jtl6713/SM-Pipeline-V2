@@ -57,6 +57,10 @@ _MEDIA_COLUMNS = {
     "Drive_Access_Status": "metadata->>drive_access_status",
     "Raw_Source_Eligibility": "metadata->>raw_source_eligibility",
     "Exclusion_Reasons": "metadata->>exclusion_reasons",
+    # Library profile densify — no media_assets.content_profile_id FK.
+    "Content_Profile": "metadata->>content_profile_airtable_id",
+    "Potential_Match_Notes": "metadata->>potential_match_notes",
+    "Search_Keywords": "metadata->>search_keywords",
 }
 
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')
@@ -142,6 +146,8 @@ def _field_ref(table_id: str, field: str) -> str | None:
         return "content_item_id"
     if field == "Content_Profile" and table_id in (PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE):
         return "content_profile_id"
+    if field == "Content_Profile" and table_id == MEDIA_ASSETS_TABLE:
+        return "metadata->>content_profile_airtable_id"
     if table_id == CONTENT_ITEMS_TABLE and field == "Production_Request":
         return "production_request_id"
     if table_id == PLATFORM_OUTPUTS_TABLE and field == "Production_Request_Output":

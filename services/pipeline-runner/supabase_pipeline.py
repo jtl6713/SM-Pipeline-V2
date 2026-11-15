@@ -925,6 +925,8 @@ def _media_row(record: dict) -> dict:
         raw_url = _queue_text(fields.get("Google Drive URL"))
         if raw_url:
             meta["google_drive_url"] = raw_url
+    if "Content_Profile" in fields:
+        meta["content_profile_airtable_id"] = _first_link(fields.get("Content_Profile"))
     if "Classification_Status" in fields:
         meta["classification_status"] = _select(fields.get("Classification_Status")) or _queue_text(
             fields.get("Classification_Status")
@@ -948,6 +950,45 @@ def _media_row(record: dict) -> dict:
         else:
             one = _select(raw) or _queue_text(raw)
             meta["exclusion_reasons"] = [one] if one else None
+    if "Potential_Match_Notes" in fields:
+        meta["potential_match_notes"] = _queue_text(fields.get("Potential_Match_Notes"))
+    if "Search_Keywords" in fields:
+        meta["search_keywords"] = _queue_text(fields.get("Search_Keywords"))
+    if "AI_Tags" in fields:
+        meta["ai_tags"] = _queue_text(fields.get("AI_Tags"))
+    if "Location" in fields:
+        meta["location"] = _queue_text(fields.get("Location"))
+    if "Topic" in fields:
+        meta["topic"] = _queue_text(fields.get("Topic"))
+    if "Subtopic" in fields:
+        meta["subtopic"] = _queue_text(fields.get("Subtopic"))
+    if "Shot_Type" in fields:
+        meta["shot_type"] = _queue_text(fields.get("Shot_Type"))
+    if "Time_Of_Day" in fields:
+        meta["time_of_day"] = _queue_text(fields.get("Time_Of_Day"))
+    if "Weather" in fields:
+        meta["weather"] = _queue_text(fields.get("Weather"))
+    if "Visible_Subjects" in fields:
+        meta["visible_subjects"] = _queue_text(fields.get("Visible_Subjects"))
+    if "Manual_Classification_JSON" in fields:
+        raw = fields.get("Manual_Classification_JSON")
+        if raw in (None, ""):
+            meta["manual_classification_json"] = None
+        elif isinstance(raw, (dict, list)):
+            meta["manual_classification_json"] = raw
+        else:
+            meta["manual_classification_json"] = _queue_text(raw)
+    if "Manual_Classification_Audit" in fields:
+        raw = fields.get("Manual_Classification_Audit")
+        if raw in (None, ""):
+            meta["manual_classification_audit"] = None
+        elif isinstance(raw, (dict, list)):
+            meta["manual_classification_audit"] = raw
+        else:
+            meta["manual_classification_audit"] = _queue_text(raw)
+    if "Intake_Date" in fields:
+        intake = _queue_text(fields.get("Intake_Date"))
+        meta["intake_date"] = intake if intake is not None else fields.get("Intake_Date")
     if meta:
         row["metadata"] = meta
     return row

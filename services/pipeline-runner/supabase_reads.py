@@ -399,7 +399,12 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         if profile_id:
             shaped["fields"]["Content_Profile"] = [profile_id]
     elif table_id == MEDIA_ASSETS_TABLE:
+        # Library densify lives in metadata (no content_profile_id FK column).
+        # A3 requires Content_Profile; without this map every classify skips.
         meta = bag if isinstance(bag, dict) else {}
+        profile_id = str(meta.get("content_profile_airtable_id") or "").strip()
+        if profile_id.startswith("rec") and "Content_Profile" not in shaped["fields"]:
+            shaped["fields"]["Content_Profile"] = [profile_id]
         if meta.get("rights_status") is not None and "Rights_Status" not in shaped["fields"]:
             shaped["fields"]["Rights_Status"] = meta.get("rights_status")
         if meta.get("asset_description") is not None and "Asset_Description" not in shaped["fields"]:
@@ -416,6 +421,32 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Raw_Source_Eligibility"] = meta.get("raw_source_eligibility")
         if meta.get("exclusion_reasons") is not None and "Exclusion_Reasons" not in shaped["fields"]:
             shaped["fields"]["Exclusion_Reasons"] = meta.get("exclusion_reasons")
+        if meta.get("potential_match_notes") is not None and "Potential_Match_Notes" not in shaped["fields"]:
+            shaped["fields"]["Potential_Match_Notes"] = meta.get("potential_match_notes")
+        if meta.get("search_keywords") is not None and "Search_Keywords" not in shaped["fields"]:
+            shaped["fields"]["Search_Keywords"] = meta.get("search_keywords")
+        if meta.get("ai_tags") is not None and "AI_Tags" not in shaped["fields"]:
+            shaped["fields"]["AI_Tags"] = meta.get("ai_tags")
+        if meta.get("location") is not None and "Location" not in shaped["fields"]:
+            shaped["fields"]["Location"] = meta.get("location")
+        if meta.get("topic") is not None and "Topic" not in shaped["fields"]:
+            shaped["fields"]["Topic"] = meta.get("topic")
+        if meta.get("subtopic") is not None and "Subtopic" not in shaped["fields"]:
+            shaped["fields"]["Subtopic"] = meta.get("subtopic")
+        if meta.get("shot_type") is not None and "Shot_Type" not in shaped["fields"]:
+            shaped["fields"]["Shot_Type"] = meta.get("shot_type")
+        if meta.get("time_of_day") is not None and "Time_Of_Day" not in shaped["fields"]:
+            shaped["fields"]["Time_Of_Day"] = meta.get("time_of_day")
+        if meta.get("weather") is not None and "Weather" not in shaped["fields"]:
+            shaped["fields"]["Weather"] = meta.get("weather")
+        if meta.get("visible_subjects") is not None and "Visible_Subjects" not in shaped["fields"]:
+            shaped["fields"]["Visible_Subjects"] = meta.get("visible_subjects")
+        if meta.get("manual_classification_json") is not None and "Manual_Classification_JSON" not in shaped["fields"]:
+            shaped["fields"]["Manual_Classification_JSON"] = meta.get("manual_classification_json")
+        if meta.get("manual_classification_audit") is not None and "Manual_Classification_Audit" not in shaped["fields"]:
+            shaped["fields"]["Manual_Classification_Audit"] = meta.get("manual_classification_audit")
+        if meta.get("intake_date") is not None and "Intake_Date" not in shaped["fields"]:
+            shaped["fields"]["Intake_Date"] = meta.get("intake_date")
     elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
         shaped["fields"]["Candidate_Status"] = row.get("status")
     elif table_id == CONTENT_PROFILES_TABLE:
