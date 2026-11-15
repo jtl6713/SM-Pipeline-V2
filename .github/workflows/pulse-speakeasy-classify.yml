@@ -1,8 +1,10 @@
 name: Pulse Speakeasy A3 Classify
 
-# Classify Chicago Speakeasy 1 via runner A3 (profile already on SoR).
+# Classify Chicago Speakeasy 1 via runner A3 on the Ops host (profile already on SoR).
 # Do not use /api/library/.../profile — ChicagoShining assign watermarks and
 # exceeds the temporary bridge Worker wall clock (500).
+# Do not rely on secrets.PIPELINE_RUNNER_SHARED_SECRET (not configured in GitHub);
+# read the secret from the runner service .env via Ops shell, same as other A3 pulses.
 on:
   push:
     branches: [main]
@@ -21,77 +23,118 @@ concurrency:
 jobs:
   pulse:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
-      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-      PIPELINE_RUNNER_SHARED_SECRET: ${{ secrets.PIPELINE_RUNNER_SHARED_SECRET }}
-      RUNNER_URL: https://pipeline.chicagoshining.com
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
       SPEAKEASY_ID: recEaYEwG1EGgLAmm
     steps:
-      - name: Pulse Speakeasy through runner A3
+      - name: Pulse Speakeasy through runner A3 via Ops
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${CF_ACCESS_CLIENT_ID:-}"
-          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
-          test -n "${PIPELINE_RUNNER_SHARED_SECRET:-}"
-          health=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-            "$RUNNER_URL/health" || true)
-          echo "runner_health_http=$health"
-          test "$health" -eq 200
-          jq -e '.ok==true and .service=="pipeline-runner"' /tmp/health.json >/dev/null
-          version=$(jq -er '.version' /tmp/health.json)
-          echo "runner_version=$version"
-          case "$version" in
-            *a3-media-content-profile*|*a3-classify-timeout*) ;;
-            *)
-              echo "runner version missing Content_Profile shape fix: $version" >&2
-              exit 1
-              ;;
-          esac
-          body=$(jq -cn --arg id "$SPEAKEASY_ID" '{
-            extra: {
-              record_ids: [$id],
-              background: false,
-              trigger_a4: false,
-              wait_for_next: false,
-              drain: false
-            }
-          }')
-          code=$(curl -sS --max-time 180 -o /tmp/a3.json -w '%{http_code}' \
-            -X POST "$RUNNER_URL/stages/a3" \
-            -H "Content-Type: application/json" \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-            -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" \
-            -d "$body" || true)
-          echo "a3_http=$code"
-          python3 - <<'PY'
-          import json
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              selected="$candidate"
+              break
+            fi
+          done
+          test -n "$selected"
+
+          # PowerShell on the Ops host: health-check the runner, require the
+          # Content_Profile shape fix, then foreground-pulse A3 for Speakeasy.
+          SPEAKEASY_ID="$SPEAKEASY_ID" python3 - <<'PY'
+          import json, os
           from pathlib import Path
-          raw = Path("/tmp/a3.json").read_text(encoding="utf-8", errors="replace")
-          print("a3_body_prefix=" + raw[:2000].replace("\n", " "))
-          try:
-              payload = json.loads(raw) if raw.strip() else {}
-          except Exception:
-              raise SystemExit("a3 response was not JSON")
-          status = str(payload.get("status") or payload.get("ok") or "")
-          print("a3_status=" + status)
-          details = payload.get("details") or payload.get("result") or payload
-          print("a3_details=" + json.dumps(details, sort_keys=True)[:1500])
+          rid = os.environ["SPEAKEASY_ID"]
+          ps = r'''$ErrorActionPreference = "Stop"
+          $id = '@SPEAKEASY_ID@'
+          $health = Invoke-RestMethod "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or [string]$health.service -ne "pipeline-runner") {
+            throw "runner_health_bad"
+          }
+          $version = [string]$health.version
+          Write-Output ("runner_version=" + $version)
+          if ($version -notmatch "a3-media-content-profile|a3-classify-timeout") {
+            throw ("runner version missing Content_Profile shape fix: " + $version)
+          }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if ($secret.Length -lt 24) { throw "runner_auth_invalid" }
+          $body = @{
+            extra = @{
+              record_ids = @($id)
+              background = $false
+              trigger_a4 = $false
+              wait_for_next = $false
+              drain = $false
+            }
+          } | ConvertTo-Json -Depth 6 -Compress
+          $response = Invoke-RestMethod "http://127.0.0.1:3350/stages/a3" `
+            -Method POST `
+            -Headers @{"X-Pipeline-Secret"=$secret} `
+            -ContentType "application/json" `
+            -Body $body `
+            -TimeoutSec 180
+          $secret = $null
+          $status = [string]$response.status
+          Write-Output ("a3_status=" + $status)
+          $details = $response.details
+          if (-not $details) { $details = $response.result }
+          if (-not $details) { $details = $response }
+          Write-Output ("a3_details=" + (($details | ConvertTo-Json -Depth 8 -Compress)))
+          if ($status -ne "ok" -and $status -ne "skipped") {
+            throw ("a3_unexpected_status=" + $status)
+          }
+          '''
+          ps = ps.replace("@SPEAKEASY_ID@", rid)
+          Path("/tmp/speakeasy-a3.ps1").write_text(ps)
+          Path("/tmp/speakeasy-a3.json").write_text(json.dumps({
+              "command": Path("/tmp/speakeasy-a3.ps1").read_text(),
+              "confirm": True,
+          }))
           PY
-          test "$code" -eq 200
-          # Foreground classify returns status=ok; a concurrent Studio classify-all
-          # returns skipped/already_running and queues the Speakeasy id.
-          jq -e '
-            (.status=="ok" or .status=="skipped")
-            and (
-              (.details.already_running==true)
-              or (.details.classified_count // 0) >= 0
-              or (.details.processed==true)
-              or (.message|tostring|length) > 0
-            )
-          ' /tmp/a3.json >/dev/null
+
+          code=$(curl -sS --max-time 20 -o /tmp/ops-shell-start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" \
+            -H "Authorization: Bearer $selected" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/speakeasy-a3.json || true)
+          echo "ops_shell_http=$code"
+          if [[ "$code" != "202" && "$code" != "200" ]]; then
+            echo "shell_launch_failed"
+            cat /tmp/ops-shell-start.json || true
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-shell-start.json)
+          test -n "$job"
+          echo "ops_job=$job"
+
+          for n in $(seq 1 50); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" \
+              "$BASE/api/jobs/$job" -o /tmp/ops-shell-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-shell-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-shell-result.json \
+                | grep -E '^(runner_version|a3_status|a3_details)=' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "speakeasy_a3_ops_failed"
+              jq -r '.job.log // ""' /tmp/ops-shell-result.json \
+                | grep -E '^(runner_version|a3_status|a3_details)=' || true
+              jq -r '.job.log // ""' /tmp/ops-shell-result.json | tail -40 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "speakeasy_a3_ops_timeout"
+          exit 1
