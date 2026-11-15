@@ -23,6 +23,10 @@ describe("library upload overlay errors", () => {
 
   test("release versions bumped for this fix", () => {
     assert.match(worker, /0\.10\.964-library-upload-overlay-errors/);
-    assert.match(ui, /item4-0\.6\.953-library-upload-overlay-errors/);
+    const build = ui.match(/\bBUILD_ID\s*=\s*["']item4-(\d+)\.(\d+)\.(\d+)-/);
+    assert.ok(build, "UI BUILD_ID must be a parseable semantic version");
+    const [major, minor, patch] = build.slice(1).map(Number);
+    assert.ok(major > 0 || minor > 6 || (minor === 6 && patch >= 953),
+      "Keep the UI build at or above the library-overlay fix release");
   });
 });

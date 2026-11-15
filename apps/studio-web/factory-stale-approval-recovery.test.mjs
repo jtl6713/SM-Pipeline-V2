@@ -52,7 +52,7 @@ function fixture(snapshot) {
     setItem(key, value) { store.set(key, value); },
   };
   const context = {
-    state, localStorage,
+    state, localStorage, FACTORY_WAITING_SELECTION_KEY: waitingKey,
     waitingFactorySelection: () => JSON.parse(store.get(waitingKey) || "[]"),
     factoryRecoveryEntries: () => store.has(recoveryKey)
       ? [{ key: recoveryKey, saved: JSON.parse(store.get(recoveryKey)) }] : [],
