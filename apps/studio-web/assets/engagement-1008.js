@@ -639,7 +639,7 @@
   }
 
   function installEngagementOverview() {
-    const page = $("page-engagement"), heading = page?.querySelector(".page-heading");
+    const page = $("page-engagement"), heading = page?.querySelector?.(".page-heading");
     if (!page || !heading || $("engagementOverview")) return;
     const tabs = page.querySelector(".engagement-mode-tabs");
     if (tabs) tabs.hidden = true;
