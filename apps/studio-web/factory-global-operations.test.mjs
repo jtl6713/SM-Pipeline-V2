@@ -87,12 +87,12 @@ test("Factory batch counts and status never overlap the full-width progress rail
   assert.ok(counts > 0 && counts < status && status < progress,
     "counts, status and progress must be separate siblings in DOM order");
   assert.match(layout, /\.factory-batch-recent-row\.factory-batch-activity-choice\{[^}]*display:grid;grid-template-columns:minmax\(0,1fr\) max-content/);
-  assert.match(layout, /grid-template-areas:"info status" "progress progress"/);
+  assert.match(layout, /grid-template-areas:"info status" "progresslabel progresslabel" "progress progress"/);
   assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-info\{[^}]*grid-area:info/);
   assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-result\{[^}]*grid-area:status/);
   assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{[^}]*grid-area:progress;[^}]*position:static/);
   assert.match(layout, /width:100%;max-width:none;height:5px/);
-  assert.match(layout, /grid-template-areas:"info" "status" "progress"/);
+  assert.match(layout, /grid-template-areas:"info" "status" "progresslabel" "progress"/);
   assert.doesNotMatch(layout, /max-width:260px|position:absolute;left:10px/);
   assert.match(desk, /style="width:\$\{percent\}%"/);
 });
