@@ -61,14 +61,21 @@ test("Music Manager uses native file labels for Windows file picker", () => {
 
 test("All Profiles Ideas count opens the Ideas page", () => {
   const overview = fs.readFileSync(path.join(here, "assets", "all-profiles-overview-1007.js"), "utf8");
-  const ideasBranch = overview.slice(overview.indexOf('if (kind === "ideas")'), overview.indexOf('const nav = document.querySelector'));
+  // Slice only the Ideas `if` body through its closing brace. Later arms (approval →
+  // Factory) also use `const nav = document.querySelector` and may mention
+  // "outputs" in comments without changing Ideas routing.
+  const ideasStart = overview.indexOf('if (kind === "ideas")');
+  assert.ok(ideasStart >= 0, "ideas branch missing");
+  const ideasReturn = overview.indexOf("return;", ideasStart);
+  assert.ok(ideasReturn > ideasStart, "ideas return missing");
+  const ideasClose = overview.indexOf("}", ideasReturn);
+  assert.ok(ideasClose > ideasReturn, "ideas block close missing");
+  const ideasBranch = overview.slice(ideasStart, ideasClose + 1);
   assert.match(ideasBranch, /\[data-page="ideas"\]/);
   assert.match(ideasBranch, /activateStudioPage\("ideas"\)/);
   assert.match(ideasBranch, /return;/);
   assert.doesNotMatch(ideasBranch, /outputs/);
-});
-
-test("Approved Ideas reopen linked Production Requests, not regenerate voiceovers", () => {
+});test("Approved Ideas reopen linked Production Requests, not regenerate voiceovers", () => {
   const row = app.slice(app.indexOf("function ideaRowHtml("), app.indexOf("function partitionIdeaRecords"));
   assert.match(row, /ideaTimelineRowButtonLabel\(r\)/);
   const handler = app.slice(
