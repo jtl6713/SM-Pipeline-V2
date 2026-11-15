@@ -420,10 +420,13 @@ test("place review service never exposes an automated publish path", () => {
   assert.match(service, /open_place/);
   assert.match(service, /manual_completed/);
   assert.match(service, /No automated review was submitted/);
+  // Engagement JSON SoR — do not mirror Targets/Actions/Settings to Airtable
+  // while STUDIO_WRITE_SOURCE=supabase (archive freeze write burn).
+  assert.match(service, /STUDIO_WRITE_SOURCE[\s\S]{0,80}supabase[\s\S]{0,40}return/);
   assert.doesNotMatch(service, /place.?review.*publish.*tiktokapis|submitPlaceReview|poi\/review\/create/i);
   assert.match(worker, /\/api\/engagement\/place-reviews/);
   assert.match(worker, /studio_place_reviews_v1/);
-  assert.match(worker, /0\.10\.946-place-reviews-discover-fast/);
+  assert.match(worker, /0\.10\.947-place-review-dnp-blank/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.

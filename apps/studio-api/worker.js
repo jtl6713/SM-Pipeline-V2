@@ -1385,7 +1385,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.946-place-reviews-discover-fast",
+          version: "0.10.947-place-review-dnp-blank",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5502,10 +5502,19 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   } finally {
     // One event for each attempted outbound request, including network failures.
     // No record ID, filter formula, Airtable token or full URL is logged.
+    const tableIdText = String(tableId || "");
     const egressEvent = {
       source,
-      table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
-        : String(tableId) === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas" : "other",
+      // Keep this coarse and non-secret: enough to kill remaining Airtable burn.
+      table_kind: tableIdText === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
+        : tableIdText === String(env.AIRTABLE_CONTENT_TABLE_ID) ? "content"
+        : tableIdText === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas"
+        : tableIdText === String(env.AIRTABLE_MEDIA_TABLE_ID || "") ? "media"
+        : /slide/i.test(tableIdText) ? "slides"
+        : /setting/i.test(tableIdText) ? "settings"
+        : /make admin/i.test(tableIdText) ? "make_admin"
+        : tableIdText === "tblhE7YHDnj2lxJPC" || tableIdText === "tbl1bjkyC2jAgt3tl" ? "engagement"
+        : "other",
       method,
       status: response?.status ?? 0,
       duration_ms: Date.now() - airtableRequestStarted,
@@ -5516,6 +5525,8 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     await recordStudioAirtableEgress(env, {
       source, method: egressEvent.method,
       status: egressEvent.status, at_ms: airtableRequestStarted,
+      // Durable hourly buckets ignore unknown keys today; table_kind stays in logs.
+      table_kind: egressEvent.table_kind,
     }).catch(error => console.warn("airtable egress durable accounting unavailable", String(error?.message || error)));
 
   }

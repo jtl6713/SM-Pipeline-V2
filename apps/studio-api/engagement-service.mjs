@@ -112,6 +112,9 @@ export async function studioSaveEngagementSettings(env, settings, deps) {
 
 async function mirrorSettingsRow(env, settings, deps) {
   if (!deps.airtableFetch || !deps.listRecords) return;
+  // Per-profile engagement settings already live in ENGAGEMENT_SETTINGS_V1.
+  // Skip the Engagement Settings table Airtable PATCH/POST while SoR is Supabase.
+  if (String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase") return;
   const name = `ENGAGEMENT_${settings.profile.toUpperCase()}`;
   const existing = await deps.listRecords(env, ENGAGEMENT_SETTINGS_TABLE, {
     filterFormula: `{Setting_Name}="${name}"`,
@@ -140,6 +143,10 @@ async function mirrorSettingsRow(env, settings, deps) {
 
 async function mirrorTargetRow(env, target, deps) {
   if (!deps.airtableFetch) return;
+  // Engagement JSON in Pipeline Settings is SoR. Do not keep POSTing Targets to
+  // Airtable while the archive is frozen — that was steady write burn with no
+  // Studio reader on this table.
+  if (String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase") return;
   await deps.airtableFetch(env, ENGAGEMENT_TARGETS_TABLE, "", {
     method: "POST",
     body: JSON.stringify({
@@ -170,6 +177,7 @@ async function mirrorTargetRow(env, target, deps) {
 
 async function mirrorActionRow(env, action, deps) {
   if (!deps.airtableFetch) return;
+  if (String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase") return;
   await deps.airtableFetch(env, ENGAGEMENT_ACTIONS_TABLE, "", {
     method: "POST",
     body: JSON.stringify({

@@ -7536,10 +7536,20 @@ function outputSideLeafFilter(cleaned) {
     return `${OUTPUT_SIDE_EQ_FIELDS[notEq[1]]}.neq.${encodeDeskFilterValue(notEq[2])}`;
   }
   const blank = cleaned.match(/^\{([A-Za-z0-9_]+)\}=BLANK\(\)$/);
+  // Checkbox BLANK() means unset/false (Airtable checkbox unset). Place Reviews
+  // discover uses OR({Do_Not_Publish}=BLANK(),{Do_Not_Publish}=0); without this
+  // leaf the whole AND tree returns null and every scan hits Airtable.
+  if (blank && OUTPUT_SIDE_BOOL_FIELDS[blank[1]]) {
+    const col = OUTPUT_SIDE_BOOL_FIELDS[blank[1]];
+    return `or(${col}.is.null,${col}.eq.false)`;
+  }
   if (blank && OUTPUT_SIDE_BLANK_FIELDS[blank[1]]) {
     return outputSideBlankFilter(OUTPUT_SIDE_BLANK_FIELDS[blank[1]]);
   }
   const notBlank = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=BLANK\(\)$/);
+  if (notBlank && OUTPUT_SIDE_BOOL_FIELDS[notBlank[1]]) {
+    return `${OUTPUT_SIDE_BOOL_FIELDS[notBlank[1]]}.eq.true`;
+  }
   if (notBlank && OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]];
     return `and(${col}.not.is.null,${col}.neq.)`;

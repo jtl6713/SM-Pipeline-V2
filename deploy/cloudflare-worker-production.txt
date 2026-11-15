@@ -1269,3 +1269,5 @@ Deploy 2026-11-15 Worker 0.10.944-place-reviews-discovery: Place Reviews Discove
 Deploy 2026-11-15 Worker 0.10.945-place-reviews-output-title: Place Reviews Discover requests Output_Title (not Content_Title) on Platform Outputs so Airtable listRecords stops UNKNOWN_FIELD_NAME.
 
 Deploy 2026-11-15 Worker 0.10.946-place-reviews-discover-fast: Place Reviews Discover one TikTok scan, skip other-profile content fetches, fallback drafts (no runner) so Safari Load failed timeouts stop.
+
+Deploy 2026-11-15 Worker 0.10.947-place-review-dnp-blank: Place Reviews Do_Not_Publish=BLANK SoR + stop engagement Airtable mirrors under STUDIO_WRITE_SOURCE=supabase. Record deletion is not started. Verify /health version 0.10.947-place-review-dnp-blank.
