@@ -243,6 +243,28 @@
       document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
       return;
     }
+    // Approval links must open the same Factory queue that owns selectable review
+    // outputs. Do not independently query Pipeline/Airtable for a broader status list.
+    if (kind === "approval") {
+      const nav = document.querySelector('[data-page="factory"]');
+      nav?.click();
+      activateStudioPage("factory");
+      const scope = document.getElementById("factoryProfileFilter");
+      if (scope) {
+        const next = profileId || "";
+        if (scope.value !== next) {
+          scope.value = next;
+          scope.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+      // Open the real Factory review band, which is collapsed by default.
+      const heading = document.getElementById("factoryLaneNeedsEyesHeading");
+      const band = heading?.closest(".factory-band");
+      const toggle = band?.querySelector("[data-factory-band-toggle]");
+      if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+      heading?.scrollIntoView({ block: "start" });
+      return;
+    }
     const view = ["approved_past_due", "approved_missing_date"].includes(kind) ? kind
       : kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
     if (typeof window.studioOpenPipelineFilter === "function") {
