@@ -300,7 +300,7 @@
   function factoryRejectedOutputId(saved, message = saved?.last_error) {
     const text = String(message || "");
     if (!/No new batch was accepted[.!]?/i.test(text)) return null;
-    const match = text.match(/Output #(\\d+):[^\\n]+?No new batch was accepted[.!]?/i);
+    const match = text.match(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/i);
     if (!match) return null;
     const member = (saved?.batches || []).flatMap(plan =>
       Array.isArray(plan?.payload?.items) ? plan.payload.items : [])
