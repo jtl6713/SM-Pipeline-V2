@@ -1301,3 +1301,5 @@ Deploy 2026-11-15 Worker 0.10.960-edit-classification-description: Manual classi
 Deploy 2026-11-15 Worker 0.10.961-library-classify-timeout: heal stale Processing library assets; small uploads classify inline.
 
 Deploy 2026-11-15 Worker 0.10.962-library-batch-name-supabase: Asset Manager multi-upload name sequencing reads existing names from Supabase under Phase 6 SoR (Airtable archive returns empty).
+
+Deploy 2026-11-15 Worker 0.10.963-purge-fanout-dupes: Strip/purge Content 1861/1862/1864 Oct-31 IG fanout orphans from Pipeline snapshots (SoR rows already deleted in Supabase).
