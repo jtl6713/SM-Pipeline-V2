@@ -16,12 +16,14 @@ function contextFor(transportClass) {
     "libraryUploadProgress", "libraryUploadProgressTitle", "libraryUploadProgressFile",
     "libraryUploadProgressPercent", "libraryUploadProgressFiles", "libraryUploadProgressBytes",
     "libraryUploadProgressStage", "libraryUploadMeter", "libraryUploadSavedMeter",
+    "libraryUploadClassificationMeter", "libraryUploadClassificationFiles", "libraryClassificationProgress",
   ]) nodes.set(name, { textContent: "", hidden: true, dataset: {}, setAttribute(name, value) { this[name] = value; } });
   const context = vm.createContext({
     $: id => nodes.get(id),
     XMLHttpRequest: transportClass || class {},
     apiBase: "https://studio.chicagoshining.com",
     URL, encodeURIComponent,
+    collectLibraryClassifyIds: result => (result?.records || []).map(row => row.id).concat(result?.id ? [result.id] : []),
   });
   vm.runInContext(helpers, context);
   return { context, nodes };
@@ -168,6 +170,8 @@ test("queue remains one asset at a time with real result counts and no implicit 
   assert.match(queue,/form\.append\("asset_name", reserved\)/);
   assert.match(queue,/await uploadLibraryFileWithProgress\(form/);
   assert.match(queue,/renderLibraryUploadProgress\(\{ phase: "saved"/);
+  assert.match(queue,/registerLibrarySavedClassification\(result, count\)/);
+  assert.match(queue,/watchLibraryClassification\(classifyIds\)/);
   assert.match(queue,/phase: errors.length \? "partial" : "complete"/);
   assert.match(queue,/if \(libraryUploadMessageBusy\(\)\) return/);
   assert.doesNotMatch(queue,/publish|\/api\/outputs/i);
@@ -229,4 +233,25 @@ test("classification watch expires after one minute without overwriting upload f
   context.syncLibraryClassifyStatusMessage(1);
   assert.match(message,/Classification is taking too long/);
   assert.equal(cleared,true);
+});
+
+test("FLA meter advances only after classification is confirmed and runs independently of saves", () => {
+  const {context,nodes} = contextFor();
+  context.resetLibraryBatchClassification(3);
+  const bar = nodes.get("libraryUploadClassificationMeter");
+  assert.equal(bar.max,3);
+  assert.equal(bar.value,0);
+  context.registerLibrarySavedClassification({records:[{id:"recOne",classification_status:"Processing"}]},1);
+  assert.equal(bar.value,0,"Saving a file does not complete its classification");
+  assert.match(nodes.get("libraryUploadClassificationFiles").textContent,/1 classifying/);
+  context.updateLibraryBatchClassification({id:"recOne",classification_status:"Classified"});
+  assert.equal(bar.value,1);
+  context.registerLibrarySavedClassification({records:[{id:"recTwo",classification_status:"Processing"}]},1);
+  assert.equal(bar.value,1,"Next file saving never resets classified count");
+  context.updateLibraryBatchClassification({id:"recTwo",classification_status:"Classification Error"});
+  assert.equal(bar.value,1,"Failed classification is never counted as success");
+  assert.match(nodes.get("libraryUploadClassificationFiles").textContent,/1 failed/);
+  context.finishLibraryBatchClassification();
+  assert.match(nodes.get("libraryUploadClassificationFiles").textContent,/1 not uploaded/);
+  assert.equal(nodes.get("libraryClassificationProgress").dataset.state,"attention");
 });
