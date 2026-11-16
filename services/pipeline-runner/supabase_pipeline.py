@@ -878,10 +878,13 @@ def _media_row(record: dict) -> dict:
             row["asset_name"] = name
     for airtable_key, column in (
         ("Media_Class", "media_class"),
+        ("Media Class", "media_class"),
         ("Asset_Role", "asset_role"),
+        ("Asset Role", "asset_role"),
         ("Asset_Status", "asset_status"),
+        ("Asset Status", "asset_status"),
     ):
-        if airtable_key in fields:
+        if airtable_key in fields and column not in row:
             row[column] = _select(fields.get(airtable_key))
     for airtable_key, column in (
         ("Active", "active"),

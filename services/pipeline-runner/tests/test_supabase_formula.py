@@ -67,7 +67,7 @@ def test_snapshotted_runner_views():
     c6 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "C6 - Active Small Branding Watermark")
     assert c6 and "Watermark_Small" in c6
     a4 = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwQv8PDtE8qXwMPk")
-    assert a4 and "google_drive_file_id.neq." in a4
+    assert a4 and "google_drive_file_id.not.is.null" in a4
     r2v = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "viwDawMj0aiPtSM4P")
     assert r2v and "Raw%20Footage" in r2v and "Classified" in r2v
     r2m = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, "R2 - Available Classified Music Assets")

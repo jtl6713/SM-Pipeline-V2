@@ -32,7 +32,7 @@ describe("library upload overlay errors", () => {
   });
 
   test("release versions bumped for this fix", () => {
-    assert.match(worker, /0\.10\.968-library-upload-async/);
+    assert.match(worker, /0\.10\.969-library-upload-wm-fallback/);
     assert.match(ui, /xhr\.timeout=360000/);
     const build = ui.match(/\bBUILD_ID\s*=\s*["']item4-(\d+)\.(\d+)\.(\d+)-/);
     assert.ok(build, "UI BUILD_ID must be a parseable semantic version");

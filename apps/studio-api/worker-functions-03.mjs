@@ -3666,7 +3666,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
         "Asset intake safety check was not confirmed by Pipeline Runner. The asset was not added to the Studio library."
       );
     }
-    if (studioProfileRequiresChicagoWatermark(uploadProfile) && !drive?.watermarked) {
+    if (studioProfileRequiresChicagoWatermark(uploadProfile) && !drive?.watermarked && !drive?.watermark_deferred) {
       throw new HttpError(
         503,
         "ChicagoShining watermarking is not active on the Pipeline Runner. The asset was not added to the Studio library."

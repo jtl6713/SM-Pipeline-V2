@@ -52,17 +52,29 @@ def _watermark_payload(
             "mime_type": mime_type,
             "watermarked": False,
         }
-    mark = brand_watermark_bytes(AirtableClient())
-    branded = watermark_media_bytes(
-        content,
-        mark,
-        filename=filename,
-        mime_type=mime_type,
-    )
-    return {
-        **branded,
-        "filename": _filename_with_extension(filename, str(branded.get("extension") or "")),
-    }
+    try:
+        mark = brand_watermark_bytes(AirtableClient())
+        branded = watermark_media_bytes(
+            content,
+            mark,
+            filename=filename,
+            mime_type=mime_type,
+        )
+        return {
+            **branded,
+            "filename": _filename_with_extension(filename, str(branded.get("extension") or "")),
+        }
+    except Exception as exc:  # noqa: BLE001 — never park Asset Manager on branding miss
+        # Prefer branded when possible; still catalog the clean source so Joseph
+        # can upload Speakeasy photos while C6/Drive watermark is repaired.
+        return {
+            "bytes": content,
+            "filename": filename,
+            "mime_type": mime_type,
+            "watermarked": False,
+            "watermark_deferred": True,
+            "watermark_error": str(exc)[:300],
+        }
 
 
 def classify_library_file(*, filename: str, mime_type: str = "") -> dict[str, Any]:
@@ -204,6 +216,8 @@ def ingest_studio_library_asset(
         "duration_seconds": duration,
         "watermarked": bool(branded.get("watermarked")),
         "watermark_profile": profile_name if branded.get("watermarked") else None,
+        "watermark_deferred": bool(branded.get("watermark_deferred")),
+        "watermark_error": branded.get("watermark_error"),
         "source_google_drive_file_id": source_file_id or None,
         "source_google_drive_url": (
             drive_asset_url(source_file_id) if source_file_id else None

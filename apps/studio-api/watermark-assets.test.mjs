@@ -16,7 +16,10 @@ test("ChicagoShining Asset Manager uploads fail closed without a watermarked der
   const handler = source.slice(start, end);
 
   assert.match(handler, /profileName:\s*f\(uploadProfile, "Profile_Name"\)/);
-  assert.match(handler, /studioProfileRequiresChicagoWatermark\(uploadProfile\)\s*&&\s*!drive\?\.watermarked/);
+  assert.match(
+    handler,
+    /studioProfileRequiresChicagoWatermark\(uploadProfile\)\s*&&\s*!drive\?\.watermarked\s*&&\s*!drive\?\.watermark_deferred/,
+  );
   assert.match(handler, /The asset was not added to the Studio library/);
 });
 
