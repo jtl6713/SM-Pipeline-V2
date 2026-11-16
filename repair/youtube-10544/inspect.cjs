@@ -11,6 +11,17 @@ const fs=require('fs'),path=require('path');
  for(let i=0;i<20;i++){const page=await get('playlistItems',{part:'snippet,contentDetails',playlistId:channel.contentDetails.relatedPlaylists.uploads,maxResults:'50',pageToken});scanned+=page.items.length;for(const item of page.items)if(item.snippet.title==='Logan Square Farmers Market Vibe')found.push(item.contentDetails.videoId);pageToken=page.nextPageToken||'';if(!pageToken)break;}
  for(const j of jobs)if(j.videoId&&!found.includes(j.videoId))found.push(j.videoId);
  const videos=[];for(let i=0;i<found.length;i+=50){const r=await get('videos',{part:'snippet,status,statistics,contentDetails',id:found.slice(i,i+50).join(',')});for(const v of r.items)videos.push({id:v.id,title:v.snippet.title,description:v.snippet.description,publishedAt:v.snippet.publishedAt,channelId:v.snippet.channelId,privacy:v.status.privacyStatus,duration:v.contentDetails.duration,views:v.statistics.viewCount,likes:v.statistics.likeCount});}
- const logs=[];const dir='D:\\Content Creation\\ChicagoShining Pipeline\\Deployment Logs\\Local Services';for(const name of fs.readdirSync(dir).filter(n=>/pipeline-runner.*(err|out).*log$/.test(n))){const file=path.join(dir,name);const fd=fs.openSync(file,'r');const size=fs.statSync(file).size;const buf=Buffer.alloc(Math.min(size,2000000));fs.readSync(fd,buf,0,buf.length,Math.max(0,size-buf.length));fs.closeSync(fd);logs.push({name,lines:buf.toString().split(/\r?\n/).filter(l=>/recyWg1UN74FE3EoW|10544|YTS1|ytp1|yts1/.test(l)).slice(-50)});}
- console.log(JSON.stringify({logs,channelId:channel.id,channelTitle:channel.snippet.title,scanned,truncated:!!pageToken,jobs,videos}));
+ const keep='NeiO8Do0PI4';
+ if(channel.id!=='UCoKmbeuH294ZpnzE0HnuAnQ')throw Error('Wrong channel');
+ const canonical=videos.find(v=>v.id===keep);if(!canonical||canonical.privacy!=='public'||canonical.title!=='Logan Square Farmers Market Vibe'||canonical.duration!=='PT41S')throw Error('Canonical receipt mismatch');
+ const cleanup=[];
+ for(const v of videos){
+  if(v.id===keep||v.privacy==='private')continue;
+  if(!jobs.some(j=>j.videoId===v.id)||v.channelId!==channel.id||v.title!==canonical.title||v.duration!==canonical.duration)throw Error('Duplicate guard failed '+v.id);
+  const r=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status',{method:'PUT',headers:{Authorization:'Bearer '+auth.access_token,'Content-Type':'application/json'},body:JSON.stringify({id:v.id,status:{privacyStatus:'private'}})});
+  if(!r.ok)throw Error('Private update failed '+v.id+' '+r.status);
+  const check=await get('videos',{part:'status',id:v.id});if(check.items[0]?.status?.privacyStatus!=='private')throw Error('Privacy readback failed');
+  cleanup.push({id:v.id,privacy:'private'});
+ }
+ console.log(JSON.stringify({channelId:channel.id,scanned,truncated:!!pageToken,jobs,videos,cleanup,canonical}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;});
