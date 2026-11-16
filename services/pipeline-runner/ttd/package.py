@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import html
 from datetime import datetime, timezone
 from typing import Any
@@ -55,6 +56,19 @@ def completion_token_material(record_id: str, publish_id: str, *, now: datetime 
 
 def hash_completion_token(material: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def stable_completion_token(record_id: str, publish_id: str, *, secret: str) -> str:
+    """Produce a stable authenticated link for one TikTok draft delivery.
+
+    Parallel TTD2 polls cannot disagree, and the signing key makes the link
+    non-derivable even when output IDs and TikTok publish IDs are visible.
+    """
+    signing_key = str(secret or "").strip()
+    if not signing_key:
+        raise ValueError("TTD4 completion signing secret is not configured")
+    material = f"ttd4-manual-completion-v1:{record_id}:{publish_id}".encode("utf-8")
+    return hmac.new(signing_key.encode("utf-8"), material, hashlib.sha256).hexdigest()
 
 
 def completion_url(base: str, record_id: str, token: str) -> str:
