@@ -96,6 +96,15 @@ export function emptyHomeContribution() {
  * Input is the EXISTING mapOutput() shape; never infer Scheduled from a date
  * alone or Ready for Review from Studio_State alone.
  */
+/** Uploaded public YouTube id is a receipt. A private upload id is not. */
+export function youtubePublicUploadReceipt(row) {
+  if (String(row?.platform || "").trim() !== "YouTube") return false;
+  if (!String(row.youtube_video_id || "").trim()) return false;
+  const upload = String(row.youtube_upload_status || "").trim().toLowerCase();
+  const privacy = String(row.youtube_privacy_status || "").trim().toLowerCase();
+  return upload === "uploaded" && privacy === "public";
+}
+
 /**
  * Return the scheduled timestamp if an approved output is not yet published.
  * This clock-independent candidate supports indexed live overdue evaluation in
@@ -103,6 +112,7 @@ export function emptyHomeContribution() {
  */
 export function homeOverdueDueAt(row) {
   if (!row || row.do_not_publish || isTikTokEmailedManualHandoff(row)) return 0;
+  if (youtubePublicUploadReceipt(row)) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   if (review && review !== "approved") return 0;
@@ -157,6 +167,7 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
   if (!row || row.do_not_publish) return false;
   // Only authoritative final approval, not provisional output status.
   if (String(row.review_status || "").trim().toLowerCase() !== "approved") return false;
+  if (youtubePublicUploadReceipt(row)) return false;
   const state = String(row.studio_state || "").trim().toLowerCase();
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();

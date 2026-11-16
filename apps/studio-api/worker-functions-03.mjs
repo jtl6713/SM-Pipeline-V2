@@ -13220,11 +13220,17 @@ export async function studioEnsureYoutubePublish(env, record) {
   }
   if (/^yt2$/i.test(stage)) {
     const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
-    if (!uploaded.ok || uploaded.still_processing) return uploaded;
-    if (uploaded.needs_finalize && !uploaded.needs_processing_poll) {
-      return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), upload: uploaded };
+    // YTS1 can discover the video id and return before the worker sees
+    // needs_processing_poll. That id is the existing upload — continue at YTS2.
+    const discoveredVideo = String(uploaded?.video_id || "").trim()
+      || /already_has_youtube_video/i.test(String(uploaded?.skipped || ""));
+    if (!discoveredVideo) {
+      if (!uploaded.ok || uploaded.still_processing) return uploaded;
+      if (uploaded.needs_finalize && !uploaded.needs_processing_poll) {
+        return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), upload: uploaded };
+      }
+      if (!uploaded.needs_processing_poll) return uploaded;
     }
-    if (!uploaded.needs_processing_poll) return uploaded;
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const processed = await studioPulseYtRecord(env, "yts2", "YTS2", record);
     if (!processed.ok || processed.still_processing || !processed.needs_finalize) {

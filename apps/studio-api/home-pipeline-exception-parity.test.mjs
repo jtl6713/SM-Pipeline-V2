@@ -43,6 +43,23 @@ test("approved unscheduled and past-due records use one canonical predicate", ()
   assert.equal(tally.past_due, 2);
   assert.equal(tally.future, 1);
 });
+test("a public uploaded YouTube id leaves Past Due and a private id stays", () => {
+  const live = {
+    ...approved,
+    platform: "YouTube",
+    publish_status: "Publishing",
+    scheduled_post_date: "2026-10-19T12:00:00Z",
+    youtube_video_id: "z2cD65scT2M",
+    youtube_upload_status: "Uploaded",
+    youtube_privacy_status: "public",
+  };
+  const privateUpload = { ...live, youtube_privacy_status: "private" };
+  const idOnly = { ...live, youtube_upload_status: "", youtube_privacy_status: "" };
+  assert.equal(homeApprovedExceptionKind(live, now), "");
+  assert.equal(homeApprovedCalendarCounts([live], now).past_due, 0);
+  assert.equal(homeApprovedExceptionKind(privateUpload, now), "approved_past_due");
+  assert.equal(homeApprovedExceptionKind(idOnly, now), "approved_past_due");
+});
 test("Failed excludes published evidence and publishing holds are not reapproved", () => {
   assert.equal(homeIsUnpublishedFailure({...approved, publish_status: "Failed",
     published_at: "2026-10-21T12:00:00Z"}), false);
