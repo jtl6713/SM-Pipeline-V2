@@ -5343,6 +5343,7 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     attention_outputs: outputCounts.attention_outputs,
     published_outputs: outputCounts.published_outputs,
     active_outputs: outputCounts.active_outputs,
+    in_production: outputCounts.in_production,
     ideas: ideaCounts.ideas,
     platform_outputs: outputCounts.platform_outputs,
   };
@@ -5630,6 +5631,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
       approval: calendar.awaiting,
+      production: metrics.in_production,
       awaiting_final_by_platform: calendar.awaiting_by_platform,
       pipeline_by_platform: calendar.pipeline_by_platform,
       pipeline_total: calendar.pipeline_total,
@@ -5695,7 +5697,7 @@ function studioProfilesOverviewRowsHealthy(rows) {
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
     // Reject legacy snapshots without per-output calendar timestamps.
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
+    for (const key of ["manual", "failed", "approval", "production", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
@@ -6150,7 +6152,7 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
+    for (const key of ["manual", "failed", "approval", "production", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
       }

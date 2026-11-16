@@ -30,7 +30,7 @@ test("profile overview includes overdue approved outputs separately from platfor
 test("awaiting approval matches Factory Needs eyes package gate", () => {
   assert.match(classifier, /homeAwaitingApprovalVisible/);
   assert.match(classifier, /factoryReviewVisibility/);
-  assert.match(ui, /same queue as Factory Needs eyes/i);
+  assert.match(ui, /Factory items awaiting your approval/i);
   const CDN = "https://media.chicagoshining.com";
   const ready = {
     id: "rec12345678901234",
@@ -51,8 +51,8 @@ test("awaiting approval matches Factory Needs eyes package gate", () => {
 });
 
 test("Home uses explicit approved future and past due columns, not parentheses", () => {
-  assert.match(ui, /Approved · Future/);
-  assert.match(ui, /Approved · Past Due/);
+  assert.match(ui, /Scheduled content/);
+  assert.match(ui, /Approved · Past due/);
   assert.doesNotMatch(ui, /approvedUnpublishedTotal/);
 });
 
@@ -93,7 +93,7 @@ test("Home rejects old R2/browser snapshots missing per-output calendar breakdow
   assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(valid, /typeof n !== "number"/);
-  assert.ok(ui.includes('studio.allProfilesOverview.v6'));
+  assert.ok(ui.includes('studio.allProfilesOverview.v7'));
   assert.match(valid, /approved_calendar_slots/);
   assert.match(verify, /approved_calendar_slots/);
   const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));

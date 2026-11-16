@@ -56,6 +56,7 @@ test("incremental ledger reproduces complete authoritative V6 calendar by output
   assert.equal(row.approved_missing_date, 1);
   assert.equal(row.pipeline_total, 5);
   assert.equal(row.approval, 2);
+  assert.equal(row.production, 0);
   assert.deepEqual(row.approved_calendar_slots, calendar.slots);
   assert.deepEqual(row.approved_future_by_platform, calendar.future_by_platform);
   assert.deepEqual(row.awaiting_final_by_platform, calendar.awaiting_by_platform);
@@ -81,6 +82,7 @@ test("V6 read eligibility rejects absent platform fields and inconsistent totals
   const valid = cityIds.map((id, i) => makeV6([], at, {id, city_label: cityNames[i], version: 7}));
   assert.equal(validProfileSummaryV6Rows(valid), true);
   assert.equal(validProfileSummaryV6Rows(valid.slice(0, 3)), false);
+  assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, production: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, approved_calendar_slots: {} })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, pipeline_total: 10 })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, approved_missing_date: -1 })), false);
@@ -118,6 +120,6 @@ test("durable V6 excludes emailed TikTok draft but preserves Manual Needed and u
 
 test("durable summary version invalidates pre-email-handoff calendar dates", () => {
   const source = readFileSync(new URL("./profile-summary-do.mjs", import.meta.url), "utf8");
-  assert.match(source, /v6_calendar_tiktok_email_handoff_v2/);
+  assert.match(source, /v7_home_stage_production_v1/);
   assert.match(source, /putMeta\("future_count_reconcile_required", "true"\)/);
 });

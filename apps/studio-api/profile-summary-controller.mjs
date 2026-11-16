@@ -200,6 +200,7 @@ async function runStudioProfileSummaryReconcile(env) {
       city_label: info.find((p) => p.id === profile.id)?.city_label,
       scheduled, manual: metrics.manual_action_required,
       failed: metrics.failed_outputs, approval: calendar.awaiting,
+      production: metrics.in_production,
       awaiting_final_by_platform: calendar.awaiting_by_platform,
       pipeline_by_platform: calendar.pipeline_by_platform,
       pipeline_total: calendar.pipeline_total,

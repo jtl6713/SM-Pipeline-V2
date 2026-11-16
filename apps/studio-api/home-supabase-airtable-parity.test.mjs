@@ -21,6 +21,7 @@ function row(id, patch = {}) {
     manual: 0,
     failed: 0,
     approval: 0,
+    production: 0,
     ideas: 0,
     approved_past_due: 0,
     approved_missing_date: 0,
@@ -39,7 +40,7 @@ function row(id, patch = {}) {
 
 test("Home parity columns cover the All Profiles action counts and pipeline cells", () => {
   for (const column of [
-    "manual", "failed", "approval", "ideas",
+    "manual", "failed", "approval", "production", "ideas",
     "approved_past_due", "approved_missing_date",
     "approved_future", "pipeline_total",
     "pipeline.Facebook", "pipeline.Instagram", "pipeline.TikTok", "pipeline.YouTube",
