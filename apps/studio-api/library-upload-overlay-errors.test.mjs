@@ -21,8 +21,16 @@ describe("library upload overlay errors", () => {
     assert.match(ui, /failed while talking to Drive\/pipeline/);
   });
 
+  test("library Drive promote skips sync source-master and hard-times out", () => {
+    assert.match(funcs, /skipSourceMaster = true/);
+    assert.match(funcs, /skip_source_master/);
+    assert.match(funcs, /LIBRARY_DRIVE_PROMOTE_TIMEOUT_MS = 100000/);
+    assert.match(funcs, /Drive\/pipeline upload timed out while confirming Google Drive/);
+    assert.match(funcs, /emptyGateway \? 504/);
+  });
+
   test("release versions bumped for this fix", () => {
-    assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+    assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
     const build = ui.match(/\bBUILD_ID\s*=\s*["']item4-(\d+)\.(\d+)\.(\d+)-/);
     assert.ok(build, "UI BUILD_ID must be a parseable semantic version");
     const [major, minor, patch] = build.slice(1).map(Number);
