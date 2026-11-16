@@ -81,6 +81,7 @@ export const HOME_METRIC_KEYS = Object.freeze([
 export function emptyHomeContribution() {
   return {
     scheduled: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
+    ready_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
     awaiting_final_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
     // Record-level metadata: used by the indexed V6 approved calendar query.
     calendar_platform: "",
@@ -265,7 +266,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.in_production = Number(homeOutputInProduction(row));
   const knownPlatform = HOME_PLATFORMS.includes(row.platform);
   result.calendar_platform = knownPlatform ? row.platform : "";
-  result.approved_unpublished = Number(homeApprovedUnpublished(row, now));
+  result.approved_unpublished = Number(knownPlatform && homeApprovedUnpublished(row, now));
+  // Approved, unpublished inventory includes future, overdue and undated outputs.
+  // It must NOT be confused with the much smaller untouched dispatch queue.
+  if (result.approved_unpublished) result.ready_by_platform[row.platform] = 1;
   // A completed emailed TikTok handoff has a real scheduled date and belongs in
   // Manual Needed; excluding its V6 calendar slot must NOT relabel it missing-date.
   result.approved_missing_date = Number(knownPlatform && result.approved_unpublished
@@ -312,6 +316,7 @@ export function combineHomeContributions(rows) {
     if (!row) continue;
     for (const platform of HOME_PLATFORMS) {
       total.scheduled[platform] += Number(row.scheduled?.[platform]) || 0;
+      total.ready_by_platform[platform] += Number(row.ready_by_platform?.[platform]) || 0;
       total.awaiting_final_by_platform[platform] += Number(row.awaiting_final_by_platform?.[platform]) || 0;
     }
     for (const key of HOME_METRIC_KEYS) total[key] += Number(row[key]) || 0;
@@ -325,6 +330,7 @@ export function homeContributionDelta(oldContribution, newContribution) {
   const delta = emptyHomeContribution();
   for (const platform of HOME_PLATFORMS) {
     delta.scheduled[platform] = (Number(b.scheduled?.[platform]) || 0) - (Number(a.scheduled?.[platform]) || 0);
+    delta.ready_by_platform[platform] = (Number(b.ready_by_platform?.[platform]) || 0) - (Number(a.ready_by_platform?.[platform]) || 0);
     delta.awaiting_final_by_platform[platform] = (Number(b.awaiting_final_by_platform?.[platform]) || 0) - (Number(a.awaiting_final_by_platform?.[platform]) || 0);
   }
   for (const key of HOME_METRIC_KEYS) delta[key] = (Number(b[key]) || 0) - (Number(a[key]) || 0);

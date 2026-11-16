@@ -20,12 +20,14 @@ const LAG_BUCKET_MS = [1000, 2500, 5000, 10000, 15000, 30000, 60000];
 
 function counterPlus(before, delta) {
   const next = structuredClone(before || ZERO());
+  next.ready_by_platform ||= Object.fromEntries(HOME_PLATFORMS.map((p) => [p, 0]));
   for (const platform of HOME_PLATFORMS) {
     next.scheduled[platform] += delta.scheduled[platform] || 0;
+    next.ready_by_platform[platform] += delta.ready_by_platform?.[platform] || 0;
     next.awaiting_final_by_platform[platform] += delta.awaiting_final_by_platform?.[platform] || 0;
   }
   for (const key of HOME_METRIC_KEYS) next[key] = (Number(next[key]) || 0) + (Number(delta[key]) || 0);
-  if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0 || next.awaiting_final_by_platform[p] < 0)
+  if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0 || next.ready_by_platform[p] < 0 || next.awaiting_final_by_platform[p] < 0)
     || HOME_METRIC_KEYS.some((key) => next[key] < 0)) {
     throw new Error("Counter underflow: requires authoritative reconciliation");
   }
@@ -85,8 +87,8 @@ export class StudioProfileSummary {
       // A stored snapshot from the previous contract is not enough.
       // A v1 tally counted only future scheduled outputs. Do not serve stale
       // counters as v2: force authoritative reconciliation before summary reads.
-      if (this.getMeta("home_summary_contract") !== "v7_home_stage_production_v1") {
-        this.putMeta("home_summary_contract", "v7_home_stage_production_v1");
+      if (this.getMeta("home_summary_contract") !== "v8_home_ready_inventory_v1") {
+        this.putMeta("home_summary_contract", "v8_home_ready_inventory_v1");
         this.putMeta("future_count_reconcile_required", "true");
       }
       if (this.getMeta("approved_unpublished_definition") !== "all_final_approved_unpublished_v2") {

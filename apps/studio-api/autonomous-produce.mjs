@@ -31,8 +31,8 @@ export function globalAutomaticIdeaBudget(globalLoad, target) {
   return Math.max(0, Math.ceil((limit - globalLoad) / AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA));
 }
 
-/** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
-export const AUTONOMOUS_SCHEDULED_TARGET = 500;
+/** Minimum per-city inventory: final-approved, unpublished outputs ready to schedule or scheduled. */
+export const AUTONOMOUS_SCHEDULED_TARGET = 1000;
 /** Planning estimate only: actual output inventory is always rechecked. */
 export const AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA = 5;
 export function autonomousIdeasForOutputDeficit(deficit, outputsPerIdea = AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA) {
@@ -41,8 +41,8 @@ export function autonomousIdeasForOutputDeficit(deficit, outputsPerIdea = AUTONO
   return Math.ceil(remaining / yieldPerIdea);
 }
 /**
- * Bound the scheduled 1 a.m. I1 run to the SAME per-city inventory target as
- * the hourly refill: future Scheduled + rendered Awaiting Approval.
+ * Bound scheduled idea generation to the SAME 1,000-per-city inventory target
+ * as the hourly refill: final-approved, unpublished ready/scheduled outputs.
  * Missing or invalid inventory is not permission to generate more Ideas.
  * One idea is estimated to become five platform outputs; this is a planning
  * bound, and the authoritative inventory is rechecked on the next run.
@@ -57,8 +57,8 @@ export function autonomousDailyIdeaBudget(score, dailyLimit, target = AUTONOMOUS
   return Math.min(requested, autonomousIdeasForOutputDeficit(ceiling - load));
 }
 
-/** Combined load above this skips that city for the Chicago hour. 500–509 holds. */
-export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 509;
+/** Small overshoot hold band; a city below 1,000 is always refill-eligible. */
+export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 1009;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /**
@@ -220,7 +220,7 @@ export function autonomousScheduledTotal(scheduledByPlatform) {
   return total;
 }
 
-/** Scheduled parenthesis total plus Awaiting Approval — the 500 / 509 ceiling uses this. */
+/** Legacy helper: total of a scheduled count and any separately supplied review count. */
 export function autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval = 0) {
   return Math.max(0, Number(scheduledTotal) || 0) + Math.max(0, Number(awaitingApproval) || 0);
 }
@@ -229,7 +229,7 @@ export function autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval = 0
  * refill: combined load under target (create this hour's ideas).
  * hold: at target through the skip ceiling (do not harvest).
  * skip: above the ceiling (skip that city this hour).
- * `loadTotal` is Scheduled + Awaiting Approval.
+ * `loadTotal` is the eligible per-city inventory supplied by the caller.
  */
 export function autonomousScheduledBand(
   loadTotal,
@@ -244,7 +244,7 @@ export function autonomousScheduledBand(
   return "hold";
 }
 
-/** True only when Scheduled + Awaiting Approval is under the target. */
+/** True only when the eligible per-city inventory is below the target. */
 export function autonomousProfileNeedsScheduledRefill(
   scheduledTotal,
   awaitingApproval = 0,
@@ -294,30 +294,37 @@ export function autonomousScheduledDeficit(
 }
 
 /**
- * Build per-profile refill scores from All-Profiles overview rows
- * Approved future platform outputs + fully rendered awaiting final human
- * approval. A legacy scheduled map is supported for old callers only.
- * New Home snapshots carry per-output due times so expired dates stop
- * contributing immediately, even before the next Airtable change.
+ * Per-city refill scores. Prefer the canonical ready_by_platform ledger:
+ * final-approved, unpublished scheduled OR ready-for-scheduling outputs.
+ * Unlike the legacy future-slot count it includes undated and overdue approvals.
+ * A Factory output awaiting final human approval is not yet ready to schedule.
+ * Legacy rows without the new ledger retain their old scoring for compatibility;
+ * production readers validate the new field and reject stale snapshots.
  */
 export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONOMOUS_SCHEDULED_TARGET) {
   const byId = Object.create(null);
+  const platforms = ["Facebook", "Instagram", "TikTok", "YouTube"];
   for (const row of Array.isArray(overviewRows) ? overviewRows : []) {
     const id = String(row?.id || "").trim();
     if (!id) continue;
+    const ready = row?.ready_by_platform;
+    const readyVerified = platforms.every((p) => Number.isSafeInteger(ready?.[p]) && ready[p] >= 0);
     const slots = row?.approved_calendar_slots;
-    const canonicalSlots = slots && ["Facebook", "Instagram", "TikTok", "YouTube"]
-      .every((platform) => Array.isArray(slots[platform]));
-    const scheduledTotal = canonicalSlots
-      ? ["Facebook", "Instagram", "TikTok", "YouTube"].reduce((sum, platform) =>
-        sum + slots[platform].filter((stamp) => Number(stamp) > Date.now()).length, 0)
-      : Number.isFinite(Number(row?.approved_future))
-        ? Math.max(0, Number(row.approved_future))
-        : autonomousScheduledTotal(row?.scheduled);
+    const canonicalSlots = slots && platforms.every((p) => Array.isArray(slots[p]));
+    const scheduledTotal = readyVerified
+      ? platforms.reduce((sum, p) => sum + ready[p], 0)
+      : canonicalSlots
+        ? platforms.reduce((sum, p) =>
+          sum + slots[p].filter((stamp) => Number(stamp) > Date.now()).length, 0)
+        : Number.isFinite(Number(row?.approved_future))
+          ? Math.max(0, Number(row.approved_future))
+          : autonomousScheduledTotal(row?.scheduled);
     const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
-    const pipelineLoad = autonomousPipelineLoadTotal(scheduledTotal, awaiting);
+    const pipelineLoad = readyVerified
+      ? scheduledTotal
+      : autonomousPipelineLoadTotal(scheduledTotal, awaiting);
     const band = autonomousScheduledBand(pipelineLoad, target);
-    const deficit = autonomousScheduledDeficit(scheduledTotal, awaiting, target);
+    const deficit = autonomousScheduledDeficit(pipelineLoad, 0, target);
     const needed = band === "refill";
     byId[id] = {
       id,
@@ -330,6 +337,7 @@ export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONO
       estimated_ideas_needed: autonomousIdeasForOutputDeficit(deficit),
       expected_outputs_per_idea: AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA,
       needed,
+      ready_inventory_verified: readyVerified,
       target: Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET),
     };
   }

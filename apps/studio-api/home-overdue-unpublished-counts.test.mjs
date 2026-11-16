@@ -93,7 +93,7 @@ test("Home rejects old R2/browser snapshots missing per-output calendar breakdow
   assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(valid, /typeof n !== "number"/);
-  assert.ok(ui.includes('studio.allProfilesOverview.v7'));
+  assert.ok(ui.includes('studio.allProfilesOverview.v8'));
   assert.match(valid, /approved_calendar_slots/);
   assert.match(verify, /approved_calendar_slots/);
   const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));

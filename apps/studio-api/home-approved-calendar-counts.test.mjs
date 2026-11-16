@@ -71,12 +71,12 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(worker,/homeApprovedCalendarCounts\(mappedOutputs\)/);
   assert.match(worker,/approved_future_by_platform: calendar\.future_by_platform/);
   assert.match(worker,/approved_calendar_slots: calendar\.slots/);
-  assert.match(ui,/studio\.allProfilesOverview\.v7/);
-  assert.match(ui,/Scheduled content/);
+  assert.match(ui,/studio\.allProfilesOverview\.v8/);
+  assert.match(ui,/Scheduled \/ ready for scheduling/);
   assert.match(ui,/Approved · Past due/);
   assert.match(ui,/Approved · No date/);
   assert.match(ui,/approvedCalendarCounts\(row, now = Date\.now\(\)\)/);
-  assert.match(ui,/r\.scheduled\?\.\[p\]/);
+  assert.match(ui,/r\.ready_by_platform\?\.\[p\]/);
   assert.doesNotMatch(ui,/approvedUnpublishedTotal\(row\)/);
   assert.match(index,/all-profiles-overview-1007\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
 });

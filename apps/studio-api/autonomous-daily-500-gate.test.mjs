@@ -6,17 +6,17 @@ import { dirname, join } from "node:path";
 import { autonomousDailyIdeaBudget } from "./autonomous-produce.mjs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 
-test("nightly I1 generates nothing when a city already has 500 or more scheduled+awaiting outputs", () => {
-  for (const load of [500, 501, 509, 510, 1200]) {
+test("nightly I1 generates nothing when a city has at least 1,000 approved ready outputs", () => {
+  for (const load of [1000, 1001, 1009, 1010, 1200]) {
     assert.equal(autonomousDailyIdeaBudget({ pipeline_load: load }, 10), 0, String(load));
   }
 });
 
-test("nightly I1 only requests the remaining estimated ideas below the 500 target", () => {
-  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 499 }, 10), 1);
-  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 495 }, 10), 1);
-  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 490 }, 10), 2);
-  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 451 }, 10), 10);
+test("nightly I1 only requests the remaining estimated ideas below 1,000", () => {
+  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 999 }, 10), 1);
+  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 995 }, 10), 1);
+  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 990 }, 10), 2);
+  assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 951 }, 10), 10);
   assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 0 }, 4), 4);
   assert.equal(autonomousDailyIdeaBudget({ pipeline_load: 0 }, 50), 10);
 });
@@ -34,11 +34,12 @@ test("scheduled daily runner requires fresh authoritative counts before batch cr
   const end = source.indexOf("async function runStudioDailyIdeas(", start);
   assert.ok(start >= 0 && end > start);
   const run = source.slice(start, end);
-  assert.match(run, /studioGlobalAutomaticIdeaInventory\(env\)/);
+  assert.match(run, /studioLoadAutonomousRefillScores\(env, profiles/);
   assert.match(run, /skipped: "global_inventory_unavailable"/);
-  assert.match(run, /globalAutomaticIdeaBudget\(/);
+  assert.match(run, /autonomousDailyIdeaBudget\(refillScores\?\.\[profile\.id\]/);
   assert.match(run, /global_idea_target_met/);
   assert.ok(run.indexOf("global_inventory_unavailable") < run.indexOf("studioIdeaCreateBatch("));
   const module = fs.readFileSync(join(dirname(fileURLToPath(import.meta.url)), "worker-functions-04.mjs"), "utf8");
   assert.match(module, /if \(requireLive \|\| summaryEnabled \|\| !rows\.length\) return \{ scores: \{\}/);
+  assert.match(run, /ready_inventory_verified !== true/);
 });

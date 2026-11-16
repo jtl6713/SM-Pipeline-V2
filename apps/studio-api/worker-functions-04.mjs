@@ -5338,6 +5338,7 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     failed_outputs: outputCounts.failed_outputs,
     awaiting_approval: outputCounts.awaiting_approval,
     approved_unpublished: outputCounts.approved_unpublished,
+    ready_by_platform: outputCounts.ready_by_platform,
     overdue_unpublished: outputCounts.overdue_unpublished,
     ideas_not_in_production: ideaCounts.ideas_not_in_production,
     attention_outputs: outputCounts.attention_outputs,
@@ -5628,6 +5629,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       name: mapped.city_label || mapped.name || profile.id,
       city_label: mapped.city_label || "",
       scheduled: studioOverviewScheduledCounts(mappedOutputs),
+      ready_by_platform: metrics.ready_by_platform,
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
       approval: calendar.awaiting,
@@ -5694,7 +5696,9 @@ function studioProfilesOverviewRowsHealthy(rows) {
     labels.add(label);
     for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
       const n = row?.scheduled?.[platform];
-      if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+      const ready = row?.ready_by_platform?.[platform];
+      if (typeof n !== "number" || !Number.isFinite(n) || n < 0
+        || !Number.isSafeInteger(ready) || ready < 0) return false;
     }
     // Reject legacy snapshots without per-output calendar timestamps.
     for (const key of ["manual", "failed", "approval", "production", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
@@ -6148,7 +6152,9 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
   }
   for (const row of rows || []) {
     for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
-      if (!Number.isFinite(Number(row?.scheduled?.[platform]))) {
+      if (!Number.isFinite(Number(row?.scheduled?.[platform]))
+        || !Number.isSafeInteger(row?.ready_by_platform?.[platform])
+        || row.ready_by_platform[platform] < 0) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
@@ -15609,35 +15615,46 @@ export async function fillAutonomousScheduledHour(env, authorization, {
     });
     return { terminal: true, created_count: 0, last: saved, result: saved };
   }
-  // One fresh aggregate check protects all four cities, including cities
-  // whose auto-generation toggles are disabled. Fail closed if Airtable fails.
-  let globalInventory;
-  try {
-    globalInventory = await studioGlobalAutomaticIdeaInventory(env);
-  } catch (error) {
-    console.warn("Hourly global idea cap verification failed; creating nothing", error);
+  // The 1,000-output target applies to EACH enabled city, not a combined
+  // four-city inventory and not the legacy shared 500-output setting.
+  // Use a verified Supabase-backed Home snapshot/summary; stale, incomplete,
+  // or legacy rows must fail closed rather than create duplicate ideas.
+  const refillMeta = await studioLoadAutonomousRefillScores(env, profiles, {
+    target: AUTONOMOUS_SCHEDULED_TARGET,
+  });
+  const verifiedScores = refillMeta?.scores || {};
+  const complete = (refillMeta?.source === "durable_summary"
+    || refillMeta?.source === "snapshot" || refillMeta?.source === "live")
+    && profiles.every((profile) => verifiedScores[profile.id]?.ready_inventory_verified === true);
+  if (!complete) {
+    console.warn("Hourly per-profile ready inventory is unavailable; creating nothing");
     const saved = await studioSaveAutonomousLastRun(env, {
       status: "skipped", skipped: "global_inventory_unavailable",
       skip_reason: "global_inventory_unavailable", slot,
       chicago_date: chicago.date, chicago_hour: chicago.hour,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      refill_source: refillMeta?.source || "missing",
     });
     return { terminal: true, created_count: 0, last: saved, result: saved };
   }
+  const globalInventory = {
+    target: AUTONOMOUS_SCHEDULED_TARGET,
+    load: profiles.reduce((sum, profile) => sum + verifiedScores[profile.id].pipeline_load, 0),
+    remaining_ideas: profiles.reduce(
+      (sum, profile) => sum + verifiedScores[profile.id].estimated_ideas_needed, 0),
+  };
   if (globalInventory.remaining_ideas <= 0) {
     const saved = await studioSaveAutonomousLastRun(env, {
       status: "skipped", skipped: "global_idea_target_met",
       skip_reason: "global_idea_target_met", slot,
       chicago_date: chicago.date, chicago_hour: chicago.hour,
       global_pipeline_load: globalInventory.load,
-      global_idea_target: globalInventory.target,
+      per_profile_target: globalInventory.target,
     });
     return { terminal: true, created_count: 0, last: saved, result: saved };
   }
-  // Per-city deficit ranking uses the shared target; no separate 500/city gate.
-  // The aggregate budget remains the binding stop for all cities together.
-  const refillMeta = await studioLoadAutonomousRefillScores(env, profiles, {
-    target: globalInventory.target,
-  });
+  // Bound the number of ideas by the SUM of the actual per-city deficits,
+  // never by a shared aggregate ceiling (another city may be above 1,000).
   const loadedScores = refillMeta?.scores || {};
   const scoreCount = Object.keys(loadedScores).length;
   let refillScores = null;
@@ -15650,7 +15667,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
   if (refillScores && !needing.length) {
     const bands = Object.values(refillScores).map((row) => row?.band);
     const skipReason = bands.length && bands.every((band) => band === "skip")
-      ? "scheduled_over_509"
+      ? "scheduled_over_1009"
       : "scheduled_target_met";
     if (sameSlot && last?.status === "skipped" && last?.skip_reason === skipReason) {
       return { terminal: true, created_count: 0, last, result: last };
@@ -15978,11 +15995,11 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  // Top of the Chicago hour only: 10 ideas per city under 500 Scheduled+Awaiting
-  // Approval, even when the subject is already in flight. When open ideas are
+  // Top of the Chicago hour only: up to 10 ideas per city under 1,000
+  // approved unpublished outputs, even when a subject is in flight. When open ideas are
   // already at/over the cap (20), skip create and drain up to 20 asset-ready
   // drafts toward Ready for Review instead. :05 and :30 ticks resume one draft.
-  // Combined load over 509 skips that city.
+  // Each profile at or above 1,000 holds or skips independently.
   if (harvestThisHour) {
     const openIdeasCount = await countAutonomousOpenIdeas(env);
     const skipCreate = autonomousOpenIdeasAtCap(openIdeasCount);
@@ -16090,7 +16107,7 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       if (!needing.length) {
         const bands = Object.values(refillScores).map((row) => row?.band);
         const skipReason = bands.length && bands.every((band) => band === "skip")
-          ? "scheduled_over_509"
+          ? "scheduled_over_1009"
           : "scheduled_target_met";
         const result = {
           skipped: skipReason,
@@ -16433,31 +16450,31 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
     return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };
   }
 
-  // The one shared Airtable setting gates the aggregate inventory of ALL
-  // active cities. Neither stale counts nor malformed settings allow new ideas.
-  // Explicit user-triggered runs continue to use their own manual workflow.
-  let globalInventory = null;
+  // Nightly I1 and hourly idea refill use the same 1,000-per-city target.
+  // A surplus in Chicago cannot suppress an eligible deficit in Miami.
+  // Missing/stale canonical ready inventory blocks unattended generation.
+  let refillScores = null;
   if (options.scheduled) {
-    try {
-      globalInventory = await studioGlobalAutomaticIdeaInventory(env);
-    } catch (error) {
-      console.warn("Overnight global idea inventory unavailable; generation blocked", error);
+    const refill = await studioLoadAutonomousRefillScores(env, profiles, {
+      target: AUTONOMOUS_SCHEDULED_TARGET,
+    });
+    const scores = refill?.scores || {};
+    if (!["durable_summary", "snapshot", "live"].includes(refill?.source)
+      || profiles.some((profile) => scores[profile.id]?.ready_inventory_verified !== true)) {
+      console.warn("Overnight per-profile ready inventory unavailable; generation blocked");
       return {
         started: false, skipped: "global_inventory_unavailable",
         chicago_date: chicago.date, runs: [],
-        errors: [String(error?.message || error)],
+        errors: ["Authoritative 1,000-per-city ready inventory unavailable"],
       };
     }
-    if (!globalInventory.remaining_ideas) {
+    refillScores = scores;
+    if (!profiles.some((profile) => scores[profile.id].needed)) {
       await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date,
-        "Overnight I1 skipped: global automatic idea inventory target met")
-        .catch((error) => console.warn("Daily global cap stamp unavailable", error));
-      return {
-        started: false, skipped: "global_idea_target_met",
-        chicago_date: chicago.date, runs: [],
-        global_pipeline_load: globalInventory.load,
-        global_idea_target: globalInventory.target,
-      };
+        "Overnight I1 skipped: each profile has at least 1,000 approved ready outputs")
+        .catch((error) => console.warn("Daily target stamp unavailable", error));
+      return { started: false, skipped: "global_idea_target_met", chicago_date: chicago.date,
+        runs: [], per_profile_target: AUTONOMOUS_SCHEDULED_TARGET };
     }
   }
 
@@ -16469,20 +16486,18 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
   const started = [];
   const skipped = [];
   const errors = [];
-  let reservedOutputs = 0;
   for (const profile of profiles) {
     const requested = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
     const count = options.scheduled
-      ? Math.min(requested, globalAutomaticIdeaBudget(
-          globalInventory.load + reservedOutputs, globalInventory.target))
+      ? autonomousDailyIdeaBudget(refillScores?.[profile.id], requested, AUTONOMOUS_SCHEDULED_TARGET)
       : requested;
     if (options.scheduled && count === 0) {
       skipped.push({
         profile_id: profile.id,
         name: profile.name,
         reason: "global_idea_target_met",
-        global_pipeline_load: globalInventory?.load + reservedOutputs,
-        global_idea_target: globalInventory?.target,
+        profile_ready_load: refillScores?.[profile.id]?.pipeline_load,
+        per_profile_target: AUTONOMOUS_SCHEDULED_TARGET,
       });
       continue;
     }
@@ -16500,9 +16515,7 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
           continue;
         }
       }
-      // Reserve this batch's expected output footprint before any later city
-      // is admitted. Partial I1 failures conservatively retain the reservation.
-      if (options.scheduled) reservedOutputs += count * AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA;
+      // The verified per-city deficit reserves this batch independently of other cities.
       const full = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
       batch = await studioIdeaCreateBatch(env, full, count, "Balanced", { email: "studio-daily-cadence" });
       await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, "Balanced");

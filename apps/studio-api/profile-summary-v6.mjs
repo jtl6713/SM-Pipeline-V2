@@ -44,6 +44,7 @@ export function buildProfileSummaryV6Row(profile, counters, approvedEntries, now
     name: profile.city_label,
     city_label: profile.city_label,
     scheduled,
+    ready_by_platform: Object.fromEntries(HOME_PLATFORMS.map((p) => [p, Number(c.ready_by_platform?.[p] || 0)])),
     manual: Number(c.manual_action_required || 0),
     failed: Number(c.failed_outputs || 0),
     approval: awaiting,
@@ -69,7 +70,7 @@ export function buildProfileSummaryV6Row(profile, counters, approvedEntries, now
 /** Clock-independent fields must exactly match the authoritative V6 rebuild. */
 export function profileSummaryV6StaticParity(expected, actual) {
   const keys = [
-    "scheduled", "manual", "failed", "approval", "production", "ideas",
+    "scheduled", "ready_by_platform", "manual", "failed", "approval", "production", "ideas",
     "approved_unpublished", "approved_missing_date",
     "approved_calendar_slots", "awaiting_final_by_platform",
   ];
@@ -92,7 +93,7 @@ export function validProfileSummaryV6Rows(rows) {
       "approved_missing_date", "pipeline_total",
     ]) if (!count(row[key])) return false;
     for (const platform of HOME_PLATFORMS) {
-      if (!count(row.scheduled?.[platform])
+      if (!count(row.scheduled?.[platform]) || !count(row.ready_by_platform?.[platform])
         || !count(row.approved_future_by_platform?.[platform])
         || !count(row.awaiting_final_by_platform?.[platform])
         || !count(row.pipeline_by_platform?.[platform])

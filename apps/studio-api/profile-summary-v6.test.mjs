@@ -62,6 +62,7 @@ test("incremental ledger reproduces complete authoritative V6 calendar by output
   assert.deepEqual(row.awaiting_final_by_platform, calendar.awaiting_by_platform);
   assert.deepEqual(row.pipeline_by_platform, calendar.pipeline_by_platform);
   assert.equal(row.approved_unpublished, 5);
+  assert.deepEqual(row.ready_by_platform, { Facebook: 1, Instagram: 2, TikTok: 1, YouTube: 1 });
   assert.equal(profileSummaryV6StaticParity({
     ...row, scheduled: { ...row.scheduled },
   }, row), true);
@@ -82,6 +83,7 @@ test("V6 read eligibility rejects absent platform fields and inconsistent totals
   const valid = cityIds.map((id, i) => makeV6([], at, {id, city_label: cityNames[i], version: 7}));
   assert.equal(validProfileSummaryV6Rows(valid), true);
   assert.equal(validProfileSummaryV6Rows(valid.slice(0, 3)), false);
+  assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, ready_by_platform: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, production: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, approved_calendar_slots: {} })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, pipeline_total: 10 })), false);
@@ -97,6 +99,7 @@ test("V6 reconciliation and snapshot are wired to the same ledger assembly", () 
   assert.match(controller, /homeApprovedCalendarCounts\(mapped\)/);
   assert.match(controller, /validateStudioProfilesOverviewRows\(expectedRows, profiles\)/);
   assert.match(controller, /validProfileSummaryV6Rows\(summary\.records\)/);
+  assert.match(doSource, /next\.ready_by_platform\[platform\] \+= delta\.ready_by_platform/);
 });
 
 
@@ -120,6 +123,6 @@ test("durable V6 excludes emailed TikTok draft but preserves Manual Needed and u
 
 test("durable summary version invalidates pre-email-handoff calendar dates", () => {
   const source = readFileSync(new URL("./profile-summary-do.mjs", import.meta.url), "utf8");
-  assert.match(source, /v7_home_stage_production_v1/);
+  assert.match(source, /v8_home_ready_inventory_v1/);
   assert.match(source, /putMeta\("future_count_reconcile_required", "true"\)/);
 });
