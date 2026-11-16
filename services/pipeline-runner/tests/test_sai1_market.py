@@ -106,3 +106,81 @@ def test_sai1_explicit_market_and_five_tags():
     assert process_request(title="Wynwood", market="Miami", dry_run=True)["market"] == "Miami"
     result = _normalize_themes({"hashtags": "#Miami #ArtDeco #Travel #OceanDrive #SouthBeach #Extra"}, needed=0)
     assert result["hashtags"] == "#Miami #ArtDeco #Travel #OceanDrive #SouthBeach"
+
+
+def test_sai1_retries_empty_voiceover_once(monkeypatch):
+    from sai1 import processor
+
+    calls = []
+
+    def fake_generate(prompt):
+        calls.append(prompt)
+        payload = {
+            "slides": [],
+            "post_caption": "A walking guide to the High Line.",
+            "hashtags": "#NYC #NewYorkCity #HighLine #Travel #Walking",
+            "slide_voiceovers": [],
+            "voiceover_script": "",
+        }
+        if len(calls) == 2:
+            payload["slide_voiceovers"] = [{"line": "Explore the High Line above Chelsea.", "hold_seconds": 0}]
+            payload["voiceover_script"] = "Explore the High Line above Chelsea."
+        return {"parsed": payload}
+
+    monkeypatch.setattr(processor, "generate_themes", fake_generate)
+    result = processor.process_request(
+        title="High Line Explained", needed=0, total=1, market="New York City"
+    )
+    assert len(calls) == 2
+    assert "NARRATION REPAIR" in calls[1]
+    assert result["themes"]["voiceover_script"] == "Explore the High Line above Chelsea."
+
+
+def test_sai1_does_not_retry_valid_voiceover(monkeypatch):
+    from sai1 import processor
+
+    calls = []
+
+    def fake_generate(prompt):
+        calls.append(prompt)
+        return {"parsed": {
+            "slides": [],
+            "post_caption": "Take the Chicago lakefront route.",
+            "hashtags": "#Chicago #Lakefront #Walk #Travel #Reels",
+            "slide_voiceovers": [{"line": "Explore Chicago's lakefront.", "hold_seconds": 0}],
+            "voiceover_script": "Explore Chicago's lakefront.",
+        }}
+
+    monkeypatch.setattr(processor, "generate_themes", fake_generate)
+    result = processor.process_request(
+        title="Lakefront Trail", needed=0, total=1, market="Chicago"
+    )
+    assert len(calls) == 1
+    assert result["themes"]["voiceover_script"] == "Explore Chicago's lakefront."
+
+
+def test_sai1_does_not_replace_valid_slides_with_invalid_recovery(monkeypatch):
+    from sai1 import processor
+
+    calls = []
+
+    def fake_generate(prompt):
+        calls.append(prompt)
+        return {"parsed": {
+            "slides": [{
+                "caption": "High Line",
+                "image_prompt": "Photorealistic walkway with trees above Chelsea",
+            }] if len(calls) == 1 else [],
+            "post_caption": "Walk above Chelsea.",
+            "hashtags": "#NYC #HighLine #Chelsea #Travel #Parks",
+            "slide_voiceovers": [],
+            "voiceover_script": "" if len(calls) == 1 else "Walk above Chelsea.",
+        }}
+
+    monkeypatch.setattr(processor, "generate_themes", fake_generate)
+    result = processor.process_request(
+        title="High Line Explained", needed=1, total=1, market="New York City"
+    )
+    assert len(calls) == 2
+    assert len(result["themes"]["slides"]) == 1
+    assert result["themes"]["voiceover_script"] == ""
