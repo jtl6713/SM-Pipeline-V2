@@ -31,6 +31,7 @@ export const HOME_OVERVIEW_PARITY_COLUMNS = Object.freeze([
   "pipeline.Instagram",
   "pipeline.TikTok",
   "pipeline.YouTube",
+  "ready.Facebook", "ready.Instagram", "ready.TikTok", "ready.YouTube",
 ]);
 
 /** @deprecated alias kept for older tests / call sites */
@@ -92,6 +93,10 @@ export function homeOverviewDisplayMetrics(row, now = Date.now()) {
     "pipeline.Instagram": pipelineByPlatform.Instagram,
     "pipeline.TikTok": pipelineByPlatform.TikTok,
     "pipeline.YouTube": pipelineByPlatform.YouTube,
+    "ready.Facebook": nestedNumber(row, "ready_by_platform.Facebook"),
+    "ready.Instagram": nestedNumber(row, "ready_by_platform.Instagram"),
+    "ready.TikTok": nestedNumber(row, "ready_by_platform.TikTok"),
+    "ready.YouTube": nestedNumber(row, "ready_by_platform.YouTube"),
   };
 }
 
@@ -213,6 +218,7 @@ export function reconcileHomeOverviewWithAirtable(supabaseRows, airtableRows, pa
       name: airtable.name || row.name,
       city_label: airtable.city_label || row.city_label,
       scheduled: { ...(airtable.scheduled || {}) },
+      ready_by_platform: { ...(airtable.ready_by_platform || {}) },
       awaiting_final_by_platform: { ...(airtable.awaiting_final_by_platform || {}) },
       pipeline_by_platform: { ...(airtable.pipeline_by_platform || {}) },
       approved_future_by_platform: { ...(airtable.approved_future_by_platform || {}) },

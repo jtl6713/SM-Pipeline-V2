@@ -6,7 +6,7 @@
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   // V6 caches approved per-output calendar dates so future/past-due boundaries
   // move with the clock, including while a durable snapshot stays cached.
-  const CACHE_KEY = "studio.allProfilesOverview.v7";
+  const CACHE_KEY = "studio.allProfilesOverview.v8";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
@@ -64,7 +64,9 @@
       ids.add(id);
       cities.add(city);
       for (const platform of platformOrder) {
-        if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
+        if (!Number.isFinite(Number(row?.scheduled?.[platform]))
+          || !Number.isSafeInteger(row?.ready_by_platform?.[platform])
+          || row.ready_by_platform[platform] < 0) return false;
       }
       for (const kind of ["manual", "failed", "approval", "production", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
         if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
@@ -324,6 +326,7 @@
     const total = {
       name: "Total",
       scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      ready_by_platform: Object.fromEntries(platformOrder.map((p) => [p, 0])),
       approved_calendar_slots: Object.fromEntries(platformOrder.map((p) => [p, []])),
       approved_missing_date: 0,
       awaiting_final_by_platform: Object.fromEntries(platformOrder.map((p) => [p, 0])),
@@ -332,6 +335,7 @@
     for (const row of state.rows) {
       for (const p of platformOrder) {
         total.scheduled[p] += Number(row.scheduled?.[p]) || 0;
+        total.ready_by_platform[p] += Number(row.ready_by_platform?.[p]) || 0;
         total.approved_calendar_slots[p].push(...row.approved_calendar_slots[p]);
         total.awaiting_final_by_platform[p] += row.awaiting_final_by_platform[p];
       }
@@ -342,9 +346,9 @@
     const profiles = [...state.rows, total];
     const tableRows = {
       scheduled: profiles.map((r, i) => {
-        const scheduledTotal = platformOrder.reduce((sum, p) => sum + (Number(r.scheduled?.[p]) || 0), 0);
+        const scheduledTotal = platformOrder.reduce((sum, p) => sum + (Number(r.ready_by_platform?.[p]) || 0), 0);
         return `<tr class="${i === state.rows.length ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
-          ${platformOrder.map((p) => `<td data-label="${p}">${Number(r.scheduled?.[p]) || 0}</td>`).join("")}
+          ${platformOrder.map((p) => `<td data-label="${p}">${Number(r.ready_by_platform?.[p]) || 0}</td>`).join("")}
           <td data-label="Total scheduled"><strong>${scheduledTotal}</strong></td></tr>`;
       }).join(""),
       issues: profiles.map((r, i) => {
@@ -354,14 +358,16 @@
           <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${actionCount(totalRow ? null : r, "approved_past_due", "approved past due", calendar.pastDue)}</td>
           <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${actionCount(totalRow ? null : r, "approved_missing_date", "approved with no date", calendar.missingDate)}</td>
           <td data-label="Manual action required" class="overview-tone-${tone(r.manual, "manual")}">${actionCount(totalRow ? null : r, "manual", "manual action")}</td>
-          <td data-label="Failed" class="overview-tone-${tone(r.failed, "failed")}">${actionCount(totalRow ? null : r, "failed", "failed")}</td></tr>`;
+          <td data-label="Failed" class="overview-tone-${tone(r.failed, "failed")}">${actionCount(totalRow ? null : r, "failed", "failed")}</td>
+          <td data-label="Total issue conditions"><strong>${calendar.pastDue + calendar.missingDate + r.manual + r.failed}</strong></td></tr>`;
       }).join(""),
       pipeline: profiles.map((r, i) => {
         const totalRow = i === state.rows.length;
         return `<tr class="${totalRow ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
           <td data-label="Ideas not in production">${actionCount(totalRow ? null : r, "ideas", "unpromoted ideas")}</td>
           <td data-label="In production, not approval-ready">${actionCount(totalRow ? null : r, "production", "unfinished production outputs")}</td>
-          <td data-label="Factory awaiting approval" class="overview-tone-${tone(r.approval, "approval")}">${actionCount(totalRow ? null : r, "approval", "Factory items awaiting your approval")}</td></tr>`;
+          <td data-label="Factory awaiting approval" class="overview-tone-${tone(r.approval, "approval")}">${actionCount(totalRow ? null : r, "approval", "Factory items awaiting your approval")}</td>
+          <td data-label="Total pipeline items"><strong>${r.ideas + r.production + r.approval}</strong></td></tr>`;
       }).join(""),
     };
     const statusText = refreshStatusText({ stale, error, cooling });
@@ -426,10 +432,10 @@
       <button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
       <div class="home-dashboard-sections">
         <section class="home-dashboard-section" aria-label="Scheduled content">
-          <div class="home-dashboard-section-heading"><h2>Scheduled content</h2><p>Approved outputs queued for future platform dispatch. Factory items are excluded.</p></div>
+          <div class="home-dashboard-section-heading"><h2>Scheduled / ready for scheduling</h2><p>Final-approved, unpublished output inventory by platform, including future, past-due and undated approvals. Factory items are excluded.</p></div>
           ${table("scheduled", [
-            ...platformOrder.map((p) => [p, `Approved, scheduled, and not yet dispatched to ${p}`]),
-            ["Total", "Total scheduled outputs across all four platforms"],
+            ...platformOrder.map((p) => [p, `Final-approved, unpublished ${p} outputs: scheduled or ready for scheduling`]),
+            ["Total", "Total approved, unpublished outputs across all four platforms"],
           ])}
         </section>
         <section class="home-dashboard-section" aria-label="Issues requiring attention">
@@ -439,6 +445,7 @@
             ["Approved · No date", "Approved and unpublished without a valid scheduled date"],
             ["Manual action", "Platform outputs requiring human intervention"],
             ["Failed", "Unpublished outputs in a failed state"],
+            ["Total", "Total condition flags in this row (an output can have more than one condition)"],
           ])}
         </section>
         <section class="home-dashboard-section" aria-label="Production pipeline">
@@ -447,8 +454,9 @@
             ["Ideas · Not promoted", "Idea candidates not yet moved into production"],
             ["In Production", "Active unfinished platform outputs, excluding failed and Factory-reviewable outputs"],
             ["Approval Factory", "Package-ready outputs in Factory Needs eyes, awaiting your final approval"],
+            ["Total", "Sum of ideas, unfinished production outputs and Factory-reviewable outputs"],
           ])}
-          <p class="home-dashboard-footnote">Ideas are idea records; Production and Approval Factory are individual platform outputs. An output belongs to only one of those latter two stages.</p>
+          <p class="home-dashboard-footnote">Ideas are idea records; Production and Approval Factory are individual platform outputs. The issues Total is the sum of flags, not necessarily unique outputs.</p>
         </section>
       </div>`;
   }
@@ -469,6 +477,7 @@
       id: row.id,
       name: row.city_label || row.name || row.id,
       scheduled: row.scheduled || Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      ready_by_platform: row.ready_by_platform || Object.fromEntries(platformOrder.map((p) => [p, 0])),
       manual: Number(row.manual) || 0,
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,

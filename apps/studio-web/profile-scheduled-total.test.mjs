@@ -23,6 +23,7 @@ test("all-profiles overview shows per-output approved future and past-due totals
       city_label: "Chicago",
       name: "Chicago",
       scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
+      ready_by_platform: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
       approved_unpublished: 3,
       overdue_unpublished: 1,
       approved_future: 2, approved_past_due: 1, approved_missing_date: 0,
@@ -42,6 +43,7 @@ test("all-profiles overview shows per-output approved future and past-due totals
       city_label: "Miami",
       name: "Miami",
       scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
+      ready_by_platform: { Facebook: 2, Instagram: 1, TikTok: 1, YouTube: 1 },
       approved_unpublished: 5,
       overdue_unpublished: 2,
       approved_future: 2, approved_past_due: 2, approved_missing_date: 1,
@@ -107,12 +109,14 @@ test("all-profiles overview shows per-output approved future and past-due totals
     assert.match(host.innerHTML, /aria-label="Issues requiring attention"/);
     assert.match(host.innerHTML, /aria-label="Production pipeline"/);
     assert.match(host.innerHTML, /data-label="Total scheduled"><strong>3<\/strong><\/td>/);
-    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>1<\/strong><\/td>/);
-    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>4<\/strong><\/td>/);
+    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>5<\/strong><\/td>/);
+    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>8<\/strong><\/td>/);
     assert.match(host.innerHTML, /data-label="Approved past due"[^>]*><button[^>]*data-overview-action="approved_past_due"[^>]*>1<\/button><\/td>/);
     assert.match(host.innerHTML, /data-label="Approved no date"[^>]*><button[^>]*data-overview-action="approved_missing_date"[^>]*>1<\/button><\/td>/);
     assert.match(host.innerHTML, /data-label="Factory awaiting approval"[^>]*><button[^>]*data-overview-action="approval"[^>]*>2<\/button><\/td>/);
     assert.match(host.innerHTML, /Ideas · Not promoted/);
+    assert.match(host.innerHTML, /data-label="Total issue conditions"/);
+    assert.match(host.innerHTML, /data-label="Total pipeline items"/);
     assert.doesNotMatch(host.innerHTML, /Ideas Needed|Pipeline · Total|Approved · Future/);
   } finally {
     globalThis.document = prior.document;
@@ -139,7 +143,7 @@ test("every All Profiles heading has an explanatory hover tooltip", async () => 
   assert.match(overview, /<th scope="col" title="Content profile">Profile<\/th>/);
   assert.match(overview, /<th scope="col" title="\$\{esc\(title\)\}">/);
   for (const label of [
-    "Scheduled content", "Facebook", "Instagram", "TikTok", "YouTube", "Total",
+    "Scheduled / ready for scheduling", "Facebook", "Instagram", "TikTok", "YouTube", "Total",
     "Issues requiring attention", "Approved · Past due", "Approved · No date",
     "Manual action", "Failed", "Production pipeline", "Ideas · Not promoted",
     "In Production", "Approval Factory",

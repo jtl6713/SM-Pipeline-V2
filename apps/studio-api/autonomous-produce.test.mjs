@@ -221,9 +221,9 @@ test("open ideas cap is 100 and hour drain advances asset-ready drafts", () => {
   assert.equal(batch[19].requestRecord.id, "recDraft0000000019");
 });
 
-test("hourly refill creates 10 ideas under 500 and skips over 509", () => {
-  assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 500);
-  assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 509);
+test("hourly refill creates up to 10 ideas under 1,000 and skips above 1,009", () => {
+  assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 1000);
+  assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 1009);
   assert.equal(AUTONOMOUS_IDEAS_PER_HOUR, 10);
   assert.equal(AUTONOMOUS_CITY_CREATE_MS, 180000);
   assert.equal(AUTONOMOUS_CITY_CREATE_ATTEMPTS, 40);
@@ -247,24 +247,24 @@ test("hourly refill creates 10 ideas under 500 and skips over 509", () => {
   );
   assert.equal(autonomousScheduledTotal({ Facebook: 14, Instagram: 20 }), 34);
   assert.equal(autonomousScheduledBand(67), "refill");
-  assert.equal(autonomousScheduledBand(499), "refill");
-  assert.equal(autonomousScheduledBand(500), "hold");
-  assert.equal(autonomousScheduledBand(509), "hold");
-  assert.equal(autonomousScheduledBand(510), "skip");
+  assert.equal(autonomousScheduledBand(999), "refill");
+  assert.equal(autonomousScheduledBand(1000), "hold");
+  assert.equal(autonomousScheduledBand(1009), "hold");
+  assert.equal(autonomousScheduledBand(1010), "skip");
   assert.equal(autonomousPipelineLoadTotal(67, 140), 207);
   assert.equal(autonomousPipelineLoadTotal(199, 1), 200);
   assert.equal(autonomousProfileNeedsScheduledRefill(67, 0), true);
-  assert.equal(autonomousProfileNeedsScheduledRefill(500, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(509, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(510, 0), false);
-  // Scheduled 67 + Awaiting Approval 440 = 507 → hold (not refill).
-  assert.equal(autonomousProfileNeedsScheduledRefill(67, 440), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(499, 0), true);
-  assert.equal(autonomousProfileNeedsScheduledRefill(150, 360), false);
-  assert.equal(autonomousScheduledDeficit(67, 0), 433);
-  assert.equal(autonomousScheduledDeficit(67, 440), 0);
-  assert.equal(autonomousScheduledDeficit(150, 20), 330);
-  assert.equal(autonomousScheduledDeficit(510, 0), 0);
+  assert.equal(autonomousProfileNeedsScheduledRefill(500, 0), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(1000, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(1009, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(1010, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 440), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(999, 0), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(150, 360), true);
+  assert.equal(autonomousScheduledDeficit(67, 0), 933);
+  assert.equal(autonomousScheduledDeficit(67, 440), 493);
+  assert.equal(autonomousScheduledDeficit(150, 20), 830);
+  assert.equal(autonomousScheduledDeficit(1010, 0), 0);
   const slot = "2026-10-14:h09";
   const oneIdea = {
     slot,
@@ -308,54 +308,32 @@ test("hourly refill creates 10 ideas under 500 and skips over 509", () => {
   assert.equal(nextHour.ideas_by_profile.recMia, 1);
 });
 
-test("refill scores prefer the city with the largest Scheduled+Awaiting Approval deficit", () => {
+test("per-profile ready inventory controls refill even when Factory awaits approval", () => {
+  const ready = (a, b, c, d) => ({ Facebook: a, Instagram: b, TikTok: c, YouTube: d });
   const scores = autonomousRefillScoresFromOverview([
-    {
-      id: "recChi",
-      name: "Chicago",
-      scheduled: { Facebook: 14, Instagram: 20, TikTok: 17, YouTube: 16 },
-      approval: 0,
-    },
-    {
-      id: "recLA",
-      name: "Los Angeles",
-      scheduled: { Facebook: 15, Instagram: 21, TikTok: 17, YouTube: 16 },
-      approval: 50,
-    },
-    {
-      id: "recMia",
-      name: "Miami",
-      scheduled: { Facebook: 125, Instagram: 125, TikTok: 125, YouTube: 125 },
-      approval: 10,
-    },
+    { id: "recChi", name: "Chicago", ready_by_platform: ready(300, 350, 150, 150), approval: 80 },
+    { id: "recLA", name: "Los Angeles", ready_by_platform: ready(350, 350, 150, 140), approval: 40 },
+    { id: "recMia", name: "Miami", ready_by_platform: ready(350, 350, 160, 150), approval: 0 },
   ]);
-  assert.equal(scores.recChi.scheduled_total, 67);
-  assert.equal(scores.recChi.pipeline_load, 67);
+  assert.equal(scores.recChi.pipeline_load, 950);
+  assert.equal(scores.recChi.awaiting_approval, 80);
+  assert.equal(scores.recChi.deficit, 50);
+  assert.equal(scores.recChi.estimated_ideas_needed, 10);
   assert.equal(scores.recChi.needed, true);
-  assert.equal(scores.recChi.band, "refill");
-  assert.equal(scores.recChi.deficit, 433);
-  // LA scheduled 69 + awaiting 50 = 119 → still refill, smaller deficit than Chicago.
-  assert.equal(scores.recLA.pipeline_load, 119);
-  assert.equal(scores.recLA.needed, true);
-  assert.equal(scores.recLA.deficit, 381);
-  // Miami scheduled 500 + awaiting 10 = 510 → skip.
-  assert.equal(scores.recMia.pipeline_load, 510);
-  assert.equal(scores.recMia.needed, false);
+  assert.equal(scores.recLA.pipeline_load, 990);
+  assert.equal(scores.recLA.deficit, 10);
+  assert.equal(scores.recLA.estimated_ideas_needed, 2);
+  assert.equal(scores.recMia.pipeline_load, 1010);
   assert.equal(scores.recMia.band, "skip");
+  assert.equal(scores.recMia.needed, false);
+  assert.equal(scores.recChi.ready_inventory_verified, true);
   const profiles = [
     { id: "recChi", name: "Chicago" },
     { id: "recLA", name: "Los Angeles" },
     { id: "recMia", name: "Miami" },
   ];
-  assert.deepEqual(
-    autonomousProfilesNeedingRefill(profiles, scores).map((row) => row.id),
-    ["recChi", "recLA"],
-  );
-  assert.equal(pickAutonomousRefillProfile(profiles, scores)?.id, "recChi");
-  assert.deepEqual(
-    autonomousProfileHarvestOrder(profiles, "recLA", scores).map((row) => row.id),
-    ["recChi", "recLA", "recMia"],
-  );
+  assert.deepEqual(autonomousProfilesNeedingRefill(profiles, scores).map((p) => p.id), ["recChi", "recLA"]);
+  assert.equal(pickAutonomousRefillProfile(profiles, scores).id, "recChi");
 });
 
 test("RSS parser reads CDATA titles", () => {
@@ -919,7 +897,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /selectAutonomousResumeDraftBatch/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_ATTEMPTS/);
-  assert.match(worker, /scheduled_over_509/);
+  assert.match(worker, /scheduled_over_1009/);
   assert.match(worker, /ideas_by_profile/);
   assert.match(worker, /fillAutonomousScheduledHour/);
   assert.match(worker, /autonomousAtTopOfHour/);

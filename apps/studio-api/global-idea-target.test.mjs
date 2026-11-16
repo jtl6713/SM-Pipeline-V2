@@ -45,7 +45,7 @@ test("shared cap applies to combined city total, never multiplied by four", () =
   assert.equal(globalAutomaticIdeaBudget(0, "bad"), 0);
 });
 
-test("both scheduled hourly and overnight production call the same authoritative global gate", () => {
+test("legacy global settings coexist with an independent 1K per-city automated refill gate", () => {
   const start = workerSource.indexOf("async function studioGlobalAutomaticIdeaInventory(");
   assert.ok(start > 0);
   const helper = workerSource.slice(start, workerSource.indexOf("async function harvestAutonomousNewsHeadlines(", start));
@@ -55,11 +55,13 @@ test("both scheduled hourly and overnight production call the same authoritative
   assert.match(helper, /refill.source !== "live"/);
   assert.match(helper, /globalIdeaPipelineLoad/);
   const daily = workerSource.slice(workerSource.indexOf("async function executeStudioDailyIdeas("), workerSource.indexOf("async function runStudioDailyIdeas("));
-  assert.match(daily, /studioGlobalAutomaticIdeaInventory\(env\)/);
-  assert.match(daily, /reservedOutputs \+= count \* AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA/);
+  assert.match(daily, /studioLoadAutonomousRefillScores\(env, profiles/);
+  assert.match(daily, /autonomousDailyIdeaBudget\(refillScores\?\.\[profile\.id\]/);
   const hourly = workerSource.slice(workerSource.indexOf("async function fillAutonomousScheduledHour("), workerSource.indexOf("async function executeStudioAutonomousProduce("));
-  assert.match(hourly, /studioGlobalAutomaticIdeaInventory\(env\)/);
+  assert.match(hourly, /studioLoadAutonomousRefillScores\(env, profiles/);
   assert.match(hourly, /globalInventory.remaining_ideas - createdCount/);
+  assert.match(hourly, /estimated_ideas_needed/);
+  assert.match(hourly, /ready_inventory_verified === true/);
   assert.match(hourly, /global_inventory_unavailable/);
   assert.match(hourly, /global_idea_target_met/);
 });
@@ -74,6 +76,6 @@ test("global admin API accepts targeted setting write without altering schedulin
   assert.match(source, /studioUpsertSetting\(env, GLOBAL_IDEA_TARGET_SETTING/);
 });
 
-// Release 0.6.746 regression checkpoint: shared target is a single cross-profile ceiling.
+// Legacy shared setting remains configurable, independent from the new 1,000 per-city floor.
 
 // Integration merge checkpoint: PR1095 includes latest main Conversational Producer work.

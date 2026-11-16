@@ -62,6 +62,7 @@ test("incremental ledger reproduces complete authoritative V6 calendar by output
   assert.deepEqual(row.awaiting_final_by_platform, calendar.awaiting_by_platform);
   assert.deepEqual(row.pipeline_by_platform, calendar.pipeline_by_platform);
   assert.equal(row.approved_unpublished, 5);
+  assert.deepEqual(row.ready_by_platform, { Facebook: 1, Instagram: 2, TikTok: 1, YouTube: 1 });
   assert.equal(profileSummaryV6StaticParity({
     ...row, scheduled: { ...row.scheduled },
   }, row), true);
@@ -82,6 +83,7 @@ test("V6 read eligibility rejects absent platform fields and inconsistent totals
   const valid = cityIds.map((id, i) => makeV6([], at, {id, city_label: cityNames[i], version: 7}));
   assert.equal(validProfileSummaryV6Rows(valid), true);
   assert.equal(validProfileSummaryV6Rows(valid.slice(0, 3)), false);
+  assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, ready_by_platform: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, production: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, approved_calendar_slots: {} })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, pipeline_total: 10 })), false);

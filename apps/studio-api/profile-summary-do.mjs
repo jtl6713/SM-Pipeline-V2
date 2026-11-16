@@ -85,8 +85,8 @@ export class StudioProfileSummary {
       // A stored snapshot from the previous contract is not enough.
       // A v1 tally counted only future scheduled outputs. Do not serve stale
       // counters as v2: force authoritative reconciliation before summary reads.
-      if (this.getMeta("home_summary_contract") !== "v7_home_stage_production_v1") {
-        this.putMeta("home_summary_contract", "v7_home_stage_production_v1");
+      if (this.getMeta("home_summary_contract") !== "v8_home_ready_inventory_v1") {
+        this.putMeta("home_summary_contract", "v8_home_ready_inventory_v1");
         this.putMeta("future_count_reconcile_required", "true");
       }
       if (this.getMeta("approved_unpublished_definition") !== "all_final_approved_unpublished_v2") {

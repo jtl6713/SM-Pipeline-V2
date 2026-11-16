@@ -16,8 +16,8 @@ test("Home Dashboard has exactly three separate stage tables in requested order"
   assert.match(html, /home-dashboard-three-sections\.css\?v=/);
 });
 
-test("Scheduled totals use only queued approved platform outputs, never Factory+future pipeline", () => {
-  assert.match(source, /const scheduledTotal = platformOrder\.reduce\(\(sum, p\) => sum \+ \(Number\(r\.scheduled\?\.\[p\]\) \|\| 0\), 0\)/);
+test("Scheduled/ready totals include all final-approved, unpublished outputs, never Factory", () => {
+  assert.match(source, /const scheduledTotal = platformOrder\.reduce\(\(sum, p\) => sum \+ \(Number\(r\.ready_by_platform\?\.\[p\]\) \|\| 0\), 0\)/);
   assert.match(source, /Total scheduled/);
   assert.match(source, /Factory items are excluded/);
   assert.match(source, /calendar\.pastDue/);
@@ -50,5 +50,5 @@ test("cached authoritative snapshots and 12-second polling remain intact", () =>
   assert.match(source, /validOverviewRows\(rows\)/);
   assert.match(source, /function refreshMatchesSnapshot/);
   assert.match(source, /function overviewViewActive/);
-  assert.match(source, /studio\.allProfilesOverview\.v7/);
+  assert.match(source, /studio\.allProfilesOverview\.v8/);
 });

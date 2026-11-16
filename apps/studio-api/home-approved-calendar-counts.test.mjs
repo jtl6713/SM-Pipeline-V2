@@ -71,7 +71,7 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(worker,/homeApprovedCalendarCounts\(mappedOutputs\)/);
   assert.match(worker,/approved_future_by_platform: calendar\.future_by_platform/);
   assert.match(worker,/approved_calendar_slots: calendar\.slots/);
-  assert.match(ui,/studio\.allProfilesOverview\.v7/);
+  assert.match(ui,/studio\.allProfilesOverview\.v8/);
   assert.match(ui,/Scheduled content/);
   assert.match(ui,/Approved · Past due/);
   assert.match(ui,/Approved · No date/);
