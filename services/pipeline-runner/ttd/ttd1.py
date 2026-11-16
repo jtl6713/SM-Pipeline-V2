@@ -191,6 +191,10 @@ def process_request(
                 "Operational_Email_Key": "",
                 "Operational_Email_Sent_At": None,
                 "TikTok_Draft_Email_Sent_At": None,
+                # A new publish ID is a new credential scope, never inherit
+                # the previous draft's manual-completion bearer link.
+                "TikTok_Manual_Completion_Token": "",
+                "TikTok_Manual_Completion_URL": "",
                 "TikTok_Draft_Response_JSON": response_json(body),
                 "TikTok_Draft_Last_Checked_At": None,
                 "Platform_Publish_Response_JSON": response_json(body),
