@@ -66,7 +66,7 @@ test("quality catalog and desk inventory know promoted_orphan_idea", () => {
 test("Worker wires daily promoted orphan heal before autonomous harvest", () => {
   const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
   const fn = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
-  assert.match(worker, /0\.10\.993-phase6-prepare-heal-fk/);
+  assert.match(worker, /0\.10\.994-pipeline-search-all-weeks/);
   assert.match(worker, /studioHealPromotedOrphanIdeas/);
   assert.match(worker, /promoted orphan idea heal failed/);
   assert.match(fn, /export async function studioHealPromotedOrphanIdeas/);

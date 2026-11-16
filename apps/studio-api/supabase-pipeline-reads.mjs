@@ -1970,6 +1970,49 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
   };
 }
 
+/** Quoted phrases and a trailing plural still match the title words. */
+export function pipelineTitleSearchTokens(raw) {
+  const text = String(raw || "").trim().replace(/^["']+|["']+$/g, "").trim().toLowerCase();
+  return text.split(/\s+/).filter((token) => token.length >= 2).map((token) => (
+    token.length > 4 && token.endsWith("s") ? token.slice(0, -1) : token
+  )).slice(0, 6);
+}
+
+export function pipelineTitleSearchLike(raw) {
+  const tokens = pipelineTitleSearchTokens(raw);
+  if (!tokens.length) return "";
+  return `*${tokens.join("*")}*`;
+}
+
+/**
+ * Title search with no schedule window. Pipeline's 7-day calendar must not
+ * hide a post whose publish time is another week.
+ */
+export async function listSupabasePipelineTitleSearch(env, { profileAirtableId, query, limit = 200 } = {}) {
+  const like = pipelineTitleSearchLike(query);
+  if (!like) return { records: [], profileMissing: false, emptyQuery: true };
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) return { records: [], profileMissing: true };
+  const capped = Math.max(1, Math.min(200, Number(limit) || 200));
+  const pattern = encodeURIComponent(like);
+  const select = `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}`;
+  const scoped = `platform_outputs?content_profile_id=eq.${profileId}`;
+  let rows;
+  try {
+    rows = await supabaseRest(
+      env,
+      `${scoped}&or=(output_title.ilike.${pattern},content_items.content_title.ilike.${pattern})${select}`,
+    );
+  } catch (error) {
+    console.warn("pipeline title search embed failed; retrying output title", error);
+    rows = await supabaseRest(env, `${scoped}&output_title=ilike.${pattern}${select}`);
+  }
+  return {
+    profileMissing: false,
+    records: (rows || []).map((row) => airtableShapedOutputFromSupabase(flattenOutputRow(row))).filter((row) => row?.id),
+  };
+}
+
 export async function listSupabaseScheduleGrid(env, { profileAirtableId, startIso, endIso } = {}) {
   const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
   if (!profileId) return { records: [], profileMissing: true };

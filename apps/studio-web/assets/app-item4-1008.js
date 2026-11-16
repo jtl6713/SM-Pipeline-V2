@@ -280,6 +280,9 @@
   let pipelineScheduleBlackoutHoursOpen = false;
   let pipelineScheduleGridAnchorDate = null;
   let pipelineScheduleGridLoadGeneration = 0;
+  let pipelineScheduledSearchTimer = 0;
+  let pipelineScheduledSearchGeneration = 0;
+  let pipelineScheduledSearchActive = false;
   const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
   const pipelineScheduleVisiblePlatforms = new Set(PIPELINE_SCHEDULE_PLATFORM_KEYS);
   let pipelineScheduleDragOutputId = "";
@@ -333,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.966-phase6-plan-mapping";
+  const BUILD_ID = "item4-0.6.967-pipeline-search-all-weeks";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22536,16 +22539,36 @@ function timedScriptAssetLabel(asset, index) {
     return "—";
   }
 
+  function pipelineSearchNeedle(raw) {
+    const text = String(raw || "").trim();
+    if (text.length >= 2 && ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))) {
+      return text.slice(1, -1).trim();
+    }
+    return text;
+  }
+
+  function pipelineOutputSearchTokens(raw) {
+    return pipelineSearchNeedle(raw).toLowerCase().split(/\s+/).filter((token) => token.length >= 2).map((token) => (
+      token.length > 4 && token.endsWith("s") ? token.slice(0, -1) : token
+    ));
+  }
+
+  function pipelineOutputSearchHit(record, raw) {
+    const tokens = pipelineOutputSearchTokens(raw);
+    if (!tokens.length) return true;
+    const hay = [record?.output_id, record?.output_title, record?.content_title, record?.content_number, record?.content_id]
+      .filter((value) => value != null && String(value).trim())
+      .join(" ")
+      .toLowerCase();
+    return tokens.every((token) => hay.includes(token));
+  }
+
   function pipelineRecordMatchesColumnFilters(record, filters = pipelineColumnFilters, records = pipelineOutputs) {
     for (const [key, selected] of Object.entries(filters || {})) {
       const needle = String(selected || "").trim();
       if (!needle) continue;
       if (key === "output") {
-        const hay = [record?.output_id, record?.output_title, record?.content_title]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(needle.toLowerCase())) return false;
+        if (!pipelineOutputSearchHit(record, needle)) return false;
         continue;
       }
       if (pipelineColumnFilterValue(record, key, records) !== needle) return false;
@@ -22625,6 +22648,7 @@ function timedScriptAssetLabel(asset, index) {
     bar.hidden = false;
     const parts = [];
     if (viewActive) parts.push(pipelineFilterLabel());
+    if (pipelineScheduledSearchActive) parts.push("all weeks");
     parts.push(...columnBits);
     if (label) label.textContent = `Showing ${parts.join(" · ")} · ${visibleCount}`;
   }
@@ -22983,6 +23007,9 @@ function timedScriptAssetLabel(asset, index) {
     });
     body.querySelector("#pipelineAdvancedFilterClear")?.addEventListener("click", () => {
       clearPipelineColumnFilters();
+      window.clearTimeout(pipelineScheduledSearchTimer);
+      pipelineScheduledSearchGeneration += 1;
+      pipelineScheduledSearchActive = false;
       const search = $("pipelineQuickSearch");
       if (search) search.value = "";
       renderOutputsTable($("outputsList"), pipelineOutputs);
@@ -23027,7 +23054,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!source.length) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty
-        ? `<div class="empty pipeline-compact-empty">No outputs match the current filters.</div>`
+        ? `<div class="empty pipeline-compact-empty">${pipelineScheduledSearchActive ? "No scheduled outputs match that search in any week." : "No outputs match the current filters."}</div>`
         : '<div class="empty pipeline-compact-empty">No Platform Output records were returned.</div>';
       return;
     }
@@ -28517,6 +28544,16 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
+      window.clearTimeout(pipelineScheduledSearchTimer);
+      if (pipelineViewFilter !== "scheduled") {
+        pipelineScheduledSearchGeneration += 1;
+        pipelineScheduledSearchActive = false;
+      }
+      const searchNeedle = pipelineSearchNeedle($("pipelineQuickSearch")?.value);
+      if (pipelineViewFilter === "scheduled" && searchNeedle.length >= 2) {
+        applyPipelineQuickSearch(searchNeedle);
+        return;
+      }
       // Exception/Failed views are a separately scoped historical fetch.
       // Never reuse those rows for All, other profile tabs, or another
       // exception view: that was making navigation silently drop outputs.
@@ -28559,14 +28596,60 @@ function timedScriptAssetLabel(asset, index) {
     clearPipelineColumnFilters();
     showStudioPage("outputs", { pipelineFilter: String(filter || "approval").trim() || "approval" });
   };
-  $("pipelineQuickSearch")?.addEventListener("input", (event) => {
-    pipelineColumnFilters.output = String(event.currentTarget.value || "");
+  async function refreshPipelineScheduledSearch(needle) {
+    const generation = ++pipelineScheduledSearchGeneration;
+    const target = $("outputsList");
+    try {
+      const result = await api(`/api/outputs?mode=scheduled_search&q=${encodeURIComponent(needle)}`, { timeoutMs: 20000, retries: 1 });
+      if (generation !== pipelineScheduledSearchGeneration || pipelineViewFilter !== "scheduled") return;
+      const records = Array.isArray(result?.records) ? result.records : [];
+      pipelineScheduledSearchActive = true;
+      if (target) renderOutputsTable(target, records);
+      setPipelineLiveHint(`Scheduled search covers every week · ${records.length} title match${records.length === 1 ? "" : "es"}`);
+    } catch (error) {
+      if (generation !== pipelineScheduledSearchGeneration) return;
+      pipelineScheduledSearchActive = true;
+      if (target) {
+        target.innerHTML = `<div class="error" role="alert">${escapeHtml(error?.message || "Could not search every week.")}</div>`;
+      }
+    }
+  }
+
+  function applyPipelineQuickSearch(raw) {
+    const needle = pipelineSearchNeedle(raw);
+    pipelineColumnFilters.output = needle;
     pipelineOpenSingleOnLoad = false;
-    renderOutputsTable($("outputsList"), pipelineOutputs);
+    window.clearTimeout(pipelineScheduledSearchTimer);
+    if (pipelineViewFilter === "scheduled" && needle.length >= 2) {
+      pipelineScheduledSearchActive = true;
+      const target = $("outputsList");
+      const label = $("pipelineFilterLabel");
+      const bar = $("pipelineFilterBar");
+      if (bar) bar.hidden = false;
+      if (label) label.textContent = `Searching every week for “${needle}”…`;
+      if (target) target.innerHTML = '<div class="empty pipeline-compact-empty">Searching every week…</div>';
+      pipelineScheduledSearchTimer = window.setTimeout(() => {
+        refreshPipelineScheduledSearch(needle).catch((error) => {
+          setPipelineLiveHint(error?.message || "Could not search every week.");
+        });
+      }, 250);
+      return;
+    }
+    pipelineScheduledSearchGeneration += 1;
+    pipelineScheduledSearchActive = false;
+    const target = $("outputsList");
+    if (target) renderOutputsTable(target, pipelineOutputs);
+  }
+
+  $("pipelineQuickSearch")?.addEventListener("input", (event) => {
+    applyPipelineQuickSearch(event.currentTarget.value);
   });
   $("pipelineFilterClear")?.addEventListener("click", () => {
     pipelineViewFilter = "all";
     clearPipelineColumnFilters();
+    window.clearTimeout(pipelineScheduledSearchTimer);
+    pipelineScheduledSearchGeneration += 1;
+    pipelineScheduledSearchActive = false;
     const search = $("pipelineQuickSearch");
     if (search) search.value = "";
     pipelineOpenSingleOnLoad = false;
