@@ -8,18 +8,21 @@ import { fileURLToPath } from "node:url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(dir, "assets/app-item4-1008.js"), "utf8");
 
-test("Production heading ignores a different Ideas drawer selection", () => {
-  const start = app.indexOf("  function ideaIdFromRequest(");
+function ideaIdentityHelpers() {
+  const start = app.indexOf("  function ideaLinkId(");
   const end = app.indexOf("  async function ensureIdeasCache(", start);
-  assert.ok(start >= 0 && end > start);
-  const code = app.slice(start, end);
+  assert.ok(start >= 0 && end > start, "idea identity helpers must exist");
+  return app.slice(start, end);
+}
+
+test("Production heading ignores a different Ideas drawer selection", () => {
   const ctx = {
     activeIdea: { id: "recOtherIdea", title: "Pier Marine Layer Watch" },
     ideasCache: [{ id: "recTasteTour", title: "Taste Tour: GCM" }],
     productionContentRecords: [{ id: "recContent597", content_id: 597, title: "Taste Tour: GCM" }],
   };
   vm.createContext(ctx);
-  vm.runInContext(code + String.raw`
+  vm.runInContext(ideaIdentityHelpers() + String.raw`
     result = productionRequestHeading({
       idea_record_id: "recTasteTour",
       promoted_content_item_links: ["recContent597"],
@@ -29,18 +32,48 @@ test("Production heading ignores a different Ideas drawer selection", () => {
 });
 
 test("Unknown request identity never borrows another idea's title", () => {
-  const start = app.indexOf("  function ideaIdFromRequest(");
-  const end = app.indexOf("  async function ensureIdeasCache(", start);
   const ctx = {
     activeIdea: { id: "recOtherIdea", title: "Pier Marine Layer Watch" },
     ideasCache: [],
     productionContentRecords: [{ id: "recContent597", content_id: 597, title: "Taste Tour: GCM" }],
   };
   vm.createContext(ctx);
-  vm.runInContext(app.slice(start, end) + String.raw`
+  vm.runInContext(ideaIdentityHelpers() + String.raw`
     result = productionRequestHeading({ promoted_content_item_links: ["recContent597"] });
   `, ctx);
   assert.equal(ctx.result, "Taste Tour: GCM · Content 597");
+});
+
+test("Timeline open keeps the Ideas title when Idea_Candidate is omitted from the payload", () => {
+  const ctx = {
+    activeIdea: { id: "recCreekView", title: "CreekView timeline" },
+    ideasCache: [{ id: "recCreekView", title: "CreekView timeline" }],
+    productionContentRecords: [],
+  };
+  vm.createContext(ctx);
+  vm.runInContext(ideaIdentityHelpers() + String.raw`
+    stamped = withIdeaIdentityOnRequest({ id: "recPr1", status: "Ready" }, activeIdea);
+    result = productionRequestHeading(stamped);
+  `, ctx);
+  assert.equal(ctx.stamped.idea_record_id, "recCreekView");
+  assert.equal(ctx.stamped.idea_title, "CreekView timeline");
+  assert.equal(ctx.result, "CreekView timeline");
+});
+
+test("Production heading uses the matching Ideas drawer title before Untitled piece", () => {
+  const ctx = {
+    activeIdea: { id: "recCreekView", title: "CreekView timeline" },
+    ideasCache: [],
+    productionContentRecords: [],
+  };
+  vm.createContext(ctx);
+  vm.runInContext(ideaIdentityHelpers() + String.raw`
+    result = productionRequestHeading({
+      idea_record_id: "recCreekView",
+      idea_candidate_links: ["recCreekView"],
+    });
+  `, ctx);
+  assert.equal(ctx.result, "CreekView timeline");
 });
 
 test("Request switch clears unrelated activeIdea before timed-script hydration", () => {
@@ -49,7 +82,9 @@ test("Request switch clears unrelated activeIdea before timed-script hydration",
   const source = app.slice(start, end);
   assert.match(source, /const requestIdeaId = ideaIdFromRequest\(record\)/);
   assert.match(source, /String\(activeIdea\?\.id \|\| ""\) !== String\(requestIdeaId\)/);
-  assert.ok(source.indexOf("activeIdea = requestIdeaId") < source.indexOf("productionTimedScript = parseProductionTimedScript"));
+  assert.match(source, /record = withIdeaIdentityOnRequest\(record, activeIdea\)/);
+  assert.match(source, /intentionally opened idea/);
+  assert.ok(source.indexOf("activeIdea = ideasCache.find") < source.indexOf("productionTimedScript = parseProductionTimedScript"));
   assert.match(source, /ideaTimedScriptPreview\?\.ideaId === activeIdea\?\.id/);
 });
 
