@@ -8,6 +8,8 @@ import { normalizeStoryVideoReferences } from "./story-first-ai-video-references
 export const STORY_VIDEO_MODEL = "veo-3.1-fast-generate-001";
 export const STORY_VIDEO_RESOLUTION = "720p";
 export const STORY_VIDEO_DURATIONS = Object.freeze([4, 6, 8]);
+/** ElevenLabs Veo text prompts accept well past the old 850-character image cap. */
+export const STORY_VIDEO_PROMPT_MAX = 5000;
 export const STORY_VIDEO_POLL_MIN_MS = 10_000;
 export const STORY_VIDEO_MAX_BYTES = 30 * 1024 * 1024;
 export const STORY_VIDEO_MODELS = Object.freeze({
@@ -43,7 +45,8 @@ export function availableStoryVideoModels(env={}) {
 
 export function normalizeStoryVideoSettings(input={}) {
   const prompt=clean(input.prompt).replace(/\s+/g," ");
-  if(prompt.length<12||prompt.length>850)throw fail(400,"Video prompt must contain 12–850 characters");
+  if(prompt.length<12||prompt.length>STORY_VIDEO_PROMPT_MAX)
+    throw fail(400,"Video prompt must contain 12–5,000 characters");
   const model_id=clean(input.model_id||STORY_VIDEO_MODEL);
   const model=STORY_VIDEO_MODELS[model_id];
   if(!model)throw fail(400,"Model is not approved for the video pilot");

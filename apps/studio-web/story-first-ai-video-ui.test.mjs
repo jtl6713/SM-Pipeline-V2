@@ -31,7 +31,15 @@ test("Script a Short retains image and uploaded-media choices while adding opt-i
 test("paid video requires a reviewed quote and direct human authorization", () => {
   assert.match(ui, /sceneUrl\(index, "video\/quote"\)/);
   assert.match(ui, /estimated_credits/);
-  assert.match(ui, /confirm\("Generate one "/);
+  assert.match(ui, /Estimated cost:/);
+  assert.match(ui, /Generate this video/);
+  assert.match(ui, /Don't generate/);
+  assert.match(ui, /current\.videoCostOffer/);
+  const quoteFlow = ui.slice(ui.indexOf("async function generateSceneVideo"),
+    ui.indexOf("async function submitApprovedSceneVideo"));
+  assert.doesNotMatch(quoteFlow, /confirm\(/);
+  assert.match(ui.slice(ui.indexOf("async function submitApprovedSceneVideo"),
+    ui.indexOf("async function reconcileUnbilledVideoAttempt")), /approve_paid_generation: true/);
   assert.match(ui, /approve_paid_generation: true/);
   assert.match(server, /requireStoryVideoPaidApproval\(quote, body\)/);
   assert.match(server, /state: "submitting"/);
