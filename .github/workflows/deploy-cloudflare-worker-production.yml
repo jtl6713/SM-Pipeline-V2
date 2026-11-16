@@ -399,16 +399,30 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           BEFORE=$(cat /tmp/active-before.txt)
           ACTIVE=''
+          # Cloudflare /deployments can 404 briefly after activate (same class as
+          # content/v2). Do not let set -e abort the poll on the first miss.
           for i in 1 2 3 4 5 6 7 8 9 10; do
-            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
-            ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)
-            [[ -n "$ACTIVE" && "$ACTIVE" != "$BEFORE" ]] && break
+            if curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json; then
+              ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json 2>/dev/null || true)
+              [[ -n "$ACTIVE" && "$ACTIVE" != "$BEFORE" ]] && break
+            else
+              echo "worker deployments poll $i failed; retrying"
+            fi
             sleep 2
           done
           test -n "$ACTIVE"
           test "$ACTIVE" != "$BEFORE"
           printf '%s' "$ACTIVE" >/tmp/active-after.txt
-          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json
+          version_ok=0
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json; then
+              version_ok=1
+              break
+            fi
+            echo "worker versions/$ACTIVE attempt $i failed; retrying"
+            sleep 2
+          done
+          test "$version_ok" = "1"
           python - <<'PY'
           import json, sys
           from pathlib import Path
