@@ -1507,6 +1507,15 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
     `idea_candidates?${filter}&select=${select}&order=created_at.asc.nullslast&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
+  let openIdeaIds = null;
+  if (lane === "photo_unconfigured") {
+    // Payload link bags stay empty under Phase 6 SoR; use the FK so auto-listen
+    // does not keep minting Draft Production Requests for the same Idea.
+    openIdeaIds = await listSupabaseIdeaIdsWithOpenProductionRequests(
+      env,
+      rows.map((row) => row?.airtable_record_id).filter(Boolean),
+    ).catch(() => null);
+  }
   return rows
     .map((row) => airtableShapedIdeaFromSupabase(flattenIdeaRow(row)))
     .filter((row) => {
@@ -1517,6 +1526,7 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
       if (lane === "photo_unconfigured") {
         const requests = row.fields?.["Production Requests"];
         if (Array.isArray(requests) && requests.length) return false;
+        if (openIdeaIds instanceof Set && openIdeaIds.has(row.id)) return false;
       }
       return true;
     });
@@ -2358,6 +2368,93 @@ export async function listSupabaseProductionRequestsByIds(env, ids) {
     rows.push(...page.filter((row) => row?.airtable_record_id));
   }
   return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+}
+
+/**
+ * Open Draft/Ready/Submitted Production Requests for one Idea via the FK.
+ * Phase 6 SoR no longer maintains Airtable's reciprocal "Production Requests"
+ * link on the Idea, so draft idempotency must query idea_candidate_id.
+ */
+export async function listSupabaseOpenProductionRequestsForIdea(env, ideaAirtableId) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const ideaId = String(ideaAirtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(ideaId)) return [];
+  const ideaUuid = await resolveSupabaseLinkedId(env, "idea_candidates", ideaId);
+  if (!ideaUuid) return [];
+  const rows = await supabaseRest(
+    env,
+    `production_requests?idea_candidate_id=eq.${encodeURIComponent(ideaUuid)}`
+      + `&request_status=in.(Draft,Ready,Submitted)`
+      + `&${REQUEST_ACTIVE}`
+      + `&select=${REQUEST_SELECT}&order=created_at.desc.nullslast&limit=40`,
+  ).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+}
+
+/** Idea airtable ids that already have an open Production Request (FK). */
+export async function listSupabaseIdeaIdsWithOpenProductionRequests(env, ideaAirtableIds) {
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
+  const wanted = [...new Set((ideaAirtableIds || [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  if (!wanted.length) return new Set();
+  const open = new Set();
+  for (let index = 0; index < wanted.length; index += 40) {
+    const chunk = wanted.slice(index, index + 40);
+    const ideaRows = await supabaseRest(
+      env,
+      `idea_candidates?airtable_record_id=in.(${chunk.map(encodeURIComponent).join(",")})`
+        + `&select=id,airtable_record_id&limit=40`,
+    ).catch(() => null);
+    if (!Array.isArray(ideaRows) || !ideaRows.length) continue;
+    const byUuid = new Map(ideaRows
+      .filter((row) => row?.id && row?.airtable_record_id)
+      .map((row) => [row.id, row.airtable_record_id]));
+    if (!byUuid.size) continue;
+    const uuids = [...byUuid.keys()];
+    const prRows = await supabaseRest(
+      env,
+      `production_requests?idea_candidate_id=in.(${uuids.map(encodeURIComponent).join(",")})`
+        + `&request_status=in.(Draft,Ready,Submitted)`
+        + `&${REQUEST_ACTIVE}`
+        + `&select=idea_candidate_id&limit=200`,
+    ).catch(() => null);
+    if (!Array.isArray(prRows)) return null;
+    for (const row of prRows) {
+      const ideaRec = byUuid.get(row?.idea_candidate_id);
+      if (ideaRec) open.add(ideaRec);
+    }
+  }
+  return open;
+}
+
+/** Persist the reciprocal Idea → Production Request link Airtable no longer writes. */
+export async function appendIdeaProductionRequestLink(env, ideaAirtableId, requestAirtableId) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  const ideaId = String(ideaAirtableId || "").trim();
+  const requestId = String(requestAirtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(ideaId) || !/^rec[A-Za-z0-9]{14}$/.test(requestId)) {
+    return { skipped: true, reason: "bad_id" };
+  }
+  const rows = await supabaseRest(
+    env,
+    `idea_candidates?airtable_record_id=eq.${encodeURIComponent(ideaId)}&select=payload&limit=1`,
+  ).catch(() => null);
+  const existing = Array.isArray(rows) ? rows[0] : null;
+  if (!existing) return { skipped: true, reason: "missing_idea" };
+  const prior = isPlainObject(existing.payload) ? existing.payload : {};
+  const links = Array.isArray(prior["Production Requests"])
+    ? prior["Production Requests"].map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (links.includes(requestId)) return { ok: true, unchanged: true };
+  const payload = { ...prior, "Production Requests": [...new Set([...links, requestId])] };
+  await supabaseRest(env, `idea_candidates?airtable_record_id=eq.${encodeURIComponent(ideaId)}`, {
+    method: "PATCH",
+    body: { payload, updated_at: new Date().toISOString() },
+    headers: { Prefer: "return=minimal" },
+  });
+  return { ok: true };
 }
 
 /** Recent Production Requests with a non-blank Studio_Production_Job_JSON. */
@@ -5456,8 +5553,10 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
     const brandId = await resolveSupabaseLinkedId(env, "brands", firstLink(fields.Brand));
     if (brandId) row.brand_id = brandId;
   }
+  let ideaAirtableId = null;
   if ("Idea_Candidate" in fields) {
-    const ideaId = await resolveSupabaseLinkedId(env, "idea_candidates", firstLink(fields.Idea_Candidate));
+    ideaAirtableId = firstLink(fields.Idea_Candidate);
+    const ideaId = await resolveSupabaseLinkedId(env, "idea_candidates", ideaAirtableId);
     if (ideaId) row.idea_candidate_id = ideaId;
   }
   if (bagPatch && Object.keys(bagPatch).length) {
@@ -5474,6 +5573,14 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
       airtable_record_id: record.id,
       ...row,
     }]);
+    // Airtable no longer writes the reciprocal Idea link under Phase 6 SoR.
+    // Densify payload["Production Requests"] so draft lookups and auto-listen
+    // stop minting duplicates every cron tick.
+    if (options.create === true && ideaAirtableId) {
+      await appendIdeaProductionRequestLink(env, ideaAirtableId, record.id).catch((error) => {
+        console.warn("idea Production Requests link densify failed", record.id, error);
+      });
+    }
     return { ok: true, mode: "upsert" };
   }
   await supabaseRest(
@@ -6808,7 +6915,17 @@ async function readIdeaRow(env, id) {
     `idea_candidates?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at&limit=1`,
   );
   const row = Array.isArray(rows) ? rows[0] : null;
-  return row?.airtable_record_id ? airtableShapedIdeaFromSupabase(row) : null;
+  if (!row?.airtable_record_id) return null;
+  const shaped = airtableShapedIdeaFromSupabase(row);
+  const bag = shaped.fields?.["Production Requests"];
+  if (Array.isArray(bag) && bag.length) return shaped;
+  // Phase 6 SoR hollow link bags: densify from production_requests.idea_candidate_id
+  // so Open Production / Create VO / auto-listen see the existing draft.
+  const open = await listSupabaseOpenProductionRequestsForIdea(env, shaped.id).catch(() => null);
+  if (Array.isArray(open) && open.length) {
+    shaped.fields["Production Requests"] = open.map((request) => request.id);
+  }
+  return shaped;
 }
 
 async function readRequestRow(env, id) {

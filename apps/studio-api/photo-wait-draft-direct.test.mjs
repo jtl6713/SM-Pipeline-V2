@@ -21,11 +21,14 @@ function harness({linked=[],requests={},missing=false}={}) {
     throw Error("linked request unavailable");
   };
   const preferAuthoritativeProductionRequest=rows=>rows[0]||null;
+  const listSupabaseOpenProductionRequestsForIdea=async()=>[];
   const find=new Function("airtableFetch","f","PRODUCTION_REQUEST_TABLE",
     "preferAuthoritativeProductionRequest","listOpenProductionRequests",
+    "listSupabaseOpenProductionRequestsForIdea",
     fn+"\nreturn findDraftProductionRequestForIdea;"
   )(airtableFetch,f,"Production Requests",preferAuthoritativeProductionRequest,
-    ()=>{throw Error("global scan must never run");});
+    ()=>{throw Error("global scan must never run");},
+    listSupabaseOpenProductionRequestsForIdea);
   return {find, calls,env:{AIRTABLE_IDEA_TABLE_ID:"Idea Candidates"}};
 }
 const draft=id=>({id,fields:{Idea_Candidate:["recIdea000000000"],Request_Status:"Draft",Active:true}});

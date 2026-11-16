@@ -22,12 +22,15 @@ function harness({ idea, requests = {}, denied = false } = {}) {
   const membershipAllowsBrand = () => !denied;
   const preferAuthoritativeProductionRequest = rows =>
     rows.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || null;
+  const listSupabaseOpenProductionRequestsForIdea = async () => [];
   const lookup = new Function(
     "airtableFetch", "f", "arrayOrEmpty", "PRODUCTION_REQUEST_TABLE",
     "membershipAllowsBrand", "preferAuthoritativeProductionRequest",
+    "listSupabaseOpenProductionRequestsForIdea",
     code + "\nreturn existingDraftForIdea;"
   )(airtableFetch, f, arrayOrEmpty, "Production Requests",
-    membershipAllowsBrand, preferAuthoritativeProductionRequest);
+    membershipAllowsBrand, preferAuthoritativeProductionRequest,
+    listSupabaseOpenProductionRequestsForIdea);
   return { lookup, calls, env, authorization };
 }
 

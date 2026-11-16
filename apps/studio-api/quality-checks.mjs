@@ -31,6 +31,7 @@ export const QUALITY_HEALS = Object.freeze([
   "return_phantom_rerender_to_review",
   "release_autonomous_revision_lock",
   "delete_promoted_orphan_ideas",
+  "cancel_duplicate_drafts",
   "extend_last_clip_requeue_r4",
   "ticket_only",
   "resume_factory_batch",
@@ -180,6 +181,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "autonomous_revision_lock",
     actor: "worker_heal",
     heal: "release_autonomous_revision_lock",
+  }),
+  check({
+    id: "phase6_duplicate_drafts",
+    title: "Check for Ideas with multiple open Draft/Ready/Submitted Production Requests (Phase 6 hollow link bag)",
+    lane: "service",
+    kind: "phase6_duplicate_drafts",
+    actor: "desk_agent",
+    heal: "cancel_duplicate_drafts",
   }),
   check({
     id: "promoted_orphan_idea",

@@ -36,6 +36,7 @@ import {
   listSupabasePlanScheduleRows,
   listSupabaseDeskHealOutputs,
   listSupabaseIdeaLane,
+  listSupabaseOpenProductionRequestsForIdea,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -3389,9 +3390,17 @@ export async function existingDraftForIdea(env, ideaRecordId, authorization, loa
   const idea = loadedIdea?.id === ideaRecordId
     ? loadedIdea
     : await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaRecordId);
-  const linkedIds = [...new Set(arrayOrEmpty(f(idea, "Production Requests"))
+  let linkedIds = [...new Set(arrayOrEmpty(f(idea, "Production Requests"))
     .map(id => String(id || "").trim())
     .filter(id => /^rec[A-Za-z0-9]+$/.test(id)))];
+  // Phase 6 SoR: Airtable no longer maintains the reciprocal link. Fall back to
+  // production_requests.idea_candidate_id before treating this as "no draft".
+  if (!linkedIds.length) {
+    const fromFk = await listSupabaseOpenProductionRequestsForIdea(env, ideaRecordId).catch(() => null);
+    if (Array.isArray(fromFk) && fromFk.length) {
+      linkedIds = fromFk.map((row) => row.id).filter(Boolean);
+    }
+  }
   if (!linkedIds.length) return null;
 
   // Fail closed if a linked draft cannot be read; treating that as "no draft"

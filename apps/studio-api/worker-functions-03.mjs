@@ -59,6 +59,7 @@ import {
   listSupabaseAssetLibraryRecords,
   listSupabaseLibraryBatchExistingNames,
   listSupabaseIdeaLane,
+  listSupabaseOpenProductionRequestsForIdea,
   listSupabaseUnfinishedIntakeBatches,
   listSupabasePipelineSettingsByNames,
   STUDIO_SUPABASE_ASSETS_READ_ROUTES,
@@ -761,13 +762,20 @@ import {
 } from "./worker-functions-04.mjs";
 
 export async function findDraftProductionRequestForIdea(env, ideaRecordId) {
-  // Airtable maintains the reciprocal Production Requests link on each idea.
+  // Airtable maintained the reciprocal Production Requests link on each idea.
+  // Under Phase 6 SoR that link bag stays empty, so also resolve via the FK.
   // Scanning the full open-request inventory per photo match used to consume
   // Worker subrequests/time out manual Find Images Now before ranking photos.
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaRecordId);
-  const ids = [...new Set((Array.isArray(f(idea, "Production Requests"))
+  let ids = [...new Set((Array.isArray(f(idea, "Production Requests"))
     ? f(idea, "Production Requests") : [])
     .filter(id => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  if (!ids.length) {
+    const fromFk = await listSupabaseOpenProductionRequestsForIdea(env, ideaRecordId).catch(() => null);
+    if (Array.isArray(fromFk) && fromFk.length) {
+      ids = fromFk.map((row) => row.id).filter(Boolean);
+    }
+  }
   if (!ids.length) return null;
   // Never turn a failed authoritative linked-record read into "no draft":
   // that would risk minting duplicate Production Requests for the same idea.
