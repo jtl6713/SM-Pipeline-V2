@@ -89,9 +89,9 @@
     report("Unsaved changes — use Save idea before leaving this screen.");
     // A prompt edit invalidates the credit quote. Drop the card without
     // redrawing the scene, so the caret in the field stays put.
-    if (current.videoCostOffer) {
+    if (current.videoCostOffer || $("storyFirstVideoCostDialog")) {
       current.videoCostOffer = null;
-      document.querySelector("#storyFirstPanel .story-first-video-cost")?.remove();
+      $("storyFirstVideoCostDialog")?.remove();
     }
   }
   function readForm() {
@@ -719,18 +719,67 @@
     });
     report(message);
   }
+  // The scene card is a <details> element that status checks rebuild. A cost
+  // note inside it disappears. This dialog is attached to the page itself.
+  function showVideoCostDialog(index, offer, error) {
+    $("storyFirstVideoCostDialog")?.remove();
+    const overlay = node("div", "story-first-video-cost-overlay");
+    overlay.id = "storyFirstVideoCostDialog";
+    const card = node("div", "story-first-video-cost");
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-label", error ? "AI video cost unavailable" : "AI video cost");
+    if (error) {
+      card.appendChild(node("p", "story-first-video-cost-title", "Video cost could not be checked"));
+      card.appendChild(node("p", "", "No paid generation was started. " + error));
+      button("Close", "primary-button", () => overlay.remove(), card);
+    } else {
+      const quoted = offer.quote;
+      card.appendChild(node("p", "story-first-video-cost-title",
+        "Estimated cost: " + quoted.estimated_credits + " ElevenLabs credits"));
+      card.appendChild(node("p", "",
+        "One " + quoted.duration_secs + "-second " + quoted.aspect_ratio + " " +
+        quoted.resolution + " " + quoted.model_id +
+        (quoted.generate_audio ? " with sound" : " without sound") +
+        (offer.refCount ? ". " + offer.refCount + " reference(s) will be transferred from Asset Manager." : ".") +
+        " Reviewed " + quoted.price_reviewed_at +
+        ". Actual billing may vary. Nothing is charged until you generate this one video."));
+      const costActions = node("div", "story-first-video-cost-actions");
+      button("Generate this video", "primary-button", () =>
+        submitApprovedSceneVideo(index).catch(e => report(e.message, true)), costActions);
+      const cancel = button("Don't generate", "secondary-button", () => {
+        current.videoCostOffer = null;
+        overlay.remove();
+        updateVideoRequestProgress(index, "Scene " + (index + 1) +
+          ": Cancelled. No paid generation submitted.");
+      }, costActions);
+      card.appendChild(costActions);
+    }
+    overlay.addEventListener("click", event => {
+      if (event.target !== overlay) return;
+      current.videoCostOffer = null;
+      overlay.remove();
+    });
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const actions = [...card.querySelectorAll("button")];
+    (actions[actions.length - 1] || actions[0])?.focus();
+  }
   async function generateSceneVideo(index) {
     if (current.busy || current.videoRequestBusy ||
       current.videoSubmissionUncertain[videoSceneIdentity(index)]) return;
     const scene = readForm().scenes[index];
     const promptText = String(scene.ai_prompt || "").trim();
     if (promptText.length < 12 || promptText.length > 5000) {
+      const message = "Video prompt must contain 12–5,000 characters.";
       updateVideoRequestProgress(index, "Scene " + (index + 1) +
-        ": No paid generation was started. Video prompt must contain 12–5,000 characters.");
-      throw new Error("Video prompt must contain 12–5,000 characters. No paid generation was submitted.");
+        ": No paid generation was started. " + message);
+      showVideoCostDialog(index, null, message);
+      throw new Error(message + " No paid generation was submitted.");
     }
     // Synchronously lock every Generate button before ANY network call.
     current.videoCostOffer = null;
+    $("storyFirstVideoCostDialog")?.remove();
     current.videoRequestBusy = true;
     const number = index + 1;
     let offered = false;
@@ -752,8 +801,8 @@
         throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
       }
       const refCount = Object.values(quote.references || {}).flat().filter(Boolean).length;
-      // Keep the estimate on the scene. A native dialog after this await
-      // is often suppressed, which looked like the cost check did nothing.
+      // Keep the estimate on the page, not inside the scene. A status refresh
+      // rebuilds the scene and was discarding the cost before it could be seen.
       current.videoCostOffer = { index, quote, request, profile, refCount };
       current.videoRequestStatus[index] = "Scene " + number + ": Estimated cost is " +
         quote.estimated_credits + " ElevenLabs credits. Approve the cost below. Nothing has been charged.";
@@ -762,15 +811,12 @@
       current.videoCostOffer = null;
       updateVideoRequestProgress(index, "Scene " + number +
         ": No paid generation was started. " + error.message);
+      showVideoCostDialog(index, null, error.message);
       throw error;
     } finally {
       current.videoRequestBusy = false;
-      if (offered) {
-        render();
-        $("storyFirstVideoCost-" + index)?.scrollIntoView({ block: "center" });
-      } else {
-        updateVideoRequestProgress(index, current.videoRequestStatus[index]);
-      }
+      updateVideoRequestProgress(index, current.videoRequestStatus[index]);
+      if (offered && current.videoCostOffer) showVideoCostDialog(index, current.videoCostOffer, null);
     }
   }
   async function submitApprovedSceneVideo(index) {
@@ -781,6 +827,7 @@
     if (current.busy || current.videoRequestBusy ||
       current.videoSubmissionUncertain[videoSceneIdentity(index)]) return;
     current.videoCostOffer = null;
+    $("storyFirstVideoCostDialog")?.remove();
     current.videoRequestBusy = true;
     const number = index + 1;
     let paidPostStarted = false, paidReceiptReceived = false;
@@ -1489,34 +1536,6 @@
           videoProgress.appendChild(node("span","story-first-video-progress-caption",progressMessage));
           videoProgress.appendChild(node("div","story-first-video-progress-track"));
           actions.appendChild(videoProgress);
-          const offer = current.videoCostOffer;
-          if (offer && offer.index === index && offer.quote?.quote_id) {
-            const quoted = offer.quote;
-            const costCard = node("div","story-first-video-cost");
-            costCard.id = "storyFirstVideoCost-" + index;
-            costCard.setAttribute("role","dialog");
-            costCard.setAttribute("aria-label","AI video cost");
-            costCard.appendChild(node("p","story-first-video-cost-title",
-              "Estimated cost: " + quoted.estimated_credits + " ElevenLabs credits"));
-            costCard.appendChild(node("p","",
-              "One " + quoted.duration_secs + "-second " + quoted.aspect_ratio + " " +
-              quoted.resolution + " " + quoted.model_id +
-              (quoted.generate_audio ? " with sound" : " without sound") +
-              (offer.refCount ? ". " + offer.refCount + " reference(s) will be transferred from Asset Manager." : ".") +
-              " Reviewed " + quoted.price_reviewed_at +
-              ". Actual billing may vary. Nothing is charged until you generate this one video."));
-            const costActions = node("div","story-first-video-cost-actions");
-            button("Generate this video","primary-button",()=>
-              submitApprovedSceneVideo(index).catch(e=>report(e.message,true)),costActions);
-            button("Don't generate","secondary-button",()=>{
-              current.videoCostOffer = null;
-              current.videoRequestStatus[index] = "Scene " + (index + 1) +
-                ": Cancelled. No paid generation submitted.";
-              render();
-            },costActions);
-            costCard.appendChild(costActions);
-            actions.appendChild(costCard);
-          }
           if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
             checkSceneVideo(index).catch(e=>report(e.message,true)),actions);
           else if (videoJob.state==="failed") actions.appendChild(node("p","form-message error-text",

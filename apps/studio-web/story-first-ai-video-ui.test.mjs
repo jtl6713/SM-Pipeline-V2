@@ -34,7 +34,9 @@ test("paid video requires a reviewed quote and direct human authorization", () =
   assert.match(ui, /Estimated cost:/);
   assert.match(ui, /Generate this video/);
   assert.match(ui, /Don't generate/);
+  assert.match(ui, /story-first-video-cost-overlay/);
   assert.match(ui, /current\.videoCostOffer/);
+  assert.match(css, /story-first-video-cost-overlay/);
   const quoteFlow = ui.slice(ui.indexOf("async function generateSceneVideo"),
     ui.indexOf("async function submitApprovedSceneVideo"));
   assert.doesNotMatch(quoteFlow, /confirm\(/);
