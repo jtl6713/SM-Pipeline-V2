@@ -9440,7 +9440,7 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
 }
 /*__STUDIO_WORKER_END:startStudioIdeaGeneration__*/
 
-export async function studioMirrorGeneratedIdeas(env, ideaIds) {
+async function studioMirrorGeneratedIdeas(env, ideaIds) {
   if (studioWriteSource(env) !== "supabase") return 0;
   const ideaTable = String(env?.AIRTABLE_IDEA_TABLE_ID || "").trim();
   const ids = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
