@@ -33,6 +33,7 @@ def test_repeated_poll_keeps_completion_link_valid(monkeypatch, provider_status,
         "TikTok_Draft_Email_Sent_At": "2026-11-15T12:00:00Z",
     }}
     class Client:
+        _settings = {"pipeline_runner_shared_secret": "unit-test-secret"}
         def get_record(self, *args):
             return record
         def update_record(self, table, record_id, fields):
@@ -86,6 +87,7 @@ def test_pre_email_polls_converge_on_stable_token(monkeypatch, provider_status):
     }}
 
     class Client:
+        _settings = {"pipeline_runner_shared_secret": "unit-test-secret"}
         def get_record(self, *args):
             return record
 
@@ -118,7 +120,84 @@ def test_pre_email_polls_converge_on_stable_token(monkeypatch, provider_status):
     url = record["fields"]["TikTok_Manual_Completion_URL"]
     from ttd.package import completion_token_material, hash_completion_token
 
-    assert token == hash_completion_token(completion_token_material(record["id"], "draft-123"))
+    from ttd.package import stable_completion_token
+    assert token == stable_completion_token(record["id"], "draft-123", secret="unit-test-secret")
     ttd2.process_request(output_record_id=record["id"])
     assert record["fields"]["TikTok_Manual_Completion_Token"] == token
     assert record["fields"]["TikTok_Manual_Completion_URL"] == url
+
+
+def test_signed_completion_is_stable_across_concurrent_first_poll_snapshots():
+    from ttd.package import stable_completion_token
+
+    # Both workers start from a row without a completion token, before either
+    # has committed. Their independently generated links must still match.
+    secret = "unit-test-secret"
+    a = stable_completion_token("recABCDEFGHIJKLMN", "publish-1", secret=secret)
+    b = stable_completion_token("recABCDEFGHIJKLMN", "publish-1", secret=secret)
+    assert a == b and len(a) == 64
+    assert a != stable_completion_token("recABCDEFGHIJKLMN", "publish-2", secret=secret)
+    assert a != stable_completion_token("recDIFFERENT12345", "publish-1", secret=secret)
+    assert a != stable_completion_token("recABCDEFGHIJKLMN", "publish-1", secret="other-secret")
+    with pytest.raises(ValueError):
+        stable_completion_token("recABCDEFGHIJKLMN", "publish-1", secret="")
+
+
+def test_form_accepts_signed_email_link_when_supabase_bag_was_overwritten():
+    from ttd.package import stable_completion_token
+
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "TikTok_Draft_Publish_ID": "publish-1",
+        # Simulate a concurrent JSON bag writer reviving an older token.
+        "TikTok_Manual_Completion_Token": "stale-token",
+        "Manual_Completion_Status": "Required",
+    }}
+    signed = stable_completion_token(record["id"], "publish-1", secret="unit-test-secret")
+    assert ttd4_form_eligibility_reason(record, token=signed, signing_secret="unit-test-secret") is None
+    assert ttd4_form_eligibility_reason(record, token="stale-token", signing_secret="unit-test-secret") is None
+    assert ttd4_form_eligibility_reason(record, token="", signing_secret="unit-test-secret") == "token_mismatch"
+    assert ttd4_form_eligibility_reason(record, token=signed, signing_secret="wrong-secret") == "token_mismatch"
+    record["fields"]["TikTok_Draft_Publish_ID"] = "publish-2"
+    assert ttd4_form_eligibility_reason(record, token=signed, signing_secret="unit-test-secret") == "token_mismatch"
+
+
+def test_empty_legacy_token_never_authorizes_form():
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "TikTok_Draft_Publish_ID": "draft-123",
+        "TikTok_Manual_Completion_Token": "",
+        "Manual_Completion_Status": "Required",
+    }}
+    assert ttd4_form_eligibility_reason(record, token="", signing_secret="unit-test-secret") == "token_mismatch"
+    assert ttd4_form_eligibility_reason(record, token="wrong-token", signing_secret="unit-test-secret") == "token_mismatch"
+
+
+def test_ttd4_form_submit_uses_verified_email_token_not_stale_supabase_link(monkeypatch):
+    from ttd import ttd4
+    from ttd.package import stable_completion_token
+
+    output_id = "recABCDEFGHIJKLMN"
+    signed = stable_completion_token(output_id, "draft-123", secret="unit-test-secret")
+    record = {"id": output_id, "fields": {
+        "TikTok_Draft_Publish_ID": "draft-123",
+        "TikTok_Manual_Completion_Token": "old-stale-token",
+        "TikTok_Manual_Completion_URL":
+            "https://pipeline.example/hooks/ttd4?record_id=recABCDEFGHIJKLMN&token=old-stale-token&action=form",
+        "Manual_Completion_Status": "Required",
+        "Publish_Status": "Ready to Publish",
+    }}
+
+    class Client:
+        _settings = {"pipeline_runner_shared_secret": "unit-test-secret"}
+
+        def get_record(self, table, record_id):
+            assert record_id == output_id
+            return record
+
+    monkeypatch.setattr(ttd4, "AirtableClient", Client)
+    monkeypatch.setattr(ttd4, "form_html", lambda record, *, action_url: action_url)
+    outcome = ttd4.process_request(output_record_id=output_id, action="form", token=signed)
+    assert outcome["processed"] is True
+    assert outcome["http_status"] == 200
+    assert f"token={signed}" in outcome["html"]
+    assert "action=submit" in outcome["html"]
+    assert "old-stale-token" not in outcome["html"]
