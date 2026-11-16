@@ -56,7 +56,7 @@ test("Worker exposes profilesOverview lean batch route", () => {
 
 test("All Profiles client soft-handles Airtable cooling without a red HTTP 429 banner", () => {
   assert.match(overview, /data\?\.cooling/);
-  assert.match(overview, /waiting on Airtable/);
+  assert.match(overview, /Waiting for the next verified profile snapshot/);
   assert.match(overview, /timeoutMs: 8000/);
   assert.match(overview, /isOverviewSoftFailure/);
   assert.match(overview, /never paint a red unavailable banner/i);

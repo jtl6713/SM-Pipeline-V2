@@ -78,13 +78,15 @@ export class StudioProfileSummary {
       if (!stageColumns.includes("approved_future_at")) {
         this.sql.exec("ALTER TABLE stage ADD COLUMN approved_future_at INTEGER NOT NULL DEFAULT 0");
       }
-      // Changing manual-handoff membership changes indexed SQLite calendar dates.
+      // New Production stage counts change the additive ledger schema; force a full
+      // authoritative reconciliation so old snapshots cannot silently show zero.
+      // Changing manual-handoff membership also changes indexed SQLite dates.
       // Force an authoritative rebuild before this DO is accepted as a Home read.
       // A stored snapshot from the previous contract is not enough.
       // A v1 tally counted only future scheduled outputs. Do not serve stale
       // counters as v2: force authoritative reconciliation before summary reads.
-      if (this.getMeta("home_summary_contract") !== "v6_calendar_tiktok_email_handoff_v2") {
-        this.putMeta("home_summary_contract", "v6_calendar_tiktok_email_handoff_v2");
+      if (this.getMeta("home_summary_contract") !== "v7_home_stage_production_v1") {
+        this.putMeta("home_summary_contract", "v7_home_stage_production_v1");
         this.putMeta("future_count_reconcile_required", "true");
       }
       if (this.getMeta("approved_unpublished_definition") !== "all_final_approved_unpublished_v2") {

@@ -47,6 +47,7 @@ export function buildProfileSummaryV6Row(profile, counters, approvedEntries, now
     manual: Number(c.manual_action_required || 0),
     failed: Number(c.failed_outputs || 0),
     approval: awaiting,
+    production: Number(c.in_production || 0),
     awaiting_final_by_platform: awaitingByPlatform,
     pipeline_by_platform: pipelineByPlatform,
     pipeline_total: future + awaiting,
@@ -68,7 +69,7 @@ export function buildProfileSummaryV6Row(profile, counters, approvedEntries, now
 /** Clock-independent fields must exactly match the authoritative V6 rebuild. */
 export function profileSummaryV6StaticParity(expected, actual) {
   const keys = [
-    "scheduled", "manual", "failed", "approval", "ideas",
+    "scheduled", "manual", "failed", "approval", "production", "ideas",
     "approved_unpublished", "approved_missing_date",
     "approved_calendar_slots", "awaiting_final_by_platform",
   ];
@@ -86,7 +87,7 @@ export function validProfileSummaryV6Rows(rows) {
     if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !city || ids.has(id) || cities.has(city)) return false;
     ids.add(id); cities.add(city);
     for (const key of [
-      "manual", "failed", "approval", "ideas", "approved_unpublished",
+      "manual", "failed", "approval", "production", "ideas", "approved_unpublished",
       "overdue_unpublished", "approved_future", "approved_past_due",
       "approved_missing_date", "pipeline_total",
     ]) if (!count(row[key])) return false;

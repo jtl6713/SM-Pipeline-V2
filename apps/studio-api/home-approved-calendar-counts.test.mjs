@@ -71,14 +71,14 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(worker,/homeApprovedCalendarCounts\(mappedOutputs\)/);
   assert.match(worker,/approved_future_by_platform: calendar\.future_by_platform/);
   assert.match(worker,/approved_calendar_slots: calendar\.slots/);
-  assert.match(ui,/studio\.allProfilesOverview\.v6/);
-  assert.match(ui,/Approved · Future/);
-  assert.match(ui,/Approved · Past Due/);
-  assert.match(ui,/Approved · No Date/);
+  assert.match(ui,/studio\.allProfilesOverview\.v7/);
+  assert.match(ui,/Scheduled content/);
+  assert.match(ui,/Approved · Past due/);
+  assert.match(ui,/Approved · No date/);
   assert.match(ui,/approvedCalendarCounts\(row, now = Date\.now\(\)\)/);
-  assert.match(ui,/calendar\.pipelineByPlatform\[p\]/);
+  assert.match(ui,/r\.scheduled\?\.\[p\]/);
   assert.doesNotMatch(ui,/approvedUnpublishedTotal\(row\)/);
-  assert.match(index,/all-profiles-overview-1007\.js\?v=.*cache=pipeline-future-review-v6/);
+  assert.match(index,/all-profiles-overview-1007\.js\?v=0\.6\.\d+-home-three-section-dashboard/);
 });
 
 test("rendered awaiting human approval adds to future-output pipeline, not approved count", () => {
@@ -110,9 +110,9 @@ test("rendered awaiting human approval adds to future-output pipeline, not appro
 test("Home UI combines future and human-review per platform, not rendering queue",()=>{
   assert.match(worker,/awaiting_final_by_platform: calendar.awaiting_by_platform/);
   assert.match(worker,/pipeline_total: calendar.pipeline_total/);
-  assert.match(ui,/Future \+ Review platform outputs/);
-  assert.match(ui,/Pipeline · Total/);
-  assert.match(ui,/Ideas Needed/);
+  assert.match(ui,/Factory items are excluded/);
+  assert.match(ui,/Production pipeline/);
+  assert.match(ui,/Ideas · Not promoted/);
   assert.match(ui,/const pipelineTotal = future \+ awaiting/);
   assert.match(ui,/Math.ceil\(Math.max\(0, 500 - pipelineTotal\) \/ 5\)/);
 });

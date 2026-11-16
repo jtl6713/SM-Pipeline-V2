@@ -75,7 +75,7 @@ export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", 
 export const HOME_METRIC_KEYS = Object.freeze([
   "manual_action_required", "failed_outputs", "awaiting_approval",
   "attention_outputs", "published_outputs", "active_outputs", "approved_unpublished", "overdue_unpublished",
-  "platform_outputs", "ideas_not_in_production", "ideas", "approved_missing_date",
+  "platform_outputs", "ideas_not_in_production", "ideas", "approved_missing_date", "in_production",
 ]);
 
 export function emptyHomeContribution() {
@@ -87,6 +87,7 @@ export function emptyHomeContribution() {
     manual_action_required: 0, failed_outputs: 0, awaiting_approval: 0,
     attention_outputs: 0, published_outputs: 0, active_outputs: 0,
     platform_outputs: 0, ideas_not_in_production: 0, ideas: 0, approved_unpublished: 0, overdue_unpublished: 0,
+    in_production: 0,
     approved_missing_date: 0,
   };
 }
@@ -239,10 +240,29 @@ export function homeIsUnpublishedFailure(row) {
   return publish === "failed" || output === "failed" || render === "failed" || state === "failed";
 }
 
+/**
+ * Work still inside Production, not an approval-ready Factory output.
+ * Count real active output stages only, never empty historic output shells.
+ * Failed outputs are an issue, and final-approved outputs are scheduled/issues.
+ */
+export function homeOutputInProduction(row) {
+  if (!row || row.do_not_publish || row.test_run_id) return false;
+  if (homeIsUnpublishedFailure(row) || homeAwaitingApprovalVisible(row)) return false;
+  if (row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  const output = String(row.output_status || "").trim().toLowerCase();
+  const state = String(row.studio_state || "").trim().toLowerCase();
+  const review = String(row.review_status || "").trim().toLowerCase();
+  if (review === "approved" || /published|skipped|cancelled|approved for publishing/.test(output)
+    || /published|skipped|manual action required/.test(state)) return false;
+  return /^(in production|ready for render|rendering|rendered|ready for review|blocked)$/.test(output)
+    || /^(in production|preparing assets|ready for render|rendering|rendered|ready for review)$/.test(state);
+}
+
 export function homeOutputContribution(row, now = Date.now()) {
   const result = emptyHomeContribution();
   if (!row) return result;
   result.platform_outputs = 1;
+  result.in_production = Number(homeOutputInProduction(row));
   const knownPlatform = HOME_PLATFORMS.includes(row.platform);
   result.calendar_platform = knownPlatform ? row.platform : "";
   result.approved_unpublished = Number(homeApprovedUnpublished(row, now));

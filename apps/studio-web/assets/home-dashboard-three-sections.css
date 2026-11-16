@@ -1,0 +1,97 @@
+/* Home Dashboard: three independent per-profile operational views. */
+#page-dashboard .studio-hub-top {
+  display: block;
+  min-width: 0;
+}
+#page-dashboard .studio-hub-hello,
+#page-dashboard #metrics {
+  display: none !important;
+}
+#page-dashboard #allProfilesOverview {
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.home-dashboard-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  width: 100%;
+}
+.home-dashboard-section {
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border, #d6dce7);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  box-shadow: 0 2px 8px rgb(23 42 69 / 5%);
+}
+.home-dashboard-section-heading {
+  margin-bottom: 10px;
+}
+.home-dashboard-section-heading h2 {
+  font-size: clamp(17px, 1.2vw, 21px);
+  font-weight: 750;
+  line-height: 1.35;
+  margin: 0 0 3px;
+}
+.home-dashboard-section-heading p,
+.home-dashboard-footnote {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--muted, #5d6879);
+}
+.home-dashboard-footnote { margin-top: 10px; }
+.home-dashboard-section .all-profiles-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+}
+.home-dashboard-section .all-profiles-table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.home-dashboard-section .all-profiles-table th,
+.home-dashboard-section .all-profiles-table td {
+  padding: 10px 13px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.home-dashboard-section .all-profiles-table thead th {
+  font-size: 12px;
+  text-align: center;
+  font-weight: 700;
+}
+.home-dashboard-section .all-profiles-table thead th:first-child,
+.home-dashboard-section .all-profiles-table tbody th {
+  text-align: left;
+}
+.home-dashboard-section .all-profiles-table tbody td {
+  text-align: center;
+  font-size: 14px;
+}
+.home-dashboard-section .all-profiles-total {
+  border-top: 2px solid var(--border, #d6dce7);
+  font-weight: 750;
+}
+.home-dashboard-section .overview-action-count {
+  min-width: 30px;
+  min-height: 30px;
+}
+@media (max-width: 720px) {
+  .home-dashboard-sections { gap: 12px; }
+  .home-dashboard-section { padding: 13px 10px; }
+  .home-dashboard-section .all-profiles-table {
+    min-width: max-content;
+  }
+  .home-dashboard-section .all-profiles-table th,
+  .home-dashboard-section .all-profiles-table td {
+    padding: 8px 10px;
+  }
+}

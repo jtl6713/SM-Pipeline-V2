@@ -13,7 +13,7 @@ test("Factory Needs eyes and Overview Awaiting Approval claim the same package-r
   assert.match(html, /Incomplete packages sit in Repair/);
   assert.match(
     overview,
-    /Package-ready platform outputs waiting for your Approve — same queue as Factory Needs eyes/,
+    /Factory items awaiting your approval/,
   );
   assert.doesNotMatch(html, /Studio overview Awaiting Approval can read higher/);
   assert.doesNotMatch(overview, /May be higher than Factory Needs eyes/);

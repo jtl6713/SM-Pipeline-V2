@@ -34,6 +34,7 @@ test("all-profiles overview shows per-output approved future and past-due totals
       manual: 0,
       failed: 0,
       approval: 1,
+      production: 0,
       ideas: 0,
     },
     {
@@ -52,6 +53,7 @@ test("all-profiles overview shows per-output approved future and past-due totals
       manual: 0,
       failed: 0,
       approval: 2,
+      production: 0,
       ideas: 0,
     },
   ];
@@ -101,16 +103,17 @@ test("all-profiles overview shows per-output approved future and past-due totals
     assert.match(host.innerHTML, /<th scope="row">Miami<\/th>/);
     assert.match(host.innerHTML, /<th scope="row">Total<\/th>/);
     assert.doesNotMatch(host.innerHTML, /Chicago \(/);
-    assert.match(host.innerHTML, /data-label="Approved future"[^>]*>2<\/td>/);
+    assert.match(host.innerHTML, /aria-label="Scheduled content"/);
+    assert.match(host.innerHTML, /aria-label="Issues requiring attention"/);
+    assert.match(host.innerHTML, /aria-label="Production pipeline"/);
+    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>3<\/strong><\/td>/);
+    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>1<\/strong><\/td>/);
+    assert.match(host.innerHTML, /data-label="Total scheduled"><strong>4<\/strong><\/td>/);
     assert.match(host.innerHTML, /data-label="Approved past due"[^>]*><button[^>]*data-overview-action="approved_past_due"[^>]*>1<\/button><\/td>/);
     assert.match(host.innerHTML, /data-label="Approved no date"[^>]*><button[^>]*data-overview-action="approved_missing_date"[^>]*>1<\/button><\/td>/);
-    assert.match(host.innerHTML, /Approved · Future/);
-    assert.match(host.innerHTML, /Approved · Past Due/);
-    assert.match(host.innerHTML, /Pipeline · Total/);
-    assert.match(host.innerHTML, /Ideas Needed/);
-    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>3<\/td>/);
-    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>4<\/td>/);
-    assert.match(host.innerHTML, /data-label="Ideas needed"[^>]*>100<\/td>/);
+    assert.match(host.innerHTML, /data-label="Factory awaiting approval"[^>]*><button[^>]*data-overview-action="approval"[^>]*>2<\/button><\/td>/);
+    assert.match(host.innerHTML, /Ideas · Not promoted/);
+    assert.doesNotMatch(host.innerHTML, /Ideas Needed|Pipeline · Total|Approved · Future/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
@@ -133,26 +136,18 @@ test("profile totals use lean overview endpoint and keep timezone helpers", asyn
 
 test("every All Profiles heading has an explanatory hover tooltip", async () => {
   const overview = await readFile(overviewPath, "utf8");
-  const start = overview.indexOf('host.innerHTML = `<div class="all-profiles-heading"');
-  assert.ok(start >= 0, "Overview render template exists");
-  const end = overview.indexOf("</thead>", start);
-  assert.ok(end > start, "Overview table header is present");
-  const headings = overview.slice(start, end);
-  const titles = headings.match(/<th\b[^>]*\btitle="[^"]+"/g) || [];
-  // Profile, 4-platform group, 7 summary fields, and each platform heading.
-  assert.equal(titles.length, 12);
+  assert.match(overview, /<th scope="col" title="Content profile">Profile<\/th>/);
+  assert.match(overview, /<th scope="col" title="\$\{esc\(title\)\}">/);
   for (const label of [
-    "Profile", "Future + Review platform outputs", "Pipeline · Total",
-    "Approved · Future", "Ideas Needed", "Approved · Past Due",
-    "Approved · No Date", "Manual action", "Failed", "Awaiting approval", "Ideas",
+    "Scheduled content", "Facebook", "Instagram", "TikTok", "YouTube", "Total",
+    "Issues requiring attention", "Approved · Past due", "Approved · No date",
+    "Manual action", "Failed", "Production pipeline", "Ideas · Not promoted",
+    "In Production", "Approval Factory",
   ]) {
-    assert.ok(headings.includes(label), `missing column heading: ${label}`);
+    assert.ok(overview.includes(label), "missing dashboard heading or tooltip: " + label);
   }
-  assert.match(headings, /<th class="all-profiles-scheduled-col" title="\$\{p\}:/);
-  assert.match(headings, /title="Estimated additional ideas: round up \(500 minus Pipeline Total\) divided by 5/);
-  assert.match(headings, /title="Package-ready platform outputs waiting for your Approve — same queue as Factory Needs eyes/);
-  assert.match(headings, /Incomplete Ready for Review packages sit in Repair and are not counted here/);
-  assert.doesNotMatch(headings, /May be higher than Factory Needs eyes/);
+  assert.match(overview, /Package-ready outputs in Factory Needs eyes, awaiting your final approval/);
+  assert.match(overview, /Active unfinished platform outputs, excluding failed and Factory-reviewable outputs/);
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(html, /all-profiles-overview-1007\.js\?v=[^"]+&tooltips=all-columns-v1/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.\d+-home-three-section-dashboard/);
 });

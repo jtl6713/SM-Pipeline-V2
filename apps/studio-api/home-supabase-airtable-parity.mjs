@@ -21,6 +21,7 @@ export const HOME_OVERVIEW_PARITY_COLUMNS = Object.freeze([
   "manual",
   "failed",
   "approval",
+  "production",
   "ideas",
   "approved_past_due",
   "approved_missing_date",
@@ -81,6 +82,7 @@ export function homeOverviewDisplayMetrics(row, now = Date.now()) {
     failed: Number(row?.failed) || 0,
     // Home "Awaiting approval" cell uses the stored approval count.
     approval: Number(row?.approval) || 0,
+    production: Number(row?.production) || 0,
     ideas: Number(row?.ideas) || 0,
     approved_past_due: pastDue,
     approved_missing_date: Number(row?.approved_missing_date) || 0,
@@ -227,6 +229,7 @@ export function reconcileHomeOverviewWithAirtable(supabaseRows, airtableRows, pa
         manual_action_required: Number(airtable.manual) || 0,
         failed_outputs: Number(airtable.failed) || 0,
         awaiting_approval: Number(airtable.approval) || 0,
+        in_production: Number(airtable.production) || 0,
         overdue_unpublished: Number(airtable.approved_past_due ?? airtable.overdue_unpublished) || 0,
         approved_missing_date: Number(airtable.approved_missing_date) || 0,
         approved_unpublished: Number(airtable.approved_unpublished ?? airtable.approved_future) || 0,

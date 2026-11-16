@@ -6,7 +6,7 @@
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   // V6 caches approved per-output calendar dates so future/past-due boundaries
   // move with the clock, including while a durable snapshot stays cached.
-  const CACHE_KEY = "studio.allProfilesOverview.v6";
+  const CACHE_KEY = "studio.allProfilesOverview.v7";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
@@ -66,7 +66,7 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
+      for (const kind of ["manual", "failed", "approval", "production", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
         if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
       }
       for (const platform of platformOrder) {
@@ -232,6 +232,17 @@
   }
 
   function openOverviewAction(profileId, kind) {
+    if (kind === "production") {
+      const profile = document.getElementById("studioProfileSelect");
+      if (profile && profileId && profile.value !== profileId) {
+        profile.value = profileId;
+        profile.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      document.querySelector('[data-page="content"]')?.click();
+      activateStudioPage("content");
+      document.getElementById("page-content")?.scrollIntoView({ block: "start" });
+      return;
+    }
     if (kind === "ideas") {
       const profile = document.getElementById("studioProfileSelect");
       if (profile && profileId && profile.value !== profileId) {
@@ -297,92 +308,93 @@
   function render({ stale = false, error = "", cooling = false } = {}) {
     if (!state.rows.length) {
       if (state.manualRefreshing) {
-        host.innerHTML = '<div class="all-profiles-loading">Refreshing All Profiles overview…</div>';
+        host.innerHTML = '<div class="all-profiles-loading">Refreshing profile counts…</div>';
         return;
       }
       if (cooling) {
-        host.innerHTML = '<div class="all-profiles-loading">All Profiles overview is waiting on Airtable — retrying shortly…</div>';
+        host.innerHTML = '<div class="all-profiles-loading">Waiting for the next verified profile snapshot…</div>';
         return;
       }
       host.innerHTML = error
-        ? `<div class="all-profiles-loading error">All Profiles Overview unavailable: ${esc(error)}</div>`
-        : '<div class="all-profiles-loading">Loading all profiles…</div>';
+        ? `<div class="all-profiles-loading error">Profile counts unavailable: ${esc(error)}</div>`
+        : '<div class="all-profiles-loading">Loading profile counts…</div>';
       return;
     }
-
     const now = Date.now();
     const total = {
+      name: "Total",
       scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
       approved_calendar_slots: Object.fromEntries(platformOrder.map((p) => [p, []])),
       approved_missing_date: 0,
       awaiting_final_by_platform: Object.fromEntries(platformOrder.map((p) => [p, 0])),
-      manual: 0, failed: 0, approval: 0, ideas: 0,
+      manual: 0, failed: 0, approval: 0, production: 0, ideas: 0,
     };
     for (const row of state.rows) {
-      for (const platform of platformOrder) {
-        total.scheduled[platform] += row.scheduled?.[platform] || 0;
-        total.approved_calendar_slots[platform].push(...row.approved_calendar_slots[platform]);
-        total.awaiting_final_by_platform[platform] += row.awaiting_final_by_platform[platform];
+      for (const p of platformOrder) {
+        total.scheduled[p] += Number(row.scheduled?.[p]) || 0;
+        total.approved_calendar_slots[p].push(...row.approved_calendar_slots[p]);
+        total.awaiting_final_by_platform[p] += row.awaiting_final_by_platform[p];
       }
-      total.approved_missing_date += row.approved_missing_date;
-      total.manual += row.manual;
-      total.failed += row.failed;
-      total.approval += row.approval;
-      total.ideas += row.ideas;
+      for (const field of ["approved_missing_date", "manual", "failed", "approval", "production", "ideas"]) {
+        total[field] += Number(row[field]) || 0;
+      }
     }
-
-    const rowHtml = (row, isTotal = false) => {
-      const calendar = approvedCalendarCounts(row, now);
-      return `<tr class="${isTotal ? "all-profiles-total" : ""}">
-      <th scope="row">${esc(row.name)}</th>
-      <td data-label="Pipeline total">${calendar.pipelineTotal}</td>
-      ${platformOrder.map((p) => `<td data-label="${p} future and review outputs">${calendar.pipelineByPlatform[p]}</td>`).join("")}
-      <td data-label="Approved future" class="overview-tone-ok">${calendar.future}</td>
-      <td data-label="Ideas needed">${calendar.ideasNeeded}</td>
-      <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${actionCount(isTotal ? null : row, "approved_past_due", "approved past due", calendar.pastDue)}</td>
-      <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${actionCount(isTotal ? null : row, "approved_missing_date", "approved with no date", calendar.missingDate)}</td>
-      <td data-label="Manual" class="overview-tone-${tone(row.manual, "manual")}">${actionCount(row, "manual", "manual action")}</td>
-      <td data-label="Failed" class="overview-tone-${tone(row.failed, "failed")}">${actionCount(row, "failed", "failed")}</td>
-      <td data-label="Approval" class="overview-tone-${tone(row.approval, "approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
-      <td data-label="Ideas" class="overview-tone-${tone(row.ideas, "ideas")}">${actionCount(row, "ideas", "ideas")}</td>
-    </tr>`;
+    const profiles = [...state.rows, total];
+    const tableRows = {
+      scheduled: profiles.map((r, i) => {
+        const scheduledTotal = platformOrder.reduce((sum, p) => sum + (Number(r.scheduled?.[p]) || 0), 0);
+        return `<tr class="${i === state.rows.length ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
+          ${platformOrder.map((p) => `<td data-label="${p}">${Number(r.scheduled?.[p]) || 0}</td>`).join("")}
+          <td data-label="Total scheduled"><strong>${scheduledTotal}</strong></td></tr>`;
+      }).join(""),
+      issues: profiles.map((r, i) => {
+        const calendar = approvedCalendarCounts(r, now);
+        const totalRow = i === state.rows.length;
+        return `<tr class="${totalRow ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
+          <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${actionCount(totalRow ? null : r, "approved_past_due", "approved past due", calendar.pastDue)}</td>
+          <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${actionCount(totalRow ? null : r, "approved_missing_date", "approved with no date", calendar.missingDate)}</td>
+          <td data-label="Manual action required" class="overview-tone-${tone(r.manual, "manual")}">${actionCount(totalRow ? null : r, "manual", "manual action")}</td>
+          <td data-label="Failed" class="overview-tone-${tone(r.failed, "failed")}">${actionCount(totalRow ? null : r, "failed", "failed")}</td></tr>`;
+      }).join(""),
+      pipeline: profiles.map((r, i) => {
+        const totalRow = i === state.rows.length;
+        return `<tr class="${totalRow ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
+          <td data-label="Ideas not in production">${actionCount(totalRow ? null : r, "ideas", "unpromoted ideas")}</td>
+          <td data-label="In production, not approval-ready">${actionCount(totalRow ? null : r, "production", "unfinished production outputs")}</td>
+          <td data-label="Factory awaiting approval" class="overview-tone-${tone(r.approval, "approval")}">${actionCount(totalRow ? null : r, "approval", "Factory items awaiting your approval")}</td></tr>`;
+      }).join(""),
     };
-
     const statusText = refreshStatusText({ stale, error, cooling });
-    const statusNote = statusText
-      ? `<p class="subtle all-profiles-stale" aria-live="polite">${esc(statusText)}</p>`
-      : "";
     const refreshText = state.manualRefreshing ? "Refreshing…" : "Refresh";
-    const disabled = state.manualRefreshing ? " disabled aria-disabled=\"true\"" : "";
-
-
-    // Preserve the existing mobile horizontal scrollport through automatic snapshot
-    // polls and force-refresh status changes. Rebuilding host.innerHTML here used
-    // to reset scrollLeft to zero and cancel taps on right-hand action counts.
-    const visibleBody = host.querySelector(".all-profiles-table-wrap tbody");
+    const disabled = state.manualRefreshing ? ' disabled aria-disabled="true"' : "";
     const visibleHeading = host.querySelector(".all-profiles-heading");
-    const bodyHtml = state.rows.map((r) => rowHtml(r)).join("") + rowHtml({ name: "Total", ...total }, true);
-    if (visibleBody && visibleHeading && visibleBody.rows.length === state.rows.length + 1) {
-      const updatedBody = document.createElement("tbody");
-      updatedBody.innerHTML = bodyHtml;
-      const oldRows = Array.from(visibleBody.rows);
-      const newRows = Array.from(updatedBody.rows);
-      for (let rowIndex = 0; rowIndex < oldRows.length; rowIndex += 1) {
-        const oldCells = Array.from(oldRows[rowIndex].cells);
-        const newCells = Array.from(newRows[rowIndex].cells);
-        if (oldCells.length !== newCells.length) {
-          visibleBody.replaceWith(updatedBody);
-          break;
-        }
-        for (let cellIndex = 0; cellIndex < oldCells.length; cellIndex += 1) {
-          if (oldCells[cellIndex].innerHTML !== newCells[cellIndex].innerHTML) {
-            oldCells[cellIndex].innerHTML = newCells[cellIndex].innerHTML;
+    const visibleBodies = [...host.querySelectorAll(".all-profiles-table-wrap tbody")];
+    const ids = ["scheduled", "issues", "pipeline"];
+
+    // Keep each existing scrollport, button focus, and touch position through
+    // 12-second snapshot polling. Only patch the changed table cells.
+    if (visibleHeading && visibleBodies.length === ids.length
+      && visibleBodies.every((tbody) => tbody.rows.length === state.rows.length + 1)) {
+      ids.forEach((id, i) => {
+        const tbody = visibleBodies[i];
+        const updatedBody = document.createElement("tbody");
+        updatedBody.innerHTML = tableRows[id];
+        const oldRows = Array.from(tbody.rows);
+        const newRows = Array.from(updatedBody.rows);
+        for (let rowIndex = 0; rowIndex < oldRows.length; rowIndex += 1) {
+          const oldCells = Array.from(oldRows[rowIndex].cells);
+          const newCells = Array.from(newRows[rowIndex].cells);
+          if (oldCells.length !== newCells.length) { tbody.replaceWith(updatedBody); break; }
+          for (let cellIndex = 0; cellIndex < oldCells.length; cellIndex += 1) {
+            if (oldCells[cellIndex].innerHTML !== newCells[cellIndex].innerHTML) {
+              oldCells[cellIndex].innerHTML = newCells[cellIndex].innerHTML;
+            }
+            if (oldCells[cellIndex].className !== newCells[cellIndex].className) {
+              oldCells[cellIndex].className = newCells[cellIndex].className;
+            }
           }
-          if (oldCells[cellIndex].className !== newCells[cellIndex].className) {
-            oldCells[cellIndex].className = newCells[cellIndex].className;
-          }
         }
-      }
+      });
       const currentStatus = visibleHeading.querySelector(".all-profiles-stale");
       if (!statusText) currentStatus?.remove();
       else if (currentStatus) {
@@ -404,10 +416,41 @@
       return;
     }
 
-    host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${statusNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
-      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2" title="City profile. Counts represent individual platform outputs associated with this city.">Profile</th><th rowspan="2" title="Total of Facebook, Instagram, TikTok and YouTube: approved unpublished outputs scheduled in the future, plus rendered outputs awaiting final human approval.">Pipeline · Total</th><th colspan="4" class="all-profiles-scheduled-group" title="Each platform counts individual unpublished outputs that are approved and scheduled after now, plus fully rendered outputs awaiting final human approval. An output is counted only once.">Future + Review platform outputs</th><th rowspan="2" title="Fully approved, not yet published platform outputs with a scheduled date and time later than now. Excludes outputs still awaiting approval.">Approved · Future</th><th rowspan="2" title="Estimated additional ideas: round up (500 minus Pipeline Total) divided by 5, with a minimum of 0. Assumes 5 platform outputs per idea; creation remains subject to hourly limits.">Ideas Needed</th><th rowspan="2" title="Fully approved outputs that are still unpublished after their scheduled date and time. Publishing exceptions; not part of the future Pipeline Total.">Approved · Past Due</th><th rowspan="2" title="Fully approved, unpublished outputs without a valid Scheduled Post Date. Scheduling exceptions; not part of the future Pipeline Total.">Approved · No Date</th><th rowspan="2" title="Platform outputs in Manual Action Required status. These need a person to complete a workflow or publishing action.">Manual action</th><th rowspan="2" title="Platform outputs in Failed status that require investigation or retry.">Failed</th><th rowspan="2" title="Package-ready platform outputs waiting for your Approve — same queue as Factory Needs eyes. Incomplete Ready for Review packages sit in Repair and are not counted here. Already included in Pipeline Total, not counted again.">Awaiting approval</th><th rowspan="2" title="Existing idea candidates that have not been promoted into production. Different from the Ideas Needed estimate.">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col" title="${p}: individual approved, unpublished outputs scheduled after now, plus fully rendered outputs awaiting final human approval. Counts every output format once.">${p}</th>`).join("")}</tr></thead>
-      <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
-
+    const table = (id, headers) =>
+      `<div class="all-profiles-table-wrap"><table class="all-profiles-table">
+        <thead><tr><th scope="col" title="Content profile">Profile</th>${headers.map(([label, title]) =>
+          `<th scope="col" title="${esc(title)}">${esc(label)}</th>`).join("")}</tr></thead>
+        <tbody>${tableRows[id]}</tbody></table></div>`;
+    host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Dashboard</h1>
+      ${statusText ? `<p class="subtle all-profiles-stale" aria-live="polite">${esc(statusText)}</p>` : ""}</div>
+      <button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
+      <div class="home-dashboard-sections">
+        <section class="home-dashboard-section" aria-label="Scheduled content">
+          <div class="home-dashboard-section-heading"><h2>Scheduled content</h2><p>Approved outputs queued for future platform dispatch. Factory items are excluded.</p></div>
+          ${table("scheduled", [
+            ...platformOrder.map((p) => [p, `Approved, scheduled, and not yet dispatched to ${p}`]),
+            ["Total", "Total scheduled outputs across all four platforms"],
+          ])}
+        </section>
+        <section class="home-dashboard-section" aria-label="Issues requiring attention">
+          <div class="home-dashboard-section-heading"><h2>Issues requiring attention</h2><p>Click a count to inspect the affected outputs.</p></div>
+          ${table("issues", [
+            ["Approved · Past due", "Approved but unpublished after scheduled date"],
+            ["Approved · No date", "Approved and unpublished without a valid scheduled date"],
+            ["Manual action", "Platform outputs requiring human intervention"],
+            ["Failed", "Unpublished outputs in a failed state"],
+          ])}
+        </section>
+        <section class="home-dashboard-section" aria-label="Production pipeline">
+          <div class="home-dashboard-section-heading"><h2>Production pipeline</h2><p>Ideas and unfinished production work, then items actually available for your final Factory review.</p></div>
+          ${table("pipeline", [
+            ["Ideas · Not promoted", "Idea candidates not yet moved into production"],
+            ["In Production", "Active unfinished platform outputs, excluding failed and Factory-reviewable outputs"],
+            ["Approval Factory", "Package-ready outputs in Factory Needs eyes, awaiting your final approval"],
+          ])}
+          <p class="home-dashboard-footnote">Ideas are idea records; Production and Approval Factory are individual platform outputs. An output belongs to only one of those latter two stages.</p>
+        </section>
+      </div>`;
   }
 
   // Delegate once: unchanged action buttons survive the periodic in-place updates.
@@ -429,6 +472,7 @@
       manual: Number(row.manual) || 0,
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,
+      production: Number(row.production) || 0,
       approved_unpublished: Number(row.approved_unpublished) || 0,
       overdue_unpublished: Number(row.overdue_unpublished) || 0,
       approved_future: Number(row.approved_future) || 0,
