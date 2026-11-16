@@ -487,17 +487,21 @@ def _partial_patch(record: dict, kind: str) -> dict:
 
 def _merge_json_bag(settings: dict, table: str, record_id: str, column: str, patch: dict) -> dict:
     """Merge a sparse jsonb patch. Never replace the whole bag with partial fields."""
+    # A failed read is not an empty record. Replacing the bag here discards
+    # upload job IDs and deduplication keys and can cause repeat publication.
+    existing = _rest(
+        settings,
+        f"{table}?airtable_record_id=eq.{record_id}&select={column}&limit=1",
+        "GET",
+    )
+    if not isinstance(existing, list):
+        raise RuntimeError("Invalid Supabase bag readback; refusing partial merge")
     prior: dict[str, Any] = {}
-    try:
-        existing = _rest(
-            settings,
-            f"{table}?airtable_record_id=eq.{record_id}&select={column}&limit=1",
-            "GET",
-        )
-        if isinstance(existing, list) and existing and isinstance(existing[0].get(column), dict):
-            prior = dict(existing[0][column])
-    except Exception:
-        prior = {}
+    if existing:
+        value = existing[0].get(column)
+        if value is not None and not isinstance(value, dict):
+            raise RuntimeError("Invalid Supabase bag; refusing partial merge")
+        prior = dict(value or {})
     merged = {**prior, **(patch or {})}
     # Explicit empty string clears a bag key (TTD2 auto-reinit clears publish id).
     for key, value in list((patch or {}).items()):

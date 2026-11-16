@@ -51,3 +51,18 @@ def test_saved_video_survives_channel_verification_failure(monkeypatch,verificat
     assert updates['Do_Not_Publish'] is True
     assert updates['Publish_Retry_Eligible'] is False
     assert updates.get('YouTube_Upload_Job_ID','job')=='job'
+
+
+def test_failed_bag_read_does_not_erase_upload_receipt(monkeypatch):
+    import supabase_pipeline as sp
+    def fail(*a,**k):raise RuntimeError('read unavailable')
+    monkeypatch.setattr(sp,'_rest',fail)
+    with pytest.raises(RuntimeError,match='read unavailable'):
+        sp._merge_json_bag({},'platform_outputs',RID,'error_messages',{'Other':'update'})
+
+
+def test_partial_bag_update_retains_upload_receipt(monkeypatch):
+    import supabase_pipeline as sp
+    monkeypatch.setattr(sp,'_rest',lambda *a,**k:[{'error_messages':{'YouTube_Video_ID':'saved','YouTube_Idempotency_Key':'stable'}}])
+    result=sp._merge_json_bag({},'platform_outputs',RID,'error_messages',{'Other':'update'})
+    assert result['YouTube_Video_ID']=='saved' and result['YouTube_Idempotency_Key']=='stable'
