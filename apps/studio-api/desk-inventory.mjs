@@ -1535,6 +1535,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "crop_parked",
   "crop_stale",
   "autonomous_revision_lock",
+  "promoted_orphan_idea",
   "autonomous_stalled",
   "autonomous_produce_gap",
   "az_stalled",

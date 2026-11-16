@@ -89,6 +89,12 @@ Job JSON says `Rendering 0/N` (~62%), heal `resume_count` climbs to `max_resumes
 
 Auto-correct: Worker `studioHealReadyNoJobVoiceover` (inside `healStuckStudioRenders`, `VO_STUCK_READY`) copies the parent `Voiceover_URL` down when it exists; otherwise sets parent `Content_Status=Ready for Voiceover`, `Voiceover_Status=Ready`, `Script_Status=Generated`, pulses P2, and resumes studio-produce (`pick_resume_step` now lands on `audio`; `step_render` runs P2 inline and treats `waiting_for_voiceover` as a wait). Cover writes (Worker `studioCoverContentStatusFields`, `thumbnail.cover_content_status_fields`) no longer clobber `Ready for Voiceover` while `Voiceover_URL` is blank. If the same fingerprint returns after a heal tick, it is a `code_bug`: attach parent field values (`Content_Status`, `Voiceover_Status`, `Voiceover_Script` present?, `Voiceover_URL`) and the P2 pulse result. Do not Approve. Skip rows whose parent `Voiceover_Status` is Not Needed / Skipped.
 
+## Watch: Promoted idea with blank Content Item id
+
+Idea Candidate `Candidate_Status=Promoted` while `Promoted_Content_Record_ID` is blank and there is no Content Item / Production Request. Studio Ideas shows **In production** incorrectly. Kind `promoted_orphan_idea`, class `data_repair`, actor `worker_heal`, fingerprint `promoted_orphan_idea:<idea_rec>:blank_content_id`.
+
+Auto-correct: Worker `studioHealPromotedOrphanIdeas` on the daily heavy `:00` tick deletes the orphan from Supabase (age ≥ 24h) before autonomous harvest. Do not Approve. Same fingerprint after that heal → `code_bug`.
+
 ## Watch: Failed for more than an hour
 
 Any Platform Output with `Publish_Status=Failed` or `Render_Status=Failed` for **≥ 60 minutes** is a finding, even when the error text is not in the old transient list. Kind `publish_failed_transient` / `render_failed`, class `transient`, actor `worker_heal`, error class `stale_failed` when the message itself is not retryable. Copyright / permission denied / invalid video / unsupported format / video too long / duplicate stay `code_bug`.

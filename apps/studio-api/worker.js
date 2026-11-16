@@ -938,6 +938,7 @@ import {
   patchStudioOperationsProfile,
   studioProfileCreativeGuidance,
   studioHealAutonomousRevisionLock,
+  studioHealPromotedOrphanIdeas,
   studioReadyProductionCronResume,
   getStudioReadyProductionDiagnostic,
   runStudioAutonomousProduce,
@@ -1394,7 +1395,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.986-open-ideas-cap-promoted",
+          version: "0.10.987-promoted-orphan-idea-heal",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4833,6 +4834,12 @@ export default {
       // Create the hour's ideas before publish heals. Those heals were still
       // running at :12, so the harvest saw a non-zero minute and created nothing.
       if (cadence.heavy && Number(cadence.minute) === 0) {
+        // Clear Promoted orphans before harvest so the open-ideas cap stays honest.
+        try {
+          await studioHealPromotedOrphanIdeas(env, { limit: 100 });
+        } catch (error) {
+          console.warn("promoted orphan idea heal failed", error);
+        }
         try {
           await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
             scheduled: true,
@@ -8732,6 +8739,8 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:alignAutonomousDraftContentType__*/
 /*__STUDIO_WORKER_EXTRACT:resumeAutonomousDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealAutonomousRevisionLock__*/
+/*__STUDIO_WORKER_EXTRACT:listPromotedOrphanIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealPromotedOrphanIdeas__*/
 /*__STUDIO_WORKER_EXTRACT:releaseAutonomousRevisionLock__*/
 /*__STUDIO_WORKER_EXTRACT:parkAutonomousResumeDraft__*/
 /**
