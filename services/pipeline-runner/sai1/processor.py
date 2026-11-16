@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+import logging
 import re
+
+logger = logging.getLogger("pipeline-runner.sai1")
 
 from sai1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from sai1.openai_themes import generate_themes
@@ -120,6 +123,34 @@ def process_request(
 
     generated = generate_themes(prompt)
     themes = _normalize_themes(generated["parsed"], needed=needed_count)
+    # With creator-supplied photos (needed=0), SAI1 sometimes selects silence
+    # for every still. A voiceover-required Studio job then blocks at 5% and
+    # repeatedly resumes the same failing stage. Give the model one targeted
+    # chance to supply spoken narration before the job is handed back as
+    # blocked. Never manufacture audio text or silently waive validation.
+    if total_count > 0 and not themes["voiceover_script"]:
+        repair_prompt = (
+            prompt
+            + "\n\nNARRATION REPAIR: The prior response had no spoken narration. "
+            "The video REQUIRES audible narration. Return the same strict JSON "
+            "schema, with a natural, complete spoken line for at least the "
+            "first slide, and a non-empty voiceover_script containing those "
+            "spoken lines in slide order. The slides array must still contain "
+            "exactly REQUESTED COUNT items; slide_voiceovers must contain "
+            "exactly TOTAL SLIDE COUNT items. Keep the target market and "
+            "source-image rules unchanged. Do not include placeholders."
+        )
+        try:
+            regenerated = generate_themes(repair_prompt)
+            repaired = _normalize_themes(regenerated["parsed"], needed=needed_count)
+            if repaired["voiceover_script"] and (
+                needed_count == 0 or len(repaired["slides"]) >= needed_count
+            ):
+                themes = repaired
+        except (RuntimeError, ValueError, KeyError) as exc:
+            # Preserve the original result. The Studio producer will continue
+            # to fail closed instead of pretending an empty script is complete.
+            logger.warning("SAI1 narration repair failed: %s", str(exc)[:180])
     validate_market_copy(themes, str(market), title)
     if needed_count > 0 and not themes["slides"]:
         return {"processed": False, "reason": "empty_slides", "themes": themes, **preview}
