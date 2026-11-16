@@ -580,6 +580,45 @@ def ensure_slide_voiceover_timeline(
         apply_voiceover_script(client, parent, {"voiceover_script": joined}, locked=False)
 
 
+def voiceover_from_existing_caption(parent: dict[str, Any]) -> str:
+    """Last-resort narration grounded in existing creator-facing copy.
+
+    Only used for a voiceover-required, unlocked script when SAI1 has returned
+    no narration even after its bounded correction attempt. Never invent
+    locations, change visuals, or waive the final Factory review.
+    """
+    caption = field_str(parent, "Caption").strip()
+    if not caption:
+        return ""
+    # Remove metadata and audience engagement instructions inappropriate for
+    # spoken narration. Avoid making a video read hashtags or URLs aloud.
+    caption = re.sub(r"https?://\\S+", " ", caption)
+    caption = re.sub(r"(?<!\\w)#[A-Za-z0-9_]+", " ", caption)
+    caption = re.sub(r"[\\U0001F300-\\U0001FAFF\\u2600-\\u27BF]", "", caption)
+    caption = re.sub(r"\\s+", " ", caption).strip()
+    if not caption:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\\s+", caption)
+    approved = []
+    total_len = 0
+    for sentence in sentences:
+        cleaned = sentence.strip()
+        if re.match(
+            r"(?i)^(save this|tag (?:a |your )?friend|follow (?:us|for)|"
+            r"comment (?:below|with)|tell us|share this|drop a comment)\\b",
+            cleaned,
+        ):
+            continue
+        # Avoid splitting a sentence mid-word to satisfy the narration budget.
+        if total_len + len(cleaned) > 460:
+            break
+        approved.append(cleaned)
+        total_len += len(cleaned) + 1
+    narration = " ".join(approved).strip()
+    # A single title, a list of tags, or a one-word label is not voiceover.
+    return narration if len(narration.split()) >= 8 else ""
+
+
 def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], parent: dict[str, Any], themes: dict[str, Any] | None = None) -> dict[str, Any]:
     """SAI1 for voiceover script when uploaded photos skipped themes (caption already set)."""
     parent = enforce_exact_voiceover_script(client, request, parent)
@@ -698,6 +737,24 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if need_script and not field_str(parent, "Voiceover_Script") and not field_str(ctx.get("parent") or parent, "Voiceover_Script"):
         parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
         ctx["parent"] = parent
+        if not field_str(parent, "Voiceover_Script") and not script_locked(request):
+            # Some SAI1 responses have every slide silent, including after
+            # the retry. Use only the existing creator-facing caption as a
+            # bounded, reviewable fallback. Nothing reaches scheduling here.
+            existing_copy = voiceover_from_existing_caption(parent)
+            if existing_copy:
+                apply_voiceover_script(
+                    client, parent, {"voiceover_script": existing_copy}, locked=False
+                )
+                # Clear any SAI1-created all-silent slide timeline so P2
+                # synthesizes one continuous spoken track, not silence.
+                ensure_slide_voiceover_timeline(
+                    client,
+                    request,
+                    parent,
+                    {},
+                    total=max(slide_total, len(covered) + needed),
+                )
         if not field_str(parent, "Voiceover_Script"):
             raise StepBlocked("SAI1 did not return a voiceover script")
     return "audio"
