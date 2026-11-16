@@ -183,6 +183,7 @@ def health():
                 {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
                 {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
                 {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
+                {"name": "studio-asset-library-job", "path": "/jobs/studio-asset-library/<job_id>"},
                 {"name": "studio-asset-watermark", "path": "/jobs/studio-asset-watermark"},
                 {"name": "studio-asset-library-rename", "path": "/jobs/studio-asset-library-rename"},
                 {"name": "studio-ai-image", "path": "/jobs/studio-ai-image"},
@@ -635,9 +636,24 @@ def run_studio_asset_library():
     profile_name = str(request.form.get("profile_name") or request.form.get("content_profile_name") or "").strip()
     skip_source_raw = str(request.form.get("skip_source_master") or "").strip().lower()
     skip_source_master = skip_source_raw in {"1", "true", "yes", "on"}
+    async_raw = str(request.form.get("async") or request.args.get("async") or "").strip().lower()
+    # Default async: Worker→tunnel cannot hold screen+watermark+Drive in one request.
+    # Pass async=0 only for local/sync diagnostics.
+    async_mode = async_raw not in {"0", "false", "no", "off"}
     content = upload.read() if upload else b""
     if not content:
         return jsonify({"error": "file is required"}), 422
+    if async_mode:
+        from studio_library.async_jobs import start_library_ingest_job
+        job_id = start_library_ingest_job(
+            content=content,
+            filename=filename,
+            mime_type=mime_type,
+            profile_name=profile_name,
+            skip_source_master=skip_source_master,
+        )
+        logger.info("job=studio-asset-library async accepted job_id=%s file=%s", job_id, filename)
+        return jsonify({"ok": True, "status": "processing", "job_id": job_id}), 202
     from studio_library.processor import ingest_studio_library_asset
     try:
         result = ingest_studio_library_asset(
@@ -659,6 +675,18 @@ def run_studio_asset_library():
         result.get("kind"),
     )
     return jsonify(result), 201
+
+
+@app.get("/jobs/studio-asset-library/<job_id>")
+def get_studio_asset_library_job(job_id: str):
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    from studio_library.async_jobs import get_library_ingest_job
+    job = get_library_ingest_job(job_id)
+    if not job:
+        return jsonify({"error": "unknown studio-asset-library job", "job_id": job_id}), 404
+    return jsonify(job), 200
 
 
 @app.post("/jobs/studio-asset-watermark")

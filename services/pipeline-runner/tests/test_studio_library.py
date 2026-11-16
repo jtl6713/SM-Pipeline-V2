@@ -203,6 +203,9 @@ def test_existing_chicago_asset_gets_watermarked_derivative(monkeypatch):
 def test_brand_watermark_bytes_prefers_authenticated_drive(monkeypatch):
     from branding import watermark as watermark_module
 
+    watermark_module._BRAND_WATERMARK_CACHE["bytes"] = b""
+    watermark_module._BRAND_WATERMARK_CACHE["at"] = 0.0
+
     class _Airtable:
         def list_records(self, *_args, **_kwargs):
             return [{
@@ -226,3 +229,36 @@ def test_brand_watermark_bytes_prefers_authenticated_drive(monkeypatch):
     )
 
     assert watermark_module.brand_watermark_bytes(_Airtable()) == b"official-watermark"
+    # Second call must use the in-process cache (no second Airtable/Drive hit).
+    assert watermark_module.brand_watermark_bytes(_Airtable()) == b"official-watermark"
+
+
+def test_async_library_ingest_job_completes(monkeypatch):
+    import time
+    from studio_library import async_jobs
+
+    monkeypatch.setattr(
+        "studio_library.processor.ingest_studio_library_asset",
+        lambda **_kwargs: {
+            "ok": True,
+            "google_drive_file_id": "driveAsync1",
+            "google_drive_url": "https://drive.google.com/uc?export=download&id=driveAsync1",
+        },
+    )
+    job_id = async_jobs.start_library_ingest_job(
+        content=b"photo-bytes",
+        filename="pier.jpg",
+        mime_type="image/jpeg",
+        profile_name="ChicagoShining",
+        skip_source_master=True,
+    )
+    deadline = time.time() + 2
+    job = None
+    while time.time() < deadline:
+        job = async_jobs.get_library_ingest_job(job_id)
+        if job and job.get("status") in {"ok", "error"}:
+            break
+        time.sleep(0.05)
+    assert job is not None
+    assert job["status"] == "ok"
+    assert job["result"]["google_drive_file_id"] == "driveAsync1"

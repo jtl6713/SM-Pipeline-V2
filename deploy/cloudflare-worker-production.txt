@@ -1307,3 +1307,4 @@ Deploy 2026-11-15 Worker 0.10.963-purge-fanout-dupes: Strip/purge Content 1861/1
 2026-11-15: Deploy Worker 0.10.965-awaiting-approval-needs-eyes — Home Awaiting Approval uses Factory Needs eyes package gate.
 2026-11-15: Deploy Worker 0.10.966-overview-awaiting-package-fields — OVERVIEW_OUTPUT_SELECT includes package evidence so Home Awaiting Approval can match Factory Needs eyes.
 2026-11-15: Deploy Worker 0.10.967-library-upload-drive-timeout — skip sync source-master Drive put; hard-timeout promote with clear 504 (Asset Manager gateway kills).
+2026-11-15: Deploy Worker 0.10.968-library-upload-async — accept library ingest as runner job + poll; stop holding one tunnel request for screen+watermark+Drive.

@@ -805,3 +805,4 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-15: Deploy Pages UI 0.6.953-library-upload-overlay-errors — summarize overlay vs Drive/pipeline upload failures.
 2026-11-15: Deploy Studio Pages UI 0.6.954-factory-stale-selection-recovery (PRs #2027/#2028); preserve remaining Factory approvals after one stale output. Validate custom-domain release.
 2026-11-15: Deploy Pages UI 0.6.955-awaiting-approval-needs-eyes — Overview Awaiting Approval matches Factory Needs eyes package-ready count.
+2026-11-15: Deploy Pages UI 0.6.956-library-upload-async — Asset Manager waits up to 6 minutes for async Drive confirm.

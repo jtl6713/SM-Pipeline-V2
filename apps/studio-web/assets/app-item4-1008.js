@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.955-awaiting-approval-needs-eyes";
+  const BUILD_ID = "item4-0.6.956-library-upload-async";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25444,7 +25444,8 @@ function timedScriptAssetLabel(asset, index) {
     const notify=(stage,loadedBytes)=>{if(settled)return;if(stage==="verifying"&&lastStage==="verifying")return;lastStage=stage;onTransfer?.({stage,loadedBytes:Math.max(0,Math.min(Number(file?.size)||0,Number(loadedBytes)||0))});};
     // Keep request scope stable even if the header Content Profile changes mid-batch.
     xhr.open("POST",`${apiBase}/api/library?profile=${encodeURIComponent(String(profileId||""))}`);
-    xhr.timeout=180000;
+    // Runner async ingest can take a few minutes for Chicago screen+watermark.
+    xhr.timeout=360000;
     // Do not set Content-Type: XHR supplies the multipart FormData boundary.
     xhr.upload.onprogress=event=>{if(!event.lengthComputable||!event.total)return;const loaded=Math.round((event.loaded/event.total)*(Number(file?.size)||0));notify(event.loaded>=event.total?"verifying":"uploading",loaded);};
     xhr.upload.onload=()=>notify("verifying",Number(file?.size)||0);
