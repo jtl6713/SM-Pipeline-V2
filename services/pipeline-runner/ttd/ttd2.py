@@ -136,12 +136,20 @@ def process_request(
     status = draft_status_from(body).upper()
     result["http_status"] = status_code
     result["tiktok_status"] = status
-    # Completion links are output-scoped bearer credentials. Re-polling must
-    # not revoke the link already delivered by TTD3 (whose email is deduplicated).
-    token = field_str(output, "TikTok_Manual_Completion_Token") or hash_completion_token(
-        completion_token_material(record_id, publish_id)
-    )
-    form_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
+    # Completion links are output-scoped bearer credentials. Hash only
+    # record_id+publish_id (no timestamp) so concurrent TTD2 polls mint the
+    # same token. Once TTD3 has emailed, freeze the stored token/URL so a later
+    # status poll cannot invalidate Mark as Published.
+    expected_token = hash_completion_token(completion_token_material(record_id, publish_id))
+    existing_token = field_str(output, "TikTok_Manual_Completion_Token")
+    existing_url = field_str(output, "TikTok_Manual_Completion_URL")
+    emailed = bool(field_str(output, "TikTok_Draft_Email_Sent_At"))
+    if emailed and existing_token:
+        token = existing_token
+        form_url = existing_url or completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
+    else:
+        token = expected_token if publish_id else (existing_token or expected_token)
+        form_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
     public_ids = public_post_ids_from(body)
 
     # TikTok photo URLs have already been accepted by the Content Posting API,

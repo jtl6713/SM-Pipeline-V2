@@ -196,8 +196,22 @@ def ttd3_eligibility_reason(record: dict[str, Any]) -> str | None:
 def ttd4_form_eligibility_reason(record: dict[str, Any], *, token: str) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
-    if str(token or "").strip() != field_str(record, "TikTok_Manual_Completion_Token"):
-        return "token_mismatch"
+    offered = str(token or "").strip()
+    stored = field_str(record, "TikTok_Manual_Completion_Token")
+    if offered != stored:
+        # Accept the stable record_id+publish_id hash too so a reminted store
+        # still honors an email that already carried the durable credential.
+        from ttd.package import completion_token_material, hash_completion_token
+
+        publish_id = field_str(record, "TikTok_Draft_Publish_ID")
+        record_id = str(record.get("id") or "").strip()
+        stable = (
+            hash_completion_token(completion_token_material(record_id, publish_id))
+            if record_id and publish_id
+            else ""
+        )
+        if not offered or offered not in {stored, stable}:
+            return "token_mismatch"
     if _ci(field_str(record, "Publish_Status")) == "published":
         return "already_published"
     # Do_Not_Publish prohibits initiating or re-sending platform content.
