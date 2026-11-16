@@ -1322,3 +1322,4 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy Worker 0.10.979-exception-columns â€” Past Due is an approved due row with no receipt. Failed is a terminal status. Rescue skips and manual holds leave both columns. Verify /health version 0.10.979-exception-columns.
 2026-11-16: Deploy Worker 0.10.980-ideas-list — Ideas list reads Supabase without a full-table count, and a stuck idea batch no longer blocks the next Generate. Verify /health version 0.10.980-ideas-list.
 2026-11-16: Deploy Worker 0.10.981-tribeca-photos — Photo matching searches the library for the neighborhood, including Tribeca, instead of only the newest city photos. Verify /health version 0.10.981-tribeca-photos.
+2026-11-16: Deploy Worker 0.10.982-story-save — Script a Short save accepts a full storyboard instead of rejecting it as too large. Verify /health version 0.10.982-story-save.

@@ -4125,8 +4125,11 @@ export async function createIdea(request, env, authorization, ctx = null) {
     throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
-  const storyFirst = String(payload?.input_kind || "").trim() === "story-first"
-    ? normalizeStoryFirst(payload?.storyboard, profile.id) : null;
+  let storyFirst = null;
+  if (String(payload?.input_kind || "").trim() === "story-first") {
+    try { storyFirst = normalizeStoryFirst(payload?.storyboard, profile.id); }
+    catch (error) { throw new HttpError(400, error?.message || "Invalid storyboard"); }
+  }
   if (storyFirst?.scenes.some(scene => scene.assigned_asset_id)) {
     throw new HttpError(409, "New Script a Short ideas cannot contain unverified media selections. Save first, then select media.");
   }
@@ -4160,14 +4163,19 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Production_Carousel_Slide_Count: 8,
     Studio_Photo_Wait_Status: "Waiting",
   };
-  if (storyFirst) Object.assign(fields, {
-    Production_Content_Type: "Vertical Short Video",
-    Production_Video_Duration: storyFirst.target_seconds,
-    Production_Video_Clip_Count: storyFirst.scenes.length,
-    Studio_Photo_Wait_Status: "Not Needed",
-    Suggested_Visuals: storyFirstShotChecklist(storyFirst),
-    Production_Config_Notes: upsertStoryFirstNotes("", storyFirst, profile.id),
-  });
+  if (storyFirst) {
+    let notes;
+    try { notes = upsertStoryFirstNotes("", storyFirst, profile.id); }
+    catch (error) { throw new HttpError(400, error?.message || "Invalid storyboard"); }
+    Object.assign(fields, {
+      Production_Content_Type: "Vertical Short Video",
+      Production_Video_Duration: storyFirst.target_seconds,
+      Production_Video_Clip_Count: storyFirst.scenes.length,
+      Studio_Photo_Wait_Status: "Not Needed",
+      Suggested_Visuals: storyFirstShotChecklist(storyFirst),
+      Production_Config_Notes: notes,
+    });
+  }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
     targetSeconds: payload?.vibe_target_seconds ?? payload?.video_duration ?? 15,
