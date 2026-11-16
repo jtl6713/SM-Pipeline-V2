@@ -88,8 +88,18 @@ test("Quality and Helpdesk keep the exact signature and restrained action", () =
   assert.match(service, /studioScanDeskHealOutputs\(env, "fb_preapproval"/);
   assert.match(healing, /scanOutstandingFailedOutputs/);
   assert.doesNotMatch(service, /studioDispatchApprovedPublishNow/);
+  assert.match(service, /fb_story_368_note/);
+  assert.match(service, /FACEBOOK_STORY_RATE_LIMIT_368/);
+  const publisher = fs.readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const story = publisher.slice(publisher.indexOf("export async function studioPublishFacebookPageStory("),
+    publisher.indexOf("/*__STUDIO_WORKER_END:studioPublishFacebookPageStory__*/"));
+  assert.match(story, /facebook_story_rate_limit/);
+  assert.match(story, /studioParkFacebookStoryRateLimit/);
   assert.doesNotMatch(service, /Studio_Publish_Dispatch_Count:\\s*0/);
   const worker = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const slideshow = worker.slice(worker.indexOf("export async function studioReconcileFacebookSlideshows("),
+    worker.indexOf("/*__STUDIO_WORKER_END:studioReconcileFacebookSlideshows__*/"));
+  assert.match(slideshow, /drive\.google\.com\/file\/d\//);
   assert.match(worker, /push\(classifyFacebookStoryRateLimit\(mapped, nowMs\)\)/);
   assert.match(worker, /push\(classifyFacebookStoryRateLimit\(mapOut\(record\), nowMs\)\)/);
 });

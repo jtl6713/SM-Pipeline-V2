@@ -81,6 +81,10 @@ def test_fbs2_stage_gates():
     assert stage_eligibility_reason(_stage()) is None
     assert stage_eligibility_reason(_stage(Platform_Output_Type="Facebook Story")) == "not_facebook_reel"
     assert stage_eligibility_reason(_stage(Final_File_ID="")) == "missing_final_file_id"
+    assert stage_eligibility_reason(_stage(
+        Final_File_ID="",
+        Final_File_URL="https://drive.google.com/file/d/1abcFromUrl/view",
+    )) is None
     assert stage_eligibility_reason(_stage(Publish_Asset_URL="https://media.chicagoshining.com/a.mp4")) == (
         "already_has_publish_asset"
     )

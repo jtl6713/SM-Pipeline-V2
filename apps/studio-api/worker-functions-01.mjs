@@ -13194,6 +13194,40 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  // Stories whose only 368 evidence is the dispatch note stay Ready to Publish
+  // and the publisher would call Graph again. Park them for six hours first.
+  const notedStories = await studioScanDeskHealOutputs(env, "fb_story_368_note", outputTable, {
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}="",FIND("limit how often you can post",{Studio_Publish_Dispatch_Note}&"")>0)',
+  }).catch((error) => {
+    console.warn("Facebook Story 368 note census unavailable", String(error?.message || error));
+    return [];
+  });
+  const notedParked = [];
+  for (const candidate of notedStories) {
+    if (notedParked.length >= limit) break;
+    const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
+    if (!latest || String(f(latest, "Publish_Error_Stage") || "").trim()
+        || f(latest, "Platform_Media_ID") || f(latest, "Platform_Post_ID") || f(latest, "Published_At")) continue;
+    if (!isFacebookPublishRateLimitError(String(f(latest, "Studio_Publish_Dispatch_Note") || ""))) continue;
+    const parkUntil = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    try {
+      await airtableFetch(env, outputTable, latest.id, {
+        method: "PATCH",
+        body: JSON.stringify({ typecast: true, fields: {
+          Publish_Status: "Failed",
+          Publish_Error_Stage: "FACEBOOK_STORY_RATE_LIMIT_368",
+          Publish_Error_Message: "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.",
+          Publish_Retry_Eligible: true,
+          Publish_Next_Retry_At: parkUntil,
+          Publish_Locked_By: "",
+          Publish_Locked_At: null,
+        } }),
+      });
+      notedParked.push({ key: "FB_STORY_RATE_LIMIT_PARK", id: latest.id, until: parkUntil });
+    } catch (error) {
+      console.warn("Facebook Story 368 park failed", latest.id, String(error?.message || error));
+    }
+  }
   // Read-only Meta verification for previously exhausted Graph 368 holds.
   // Exact saved video/media identity only; an absent Graph entry NEVER permits
   // rearming or resetting the original dispatch counter.
@@ -13386,7 +13420,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
       blocked, recovered: recovered.map(({ output_id, state }) => ({ output_id, state })),
     }));
   }
-  return [...remoteHealed, ...evidenceHealed, ...recovered];
+  return [...notedParked, ...remoteHealed, ...evidenceHealed, ...recovered];
 }
 /*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/
 

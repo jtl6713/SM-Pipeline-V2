@@ -22,6 +22,7 @@ import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mj
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
@@ -12555,7 +12556,50 @@ export async function studioPublishInstagramFeedPhotoInner(env, record) {
 }
 /*__STUDIO_WORKER_END:studioPublishInstagramFeedPhotoInner__*/
 
+const FB_STORY_RATE_LIMIT_MS = 6 * 60 * 60 * 1000;
+
+function facebookStoryRateLimitText(record) {
+  return [
+    f(record, "Publish_Error_Message"),
+    f(record, "Publish_Error_Stage"),
+    f(record, "Studio_Publish_Dispatch_Note"),
+    f(record, "FB_Slideshow_Error_Message"),
+  ].map((value) => String(value || "")).join(" ");
+}
+
+async function studioParkFacebookStoryRateLimit(env, record, message) {
+  const existing = Date.parse(String(f(record, "Publish_Next_Retry_At") || ""));
+  const parkUntil = Number.isFinite(existing) && existing > Date.now()
+    ? new Date(existing).toISOString()
+    : new Date(Date.now() + FB_STORY_RATE_LIMIT_MS).toISOString();
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({ typecast: true, fields: {
+      Publish_Status: "Failed",
+      Publish_Error_Stage: "FACEBOOK_STORY_RATE_LIMIT_368",
+      Publish_Error_Message: String(message || "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.").slice(0, 900),
+      Publish_Retry_Eligible: true,
+      Publish_Next_Retry_At: parkUntil,
+      Publish_Locked_By: "",
+      Publish_Locked_At: null,
+    } }),
+  });
+  return { ok: false, skipped: "facebook_story_rate_limit", until: parkUntil };
+}
+
 export async function studioPublishFacebookPageStory(env, record) {
+  const stage = String(f(record, "Publish_Error_Stage") || "");
+  const retryMs = Date.parse(String(f(record, "Publish_Next_Retry_At") || ""));
+  const noRemoteStory = !String(f(record, "Platform_Media_ID") || "").trim()
+    && !String(f(record, "Platform_Post_ID") || "").trim();
+  if (stage === "FACEBOOK_STORY_RATE_LIMIT_368" && Number.isFinite(retryMs) && retryMs > Date.now()) {
+    return { ok: false, skipped: "facebook_story_rate_limit" };
+  }
+  if (noRemoteStory && stage !== "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"
+      && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record))
+      && !(stage === "FACEBOOK_STORY_RATE_LIMIT_368" && Number.isFinite(retryMs) && retryMs <= Date.now())) {
+    return studioParkFacebookStoryRateLimit(env, record);
+  }
   const preview = String(f(record, "Publish_Asset_URL") || f(record, "Studio_Preview_URL") || "").trim();
   if (!preview.startsWith("https://media.chicagoshining.com/")) {
     return { ok: false, skipped: "missing-cdn-preview" };
@@ -12627,7 +12671,8 @@ export async function studioPublishFacebookPageStory(env, record) {
   if (Number(f(record, "Studio_Publish_Dispatch_Count") || 0) > 0 &&
       /(?:QA-FB-STORY-368|FB-STORY-GRAPH|remote.verification)/i.test(
         String(f(record, "Studio_Publish_Dispatch_Note") || "") + " " +
-        String(f(record, "Publish_Error_Stage") || ""))) {
+        String(f(record, "Publish_Error_Stage") || "")) &&
+      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
         Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",
@@ -12648,7 +12693,11 @@ export async function studioPublishFacebookPageStory(env, record) {
   const start = await startResponse.json().catch(() => ({}));
   if (!startResponse.ok || !start.video_id || !start.upload_url) {
     console.warn("facebook story start failed", startResponse.status, start?.error?.message || "");
-    return { ok: false, error: start?.error?.message || `start ${startResponse.status}` };
+    const startError = start?.error?.message || `start ${startResponse.status}`;
+    if (isFacebookPublishRateLimitError(startError + " " + JSON.stringify(start?.error || {}))) {
+      return studioParkFacebookStoryRateLimit(env, record, startError);
+    }
+    return { ok: false, error: startError };
   }
 
   // Persist the upload identity before the first media upload or finish POST.
@@ -12896,6 +12945,13 @@ export async function studioEnsureFacebookSlideshowAsset(env, record) {
   const publicUrl = String(f(record, "FB_Slideshow_Public_URL") || "").trim();
   if (/^video ready$/i.test(status) && publicUrl) {
     return { ok: true, skipped: "already-ready", target: "FBS1" };
+  }
+  // The MP4 already exists on Drive. FBS1 would skip Video Ready; FBS2 copies
+  // it to the public publish host. A miss parks instead of staying Ready to Publish.
+  const driveFinal = String(f(record, "Final_File_ID") || "").trim()
+    || /drive\.google\.com\/file\/d\//i.test(String(f(record, "Final_File_URL") || ""));
+  if (/^video ready$/i.test(status) && !publicUrl && driveFinal) {
+    return studioPulseFbs2(env, record);
   }
   const created = await studioPulseFbs1(env, record);
   if (!created.ok) return created;

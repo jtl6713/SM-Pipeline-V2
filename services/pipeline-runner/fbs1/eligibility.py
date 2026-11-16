@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from asset.helpers import as_bool
 from fbs1.constants import STATUS_READY_TO_RENDER, STATUS_RENDERING, STATUS_RETRY_PENDING
 from render.fields import field_str
+
+_DRIVE_FILE_ID = re.compile(r"drive\.google\.com/file/d/([A-Za-z0-9_-]+)")
+
+
+def drive_final_file_id(record: dict[str, Any]) -> str:
+    """Drive file id from Final_File_ID, or the id embedded in Final_File_URL."""
+    explicit = field_str(record, "Final_File_ID")
+    if explicit:
+        return explicit
+    match = _DRIVE_FILE_ID.search(field_str(record, "Final_File_URL"))
+    return match.group(1) if match else ""
 
 
 def _ci(value: Any) -> str:
@@ -64,7 +76,7 @@ def stage_eligibility_reason(record: dict[str, Any]) -> str | None:
         return "output_not_approved_for_publishing"
     if _ci(field_str(record, "Review_Status")) != "approved":
         return "review_not_approved"
-    if not field_str(record, "Final_File_ID"):
+    if not drive_final_file_id(record):
         return "missing_final_file_id"
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"

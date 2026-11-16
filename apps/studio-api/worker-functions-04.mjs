@@ -2622,7 +2622,7 @@ export async function studioReconcileFacebookSlideshows(env, options = {}) {
   try {
     processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Final_File_ID}!="",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",OR({Final_File_ID}!="",FIND("drive.google.com/file/d/",{Final_File_URL}&"")>0),{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))))',
     });
   } catch (error) {
     console.warn("facebook slideshow poll reconcile scan failed", error);
