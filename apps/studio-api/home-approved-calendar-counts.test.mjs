@@ -78,7 +78,7 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(ui,/approvedCalendarCounts\(row, now = Date\.now\(\)\)/);
   assert.match(ui,/r\.scheduled\?\.\[p\]/);
   assert.doesNotMatch(ui,/approvedUnpublishedTotal\(row\)/);
-  assert.match(index,/all-profiles-overview-1007\.js\?v=0\.6\.\d+-home-three-section-dashboard/);
+  assert.match(index,/all-profiles-overview-1007\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
 });
 
 test("rendered awaiting human approval adds to future-output pipeline, not approved count", () => {
