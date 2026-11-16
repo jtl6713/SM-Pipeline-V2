@@ -24,10 +24,17 @@
   const put = (parent, ...children) => { children.forEach(child => parent.appendChild(child)); return parent; };
   function report(message, error = false) {
     const text = String(message || "");
-    status.textContent = /signal timed out|supabase request timed out/i.test(text)
+    const shown = /signal timed out|supabase request timed out/i.test(text)
       ? "Studio took too long to answer. Refresh saved ideas, or try Generate again."
       : text;
+    status.textContent = shown;
     status.className = "form-message" + (error ? " error-text" : "");
+    const inline = $("storyFirstSaveStatus");
+    if (inline) {
+      inline.textContent = shown;
+      inline.className = "form-message" + (error ? " error-text" : "");
+      if (error) inline.scrollIntoView({ block: "nearest" });
+    }
   }
   async function call(path, options = {}) {
     const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 150000;
@@ -85,7 +92,37 @@
     current.summary = String($("storyFirstSummary").value || "").trim();
     if (!current.title) throw new Error("Give this storyboard a title before saving.");
     if (current.summary.length > 5000) throw new Error("Creative direction must be 5,000 characters or fewer.");
+    sealStoryTimeline(current.story);
     return current.story;
+  }
+  // The writer returns fractional scene times. Rounding those independently
+  // leaves a gap, and Save then fails before an Idea exists. Store one
+  // contiguous timeline that ends at the short's duration.
+  function sealStoryTimeline(story) {
+    const scenes = story?.scenes;
+    if (!Array.isArray(scenes) || !scenes.length) return story;
+    let seconds = Math.round(Number(story.target_seconds) || 30);
+    if (!Number.isFinite(seconds)) seconds = 30;
+    seconds = Math.min(180, Math.max(5, seconds, scenes.length));
+    const weights = scenes.map((scene) => {
+      const match = /^(\d{1,3})\s*-\s*(\d{1,3})$/.exec(String(scene.time || "").replace(/[–—]/g, "-").trim());
+      const span = match ? Math.max(1, Number(match[2]) - Number(match[1])) : 1;
+      const hold = Math.max(0, Number(scene.music_only_last_seconds) || 0);
+      return Math.max(1, span, hold);
+    });
+    const last = weights.length - 1;
+    const minLast = Math.max(1, Number(scenes[last].music_only_last_seconds) || 0);
+    weights[last] = Math.max(minLast, weights[last] + (seconds - weights.reduce((sum, n) => sum + n, 0)));
+    const total = weights.reduce((sum, n) => sum + n, 0);
+    if (total !== seconds) seconds = Math.min(180, Math.max(seconds, total));
+    let cursor = 0;
+    scenes.forEach((scene, index) => {
+      const end = index === scenes.length - 1 ? seconds : cursor + weights[index];
+      scene.time = cursor + "-" + end;
+      cursor = end;
+    });
+    story.target_seconds = seconds;
+    return story;
   }
   function clock(t) { return String(t || "").replace(/-/g, "–") + "s"; }
   async function refresh(keep = false) {
@@ -211,13 +248,16 @@
   }
   async function save() {
     if (current.busy) throw new Error("Another storyboard action is still running.");
-    const story = readForm();
-    const id = assertProfile();
-    current.busy = true;
     const saveButton = $("storyFirstSave");
-    saveButton.disabled = true;
-    report("Saving storyboard to Airtable…");
+    current.busy = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = "Saving…";
+    }
+    report("Saving storyboard…");
     try {
+      const story = readForm();
+      const id = assertProfile();
       const body = {
         title: current.title,
         summary: current.summary,
@@ -278,7 +318,10 @@
       return result.record;
     } finally {
       current.busy = false;
-      saveButton.disabled = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = current.record ? "Save changes to idea" : "Save idea";
+      }
     }
   }
   async function openAssetManager() {
@@ -1472,7 +1515,8 @@
       mode.addEventListener("change",()=>{shot.decision=mode.value;renderActions();markEditing();});
       card.appendChild(actions);renderActions();list.appendChild(card);
     });
-    $("storyFirstSave").textContent=current.record?"Save changes to idea":"Save idea";
+    const saveButton = $("storyFirstSave");
+    if (saveButton && !current.busy) saveButton.textContent = current.record ? "Save changes to idea" : "Save idea";
     scenes.forEach((_,i)=>discoverScene(i));
   }
   // Reject the whole AI storyboard, not individual image candidates. This is a
@@ -1615,6 +1659,7 @@
         schema: "story-first.1", profile_id: id, target_seconds: Number(proposal.duration_seconds || 30),
         status: "awaiting_shots", publications_blocked: true, scenes,
       };
+      sealStoryTimeline(current.story);
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Choose Media sourcing on each scene, then review recommendations or generate/supply your own. Save partial progress anytime.");

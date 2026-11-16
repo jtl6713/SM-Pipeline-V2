@@ -173,7 +173,10 @@ export function upsertStoryFirstNotes(notes, story, profileId = "") {
     .filter(line => line.trim());
   if (!retained.some(line => /^ez-photo-wait=off$/i.test(line.trim()))) retained.unshift("ez-photo-wait=off");
   const next = [...retained, STORY_FIRST_PREFIX + JSON.stringify(validated)].join("\n");
-  if (next.length > 9800) throw new RangeError("Storyboard is too large for Idea notes");
+  // A Script a Short carries prompts and library candidates for every scene.
+  // 9,800 characters rejected that storyboard before the Idea was written.
+  // Airtable long text allows 100,000; stay under that with room for other notes.
+  if (next.length > 90000) throw new RangeError("Storyboard is too large for Idea notes");
   return next;
 }
 

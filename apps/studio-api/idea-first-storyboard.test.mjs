@@ -22,6 +22,21 @@ const asset = (id,profile=CHICAGO, overrides={}) => ({id,fields:{
   Asset_Status:"Available","Google Drive File ID":"file-123456",
   Media_Class:"Image",MIME_Type:"image/jpeg",...overrides,
 }});
+test("a full short with prompts and library candidates still saves", () => {
+  const scenes = Array.from({ length: 8 }, (_, index) => scene(
+    `${index * 4}-${(index + 1) * 4}`,
+    `${"Skyline detail ".repeat(12)}${index + 1}`,
+    {
+      voiceover: "Narration ".repeat(20),
+      ai_prompt: "Prompt ".repeat(40),
+      candidate_assets: [1, 2, 3].map((n) => ({ id: `recCandidate${index}${n}`.padEnd(17, "x").slice(0, 17), reason: "Location match ".repeat(4) })),
+    },
+  ));
+  const notes = upsertStoryFirstNotes("", { ...idea, target_seconds: 32, scenes }, CHICAGO);
+  assert.ok(notes.length > 9800);
+  assert.ok(notes.length <= 90000);
+  assert.equal(parseStoryFirstNotes(notes).scenes.length, 8);
+});
 test("creative scene and editable script survive an Airtable Idea save and reopen",()=>{
   const normalized=normalizeStoryFirst(idea,CHICAGO);
   assert.equal(normalized.scenes.length,3);
