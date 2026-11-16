@@ -230,12 +230,13 @@ export function homeApprovedExceptionKind(row, now = Date.now()) {
 }
 
 export function homeIsUnpublishedFailure(row) {
-  if (!row || facebookGraphCooldown(row)) return false;
+  if (!row || facebookGraphCooldown(row) || homeNonterminalPublishError(row)) return false;
   if (row.published_at || row.platform_post_url || row.manual_published_url) return false;
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   const render = String(row.render_status || "").trim().toLowerCase();
-  return publish === "failed" || output === "failed" || render === "failed";
+  const state = String(row.studio_state || "").trim().toLowerCase();
+  return publish === "failed" || output === "failed" || render === "failed" || state === "failed";
 }
 
 export function homeOutputContribution(row, now = Date.now()) {
