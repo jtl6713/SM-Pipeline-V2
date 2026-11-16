@@ -5937,6 +5937,9 @@ function transferQueueWriteThroughRow(record) {
   copy("Target_Drive_Folder_ID", "target_drive_folder_id", transferQueueText(fields.Target_Drive_Folder_ID));
   copy("Target_File_Name", "target_file_name", transferQueueText(fields.Target_File_Name));
   copy("Variant_Style", "variant_style", transferQueueText(fields.Variant_Style));
+  copy("Drive_File_ID", "drive_file_id", transferQueueText(fields.Drive_File_ID));
+  copy("Drive_URL", "drive_url", transferQueueText(fields.Drive_URL));
+  copy("Media_Asset_Record_ID", "media_asset_record_id", transferQueueText(fields.Media_Asset_Record_ID));
   copy("Preview_Status", "preview_status", transferQueueText(selectName(fields.Preview_Status) || fields.Preview_Status));
   copy("Preview_R2_Key", "preview_r2_key", transferQueueText(fields.Preview_R2_Key));
   copy("Preview_URL", "preview_url", transferQueueText(fields.Preview_URL));
@@ -6065,6 +6068,16 @@ export async function syncAirtableTransferQueueRowToSupabase(env, record, option
     return options.create === true
       ? { ok: false, reason: "create_identity" }
       : { skipped: true, reason: "empty_patch" };
+  }
+  // Partial Ready/claim patches must merge densified payload keys. A replace
+  // drops Transfer_ID / Production_Request_Record_ID and Frames flip to Error.
+  if (isPlainObject(row.payload) && options.create !== true) {
+    const existing = await supabaseRest(
+      env,
+      `studio_media_transfer_queue?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+    ).catch(() => []);
+    const prior = isPlainObject(existing?.[0]?.payload) ? existing[0].payload : {};
+    row.payload = { ...prior, ...row.payload };
   }
   await upsertChunk(env, "studio_media_transfer_queue", [{
     airtable_record_id: record.id,
@@ -7244,6 +7257,8 @@ const QUEUE_PAYLOAD_FIELDS = {
   target_drive_folder_id: "Target_Drive_Folder_ID",
   target_file_name: "Target_File_Name",
   variant_style: "Variant_Style",
+  drive_file_id: "Drive_File_ID",
+  drive_url: "Drive_URL",
   preview_status: "Preview_Status",
   preview_r2_key: "Preview_R2_Key",
   preview_url: "Preview_URL",

@@ -173,6 +173,8 @@ def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatc
 
     def fake_request(method, url, *, headers, json, timeout):
         seen.append((method, url, json))
+        if method == "GET" and "studio_media_transfer_queue?" in url and "select=payload" in url:
+            return Response([{"airtable_record_id": "recQueue1", "payload": {"transfer_id": "keep"}}])
         if "studio_side_effect_outbox" in url:
             return Response('{"code":"PGRST205"}', status_code=404)
         return Response("")
@@ -202,6 +204,51 @@ def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatc
     assert not any("studio_media_transfer_targets" in row[1] or "production_request_outputs" in row[1] for row in seen)
 
 
+def test_queue_ready_update_merges_existing_payload(monkeypatch):
+    """Partial Ready patches must keep Transfer_ID / Production_Request_Record_ID."""
+    seen = []
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if method == "GET" and "studio_media_transfer_queue?" in url and "select=payload" in url:
+            return Response([{
+                "airtable_record_id": "recQueueMerge",
+                "payload": {
+                    "transfer_id": "ITEM4-VARIANT-keep-me",
+                    "production_request_record_id": "recPR1",
+                    "asset_kind": "Platform Variant",
+                    "target_drive_folder_id": "folder1",
+                },
+            }])
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Airtable closed")))
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(
+        studio_write_source="supabase",
+        studio_phase6_write_source="supabase",
+    )).update_record(
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        "recQueueMerge",
+        {
+            "Transfer_Status": "Ready",
+            "Generated_Media_Asset": ["recMediaReady"],
+            "Preview_Status": "Pending",
+        },
+    )
+    assert record["id"] == "recQueueMerge"
+    posts = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
+    assert len(posts) == 1
+    payload = posts[0][2][0]["payload"]
+    assert payload["transfer_id"] == "ITEM4-VARIANT-keep-me"
+    assert payload["production_request_record_id"] == "recPR1"
+    assert payload["target_drive_folder_id"] == "folder1"
+    assert payload["generated_media_asset_id"] == "recMediaReady"
+    assert payload["preview_status"] == "Pending"
+
+
 def test_queue_update_mirrors_target_links_without_file_bytes(monkeypatch):
     seen = []
 
@@ -219,6 +266,8 @@ def test_queue_update_mirrors_target_links_without_file_bytes(monkeypatch):
     def fake_request(method, url, *, headers, json, timeout):
         seen.append((method, url, json))
         if method == "GET" and "studio_media_transfer_queue?" in url:
+            if "select=payload" in url:
+                return Response([{"airtable_record_id": "recQueue1", "payload": {"transfer_id": "keep"}}])
             return Response([{"id": "11111111-1111-1111-1111-111111111111", "airtable_record_id": "recQueue1"}])
         if method == "GET" and "production_request_outputs?" in url:
             return Response([{"id": "22222222-2222-2222-2222-222222222222", "airtable_record_id": "recProOutput1"}])

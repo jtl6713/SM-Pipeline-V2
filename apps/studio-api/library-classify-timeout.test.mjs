@@ -22,7 +22,7 @@ test("Worker heals stale library Processing and classifies small uploads inline"
   assert.match(worker, /studioHealStaleLibraryClassification\(env/);
 
 
-  assert.match(worker, /0\.10\.991-phase6-duplicate-drafts/);
+  assert.match(worker, /0\.10\.992-queue-payload-merge/);
 });
 
 test("Asset Manager Classifying watch expires at 60 seconds", () => {

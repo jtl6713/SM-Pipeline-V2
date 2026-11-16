@@ -60,5 +60,5 @@ test("existingDraftForIdea and findDraft fall back to the FK before minting", ()
 });
 
 test("Worker version bumps for Phase 6 duplicate-draft fix", () => {
-  assert.match(worker, /0\.10\.991-phase6-duplicate-drafts/);
+  assert.match(worker, /0\.10\.992-queue-payload-merge/);
 });
