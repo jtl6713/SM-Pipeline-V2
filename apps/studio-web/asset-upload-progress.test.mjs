@@ -164,6 +164,8 @@ test("queue remains one asset at a time with real result counts and no implicit 
   const end=source.indexOf("function libraryPhotoAccept(",start);
   const queue=source.slice(start,end);
   assert.match(queue,/const chunkSize = 1/);
+  assert.match(queue,/form\.append\("batch_count", String\(files\.length\)\)/);
+  assert.match(queue,/form\.append\("asset_name", reserved\)/);
   assert.match(queue,/await uploadLibraryFileWithProgress\(form/);
   assert.match(queue,/renderLibraryUploadProgress\(\{ phase: "saved"/);
   assert.match(queue,/phase: errors.length \? "partial" : "complete"/);

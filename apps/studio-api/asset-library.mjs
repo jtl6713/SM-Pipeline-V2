@@ -422,7 +422,9 @@ export function libraryBatchNameFilterFormula(baseName) {
   const base = stripLibraryAssetExtension(baseName);
   if (!base) return null;
   const regexEscaped = escapeRegExp(base.toLowerCase()).replace(/"/g, '\\"');
-  const ext = "([.][a-z0-9]{1,8})?";
+  // No curly quantifiers. Airtable treats {1,8} as a field name even inside
+  // a quoted regex, the formula 422s, and the caller treats that as "no names".
+  const ext = "([.][a-z0-9][a-z0-9]?[a-z0-9]?[a-z0-9]?[a-z0-9]?[a-z0-9]?[a-z0-9]?[a-z0-9]?)?";
   return `OR(REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}[0-9]+${ext}$"))`;
 }
 

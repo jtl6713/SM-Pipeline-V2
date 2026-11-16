@@ -268,6 +268,7 @@ test("library batch numbering continues from highest number no matter the file e
     ["Navy Pier 5"]
   );
   assert.match(libraryBatchNameFilterFormula("Navy Pier"), /\[\.\]/);
+  assert.doesNotMatch(libraryBatchNameFilterFormula("Navy Pier"), /\{[0-9]/);
 });
 
 test("explicitly numbered upload names preserve the supplied suffix, without double numbering", () => {

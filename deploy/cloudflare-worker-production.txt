@@ -1313,3 +1313,4 @@ Deploy 2026-11-15 Worker 0.10.963-purge-fanout-dupes: Strip/purge Content 1861/1
 
 Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-content same-final duplicate Platform Outputs across 40 contents (SoR already deleted); strip allowlist for Pipeline snapshots.
 2026-11-16: Deploy Worker 0.10.972-tiktok-stable-completion-token — clear completion token on TikTok resend; pair with stable runner tokens.
+2026-11-16: Deploy Worker 0.10.973-library-sequential-names — Asset Manager sequence uses asset_name=ilike and reserves the picker batch on the first file. Verify /health version 0.10.973-library-sequential-names.
