@@ -82,10 +82,15 @@ test("Home uses platform-output timestamps, explicit future and past due columns
 });
 
 test("rendered awaiting human approval adds to future-output pipeline, not approved count", () => {
+  const CDN = "https://media.chicagoshining.com";
   const review=(platform, renderStatus="Rendered")=>({
     id:"rec12345678901234",platform,studio_state:"Ready for Review",
     output_status:"Ready for Review",render_status:renderStatus,
-    review_status:"",publish_status:"",
+    review_status:"Review Sent",publish_status:"",
+    output_caption: `${platform} skyline cut.`,
+    final_file_url: `${CDN}/studio/previews/${platform}.mp4`,
+    thumbnail_url: `${CDN}/studio/previews/${platform}.jpg`,
+    studio_output_type: "Reel",
   });
   const rows=[
     approved("Instagram",stampFuture),

@@ -20,7 +20,7 @@ test("Worker heals stale library Processing and classifies small uploads inline"
   assert.match(funcs, /studioHealStaleLibraryClassification/);
   assert.match(funcs, /background: uploadedIds\.length > 3/);
   assert.match(worker, /studioHealStaleLibraryClassification\(env/);
-  assert.match(worker, /0\.10\.964-library-upload-overlay-errors/);
+  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
 });
 
 test("Asset Manager Classifying watch expires at 60 seconds", () => {

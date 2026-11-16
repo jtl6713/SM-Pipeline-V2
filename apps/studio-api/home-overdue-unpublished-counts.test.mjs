@@ -27,16 +27,27 @@ test("profile overview includes overdue approved outputs separately from platfor
   assert.equal(homeOutputContribution({ ...late, published_at: "2020-01-01T00:01:00Z" }).overdue_unpublished, 0);
 });
 
-test("awaiting approval is review-ready but not approved or rendering", () => {
-  assert.match(classifier, /state === "Ready for Review" \|\| state === "Awaiting Approval"/);
-  assert.match(classifier, /output === "ready for review"/);
-  assert.ok(classifier.includes('["approved", "rejected", "skipped"].includes(review)'));
-  assert.ok(classifier.includes("ready for render|waiting in render queue"));
-  const ready = { id: "rec12345678901234", studio_state: "Ready for Review",
-    output_status: "Ready for Review", render_status: "Rendered", review_status: "" };
+test("awaiting approval matches Factory Needs eyes package gate", () => {
+  assert.match(classifier, /homeAwaitingApprovalVisible/);
+  assert.match(classifier, /factoryReviewVisibility/);
+  assert.match(ui, /same queue as Factory Needs eyes/i);
+  const CDN = "https://media.chicagoshining.com";
+  const ready = {
+    id: "rec12345678901234",
+    platform: "Instagram",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "Review Sent",
+    output_caption: "Navy Pier lights after dark.",
+    final_file_url: `${CDN}/studio/previews/a.mp4`,
+    thumbnail_url: `${CDN}/studio/previews/a.jpg`,
+    studio_output_type: "Reel",
+  };
   assert.equal(homeOutputContribution(ready).awaiting_approval, 1);
   assert.equal(homeOutputContribution({ ...ready, render_status: "Queued" }).awaiting_approval, 0);
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
+  assert.equal(homeOutputContribution({ ...ready, output_caption: "", final_file_url: "" }).awaiting_approval, 0);
 });
 
 test("Home uses explicit approved future and past due columns, not parentheses", () => {
@@ -46,10 +57,15 @@ test("Home uses explicit approved future and past due columns, not parentheses",
 });
 
 test("Home parentheses count rises for final approval even when schedule is overdue", () => {
+  const CDN = "https://media.chicagoshining.com";
   const base = {
     id:"rec12345678901234", platform:"TikTok",
     studio_state:"Ready for Review", output_status:"Ready for Review",
-    render_status:"Rendered", review_status:"",
+    render_status:"Rendered", review_status:"Review Sent",
+    output_caption: "Riverwalk evening clip.",
+    final_file_url: `${CDN}/studio/previews/t.mp4`,
+    thumbnail_url: `${CDN}/studio/previews/t.jpg`,
+    studio_output_type: "Video Draft",
     scheduled_post_date:"2099-01-01T00:00:00Z",
   };
   const before=homeOutputContribution(base);
@@ -184,7 +200,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
     /if \(airtableDataWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx\.waitUntil\(studioReconcileTiktokDrafts/,
   );
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
-  assert.match(cron, /0\.10\.964-library-upload-overlay-errors/);
+  assert.match(cron, /0\.10\.965-awaiting-approval-needs-eyes/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);

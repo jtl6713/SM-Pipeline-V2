@@ -112,21 +112,33 @@ test("Home approval metric matches actionable review-ready outputs instead of qu
   const end = workerFunctions.indexOf("/*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/", start);
   assert.ok(start >= 0 && end > start, "overview function is available for runtime contract test");
   const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`, { combineHomeContributions, homeOutputContribution, homeIdeaContribution });
+  const CDN = "https://media.chicagoshining.com";
   const base = {
     studio_state: "Ready for Review",
     output_status: "Ready for Review",
     render_status: "Rendered",
-    review_status: "",
+    review_status: "Review Sent",
     publish_status: "Ready to Schedule",
     do_not_publish: false,
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    output_caption: "Factory overview parity clip.",
+    final_file_url: `${CDN}/studio/previews/parity.mp4`,
+    thumbnail_url: `${CDN}/studio/previews/parity.jpg`,
   };
   const rows = [
-    ...Array.from({ length: 14 }, () => ({ ...base })),
-    { ...base, render_status: "Waiting in Render Queue" },
-    { ...base, render_status: "Rendering" },
-    { ...base, review_status: "Approved" },
-    { ...base, publish_status: "Published" },
-    { ...base, do_not_publish: true },
+    ...Array.from({ length: 14 }, (_, i) => ({
+      ...base,
+      id: `recParity0000000${String(i).padStart(2, "0")}`,
+      final_file_url: `${CDN}/studio/previews/parity-${i}.mp4`,
+      thumbnail_url: `${CDN}/studio/previews/parity-${i}.jpg`,
+    })),
+    { ...base, id: "recQueued000000001", render_status: "Waiting in Render Queue" },
+    { ...base, id: "recRendering0000001", render_status: "Rendering" },
+    { ...base, id: "recApproved00000001", review_status: "Approved" },
+    { ...base, id: "recPublished0000001", publish_status: "Published" },
+    // Incomplete package must not inflate Overview Awaiting Approval.
+    { ...base, id: "recIncomplete000001", output_caption: "", final_file_url: "", thumbnail_url: "" },
   ];
   assert.equal(fn(rows, []).awaiting_approval, 14);
 });

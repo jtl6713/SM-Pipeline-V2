@@ -3,30 +3,41 @@ import assert from "node:assert/strict";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
   combineHomeContributions, homeContributionDelta, homeOverdueDueAt, homeApprovedUpcomingAt, homeApprovedUnpublished,
+  homeAwaitingApprovalVisible,
 } from "./profile-summary-classification.mjs";
 
+const CDN = "https://media.chicagoshining.com";
 const base = {
   id: "rec00000000000001",
   platform: "Instagram",
   studio_state: "Ready for Review",
   output_status: "Ready for Review",
-  review_status: "Pending",
-  render_status: "Complete",
+  review_status: "Review Sent",
+  render_status: "Rendered",
   publish_status: "",
+  output_caption: "Chicago night skyline walk.",
+  final_file_url: `${CDN}/studio/previews/rec00000000000001.mp4`,
+  thumbnail_url: `${CDN}/studio/previews/rec00000000000001.jpg`,
+  studio_output_type: "Reel",
 };
 
-test("review count is actionable, not merely Ready for Review state", () => {
+test("awaiting approval matches Factory Needs eyes package gate", () => {
+  assert.equal(homeAwaitingApprovalVisible(base), true);
   assert.equal(homeOutputContribution(base).awaiting_approval, 1);
   for (const patch of [
     { render_status: "Waiting in render queue" },
     { render_status: "Rendering" },
     { output_status: "Approved for Publishing" },
     { review_status: "Approved" },
-    { do_not_publish: true },
     { output_notes: "origin=az-finished-video" },
+    { final_file_url: "", thumbnail_url: "" },
+    { output_caption: "" },
   ]) assert.equal(homeOutputContribution({ ...base, ...patch }).awaiting_approval, 0);
-  // Overview drops file URLs, so the shared label becomes Preparing Assets
-  // while Output_Status is still Ready for Review.
+  // Do_Not_Publish with a complete package can still appear in Needs eyes for
+  // operator hold-release — same as Factory visibility, so it still counts.
+  assert.equal(homeOutputContribution({ ...base, do_not_publish: true }).awaiting_approval, 1);
+  // Overview label may fall through to Preparing Assets while Output_Status
+  // is still Ready for Review; package-ready rows still count.
   assert.equal(homeOutputContribution({
     ...base,
     studio_state: "Preparing Assets",
@@ -35,6 +46,23 @@ test("review count is actionable, not merely Ready for Review state", () => {
     ...base,
     studio_state: "Preparing Assets",
     review_status: "Approved",
+  }).awaiting_approval, 0);
+});
+
+test("native photo Ready for Review counts when compact package fields are present", () => {
+  const native = {
+    ...base,
+    render_status: "Native Photo Route",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    final_file_url: "",
+    studio_preview_url: `${CDN}/studio/previews/carousel.jpg`,
+    thumbnail_url: `${CDN}/studio/previews/cover.jpg`,
+    selected_clip_count: 4,
+  };
+  assert.equal(homeOutputContribution(native).awaiting_approval, 1);
+  assert.equal(homeOutputContribution({
+    ...native, selected_clip_count: 0, studio_preview_url: "",
   }).awaiting_approval, 0);
 });
 

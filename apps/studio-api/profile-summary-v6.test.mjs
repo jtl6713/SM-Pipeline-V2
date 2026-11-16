@@ -12,9 +12,18 @@ const approved = (platform, scheduled_post_date) => ({
   output_status: "Approved for Publishing", studio_state: "Scheduled",
   publish_status: "Ready to Publish",
 });
+const CDN = "https://media.chicagoshining.com";
 const pending = (platform) => ({
-  platform, review_status: "Pending", output_status: "Ready for Review",
-  studio_state: "Ready for Review", render_status: "Complete",
+  id: `recPending0000000${platform.slice(0, 2)}`,
+  platform,
+  review_status: "Review Sent",
+  output_status: "Ready for Review",
+  studio_state: "Ready for Review",
+  render_status: "Rendered",
+  output_caption: `${platform} review package`,
+  final_file_url: `${CDN}/studio/previews/${platform}.mp4`,
+  thumbnail_url: `${CDN}/studio/previews/${platform}.jpg`,
+  studio_output_type: "Reel",
 });
 const cityIds = ["rec00000000000001", "rec00000000000002", "rec00000000000003", "rec00000000000004"];
 const cityNames = ["Chicago", "New York", "Los Angeles", "Miami"];
