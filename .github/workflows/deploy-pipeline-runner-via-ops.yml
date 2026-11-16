@@ -14,7 +14,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     env:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
@@ -94,36 +94,64 @@ jobs:
           selected=''
           for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
             if [[ -z "$candidate" ]]; then continue; fi
-            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}'               -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
             if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
               selected="$candidate"; break
             fi
           done
           test -n "$selected"
 
-          code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}'             -X POST "$BASE/api/run"             -H "Authorization: Bearer $selected"             -H 'Content-Type: application/json'             --data '{"action":"deploy","service":"pipeline-runner","confirm":true}' || true)
-
-          if [[ "$code" == "409" ]]; then
-            JOB=$(jq -r '.jobId // .job.id // empty' /tmp/run.json)
-          else
-            test "$code" = "202"
-            jq -e '.ok==true' /tmp/run.json >/dev/null
-            JOB=$(jq -r '.job.id // empty' /tmp/run.json)
-          fi
+          # Never adopt a 409 busy job — concurrent Speakeasy /api/shell pulses
+          # have been mistaken for a successful deploy (health stayed on the
+          # prior runner version while this step exited 0).
+          JOB=''
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" \
+              -H "Authorization: Bearer $selected" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"deploy","service":"pipeline-runner","confirm":true}' || true)
+            if [[ "$code" == "202" ]] && jq -e '.ok==true and .job.action=="deploy" and .job.service=="pipeline-runner"' /tmp/run.json >/dev/null 2>&1; then
+              JOB=$(jq -r '.job.id // empty' /tmp/run.json)
+              echo "ops_pipeline_runner_fresh_deploy_job=$JOB"
+              break
+            fi
+            if [[ "$code" == "409" ]]; then
+              ACTIVE=$(jq -r '.jobId // .job.id // "unknown"' /tmp/run.json)
+              ACTIVE_ACTION=$(jq -r '.job.action // "unknown"' /tmp/run.json)
+              ACTIVE_SERVICE=$(jq -r '.job.service // "none"' /tmp/run.json)
+              echo "ops_busy attempt=$attempt active_job=$ACTIVE action=$ACTIVE_ACTION service=$ACTIVE_SERVICE waiting_for_fresh_pipeline_runner_deploy"
+              sleep 5
+              continue
+            fi
+            echo "Unable to create fresh pipeline-runner deploy job http=$code" >&2
+            cat /tmp/run.json >&2 || true
+            exit 2
+          done
           test -n "$JOB"
 
-          for i in $(seq 1 100); do
-            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}'               -H "Authorization: Bearer $selected" "$BASE/api/jobs/$JOB" || true)
+          for i in $(seq 1 120); do
+            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $selected" "$BASE/api/jobs/$JOB" || true)
             if [[ "$code" == "200" ]]; then
               status=$(jq -r '.job.status // empty' /tmp/job.json)
               echo "ops_job_status=$status"
               case "$status" in
-                ok) jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json; exit 0 ;;
-                failed) jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json; exit 4 ;;
+                ok)
+                  jq -e '.job.action=="deploy" and .job.service=="pipeline-runner"' /tmp/job.json >/dev/null
+                  jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                  exit 0
+                  ;;
+                failed)
+                  jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
+                  exit 4
+                  ;;
               esac
             fi
             sleep 5
           done
+          echo "ops_pipeline_runner_deploy_timeout=$JOB" >&2
           exit 5
 
       - name: Verify Pipeline Runner health
@@ -133,7 +161,7 @@ jobs:
           set -euo pipefail
           EXPECTED=$(grep '^PIPELINE_RUNNER_CODE_VERSION = ' services/pipeline-runner/config.py | cut -d '"' -f 2)
           test -n "$EXPECTED"
-          for i in $(seq 1 18); do
+          for i in $(seq 1 24); do
             code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
             if [[ "$code" == "200" ]] && jq -e --arg expected "$EXPECTED" '.ok==true and .version==$expected' /tmp/health.json >/dev/null 2>&1; then
               cat /tmp/health.json
@@ -142,6 +170,7 @@ jobs:
             fi
             sleep 5
           done
+          echo "health_verify_failed expected=$EXPECTED" >&2
           cat /tmp/health.json || true
           exit 6
 
