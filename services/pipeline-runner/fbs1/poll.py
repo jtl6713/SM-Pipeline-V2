@@ -34,7 +34,7 @@ from fbs1.constants import (
     STATUS_STAGING,
     STATUS_VIDEO_READY,
 )
-from fbs1.eligibility import poll_eligibility_reason, stage_eligibility_reason
+from fbs1.eligibility import drive_final_file_id, poll_eligibility_reason, stage_eligibility_reason
 from integrations.google_drive import GoogleDriveClient
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
@@ -180,7 +180,9 @@ def process_request(
     stage_reason = stage_eligibility_reason(output)
     preview["poll_reason"] = poll_reason
     preview["stage_reason"] = stage_reason
-    if poll_reason and stage_reason:
+    # Video Ready with no Drive id is not a render poll. Park it as a staging
+    # failure instead of returning slideshow_status_not_rendering forever.
+    if poll_reason and stage_reason and stage_reason != "missing_final_file_id":
         return {"processed": False, "reason": poll_reason, **preview}
     route = "poll" if not poll_reason else "stage"
     preview["route"] = route
@@ -344,15 +346,25 @@ def _process_stage(client: AirtableClient, output: dict[str, Any], preview: dict
     output_id = field_str(output, "Output_ID") or output["id"]
     key = f"{settings['r2_prefix']}/platform-output-{output_id}.mp4"
     public_url = f"{settings['public_base']}/{key}"
+    drive_id = drive_final_file_id(output)
+    if not drive_id:
+        _mark_retry(
+            client,
+            output,
+            stage="FBS2_DIRECT_DRIVE",
+            message="FBS2 could not stage the Facebook Reel. No Drive file id on the final file.",
+            detail="FBS2 direct final-MP4 staging found neither Final_File_ID nor a Drive file id in Final_File_URL.",
+        )
+        return {"processed": False, "reason": "missing_final_file_id", **preview}
     try:
-        content, _mime = GoogleDriveClient().download_file(field_str(output, "Final_File_ID"))
+        content, _mime = GoogleDriveClient().download_file(drive_id)
     except Exception as exc:
         _mark_retry(
             client,
             output,
             stage="FBS2_DIRECT_DRIVE",
             message="FBS2 could not download the existing final MP4 from Google Drive.",
-            detail=f"FBS2 direct final-MP4 staging could not download Final_File_ID {field_str(output, 'Final_File_ID')}.",
+            detail=f"FBS2 direct final-MP4 staging could not download Drive file {drive_id}.",
             payload={"error": str(exc)},
         )
         return {"processed": False, "reason": "drive_download_failed", "error": str(exc), **preview}
@@ -362,7 +374,7 @@ def _process_stage(client: AirtableClient, output: dict[str, Any], preview: dict
             output,
             stage="FBS2_DIRECT_DRIVE",
             message="FBS2 could not download the existing final MP4 from Google Drive.",
-            detail=f"FBS2 direct final-MP4 staging could not download Final_File_ID {field_str(output, 'Final_File_ID')}.",
+            detail=f"FBS2 direct final-MP4 staging could not download Drive file {drive_id}.",
         )
         return {"processed": False, "reason": "drive_download_failed", **preview}
 
@@ -401,6 +413,7 @@ def _process_stage(client: AirtableClient, output: dict[str, Any], preview: dict
         {
             "Publish_Status": PUBLISH_STATUS_READY,
             "FB_Publish_Status": FB_PUBLISH_READY,
+            "Final_File_ID": drive_id,
             "Publish_Asset_URL": public_url,
             "Publish_Locked_At": None,
             "Publish_Locked_By": "",

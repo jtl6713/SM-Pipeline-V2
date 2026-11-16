@@ -13,7 +13,7 @@ test("Idea Batches stay on Airtable under Supabase write source", async () => {
   assert.match(worker, /tblpCKSqcTpDtyst3/);
   assert.match(worker, /method === "GET"\s*&& !studioAirtableArchiveStaysLive\(tableId\)/);
   assert.match(worker, /method !== "GET"\s*&& studioWriteSource\(env\) === "supabase"\s*&& !studioAirtableArchiveStaysLive\(tableId\)/);
-  assert.match(worker, /0\.10\.975-idea-batch-live/);
+  assert.match(worker, /0\.10\.976-fb-reel-stage-story-park/);
   assert.match(ideas, /async function studioMirrorGeneratedIdeas/);
   assert.match(ideas, /await studioMirrorGeneratedIdeas\(env, linkedRecordIds\(f\(record, "Idea Candidates"\)\)\)/);
 });
