@@ -470,12 +470,17 @@ async function executeYoutubeAction(env, target, actionType, comment, deps) {
     return { ok: false, status: "needs_authorization", error: "This profile has no uploader service key available to Studio. No action was sent." };
   }
   // Health is public. Engage routes sit behind the shared secret, so a missing
-  // route looks like 404 only after auth. Detect stale builds up front.
+  // route looks like 404 only after auth. Prefer a clear stale message when the
+  // version cannot include engage — but do not hard-block builds that kept
+  // /youtube/engage after a SERVICE_VERSION rename that dropped "engagement"
+  // (proven: 2026-11-15-durable-upload-dedup still serves /youtube/engage/*).
   try {
     const health = await fetch(`${base}/health`, { method: "GET", headers: { Accept: "application/json" } });
     const healthBody = await health.json().catch(() => ({}));
     const version = String(healthBody?.version || "");
-    if (health.ok && version && !/engagement/i.test(version)) {
+    const advertisesEngagement = /engagement/i.test(version);
+    const retainedEngageRoutes = /durable-upload-dedup/i.test(version);
+    if (health.ok && version && !advertisesEngagement && !retainedEngageRoutes) {
       return {
         ok: false,
         status: "unsupported",

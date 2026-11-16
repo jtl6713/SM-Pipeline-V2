@@ -368,6 +368,8 @@ test("YouTube engage probes uploader health for engagement build before comment"
   const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
   assert.match(service, /\/health/);
   assert.match(service, /\/engagement\/i\.test\(version\)/);
+  assert.match(service, /durable-upload-dedup/);
+  assert.match(service, /retainedEngageRoutes/);
   assert.match(service, /YouTube uploader is stale/);
   assert.match(service, /\/youtube\/engage\/comment/);
   assert.match(service, /YouTube did not return a comment id/);
@@ -428,7 +430,7 @@ test("place review service never exposes an automated publish path", () => {
   assert.match(worker, /studio_place_reviews_v1/);
 
 
-  assert.match(worker, /0\.10\.983-storyboard-notes-room/);
+  assert.match(worker, /0\.10\.984-yt-engage-version-gate/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.
