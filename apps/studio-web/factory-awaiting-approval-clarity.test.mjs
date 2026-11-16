@@ -6,16 +6,17 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test("Factory Needs eyes copy explains why overview Awaiting Approval can read higher", async () => {
+test("Factory Needs eyes and Overview Awaiting Approval claim the same package-ready queue", async () => {
   const html = await readFile(path.join(here, "index.html"), "utf8");
   const overview = await readFile(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
-  assert.match(html, /Approve-ready outputs only/);
-  assert.match(html, /incomplete Ready for Review packages sit in Repair/i);
-  assert.match(html, /Studio overview Awaiting Approval can read higher/);
+  assert.match(html, /Same queue as Studio overview Awaiting Approval/);
+  assert.match(html, /Incomplete packages sit in Repair/);
   assert.match(
     overview,
-    /May be higher than Factory Needs eyes: that gate counts package-ready Approve items only/,
+    /Package-ready platform outputs waiting for your Approve — same queue as Factory Needs eyes/,
   );
+  assert.doesNotMatch(html, /Studio overview Awaiting Approval can read higher/);
+  assert.doesNotMatch(overview, /May be higher than Factory Needs eyes/);
 });
 
 
