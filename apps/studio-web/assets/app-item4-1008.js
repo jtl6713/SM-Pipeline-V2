@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.960-story-save";
+  const BUILD_ID = "item4-0.6.961-storyboard-notes-room";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2775,7 +2775,7 @@
   function updateScriptedShortCharacterCount() {
     const prompt = $("scriptedShortPrompt");
     const count = $("scriptedShortCharacterCount");
-    if (count) count.textContent = `${Number(prompt?.value?.length || 0).toLocaleString()} / 5,000`;
+    if (count) count.textContent = `${Number(prompt?.value?.length || 0).toLocaleString()} / 100,000`;
   }
 
   function initializeScriptedShortDictation() {
@@ -2817,11 +2817,11 @@
         else interim += transcript;
       }
       const separator = startingText && !/\s$/.test(startingText) ? " " : "";
-      const next = `${startingText}${separator}${finalTranscript}${interim}`.slice(0, 5000);
+      const next = `${startingText}${separator}${finalTranscript}${interim}`.slice(0, 100000);
       prompt.value = next;
       updateScriptedShortCharacterCount();
-      if (next.length >= 5000) {
-        status.textContent = "The 5,000-character limit was reached. Review the brief, then Propose.";
+      if (next.length >= 100000) {
+        status.textContent = "The 100,000-character limit was reached. Review the brief, then Propose.";
         recognition.stop();
       }
     };
@@ -9000,7 +9000,7 @@ function timedScriptAssetLabel(asset, index) {
       ezWizardShowForm(
         `<label>Title<input name="title" maxlength="160" required placeholder="${escapeHtml(ideaExample.wizardTitle)}"></label>
          <label>Summary <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
-         <textarea name="summary" maxlength="5000" placeholder="${escapeHtml(ideaExample.ideaSummary)}"></textarea></label>
+         <textarea name="summary" maxlength="100000" placeholder="${escapeHtml(ideaExample.ideaSummary)}"></textarea></label>
          <label>Primary location <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
          <input name="location" maxlength="200" placeholder="${escapeHtml(ideaExample.wizardLocation)}"></label>
          <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,

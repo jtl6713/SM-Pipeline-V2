@@ -1,4 +1,4 @@
-import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
+import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
@@ -4103,7 +4103,7 @@ export function cleanIdeaCreatePayload(payload) {
 
   if (!title) throw new HttpError(400, "Idea title is required");
   if (title.length > 160) throw new HttpError(400, "Idea title must be 160 characters or fewer");
-  if (summary.length > 5000) throw new HttpError(400, "Idea summary must be 5000 characters or fewer");
+  if (summary.length > AIRTABLE_LONG_TEXT_MAX) throw new HttpError(400, "Idea summary must be 100000 characters or fewer");
   if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
 
   return { title, summary, primary_location: primaryLocation };
@@ -4273,7 +4273,7 @@ export function cleanIdeaUpdatePayload(payload) {
 
   if (!title) throw new HttpError(400, "Idea title is required");
   if (title.length > 160) throw new HttpError(400, "Idea title must be 160 characters or fewer");
-  if (summary.length > 5000) throw new HttpError(400, "Idea summary must be 5000 characters or fewer");
+  if (summary.length > AIRTABLE_LONG_TEXT_MAX) throw new HttpError(400, "Idea summary must be 100000 characters or fewer");
   if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
 
   return { title, summary, primary_location: primaryLocation };

@@ -411,11 +411,35 @@ export function ideaManagePhotoPauseActive(notes, nowMs = Date.now()) {
   return Number.isFinite(until) && until > nowMs;
 }
 
+const STORY_FIRST_NOTE_LINE = /^\s*\[story-first\.1\]\s*/;
+const IDEA_NOTES_FIELD_MAX = 100000;
+
+function partitionStoryFirstNotes(notes) {
+  const story = [];
+  const rest = [];
+  for (const line of String(notes || "").split(/\r?\n/)) {
+    if (STORY_FIRST_NOTE_LINE.test(line)) story.push(line);
+    else rest.push(line);
+  }
+  return { story, rest };
+}
+
+function joinOperatorNotesWithStory(head, storyLines, headMax = 3000) {
+  const story = storyLines.map((line) => String(line || "").trim()).filter(Boolean).join("\n");
+  const clipped = String(head || "").slice(0, headMax);
+  const combined = [clipped, story].filter(Boolean).join("\n");
+  if (combined.length <= IDEA_NOTES_FIELD_MAX) return combined;
+  const budget = Math.max(0, IDEA_NOTES_FIELD_MAX - (story ? story.length + 1 : 0));
+  return [clipped.slice(0, budget), story].filter(Boolean).join("\n");
+}
+
 export function withIdeaManagePhotoPause(notes, { nowMs = Date.now(), ttlMinutes = 30 } = {}) {
   const until = new Date(nowMs + Math.max(5, Number(ttlMinutes) || 30) * 60 * 1000).toISOString();
   const token = `ez-photo-manage-pause=${until}`;
-  const lines = String(notes || "").split(/\r?\n/).filter((line) => !IDEA_MANAGE_PHOTO_PAUSE_RE.test(line.trim()));
-  return [token, ...lines.filter((line) => String(line || "").trim())].join("\n").slice(0, 3000);
+  const { story, rest } = partitionStoryFirstNotes(notes);
+  const lines = rest.filter((line) => !IDEA_MANAGE_PHOTO_PAUSE_RE.test(line.trim()));
+  const head = [token, ...lines.filter((line) => String(line || "").trim())].join("\n");
+  return joinOperatorNotesWithStory(head, story);
 }
 
 export function withoutIdeaManagePhotoPause(notes) {
@@ -535,13 +559,18 @@ export function ideaLibraryAssetIdsFromPayload(payload) {
 
 export function mergeIdeaProductionNotes(existingNotes, userNotes, libraryAssetIds) {
   const parsed = parseIdeaMachineNotes(existingNotes);
+  const existingStory = partitionStoryFirstNotes(parsed.user).story;
   const machine = parsed.machine.filter((line) => !/^media_asset_ids=/i.test(line));
   const ids = libraryAssetIds === null || libraryAssetIds === undefined
     ? parseIdeaNotedMediaIds(existingNotes)
     : [...libraryAssetIds];
   if (ids.length) machine.unshift(`media_asset_ids=${ids.join(",")}`);
-  const user = userNotes === undefined ? parsed.user : String(userNotes || "").trim();
-  return [...machine, user].filter(Boolean).join("\n").slice(0, 3000) || null;
+  const incoming = userNotes === undefined ? parsed.user : String(userNotes || "").trim();
+  const incomingParts = partitionStoryFirstNotes(incoming);
+  const story = incomingParts.story.length ? incomingParts.story : existingStory;
+  const user = incomingParts.rest.join("\n").trim();
+  const head = [...machine, user].filter(Boolean).join("\n");
+  return joinOperatorNotesWithStory(head, story) || null;
 }
 
 /**
@@ -673,9 +702,7 @@ export function ideaProductionConfigFields(payload, existingNotes = "", photoWai
     const userNotes = Object.prototype.hasOwnProperty.call(payload, "production_notes")
       ? payload.production_notes
       : undefined;
-    const merged = mergeIdeaProductionNotes(existingNotes, userNotes, libraryIds);
-    if (merged && merged.length > 3000) throw new Error("Production notes must be 3000 characters or fewer");
-    fields.Production_Config_Notes = merged;
+    fields.Production_Config_Notes = mergeIdeaProductionNotes(existingNotes, userNotes, libraryIds);
   }
 
   return fields;

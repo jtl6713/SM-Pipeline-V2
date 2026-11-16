@@ -32,10 +32,11 @@ const catalog = [
 ];
 const brief = "Create a 30-second short about the Staten Island Ferry. Use my uploaded Staten Island Ferry photos. Keep the narration friendly. Don't use stock media. Produce for Instagram and TikTok.";
 
-test("creative brief accepts 5,000 characters without normalizing away the operator's detail", () => {
+test("creative brief accepts the Airtable long-text ceiling without normalizing away the operator's detail", () => {
   const value = "a".repeat(SCRIPTED_SHORT_BRIEF_LIMIT);
-  assert.equal(normalizeScriptedShortBrief(value).length, 5000);
-  assert.throws(() => normalizeScriptedShortBrief(value + "b"), /5,000 characters or fewer/);
+  assert.equal(normalizeScriptedShortBrief(value).length, SCRIPTED_SHORT_BRIEF_LIMIT);
+  assert.equal(SCRIPTED_SHORT_BRIEF_LIMIT, 100000);
+  assert.throws(() => normalizeScriptedShortBrief(value + "b"), /100,000 characters or fewer/);
   assert.equal(normalizeScriptedShortBrief("first line\r\nsecond line"), "first line\nsecond line");
 });
 

@@ -1,7 +1,8 @@
 import { libraryAssetSatisfiesPolicy } from "./scripted-short-asset-policy.mjs";
 import { scriptedShortSceneDirectionErrors } from "./scripted-short-scene-directions.mjs";
 
-export const SCRIPTED_SHORT_BRIEF_LIMIT = 5000;
+/** Matches Airtable long text. A creative brief is stored with the Idea, not in a 5,000-character scratch field. */
+export const SCRIPTED_SHORT_BRIEF_LIMIT = 100000;
 export const SCRIPTED_SHORT_PLAN_SIGNATURE = "QA-SCRIPTED-SHORT-PRODUCER-CONSTRAINTS";
 
 const DEFAULT_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);

@@ -6,7 +6,7 @@ const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 
 test("Script a short accepts a detailed brief and exposes accessible browser dictation", () => {
-  assert.match(html, /id="scriptedShortPrompt" maxlength="5000"/);
+  assert.match(html, /id="scriptedShortPrompt" maxlength="100000"/);
   assert.match(html, /id="scriptedShortDictate" aria-pressed="false"/);
   assert.match(html, /id="scriptedShortCharacterCount"/);
   assert.match(app, /window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/);
