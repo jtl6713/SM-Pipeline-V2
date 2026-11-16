@@ -38,10 +38,10 @@ if not EXPECTED_COMMIT or len(EXPECTED_COMMIT) != 40:
 
 services = [
     ("pipeline-runner", "https://pipeline.chicagoshining.com", "2026-11-16-youtube-durable-dedup"),
-    ("youtube-uploader", "https://youtube-upload.chicagoshining.com", "2026-11-15-durable-upload-dedup"),
-    ("youtube-uploader-la", "https://youtube-upload-la.chicagoshining.com", "2026-11-15-durable-upload-dedup"),
-    ("youtube-uploader-nyc", "https://youtube-upload-nyc.chicagoshining.com", "2026-11-15-durable-upload-dedup"),
-    ("youtube-uploader-miami", "https://youtube-upload-miami.chicagoshining.com", "2026-11-15-durable-upload-dedup"),
+    ("youtube-uploader", "https://youtube-upload.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
+    ("youtube-uploader-la", "https://youtube-upload-la.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
+    ("youtube-uploader-nyc", "https://youtube-upload-nyc.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
+    ("youtube-uploader-miami", "https://youtube-upload-miami.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
 ]
 for service, url, version in services:
     for attempt in range(120):

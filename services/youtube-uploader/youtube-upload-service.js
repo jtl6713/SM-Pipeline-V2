@@ -8,7 +8,9 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-11-15-durable-upload-dedup";
+// Studio Engagement probes /health and requires "engagement" in this string
+// before calling /youtube/engage/*. Keep that marker when bumping the version.
+const SERVICE_VERSION = "2026-11-16-engagement-durable-upload-dedup";
 const engageIdempotency = new Map();
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");

@@ -19,3 +19,11 @@ test('disk failure prevents launch',async()=>{const h=harness();h.context.persis
 test('cleanup retains receipts and ambiguous sessions beyond retention',()=>{const jobs=new Map([['a',{status:'completed',videoId:'saved',createdAt:'2020-01-01'}],['b',{status:'failed',sessionCreated:true,createdAt:'2020-01-01'}],['c',{status:'failed',createdAt:'2020-01-01'}]]);const start=source.indexOf('function cleanupOldJobs()');const end=source.indexOf('\n}',start)+2;vm.runInNewContext(source.slice(start,end)+';cleanupOldJobs()',{jobs,cfg:{retentionHours:168},Date,persist:async()=>{}});assert.deepEqual([...jobs.keys()],['a','b'])});
 
 test('unreadable ledger fails startup instead of forgetting receipts',async()=>{const start=source.indexOf('async function init()');const end=source.indexOf('\n}',start)+2;const context={fsp:{mkdir:async()=>{},readFile:async()=>'{corrupt'},path:require('node:path'),cfg:{tempDir:'/tmp/test',jobStore:'/tmp/test/jobs.json'},jobs:new Map(),cleanupOldJobs:()=>{throw Error('must not continue')}};await assert.rejects(vm.runInNewContext(source.slice(start,end)+';init()',context));});
+
+test('SERVICE_VERSION advertises engagement for Studio Engagement gate',()=>{
+  const match=source.match(/const SERVICE_VERSION\s*=\s*"([^"]+)"/);
+  assert.ok(match,'SERVICE_VERSION constant present');
+  assert.match(match[1],/engagement/i,'Studio rejects /health when version lacks engagement');
+  assert.match(source,/\/youtube\/engage\/comment/);
+  assert.match(source,/\/youtube\/engage\/like/);
+});
