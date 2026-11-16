@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.971-asset-fla-parallel-progress";
+  const BUILD_ID = "item4-0.6.972-asset-manager-supabase-delete";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24902,8 +24902,11 @@ function timedScriptAssetLabel(asset, index) {
         }
         button.disabled = true;
         try {
-          await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
-          setLibraryUploadMessage(`Deleted ${name}.`, "success");
+          const result = await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}), retries: 0, timeoutMs: 30000 });
+          if (result?.deleted !== true || result?.read_source !== "supabase") {
+            throw new Error("Asset deletion was not confirmed by Supabase. The asset was not removed.");
+          }
+          setLibraryUploadMessage(`Deleted ${name} from Supabase and Google Drive.`, "success");
           await loadLibrary();
         } catch (error) {
           setLibraryUploadMessage(error.message, "error-text");

@@ -59,6 +59,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseMusicRecords,
   listSupabaseAssetLibraryRecords,
+  supabaseRest,
   listSupabaseLibraryBatchExistingNames,
   listSupabaseIdeaLane,
   listSupabaseOpenProductionRequestsForIdea,
@@ -598,6 +599,7 @@ import {
   requirePermission,
   airtableCooldownWaitMs,
   studioReadCoalesce,
+  studioReadCacheDropPrefix,
   clampLimit,
   listRecords,
   listRecordsPage,
@@ -3404,7 +3406,7 @@ export function mapLibraryAsset(record, profilesById = {}) {
 export async function listAssetLibrary(request, env, url, authorization) {
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
   if (kind === "published") return listPublishedLibraryFiles(request, env, url);
-  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  if (studioAssetsReadSource(env) !== "supabase" && !env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
   const requestedIds = parseLibraryRecordIdsParam(url.searchParams.get("ids"));
   const needsProfile = ["1", "true", "yes"].includes(String(url.searchParams.get("needs_profile") || "").trim().toLowerCase())
@@ -3467,7 +3469,8 @@ export async function listAssetLibrary(request, env, url, authorization) {
           read_source: "supabase",
         };
       } catch (error) {
-        console.warn("supabase asset library list failed; falling back to Airtable", error);
+        console.error("supabase asset library list failed; refusing legacy Airtable fallback", error);
+        throw new HttpError(503, "Supabase Asset Manager is temporarily unavailable. No Airtable fallback was used.");
       }
     }
     const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions);
@@ -4363,33 +4366,68 @@ export async function renameAssetLibraryItem(request, env, url, ctx) {
 /*__STUDIO_WORKER_END:renameAssetLibraryItem__*/
 
 export async function deleteAssetLibraryItem(request, env, url) {
-  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const recordId = String(url.pathname.split("/")[3] || "");
-  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid library record");
-  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
-  const role = String(f(record, "Asset_Role") || "").trim();
-  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(recordId)) throw new HttpError(400, "Invalid library record");
+  // Asset Manager is Supabase-authoritative. Never delete the legacy Airtable row:
+  // a mirrored Supabase list would immediately show the supposedly deleted asset again.
+  if (!studioSupabaseConfigured(env)) throw new HttpError(503, "Supabase media library is not configured");
+  const rows = await supabaseRest(
+    env,
+    `media_assets?airtable_record_id=eq.${encodeURIComponent(recordId)}&select=id,airtable_record_id,asset_name,media_class,asset_role,google_drive_file_id&limit=2`,
+  );
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw new HttpError(rows?.length ? 409 : 404, rows?.length ? "Ambiguous media asset record" : "Asset no longer exists");
+  }
+  const asset = rows[0];
+  const role = String(asset.asset_role || "").trim();
+  const mediaClass = String(asset.media_class || "").trim().toLowerCase();
   if (role === "Music") throw new HttpError(409, "Delete music tracks from the Music Manager tab");
   if (!["image", "graphic", "video"].includes(mediaClass) && role !== "Raw Footage") {
     throw new HttpError(409, "Only photo and video library assets can be deleted here");
   }
-  const usages = await findAssetLibraryUsages(env, recordId);
-  if (usages.production_requests.length) {
-    throw new HttpError(
-      409,
-      `Cannot delete this asset. It is still attached to ${usages.production_requests.length} Production Request${usages.production_requests.length === 1 ? "" : "s"}. Remove it there first.`
-    );
+
+  // Read the live Supabase relationships, never Airtable. No catch-to-empty:
+  // a failed usage lookup must block deletion rather than risk deleting media in use.
+  const [requests, outputs, transfers] = await Promise.all([
+    supabaseRest(env, `production_requests?master_assets=cs.${encodeURIComponent(JSON.stringify([recordId]))}&select=id&limit=1`),
+    supabaseRest(env, `platform_outputs?selected_assets_text=ilike.*${encodeURIComponent(recordId)}*&select=id&limit=1`),
+    supabaseRest(env, `studio_media_transfer_queue?or=(source_media_asset_id.eq.${asset.id},generated_media_asset_id.eq.${asset.id})&select=id&limit=1`),
+  ]);
+  if (!Array.isArray(requests) || !Array.isArray(outputs) || !Array.isArray(transfers)) {
+    throw new HttpError(503, "Unable to verify media asset references");
   }
-  const drive = await trashStudioAssetOnDrive(env, googleDriveFileId(record)).catch((error) => ({
-    ok: false,
-    error: error?.message || String(error),
-  }));
-  const deleted = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, { method: "DELETE" });
+  if (requests.length || outputs.length || transfers.length) {
+    throw new HttpError(409, "Cannot delete this asset while it is referenced by Production, an output, or media transfer. Remove those attachments first.");
+  }
+
+  const driveId = String(asset.google_drive_file_id || "").trim();
+  const drive = driveId
+    ? await trashStudioAssetOnDrive(env, driveId).catch((error) => ({
+      ok: false,
+      error: error?.message || String(error),
+    }))
+    : { ok: true, skipped: true, reason: "no_drive_file" };
+  // Do not orphan a live Drive file and leave it eligible for re-ingestion.
+  if (driveId && !(drive.ok && drive.trashed === true) && !driveTrashLooksGone(drive)) {
+    throw new HttpError(502, `Google Drive trash failed; asset was not removed from Supabase: ${drive.error || drive.reason || "unknown error"}`);
+  }
+
+  const deleted = await supabaseRest(
+    env,
+    `media_assets?id=eq.${encodeURIComponent(asset.id)}&airtable_record_id=eq.${encodeURIComponent(recordId)}`,
+    { method: "DELETE", headers: { Prefer: "return=representation" } },
+  );
+  if (!Array.isArray(deleted) || deleted.length !== 1 || deleted[0]?.id !== asset.id) {
+    throw new HttpError(409, "Supabase did not confirm this asset was deleted");
+  }
+  // The 8-second Asset Manager list coalescer must not redisplay a deleted card.
+  studioReadCacheDropPrefix("library:page:");
   return respond(request, env, {
     ok: true,
-    deleted: Boolean(deleted?.deleted),
+    deleted: true,
     record_id: recordId,
-    name: f(record, "Asset Name"),
+    name: asset.asset_name,
+    read_source: "supabase",
     drive,
   });
 }
