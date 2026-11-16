@@ -4945,6 +4945,52 @@ test("Autonomous idea-library harvest prefers paged Supabase asset library under
   assert.match(harvest, /supabase autonomous library catalog failed; falling back to Airtable/);
 });
 
+test("Production Request Outputs POST commit via studioSideTableCommit under write SoR", async () => {
+  const { studioSideTableCommit } = await import("./supabase-pipeline-reads.mjs");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (method === "POST" || method === "PATCH") {
+        bodies.push({ href, method, body: String(init?.body || "") });
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const created = await studioSideTableCommit(
+      env,
+      "Production Request Outputs",
+      "POST",
+      "",
+      JSON.stringify({
+        fields: {
+          Platform: "Instagram",
+          Output_Type: "Reel",
+          Aspect_Ratio: "9:16",
+          Enabled: true,
+          Production_Request: ["recEa6IAB5oBHvR2a"],
+        },
+      }),
+    );
+    assert.equal(created.ok, true);
+    assert.match(created.records[0].id, /^rec[A-Za-z0-9]{14}$/);
+    assert.equal(created.records[0].fields.Platform, "Instagram");
+    assert.equal(created.records[0].fields.Aspect_Ratio, "9:16");
+    assert.ok(bodies.some((entry) => entry.href.includes("production_request_outputs")));
+    assert.ok(bodies.some((entry) => entry.body.includes("recEa6IAB5oBHvR2a")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Quality Agent Recovery Ledger POST/PATCH commit via studioSideTableCommit under write SoR", async () => {
   const { studioSideTableCommit } = await import("./supabase-pipeline-reads.mjs");
   const env = {

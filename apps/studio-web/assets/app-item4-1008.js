@@ -333,7 +333,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.965-phase6-pr-photo-load";
+  const BUILD_ID = "item4-0.6.966-phase6-plan-mapping";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -11709,7 +11709,9 @@ function timedScriptAssetLabel(asset, index) {
       const canAutoPlan = Boolean(status?.assets?.length) && String(status?.assets_status || "") === "Ready";
       hint.textContent = status?.plan_status !== "Ready"
         ? (canAutoPlan
-          ? "Click Prepare. Studio will build the platform plan first, then prepare frames."
+          ? (String(status?.plan_status || "") === "Needs Review"
+            ? "Platform plan needs aspect ratios. Click Prepare to rebuild the plan, then prepare frames."
+            : "Click Prepare. Studio will build the platform plan first, then prepare frames.")
           : "Finish adding media before preparing frames.")
         : variantStatus === "Preparing"
           ? (clipRequest
@@ -12354,7 +12356,10 @@ function timedScriptAssetLabel(asset, index) {
         await buildItem4Plan();
         if (activeProductionRequest?.id !== requestId) return;
         if (String(item4Workspace?.plan_status || "") !== "Ready") {
-          throw new Error("The platform plan is not ready. Check the recommendation message and try Prepare again.");
+          const planStatus = String(item4Workspace?.plan_status || "Needs Plan");
+          throw new Error(planStatus === "Needs Review"
+            ? "The platform plan is still missing aspect ratios. Tap Recommend formats, then Prepare again."
+            : "The platform plan is not ready. Check the recommendation message and try Prepare again.");
         }
         // Server plan recommendations must not overwrite user-edited formats.
         if (requestedKeys.length && restoreProductionOutputSelection(requestedKeys)) {

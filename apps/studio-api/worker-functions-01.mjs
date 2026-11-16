@@ -4641,10 +4641,19 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
     includeInactive,
     limit: 500,
   }).catch(() => null);
+  // Under STUDIO_WRITE_SOURCE=supabase Airtable PRO lists are empty. Use densified
+  // rows for plan/prepare even when Platform_Output is not yet a typed column.
+  // Fanout still reuses Platform Outputs by PRO record id before POST (#1907).
+  if (Array.isArray(fromSupabase) && fromSupabase.length > 0 && studioWriteSource(env) === "supabase") {
+    const filtered = includeInactive
+      ? fromSupabase
+      : fromSupabase.filter((row) => Boolean(f(row, "Active") || f(row, "Enabled")));
+    return filtered.sort(
+      (a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0),
+    );
+  }
   // Densified PRO rows omit Platform_Output (and platform_output_id is unset).
-  // studioHealPromotedMissingFanout treats blank Platform_Output as "create",
-  // which after #1907 flooded Platform Outputs every 5 minutes. Prefer Airtable
-  // until Platform_Output is densified onto production_request_outputs.
+  // Outside write SoR, prefer Airtable until Platform_Output is densified.
   const supabaseHasPlatformOutputLinks = Array.isArray(fromSupabase)
     && fromSupabase.length > 0
     && fromSupabase.every((row) => Object.prototype.hasOwnProperty.call(row?.fields || {}, "Platform_Output"));
@@ -7891,10 +7900,83 @@ export function item4DynamicRationale(text, count) {
 }
 /*__STUDIO_WORKER_END:item4DynamicRationale__*/
 
+/**
+ * Airtable Platform Output Mappings aspect ratios. Used when STUDIO_WRITE_SOURCE
+ * freezes archive GETs so listRecords(ITEM4_MAPPING_TABLE) returns [].
+ * Keys are Platform_Output_Type (plan mapping_type). Keep in sync with the
+ * Airtable catalog; Story already had an inline 9:16 default.
+ */
+export const ITEM4_MAPPING_ASPECT_FALLBACKS = Object.freeze({
+  "Instagram Reel": "9:16",
+  "Instagram Story": "9:16",
+  "Instagram Carousel": "4:5",
+  "Instagram Feed Post": "4:5",
+  "Instagram Photo Set": "4:5",
+  "Facebook Reel": "9:16",
+  "Facebook Story": "9:16",
+  "Facebook Photo Set": "4:5",
+  "Facebook Post": "4:5",
+  "Facebook Event/Flyer Post": "4:5",
+  "TikTok Video": "9:16",
+  "TikTok Slideshow": "9:16",
+  "YouTube Short": "9:16",
+  "YouTube Longform": "16:9",
+  "YouTube Thumbnail": "16:9",
+  "Threads Feed Post": "4:5",
+  "Threads Photo Set": "4:5",
+  "X Feed Post": "1:1",
+  "X Video": "9:16",
+});
+
+export const ITEM4_FORMAT_ASPECT_FALLBACKS = Object.freeze({
+  "Vertical Short Video": "9:16",
+  Story: "9:16",
+  Carousel: "4:5",
+  "Feed Post": "4:5",
+  "Photo Set": "4:5",
+  "Longform Video": "16:9",
+  "Thumbnail / Promo Still": "16:9",
+});
+
+export function item4FallbackAspectRatio({ mappingType = "", format = "", outputType = "" } = {}) {
+  const mapping = String(mappingType || "").trim();
+  if (mapping && ITEM4_MAPPING_ASPECT_FALLBACKS[mapping]) {
+    return { aspect_ratio: ITEM4_MAPPING_ASPECT_FALLBACKS[mapping], ratio_source: "Studio mapping fallback" };
+  }
+  const fmt = String(format || "").trim();
+  if (fmt && ITEM4_FORMAT_ASPECT_FALLBACKS[fmt]) {
+    return { aspect_ratio: ITEM4_FORMAT_ASPECT_FALLBACKS[fmt], ratio_source: "Studio format fallback" };
+  }
+  if (String(outputType || "").trim() === "Story") {
+    return { aspect_ratio: "9:16", ratio_source: "Story default 9:16" };
+  }
+  return { aspect_ratio: null, ratio_source: "Missing mapping" };
+}
+/*__STUDIO_WORKER_END:item4FallbackAspectRatio__*/
+
+function item4SyntheticMappingRecords() {
+  const rows = [];
+  for (const [mappingType, aspect] of Object.entries(ITEM4_MAPPING_ASPECT_FALLBACKS)) {
+    const platform = String(mappingType || "").split(/\s+/)[0] || "";
+    if (!platform) continue;
+    rows.push({
+      id: `recMapFallback${mappingType.replace(/[^A-Za-z0-9]/g, "").slice(0, 8)}`,
+      fields: {
+        Active: true,
+        Platform: platform,
+        Platform_Output_Type: mappingType,
+        Aspect_Ratio: aspect,
+      },
+    });
+  }
+  return rows;
+}
+
 export async function item4MappingIndex(env) {
-  const records = await listRecords(env, ITEM4_MAPPING_TABLE, { limit: 100 });
+  const records = await listRecords(env, ITEM4_MAPPING_TABLE, { limit: 100 }).catch(() => []);
   const index = new Map();
-  for (const row of records) {
+  const source = Array.isArray(records) && records.length ? records : item4SyntheticMappingRecords();
+  for (const row of source) {
     if (!Boolean(f(row, "Active"))) continue;
     const platform = String(f(row, "Platform") || "").trim();
     const outputType = String(f(row, "Platform_Output_Type") || "").trim();
@@ -9035,12 +9117,17 @@ export function item4PlanChoice(platform, requestedOutputType, photoCount, { has
 /*__STUDIO_WORKER_END:item4PlanChoice__*/
 
 export function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { companion = false } = {}) {
-  const mapping = mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
+  const mapping = mappingIndex?.get?.(`${platform}::${chosen.mapping_type}`) || null;
   let aspectRatio = mapping ? String(f(mapping, "Aspect_Ratio") || "").trim() : null;
   let ratioSource = mapping ? "Platform Output Mappings" : "Missing mapping";
-  if (!aspectRatio && chosen.output_type === "Story") {
-    aspectRatio = "9:16";
-    ratioSource = "Story default 9:16";
+  if (!aspectRatio) {
+    const fallback = item4FallbackAspectRatio({
+      mappingType: chosen.mapping_type,
+      format: chosen.format,
+      outputType: chosen.output_type,
+    });
+    aspectRatio = fallback.aspect_ratio;
+    ratioSource = fallback.ratio_source;
   }
   const available = companion || chosen.output_type === "Story"
     ? [chosen.output_type]
@@ -9294,6 +9381,7 @@ export async function item4SyncPlanOutputs(env, requestRecord, items, { schedule
       Created_By: arrayOrEmpty(f(requestRecord, "Created_By")),
       Platform: item.platform,
       Output_Type: item.output_type,
+      Aspect_Ratio: String(item.aspect_ratio || "").trim() || null,
       Output_Status: "Draft",
       Output_Order: i + 1,
       Enabled: true,

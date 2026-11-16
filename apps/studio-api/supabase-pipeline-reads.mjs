@@ -2209,11 +2209,13 @@ export function mapPlanScheduleRow(record, { partial = false } = {}) {
   const present = (name) => !partial || Object.prototype.hasOwnProperty.call(fields, name);
   if (present("Platform")) row.platform = String(fields.Platform || "").trim() || null;
   if (present("Output_Type")) row.output_type = String(fields.Output_Type || "").trim() || null;
+  if (present("Aspect_Ratio")) row.aspect_ratio = String(fields.Aspect_Ratio || "").trim() || null;
   if (present("Scheduled_At")) {
     const ms = Date.parse(String(fields.Scheduled_At || ""));
     row.scheduled_at = Number.isFinite(ms) ? new Date(ms).toISOString() : null;
   }
   if (present("Enabled")) row.enabled = checkboxOn(fields.Enabled);
+  if (present("Notes")) row.notes = String(fields.Notes || "").trim() || null;
   if (present("Brand")) {
     const brands = recordLinkIds(fields.Brand);
     row.brand_airtable_id = brands[0] || null;
@@ -8816,6 +8818,28 @@ async function commitSlideRecords(env, records) {
   return merged;
 }
 
+/** Persist Production Request Outputs under write SoR (minted ids on create). */
+async function commitProOutputRecords(env, records, { insert = false } = {}) {
+  if (!studioSupabaseConfigured(env)) return null;
+  if (!Array.isArray(records) || !records.length) return null;
+  const prepared = [];
+  for (const record of records) {
+    const id = String(record?.id || "").trim() || (insert ? mintAirtableRecordId() : "");
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id)) continue;
+    const prior = insert
+      ? null
+      : await readProOutputRow(env, id).catch(() => null);
+    const fields = {
+      ...(isPlainObject(prior?.fields) ? prior.fields : {}),
+      ...(isPlainObject(record?.fields) ? record.fields : {}),
+    };
+    prepared.push({ id, fields, createdTime: prior?.createdTime || new Date().toISOString() });
+  }
+  if (!prepared.length) return null;
+  await syncPlanScheduleRowsToSupabase(env, prepared, { partial: !insert });
+  return prepared;
+}
+
 /** Commit idea, settings, or slide writes. ok false leaves the Airtable call in place. */
 export async function studioSideTableCommit(env, tableId, method, pathOrParams, rawBody) {
   if (studioWriteSource(env) !== "supabase") return { ok: false, reason: "airtable" };
@@ -8831,6 +8855,9 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
     if (kind === "idea") records = await commitIdeaRecords(env, parsed);
     else if (kind === "idea_batch") records = await commitIdeaBatchRecords(env, parsed);
     else if (kind === "slides") records = await commitSlideRecords(env, parsed);
+    else if (kind === "pro_output") {
+      records = await commitProOutputRecords(env, parsed, { insert: verb === "POST" });
+    }
     else if (kind === "pipeline_settings" || kind === "engagement_settings") {
       records = await commitSettingRecords(
         env,
