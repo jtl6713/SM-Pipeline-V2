@@ -1,5 +1,7 @@
 """Phase 5 runner write-through. No live Airtable or Supabase calls."""
 
+import json
+
 import requests
 
 from airtable.client import AirtableClient
@@ -377,6 +379,33 @@ def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
     posts = [row for row in seen if row[0] == "POST" and "production_requests" in row[1]]
     assert posts == []
     assert patches[0][2] == {"request_status": "Submitted"}
+
+
+def test_phase6_produce_job_patch_persists_production_job(monkeypatch):
+    """A themes→audio step write is only Studio_Production_Job_JSON. It must land."""
+    seen = []
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    def fail_airtable(*_args, **_kwargs):
+        raise AssertionError("airtable patch")
+
+    monkeypatch.setattr(requests, "patch", fail_airtable)
+    monkeypatch.setattr(requests, "request", fake_request)
+    job = json.dumps({"step": "audio", "job_id": "spj-test", "percent": 20})
+    record = AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
+        PRODUCTION_REQUESTS_TABLE,
+        "recRequest1",
+        {"Studio_Production_Job_JSON": job},
+    )
+    assert record["id"] == "recRequest1"
+    patches = [row for row in seen if row[0] == "PATCH" and "production_requests" in row[1]]
+    assert len(patches) == 1
+    assert patches[0][2] == {"production_job": {"step": "audio", "job_id": "spj-test", "percent": 20}}
 
 
 def test_runner_media_patch_densifies_content_profile_and_notes(monkeypatch):

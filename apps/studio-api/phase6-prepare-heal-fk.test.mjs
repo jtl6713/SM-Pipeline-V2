@@ -49,5 +49,5 @@ test("Promote sibling cancel and ready-claim fall back to idea_candidate_id FK",
 });
 
 test("Worker version bumps for prepare heal + Idea FK preventative fix", () => {
-  assert.match(worker, /0\.10\.994-pipeline-search-all-weeks/);
+  assert.match(worker, /0\.10\.995-produce-job-persist/);
 });
