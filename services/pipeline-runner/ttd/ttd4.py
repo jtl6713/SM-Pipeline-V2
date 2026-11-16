@@ -59,7 +59,11 @@ def process_request(
         result["http_status"] = 400
         return {"processed": False, "reason": "test_run_mismatch", **result}
 
-    reason = ttd4_form_eligibility_reason(output, token=str(token or ""))
+    reason = ttd4_form_eligibility_reason(
+        output,
+        token=str(token or ""),
+        signing_secret=str((getattr(client, "_settings", {}) or {}).get("pipeline_runner_shared_secret") or ""),
+    )
     result["eligibility_reason"] = reason
     if reason == "token_mismatch":
         result["html"] = page_html(title="Invalid or expired link", body="The TikTok completion token does not match this output.")
