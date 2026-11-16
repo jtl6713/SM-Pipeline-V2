@@ -49,7 +49,8 @@ export const IDEA_LIBRARY_NAMED_PLACES = [
   "streeterville", "ukrainian village", "uptown", "west loop", "wicker park",
   "central park", "times square", "brooklyn bridge", "statue of liberty",
   "high line", "washington square", "bryant park", "grand central",
-  "one world trade", "santa monica pier", "griffith observatory",
+  "one world trade", "tribeca", "soho", "chelsea", "dumbo", "harlem",
+  "santa monica pier", "griffith observatory",
   "venice beach", "rodeo drive", "hollywood sign",
 ];
 
@@ -144,14 +145,21 @@ export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary
   };
 }
 
-/** Airtable FIND keys: place anchors plus brand/transit subjects from the title. */
+const IDEA_LIBRARY_GENERIC_PLACE_TOKENS = new Set([
+  "york", "nyc", "manhattan", "brooklyn", "queens", "bronx",
+  "chicago", "miami", "angeles",
+]);
+
+/** Airtable FIND keys: place anchors plus brand/transit subjects from the title.
+ * A neighborhood such as Tribeca must not be crowded out by "New York". */
 export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
   const distinctive = (subjectKeys || []).filter((token) => IDEA_LIBRARY_DISTINCTIVE_SUBJECTS.has(token));
-  if ((placeKeys || []).length || brands.length) {
-    return [...new Set([...(placeKeys || []), ...brands, ...distinctive])];
-  }
-  return [...new Set(subjectKeys || [])];
+  const keys = ((placeKeys || []).length || brands.length)
+    ? [...new Set([...(placeKeys || []), ...brands, ...distinctive])]
+    : [...new Set(subjectKeys || [])];
+  const specific = keys.filter((token) => !IDEA_LIBRARY_GENERIC_PLACE_TOKENS.has(token));
+  return specific.length ? specific : keys;
 }
 
 export function rankIdeaLibraryFields({

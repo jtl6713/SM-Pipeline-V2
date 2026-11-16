@@ -7084,13 +7084,19 @@ export function ideaLibraryMatchKeys(idea, query = "") {
 }
 /*__STUDIO_WORKER_END:ideaLibraryMatchKeys__*/
 
+const IDEA_LIBRARY_GENERIC_PLACE_TOKENS = new Set([
+  "york", "nyc", "manhattan", "brooklyn", "queens", "bronx",
+  "chicago", "miami", "angeles",
+]);
+
 export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
   const distinctive = (subjectKeys || []).filter((token) => IDEA_LIBRARY_DISTINCTIVE_SUBJECTS.has(token));
-  if ((placeKeys || []).length || brands.length) {
-    return [...new Set([...(placeKeys || []), ...brands, ...distinctive])];
-  }
-  return [...new Set(subjectKeys || [])];
+  const keys = ((placeKeys || []).length || brands.length)
+    ? [...new Set([...(placeKeys || []), ...brands, ...distinctive])]
+    : [...new Set(subjectKeys || [])];
+  const specific = keys.filter((token) => !IDEA_LIBRARY_GENERIC_PLACE_TOKENS.has(token));
+  return specific.length ? specific : keys;
 }
 /*__STUDIO_WORKER_END:ideaLibraryFilterKeys__*/
 

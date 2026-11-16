@@ -497,6 +497,18 @@ test("Manage Idea pause token is temporary, preserved by save, and removable", (
   assert.match(resumed, /Keep the bridge shot/);
 });
 
+test("Tribeca in the title is the scan key even when the location is New York", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "New York City",
+    title: "Tribeca cobblestones at dusk",
+    summary: "Cast-iron streets and a quiet corner in lower Manhattan.",
+  });
+  assert.ok(keys.placeKeys.includes("tribeca"));
+  const filter = ideaLibraryFilterKeys(keys.placeKeys, keys.subjectKeys);
+  assert.ok(filter.includes("tribeca"));
+  assert.equal(filter.includes("york"), false);
+});
+
 test("NYC Jazz Clubs photo uploads remain discoverable for a Greenwich Village jazz idea", () => {
   const keys = buildIdeaLibraryKeys({
     primaryLocation: "Greenwich Village",

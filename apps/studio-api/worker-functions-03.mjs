@@ -819,6 +819,7 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     try {
       const packed = await listSupabaseAssetLibraryRecords(env, {
         limit: scanLimit,
+        query: filterKeys.join(" "),
         kind: "photo",
         profileId: crossScope ? "" : (profileId || ""),
         sortField: "Added_At",
@@ -894,6 +895,7 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
     try {
       const packed = await listSupabaseAssetLibraryRecords(env, {
         limit: scanLimit,
+        query: filterKeys.join(" "),
         kind: "video",
         profileId: crossScope ? "" : (profileId || ""),
         sortField: "Added_At",
