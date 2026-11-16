@@ -5847,6 +5847,21 @@ const DELETED_DUPLICATE_OUTPUT_IDS = [
   // that blocked Factory Approve all (6 ready · 6 sibling awaiting).
   "recUk2dHAy46NC1m1", "recvEyf19YgvnnYLK", "recMRltdcjj1EPYVP",
   "recUeWwgha0wxtAqJ", "rec2iCOn0znlnw7Au", "reccNV0YE7k3ntvmU",
+  // Incomplete-content same-final fanout sweep 2026-11-15 (keep best parent).
+  "rec19ZXmFVvs8SvaS", "recbJhaQOii1RADun", "reclMSwv9jkRbNJbO", "rec88eWtr9KrhYiy9", "recVWrkRKUi4a5MGI", "recz6ND15MMNHTC3e",
+  "recqHZsfKV5OGj5GO", "recA9Bljjn261IQcF", "recQWqQ9qfNFy53CX", "recghonczRjCVueLr", "recu0iwmeotOlNRW7", "rec5jIIZHQGx9iSne",
+  "recldENTzZuRFmvK5", "rechnIzH4Gu33vOtt", "recresQXTjGKHW21V", "recPp8M0dDnTlnPeO", "recx2IpCM8Ah77W3C", "reckaME5cTVdgUTzb",
+  "recNO9gqg5V7ZvZYI", "rect5pnyVH0SMDYjF", "recOpChkkKld7Z8RZ", "recoIagiIMpAr6MGY", "recoBrc0bNh9YRTGQ", "reconKwIkVZ4BBU8a",
+  "recquDk1lOPGKp6Oa", "recJRhtVJLfM1nKS2", "recGZRVlOgVq7hS7b", "rec9sWGAAHyNxZgvm", "recW43HmyFJq6Wedd", "rec78nhAkuuItSyxC",
+  "recyvFkoLPw8BPYge", "recMDMjbcZFXJ6s9h", "recl77s62FK5UGl4d", "rec6tQLEzEXmbzEUZ", "recu0yzxApC4FvqKH", "recRbF6P9psmmRrDp",
+  "recmGQ6pufeOFzVpH", "rec1m8FUEQJR3BbDa", "rec2LgaUq6mO8ZPTH", "recxPGOcHfeK3ZTr6", "recLm0zmzT94hxzyn", "recT2ceme6cIu0bVY",
+  "rector7U1QbXSNYbZ", "recpnDQe2uuTQG3OD", "recyfosU0ZgWW4b69", "rechq6ESjYC0oenUK", "recjSlKSlR8MJDgzS", "recIx34f5RWQ9qMQi",
+  "recA3xcUmMMY9YOkL", "rec6BfHuV4h0uFcwx", "recHd73DAb0OBDA4h", "recgVKRImnSvWkhiE", "recjEyNwGL9tgK6FL", "reciwFhoJlZejFPaq",
+  "recAp4HmQabMHxfpg", "recRUTFpX3G6HBsPx", "recdmai5Ifp3In4qb", "recjEtzi3AvyKqmii", "recjXw74DO6oF83Iw", "recAPAnF24utiwO0E",
+  "rec02VtH6WPdAKCpk", "recWKjBIVvt297zui", "recKQ00ijCO6Zk268", "reckqgAUl0MbKW32O", "recxwzl00OsC2MZgv", "recw7uPhfnUJhgT4J",
+  "recUbuFtbeTbFhPDX", "recpScjldi4MTdI0l", "recVuoBTpzDoo6iHO", "recmEE2uBum9TKZu3", "recJj7ICIF7MEuqeX", "recN3YNs8JUupTYbY",
+  "recVKfkcmalwRWJX1", "recSCXBOr3PVpfjAn", "recxETi5b1Qt9ptop", "recxxoWe8clTIlNAu", "reckR0W1xbY4AJipr", "recVkPlIh3fVi596r",
+  "rec6cSx2NkJTWN4E9",
 ];
 const DELETED_DUPLICATE_CONTENT_IDS = [
   "recWNbnAIsxpYNbkJ", "recM7FoAUXSUp5x8I", "recBjFgzASl88oxdS", "recyMKQJ8p53i1HOq", "recsgloGPGs0WWkNw",
@@ -5893,6 +5908,12 @@ const DELETED_DUPLICATE_OUTPUT_NUMBERS = [
   9546, 9547, 9548, 9549, 9550, 9551, 9552, 9553, 9554, 9555, 9556, 9557, 9558, 9559, 9560, 9561,
   9562, 9563, 9564, 9565, 9566, 9567, 9568, 9569, 9570, 9571, 9572, 9573, 9574, 9575, 9576, 9577,
   9578, 9579, 9580, 9581, 9582, 9583, 9584, 9585, 9586, 9587, 9588, 9589, 9590, 9591, 9592, 9599,
+  // Incomplete-content same-final duplicates purged 2026-11-15 (40 contents / 79 outputs).
+  4943, 4945, 5029, 5044, 5046, 5093, 5096, 5098, 5145, 5467, 5469, 5495, 5497, 5499, 5561, 5576,
+  5746, 5749, 5807, 5809, 5811, 5813, 5828, 5830, 5857, 5924, 5926, 5935, 5939, 5941, 5951, 5955,
+  5976, 6027, 6030, 6032, 6466, 6546, 6548, 6550, 6833, 7096, 7907, 8071, 8072, 8597, 9446, 9598,
+  9608, 9630, 9710, 10080, 10082, 10084, 10190, 10192, 10195, 10197, 10199, 10316, 10360, 10361, 10363, 10365,
+  10369, 10370, 10371, 10449, 10452, 10453, 10454, 10513, 10515, 10519, 10527, 10528, 10530, 10531, 10537,
 ];
 const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
 const deletedDuplicateContentIdSet = new Set(DELETED_DUPLICATE_CONTENT_IDS);

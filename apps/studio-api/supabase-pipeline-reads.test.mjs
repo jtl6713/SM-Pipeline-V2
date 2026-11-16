@@ -948,7 +948,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1052,7 +1054,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2742,15 +2746,17 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
 test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled posts", async () => {
   const oldFetch = globalThis.fetch;
   const urls = [];
+  // Keep mock Output_IDs far above DELETED_DUPLICATE_OUTPUT_NUMBERS so strip
+  // allowlists cannot eat Scheduled rows in this pagination regression.
   const newer = Array.from({ length: 800 }, (_, i) => ({
     airtable_record_id: `recSched${String(i).padStart(9, "0")}`,
-    output_number: 6000 - i, output_status: "Scheduled",
+    output_number: 260000 - i, output_status: "Scheduled",
     render_status: "Rendered", do_not_publish: false,
     platform: "Instagram", studio_output_type: "Reel",
   }));
   const olderReview = Array.from({ length: 30 }, (_, i) => ({
     airtable_record_id: `recReview${String(i).padStart(8, "0")}`,
-    output_number: 4700 - i, output_status: "Ready for Review",
+    output_number: 250000 - i, output_status: "Ready for Review",
     review_status: "Review Sent", render_status: "Rendered",
     do_not_publish: false, platform: "Instagram", studio_output_type: "Reel",
     final_file_url: "https://example.test/ready.mp4",
@@ -2776,7 +2782,7 @@ test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled p
     assert.equal(pack.outputs.length, 830);
     assert.equal(pack.reviewOutputs.length, 30);
     assert.equal(pack.outputs.filter((row) => row.fields.Output_Status === "Ready for Review").length, 30);
-    assert.equal(pack.reviewOutputs[0].fields.Output_ID, 4700);
+    assert.equal(pack.reviewOutputs[0].fields.Output_ID, 250000);
     assert.ok(urls.some((url) => url.includes("or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)")));
     assert.ok(urls.some((url) => url.includes("&offset=0")));
   } finally {
@@ -2810,7 +2816,9 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3130,7 +3138,9 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3753,7 +3763,9 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /supabase SoR mutation miss; skipping Airtable archive WRITE/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
 });
 
 test("sideTableKind recognizes Platform Outputs and Content Items table names", async () => {
@@ -3779,7 +3791,9 @@ test("Insights Learned settings SoR under STUDIO_WRITE_SOURCE=supabase", async (
   assert.match(fn, /STUDIO_INSIGHTS_LEARNED_SETTING/);
   assert.match(fn, /studioWriteSource\(env\) === "supabase"/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
 });
 
 test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", async () => {
@@ -3796,7 +3810,9 @@ test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", as
   assert.match(fn, /studioInsightsObservationsStore/);
   assert.match(fn, /studioInsightsPruneObservationStore/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
 });
 
 
@@ -3811,7 +3827,9 @@ test("studioSettingsByName SoR miss skips Airtable archive", async () => {
     "utf8",
   );
   assert.match(fn, /SoR miss: do not GET the frozen Airtable settings archive/);
-  assert.match(worker, /0\.10\.970-library-overlay-override/);
+
+
+  assert.match(worker, /0\.10\.971-incomplete-dupe-sweep/);
 });
 
 test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {
