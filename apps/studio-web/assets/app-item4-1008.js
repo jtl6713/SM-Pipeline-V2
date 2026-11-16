@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.967-pipeline-search-all-weeks";
+  const BUILD_ID = "item4-0.6.968-pipeline-content-title";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22797,7 +22797,9 @@ function timedScriptAssetLabel(asset, index) {
     const first = group.records[0] || {};
     const content = pipelineContentRecordForGroup(group.records);
     const contentNumber = String(content?.content_id ?? first.content_number ?? "").trim();
-    const title = String(content?.title || first.output_title || first.content_title || "Untitled content").trim();
+    // Prefer the Content Item title so one sibling Output_Title typo (or
+    // cross-content stamp) cannot rename the whole Pipeline package card.
+    const title = String(content?.title || first.content_title || first.output_title || "Untitled content").trim();
     const summary = pipelineContentSummary(content, first);
     const groupReady = pipelineManualApprovableOutputs(group.records);
     const destination = pipelineDestinationProgress(group.records);
