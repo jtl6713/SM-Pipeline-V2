@@ -105,6 +105,14 @@ export function youtubePublicUploadReceipt(row) {
   return upload === "uploaded" && privacy === "public";
 }
 
+/** Graph 368 is a timed cooldown. It is not an unpublished failure or a past-due approval. */
+export function facebookGraphCooldown(row) {
+  if (String(row?.platform || "").trim() !== "Facebook") return false;
+  if (row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  const stage = String(row.publish_error_stage || "").trim();
+  return /^(FACEBOOK_STORY_RATE_LIMIT_368|FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT)$/i.test(stage);
+}
+
 /**
  * Return the scheduled timestamp if an approved output is not yet published.
  * This clock-independent candidate supports indexed live overdue evaluation in
@@ -112,7 +120,7 @@ export function youtubePublicUploadReceipt(row) {
  */
 export function homeOverdueDueAt(row) {
   if (!row || row.do_not_publish || isTikTokEmailedManualHandoff(row)) return 0;
-  if (youtubePublicUploadReceipt(row)) return 0;
+  if (youtubePublicUploadReceipt(row) || facebookGraphCooldown(row)) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   if (review && review !== "approved") return 0;
@@ -167,7 +175,7 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
   if (!row || row.do_not_publish) return false;
   // Only authoritative final approval, not provisional output status.
   if (String(row.review_status || "").trim().toLowerCase() !== "approved") return false;
-  if (youtubePublicUploadReceipt(row)) return false;
+  if (youtubePublicUploadReceipt(row) || facebookGraphCooldown(row)) return false;
   const state = String(row.studio_state || "").trim().toLowerCase();
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
@@ -195,7 +203,7 @@ export function homeApprovedExceptionKind(row, now = Date.now()) {
 }
 
 export function homeIsUnpublishedFailure(row) {
-  if (!row) return false;
+  if (!row || facebookGraphCooldown(row)) return false;
   const failed = String(row.studio_state || "").trim().toLowerCase() === "failed"
     || String(row.output_status || "").trim().toLowerCase() === "failed"
     || String(row.publish_status || "").trim().toLowerCase() === "failed";
