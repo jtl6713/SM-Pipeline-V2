@@ -35,6 +35,7 @@ def start_library_ingest_job(
     mime_type: str = "",
     profile_name: str = "",
     skip_source_master: bool = False,
+    override_overlay_hold: bool = False,
 ) -> str:
     job_id = uuid.uuid4().hex
     now = time.time()
@@ -59,6 +60,7 @@ def start_library_ingest_job(
                 mime_type=mime_type,
                 profile_name=profile_name,
                 skip_source_master=skip_source_master,
+                override_overlay_hold=override_overlay_hold,
             )
             with _LOCK:
                 _JOBS[job_id] = {

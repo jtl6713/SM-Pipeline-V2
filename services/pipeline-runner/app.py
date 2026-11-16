@@ -636,6 +636,8 @@ def run_studio_asset_library():
     profile_name = str(request.form.get("profile_name") or request.form.get("content_profile_name") or "").strip()
     skip_source_raw = str(request.form.get("skip_source_master") or "").strip().lower()
     skip_source_master = skip_source_raw in {"1", "true", "yes", "on"}
+    override_raw = str(request.form.get("override_overlay_hold") or "").strip().lower()
+    override_overlay_hold = override_raw in {"1", "true", "yes", "on"}
     async_raw = str(request.form.get("async") or request.args.get("async") or "").strip().lower()
     # Default async: Worker→tunnel cannot hold screen+watermark+Drive in one request.
     # Pass async=0 only for local/sync diagnostics.
@@ -651,8 +653,14 @@ def run_studio_asset_library():
             mime_type=mime_type,
             profile_name=profile_name,
             skip_source_master=skip_source_master,
+            override_overlay_hold=override_overlay_hold,
         )
-        logger.info("job=studio-asset-library async accepted job_id=%s file=%s", job_id, filename)
+        logger.info(
+            "job=studio-asset-library async accepted job_id=%s file=%s override=%s",
+            job_id,
+            filename,
+            override_overlay_hold,
+        )
         return jsonify({"ok": True, "status": "processing", "job_id": job_id}), 202
     from studio_library.processor import ingest_studio_library_asset
     try:
@@ -662,6 +670,7 @@ def run_studio_asset_library():
             mime_type=mime_type,
             profile_name=profile_name,
             skip_source_master=skip_source_master,
+            override_overlay_hold=override_overlay_hold,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 422
