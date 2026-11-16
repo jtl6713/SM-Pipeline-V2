@@ -125,6 +125,8 @@ import {
   listSupabaseOversizedMedia,
   listSupabaseIdeaLane,
   listSupabaseAutonomousDraftRequests,
+  studioSideTableRead,
+  studioSideTableCommit,
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
@@ -634,6 +636,7 @@ import {
   AUTONOMOUS_OPEN_IDEAS_FORMULA,
   TIKTOK_COMPLETE_ERRORS,
   YOUTUBE_COMPLETE_ERRORS,
+  airtableLiveRecord,
 } from "./worker.js";
 import {
   resolveStudioCronAuthorization,
@@ -9276,6 +9279,7 @@ export async function studioIdeaRunPythonBatch(env, authorization, profile, batc
   const createdIds = Array.isArray(run.created_record_ids)
     ? run.created_record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
     : [];
+  await studioMirrorGeneratedIdeas(env, createdIds);
   const photoListening = await studioIdeaStartPhotoListening(env, authorization, createdIds);
   await studioIdeaUpdateBatch(env, batch.id, {
     Status: "Complete",
@@ -9436,9 +9440,40 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
 }
 /*__STUDIO_WORKER_END:startStudioIdeaGeneration__*/
 
+async function studioMirrorGeneratedIdeas(env, ideaIds) {
+  if (studioWriteSource(env) !== "supabase") return 0;
+  const ideaTable = String(env?.AIRTABLE_IDEA_TABLE_ID || "").trim();
+  const ids = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  if (!ideaTable || !ids.length) return 0;
+  let mirrored = 0;
+  for (const id of ids) {
+    const existing = await studioSideTableRead(env, ideaTable, id).catch(() => null);
+    if (existing?.id) continue;
+    const live = await airtableLiveRecord(env, ideaTable, id);
+    if (!live?.id || !live.fields) continue;
+    const committed = await studioSideTableCommit(
+      env,
+      ideaTable,
+      "PATCH",
+      live.id,
+      JSON.stringify({ fields: live.fields }),
+    ).catch((error) => {
+      console.warn("idea batch supabase mirror failed", String(error?.message || error));
+      return null;
+    });
+    if (committed?.ok) mirrored += 1;
+  }
+  return mirrored;
+}
+
 export async function studioIdeaGenerationStatus(request, env, url) {
   const recordId = studioIdeaBatchRecordIdFromPath(url);
   let record = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, recordId);
+  await studioMirrorGeneratedIdeas(env, linkedRecordIds(f(record, "Idea Candidates"))).catch((error) => {
+    console.warn("idea batch candidate mirror failed", String(error?.message || error));
+  });
   let view = studioIdeaBatchView(record);
   const now = Date.now();
   const requestedAt = view.requested_at ? Date.parse(view.requested_at) : now;
