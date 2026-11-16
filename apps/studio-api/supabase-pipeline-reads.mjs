@@ -616,6 +616,9 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
   }
   const url = pathAndQuery.startsWith("http") ? pathAndQuery : `${base}/rest/v1/${pathAndQuery.replace(/^\//, "")}`;
   let res;
+  const deadline = signal || (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(20000)
+    : null);
   try {
     res = await fetch(url, {
       method,
@@ -623,14 +626,20 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
         apikey: key,
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
-        Prefer: method === "GET" ? "count=exact" : "resolution=merge-duplicates,return=minimal",
+        // count=exact makes PostgREST count the whole match before returning
+        // the page. Idea and session reads were dying as "signal timed out".
+        Prefer: method === "GET" ? "return=representation" : "resolution=merge-duplicates,return=minimal",
         ...headers,
       },
       body: body == null ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
-      signal: signal || undefined,
+      signal: deadline || undefined,
     });
   } catch (error) {
     noteSupabaseCircuitFailure(error);
+    const message = String(error?.message || error || "");
+    if (error?.name === "TimeoutError" || error?.name === "AbortError" || /signal timed out|aborted/i.test(message)) {
+      throw new Error("Supabase request timed out");
+    }
     throw error;
   }
   const text = await res.text();
@@ -6868,6 +6877,41 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
     });
 }
 
+/** Ideas for one profile. Uses the indexed profile id and does not count the table. */
+export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit = 100) {
+  const id = String(profileAirtableId || "").trim();
+  const cap = Math.max(1, Math.min(100, Number(limit) || 100));
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return [];
+  const uuid = await resolveSupabaseProfileId(env, id).catch((error) => {
+    throw ideaListReadError(error);
+  });
+  if (!uuid) return [];
+  const rows = await supabaseRest(
+    env,
+    `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`
+      + `&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at`
+      + `&order=created_at.desc&limit=${cap}`,
+    { headers: { Prefer: "return=representation" } },
+  ).catch((error) => {
+    throw ideaListReadError(error);
+  });
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.airtable_record_id)
+    .map(airtableShapedIdeaFromSupabase);
+}
+
+function ideaListReadError(error) {
+  const message = String(error?.message || error || "");
+  if (/timed out|signal timed out|abort|circuit open/i.test(message)) {
+    const wrapped = new Error("Ideas are taking too long to load. Refresh Ideas in a moment.");
+    wrapped.status = 503;
+    return wrapped;
+  }
+  const wrapped = new Error(message.slice(0, 300) || "Ideas could not be loaded");
+  wrapped.status = 503;
+  return wrapped;
+}
+
 const QUEUE_FILTER_FIELDS = {
   Transfer_Status: "status",
   Transfer_ID: "payload->>transfer_id",
@@ -8557,7 +8601,13 @@ export async function listOpenSupabaseIdeaBatches(env, profileAirtableId) {
     `idea_batches?content_profile_airtable_id=eq.${encodeURIComponent(id)}`
       + `&status=in.(Pending,Running)&select=airtable_record_id,status,requested_at&limit=5`,
   ).catch(() => []);
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+  // A runner that never finished used to leave Pending forever and block the next Generate.
+  const freshMs = 20 * 60 * 1000;
+  return rows.filter((row) => {
+    const at = Date.parse(String(row?.requested_at || ""));
+    return Number.isFinite(at) && Date.now() - at < freshMs;
+  });
 }
 
 async function commitSettingRecords(env, source, records, { insert = false } = {}) {

@@ -23,13 +23,21 @@
   };
   const put = (parent, ...children) => { children.forEach(child => parent.appendChild(child)); return parent; };
   function report(message, error = false) {
-    status.textContent = message;
+    const text = String(message || "");
+    status.textContent = /signal timed out|supabase request timed out/i.test(text)
+      ? "Studio took too long to answer. Refresh saved ideas, or try Generate again."
+      : text;
     status.className = "form-message" + (error ? " error-text" : "");
   }
   async function call(path, options = {}) {
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 150000;
+    const rest = { ...options };
+    delete rest.timeoutMs;
+    delete rest.signal;
     const response = await fetch(root + path, {
       credentials: "same-origin", cache: "no-store",
-      ...options,
+      ...rest,
+      signal: options.signal || AbortSignal.timeout(timeoutMs),
       headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
     });
     const text = await response.text();
@@ -83,7 +91,18 @@
   async function refresh(keep = false) {
     const id = profileId();
     if (!isId(id)) { report("Select a profile to load saved storyboards."); return; }
-    const result = await call("/api/ideas?limit=100&fresh=1&profile=" + encodeURIComponent(id));
+    let result;
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        result = await call("/api/ideas?limit=100&fresh=1&profile=" + encodeURIComponent(id), { timeoutMs: 20000 });
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
     if (result.live !== true || !Array.isArray(result.records)) throw new Error("Saved Ideas could not be verified against Airtable.");
     current.ideaRecords = result.records.filter(row =>
       Array.isArray(row.content_profile_links) && row.content_profile_links.includes(id) && storyNotesFromRecord(row));

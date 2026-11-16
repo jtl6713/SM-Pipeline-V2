@@ -808,3 +808,4 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-15: Deploy Pages UI 0.6.956-library-upload-async — Asset Manager waits up to 6 minutes for async Drive confirm.
 2026-11-15: Deploy Pages UI 0.6.957-library-overlay-override — Asset Manager can override false-positive third-party overlay holds.
 2026-11-16: Deploy Pages UI 0.6.958-library-sequential-names — Asset Manager numbers a multi-file upload from one reservation. Hard-refresh; footer UI 0.6.958.
+2026-11-16: Deploy Pages UI 0.6.959-ideas-load � Saved storyboards retry instead of showing signal timed out. Hard-refresh; footer UI 0.6.959.
