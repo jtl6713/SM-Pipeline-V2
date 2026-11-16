@@ -451,6 +451,27 @@ def test_output_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
     assert posts[0][2][0]["platform"] == "TikTok"
 
 
+def test_idea_batch_create_stays_on_supabase(monkeypatch):
+    from airtable.constants import IDEA_BATCHES_TABLE
+
+    seen = []
+    monkeypatch.setattr(
+        requests, "post",
+        lambda url, *, headers, json, timeout: (_ for _ in ()).throw(AssertionError("airtable export")),
+    )
+    monkeypatch.setattr(requests, "request", _supabase_request_log(seen))
+    rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+        IDEA_BATCHES_TABLE,
+        [{"Batch_ID": "IDEAS-TEST", "Status": "Pending", "Requested_Count": 2, "Quality": "Highest Quality"}],
+    )
+    assert rows[0]["id"].startswith("rec")
+    assert len(rows[0]["id"]) == 17
+    posts = [row for row in seen if row[0] == "POST" and "idea_batches" in row[1]]
+    assert posts
+    assert posts[0][2][0]["batch_id"] == "IDEAS-TEST"
+    assert posts[0][2][0]["airtable_record_id"] == rows[0]["id"]
+
+
 def test_output_create_keeps_minted_id_when_airtable_is_archived(monkeypatch):
     seen = []
     monkeypatch.setattr(

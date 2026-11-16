@@ -25,10 +25,12 @@ from typing import Any
 from airtable.constants import (
     CAROUSEL_SLIDES_TABLE,
     CONTENT_ITEMS_TABLE,
+    IDEA_BATCHES_TABLE,
     MEDIA_ASSETS_TABLE,
     MEDIA_TRANSFER_QUEUE_TABLE,
     PLATFORM_OUTPUTS_TABLE,
     PRODUCTION_REQUESTS_TABLE,
+    SOURCE_CANDIDATES_TABLE,
 )
 
 logger = logging.getLogger("pipeline-runner.supabase")
@@ -161,8 +163,13 @@ def legacy_export_enabled(settings: dict | None, table_id: str) -> bool:
 
 def side_table_kind(table_id: str) -> str:
     """Side tables under STUDIO_WRITE_SOURCE=supabase (not Output/Content/Phase6)."""
-    if str(table_id or "") == CAROUSEL_SLIDES_TABLE:
+    table = str(table_id or "")
+    if table == CAROUSEL_SLIDES_TABLE:
         return "slides"
+    if table == SOURCE_CANDIDATES_TABLE:
+        return "ideas"
+    if table == IDEA_BATCHES_TABLE:
+        return "idea_batches"
     return ""
 
 
@@ -1249,6 +1256,134 @@ def commit_carousel_slides(settings: dict | None, records: list[dict], *, partia
     return {"ok": saved == len(records), "kind": "slides", "count": saved}
 
 
+def _first_record_link(value: Any) -> str | None:
+    if isinstance(value, list) and value:
+        item = value[0]
+        if isinstance(item, str) and item.startswith("rec"):
+            return item
+        if isinstance(item, dict) and str(item.get("id") or "").startswith("rec"):
+            return str(item["id"])
+    return None
+
+
+def commit_idea_batches(settings: dict | None, records: list[dict], *, partial: bool = True) -> dict:
+    """Commit Idea Batch rows to Supabase. Airtable is not written."""
+    if not side_table_export_enabled(settings, IDEA_BATCHES_TABLE):
+        return {"ok": False, "reason": "disabled"}
+    if not records:
+        return {"ok": False, "reason": "no_records"}
+    cfg = settings or {}
+    saved = 0
+    for record in records:
+        if not isinstance(record, dict) or not record.get("id"):
+            continue
+        record_id = str(record["id"])
+        patch_fields = dict(record.get("fields") or {})
+        prior: dict[str, Any] = {}
+        if partial:
+            existing = _rest(
+                cfg,
+                f"idea_batches?airtable_record_id=eq.{record_id}&select=fields&limit=1",
+                "GET",
+                prefer="return=representation",
+            ) or []
+            row0 = existing[0] if isinstance(existing, list) and existing else None
+            if isinstance(row0, dict) and isinstance(row0.get("fields"), dict):
+                prior = dict(row0["fields"])
+        merged = {**prior, **patch_fields}
+        profile_id = _first_record_link(merged.get("Content_Profile"))
+        body = {
+            "airtable_record_id": record_id,
+            "batch_id": merged.get("Batch_ID") or None,
+            "status": merged.get("Status") or None,
+            "requested_count": merged.get("Requested_Count"),
+            "generated_count": merged.get("Generated_Count") if merged.get("Generated_Count") is not None else 0,
+            "quality": merged.get("Quality") or None,
+            "content_profile_airtable_id": profile_id,
+            "fields": merged,
+            "requested_at": merged.get("Requested_At") or None,
+            "completed_at": merged.get("Completed_At") or None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _rest(
+            cfg,
+            "idea_batches?on_conflict=airtable_record_id",
+            "POST",
+            [body],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        saved += 1
+    return {"ok": saved == len(records), "kind": "idea_batches", "count": saved}
+
+
+def _append_idea_to_batch(settings: dict, batch_id: str, idea_id: str) -> None:
+    existing = _rest(
+        settings,
+        f"idea_batches?airtable_record_id=eq.{batch_id}&select=fields&limit=1",
+        "GET",
+        prefer="return=representation",
+    ) or []
+    row0 = existing[0] if isinstance(existing, list) and existing else None
+    fields = dict(row0.get("fields") or {}) if isinstance(row0, dict) else {}
+    links = [item for item in (fields.get("Idea Candidates") or []) if isinstance(item, str)]
+    if idea_id not in links:
+        links.append(idea_id)
+    fields["Idea Candidates"] = links
+    fields["Generated_Count"] = len(links)
+    commit_idea_batches(settings, [{"id": batch_id, "fields": fields}], partial=True)
+
+
+def commit_idea_candidates(settings: dict | None, records: list[dict], *, partial: bool = True) -> dict:
+    """Commit Idea Candidates to Supabase and link them on their batch."""
+    if not side_table_export_enabled(settings, SOURCE_CANDIDATES_TABLE):
+        return {"ok": False, "reason": "disabled"}
+    if not records:
+        return {"ok": False, "reason": "no_records"}
+    cfg = settings or {}
+    saved = 0
+    for record in records:
+        if not isinstance(record, dict) or not record.get("id"):
+            continue
+        record_id = str(record["id"])
+        patch_fields = dict(record.get("fields") or {})
+        prior: dict[str, Any] = {}
+        if partial:
+            existing = _rest(
+                cfg,
+                f"idea_candidates?airtable_record_id=eq.{record_id}&select=payload&limit=1",
+                "GET",
+                prefer="return=representation",
+            ) or []
+            row0 = existing[0] if isinstance(existing, list) and existing else None
+            if isinstance(row0, dict) and isinstance(row0.get("payload"), dict):
+                prior = dict(row0["payload"])
+        merged = {**prior, **patch_fields}
+        profile_id = _first_record_link(merged.get("Content_Profile"))
+        body = {
+            "airtable_record_id": record_id,
+            "candidate_title": merged.get("Candidate_Title") or None,
+            "idea_summary": merged.get("Idea_Summary") or None,
+            "status": merged.get("Candidate_Status") or None,
+            "payload": merged,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        profile_uuid = _profile_uuid(cfg, profile_id)
+        if profile_uuid:
+            body["content_profile_id"] = profile_uuid
+        _rest(
+            cfg,
+            "idea_candidates?on_conflict=airtable_record_id",
+            "POST",
+            [body],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        batch_id = _first_record_link(merged.get("Idea_Batch"))
+        if batch_id:
+            _append_idea_to_batch(cfg, batch_id, record_id)
+        saved += 1
+    return {"ok": saved == len(records), "kind": "ideas", "count": saved}
+
+
 def mirror_airtable_records(settings: dict | None, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
     """Mirror Output, Content Item, request, media, transfer-queue, or slide rows. Never raises."""
     table = str(table_id or "")
@@ -1257,6 +1392,8 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         PRODUCTION_REQUESTS_TABLE: "request",
         MEDIA_ASSETS_TABLE: "media",
         CAROUSEL_SLIDES_TABLE: "slides",
+        SOURCE_CANDIDATES_TABLE: "ideas",
+        IDEA_BATCHES_TABLE: "idea_batches",
     }.get(table) or table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
@@ -1268,6 +1405,18 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         except Exception as error:
             logger.warning("supabase slides write-through failed: %s", error)
             return {"ok": False, "kind": "slides", "count": 0, "error": type(error).__name__}
+    if kind == "ideas":
+        try:
+            return commit_idea_candidates(settings, records or [], partial=partial)
+        except Exception as error:
+            logger.warning("supabase idea write-through failed: %s", error)
+            return {"ok": False, "kind": "ideas", "count": 0, "error": type(error).__name__}
+    if kind == "idea_batches":
+        try:
+            return commit_idea_batches(settings, records or [], partial=partial)
+        except Exception as error:
+            logger.warning("supabase idea batch write-through failed: %s", error)
+            return {"ok": False, "kind": "idea_batches", "count": 0, "error": type(error).__name__}
     mirrored = 0
     for record in records or []:
         if not isinstance(record, dict) or not record.get("id"):

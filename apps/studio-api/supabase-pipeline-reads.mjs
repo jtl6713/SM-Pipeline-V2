@@ -6176,6 +6176,7 @@ function sideTableKind(env, tableId) {
   if (table === idea || table === IDEA_CANDIDATES_TABLE_ID || table === "Idea Candidates") {
     return "idea";
   }
+  if (table === "tblpCKSqcTpDtyst3" || table === "Idea Batches") return "idea_batch";
   if (table === profiles || table === CONTENT_PROFILES_TABLE_ID || table === "Content Profiles") {
     return "profile";
   }
@@ -8166,6 +8167,9 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
       const row = await readIdeaRow(env, id);
       return row || null;
     }
+    if (kind === "idea_batch") {
+      return await readIdeaBatchRow(env, id);
+    }
     if (kind === "slides") {
       const rows = await listSupabaseCarouselSlidesByIds(env, [id]);
       return rows[0] || null;
@@ -8454,9 +8458,106 @@ async function commitIdeaRecords(env, records) {
     } else {
       await upsertChunk(env, "idea_candidates", [body]);
     }
+    await linkIdeaCandidateToBatch(env, record.id, firstLink(fields.Idea_Batch) || firstLink(prior.Idea_Batch)).catch((error) => {
+      console.warn("idea batch link failed", String(error?.message || error));
+    });
     saved.push({ id: record.id, fields: payload });
   }
   return saved;
+}
+
+function shapeIdeaBatchRow(row) {
+  if (!row?.airtable_record_id) return null;
+  const fields = isPlainObject(row.fields) ? { ...row.fields } : {};
+  if (row.batch_id != null) fields.Batch_ID = row.batch_id;
+  if (row.status != null) fields.Status = row.status;
+  if (row.requested_count != null) fields.Requested_Count = Number(row.requested_count);
+  if (row.generated_count != null) fields.Generated_Count = Number(row.generated_count);
+  if (row.quality != null) fields.Quality = row.quality;
+  if (row.content_profile_airtable_id) fields.Content_Profile = [row.content_profile_airtable_id];
+  if (row.requested_at) fields.Requested_At = row.requested_at;
+  if (row.completed_at) fields.Completed_At = row.completed_at;
+  return {
+    id: row.airtable_record_id,
+    fields,
+    createdTime: row.created_at || row.requested_at || null,
+  };
+}
+
+async function readIdeaBatchRow(env, id) {
+  const rows = await supabaseRest(
+    env,
+    `idea_batches?airtable_record_id=eq.${encodeURIComponent(id)}&select=*&limit=1`,
+  ).catch(() => null);
+  if (!Array.isArray(rows) || !rows[0]) return null;
+  return shapeIdeaBatchRow(rows[0]);
+}
+
+async function commitIdeaBatchRecords(env, records) {
+  const saved = [];
+  for (const record of records) {
+    const id = String(record?.id || "").trim();
+    if (!id) continue;
+    const existing = await readIdeaBatchRow(env, id);
+    const fields = { ...(existing?.fields || {}), ...(record.fields || {}) };
+    const profileId = firstLink(fields.Content_Profile);
+    const body = {
+      airtable_record_id: id,
+      batch_id: fields.Batch_ID || null,
+      status: fields.Status || null,
+      requested_count: Number.isFinite(Number(fields.Requested_Count)) ? Number(fields.Requested_Count) : null,
+      generated_count: Number.isFinite(Number(fields.Generated_Count)) ? Number(fields.Generated_Count) : 0,
+      quality: fields.Quality || null,
+      content_profile_airtable_id: profileId,
+      fields,
+      requested_at: fields.Requested_At || null,
+      completed_at: fields.Completed_At || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (existing) {
+      await supabaseRest(env, `idea_batches?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body,
+        headers: { Prefer: "return=minimal" },
+      });
+    } else {
+      await upsertChunk(env, "idea_batches", [body]);
+    }
+    saved.push({
+      id,
+      fields,
+      createdTime: existing?.createdTime || fields.Requested_At || new Date().toISOString(),
+    });
+  }
+  return saved;
+}
+
+async function linkIdeaCandidateToBatch(env, ideaId, batchId) {
+  if (!ideaId || !batchId) return;
+  const existing = await readIdeaBatchRow(env, batchId);
+  if (!existing?.id) return;
+  const links = Array.isArray(existing.fields?.["Idea Candidates"]) ? existing.fields["Idea Candidates"] : [];
+  if (links.includes(ideaId)) return;
+  const next = [...links, ideaId];
+  await commitIdeaBatchRecords(env, [{
+    id: batchId,
+    fields: {
+      "Idea Candidates": next,
+      Generated_Count: next.length,
+    },
+  }]);
+}
+
+export async function listOpenSupabaseIdeaBatches(env, profileAirtableId) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) return [];
+  const id = String(profileAirtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return [];
+  const rows = await supabaseRest(
+    env,
+    `idea_batches?content_profile_airtable_id=eq.${encodeURIComponent(id)}`
+      + `&status=in.(Pending,Running)&select=airtable_record_id,status,requested_at&limit=5`,
+  ).catch(() => []);
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function commitSettingRecords(env, source, records, { insert = false } = {}) {
@@ -8516,6 +8617,7 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
     if (!parsed.length) return { ok: false, reason: "no_records" };
     let records = null;
     if (kind === "idea") records = await commitIdeaRecords(env, parsed);
+    else if (kind === "idea_batch") records = await commitIdeaBatchRecords(env, parsed);
     else if (kind === "slides") records = await commitSlideRecords(env, parsed);
     else if (kind === "pipeline_settings" || kind === "engagement_settings") {
       records = await commitSettingRecords(

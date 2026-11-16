@@ -1393,7 +1393,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.976-fb-reel-stage-story-park",
+          version: "0.10.977-idea-batches-supabase",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5470,40 +5470,6 @@ function studioAirtableEgressTableKind(env, tableId) {
   return "other";
 }
 
-function studioAirtableArchiveStaysLive(tableId) {
-  // Idea Batches have no Supabase table. I1 and Generate Ideas require the
-  // Airtable record. Echoing a create returns fields without an id, and Studio
-  // reports "could not create the idea-generation batch".
-  return String(tableId || "") === "tblpCKSqcTpDtyst3";
-}
-
-async function airtableLiveRecord(env, tableId, recordId) {
-  const id = String(recordId || "").trim();
-  if (!/^rec[A-Za-z0-9]+$/.test(id) || !env?.AIRTABLE_BASE_ID || !env?.AIRTABLE_PAT) return null;
-  const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${encodeURIComponent(String(tableId))}/${id}`;
-  await airtableRequestSlot();
-  const started = Date.now();
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      headers: { Authorization: `Bearer ${env.AIRTABLE_PAT}` },
-    });
-  } finally {
-    console.log("studio_airtable_egress_v1", JSON.stringify({
-      source: "studio_worker_gateway",
-      table_kind: studioAirtableEgressTableKind(env, tableId),
-      method: "GET",
-      status: response?.status ?? 0,
-      duration_ms: Date.now() - started,
-      at: new Date().toISOString(),
-      request_count: 1,
-    }));
-  }
-  if (!response?.ok) return null;
-  const body = await response.json().catch(() => null);
-  return body?.id ? body : null;
-}
-
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const method = String(options?.method || "GET").toUpperCase();
@@ -5631,7 +5597,6 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     // touch Airtable — record miss → 404, list/view → empty page.
     // Phase 6 keep their own write-source gate when Output SoR is still airtable.
     method === "GET"
-    && !studioAirtableArchiveStaysLive(tableId)
     && (
       studioWriteSource(env) === "supabase"
       || (
@@ -5660,7 +5625,6 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     // callers soft-continue without egress.
     method !== "GET"
     && studioWriteSource(env) === "supabase"
-    && !studioAirtableArchiveStaysLive(tableId)
   ) {
     const tableKind = studioAirtableEgressTableKind(env, tableId);
     console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
@@ -8831,7 +8795,6 @@ const YOUTUBE_COMPLETE_ERRORS = {
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   airtableFetch,
-  airtableLiveRecord,
   studioMarkMappedListDirty,
   schedulePipelineListHeal,
   item4EnsureMakeHardeningFromWorkspaceOpen,

@@ -1317,3 +1317,4 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy Worker 0.10.974-youtube-public-receipt — Continue public YouTube uploads at YTS2/YTS3 and drop them from Past Due. Verify /health version 0.10.974-youtube-public-receipt.
 2026-11-16: Deploy Worker 0.10.975-idea-batch-live — Generate Ideas writes Idea Batches to Airtable again and mirrors new candidates into Supabase. Verify /health version 0.10.975-idea-batch-live.
 2026-11-16: Deploy Worker 0.10.976-fb-reel-stage-story-park — Stage Facebook Reels from the Drive final file, then park Graph 368 Stories for six hours. Verify /health version 0.10.976-fb-reel-stage-story-park.
+2026-11-16: Deploy Worker 0.10.977-idea-batches-supabase — Generate Ideas stores batches and new ideas in Supabase. Airtable stays closed. Verify /health version 0.10.977-idea-batches-supabase.

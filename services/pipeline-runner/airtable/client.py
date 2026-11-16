@@ -309,14 +309,22 @@ class AirtableClient:
         created: list[dict[str, Any]] = []
         legacy = self._legacy_export(table_id)
         phase6 = self._phase6_export(table_id) and not legacy
+        side = self._side_table_export(table_id) and not legacy and not phase6
         for start in range(0, len(records), 10):
             chunk = records[start : start + 10]
             minted = [
                 {"id": mint_record_id(), "fields": dict(item)}
                 for item in chunk
-            ] if (legacy or phase6) else []
+            ] if (legacy or phase6 or side) else []
             committed = False
-            if minted:
+            if side and minted:
+                committed = self._commit_side_table(table_id, minted)
+                if not committed:
+                    raise RuntimeError(f"Supabase create failed for {table_id}")
+                logger.info("Airtable archive kept the Supabase side-table create and did not export %s", table_id)
+                created.extend(minted)
+                continue
+            if minted and not side:
                 try:
                     committed = (
                         commit_minted_creates(self._settings, table_id, minted)
