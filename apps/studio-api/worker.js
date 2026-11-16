@@ -1394,7 +1394,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.985-yt-engage-version-gate",
+          version: "0.10.986-open-ideas-cap-promoted",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -8736,10 +8736,12 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:parkAutonomousResumeDraft__*/
 /**
  * Unpromoted Idea Candidates that still clog Factory / Ideas.
- * Rejected and On Hold do not count toward the open-ideas cap.
+ * Rejected, On Hold, and Promoted do not count toward the open-ideas cap.
+ * Promoted-status rows with a blank Promoted_Content_Record_ID are already
+ * "In production" in the Ideas UI — counting them false-capped harvest at 100.
  */
 const AUTONOMOUS_OPEN_IDEAS_FORMULA =
-  "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
+  "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold',{Candidate_Status}!='Promoted')";
 
 /** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
 /*__STUDIO_WORKER_EXTRACT:countAutonomousOpenIdeas__*/

@@ -1480,9 +1480,10 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
     filter += "&status=neq.On Hold&status=neq.Rejected&status=neq.Promoted";
   } else if (lane === "autonomous_open") {
-    // Match AUTONOMOUS_OPEN_IDEAS_FORMULA — do not drop Content Items rows.
+    // Match AUTONOMOUS_OPEN_IDEAS_FORMULA — Ideas UI treats Promoted as
+    // in-production even when Promoted_Content_Record_ID is blank.
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
-    filter += "&status=neq.On Hold&status=neq.Rejected";
+    filter += "&status=neq.On Hold&status=neq.Rejected&status=neq.Promoted";
   } else if (lane === "photo_unconfigured") {
     // autoListenOpenPhotoIdeas — wait blank, no promote links, no production config.
     filter += "&or=(payload->>Studio_Photo_Wait_Status.is.null,payload->>Studio_Photo_Wait_Status.eq.)";
@@ -6577,12 +6578,10 @@ export function ideaLaneFromFormula(formula) {
     if (notRejected && notPromoted) return "ready_production";
     return "photo_ready";
   }
-  // Unfinished / quality: no wait status, promoted blank, exclude terminal statuses.
+  // Autonomous open-ideas cap + unfinished/quality share the same status
+  // exclusions. Prefer autonomous_open so Content Items rows are kept (the
+  // Ideas UI already treats Promoted status as in-production).
   if (!waiting && !ready && promotedBlank && notOnHold && notRejected && notPromoted) {
-    return "photo_quality";
-  }
-  // Autonomous open-ideas cap: promoted blank, not Rejected/On Hold (Promoted status ok).
-  if (!waiting && !ready && promotedBlank && notOnHold && notRejected) {
     return "autonomous_open";
   }
   // Legacy auto-listen: wait blank + unconfigured production + Generated/Sent for Review.
