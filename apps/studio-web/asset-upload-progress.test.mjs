@@ -125,7 +125,7 @@ test("single-request library upload reports sent bytes and only resolves after s
   assert.equal(result.uploaded,1);
   assert.equal(request.method,"POST");
   assert.match(request.url,/\/api\/library\?profile=recChicagoTest$/);
-  assert.equal(request.timeout,180000);
+  assert.equal(request.timeout,360000);
   assert.equal(sentForm,form);
   assert.deepEqual([...stages].map(x=>x.stage),["uploading","verifying"]);
   assert.equal(stages[0].loadedBytes,3*1024*1024);
