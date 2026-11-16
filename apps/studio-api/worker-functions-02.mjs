@@ -1912,17 +1912,28 @@ export async function item4ReconcileVariants(env, recordId, record = null, optio
       const missingDrive = assets.filter((asset) =>
         !String(asset?.google_drive_file_id || "").trim() || !String(asset?.media_asset_record_id || "").trim()
       );
-      const error = !assets.length
-        ? "Those photos and clips are not saved yet. Wait until they finish copying to Google Drive, then click Prepare."
-        : (missingDrive.length
-          ? `${missingDrive.length} file${missingDrive.length === 1 ? " has" : "s have"} not finished copying to Google Drive yet. Wait until they appear as saved, then click Prepare.`
-          : "Prepare could not create platform frames. Click Prepare again after the files show as saved.");
-      const updated = await item4UpdateRequestState(env, recordId, {
-        Studio_Variant_Status: "Error",
-        Studio_Variant_Error: error,
-        Studio_Item4_State: "Error",
-      });
-      return { record: updated, status: "Error", error, manifest: null, queue_rows: [] };
+      // Masters still copying → Error so the UI asks the operator to wait.
+      // Masters already on Drive with zero scoped queue rows is Transfer_ID /
+      // payload-wipe hollow queue — stay Preparing so resume/heal recreates
+      // rows. Stamping Error here + prepare-not-started parked Frames forever.
+      if (!assets.length || missingDrive.length) {
+        const error = !assets.length
+          ? "Those photos and clips are not saved yet. Wait until they finish copying to Google Drive, then click Prepare."
+          : `${missingDrive.length} file${missingDrive.length === 1 ? " has" : "s have"} not finished copying to Google Drive yet. Wait until they appear as saved, then click Prepare.`;
+        const updated = await item4UpdateRequestState(env, recordId, {
+          Studio_Variant_Status: "Error",
+          Studio_Variant_Error: error,
+          Studio_Item4_State: "Error",
+        });
+        return { record: updated, status: "Error", error, manifest: null, queue_rows: [] };
+      }
+      return {
+        record,
+        status: "Preparing",
+        error: null,
+        manifest: null,
+        queue_rows: [],
+      };
     }
     const updated = await item4UpdateRequestState(env, recordId, {
       Studio_Variant_Manifest_JSON: null,
@@ -2429,13 +2440,26 @@ export async function item4ResumePendingVariants(env, recordId, record = null) {
     item4ExpectedVariantKeys(recordId, assets, plan || {}).map((row) => row.transfer_id)
   );
   let scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
+  const parentStatus = String(f(currentRecord, "Studio_Variant_Status") || "").trim();
+
+  // Explicit Prepare (or Error after a hollow queue) already entered the
+  // Preparing lifecycle. Empty scoped rows after payload wipe / Transfer_ID
+  // churn must recreate the queue — not park as prepare-not-started forever.
   if (!scoped.length) {
-    return { attempted: false, reason: "prepare-not-started", record: currentRecord, execution_ids: [] };
+    if (parentStatus !== "Preparing" && parentStatus !== "Error") {
+      return { attempted: false, reason: "prepare-not-started", record: currentRecord, execution_ids: [] };
+    }
+    const outputRows = await outputRowsForProductionRequest(env, recordId);
+    await item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan);
+    const refreshed = await item4VariantQueueRows(env, recordId);
+    scoped = refreshed.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
+    if (!scoped.length) {
+      return { attempted: false, reason: "prepare-queue-hollow", record: currentRecord, execution_ids: [] };
+    }
   }
 
   // Photos added after Prepare can sit at 23/27 forever: drain only sees existing
   // queue rows, and this resume path used to refuse to create the missing ones.
-  const parentStatus = String(f(currentRecord, "Studio_Variant_Status") || "").trim();
   const missingKeys = [...expectedIds].filter((id) => !scoped.some((row) => String(f(row, "Transfer_ID") || "").trim() === id));
   if (missingKeys.length && (parentStatus === "Preparing" || parentStatus === "Error")) {
     const outputRows = await outputRowsForProductionRequest(env, recordId);
@@ -10856,9 +10880,19 @@ export async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, wi
   const ideaLinks = Array.isArray(f(ideaRecord, "Production Requests"))
     ? f(ideaRecord, "Production Requests")
     : [];
-  const siblingIds = [...new Set(
+  let siblingIds = [...new Set(
     ideaLinks.map((value) => String(value || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id) && id !== winnerRequestId)
   )];
+  // Phase 6 SoR: Idea link bag is often empty. Cancel open siblings via FK.
+  if (!siblingIds.length && ideaRecord?.id) {
+    const fromFk = await listSupabaseOpenProductionRequestsForIdea(env, ideaRecord.id).catch(() => null);
+    if (Array.isArray(fromFk) && fromFk.length) {
+      siblingIds = [...new Set(
+        fromFk.map((row) => String(row?.id || "").trim())
+          .filter((id) => /^rec[A-Za-z0-9]+$/.test(id) && id !== winnerRequestId)
+      )];
+    }
+  }
   if (!siblingIds.length) return [];
   const loaded = await Promise.allSettled(siblingIds.map((id) => airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)));
   const rows = loaded

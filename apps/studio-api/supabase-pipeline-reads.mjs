@@ -2384,7 +2384,9 @@ export async function listSupabaseOpenProductionRequestsForIdea(env, ideaAirtabl
   const rows = await supabaseRest(
     env,
     `production_requests?idea_candidate_id=eq.${encodeURIComponent(ideaUuid)}`
-      + `&request_status=in.(Draft,Ready,Submitted)`
+      // Include Promoted so ready-claim / sibling cleanup see the Idea owner
+      // when the reciprocal Production Requests bag is hollow under Phase 6.
+      + `&request_status=in.(Draft,Ready,Submitted,Promoted)`
       + `&${REQUEST_ACTIVE}`
       + `&select=${REQUEST_SELECT}&order=created_at.desc.nullslast&limit=40`,
   ).catch(() => null);
@@ -2416,7 +2418,7 @@ export async function listSupabaseIdeaIdsWithOpenProductionRequests(env, ideaAir
     const prRows = await supabaseRest(
       env,
       `production_requests?idea_candidate_id=in.(${uuids.map(encodeURIComponent).join(",")})`
-        + `&request_status=in.(Draft,Ready,Submitted)`
+        + `&request_status=in.(Draft,Ready,Submitted,Promoted)`
         + `&${REQUEST_ACTIVE}`
         + `&select=idea_candidate_id&limit=200`,
     ).catch(() => null);

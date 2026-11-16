@@ -430,7 +430,7 @@ test("place review service never exposes an automated publish path", () => {
   assert.match(worker, /studio_place_reviews_v1/);
 
 
-  assert.match(worker, /0\.10\.992-queue-payload-merge/);
+  assert.match(worker, /0\.10\.993-phase6-prepare-heal-fk/);
   // Routes must resolve to live handlers. The split Worker strips the ESM
   // import list and inlines these bodies at EXTRACT markers — assert both
   // the call sites and that reconstruction succeeded for all three.

@@ -14,7 +14,7 @@ const worker = readStudioWorkerSource();
 test("Phase 6 SoR exposes open Production Requests by idea_candidate_id", () => {
   assert.match(reads, /export async function listSupabaseOpenProductionRequestsForIdea/);
   assert.match(reads, /idea_candidate_id=eq\.\$\{encodeURIComponent\(ideaUuid\)\}/);
-  assert.match(reads, /request_status=in\.\(Draft,Ready,Submitted\)/);
+  assert.match(reads, /request_status=in\.\(Draft,Ready,Submitted,Promoted\)/);
   assert.match(reads, /export async function listSupabaseIdeaIdsWithOpenProductionRequests/);
   assert.match(reads, /export async function appendIdeaProductionRequestLink/);
 });
@@ -60,5 +60,5 @@ test("existingDraftForIdea and findDraft fall back to the FK before minting", ()
 });
 
 test("Worker version bumps for Phase 6 duplicate-draft fix", () => {
-  assert.match(worker, /0\.10\.992-queue-payload-merge/);
+  assert.match(worker, /0\.10\.993-phase6-prepare-heal-fk/);
 });

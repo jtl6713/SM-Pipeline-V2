@@ -1341,3 +1341,4 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy Worker 0.10.991-phase6-duplicate-drafts — SoR-safe draft lookup by idea_candidate_id + densify Idea Production Requests link bag so Create VO / photo-wait cron stop minting duplicate Drafts every ~2 minutes. Verify /health version 0.10.991-phase6-duplicate-drafts.
 
 2026-11-16: Deploy Worker 0.10.992-queue-payload-merge — merge densified transfer-queue payload on partial Ready/claim updates so Transfer_ID/PR id survive SMV1 completion (Frames Error after crops finish).
+2026-11-16: Deploy Worker 0.10.993-phase6-prepare-heal-fk — recreate hollow Preparing/Error frame queues on heal; Idea FK for ready-claim + sibling cancel; include Promoted in open-PR FK lists. Ships queue payload merge (0.10.992). Verify /health version 0.10.993-phase6-prepare-heal-fk.

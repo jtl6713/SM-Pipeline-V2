@@ -43,7 +43,7 @@ describe("library upload overlay errors", () => {
   test("release versions bumped for this fix", () => {
 
 
-    assert.match(worker, /0\.10\.992-queue-payload-merge/);
+    assert.match(worker, /0\.10\.993-phase6-prepare-heal-fk/);
     const build = ui.match(/\bBUILD_ID\s*=\s*["']item4-(\d+)\.(\d+)\.(\d+)-/);
     assert.ok(build, "UI BUILD_ID must be a parseable semantic version");
     const [major, minor, patch] = build.slice(1).map(Number);

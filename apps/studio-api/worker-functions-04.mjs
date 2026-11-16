@@ -126,6 +126,7 @@ import {
   listSupabaseIdeaLane,
   listSupabaseAutonomousDraftRequests,
   listOpenSupabaseIdeaBatches,
+  listSupabaseOpenProductionRequestsForIdea,
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
@@ -13579,10 +13580,18 @@ async function discoverReadyVibeProductionDrafts(env, { limit = 25 } = {}) {
 }
 
 async function readyProductionRequestForIdea(env, idea) {
-  const ids = linkedRecordIds(f(idea, "Production Requests"));
+  let ids = linkedRecordIds(f(idea, "Production Requests"));
+  // Phase 6 SoR: Idea reciprocal bag is often empty. Fall back to
+  // production_requests.idea_candidate_id before treating this as "no request".
+  if (!ids.length && idea?.id) {
+    const fromFk = await listSupabaseOpenProductionRequestsForIdea(env, idea.id).catch(() => null);
+    if (Array.isArray(fromFk) && fromFk.length) {
+      ids = fromFk.map((row) => row.id).filter(Boolean);
+    }
+  }
   if (!ids.length) return null;
-  // Airtable's reciprocal link is the authority. Fail closed if any linked row
-  // cannot be read so a transient read failure cannot mint a duplicate request.
+  // Fail closed if any linked row cannot be read so a transient read failure
+  // cannot mint a duplicate request.
   const rows = await Promise.all(ids.map((id) => airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)));
   const candidates = rows.filter((row) => {
     if (!row?.id || !f(row, "Active")) return false;
