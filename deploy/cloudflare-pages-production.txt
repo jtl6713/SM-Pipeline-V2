@@ -813,3 +813,4 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-16: Deploy Pages UI 0.6.961-storyboard-notes-room — Story-first briefs, scene copy, and Idea notes use the 100,000-character field. Hard-refresh; footer UI 0.6.961.
 2026-11-16: Deploy Pages UI 0.6.962-video-cost-card — AI video cost stays on the scene after Check cost. Hard-refresh; footer UI 0.6.962.
 2026-11-16: Deploy Pages UI 0.6.963-video-cost-dialog — AI video cost opens in a page dialog. Hard-refresh; footer UI 0.6.963.
+2026-11-16: Deploy Pages UI 0.6.964-idea-title-carryover — Production heading carries the Ideas Candidate_Title after Create VO timeline (not Untitled piece). Hard-refresh; footer UI 0.6.964.

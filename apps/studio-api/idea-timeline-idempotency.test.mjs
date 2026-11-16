@@ -18,7 +18,7 @@ test("repeated timed-script POST reuses linked saved timeline before AI or write
   assert.match(route, /Promise\.allSettled\(linkedProductionRequestIds\.map/);
   assert.match(route, /timedScriptFromNotes\(f\(record, "Production_Notes"\)\)/);
   assert.match(route, /reused_existing: true/);
-  assert.match(route, /production_request: mapProductionRequest\(savedRequest\)/);
+  assert.match(route, /production_request: mapProductionRequest\(savedRequest, reusedTitle\)/);
   assert.ok(route.indexOf("reused_existing: true") < route.indexOf("rankStillsForIdeaPhotoWait"),
     "saved-script check must precede new writing or asset replacement");
 });
@@ -30,6 +30,11 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 
 test("Worker version is incremented for deployed idempotency fix", () => {
   assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
+});
+
+test("timed-script responses stamp Candidate_Title onto production_request.idea_title", () => {
+  assert.match(route, /production_request: mapProductionRequest\(requestRecord, title\)/);
+  assert.match(route, /production_request: mapProductionRequest\(savedRequest, reusedTitle\)/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {

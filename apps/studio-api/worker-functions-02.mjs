@@ -13097,6 +13097,7 @@ export async function createIdeaTimedScriptRoute(request, env, url, authorizatio
       })[0];
     if (saved) {
       const { record: savedRequest, timeline } = saved;
+      const reusedTitle = String(f(idea, "Candidate_Title") || "").trim() || null;
       return respond(request, env, {
         ok: true,
         reused_existing: true,
@@ -13107,7 +13108,7 @@ export async function createIdeaTimedScriptRoute(request, env, url, authorizatio
         scene_count: timeline.segments.length,
         ready_for_approval: false,
         record: mapIdea(idea),
-        production_request: mapProductionRequest(savedRequest),
+        production_request: mapProductionRequest(savedRequest, reusedTitle),
         message: "The existing voiceover timeline was reopened without changing its scenes or stills. Review it in Production / Rendering.",
       });
     }
@@ -13424,7 +13425,10 @@ export async function createIdeaTimedScriptRoute(request, env, url, authorizatio
     }),
     timeline,
     record: mapIdea(idea),
-    production_request: mapProductionRequest(requestRecord),
+    // Stamp Candidate_Title onto the response. Airtable has no Idea_Title field,
+    // and partial update payloads can omit Idea_Candidate — Studio needs this for
+    // the Production heading. This is not Requested_Title / the on-post title.
+    production_request: mapProductionRequest(requestRecord, title),
     message: readyForApproval
       ? `Ready for Production Approve: ${timeline.segments.length} scenes, ${Number(timeline.duration_seconds).toFixed(0)} seconds, named stills attached. Open Production and tap Approve. This does not publish.`
       : `Timeline and stills are on Production (${timeline.segments.length} scenes). Platform crops are still finishing — open Production and Approve when crops say Ready. This does not publish.`,

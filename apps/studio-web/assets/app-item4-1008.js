@@ -14,17 +14,49 @@
   let ideaPhotoManagePauseTimer = null;
   let ideaPhotoManagePauseIdeaId = null;
 
+  function ideaLinkId(value) {
+    if (!value) return null;
+    if (typeof value === "object") {
+      const id = String(value.id || value.record_id || "").trim();
+      return /^rec[A-Za-z0-9]+$/.test(id) ? id : null;
+    }
+    const id = String(value).trim();
+    return /^rec[A-Za-z0-9]+$/.test(id) ? id : null;
+  }
+
   function ideaIdFromRequest(record) {
-    return record?.idea_record_id
-      || (Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null)
-      || (Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null)
+    return ideaLinkId(record?.idea_record_id)
+      || ideaLinkId(Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null)
       || null;
   }
 
   function ideaTitleForRequest(record) {
     const ideaId = ideaIdFromRequest(record);
     const cached = ideaId ? ideasCache.find((idea) => idea.id === ideaId) : null;
-    return String(record?.idea_title || cached?.title || record?.requested_title || "").trim();
+    const link = Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null;
+    const linkTitle = link && typeof link === "object" ? String(link.name || link.title || "").trim() : "";
+    return String(record?.idea_title || cached?.title || linkTitle || record?.requested_title || "").trim();
+  }
+
+  function withIdeaIdentityOnRequest(record, idea = null) {
+    if (!record || typeof record !== "object") return record;
+    const ideaId = ideaIdFromRequest(record) || String(idea?.id || "").trim() || null;
+    const ideaTitle = String(record?.idea_title || idea?.title || "").trim() || null;
+    const links = Array.isArray(record.idea_candidate_links) ? record.idea_candidate_links : [];
+    const nextLinks = links.length
+      ? links
+      : (ideaId ? [ideaId] : []);
+    if ((!ideaId || record.idea_record_id === ideaId)
+      && (!ideaTitle || record.idea_title === ideaTitle)
+      && links.length === nextLinks.length) {
+      return record;
+    }
+    return {
+      ...record,
+      idea_record_id: record.idea_record_id || ideaId,
+      idea_title: record.idea_title || ideaTitle,
+      idea_candidate_links: nextLinks,
+    };
   }
 
   function contentNumberForProductionRequest(record) {
@@ -301,7 +333,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.963-video-cost-dialog";
+  const BUILD_ID = "item4-0.6.964-idea-title-carryover";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14766,12 +14798,17 @@ function timedScriptAssetLabel(asset, index) {
     const changingRequest = clearProductionMediaOnRequestChange(record);
     // Never carry the previous Ideas drawer's identity, script, or location into
     // the new request. Keep it only when the linked Idea_Candidate actually matches.
+    // Timeline create/update payloads sometimes omit Idea_Candidate; keep the
+    // intentionally opened idea so the heading does not fall back to Untitled.
     const requestIdeaId = ideaIdFromRequest(record);
-    if (!requestIdeaId || String(activeIdea?.id || "") !== String(requestIdeaId)) {
-      activeIdea = requestIdeaId
-        ? (ideasCache.find((idea) => String(idea.id) === String(requestIdeaId)) || null)
-        : null;
+    if (requestIdeaId) {
+      if (String(activeIdea?.id || "") !== String(requestIdeaId)) {
+        activeIdea = ideasCache.find((idea) => String(idea.id) === String(requestIdeaId)) || null;
+      }
+    } else if (!activeIdea?.id) {
+      activeIdea = null;
     }
+    record = withIdeaIdentityOnRequest(record, activeIdea);
     voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
@@ -15080,6 +15117,10 @@ function timedScriptAssetLabel(asset, index) {
       activeIdea = idea?.id ? idea : null;
       ezEntryPath = "configure";
       switchToPage("content");
+      result = {
+        ...result,
+        record: withIdeaIdentityOnRequest(result.record, idea),
+      };
       populateProductionRequestForm(result.record);
       showProductionRequestWorkspace();
       setEzAdvancedOpen(false);
