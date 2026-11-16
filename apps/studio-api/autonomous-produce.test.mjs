@@ -904,6 +904,10 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /AUTONOMOUS_HOUR_ASSET_DRAIN/);
   assert.match(worker, /countAutonomousOpenIdeas/);
   assert.match(worker, /open_ideas_cap/);
+  assert.match(
+    worker,
+    /AUTONOMOUS_OPEN_IDEAS_FORMULA\s*=\s*[\s\S]*Candidate_Status\}!='Promoted'/,
+  );
   const manualIdeaGateStart = worker.indexOf("// Manual / dry-run: one idea.");
   const manualIdeaGate = worker.slice(
     manualIdeaGateStart,
