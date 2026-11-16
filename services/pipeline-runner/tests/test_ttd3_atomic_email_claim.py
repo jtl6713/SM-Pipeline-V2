@@ -16,11 +16,11 @@ def _output():
 
 def test_claim_replay_never_sends(monkeypatch):
     client = Mock()
-    client._settings = {"supabase_url": "https://db.example", "supabase_service_role_key": "key"}
+    client._settings = {"supabase_url": "https://db.example", "supabase_service_role_key": "key", "pipeline_runner_shared_secret": "unit-test-secret"}
     client.get_record.return_value = _output()
     monkeypatch.setattr(ttd3, "AirtableClient", lambda: client)
     monkeypatch.setattr(ttd3, "ttd3_eligibility_reason", lambda output: None)
-    monkeypatch.setattr(ttd3, "PipelineSettings", lambda client: Mock(get=lambda key: None))
+    monkeypatch.setattr(ttd3, "PipelineSettings", lambda client: Mock(get=lambda key: "https://example.org/hooks/ttd4" if key == "TTD4_WEBHOOK_URL" else None))
     monkeypatch.setattr(ttd3, "_rest", lambda *args, **kwargs: False)
     sender = Mock()
     monkeypatch.setattr(ttd3, "GmailClient", lambda: sender)
@@ -32,11 +32,11 @@ def test_claim_replay_never_sends(monkeypatch):
 
 def test_claim_backend_failure_fails_closed(monkeypatch):
     client = Mock()
-    client._settings = {"supabase_url": "https://db.example", "supabase_service_role_key": "key"}
+    client._settings = {"supabase_url": "https://db.example", "supabase_service_role_key": "key", "pipeline_runner_shared_secret": "unit-test-secret"}
     client.get_record.return_value = _output()
     monkeypatch.setattr(ttd3, "AirtableClient", lambda: client)
     monkeypatch.setattr(ttd3, "ttd3_eligibility_reason", lambda output: None)
-    monkeypatch.setattr(ttd3, "PipelineSettings", lambda client: Mock(get=lambda key: None))
+    monkeypatch.setattr(ttd3, "PipelineSettings", lambda client: Mock(get=lambda key: "https://example.org/hooks/ttd4" if key == "TTD4_WEBHOOK_URL" else None))
     def fail(*args, **kwargs):
         raise RuntimeError("database unavailable")
     monkeypatch.setattr(ttd3, "_rest", fail)
