@@ -12,5 +12,9 @@ test("Asset Manager requires clean receipt before Airtable creation", () => {
   assert.ok(route.includes('The asset was not added to the Studio library'));
   assert.ok(route.indexOf('drive?.provenance_screen?.decision !== "clean"') <
     route.indexOf("const created = await airtableFetch"));
-  assert.ok(route.includes("Potential_Match_Notes: drive.provenance_screen"));
+  // Clean receipt or explicit operator override is stamped into Potential_Match_Notes.
+  assert.ok(route.includes("Potential_Match_Notes: overlayOverridden"));
+  assert.ok(route.includes("OPERATOR_OVERRIDE"));
+  assert.ok(route.includes("drive.provenance_screen?.decision === \"clean\""));
+  assert.ok(route.includes("overrideOverlayHold"));
 });
