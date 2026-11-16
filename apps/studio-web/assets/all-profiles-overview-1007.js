@@ -418,7 +418,7 @@
 
     const table = (id, headers) =>
       `<div class="all-profiles-table-wrap"><table class="all-profiles-table">
-        <thead><tr><th scope="col">Profile</th>${headers.map(([label, title]) =>
+        <thead><tr><th scope="col" title="Content profile">Profile</th>${headers.map(([label, title]) =>
           `<th scope="col" title="${esc(title)}">${esc(label)}</th>`).join("")}</tr></thead>
         <tbody>${tableRows[id]}</tbody></table></div>`;
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Dashboard</h1>
