@@ -818,3 +818,4 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-16: Deploy Pages UI 0.6.965-phase6-pr-photo-load — Ready Production opens use item4 snapshot without requiring masters first (avoids Still loading loop). Hard-refresh; footer UI 0.6.965.
 
 2026-11-16: Deploy Pages UI 0.6.966-phase6-plan-mapping — Phase 6 plan aspect-ratio fallbacks so Prepare Frames reaches Ready (Platform Output Mappings archive GETs empty under write SoR). Hard-refresh; footer UI 0.6.966.
+2026-11-16: Deploy Pages UI 0.6.967-pipeline-search-all-weeks — Pipeline Scheduled search covers every week, not only the calendar on screen. Hard-refresh; footer UI 0.6.967.

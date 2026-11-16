@@ -48,6 +48,8 @@ import {
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
+  listSupabasePipelineTitleSearch,
+  pipelineTitleSearchTokens,
   listSupabaseManualActionOutputs,
   readSupabaseShapedOutput,
   listSupabaseScheduleGrid,
@@ -2499,6 +2501,90 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
       complete: rows.length < 500,
       scanned_at: new Date(observedAt).toISOString(),
       mode: focusedMode,
+    });
+  }
+  // Scheduled search ignores the calendar's 7-day window. A title from another
+  // week is still a scheduled output for this profile.
+  if (url.searchParams.get("mode") === "scheduled_search") {
+    const query = String(url.searchParams.get("q") || "");
+    const tokens = pipelineTitleSearchTokens(query);
+    if (!tokens.length) {
+      return respond(request, env, {
+        ok: true,
+        records: [],
+        count: 0,
+        mode: "scheduled_search",
+        scope: "all_weeks",
+        profile: mapStudioContentProfile(profile),
+      });
+    }
+    if (studioPipelineReadSource(env) === "supabase") {
+      try {
+        const packed = await listSupabasePipelineTitleSearch(env, {
+          profileAirtableId: profile.id,
+          query,
+          limit: 200,
+        });
+        if (!packed.profileMissing) {
+          const labels = await pipelineContentLabelsById(
+            env,
+            profile,
+            studioPipelineContentIdsFromOutputs(packed.records || []),
+          );
+          const mapped = (packed.records || []).map((record) => mapOutput(
+            record,
+            null,
+            null,
+            labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+          ));
+          const records = stripDeletedDuplicateOutputRecords(mapped);
+          return respond(request, env, {
+            ok: true,
+            records,
+            count: records.length,
+            mode: "scheduled_search",
+            scope: "all_weeks",
+            profile: mapStudioContentProfile(profile),
+            read_source: "supabase",
+          });
+        }
+      } catch (error) {
+        console.warn("supabase scheduled title search failed; falling back to Airtable", error);
+      }
+    }
+    const titleChecks = tokens.map((token) => (
+      `FIND("${airtableFormulaEscape(token)}",LOWER({Output_Title}&""))`
+    ));
+    const profileFormula = contentProfileFilterFormula(profile);
+    const titleFormula = titleChecks.length === 1 ? titleChecks[0] : `AND(${titleChecks.join(",")})`;
+    const filterFormula = profileFormula ? `AND(${profileFormula},${titleFormula})` : titleFormula;
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      fields: OUTPUT_LIST_FIELDS,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula,
+      limit: 200,
+    });
+    const labels = await pipelineContentLabelsById(
+      env,
+      profile,
+      studioPipelineContentIdsFromOutputs(rows),
+    );
+    const mapped = rows.map((record) => mapOutput(
+      record,
+      null,
+      null,
+      labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    ));
+    const records = stripDeletedDuplicateOutputRecords(mapped);
+    return respond(request, env, {
+      ok: true,
+      records,
+      count: records.length,
+      mode: "scheduled_search",
+      scope: "all_weeks",
+      profile: mapStudioContentProfile(profile),
+      read_source: "airtable",
     });
   }
   // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
