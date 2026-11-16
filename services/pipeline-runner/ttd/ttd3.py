@@ -29,8 +29,10 @@ from ttd.constants import (
 )
 from ttd.eligibility import ttd3_eligibility_reason
 from ttd.package import (
+    completion_url,
     handoff_email_text,
     handoff_email_subject,
+    stable_completion_token,
     is_az_finished_video,
     profile_display_name,
     sibling_platform_outputs,
@@ -76,6 +78,13 @@ def process_request(
     publish_id = field_str(output, "TikTok_Draft_Publish_ID")
     if not publish_id:
         return {"processed": False, "reason": "missing_draft_publish_id", **result}
+    signing_secret = str((getattr(client, "_settings", {}) or {}).get("pipeline_runner_shared_secret") or "").strip()
+    if not signing_secret:
+        return {"processed": False, "reason": "missing_completion_signing_secret", **result}
+    signed_token = stable_completion_token(record_id, publish_id, secret=signing_secret)
+    signed_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, signed_token)
+    if not signed_url:
+        return {"processed": False, "reason": "missing_completion_url", **result}
     if not supabase_configured(client._settings):
         return {"processed": False, "reason": "email_claim_store_unavailable", **result}
     claim_key = f"TTD3:{record_id}:{publish_id}"
@@ -102,8 +111,19 @@ def process_request(
             "Publish_Started_At": now,
             "Publish_Error_Stage": "",
             "Publish_Error_Message": "",
+            # Stamp the exact signed link that the email will contain. Even if
+            # an unrelated bag merge races, TTD4 independently validates the
+            # signed token against this output and its current publish ID.
+            "TikTok_Manual_Completion_Token": signed_token,
+            "TikTok_Manual_Completion_URL": signed_url,
         },
     )
+    output = {
+        **output,
+        "fields": {**output.get("fields", {}),
+                   "TikTok_Manual_Completion_Token": signed_token,
+                   "TikTok_Manual_Completion_URL": signed_url},
+    }
 
     profile: dict[str, Any] | None = None
     profile_id = first_linked_id(field(output, "Content_Profile"))
