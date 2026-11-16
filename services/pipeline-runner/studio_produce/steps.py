@@ -592,20 +592,20 @@ def voiceover_from_existing_caption(parent: dict[str, Any]) -> str:
         return ""
     # Remove metadata and audience engagement instructions inappropriate for
     # spoken narration. Avoid making a video read hashtags or URLs aloud.
-    caption = re.sub(r"https?://\\S+", " ", caption)
-    caption = re.sub(r"(?<!\\w)#[A-Za-z0-9_]+", " ", caption)
-    caption = re.sub(r"[\\U0001F300-\\U0001FAFF\\u2600-\\u27BF]", "", caption)
-    caption = re.sub(r"\\s+", " ", caption).strip()
+    caption = re.sub(r"https?://\S+", " ", caption)
+    caption = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", " ", caption)
+    caption = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", caption)
+    caption = re.sub(r"\s+", " ", caption).strip()
     if not caption:
         return ""
-    sentences = re.split(r"(?<=[.!?])\\s+", caption)
+    sentences = re.split(r"(?<=[.!?])\s+", caption)
     approved = []
     total_len = 0
     for sentence in sentences:
         cleaned = sentence.strip()
         if re.match(
             r"(?i)^(save this|tag (?:a |your )?friend|follow (?:us|for)|"
-            r"comment (?:below|with)|tell us|share this|drop a comment)\\b",
+            r"comment (?:below|with)|tell us|share this|drop a comment)\b",
             cleaned,
         ):
             continue
