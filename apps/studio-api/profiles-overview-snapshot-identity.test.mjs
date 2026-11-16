@@ -23,6 +23,7 @@ const health = runInNewContext("(" + functionSource(
 const scheduled = { Facebook: 4, Instagram: 5, TikTok: 3, YouTube: 2 };
 function row(id, city, n = 2) {
   return { id, city_label: city, name: city, scheduled: { ...scheduled },
+    ready_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
     manual: 0, failed: 0, approval: n, production: 0, ideas: 12,
     approved_unpublished: 0, overdue_unpublished: 0,
     approved_future: 0, approved_past_due: 0, approved_missing_date: 0,
