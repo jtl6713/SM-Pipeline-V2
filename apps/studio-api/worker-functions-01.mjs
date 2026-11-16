@@ -11953,13 +11953,28 @@ export function isTransientRenderBlockError(blockError) {
 export async function resumeStaleStudioProductionJobs(env, options = {}) {
   // Prefer Updated_At so an older active Vibe Cut (Chicago Walk with me) is not
   // starved by newer Draft/Ready rows that sort higher on Created_At.
-  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 40,
-    sortField: "Updated_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
-  }).catch(() => []);
-  const ids = [...new Set((rows || []).map((row) => String(row?.id || "").trim()).filter((id) => id.startsWith("rec")))];
+  // Cancelled duplicates from the same morning must not fill this window:
+  // a job-JSON list ordered by recency was all Cancelled, so Promoted
+  // requests stuck at themes were never resumed.
+  let rows = null;
+  if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    rows = await listSupabaseRequestsWithProductionJob(env, {
+      limit: 40,
+      statuses: ["Promoted", "Submitted"],
+    }).catch(() => null);
+  }
+  if (!Array.isArray(rows)) {
+    rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 40,
+      sortField: "Updated_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="",OR({Request_Status}="Promoted",{Request_Status}="Submitted"))',
+    }).catch(() => []);
+  }
+  const ids = [...new Set((rows || []).filter((row) => {
+    const status = String(f(row, "Request_Status") || "").trim();
+    return status === "Promoted" || status === "Submitted";
+  }).map((row) => String(row?.id || "").trim()).filter((id) => id.startsWith("rec")))];
   const pulses = [];
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);

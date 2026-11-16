@@ -2503,13 +2503,19 @@ export async function appendIdeaProductionRequestLink(env, ideaAirtableId, reque
 }
 
 /** Recent Production Requests with a non-blank Studio_Production_Job_JSON. */
-export async function listSupabaseRequestsWithProductionJob(env, { limit = 50 } = {}) {
+export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, statuses = null } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
+  const allowed = (Array.isArray(statuses) ? statuses : [])
+    .map((status) => String(status || "").trim())
+    .filter((status) => ["Draft", "Ready", "Submitted", "Promoted", "Cancelled"].includes(status));
+  const statusFilter = allowed.length
+    ? `&request_status=in.(${allowed.map(encodeURIComponent).join(",")})`
+    : "";
   const rows = await supabaseRest(
     env,
-    `production_requests?production_job=not.is.null`
-      + `&select=${REQUEST_SELECT}&order=created_at.desc.nullslast&limit=${cap}`,
+    `production_requests?production_job=not.is.null${statusFilter}`
+      + `&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
   return rows

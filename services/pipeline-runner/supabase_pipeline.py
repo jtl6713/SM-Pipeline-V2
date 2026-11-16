@@ -889,6 +889,22 @@ def _request_row(record: dict) -> dict:
         row["variant_status"] = _select(fields.get("Studio_Variant_Status"))
     if "Studio_Output_Plan_Status" in fields:
         row["output_plan_status"] = _select(fields.get("Studio_Output_Plan_Status"))
+    if "Studio_Production_Job_JSON" in fields:
+        # studio-produce writes only this field when a step advances. Dropping it
+        # left Promoted jobs at "themes" forever: the runner re-read the old step
+        # and never reached audio, images, or render.
+        raw_job = fields.get("Studio_Production_Job_JSON")
+        if raw_job in (None, ""):
+            row["production_job"] = {}
+        elif isinstance(raw_job, dict):
+            row["production_job"] = raw_job
+        else:
+            text = str(raw_job).strip()
+            try:
+                parsed = json.loads(text) if text else {}
+            except json.JSONDecodeError:
+                parsed = {"raw": text[:2000]}
+            row["production_job"] = parsed if isinstance(parsed, dict) else {"raw": text[:2000]}
     return row
 
 
