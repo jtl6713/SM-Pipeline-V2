@@ -648,6 +648,16 @@ def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], par
         market=studio_market_for_request(client, request, parent),
     )
     next_themes = result.get("themes") or {}
+    if not str(next_themes.get("voiceover_script") or "").strip() and not script_locked(request):
+        # P2 rearm uses this helper too; it must not block indefinitely on
+        # the same silent SAI1 result that the initial Studio step recovered.
+        existing_copy = voiceover_from_existing_caption(parent)
+        if existing_copy:
+            next_themes = {
+                **next_themes,
+                "voiceover_script": existing_copy,
+                "slide_voiceovers": [],
+            }
     if not str(next_themes.get("voiceover_script") or "").strip():
         raise StepBlocked(result.get("reason") or "SAI1 did not return a voiceover script")
     apply_voiceover_script(client, parent, next_themes)
