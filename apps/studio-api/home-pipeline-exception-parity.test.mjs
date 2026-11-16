@@ -60,6 +60,33 @@ test("a Facebook Graph 368 cooldown leaves Past Due and Failed", () => {
   assert.equal(homeIsUnpublishedFailure(plain), true);
   assert.equal(homeApprovedCalendarCounts([story, reel], now).past_due, 0);
 });
+test("a leftover carousel error stays out of Failed and Past Due until the publish status is terminal", () => {
+  const queued = {
+    ...approved,
+    platform: "Instagram",
+    publish_status: "Ready to Schedule",
+    ig_carousel_error_message: "(#100) The parameter image_url is required.",
+    scheduled_post_date: "2026-10-19T12:00:00Z",
+    auto_publish_enabled: true,
+    studio_publish_dispatch_count: 1,
+  };
+  const parked = { ...queued, publish_status: "Failed" };
+  assert.equal(homeIsUnpublishedFailure(queued), false);
+  assert.equal(homeApprovedExceptionKind(queued, now), "");
+  assert.equal(homeIsUnpublishedFailure(parked), true);
+  assert.equal(homeApprovedCalendarCounts([queued], now).past_due, 0);
+});
+test("an approved row with auto-publish off and no dispatch is not Past Due", () => {
+  const manual = {
+    ...approved,
+    auto_publish_enabled: false,
+    studio_publish_dispatch_count: 0,
+    scheduled_post_date: "2026-10-19T12:00:00Z",
+  };
+  assert.equal(homeApprovedExceptionKind(manual, now), "");
+  assert.equal(homeIsUnpublishedFailure(manual), false);
+  assert.equal(homeApprovedCalendarCounts([manual], now).past_due, 0);
+});
 test("a public uploaded YouTube id leaves Past Due and a private id stays", () => {
   const live = {
     ...approved,

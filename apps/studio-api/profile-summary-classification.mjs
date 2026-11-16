@@ -113,6 +113,32 @@ export function facebookGraphCooldown(row) {
   return /^(FACEBOOK_STORY_RATE_LIMIT_368|FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT)$/i.test(stage);
 }
 
+/** Approved, auto-publish off, never dispatched. That is a manual send, not a late job. */
+export function homeManualPublishHold(row) {
+  if (!row || row.do_not_publish || row.auto_publish_enabled !== false) return false;
+  if (String(row.review_status || "").trim().toLowerCase() !== "approved") return false;
+  if (row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  return Number(row.studio_publish_dispatch_count || 0) <= 0;
+}
+
+/** Error text left on a row that is still queued. Terminal Failed/render status is not this. */
+export function homeNonterminalPublishError(row) {
+  if (!row || row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  const publish = String(row.publish_status || "").trim().toLowerCase();
+  const output = String(row.output_status || "").trim().toLowerCase();
+  const render = String(row.render_status || "").trim().toLowerCase();
+  if (publish === "failed" || output === "failed" || render === "failed") return false;
+  const text = [
+    row.publish_error_message,
+    row.ig_carousel_error_message,
+    row.studio_publish_dispatch_note,
+    row.publish_error_stage,
+  ].map((value) => String(value || "")).join(" ");
+  return /image_url is required|slide-set mismatch|skipped:/i.test(text)
+    || String(row.publish_error_stage || "").trim() === "RESCUE_SKIP"
+    || String(row.studio_state || "").trim().toLowerCase() === "retry pending";
+}
+
 /**
  * Return the scheduled timestamp if an approved output is not yet published.
  * This clock-independent candidate supports indexed live overdue evaluation in
@@ -121,6 +147,7 @@ export function facebookGraphCooldown(row) {
 export function homeOverdueDueAt(row) {
   if (!row || row.do_not_publish || isTikTokEmailedManualHandoff(row)) return 0;
   if (youtubePublicUploadReceipt(row) || facebookGraphCooldown(row)) return 0;
+  if (homeManualPublishHold(row) || homeNonterminalPublishError(row)) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   if (review && review !== "approved") return 0;
@@ -196,7 +223,7 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
  */
 export function homeApprovedExceptionKind(row, now = Date.now()) {
   if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return "";
-  if (isTikTokEmailedManualHandoff(row)) return "";
+  if (isTikTokEmailedManualHandoff(row) || homeManualPublishHold(row) || homeNonterminalPublishError(row)) return "";
   const due = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(due) || due <= 0) return "approved_missing_date";
   return due <= now ? "approved_past_due" : "";
@@ -204,10 +231,11 @@ export function homeApprovedExceptionKind(row, now = Date.now()) {
 
 export function homeIsUnpublishedFailure(row) {
   if (!row || facebookGraphCooldown(row)) return false;
-  const failed = String(row.studio_state || "").trim().toLowerCase() === "failed"
-    || String(row.output_status || "").trim().toLowerCase() === "failed"
-    || String(row.publish_status || "").trim().toLowerCase() === "failed";
-  return failed && !row.published_at && !row.platform_post_url && !row.manual_published_url;
+  if (row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  const publish = String(row.publish_status || "").trim().toLowerCase();
+  const output = String(row.output_status || "").trim().toLowerCase();
+  const render = String(row.render_status || "").trim().toLowerCase();
+  return publish === "failed" || output === "failed" || render === "failed";
 }
 
 export function homeOutputContribution(row, now = Date.now()) {

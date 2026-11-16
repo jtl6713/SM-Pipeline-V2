@@ -13962,6 +13962,16 @@ export async function studioStampPublishDispatch(env, record, note) {
           Studio_Publish_Dispatch_At: new Date().toISOString(),
           Studio_Publish_Dispatch_Count: count,
           Studio_Publish_Dispatch_Note: String(note || "").slice(0, 900),
+          // A rescue skip used to leave Publish_Status at Ready to Publish, so
+          // the row stayed Past Due. Park the reason without calling it Failed.
+          ...(/skipped:/i.test(String(note || "")) && !/RATE_LIMIT|FACEBOOK_STORY_RATE_LIMIT_368/i.test(String(f(record, "Publish_Error_Stage") || ""))
+            ? {
+              Publish_Error_Stage: "RESCUE_SKIP",
+              Publish_Error_Message: String(note || "").slice(0, 900),
+              Publish_Retry_Eligible: true,
+              Publish_Next_Retry_At: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+            }
+            : {}),
         },
         typecast: true,
       }),

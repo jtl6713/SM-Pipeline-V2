@@ -2603,6 +2603,83 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
 }
 /*__STUDIO_WORKER_END:studioReconcilePublishingInstagramReels__*/
 
+export async function studioCheckStaleInstagramReelContainers(env, options = {}) {
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 2)));
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Reel",{Do_Not_Publish}=0,{Published_At}=BLANK(),{Platform_Post_URL}="",{Platform_Media_ID}!="",{Publish_Status}="Publishing",OR({Last_Publish_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{Last_Publish_Attempt_At},"hours")>=6))',
+      sortField: "Last_Publish_Attempt_At",
+      sortDirection: "asc",
+    });
+  } catch (error) {
+    console.warn("stale instagram reel scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const candidate of rows) {
+    const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id).catch(() => null);
+    const mediaId = String(f(row, "Platform_Media_ID") || "").trim();
+    if (!row || !mediaId || f(row, "Published_At") || f(row, "Platform_Post_URL")) continue;
+    const settings = await studioActivePipelineSettings(env, [
+      "FACEBOOK_PAGE_ACCESS_TOKEN",
+      "FACEBOOK_GRAPH_API_VERSION",
+    ], row).catch(() => ({}));
+    const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
+    if (!token) {
+      results.push({ id: row.id, skipped: "missing-token", new_containers: 0 });
+      continue;
+    }
+    const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+    const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(mediaId)}?fields=status_code,permalink&access_token=${encodeURIComponent(token)}`);
+    const body = await response.json().catch(() => ({}));
+    const code = String(body.status_code || "").toUpperCase();
+    const permalink = String(body.permalink || "").trim();
+    if (permalink.startsWith("https://")) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ typecast: true, fields: {
+          Publish_Status: "Published",
+          Output_Status: "Published",
+          Published_At: new Date().toISOString(),
+          Platform_Post_URL: permalink,
+          Publish_Error_Stage: "",
+          Publish_Error_Message: "",
+          Publish_Retry_Eligible: false,
+        } }),
+      });
+      results.push({ id: row.id, stamped: true, new_containers: 0 });
+      continue;
+    }
+    if (code === "EXPIRED" || code === "ERROR") {
+      const notes = String(f(row, "Output_Notes") || "");
+      if (notes.includes("IG_CONTAINER_RESET_ONCE")) {
+        results.push({ id: row.id, skipped: "reset-already-used", new_containers: 0 });
+        continue;
+      }
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ typecast: true, fields: {
+          Platform_Media_ID: "",
+          Publish_Status: "Ready to Publish",
+          Publish_Error_Stage: "IG_CONTAINER_EXPIRED",
+          Publish_Error_Message: "Instagram container expired. Reset once; the next publish creates one new container.",
+          Publish_Retry_Eligible: true,
+          Publish_Locked_By: "",
+          Publish_Locked_At: null,
+          Output_Notes: (notes + "\nIG_CONTAINER_RESET_ONCE").slice(-9000),
+        } }),
+      });
+      results.push({ id: row.id, reset_once: true, new_containers: 0 });
+      continue;
+    }
+    results.push({ id: row.id, status: code || String(response.status), new_containers: 0 });
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioCheckStaleInstagramReelContainers__*/
+
 export async function studioReconcileFacebookSlideshows(env, options = {}) {
   if (pipelineStageBackend(env, "FBS1").mode !== "python") return [];
   const limit = Number(options.limit || 3);

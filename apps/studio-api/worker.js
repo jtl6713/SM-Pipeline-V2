@@ -877,6 +877,7 @@ import {
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
+  studioCheckStaleInstagramReelContainers,
   studioRecoverFencedIgStaleUpload,
   studioReconcileFacebookSlideshows,
   studioReconcileFacebookReels,
@@ -1393,7 +1394,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.978-fb-backlog-drain",
+          version: "0.10.979-exception-columns",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4675,6 +4676,14 @@ export default {
         .catch((error) => console.warn("Facebook Story 368 park failed", error)));
     }
     if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioCheckStaleInstagramReelContainers(env, { limit: 2 })
+        .then((results) => console.info("Instagram stale container check", JSON.stringify({
+          checked: results.length,
+          stamped: results.filter((row) => row.stamped).length,
+          reset: results.filter((row) => row.reset_once).length,
+          new_containers: 0,
+        })))
+        .catch((error) => console.warn("Instagram stale container check failed", error)));
       ctx.waitUntil(studioReconcilePublishingInstagramReels(env, { limit: 1 })
         .then(results => console.info("Instagram saved-Reel continuation", JSON.stringify({
           checked: results.length,
@@ -7447,6 +7456,7 @@ const OUTPUT_LIST_FIELDS = [
   "Music_Status",
   "Publish_Error_Stage",
   "Publish_Error_Message",
+  "Studio_Publish_Dispatch_Note",
   "Remotion_Error_Message",
   "Final_File_Error_Message",
   "IG_Carousel_Error_Message",

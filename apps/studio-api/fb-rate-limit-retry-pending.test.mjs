@@ -29,6 +29,36 @@ test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
   assert.equal(state, "Retry Pending");
 });
 
+test("a leftover carousel image_url error on Ready to Schedule paints Retry Pending", () => {
+  const state = normalizedOutputState({
+    fields: {
+      Platform: "Instagram",
+      Review_Status: "Approved",
+      Output_Status: "Approved for Publishing",
+      Publish_Status: "Ready to Schedule",
+      Auto_Publish_Enabled: true,
+      Studio_Publish_Dispatch_Count: 1,
+      IG_Carousel_Error_Message: "(#100) The parameter image_url is required.",
+    },
+  });
+  assert.equal(state, "Retry Pending");
+});
+
+test("approved auto-publish off with zero dispatches paints Manual Action Required", () => {
+  const state = normalizedOutputState({
+    fields: {
+      Platform: "Facebook",
+      Platform_Output_Type: "Facebook Story",
+      Review_Status: "Approved",
+      Output_Status: "Approved for Publishing",
+      Publish_Status: "Ready to Schedule",
+      Auto_Publish_Enabled: false,
+      Studio_Publish_Dispatch_Count: 0,
+    },
+  });
+  assert.equal(state, "Manual Action Required");
+});
+
 test("FBS3_RATE_LIMIT stage also paints Retry Pending", () => {
   const state = normalizedOutputState({
     fields: {
