@@ -104,3 +104,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-15: Runner 2026-11-15-library-upload-wm-fallback — Drive ID fallback for C6 small watermark; soft-defer library branding; fix PostgREST nonempty Drive id filter.
 2026-11-15: Runner 2026-11-15-library-overlay-override — operator can override overlay holds; vision prompt treats marketing scene text as non-credit.
 2026-11-16: Runner 2026-11-16-tiktok-stable-completion-token — deterministic Mark as Published tokens; freeze after TTD3 email so status polls cannot invalidate inbox handoff links.
+
+2026-11-16: Deploy runner 2026-11-16-ttd4-signed-link-stability — authenticated stable TikTok email tokens supersede deterministic legacy, reject blank tokens, retain 2041 resend logic, reconcile concurrent DB bag races.
