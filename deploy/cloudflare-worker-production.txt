@@ -1310,3 +1310,5 @@ Deploy 2026-11-15 Worker 0.10.963-purge-fanout-dupes: Strip/purge Content 1861/1
 2026-11-15: Deploy Worker 0.10.968-library-upload-async — accept library ingest as runner job + poll; stop holding one tunnel request for screen+watermark+Drive.
 2026-11-15: Deploy Worker 0.10.969-library-upload-wm-fallback — C6 miss no longer blocks Chicago Asset Manager; allow deferred watermark.
 2026-11-15: Deploy Worker 0.10.970-library-overlay-override — pass override_overlay_hold through library ingest; stamp OPERATOR_OVERRIDE notes.
+
+Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-content same-final duplicate Platform Outputs across 40 contents (SoR already deleted); strip allowlist for Pipeline snapshots.
