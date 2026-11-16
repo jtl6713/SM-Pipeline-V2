@@ -88,29 +88,30 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-settings-get: Pipeline Settings si
 
 Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATCH/POST commit to Supabase under STUDIO_WRITE_SOURCE=supabase and skip Airtable archive export (kills ~54/hr slides PATCH). FALLBACK_STOPPED includes slides. Record deletion is not started. Verify /health version 2026-11-15-zcloseout-slides-patch.
 
-2026-11-15: Runner 2026-11-15-zcloseout-ref-cache — seed org/brand/market/vertical/persona/production/prompt GETs off Airtable; expand table_kind for reference + review tables.
+2026-11-15: Runner 2026-11-15-zcloseout-ref-cache â seed org/brand/market/vertical/persona/production/prompt GETs off Airtable; expand table_kind for reference + review tables.
 
-2026-11-15: Runner 2026-11-15-zcloseout-review-poll — stop 30s Rendering Review Jobs Airtable poll under STUDIO_WRITE_SOURCE=supabase (quiet closeout).
+2026-11-15: Runner 2026-11-15-zcloseout-review-poll â stop 30s Rendering Review Jobs Airtable poll under STUDIO_WRITE_SOURCE=supabase (quiet closeout).
 
-2026-11-15: Runner 2026-11-15-zcloseout-runner-nuke — under STUDIO_WRITE_SOURCE=supabase, AirtableClient never HTTP to Airtable (GET miss→404/[], WRITE miss→local echo). Kills residual media/other drip. Quiet closeout; no record deletion.
+2026-11-15: Runner 2026-11-15-zcloseout-runner-nuke â under STUDIO_WRITE_SOURCE=supabase, AirtableClient never HTTP to Airtable (GET missâ404/[], WRITE missâlocal echo). Kills residual media/other drip. Quiet closeout; no record deletion.
 
 2026-11-15: Preserve TikTok manual completion tokens across repeated status polls.
-2026-11-15: Runner 2026-11-15-a3-classify-timeout — A3 OpenAI timeout 45s; never leave Processing parked on skip/miss. Soft SLA: Asset Manager Classifying <60s.
+2026-11-15: Runner 2026-11-15-a3-classify-timeout â A3 OpenAI timeout 45s; never leave Processing parked on skip/miss. Soft SLA: Asset Manager Classifying <60s.
 
-2026-11-15: Runner 2026-11-15-a3-media-content-profile — shape Content_Profile from media metadata so A3 stops skipping Supabase library assets; densify profile/notes/keywords on write; Speakeasy pulse uses Chicago profile.
-2026-11-15: Runner 2026-11-15-library-upload-skip-source — skip sync source-master Drive put on Chicago library ingest so Worker→runner confirm fits under the gateway window.
-2026-11-15: Re-deploy runner 2026-11-15-library-upload-skip-source — prior Ops step adopted Speakeasy /api/shell on HTTP 409 and never deployed; workflow now waits for a fresh pipeline-runner deploy job.
-2026-11-15: Runner 2026-11-15-library-upload-async — async studio-asset-library jobs + watermark byte cache so Chicago multi-photo uploads clear the Worker/tunnel window.
-2026-11-15: Runner 2026-11-15-library-upload-wm-fallback — Drive ID fallback for C6 small watermark; soft-defer library branding; fix PostgREST nonempty Drive id filter.
-2026-11-15: Runner 2026-11-15-library-overlay-override — operator can override overlay holds; vision prompt treats marketing scene text as non-credit.
-2026-11-16: Runner 2026-11-16-tiktok-stable-completion-token — deterministic Mark as Published tokens; freeze after TTD3 email so status polls cannot invalidate inbox handoff links.
+2026-11-15: Runner 2026-11-15-a3-media-content-profile â shape Content_Profile from media metadata so A3 stops skipping Supabase library assets; densify profile/notes/keywords on write; Speakeasy pulse uses Chicago profile.
+2026-11-15: Runner 2026-11-15-library-upload-skip-source â skip sync source-master Drive put on Chicago library ingest so Workerârunner confirm fits under the gateway window.
+2026-11-15: Re-deploy runner 2026-11-15-library-upload-skip-source â prior Ops step adopted Speakeasy /api/shell on HTTP 409 and never deployed; workflow now waits for a fresh pipeline-runner deploy job.
+2026-11-15: Runner 2026-11-15-library-upload-async â async studio-asset-library jobs + watermark byte cache so Chicago multi-photo uploads clear the Worker/tunnel window.
+2026-11-15: Runner 2026-11-15-library-upload-wm-fallback â Drive ID fallback for C6 small watermark; soft-defer library branding; fix PostgREST nonempty Drive id filter.
+2026-11-15: Runner 2026-11-15-library-overlay-override â operator can override overlay holds; vision prompt treats marketing scene text as non-credit.
+2026-11-16: Runner 2026-11-16-tiktok-stable-completion-token â deterministic Mark as Published tokens; freeze after TTD3 email so status polls cannot invalidate inbox handoff links.
 
-2026-11-16: Deploy runner 2026-11-16-ttd4-signed-link-stability — authenticated stable TikTok email tokens supersede deterministic legacy, reject blank tokens, retain 2041 resend logic, reconcile concurrent DB bag races.
+2026-11-16: Deploy runner 2026-11-16-ttd4-signed-link-stability â authenticated stable TikTok email tokens supersede deterministic legacy, reject blank tokens, retain 2041 resend logic, reconcile concurrent DB bag races.
 
-2026-11-16: Post-2041 reconciliation verification trigger — run signed-link regression and release checks on PR #2042 before merge.
+2026-11-16: Post-2041 reconciliation verification trigger â run signed-link regression and release checks on PR #2042 before merge.
 
-2026-11-16: Deploy runner 2026-11-16-smv1-queue-payload-densify — shape Target_Drive_Folder_ID/Width/Height/Variant_Style from Phase 6 queue payload so SMV1 can claim Pending Platform Variants (Frames Preparing 0/N stall since 2026-11-13).
+2026-11-16: Deploy runner 2026-11-16-smv1-queue-payload-densify â shape Target_Drive_Folder_ID/Width/Height/Variant_Style from Phase 6 queue payload so SMV1 can claim Pending Platform Variants (Frames Preparing 0/N stall since 2026-11-13).
 
-2026-11-16: Deploy runner 2026-11-16-queue-payload-merge — merge studio_media_transfer_queue.payload on partial SMV1 Ready updates (do not wipe Transfer_ID / Production_Request_Record_ID).
+2026-11-16: Deploy runner 2026-11-16-queue-payload-merge â merge studio_media_transfer_queue.payload on partial SMV1 Ready updates (do not wipe Transfer_ID / Production_Request_Record_ID).
 
-2026-11-16: Deploy runner 2026-11-16-produce-job-persist � persist Studio_Production_Job_JSON to production_job so Promoted produce can leave themes. Verify /health version 2026-11-16-produce-job-persist.
+2026-11-16: Deploy runner 2026-11-16-produce-job-persist  persist Studio_Production_Job_JSON to production_job so Promoted produce can leave themes. Verify /health version 2026-11-16-produce-job-persist.
+2026-11-16: Deploy pipeline runner SAI1 narration recovery (merged PR #2070), version 2026-11-16-sai1-voiceover-recovery-v1. Retry empty SAI1 narration once without fabricated approval or publishing; restart regular Studio produce watchdog against linked 20 promoted requests. Verify health version, job processing, and protect manual final Factory review.
