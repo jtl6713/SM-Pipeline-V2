@@ -1,0 +1,52 @@
+.profile-upload-preflight {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--border, #d4dbe7);
+  border-radius: 18px;
+  padding: 24px;
+  background: var(--panel-bg, #fff);
+  color: var(--text, #192434);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .28);
+}
+.profile-upload-preflight::backdrop {
+  background: rgba(9, 16, 32, .62);
+}
+.profile-upload-preflight h2 {
+  font-size: 1.3rem;
+  line-height: 1.25;
+  margin: 0 0 12px;
+}
+.profile-upload-preflight p {
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+.profile-upload-preflight-detail {
+  padding: 8px 12px;
+  margin: 0 0 2px !important;
+  border-radius: 8px;
+  background: rgba(128, 142, 167, .12);
+}
+.profile-upload-preflight-detail strong {
+  display: block;
+  font-size: .85rem;
+}
+.profile-upload-preflight-clue {
+  color: var(--muted, #5a6474);
+  font-size: .84rem;
+  overflow-wrap: anywhere;
+}
+.profile-upload-preflight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 6px;
+}
+.profile-upload-preflight-actions button {
+  min-width: 120px;
+}
+@media (max-width: 420px) {
+  .profile-upload-preflight { padding: 18px; }
+  .profile-upload-preflight-actions button { flex: 1; }
+}
