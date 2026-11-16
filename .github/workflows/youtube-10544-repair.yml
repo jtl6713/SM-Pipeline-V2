@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: pip install pytest requests python-dotenv flask pillow tzdata
-      - run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_youtube_upload_dedup.py
+      - run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_youtube_upload_dedup.py services/pipeline-runner/tests/test_supabase_pipeline_writes.py services/pipeline-runner/tests/test_yt_manual_publish.py services/pipeline-runner/tests/test_yt_channel_guard.py services/pipeline-runner/tests/test_yt_eligibility.py
       - run: node --test services/youtube-uploader/upload-dedup.test.cjs
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

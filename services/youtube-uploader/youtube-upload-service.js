@@ -78,7 +78,7 @@ async function init() {
     const rows = JSON.parse(await fsp.readFile(cfg.jobStore, "utf8"));
     for (const job of rows) jobs.set(job.id, job);
   } catch (error) {
-    if (error.code !== "ENOENT") console.error("Job store load warning:", error.message);
+    if (error.code !== "ENOENT") throw error; // Never upload with an unreadable dedup ledger.
   }
   cleanupOldJobs();
 }
