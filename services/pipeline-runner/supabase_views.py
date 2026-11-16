@@ -28,21 +28,22 @@ _MEDIA_VIEW_FILTERS = {
         "active.eq.true,or(do_not_use.is.null,do_not_use.eq.false))"
     ),
     # C6 small branding watermark (view id + display name).
+    # Use not.is.null — trailing `.neq.` is not a reliable PostgREST "nonempty".
     "viwokn4fYjXHScEos": (
         "and=(asset_role.eq.Watermark,asset_status.eq.Available,active.eq.true,"
         "or(do_not_use.is.null,do_not_use.eq.false),"
-        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.neq.)"
+        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.not.is.null)"
     ),
     "C6 - Active Small Branding Watermark": (
         "and=(asset_role.eq.Watermark,asset_status.eq.Available,active.eq.true,"
         "or(do_not_use.is.null,do_not_use.eq.false),"
-        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.neq.)"
+        "asset_name.ilike.*Watermark_Small*,google_drive_file_id.not.is.null)"
     ),
     # A4 orphan check — Active + Drive id present. Last_Match_Checked_On is not
     # densified yet; client re-filters after Drive HEAD (bounded max_records).
     "viwQv8PDtE8qXwMPk": (
         "and=(active.eq.true,or(do_not_use.is.null,do_not_use.eq.false),"
-        "google_drive_file_id.neq.)"
+        "google_drive_file_id.not.is.null)"
     ),
     # R2 classified candidates — client re-filters eligibility after densify.
     "viwDawMj0aiPtSM4P": (

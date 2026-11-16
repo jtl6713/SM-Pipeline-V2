@@ -233,6 +233,56 @@ def test_brand_watermark_bytes_prefers_authenticated_drive(monkeypatch):
     assert watermark_module.brand_watermark_bytes(_Airtable()) == b"official-watermark"
 
 
+def test_brand_watermark_bytes_falls_back_to_known_drive_id(monkeypatch):
+    from branding import watermark as watermark_module
+
+    watermark_module._BRAND_WATERMARK_CACHE["bytes"] = b""
+    watermark_module._BRAND_WATERMARK_CACHE["at"] = 0.0
+
+    class _Airtable:
+        def list_records(self, *_args, **_kwargs):
+            return []
+
+    class _Drive:
+        def download_file(self, file_id):
+            assert file_id == watermark_module.FALLBACK_SMALL_WATERMARK_DRIVE_ID
+            return b"fallback-watermark", "image/png"
+
+    monkeypatch.setattr(watermark_module, "GoogleDriveClient", lambda: _Drive())
+    assert watermark_module.brand_watermark_bytes(_Airtable()) == b"fallback-watermark"
+
+
+def test_chicago_library_ingest_defers_when_watermark_unavailable(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
+        "decision": "clean", "indicators": [],
+        "evidence": "No overlays found", "frames_checked": 1,
+    })
+    calls = []
+
+    class _Drive:
+        def upload_and_share(self, folder_id, filename, content, mime_type):
+            calls.append((folder_id, filename, content, mime_type))
+            return {"id": "rawDrive1", "webViewLink": "https://drive/raw"}
+
+    monkeypatch.setattr("studio_library.processor.GoogleDriveClient", lambda: _Drive())
+    monkeypatch.setattr(
+        "studio_library.processor.brand_watermark_bytes",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("C6 watermark asset view returned no active branding watermark")),
+    )
+
+    result = ingest_studio_library_asset(
+        content=b"original-photo",
+        filename="riverwalk.jpg",
+        mime_type="image/jpeg",
+        profile_name="ChicagoShining",
+        skip_source_master=True,
+    )
+    assert result["watermarked"] is False
+    assert result["watermark_deferred"] is True
+    assert result["google_drive_file_id"] == "rawDrive1"
+    assert calls and calls[0][2] == b"original-photo"
+
+
 def test_async_library_ingest_job_completes(monkeypatch):
     import time
     from studio_library import async_jobs

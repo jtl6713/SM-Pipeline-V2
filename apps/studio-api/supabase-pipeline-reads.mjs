@@ -1298,7 +1298,7 @@ export const MEDIA_SIDE_VIEW_FILTERS = {
     + "&active.eq.true"
     + "&or=(do_not_use.is.null,do_not_use.eq.false)"
     + "&asset_name.ilike.*Watermark_Small*"
-    + "&google_drive_file_id=neq.",
+    + "&google_drive_file_id=not.is.null",
   // Runner R2 classified music candidates.
   viwQl0aLMi6xP3Rdp:
     "media_class.eq.Audio"

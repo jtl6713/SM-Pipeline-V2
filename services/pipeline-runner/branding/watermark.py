@@ -27,6 +27,10 @@ DEFAULT_SCALE = 0.12
 DEFAULT_MARGIN = 30
 DEFAULT_OPACITY = 1.0
 BRANDED_PATH_MARKERS = ("/lettered/", "/watermarked/")
+# Proven Chicago small brand mark (Airtable recTnq3abS2rcsTzK / Supabase densify).
+# Used when the C6 view snapshot returns empty under Phase 6 SoR so Asset Manager
+# cannot be parked by a catalog/view miss for a mark that already lives on Drive.
+FALLBACK_SMALL_WATERMARK_DRIVE_ID = "1WQyd5W1__HkaEkWyC38IMErW8702Rd4u"
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
@@ -164,6 +168,27 @@ def watermark_service_url() -> str:
     return (configured or from_airtable or DEFAULT_WATERMARK_SERVICE_URL).rstrip("/")
 
 
+def _c6_watermark_rows(client: AirtableClient) -> list:
+    rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
+    if rows:
+        return rows
+    # View snapshot can miss under Supabase SoR; fall back to a direct role/name filter.
+    return client.list_records(
+        MEDIA_ASSETS_TABLE,
+        formula=(
+            "AND("
+            "{Asset Role}='Watermark',"
+            "{Asset Status}='Available',"
+            "{Active}=TRUE(),"
+            "OR({Do Not Use}=BLANK(),{Do Not Use}=FALSE()),"
+            "FIND('Watermark_Small',{Asset Name})>0,"
+            "{Google Drive File ID}!=''"
+            ")"
+        ),
+        max_records=1,
+    )
+
+
 def brand_watermark_url(client: AirtableClient) -> str:
     """Return a Remotion-localizable watermark URL.
 
@@ -171,17 +196,16 @@ def brand_watermark_url(client: AirtableClient) -> str:
     public branding URL in Google Drive URL; Remotion downloading that writes
     Cloudflare HTML as watermark.png and fails with Error loading image.
     """
-    rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
-    if not rows:
-        raise RuntimeError("C6 watermark asset view returned no active branding watermark")
-    row = rows[0]
-    drive_id = field_str(row, "Google Drive File ID")
-    if drive_id:
-        return f"https://drive.google.com/uc?export=download&id={drive_id}"
-    url = field_str(row, "Google Drive URL")
-    if not url:
-        raise RuntimeError("C6 watermark asset is missing Google Drive File ID and URL")
-    return url
+    rows = _c6_watermark_rows(client)
+    if rows:
+        row = rows[0]
+        drive_id = field_str(row, "Google Drive File ID")
+        if drive_id:
+            return f"https://drive.google.com/uc?export=download&id={drive_id}"
+        url = field_str(row, "Google Drive URL")
+        if url:
+            return url
+    return f"https://drive.google.com/uc?export=download&id={FALLBACK_SMALL_WATERMARK_DRIVE_ID}"
 
 
 _BRAND_WATERMARK_CACHE: dict[str, object] = {"bytes": b"", "at": 0.0}
@@ -207,29 +231,34 @@ def brand_watermark_bytes(client: AirtableClient) -> bytes:
     if isinstance(cached, (bytes, bytearray)) and cached and (time.time() - cached_at) < _BRAND_WATERMARK_TTL_SEC:
         return bytes(cached)
 
-    rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
-    if not rows:
-        raise RuntimeError("C6 watermark asset view returned no active branding watermark")
-    row = rows[0]
-    drive_id = field_str(row, "Google Drive File ID")
-    if drive_id:
-        content, _mime_type = GoogleDriveClient().download_file(drive_id)
-        if not content:
-            raise RuntimeError("C6 watermark Drive download was empty")
-        _BRAND_WATERMARK_CACHE["bytes"] = content
-        _BRAND_WATERMARK_CACHE["at"] = time.time()
-        return content
+    drive = GoogleDriveClient()
+    rows = _c6_watermark_rows(client)
+    if rows:
+        row = rows[0]
+        drive_id = field_str(row, "Google Drive File ID")
+        if drive_id:
+            content, _mime_type = drive.download_file(drive_id)
+            if content:
+                _BRAND_WATERMARK_CACHE["bytes"] = content
+                _BRAND_WATERMARK_CACHE["at"] = time.time()
+                return content
+        url = field_str(row, "Google Drive URL")
+        if url:
+            response = requests.get(url, timeout=120)
+            response.raise_for_status()
+            if response.content:
+                _BRAND_WATERMARK_CACHE["bytes"] = response.content
+                _BRAND_WATERMARK_CACHE["at"] = time.time()
+                return response.content
 
-    url = field_str(row, "Google Drive URL")
-    if not url:
-        raise RuntimeError("C6 watermark asset is missing Google Drive File ID and URL")
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
-    if not response.content:
-        raise RuntimeError("C6 watermark asset download was empty")
-    _BRAND_WATERMARK_CACHE["bytes"] = response.content
+    # Catalog/view miss must not block Chicago Asset Manager. The official small
+    # mark already lives on Drive; load it authenticated and keep branding on.
+    content, _mime_type = drive.download_file(FALLBACK_SMALL_WATERMARK_DRIVE_ID)
+    if not content:
+        raise RuntimeError("C6 watermark asset view returned no active branding watermark")
+    _BRAND_WATERMARK_CACHE["bytes"] = content
     _BRAND_WATERMARK_CACHE["at"] = time.time()
-    return response.content
+    return content
 
 
 def _position(position: str, base_w: int, base_h: int, wm_w: int, wm_h: int, margin: int) -> tuple[int, int]:
