@@ -49,7 +49,7 @@ from ttd.constants import (
     VIDEO_RETRY_MINUTES,
 )
 from ttd.eligibility import ttd2_eligibility_reason
-from ttd.package import completion_token_material, completion_url, hash_completion_token
+from ttd.package import completion_url, stable_completion_token
 
 
 def process_request(
@@ -88,6 +88,12 @@ def process_request(
         return {"processed": False, "reason": reason, **result}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
+
+    # Fail closed rather than mint an insecure token when the signing key is
+    # absent; existing pre-cutover tokens remain usable for old email links.
+    signing_secret = str((getattr(client, "_settings", {}) or {}).get("pipeline_runner_shared_secret") or "").strip()
+    if not field_str(output, "TikTok_Manual_Completion_Token") and not signing_secret:
+        return {"processed": False, "reason": "missing_completion_signing_secret", **result}
 
     now = iso_utc()
     client.update_record(
@@ -136,20 +142,16 @@ def process_request(
     status = draft_status_from(body).upper()
     result["http_status"] = status_code
     result["tiktok_status"] = status
-    # Completion links are output-scoped bearer credentials. Hash only
-    # record_id+publish_id (no timestamp) so concurrent TTD2 polls mint the
-    # same token. Once TTD3 has emailed, freeze the stored token/URL so a later
-    # status poll cannot invalidate Mark as Published.
-    expected_token = hash_completion_token(completion_token_material(record_id, publish_id))
+    # Two concurrent polls starting from an empty token mint the same HMAC.
+    # Never revoke a legacy link already sent in a handoff email.
     existing_token = field_str(output, "TikTok_Manual_Completion_Token")
     existing_url = field_str(output, "TikTok_Manual_Completion_URL")
     emailed = bool(field_str(output, "TikTok_Draft_Email_Sent_At"))
-    if emailed and existing_token:
-        token = existing_token
-        form_url = existing_url or completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
-    else:
-        token = expected_token if publish_id else (existing_token or expected_token)
-        form_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
+    token = existing_token or stable_completion_token(record_id, publish_id, secret=signing_secret)
+    form_url = (
+        existing_url if emailed and existing_url and existing_token
+        else completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
+    )
     public_ids = public_post_ids_from(body)
 
     # TikTok photo URLs have already been accepted by the Content Posting API,
