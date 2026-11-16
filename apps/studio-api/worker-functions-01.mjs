@@ -2298,12 +2298,27 @@ export function normalizedOutputState(record) {
   // Meta action throttling is a timed automatic retry, not a terminal failure.
   if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
 
+  // Auto-publish was never turned on and nothing has been sent. That is a manual
+  // handoff, not a late or failed job.
+  if (fields.Auto_Publish_Enabled === false
+      && Number(fields.Studio_Publish_Dispatch_Count || 0) <= 0
+      && has("Review_Status", "approved")
+      && !text("Published_At")
+      && !text("Platform_Post_URL")
+      && !text("Manual_Published_URL")
+      && !has("Publish_Status", "failed")
+      && !has("Output_Status", "failed")
+      && !has("Render_Status", "failed")) {
+    return "Manual Action Required";
+  }
+
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
     const render = text("Render_Status").toLowerCase();
     const publish = text("Publish_Status").toLowerCase();
     const outputDead = output.includes("failed") || output.includes("terminal error") || output.includes("skipped");
     const publishDead = publish.includes("failed") || publish.includes("error");
+    const renderDead = render.includes("failed") || render.includes("error");
     // Queue wait / ready package must never show as Trying Again — only real
     // Remotion failures (delayRender, exit code, Chrome) while still in produce.
     const stillInProduce = output.includes("in production") || output.includes("rendering");
@@ -2313,6 +2328,10 @@ export function normalizedOutputState(record) {
     }
     if (!outputDead && !publishDead && queuedOrReady) {
       // Fall through to Waiting in Render Queue / ready labels below.
+    } else if (!outputDead && !publishDead && !renderDead) {
+      // A leftover AP1C or rescue-skip message on a row still queued to publish
+      // is a retry, not a terminal failure.
+      return "Retry Pending";
     } else {
       return "Failed";
     }
@@ -2882,6 +2901,8 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     youtube_error_message: f(record, "YouTube_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
     publish_error_message: f(record, "Publish_Error_Message"),
+    ig_carousel_error_message: f(record, "IG_Carousel_Error_Message"),
+    studio_publish_dispatch_note: f(record, "Studio_Publish_Dispatch_Note"),
     manual_fallback_required: Boolean(f(record, "Manual_Fallback_Required")),
     studio_publish_dispatch_at: f(record, "Studio_Publish_Dispatch_At"),
     studio_publish_dispatch_count: f(record, "Studio_Publish_Dispatch_Count"),

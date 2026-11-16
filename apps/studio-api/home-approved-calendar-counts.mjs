@@ -1,4 +1,4 @@
-import { homeApprovedUnpublished, homeApprovedExceptionKind, homeOutputContribution, HOME_PLATFORMS } from "./profile-summary-classification.mjs";
+import { homeApprovedUnpublished, homeApprovedExceptionKind, homeOutputContribution, homeOverdueDueAt, HOME_PLATFORMS } from "./profile-summary-classification.mjs";
 import { isTikTokEmailedManualHandoff } from "./tiktok-emailed-handoff.mjs";
 
 // Calendar uses Scheduled_Post_Date, never dispatch status or provisional approval.
@@ -28,6 +28,8 @@ export function homeApprovedCalendarCounts(outputs, now = Date.now()) {
     }
     const stamp = Date.parse(String(row.scheduled_post_date || ""));
     if (!Number.isFinite(stamp) || stamp <= 0) continue;
+    // Past Due is the overdue receipt clock, not every approved date that has passed.
+    if (stamp <= now && !homeOverdueDueAt(row)) continue;
     slots[row.platform].push(stamp);
   }
   for (const platform of HOME_PLATFORMS) slots[platform].sort((a, b) => a - b);
