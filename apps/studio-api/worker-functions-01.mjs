@@ -11959,22 +11959,41 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   let rows = null;
   if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
     rows = await listSupabaseRequestsWithProductionJob(env, {
-      limit: 40,
+      limit: 100,
       statuses: ["Promoted", "Submitted"],
     }).catch(() => null);
   }
   if (!Array.isArray(rows)) {
     rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-      limit: 40,
+      limit: 100,
       sortField: "Updated_At",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="",OR({Request_Status}="Promoted",{Request_Status}="Submitted"))',
     }).catch(() => []);
   }
-  const ids = [...new Set((rows || []).filter((row) => {
-    const status = String(f(row, "Request_Status") || "").trim();
-    return status === "Promoted" || status === "Submitted";
-  }).map((row) => String(row?.id || "").trim()).filter((id) => id.startsWith("rec")))];
+  // Supabase sorts these records by immutable request-row updated_at. A burst
+  // of recent blocked SAI1 retries monopolized the first 16 slots while older
+  // otherwise-ready themes remained stalled for hours. Fairly order the 100
+  // eligible jobs by their actual job heartbeat, oldest first, and exclude
+  // already-terminal jobs before choosing the 16 bounded pulses.
+  const ids = [...new Set((rows || [])
+    .filter((row) => {
+      const status = String(f(row, "Request_Status") || "").trim();
+      return status === "Promoted" || status === "Submitted";
+    })
+    .map((row) => ({
+      id: String(row?.id || "").trim(),
+      job: parseStudioProductionJob(row),
+    }))
+    .filter(({ id, job }) => id.startsWith("rec") && !["done", "escalated"].includes(String(job?.step || "").trim()))
+    .sort((a, b) => {
+      const age = (job) => {
+        const at = Date.parse(String(job?.updated_at || ""));
+        return Number.isFinite(at) ? at : 0;
+      };
+      return age(a.job) - age(b.job) || a.id.localeCompare(b.id);
+    })
+    .map(({ id }) => id))];
   const pulses = [];
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
