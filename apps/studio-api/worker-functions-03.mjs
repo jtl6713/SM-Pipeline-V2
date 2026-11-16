@@ -3509,6 +3509,8 @@ export async function promoteStudioAssetToDrive(env, {
   // Default true: Chicago used to put source+branded Drive files in one call and
   // the gateway timed out after the browser already showed 100% sent.
   skipSourceMaster = true,
+  // Operator override for false-positive overlay holds (scene text ≠ credit).
+  overrideOverlayHold = false,
 } = {}) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
   if (!runnerUrl) {
@@ -3521,6 +3523,7 @@ export async function promoteStudioAssetToDrive(env, {
   form.set("profile_name", String(profileName || ""));
   form.set("async", "1");
   if (skipSourceMaster) form.set("skip_source_master", "1");
+  if (overrideOverlayHold) form.set("override_overlay_hold", "1");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
   let response;
   try {
@@ -3604,6 +3607,9 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
   const location = String(form.get("location") || "").trim();
   const description = String(form.get("description") || "").trim();
   const formDuration = coerceLibraryDurationSeconds(form.get("duration_seconds"));
+  const overrideOverlayHold = ["1", "true", "yes", "on"].includes(
+    String(form.get("override_overlay_hold") || "").trim().toLowerCase(),
+  );
   const rawBatchName = String(form.get("batch_name") || form.get("display_name") || "").trim();
   let batchBase = null;
   let batchNames = null;
@@ -3659,6 +3665,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       bytes,
       contentType: item4NormalizedMimeType(file),
       profileName: f(uploadProfile, "Profile_Name") || "",
+      overrideOverlayHold,
     });
     if (drive?.provenance_screen?.decision !== "clean") {
       throw new HttpError(
@@ -3675,6 +3682,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
     const durationSeconds = isVideo
       ? (coerceLibraryDurationSeconds(drive.duration_seconds) || formDuration)
       : null;
+    const overlayOverridden = Boolean(drive?.provenance_screen?.operator_override);
     const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
       method: "POST",
       body: JSON.stringify({
@@ -3700,10 +3708,13 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
             Asset_Role: isVideo ? "Raw Footage" : "Other",
             Raw_Source_Eligibility: isVideo ? "Eligible" : "Not Applicable",
             Location: location || null,
-            Potential_Match_Notes: drive.provenance_screen?.decision === "clean"
-              ? "QA-ASSET-THIRD-PARTY-OVERLAY: CLEAN; source reviewed before watermark/Drive upload; " +
-                String(drive.provenance_screen?.evidence || "").slice(0, 250)
-              : "QA-ASSET-THIRD-PARTY-OVERLAY: Review required — missing clean receipt",
+            Potential_Match_Notes: overlayOverridden
+              ? "QA-ASSET-THIRD-PARTY-OVERLAY: OPERATOR_OVERRIDE; Asset Manager accepted after false-positive hold; " +
+                String(drive.provenance_screen?.evidence || "").slice(0, 220)
+              : (drive.provenance_screen?.decision === "clean"
+                ? "QA-ASSET-THIRD-PARTY-OVERLAY: CLEAN; source reviewed before watermark/Drive upload; " +
+                  String(drive.provenance_screen?.evidence || "").slice(0, 250)
+                : "QA-ASSET-THIRD-PARTY-OVERLAY: Review required — missing clean receipt"),
             Asset_Description: [
               description,
               drive.watermarked

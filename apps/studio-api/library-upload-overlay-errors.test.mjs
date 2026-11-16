@@ -17,8 +17,11 @@ describe("library upload overlay errors", () => {
 
   test("UI summarizes overlay blocks separately from Drive/pipeline failures", () => {
     assert.match(ui, /function summarizeLibraryUploadErrors/);
-    assert.match(ui, /blocked: photographer\/credit watermark/);
+    assert.match(ui, /held for possible third-party overlay/);
+    assert.match(ui, /Override below if Studio got this wrong/);
     assert.match(ui, /failed while talking to Drive\/pipeline/);
+    assert.match(ui, /override_overlay_hold/);
+    assert.match(ui, /libraryOverlayOverrideBtn/);
   });
 
   test("library Drive promote uses async runner job + poll", () => {
@@ -31,13 +34,19 @@ describe("library upload overlay errors", () => {
     assert.match(funcs, /emptyGateway \? 504/);
   });
 
+  test("Worker passes overlay override through library promote", () => {
+    assert.match(funcs, /overrideOverlayHold/);
+    assert.match(funcs, /override_overlay_hold/);
+    assert.match(funcs, /OPERATOR_OVERRIDE/);
+  });
+
   test("release versions bumped for this fix", () => {
-    assert.match(worker, /0\.10\.969-library-upload-wm-fallback/);
+    assert.match(worker, /0\.10\.970-library-overlay-override/);
     assert.match(ui, /xhr\.timeout=360000/);
     const build = ui.match(/\bBUILD_ID\s*=\s*["']item4-(\d+)\.(\d+)\.(\d+)-/);
     assert.ok(build, "UI BUILD_ID must be a parseable semantic version");
     const [major, minor, patch] = build.slice(1).map(Number);
-    assert.ok(major > 0 || minor > 6 || (minor === 6 && patch >= 956),
-      "Keep the UI build at or above the async library-upload release");
+    assert.ok(major > 0 || minor > 6 || (minor === 6 && patch >= 957),
+      "Keep the UI build at or above the overlay-override release");
   });
 });

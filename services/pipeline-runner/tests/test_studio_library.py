@@ -283,6 +283,46 @@ def test_chicago_library_ingest_defers_when_watermark_unavailable(monkeypatch):
     assert calls and calls[0][2] == b"original-photo"
 
 
+def test_chicago_library_ingest_honors_overlay_hold_override(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
+        "decision": "review", "indicators": ["other"],
+        "evidence": "Visible slogan text", "frames_checked": 1,
+        "signature": "QA-ASSET-THIRD-PARTY-OVERLAY",
+    })
+    calls = []
+
+    class _Drive:
+        def upload_and_share(self, folder_id, filename, content, mime_type):
+            calls.append((folder_id, filename, content, mime_type))
+            return {"id": "overrideDrive1", "webViewLink": "https://drive/override"}
+
+    monkeypatch.setattr("studio_library.processor.GoogleDriveClient", lambda: _Drive())
+    monkeypatch.setattr(
+        "studio_library.processor._watermark_payload",
+        lambda **_kwargs: {
+            "bytes": b"watermarked-photo",
+            "filename": "images-1.jpg",
+            "mime_type": "image/jpeg",
+            "watermarked": True,
+            "extension": "jpg",
+        },
+    )
+
+    result = ingest_studio_library_asset(
+        content=b"original-photo",
+        filename="images (1).jpg",
+        mime_type="image/jpeg",
+        profile_name="ChicagoShining",
+        skip_source_master=True,
+        override_overlay_hold=True,
+    )
+    assert result["google_drive_file_id"] == "overrideDrive1"
+    assert result["provenance_screen"]["decision"] == "clean"
+    assert result["provenance_screen"]["operator_override"] is True
+    assert "OPERATOR_OVERRIDE" in result["provenance_screen"]["evidence"]
+    assert calls
+
+
 def test_async_library_ingest_job_completes(monkeypatch):
     import time
     from studio_library import async_jobs
