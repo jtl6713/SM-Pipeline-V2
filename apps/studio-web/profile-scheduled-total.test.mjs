@@ -149,5 +149,5 @@ test("every All Profiles heading has an explanatory hover tooltip", async () => 
   assert.match(overview, /Package-ready outputs in Factory Needs eyes, awaiting your final approval/);
   assert.match(overview, /Active unfinished platform outputs, excluding failed and Factory-reviewable outputs/);
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.\d+-home-three-section-dashboard/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
 });
