@@ -43,6 +43,23 @@ test("approved unscheduled and past-due records use one canonical predicate", ()
   assert.equal(tally.past_due, 2);
   assert.equal(tally.future, 1);
 });
+test("a Facebook Graph 368 cooldown leaves Past Due and Failed", () => {
+  const story = {
+    ...approved,
+    platform_output_type: "Facebook Story",
+    publish_status: "Failed",
+    publish_error_stage: "FACEBOOK_STORY_RATE_LIMIT_368",
+    scheduled_post_date: "2026-10-19T12:00:00Z",
+  };
+  const reel = { ...story, publish_error_stage: "FBS3_RATE_LIMIT" };
+  const plain = { ...approved, publish_status: "Failed", scheduled_post_date: "2026-10-19T12:00:00Z" };
+  assert.equal(homeApprovedExceptionKind(story, now), "");
+  assert.equal(homeIsUnpublishedFailure(story), false);
+  assert.equal(homeApprovedExceptionKind(reel, now), "");
+  assert.equal(homeIsUnpublishedFailure(reel), false);
+  assert.equal(homeIsUnpublishedFailure(plain), true);
+  assert.equal(homeApprovedCalendarCounts([story, reel], now).past_due, 0);
+});
 test("a public uploaded YouTube id leaves Past Due and a private id stays", () => {
   const live = {
     ...approved,

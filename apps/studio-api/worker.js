@@ -1393,7 +1393,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.977-idea-batches-supabase",
+          version: "0.10.978-fb-backlog-drain",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4660,6 +4660,20 @@ export default {
     // AP1-IG continuation must not be stranded by heavy Factory/QA. Only
     // already-created Reel media containers are selected; runner rereads
     // approvals, holds, state and container ID before any Graph publishing.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileFacebookSlideshows(env, { driveLimit: 4 })
+        .then((results) => console.info("Facebook drive-reel drain", JSON.stringify({
+          checked: results.filter((row) => row.stage === "fbs2-drive").length,
+          staged: results.filter((row) => row.public_url).length,
+          results,
+        })))
+        .catch((error) => console.warn("Facebook drive-reel drain failed", error)));
+      ctx.waitUntil(studioHealFacebookRateLimitRearm(env, { limit: 2, noteLimit: 24 })
+        .then((results) => console.info("Facebook Story 368 park", JSON.stringify({
+          parked: (results || []).filter((row) => row.key === "FB_STORY_RATE_LIMIT_PARK").length,
+        })))
+        .catch((error) => console.warn("Facebook Story 368 park failed", error)));
+    }
     if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
       ctx.waitUntil(studioReconcilePublishingInstagramReels(env, { limit: 1 })
         .then(results => console.info("Instagram saved-Reel continuation", JSON.stringify({

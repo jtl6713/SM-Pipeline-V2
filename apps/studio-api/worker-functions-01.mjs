@@ -13193,6 +13193,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Rearm approved Graph 368 Reels and Stories after cooldown. Do not bypass
   // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
+  const noteLimit = Math.max(1, Math.min(24, Number(options.noteLimit || limit)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   // Stories whose only 368 evidence is the dispatch note stay Ready to Publish
   // and the publisher would call Graph again. Park them for six hours first.
@@ -13204,7 +13205,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   });
   const notedParked = [];
   for (const candidate of notedStories) {
-    if (notedParked.length >= limit) break;
+    if (notedParked.length >= noteLimit) break;
     const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
     if (!latest || String(f(latest, "Publish_Error_Stage") || "").trim()
         || f(latest, "Platform_Media_ID") || f(latest, "Platform_Post_ID") || f(latest, "Published_At")) continue;

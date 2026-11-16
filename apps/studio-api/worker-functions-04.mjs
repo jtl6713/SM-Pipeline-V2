@@ -2606,9 +2606,11 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
 export async function studioReconcileFacebookSlideshows(env, options = {}) {
   if (pipelineStageBackend(env, "FBS1").mode !== "python") return [];
   const limit = Number(options.limit || 3);
+  const driveLimit = Math.max(0, Math.min(8, Number(options.driveLimit ?? 4)));
   const results = [];
   let ready = [];
   let processing = [];
+  let driveReady = [];
   try {
     ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
@@ -2620,10 +2622,20 @@ export async function studioReconcileFacebookSlideshows(env, options = {}) {
   try {
     processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",OR({Final_File_ID}!="",FIND("drive.google.com/file/d/",{Final_File_URL}&"")>0),{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0)))',
     });
   } catch (error) {
     console.warn("facebook slideshow poll reconcile scan failed", error);
+  }
+  if (driveLimit > 0) {
+    try {
+      driveReady = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: driveLimit,
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{FB_Slideshow_Status}="Video Ready",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="",{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({Final_File_ID}!="",FIND("drive.google.com/file/d/",{Final_File_URL}&"")>0),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))',
+      });
+    } catch (error) {
+      console.warn("facebook reel drive-stage scan failed", error);
+    }
   }
   for (const row of ready) {
     try {
@@ -2643,6 +2655,24 @@ export async function studioReconcileFacebookSlideshows(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook slideshow poll reconcile failed", row.id, error);
       results.push({ id: row.id, stage: "fbs2", error: message });
+    }
+  }
+  for (const row of driveReady) {
+    try {
+      const pulsed = await studioPulseFbs2(env, row);
+      let created = null;
+      if (pulsed?.ok && !pulsed.skipped && !pulsed.still_processing && !studioFacebookGraphPublishHeld(env)) {
+        created = await studioPulseFbs3(env, row);
+      }
+      results.push({
+        id: row.id, stage: "fbs2-drive", ok: pulsed?.ok !== false,
+        skipped: pulsed?.skipped || false, public_url: pulsed?.public_url || null,
+        fbs3: created ? (created.skipped || created.ok) : null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook reel drive stage failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs2-drive", error: message });
     }
   }
   return results;
