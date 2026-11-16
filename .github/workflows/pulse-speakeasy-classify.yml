@@ -61,7 +61,7 @@ jobs:
           }
           $version = [string]$health.version
           Write-Output ("runner_version=" + $version)
-          if ($version -notmatch "a3-media-content-profile|a3-classify-timeout|library-upload-skip-source") {
+          if ($version -notmatch "a3-media-content-profile|a3-classify-timeout|library-upload-skip-source|library-upload-async") {
             throw ("runner version missing Content_Profile / library-upload fix: " + $version)
           }
           $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"

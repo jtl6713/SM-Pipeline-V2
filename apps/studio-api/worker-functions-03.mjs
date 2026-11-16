@@ -3416,9 +3416,90 @@ export async function listAssetLibrary(request, env, url, authorization) {
 }
 /*__STUDIO_WORKER_END:listAssetLibrary__*/
 
-/** Worker→runner library ingest hard ceiling. Cloudflare often kills longer
- * subrequests with an empty 502; fail closed with a timeout message instead. */
-const LIBRARY_DRIVE_PROMOTE_TIMEOUT_MS = 100000;
+/** Short POST/GET ceilings for async library ingest. One long POST used to die
+ * at the Cloudflare tunnel (~100s) while Chicago still screened + watermarked. */
+const LIBRARY_DRIVE_PROMOTE_POST_TIMEOUT_MS = 30000;
+const LIBRARY_DRIVE_PROMOTE_POLL_TIMEOUT_MS = 15000;
+const LIBRARY_DRIVE_PROMOTE_POLL_INTERVAL_MS = 1500;
+const LIBRARY_DRIVE_PROMOTE_POLL_MAX_MS = 240000;
+
+function libraryPromoteFetchInit(secret, timeoutMs, body) {
+  return {
+    ...(body ? { body } : {}),
+    headers: {
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? { signal: AbortSignal.timeout(timeoutMs) }
+      : {}),
+  };
+}
+
+function throwLibraryPromoteFailure(response, payload = {}) {
+  const detail = String(payload?.error || payload?.message || "").trim();
+  const overlayHeld = /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(detail);
+  const emptyGateway = !detail && (response.status === 502 || response.status === 504 || response.status === 524);
+  const status = overlayHeld
+    ? 422
+    : (emptyGateway ? 504 : (response.status >= 400 ? response.status : 502));
+  throw new HttpError(
+    status,
+    detail || (overlayHeld
+      ? "Asset held for third-party overlay review. Use a clean source."
+      : (emptyGateway
+        ? "Drive/pipeline gateway timed out (empty response). Retry this file one at a time."
+        : `Google Drive asset upload failed (${response.status || "unknown"})`)),
+  );
+}
+
+async function pollLibraryPromoteJob(env, runnerUrl, secret, jobId) {
+  const started = Date.now();
+  while (Date.now() - started < LIBRARY_DRIVE_PROMOTE_POLL_MAX_MS) {
+    let response;
+    try {
+      response = await fetch(
+        `${runnerUrl}/jobs/studio-asset-library/${encodeURIComponent(jobId)}`,
+        {
+          method: "GET",
+          ...libraryPromoteFetchInit(secret, LIBRARY_DRIVE_PROMOTE_POLL_TIMEOUT_MS),
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "network error";
+      const timedOut = /abort|timeout|timed out/i.test(message);
+      if (!timedOut) {
+        throw new HttpError(503, `Pipeline runner unreachable while confirming Drive upload (${message}).`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, LIBRARY_DRIVE_PROMOTE_POLL_INTERVAL_MS));
+      continue;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 404) {
+      throw new HttpError(504, "Drive/pipeline upload job was lost before confirmation. Retry this file.");
+    }
+    const status = String(payload?.status || "").trim().toLowerCase();
+    if (status === "processing" || status === "queued" || status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, LIBRARY_DRIVE_PROMOTE_POLL_INTERVAL_MS));
+      continue;
+    }
+    if (status === "ok" && payload?.result) {
+      const result = payload.result;
+      const fileId = String(result?.google_drive_file_id || "").trim();
+      const driveUrl = String(result?.google_drive_url || "").trim();
+      if (!fileId || !driveUrl) throwLibraryPromoteFailure(response, result);
+      return result;
+    }
+    if (status === "error") {
+      const httpStatus = Number(payload?.http_status) || 502;
+      throwLibraryPromoteFailure({ status: httpStatus }, payload);
+    }
+    throwLibraryPromoteFailure(response, payload);
+  }
+  throw new HttpError(
+    504,
+    "Drive/pipeline upload timed out while confirming Google Drive. Retry this file — Pipeline Runner may still be busy.",
+  );
+}
 
 export async function promoteStudioAssetToDrive(env, {
   filename,
@@ -3438,19 +3519,14 @@ export async function promoteStudioAssetToDrive(env, {
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
   form.set("profile_name", String(profileName || ""));
+  form.set("async", "1");
   if (skipSourceMaster) form.set("skip_source_master", "1");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
   let response;
   try {
     response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
       method: "POST",
-      headers: {
-        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-      },
-      body: form,
-      ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-        ? { signal: AbortSignal.timeout(LIBRARY_DRIVE_PROMOTE_TIMEOUT_MS) }
-        : {}),
+      ...libraryPromoteFetchInit(secret, LIBRARY_DRIVE_PROMOTE_POST_TIMEOUT_MS, form),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "network error";
@@ -3458,30 +3534,21 @@ export async function promoteStudioAssetToDrive(env, {
     throw new HttpError(
       timedOut ? 504 : 503,
       timedOut
-        ? "Drive/pipeline upload timed out while confirming Google Drive. Retry this file — Pipeline Runner may still be busy."
+        ? "Drive/pipeline upload timed out while starting Google Drive ingest. Retry this file."
         : `Pipeline runner unreachable for Google Drive upload (${message}). Confirm Pipeline Runner is running on Windows.`,
     );
   }
   const payload = await response.json().catch(() => ({}));
+  // New runner: accept → 202 job_id → poll. Old runner may still return 201 sync.
+  if (response.status === 202 || payload?.job_id) {
+    const jobId = String(payload?.job_id || "").trim();
+    if (!jobId) throwLibraryPromoteFailure(response, payload);
+    return pollLibraryPromoteJob(env, runnerUrl, secret, jobId);
+  }
   const fileId = String(payload?.google_drive_file_id || "").trim();
   const driveUrl = String(payload?.google_drive_url || "").trim();
   if (!response.ok || !fileId || !driveUrl) {
-    const detail = String(payload?.error || payload?.message || "").trim();
-    const overlayHeld = /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(detail);
-    // Provenance holds are client errors (runner 422). Do not report them as a
-    // Drive/gateway 502 — that made a 10-file blocked batch look like an outage.
-    const emptyGateway = !detail && (response.status === 502 || response.status === 504 || response.status === 524);
-    const status = overlayHeld
-      ? 422
-      : (emptyGateway ? 504 : (response.status >= 400 ? response.status : 502));
-    throw new HttpError(
-      status,
-      detail || (overlayHeld
-        ? "Asset held for third-party overlay review. Use a clean source."
-        : (emptyGateway
-          ? "Drive/pipeline gateway timed out (empty response). Retry this file one at a time."
-          : `Google Drive asset upload failed (${response.status || "unknown"})`)),
-    );
+    throwLibraryPromoteFailure(response, payload);
   }
   return payload;
 }

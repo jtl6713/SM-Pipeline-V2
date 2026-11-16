@@ -184,6 +184,10 @@ def brand_watermark_url(client: AirtableClient) -> str:
     return url
 
 
+_BRAND_WATERMARK_CACHE: dict[str, object] = {"bytes": b"", "at": 0.0}
+_BRAND_WATERMARK_TTL_SEC = 3600.0
+
+
 def brand_watermark_bytes(client: AirtableClient) -> bytes:
     """Load the official watermark using authenticated Drive first.
 
@@ -192,7 +196,17 @@ def brand_watermark_bytes(client: AirtableClient) -> bytes:
     plain requests.get() can fail even though the runner itself has Drive
     credentials. Prefer the stored Drive file ID and authenticated Drive
     download; retain URL download only for legacy watermark rows.
+
+    Cache the bytes for an hour so a 7-photo Chicago batch does not re-hit
+    Airtable + Drive for the same C6 mark on every file.
     """
+    import time
+
+    cached = _BRAND_WATERMARK_CACHE.get("bytes")
+    cached_at = float(_BRAND_WATERMARK_CACHE.get("at") or 0)
+    if isinstance(cached, (bytes, bytearray)) and cached and (time.time() - cached_at) < _BRAND_WATERMARK_TTL_SEC:
+        return bytes(cached)
+
     rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
     if not rows:
         raise RuntimeError("C6 watermark asset view returned no active branding watermark")
@@ -202,6 +216,8 @@ def brand_watermark_bytes(client: AirtableClient) -> bytes:
         content, _mime_type = GoogleDriveClient().download_file(drive_id)
         if not content:
             raise RuntimeError("C6 watermark Drive download was empty")
+        _BRAND_WATERMARK_CACHE["bytes"] = content
+        _BRAND_WATERMARK_CACHE["at"] = time.time()
         return content
 
     url = field_str(row, "Google Drive URL")
@@ -211,6 +227,8 @@ def brand_watermark_bytes(client: AirtableClient) -> bytes:
     response.raise_for_status()
     if not response.content:
         raise RuntimeError("C6 watermark asset download was empty")
+    _BRAND_WATERMARK_CACHE["bytes"] = response.content
+    _BRAND_WATERMARK_CACHE["at"] = time.time()
     return response.content
 
 

@@ -100,3 +100,4 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-15: Runner 2026-11-15-a3-media-content-profile — shape Content_Profile from media metadata so A3 stops skipping Supabase library assets; densify profile/notes/keywords on write; Speakeasy pulse uses Chicago profile.
 2026-11-15: Runner 2026-11-15-library-upload-skip-source — skip sync source-master Drive put on Chicago library ingest so Worker→runner confirm fits under the gateway window.
 2026-11-15: Re-deploy runner 2026-11-15-library-upload-skip-source — prior Ops step adopted Speakeasy /api/shell on HTTP 409 and never deployed; workflow now waits for a fresh pipeline-runner deploy job.
+2026-11-15: Runner 2026-11-15-library-upload-async — async studio-asset-library jobs + watermark byte cache so Chicago multi-photo uploads clear the Worker/tunnel window.
