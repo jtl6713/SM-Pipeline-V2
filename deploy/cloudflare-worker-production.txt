@@ -1346,3 +1346,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 
 2026-11-16: Deploy Worker 0.10.995-produce-job-persist — resume stale Promoted/Submitted produce jobs instead of the newest Cancelled duplicates. Verify /health version 0.10.995-produce-job-persist.
 2026-11-16: Deploy Worker 0.10.996-produce-fair-recovery — PR #2076. Fair oldest-heartbeat-first production watchdog across Supabase Promoted/Submitted requests, no terminal reprocessing; preserve 16-job bounded concurrency, pause, Factory, and publishing gates. Verify exact /health version.
+
+2026-11-16: Deploy Worker 0.10.997-asset-manager-supabase-delete — PR #2080. Supabase-only Asset Manager delete, verified Drive trash, reference checks, and list-cache invalidation. No Airtable delete.
