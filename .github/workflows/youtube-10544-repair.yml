@@ -1,18 +1,35 @@
-name: YouTube 10544 incident inspection
+name: YouTube durable upload repair
 on:
   push:
-    branches: [repair/youtube-10544]
-    paths: ['repair/youtube-10544/**', '.github/workflows/youtube-10544-repair.yml']
+    branches: [main, repair/youtube-10544]
+    paths:
+      - 'repair/youtube-10544/**'
+      - '.github/workflows/youtube-10544-repair.yml'
+      - 'services/pipeline-runner/yt/**'
+      - 'services/youtube-uploader/**'
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/yt/**'
+      - 'services/youtube-uploader/**'
 permissions: {contents: read}
 concurrency: {group: youtube-10544-incident, cancel-in-progress: false}
 jobs:
-  inspect:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: pip install pytest requests python-dotenv flask pillow tzdata
+      - run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_youtube_upload_dedup.py
+      - run: node --test services/youtube-uploader/upload-dedup.test.cjs
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - run: python repair/youtube-10544/ops.py
+      - run: python repair/youtube-10544/deploy.py

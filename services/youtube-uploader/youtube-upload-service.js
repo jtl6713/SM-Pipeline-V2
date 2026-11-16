@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-10-09-engagement-comment-like";
+const SERVICE_VERSION = "2026-11-15-durable-upload-dedup";
 const engageIdempotency = new Map();
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
@@ -84,14 +84,18 @@ async function init() {
 }
 
 function persist() {
-  saveChain = saveChain.then(() => fsp.writeFile(cfg.jobStore, JSON.stringify([...jobs.values()], null, 2)));
+  saveChain = saveChain.catch(() => {}).then(async () => {
+    const temp = cfg.jobStore + ".tmp";
+    await fsp.writeFile(temp, JSON.stringify([...jobs.values()], null, 2));
+    await fsp.rename(temp, cfg.jobStore);
+  });
   return saveChain;
 }
 
 function cleanupOldJobs() {
   const cutoff = Date.now() - cfg.retentionHours * 3600000;
   for (const [id, job] of jobs) {
-    if (Date.parse(job.updatedAt || job.createdAt) < cutoff && ["completed", "failed"].includes(job.status)) {
+    if (!job.videoId && !job.sessionCreated && Date.parse(job.updatedAt || job.createdAt) < cutoff && job.status === "failed") {
       jobs.delete(id);
     }
   }
@@ -863,15 +867,19 @@ async function handler(req, res) {
       if (!payload.sourceUrl || !payload.title) {
         return json(res, 400, { error: "sourceUrl and title are required" });
       }
-      const idem = String(payload.idempotencyKey || "");
+      const idem = String(payload.idempotencyKey || "").trim();
+      if (!idem) return json(res, 400, { error: "idempotencyKey is required; upload refused" });
+      const outputRecordId = String(payload.outputRecordId || "").trim();
+      const replaceTransactionId = String(payload.replaceTransactionId || "BASE").trim();
       if (idem) {
-        const existing = [...jobs.values()].find((job) => job.idempotencyKey === idem && job.status !== "failed");
+        const existing = [...jobs.values()].find((job) => (job.idempotencyKey === idem || (outputRecordId && job.outputRecordId === outputRecordId && job.replaceTransactionId === replaceTransactionId)) && (job.status !== "failed" || job.videoId || job.sessionCreated));
         if (existing) return json(res, 200, existing);
       }
       const id = crypto.randomUUID();
       const job = {
         id,
         idempotencyKey: idem,
+        outputRecordId, replaceTransactionId,
         status: "queued",
         progressPercent: 0,
         bytesUploaded: 0,
@@ -881,7 +889,8 @@ async function handler(req, res) {
         error: null,
       };
       jobs.set(id, job);
-      await persist();
+      try { await persist(); }
+      catch (error) { jobs.delete(id); throw error; }
       setImmediate(() => processUpload(id, payload));
       return json(res, 202, job);
     }

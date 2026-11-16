@@ -94,6 +94,10 @@ def ytp1_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
+        return "do_not_publish"
+    if _ci(field_str(record, "Publish_Status")) in {"published", "published privately"} or field_str(record, "Platform_Post_URL") or field_str(record, "Platform_Post_ID"):
+        return "already_published"
     if _ci(field_str(record, "Platform")) != "youtube":
         return "not_youtube"
     if _ci(field_str(record, "YouTube_Stage")) != _ci(STAGE_YT1):
