@@ -15,6 +15,7 @@ const snapshot = () => ({
   records: ids.map((id, i) => ({
     id, city_label: ["Chicago", "New York", "Los Angeles", "Miami"][i],
     scheduled: { Facebook: 2, Instagram: 3, TikTok: 0, YouTube: 1 },
+    ready_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
     manual: 0, failed: 0, approval: 2, production: 0, ideas: 1, approved_unpublished: 0, overdue_unpublished: 0,
     approved_future: 0, approved_past_due: 0, approved_missing_date: 0, pipeline_total: 2,
     approved_future_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
