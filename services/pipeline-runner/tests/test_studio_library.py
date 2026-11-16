@@ -117,6 +117,52 @@ def test_chicago_library_ingest_preserves_source_and_catalogs_watermarked_deriva
     assert calls[1][0] == "derived"
 
 
+def test_chicago_library_ingest_can_skip_source_master_on_hot_path(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
+        "decision": "clean", "indicators": [],
+        "evidence": "No overlays found", "frames_checked": 1,
+    })
+    calls = []
+
+    class _Drive:
+        def upload_file(self, folder_id, filename, content, mime_type):
+            calls.append(("source", folder_id, filename, content, mime_type))
+            return {"id": "sourceDrive1", "webViewLink": "https://drive/source"}
+
+        def upload_and_share(self, folder_id, filename, content, mime_type):
+            calls.append(("derived", folder_id, filename, content, mime_type))
+            return {"id": "wmDrive1", "webViewLink": "https://drive/wm"}
+
+        def get_file(self, *_args, **_kwargs):
+            return {}
+
+    monkeypatch.setattr("studio_library.processor.GoogleDriveClient", lambda: _Drive())
+    monkeypatch.setattr(
+        "studio_library.processor._watermark_payload",
+        lambda **_kwargs: {
+            "bytes": b"watermarked-photo",
+            "filename": "riverwalk.jpg",
+            "mime_type": "image/jpeg",
+            "watermarked": True,
+            "extension": "jpg",
+        },
+    )
+
+    result = ingest_studio_library_asset(
+        content=b"original-photo",
+        filename="riverwalk.jpg",
+        mime_type="image/jpeg",
+        profile_name="ChicagoShining",
+        skip_source_master=True,
+    )
+
+    assert result["watermarked"] is True
+    assert result["google_drive_file_id"] == "wmDrive1"
+    assert result["source_google_drive_file_id"] is None
+    assert result["source_master_deferred"] is True
+    assert calls == [("derived", GDRIVE_STUDIO_INTAKE_FOLDER, "riverwalk.jpg", b"watermarked-photo", "image/jpeg")]
+
+
 def test_existing_chicago_asset_gets_watermarked_derivative(monkeypatch):
     monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
         "decision": "clean", "indicators": [],

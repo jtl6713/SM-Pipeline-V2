@@ -125,6 +125,7 @@ def ingest_studio_library_asset(
     filename: str,
     mime_type: str = "",
     profile_name: str = "",
+    skip_source_master: bool = False,
 ) -> dict[str, Any]:
     payload = content or b""
     if not payload:
@@ -156,7 +157,14 @@ def ingest_studio_library_asset(
         mime_type=spec["mime_type"],
         profile_name=profile_name,
     )
-    if branded.get("watermarked"):
+    # Chicago branding used to upload the unwatermarked source AND the branded
+    # derivative in one Worker→runner round trip (screen + OpenAI + two Drive
+    # puts). Cloudflare routinely killed that with an empty 502/504 before the
+    # catalog stamp, so Asset Manager showed "Drive/pipeline timeout" after
+    # 100% sent. Skip the source put on the hot path; Studio can archive the
+    # source master afterward without blocking the library confirm.
+    source_master_deferred = bool(branded.get("watermarked") and skip_source_master)
+    if branded.get("watermarked") and not skip_source_master:
         source_uploaded = drive.upload_file(
             GDRIVE_STUDIO_INTAKE_FOLDER,
             _source_filename(filename or "asset"),
@@ -203,6 +211,7 @@ def ingest_studio_library_asset(
         "source_web_view_link": source_web_view_link or None,
         "source_filename": filename or "asset",
         "source_file_size_bytes": len(payload),
+        "source_master_deferred": source_master_deferred,
         "provenance_screen": screen,
     }
 

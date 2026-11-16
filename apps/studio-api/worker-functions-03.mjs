@@ -3416,7 +3416,19 @@ export async function listAssetLibrary(request, env, url, authorization) {
 }
 /*__STUDIO_WORKER_END:listAssetLibrary__*/
 
-export async function promoteStudioAssetToDrive(env, { filename, bytes, contentType, profileName = "" }) {
+/** Worker→runner library ingest hard ceiling. Cloudflare often kills longer
+ * subrequests with an empty 502; fail closed with a timeout message instead. */
+const LIBRARY_DRIVE_PROMOTE_TIMEOUT_MS = 100000;
+
+export async function promoteStudioAssetToDrive(env, {
+  filename,
+  bytes,
+  contentType,
+  profileName = "",
+  // Default true: Chicago used to put source+branded Drive files in one call and
+  // the gateway timed out after the browser already showed 100% sent.
+  skipSourceMaster = true,
+} = {}) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
   if (!runnerUrl) {
     throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
@@ -3426,6 +3438,7 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
   form.set("profile_name", String(profileName || ""));
+  if (skipSourceMaster) form.set("skip_source_master", "1");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
   let response;
   try {
@@ -3435,11 +3448,18 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
         ...(secret ? { "X-Pipeline-Secret": secret } : {}),
       },
       body: form,
+      ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? { signal: AbortSignal.timeout(LIBRARY_DRIVE_PROMOTE_TIMEOUT_MS) }
+        : {}),
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "network error";
+    const timedOut = /abort|timeout|timed out/i.test(message);
     throw new HttpError(
-      503,
-      `Pipeline runner unreachable for Google Drive upload (${error instanceof Error ? error.message : "network error"}). Confirm Pipeline Runner is running on Windows.`
+      timedOut ? 504 : 503,
+      timedOut
+        ? "Drive/pipeline upload timed out while confirming Google Drive. Retry this file — Pipeline Runner may still be busy."
+        : `Pipeline runner unreachable for Google Drive upload (${message}). Confirm Pipeline Runner is running on Windows.`,
     );
   }
   const payload = await response.json().catch(() => ({}));
@@ -3450,14 +3470,17 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
     const overlayHeld = /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(detail);
     // Provenance holds are client errors (runner 422). Do not report them as a
     // Drive/gateway 502 — that made a 10-file blocked batch look like an outage.
+    const emptyGateway = !detail && (response.status === 502 || response.status === 504 || response.status === 524);
     const status = overlayHeld
       ? 422
-      : (response.status >= 400 ? response.status : 502);
+      : (emptyGateway ? 504 : (response.status >= 400 ? response.status : 502));
     throw new HttpError(
       status,
       detail || (overlayHeld
         ? "Asset held for third-party overlay review. Use a clean source."
-        : `Google Drive asset upload failed (${response.status || "unknown"})`),
+        : (emptyGateway
+          ? "Drive/pipeline gateway timed out (empty response). Retry this file one at a time."
+          : `Google Drive asset upload failed (${response.status || "unknown"})`)),
     );
   }
   return payload;
@@ -3617,7 +3640,9 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
             Asset_Description: [
               description,
               drive.watermarked
-                ? `[watermarked:${String(drive.watermark_profile || f(uploadProfile, "Profile_Name") || "ChicagoShining")}] Source master Drive ID: ${String(drive.source_google_drive_file_id || "").trim()}`
+                ? (drive.source_google_drive_file_id
+                  ? `[watermarked:${String(drive.watermark_profile || f(uploadProfile, "Profile_Name") || "ChicagoShining")}] Source master Drive ID: ${String(drive.source_google_drive_file_id || "").trim()}`
+                  : `[watermarked:${String(drive.watermark_profile || f(uploadProfile, "Profile_Name") || "ChicagoShining")}] Source master deferred after branded Drive confirm.`)
                 : "",
             ].filter(Boolean).join("\n") || "Studio Asset Manager upload stored in Google Drive.",
             Studio_Transfer_ID: `LIB-${id}`,

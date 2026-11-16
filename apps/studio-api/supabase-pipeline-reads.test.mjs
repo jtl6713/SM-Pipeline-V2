@@ -948,7 +948,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1052,7 +1052,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2810,7 +2810,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3130,7 +3130,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3753,7 +3753,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /supabase SoR mutation miss; skipping Airtable archive WRITE/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
 });
 
 test("sideTableKind recognizes Platform Outputs and Content Items table names", async () => {
@@ -3779,7 +3779,7 @@ test("Insights Learned settings SoR under STUDIO_WRITE_SOURCE=supabase", async (
   assert.match(fn, /STUDIO_INSIGHTS_LEARNED_SETTING/);
   assert.match(fn, /studioWriteSource\(env\) === "supabase"/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
 });
 
 test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", async () => {
@@ -3796,7 +3796,7 @@ test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", as
   assert.match(fn, /studioInsightsObservationsStore/);
   assert.match(fn, /studioInsightsPruneObservationStore/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
 });
 
 
@@ -3811,7 +3811,7 @@ test("studioSettingsByName SoR miss skips Airtable archive", async () => {
     "utf8",
   );
   assert.match(fn, /SoR miss: do not GET the frozen Airtable settings archive/);
-  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
+  assert.match(worker, /0\.10\.967-library-upload-drive-timeout/);
 });
 
 test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {

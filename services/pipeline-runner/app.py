@@ -633,6 +633,8 @@ def run_studio_asset_library():
     filename = str(request.form.get("filename") or getattr(upload, "filename", "") or "").strip()
     mime_type = str(request.form.get("mime_type") or getattr(upload, "mimetype", "") or "").strip()
     profile_name = str(request.form.get("profile_name") or request.form.get("content_profile_name") or "").strip()
+    skip_source_raw = str(request.form.get("skip_source_master") or "").strip().lower()
+    skip_source_master = skip_source_raw in {"1", "true", "yes", "on"}
     content = upload.read() if upload else b""
     if not content:
         return jsonify({"error": "file is required"}), 422
@@ -643,6 +645,7 @@ def run_studio_asset_library():
             filename=filename,
             mime_type=mime_type,
             profile_name=profile_name,
+            skip_source_master=skip_source_master,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 422
