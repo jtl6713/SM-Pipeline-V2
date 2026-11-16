@@ -63,3 +63,62 @@ def test_repeated_poll_keeps_completion_link_valid(monkeypatch, provider_status,
     assert ttd4_form_eligibility_reason(record, token=token) is None
     assert ttd4_form_eligibility_reason(record, token="wrong-token") == "token_mismatch"
     assert record["fields"]["TikTok_Draft_Email_Sent_At"] == "2026-11-15T12:00:00Z"
+
+
+def test_completion_token_is_stable_across_concurrent_mints():
+    from ttd.package import completion_token_material, hash_completion_token
+
+    first = hash_completion_token(completion_token_material("recABCDEFGHIJKLMN", "draft-123"))
+    second = hash_completion_token(completion_token_material("recABCDEFGHIJKLMN", "draft-123"))
+    assert first == second
+    assert first != hash_completion_token(
+        completion_token_material("recABCDEFGHIJKLMN", "draft-OTHER")
+    )
+
+
+@pytest.mark.parametrize("provider_status", ["SEND_TO_USER_INBOX", "PUBLISH_COMPLETE"])
+def test_pre_email_polls_converge_on_stable_token(monkeypatch, provider_status):
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "TikTok_Draft_Publish_ID": "draft-123",
+        "TikTok_Draft_Type": "Video",
+        "TikTok_Manual_Completion_Token": "",
+        "TikTok_Draft_Email_Sent_At": "",
+    }}
+
+    class Client:
+        def get_record(self, *args):
+            return record
+
+        def update_record(self, table, record_id, fields):
+            record["fields"].update(fields)
+
+    class Settings:
+        def __init__(self, client):
+            pass
+
+        def get(self, key):
+            return "https://example.com/hooks/ttd4" if key == "TTD4_WEBHOOK_URL" else None
+
+    class TikTok:
+        def __init__(self, **kwargs):
+            pass
+
+        def draft_status(self, publish_id):
+            return 200, {}
+
+    monkeypatch.setattr(ttd2, "AirtableClient", Client)
+    monkeypatch.setattr(ttd2, "PipelineSettings", Settings)
+    monkeypatch.setattr(ttd2, "TikTokDraftClient", TikTok)
+    monkeypatch.setattr(ttd2, "ttd2_eligibility_reason", lambda *a, **k: None)
+    monkeypatch.setattr(ttd2, "load_tiktok_settings", lambda *a, **k: {"url": "", "secret": ""})
+    monkeypatch.setattr(ttd2, "draft_status_from", lambda body: provider_status)
+    monkeypatch.setattr(ttd2, "public_post_ids_from", lambda body: [])
+    ttd2.process_request(output_record_id=record["id"])
+    token = record["fields"]["TikTok_Manual_Completion_Token"]
+    url = record["fields"]["TikTok_Manual_Completion_URL"]
+    from ttd.package import completion_token_material, hash_completion_token
+
+    assert token == hash_completion_token(completion_token_material(record["id"], "draft-123"))
+    ttd2.process_request(output_record_id=record["id"])
+    assert record["fields"]["TikTok_Manual_Completion_Token"] == token
+    assert record["fields"]["TikTok_Manual_Completion_URL"] == url

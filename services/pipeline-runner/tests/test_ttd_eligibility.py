@@ -17,6 +17,7 @@ from ttd.package import (
     cover_block,
     handoff_email_html,
     handoff_email_subject,
+    completion_token_material,
     hash_completion_token,
     is_az_finished_video,
     ordered_asset_links_html,
@@ -166,8 +167,11 @@ def test_package_helpers():
     record = _record(Output_Title="A very long title " * 10, Output_Caption="Caption", Output_Hashtags="#Chicago")
     assert len(photo_title(record)) == 90
     assert photo_description(record) == "Caption\n\n#Chicago"
-    token = hash_completion_token("TTD2:recX:pub:stamp")
+    token = hash_completion_token(completion_token_material("recX", "pub"))
+    assert token == hash_completion_token("TTD2:recX:pub")
     assert len(token) == 64
+    # Concurrent callers with the same publish_id must mint the same token.
+    assert completion_token_material("recX", "pub") == completion_token_material("recX", "pub")
     assert completion_url("https://pipeline.chicagoshining.com/hooks/ttd4", "recABCDEFGHIJKLMN", token).endswith(
         f"token={token}&action=form"
     )

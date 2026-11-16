@@ -40,8 +40,17 @@ def photo_description(
 
 
 def completion_token_material(record_id: str, publish_id: str, *, now: datetime | None = None) -> str:
-    stamp = (now or utc_now()).astimezone(timezone.utc).strftime("%Y%m%d%H%M%S%f")[:-3]
-    return f"TTD2:{record_id}:{publish_id}:{stamp}"
+    """Stable material for the manual-completion bearer token.
+
+    Must NOT include a timestamp. Concurrent TTD2 status polls used to mint a
+    fresh hash every pass, then overwrite TikTok_Manual_Completion_Token while
+    TTD3 had already emailed the previous link — Joseph got "Invalid or expired
+    link" on Mark as Published. record_id + publish_id alone are unique per
+    inbox delivery generation (resend clears publish_id before TTD1).
+    `now` is accepted for call-site compatibility and ignored.
+    """
+    del now  # intentionally unused — keep the signature stable for callers/tests
+    return f"TTD2:{str(record_id or '').strip()}:{str(publish_id or '').strip()}"
 
 
 def hash_completion_token(material: str) -> str:

@@ -77,6 +77,8 @@ test("tiktokResendRearmFields clear auth park and arm Ready for Delivery", () =>
   assert.equal(fields.TikTok_Draft_Publish_ID, "");
   assert.equal(fields.TikTok_Draft_Delivered_At, null);
   assert.equal(fields.TikTok_Draft_Email_Sent_At, null);
+  assert.equal(fields.TikTok_Manual_Completion_Token, "");
+  assert.equal(fields.TikTok_Manual_Completion_URL, "");
   assert.equal(fields.TikTok_Draft_Response_JSON, "");
   assert.equal(fields.Operational_Email_Key, "");
   assert.equal(fields.Operational_Email_Sent_At, null);

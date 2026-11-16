@@ -68,6 +68,10 @@ export function tiktokResendRearmFields({
     TikTok_Draft_Delivered_At: null,
     TikTok_Draft_Last_Checked_At: null,
     TikTok_Draft_Email_Sent_At: null,
+    // Drop the prior generation's Mark as Published credential so TTD2 mints a
+    // fresh stable token for the new publish_id (do not reuse a reminted hash).
+    TikTok_Manual_Completion_Token: "",
+    TikTok_Manual_Completion_URL: "",
     TikTok_Draft_Response_JSON: "",
     TikTok_Draft_Public_Post_IDs_JSON: "",
     TikTok_Draft_Poll_Attempt_Count: 0,
