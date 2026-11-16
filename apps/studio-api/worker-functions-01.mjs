@@ -35,6 +35,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseDeskHealPage,
   listSupabaseContentProfiles,
+  listSupabaseIdeasForProfile,
   listSupabaseDeskInventoryRequests,
   listSupabaseProductionRequestOutputs,
   listSupabaseProductionRequestsByIds,
@@ -3132,6 +3133,10 @@ export async function brandLogo(request, env, authorization) {
 /*__STUDIO_WORKER_END:brandLogo__*/
 
 export async function buildIdeasListPayload(env, profile, limit) {
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env) && profile?.id) {
+    const records = await listSupabaseIdeasForProfile(env, profile.id, limit);
+    return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
+  }
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit,
     sortField: "Create_Date",
