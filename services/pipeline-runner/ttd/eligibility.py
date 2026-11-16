@@ -193,25 +193,33 @@ def ttd3_eligibility_reason(record: dict[str, Any]) -> str | None:
     return "tiktok_draft_not_ready_for_email"
 
 
-def ttd4_form_eligibility_reason(record: dict[str, Any], *, token: str) -> str | None:
-    if not str(record.get("id") or "").strip():
+def ttd4_form_eligibility_reason(
+    record: dict[str, Any], *, token: str, signing_secret: str = ""
+) -> str | None:
+    record_id = str(record.get("id") or "").strip()
+    if not record_id:
         return "missing_record_id"
     offered = str(token or "").strip()
+    # NEVER accept a missing credential, even when the stored field is empty.
+    if not offered:
+        return "token_mismatch"
     stored = field_str(record, "TikTok_Manual_Completion_Token")
-    if offered != stored:
-        # Accept the stable record_id+publish_id hash too so a reminted store
-        # still honors an email that already carried the durable credential.
-        from ttd.package import completion_token_material, hash_completion_token
+    publish_id = field_str(record, "TikTok_Draft_Publish_ID")
+    from ttd.package import completion_token_material, hash_completion_token, stable_completion_token
+    import hmac
 
-        publish_id = field_str(record, "TikTok_Draft_Publish_ID")
-        record_id = str(record.get("id") or "").strip()
-        stable = (
-            hash_completion_token(completion_token_material(record_id, publish_id))
-            if record_id and publish_id
-            else ""
-        )
-        if not offered or offered not in {stored, stable}:
-            return "token_mismatch"
+    valid_stored = bool(stored and hmac.compare_digest(offered, stored))
+    legacy_stable = (
+        hash_completion_token(completion_token_material(record_id, publish_id))
+        if publish_id else ""
+    )
+    valid_legacy = bool(legacy_stable and hmac.compare_digest(offered, legacy_stable))
+    valid_signed = False
+    if publish_id and signing_secret:
+        signed = stable_completion_token(record_id, publish_id, secret=signing_secret)
+        valid_signed = hmac.compare_digest(offered, signed)
+    if not (valid_stored or valid_legacy or valid_signed):
+        return "token_mismatch"
     if _ci(field_str(record, "Publish_Status")) == "published":
         return "already_published"
     # Do_Not_Publish prohibits initiating or re-sending platform content.
