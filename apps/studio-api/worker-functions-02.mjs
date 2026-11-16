@@ -13243,9 +13243,12 @@ export async function createIdeaTimedScriptRoute(request, env, url, authorizatio
     .slice()
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const byMedia = new Map(orderedAssets.map((asset) => [String(asset?.media_asset_record_id || "").trim(), asset]));
+  // Keep Airtable Media Asset ids on the timed-script (rec…). Item-4 internal
+  // asset ids are ephemeral hex and break reopen/attach after Phase 6 SoR.
   timeline.segments.forEach((segment, index) => {
     const matched = byMedia.get(String(segment.asset_id || "").trim()) || orderedAssets[index];
-    if (matched?.id) segment.asset_id = String(matched.id);
+    const mediaId = String(matched?.media_asset_record_id || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(mediaId)) segment.asset_id = mediaId;
   });
 
   const script = exactVoiceoverText(timeline);

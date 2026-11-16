@@ -13,7 +13,8 @@ const handler = app.slice(start, end);
 test("opening Ready production uses lightweight saved-state snapshot", () => {
   assert.match(handler, /snapshotReady/);
   assert.match(handler, /record\.status/);
-  assert.match(handler, /record\.studio_master_assets/);
+  assert.match(handler, /String\(record\.status \|\| ""\) === "Ready"/);
+  assert.doesNotMatch(handler, /studio_master_assets\.length > 0/);
   assert.match(handler, /\?snapshot=1/);
 });
 

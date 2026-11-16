@@ -1585,12 +1585,31 @@ export function airtableShapedIdeaFromSupabase(row) {
 
 export function airtableShapedProductionRequestFromSupabase(row) {
   const bag = isPlainObject(row.publish_status) ? row.publish_status : {};
-  const ideaId = bag.idea_candidate_airtable_id || null;
+  const ideaId = bag.idea_candidate_airtable_id
+    || row.idea_candidates?.airtable_record_id
+    || (Array.isArray(bag.Idea_Candidate) ? firstLink(bag.Idea_Candidate) : null)
+    || null;
   const contentId = bag.promoted_content_airtable_id || null;
   const profileId = bag.content_profile_airtable_id || row.content_profile_airtable_id || null;
+  const orgId = firstLink(bag.Organization) || row.organizations?.airtable_record_id || null;
+  const brandId = firstLink(bag.Brand) || row.brands?.airtable_record_id || null;
+  const masterAssets = Array.isArray(row.master_assets) ? row.master_assets : [];
+  const masterCount = bag.Studio_Master_Asset_Count ?? masterAssets.length;
   let jobJson = row.production_job;
   if (jobJson && typeof jobJson === "object") {
     try { jobJson = JSON.stringify(jobJson); } catch { jobJson = ""; }
+  }
+  let planJson = "";
+  if (row.output_plan && typeof row.output_plan === "object") {
+    try { planJson = JSON.stringify(row.output_plan); } catch { planJson = ""; }
+  } else if (typeof bag.Studio_Output_Plan_JSON === "string") {
+    planJson = bag.Studio_Output_Plan_JSON;
+  }
+  let variantJson = "";
+  if (row.variant_manifest && typeof row.variant_manifest === "object") {
+    try { variantJson = JSON.stringify(row.variant_manifest); } catch { variantJson = ""; }
+  } else if (typeof bag.Studio_Variant_Manifest_JSON === "string") {
+    variantJson = bag.Studio_Variant_Manifest_JSON;
   }
   return {
     id: row.airtable_record_id,
@@ -1602,9 +1621,12 @@ export function airtableShapedProductionRequestFromSupabase(row) {
       Studio_Production_Job_JSON: typeof jobJson === "string" ? jobJson : (bag.Studio_Production_Job_JSON || ""),
       Studio_Variant_Status: row.variant_status || bag.Studio_Variant_Status || null,
       Studio_Output_Plan_Status: row.output_plan_status || bag.Studio_Output_Plan_Status || null,
+      Studio_Output_Plan_JSON: planJson || null,
+      Studio_Variant_Manifest_JSON: variantJson || null,
       Studio_Variant_Updated_At: bag.Studio_Variant_Updated_At || null,
-      Studio_Master_Asset_Status: bag.Studio_Master_Asset_Status || null,
-      Studio_Master_Asset_Count: bag.Studio_Master_Asset_Count ?? null,
+      Studio_Master_Assets_JSON: JSON.stringify(masterAssets),
+      Studio_Master_Asset_Status: row.master_asset_status || bag.Studio_Master_Asset_Status || null,
+      Studio_Master_Asset_Count: masterCount,
       Selected_Music_Asset: Array.isArray(bag.Selected_Music_Asset) ? bag.Selected_Music_Asset : [],
       Studio_Master_Media_Assets: Array.isArray(bag.Studio_Master_Media_Assets)
         ? bag.Studio_Master_Media_Assets
@@ -1614,9 +1636,12 @@ export function airtableShapedProductionRequestFromSupabase(row) {
       Master_Content_Type: bag.Master_Content_Type || null,
       Target_Platforms: Array.isArray(bag.Target_Platforms) ? bag.Target_Platforms : [],
       Requested_Title: row.requested_title || bag.Requested_Title || null,
+      Organization: orgId ? [orgId] : [],
+      Brand: brandId ? [brandId] : [],
       Idea_Candidate: ideaId ? [ideaId] : [],
       Promoted_Content_Item: contentId ? [contentId] : [],
       Content_Profile: profileId ? [profileId] : [],
+      Created_By: Array.isArray(bag.Created_By) ? bag.Created_By : [],
       Created_At: bag.Created_At || row.created_at || null,
       Updated_At: bag.Updated_At || row.updated_at || null,
       Test_Run_ID: bag.Test_Run_ID || null,
@@ -1787,15 +1812,25 @@ const REQUEST_SELECT = [
   "id",
   "airtable_record_id",
   "production_request_id",
+  "organization_id",
+  "brand_id",
+  "idea_candidate_id",
   "request_status",
   "requested_title",
   "production_notes",
-  "variant_status",
+  "master_asset_status",
   "output_plan_status",
+  "variant_status",
+  "master_assets",
+  "output_plan",
+  "variant_manifest",
   "production_job",
   "publish_status",
   "created_at",
   "updated_at",
+  "organizations(airtable_record_id)",
+  "brands(airtable_record_id)",
+  "idea_candidates(airtable_record_id)",
 ].join(",");
 
 function flattenOutputRow(row) {
@@ -5264,7 +5299,78 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
  * cannot blank title, notes, or the production job. Identity for an insert
  * is Production_Request_ID plus Request_Status. Anything thinner patches an
  * existing row, or skips when there is nothing safe to write.
+ *
+ * Master assets, plan/variant JSON, and Organization/Brand/Idea links must
+ * densify here. Without them, Create VO timeline opens from the in-memory
+ * create echo, then /item4 GET reads a hollow Supabase row (no Organization →
+ * 403, empty master_assets → no photos) and Studio spins on "Still loading".
  */
+function parseProductionRequestJsonField(raw, fallback) {
+  if (raw == null || raw === "") return fallback;
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch { return fallback; }
+  }
+  if (Array.isArray(fallback)) return Array.isArray(raw) ? raw : fallback;
+  return isPlainObject(raw) ? raw : fallback;
+}
+
+function productionRequestPublishStatusPatch(fields) {
+  const bag = {};
+  if ("Organization" in fields) {
+    const ids = profileLinkIds(fields.Organization);
+    bag.Organization = ids;
+  }
+  if ("Brand" in fields) {
+    const ids = profileLinkIds(fields.Brand);
+    bag.Brand = ids;
+  }
+  if ("Idea_Candidate" in fields) {
+    const ideaId = firstLink(fields.Idea_Candidate);
+    bag.idea_candidate_airtable_id = ideaId;
+    bag.Idea_Candidate = ideaId ? [ideaId] : [];
+  }
+  if ("Promoted_Content_Item" in fields) {
+    const contentId = firstLink(fields.Promoted_Content_Item);
+    bag.promoted_content_airtable_id = contentId;
+    bag.Promoted_Content_Item = contentId ? [contentId] : [];
+  }
+  if ("Content_Profile" in fields) {
+    const profileId = firstLink(fields.Content_Profile);
+    bag.content_profile_airtable_id = profileId;
+    bag.Content_Profile = profileId ? [profileId] : [];
+  }
+  if ("Studio_Master_Asset_Status" in fields) {
+    bag.Studio_Master_Asset_Status = selectName(fields.Studio_Master_Asset_Status)
+      || fields.Studio_Master_Asset_Status
+      || null;
+  }
+  if ("Studio_Master_Asset_Count" in fields) {
+    bag.Studio_Master_Asset_Count = fields.Studio_Master_Asset_Count ?? null;
+  }
+  if ("Studio_Master_Media_Assets" in fields) {
+    bag.Studio_Master_Media_Assets = Array.isArray(fields.Studio_Master_Media_Assets)
+      ? fields.Studio_Master_Media_Assets
+      : [];
+  }
+  if ("Master_Content_Type" in fields) bag.Master_Content_Type = fields.Master_Content_Type || null;
+  if ("Target_Platforms" in fields) {
+    bag.Target_Platforms = Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [];
+  }
+  if ("Background_Music_Mode" in fields) bag.Background_Music_Mode = fields.Background_Music_Mode || null;
+  if ("Selected_Music_Asset" in fields) {
+    bag.Selected_Music_Asset = Array.isArray(fields.Selected_Music_Asset) ? fields.Selected_Music_Asset : [];
+  }
+  if ("Active" in fields) bag.Active = fields.Active !== false && fields.Active !== 0;
+  if ("Created_At" in fields) bag.Created_At = fields.Created_At || null;
+  if ("Updated_At" in fields) bag.Updated_At = fields.Updated_At || null;
+  if ("Test_Run_ID" in fields) bag.Test_Run_ID = fields.Test_Run_ID || null;
+  if ("Created_By" in fields) {
+    const createdBy = firstLink(fields.Created_By);
+    bag.Created_By = createdBy ? [createdBy] : [];
+  }
+  return bag;
+}
+
 function productionRequestWriteThroughRow(record) {
   const fields = record?.fields || {};
   const row = {};
@@ -5280,6 +5386,20 @@ function productionRequestWriteThroughRow(record) {
   if ("Production_Notes" in fields) row.production_notes = fields.Production_Notes || null;
   if ("Studio_Variant_Status" in fields) row.variant_status = selectName(fields.Studio_Variant_Status);
   if ("Studio_Output_Plan_Status" in fields) row.output_plan_status = selectName(fields.Studio_Output_Plan_Status);
+  if ("Studio_Master_Asset_Status" in fields) {
+    row.master_asset_status = selectName(fields.Studio_Master_Asset_Status)
+      || String(fields.Studio_Master_Asset_Status || "").trim()
+      || null;
+  }
+  if ("Studio_Master_Assets_JSON" in fields) {
+    row.master_assets = parseProductionRequestJsonField(fields.Studio_Master_Assets_JSON, []);
+  }
+  if ("Studio_Output_Plan_JSON" in fields) {
+    row.output_plan = parseProductionRequestJsonField(fields.Studio_Output_Plan_JSON, {});
+  }
+  if ("Studio_Variant_Manifest_JSON" in fields) {
+    row.variant_manifest = parseProductionRequestJsonField(fields.Studio_Variant_Manifest_JSON, {});
+  }
   if ("Studio_Production_Job_JSON" in fields) {
     let productionJob = {};
     const rawJob = fields.Studio_Production_Job_JSON;
@@ -5290,16 +5410,59 @@ function productionRequestWriteThroughRow(record) {
     }
     row.production_job = productionJob;
   }
+  const bag = productionRequestPublishStatusPatch(fields);
+  if (Object.keys(bag).length) row.publish_status_patch = bag;
   return row;
+}
+
+async function resolveSupabaseLinkedId(env, table, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !studioSupabaseConfigured(env)) return null;
+  const rows = await supabaseRest(
+    env,
+    `${table}?airtable_record_id=eq.${encodeURIComponent(id)}&select=id,airtable_record_id&limit=1`,
+  ).catch(() => null);
+  return Array.isArray(rows) && rows[0]?.id ? rows[0].id : null;
+}
+
+async function readProductionRequestPublishStatus(env, airtableId) {
+  const rows = await supabaseRest(
+    env,
+    `production_requests?airtable_record_id=eq.${encodeURIComponent(airtableId)}&select=publish_status&limit=1`,
+  ).catch(() => null);
+  const bag = Array.isArray(rows) ? rows[0]?.publish_status : null;
+  return isPlainObject(bag) ? bag : {};
 }
 
 export async function syncAirtableProductionRequestRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
-  const row = productionRequestWriteThroughRow(record);
+  const drafted = productionRequestWriteThroughRow(record);
+  const bagPatch = drafted.publish_status_patch || null;
+  delete drafted.publish_status_patch;
+  const row = { ...drafted };
   if (options.create === true) {
     if (row.production_request_id == null) row.production_request_id = record.id;
     if (row.request_status == null) row.request_status = "Draft";
+  }
+  const fields = record?.fields || {};
+  if ("Organization" in fields) {
+    const orgId = await resolveSupabaseLinkedId(env, "organizations", firstLink(fields.Organization));
+    if (orgId) row.organization_id = orgId;
+  }
+  if ("Brand" in fields) {
+    const brandId = await resolveSupabaseLinkedId(env, "brands", firstLink(fields.Brand));
+    if (brandId) row.brand_id = brandId;
+  }
+  if ("Idea_Candidate" in fields) {
+    const ideaId = await resolveSupabaseLinkedId(env, "idea_candidates", firstLink(fields.Idea_Candidate));
+    if (ideaId) row.idea_candidate_id = ideaId;
+  }
+  if (bagPatch && Object.keys(bagPatch).length) {
+    const existing = options.create === true
+      ? {}
+      : await readProductionRequestPublishStatus(env, record.id);
+    row.publish_status = { ...existing, ...bagPatch };
   }
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
   const identity = row.production_request_id != null && row.request_status != null;

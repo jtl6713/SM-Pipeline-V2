@@ -333,7 +333,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.964-idea-title-carryover";
+  const BUILD_ID = "item4-0.6.965-phase6-pr-photo-load";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12534,10 +12534,12 @@ function timedScriptAssetLabel(asset, index) {
           console.warn("Production photo-listening stop deferred without blocking editor", error);
         });
       }
-      const snapshotReady = String(record.status || "") === "Ready"
-        && Array.isArray(record.studio_master_assets) && record.studio_master_assets.length > 0;
+      // Ready drafts use the lightweight snapshot even with zero masters so a
+      // Phase 6 SoR hollow row (or AI-only draft) cannot spin the heavy
+      // reconcile path into a mobile "Still loading" loop.
+      const snapshotReady = String(record.status || "") === "Ready";
       const item4Path = `/api/production-requests/${encodeURIComponent(record.id)}/item4`;
-      // Snapshot is a read-only, authoritative Airtable view. A Ready draft
+      // Snapshot is a read-only, authoritative saved-state view. A Ready draft
       // should not need expensive variant reconciliation simply to reopen.
       const incoming = await api(snapshotReady ? `${item4Path}?snapshot=1` : item4Path);
       if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision
