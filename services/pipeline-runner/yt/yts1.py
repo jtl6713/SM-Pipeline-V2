@@ -84,14 +84,23 @@ def process_request(
     result["job_status"] = job_status
     result["video_id"] = video_id
     now = iso_utc()
-    if 200 <= status_code <= 299 and job_status == "completed" and video_id:
-        channel_error, upload_theme, expected_channel = verify_upload_channel(
-            settings=pipeline_settings,
-            output=output,
-            client=client,
-            uploader=uploader,
-            video_id=video_id,
-        )
+    if 200 <= status_code <= 299 and video_id:
+        # A provider receipt survives verification errors; never re-upload it.
+        try:
+            channel_error, upload_theme, expected_channel = verify_upload_channel(
+                settings=pipeline_settings, output=output, client=client,
+                uploader=uploader, video_id=video_id,
+            )
+        except Exception:
+            client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, {
+                "YouTube_Video_ID": video_id,
+                "YouTube_Upload_Job_ID": job_id,
+                "YouTube_Upload_Status": UPLOAD_UPLOADED,
+                "YouTube_Stage": STAGE_YT1,
+                "Do_Not_Publish": True,
+                "Publish_Retry_Eligible": False,
+            })
+            raise
         result["upload_theme"] = upload_theme
         result["expected_channel_id"] = expected_channel
         if channel_error:
@@ -101,11 +110,13 @@ def process_request(
                 youtube_message=channel_error,
                 body=body,
                 youtube_stage=STAGE_YT1,
-                clear_upload_job=True,
+                clear_upload_job=False,
                 package_status=PACKAGE_READY,
                 extra={
                     "YouTube_Last_Checked_At": now,
-                    "YouTube_Video_ID": "",
+                    "YouTube_Video_ID": video_id,
+                    "Do_Not_Publish": True,
+                    "Publish_Retry_Eligible": False,
                     "Platform_Post_ID": "",
                     "Platform_Post_URL": "",
                 },

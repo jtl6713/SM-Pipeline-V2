@@ -24,7 +24,7 @@ from yt.constants import (
     UPLOAD_UPLOADING,
 )
 from yt.eligibility import upload_source_url, ytp1_eligibility_reason
-from yt.package import youtube_publish_at, youtube_tags
+from yt.package import idempotency_key, youtube_publish_at, youtube_tags
 
 
 def process_request(
@@ -80,12 +80,19 @@ def process_request(
         "publishAt": publish_at,
         "madeForKids": as_bool(field(output, "YouTube_Made_For_Kids"), False),
         "containsSyntheticMedia": as_bool(field(output, "YouTube_Contains_Synthetic_Media"), False),
-        "idempotencyKey": field_str(output, "YouTube_Idempotency_Key"),
+        "idempotencyKey": field_str(output, "YouTube_Idempotency_Key") or idempotency_key(output),
+        "outputRecordId": record_id,
+        "replaceTransactionId": field_str(output, "Replace_Transaction_ID") or "BASE",
     }
     result["upload_request"] = {key: value for key, value in payload.items() if key != "idempotencyKey"}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
+    # Save before the external side effect; retries derive the same key even
+    # when a legacy projection has lost the prepared package fields.
+    client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, {
+        "YouTube_Idempotency_Key": payload["idempotencyKey"],
+    })
     settings = load_uploader_settings(PipelineSettings(client), output, client=client)
     status_code, body = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"]).start_upload(payload)
     job_id = str(body.get("id") or "").strip()
