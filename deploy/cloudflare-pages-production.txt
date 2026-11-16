@@ -811,3 +811,4 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-16: Deploy Pages UI 0.6.959-ideas-load — Saved storyboards retry instead of showing signal timed out. Hard-refresh; footer UI 0.6.959.
 2026-11-16: Deploy Pages UI 0.6.960-story-save — Save idea shows Saving and keeps the result next to the button. Hard-refresh; footer UI 0.6.960.
 2026-11-16: Deploy Pages UI 0.6.961-storyboard-notes-room — Story-first briefs, scene copy, and Idea notes use the 100,000-character field. Hard-refresh; footer UI 0.6.961.
+2026-11-16: Deploy Pages UI 0.6.962-video-cost-card — AI video cost stays on the scene after Check cost. Hard-refresh; footer UI 0.6.962.

@@ -549,7 +549,36 @@
   border-color: #bcd9c2;
   color: #215c36;
 }
-#storyFirstPanel .story-first-video-progress.is-complete .story-first-video-progress-track { display: none; }
+#storyFirstPanel .story-first-video-progress.is-error {
+  background: #fff4f2;
+  border-color: #e4b2a8;
+  color: #8a2b1f;
+}
+#storyFirstPanel .story-first-video-progress.is-complete .story-first-video-progress-track,
+#storyFirstPanel .story-first-video-progress.is-error .story-first-video-progress-track { display: none; }
+#storyFirstPanel .story-first-video-cost {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 2px;
+  padding: 14px;
+  border: 2px solid #8a6a12;
+  border-radius: 12px;
+  background: #fff8e6;
+  color: #3d3112;
+}
+#storyFirstPanel .story-first-video-cost-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 750;
+}
+#storyFirstPanel .story-first-video-cost p { margin: 0; line-height: 1.4; }
+#storyFirstPanel .story-first-video-cost-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 @keyframes storyFirstVideoInFlight {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(350%); }

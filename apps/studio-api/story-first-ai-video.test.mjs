@@ -29,6 +29,10 @@ test("Veo model retains safe defaults and rejects unsupported duration/ratio", (
   assert.throws(()=>normalizeStoryVideoSettings({...input,aspect_ratio:"1:1"}),/ratio/);
   assert.throws(()=>normalizeStoryVideoSettings({...input,model_id:"bytedance-seedance-v2"}),/Model/);
   assert.throws(()=>normalizeStoryVideoSettings({...input,prompt:"hello"}),/prompt/);
+  const longPrompt = "Vertical documentary shot of the riverwalk at blue hour. ".repeat(30).trim();
+  assert.ok(longPrompt.length > 850 && longPrompt.length <= 5000);
+  assert.equal(normalizeStoryVideoSettings({...input, prompt: longPrompt}).prompt, longPrompt);
+  assert.throws(()=>normalizeStoryVideoSettings({...input, prompt:"x".repeat(5001)}), /5,000/);
 });
 
 test("dedicated video key is mandatory; legacy narration key cannot authorize billing", async () => {
