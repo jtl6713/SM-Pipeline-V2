@@ -1046,6 +1046,35 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
   } catch (error) {
     console.warn("youtube manual-publish rearm failed", error);
   }
+  // Already-published Shorts used to stay at YT2 / processing Not Started and
+  // fill this scan, so live unpublished uploads never reached YTS2.
+  try {
+    const publicUploads = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: Math.max(1, Math.min(4, Number(options.publicUploadLimit || 4))),
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}="Publishing",{YouTube_Stage}="YT2",{YouTube_Video_ID}!="",{YouTube_Upload_Status}="Uploaded",{YouTube_Privacy_Status}="public")',
+      sortField: "YouTube_Last_Checked_At",
+      sortDirection: "asc",
+    });
+    for (const row of publicUploads) {
+      const processed = await studioPulseYtRecord(env, "yts2", "YTS2", row);
+      let finalized = null;
+      if (processed?.ok !== false && processed.needs_finalize && !processed.still_processing) {
+        finalized = await studioPulseYtRecord(env, "yts3", "YTS3", row);
+      }
+      results.push({
+        id: row.id,
+        output_id: f(row, "Output_ID"),
+        stage: "yts2_public_upload",
+        ok: processed?.ok !== false,
+        skipped: processed?.skipped || false,
+        still_processing: Boolean(processed?.still_processing),
+        finalize: finalized ? (finalized.ok === false ? "failed" : (finalized.skipped || "yts3")) : null,
+        existing_video_only: true,
+      });
+    }
+  } catch (error) {
+    console.warn("youtube public upload continuation failed", error);
+  }
   const scans = [
     {
       stage: "yt0",
@@ -1065,7 +1094,7 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
     {
       stage: "yts2",
       target: "YTS2",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="",OR({Publish_Status}!="Manual Publish Required",AND({Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",{YouTube_Stage}="YT2",{YouTube_Video_ID}!="",OR({Publish_Status}!="Manual Publish Required",AND({Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
     {
       stage: "yts3",

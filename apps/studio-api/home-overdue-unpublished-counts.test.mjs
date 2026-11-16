@@ -202,7 +202,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
 
 
-  assert.match(cron, /0\.10\.973-library-sequential-names/);
+  assert.match(cron, /0\.10\.974-youtube-public-receipt/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);
@@ -231,6 +231,15 @@ test("YTS1 stale jobs receive independent bounded status polling without duplica
   assert.match(stage, /expected !== job/);
   assert.match(stage, /studioPulseYtRecord\(env, "yts1", "YTS1", row\)/);
   assert.doesNotMatch(stage, /ytp1|studioDispatchApprovedPublishNow|studioEnsureYoutubePublish/);
+  const publishStart = impl.indexOf("export async function studioReconcileYoutubePublishes(");
+  const publishEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileYoutubePublishes__*/", publishStart);
+  const publish = impl.slice(publishStart, publishEnd);
+  assert.match(publish, /YouTube_Upload_Status\}="Uploaded"/);
+  assert.match(publish, /YouTube_Privacy_Status\}="public"/);
+  assert.match(publish, /studioPulseYtRecord\(env, "yts2", "YTS2", row\)/);
+  assert.match(publish, /studioPulseYtRecord\(env, "yts3", "YTS3", row\)/);
+  assert.match(publish, /\{Published_At\}=BLANK\(\),\{Publish_Status\}!="Published",\{YouTube_Stage\}="YT2"/);
+  assert.doesNotMatch(publish.slice(publish.indexOf("publicUploads"), publish.indexOf("const scans")), /"yts1"|"ytp1"/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileYoutubeUploadProcessing/);
   const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
   const independent = scheduled.indexOf("ctx.waitUntil(studioReconcileYoutubeUploadProcessing");
