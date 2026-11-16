@@ -823,3 +823,5 @@ Deploy 2026-11-15 UI 0.6.952-library-classify-timeout: Classifying watch expires
 2026-11-16: Deploy Pages UI 0.6.969-profile-upload-preflight — Warn before Asset Manager, Production and finished-video uploads when location or filename strongly suggests a different Shining profile. Continue or Cancel safely before transfer. PR #2071.
 Deploy Studio UI 0.6.970-home-three-section-dashboard: Three per-profile dashboard sections for scheduled outputs, issues, and pipeline stages. Preserve all newer main upload-preflight changes. 2026-11-16.
 2026-11-16: Deploy Pages UI 0.6.971-asset-fla-parallel-progress — Asset Manager shows independent saved-assets and FLA classification bars; classify status polls while next files upload. PR #2079.
+
+2026-11-16: Deploy Pages UI 0.6.972-asset-manager-supabase-delete — PR #2080. Require verified Supabase delete receipt, preserve the concurrent saved-assets and FLA progress bars from 0.6.971.
