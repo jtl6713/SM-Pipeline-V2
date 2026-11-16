@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { mapOutput } from "./worker-functions-01.mjs";
+import { homeOutputContribution } from "./profile-summary-classification.mjs";
 import {
   studioReadSource,
   studioPipelineReadSource,
@@ -469,6 +471,45 @@ test("airtable-shaped output preserves rec id for approve/creative routes", () =
   assert.equal(shaped.fields.YouTube_Video_ID, "abc123");
 });
 
+test("overview package evidence shapes into Home Awaiting Approval", () => {
+  const CDN = "https://media.chicagoshining.com";
+  const ready = airtableShapedOutputFromSupabase({
+    airtable_record_id: "recPkgReady000001",
+    output_number: 9001,
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    render_status: "Rendered",
+    do_not_publish: false,
+    output_caption: "Adler Point Skyline Teaser",
+    final_file_url: `${CDN}/studio/previews/recPkgReady000001.mp4`,
+    thumbnail_url: `${CDN}/studio/previews/recPkgReady000001.jpg`,
+  });
+  assert.equal(homeOutputContribution(mapOutput(ready, null)).awaiting_approval, 1);
+
+  // When overview omits typed package columns, keep bag evidence (do not wipe
+  // Final_File_URL with undefined) so Home can still match Factory Needs eyes.
+  const lean = airtableShapedOutputFromSupabase({
+    airtable_record_id: "recPkgLean0000001",
+    output_number: 9002,
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    render_status: "Rendered",
+    do_not_publish: false,
+    error_messages: {
+      Final_File_URL: `${CDN}/studio/previews/recPkgLean0000001.mp4`,
+      Thumbnail_URL: `${CDN}/studio/previews/recPkgLean0000001.jpg`,
+      Output_Caption: "Buckingham After Dark",
+    },
+  });
+  assert.match(String(lean.fields.Final_File_URL || ""), /media\.chicagoshining\.com/);
+  assert.equal(homeOutputContribution(mapOutput(lean, null)).awaiting_approval, 1);
+});
+
+
 test("packOutputListFields drops typed and huge JSON columns", () => {
   const bag = packOutputListFields({
     Output_ID: 1,
@@ -779,7 +820,11 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
       assert.match(outputCall.href, /output_status\.neq\.Cancelled/);
       assert.match(outputCall.href, /publish_status\.is\.null/);
       assert.match(outputCall.href, /publish_status\.neq\.Published/);
-      assert.doesNotMatch(outputCall.href, /output_caption/);
+      // Package evidence required so Home Awaiting Approval = Factory Needs eyes.
+      assert.match(outputCall.href, /output_caption/);
+      assert.match(outputCall.href, /final_file_url/);
+      assert.match(outputCall.href, /thumbnail_url/);
+      assert.match(outputCall.href, /selected_clip_count/);
       assert.doesNotMatch(outputCall.href, /content_items\(/);
     }
     assert.equal(calls.some((call) => call.href.includes("idea_candidates")), false);
@@ -903,7 +948,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1007,7 +1052,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1040,6 +1085,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(reads, /publish_status\.is\.null,publish_status\.neq\.Published/);
   assert.match(reads, /Prefer: "count=none"/);
   assert.match(reads, /OVERVIEW_OUTPUT_SELECT/);
+  assert.match(reads, /OVERVIEW_OUTPUT_SELECT[\s\S]*?output_caption[\s\S]*?final_file_url[\s\S]*?thumbnail_url[\s\S]*?selected_clip_count/);
   assert.match(reads, /OVERVIEW_OPEN_IDEA_FILTER/);
   assert.match(reads, /status\.neq\.Promoted/);
   assert.match(reads, /payload-%3E%3EPromoted_Content_Record_ID\.is\.null/);
@@ -2764,7 +2810,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   assert.deepEqual(parseAirtableCreateFields(JSON.stringify({ fields: { Content_Title: "Pier" } })), [{ Content_Title: "Pier" }]);
   assert.match(mintAirtableRecordId(), /^rec[A-Za-z0-9]{14}$/);
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3084,7 +3130,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
     globalThis.fetch = originalFetch;
   }
   const worker = readStudioWorkerSource();
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3707,7 +3753,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /supabase SoR mutation miss; skipping Airtable archive WRITE/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
 });
 
 test("sideTableKind recognizes Platform Outputs and Content Items table names", async () => {
@@ -3733,7 +3779,7 @@ test("Insights Learned settings SoR under STUDIO_WRITE_SOURCE=supabase", async (
   assert.match(fn, /STUDIO_INSIGHTS_LEARNED_SETTING/);
   assert.match(fn, /studioWriteSource\(env\) === "supabase"/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
 });
 
 test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", async () => {
@@ -3750,7 +3796,7 @@ test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", as
   assert.match(fn, /studioInsightsObservationsStore/);
   assert.match(fn, /studioInsightsPruneObservationStore/);
   assert.match(fn, /Airtable archive frozen/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
 });
 
 
@@ -3765,7 +3811,7 @@ test("studioSettingsByName SoR miss skips Airtable archive", async () => {
     "utf8",
   );
   assert.match(fn, /SoR miss: do not GET the frozen Airtable settings archive/);
-  assert.match(worker, /0\.10\.965-awaiting-approval-needs-eyes/);
+  assert.match(worker, /0\.10\.966-overview-awaiting-package-fields/);
 });
 
 test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {
