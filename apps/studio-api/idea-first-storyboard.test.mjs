@@ -34,7 +34,7 @@ test("a full short with prompts and library candidates still saves", () => {
   ));
   const notes = upsertStoryFirstNotes("", { ...idea, target_seconds: 32, scenes }, CHICAGO);
   assert.ok(notes.length > 9800);
-  assert.ok(notes.length <= 90000);
+  assert.ok(notes.length <= 100000);
   assert.equal(parseStoryFirstNotes(notes).scenes.length, 8);
 });
 test("creative scene and editable script survive an Airtable Idea save and reopen",()=>{
@@ -114,6 +114,31 @@ test("planning-text and media-selection corruption cannot be saved into storyboa
     scene("15-30","Close detail that proves the point of the same concept"),
   ]},CHICAGO),/planning|media-selection|library-sourcing/i);
 });
+test("a long storyboard past the old 9,800 cap still saves inside the Airtable field", () => {
+  const visual = "Empty riverwalk at blue hour before the first train. ".repeat(120).trim();
+  const prompt = "Vertical documentary shot of that riverwalk, no text. ".repeat(80).trim();
+  assert.ok(visual.length > 340);
+  assert.ok(prompt.length > 850);
+  const long = { ...idea, scenes: [scene("0-30", visual, { decision: "ai", ai_prompt: prompt })] };
+  const notes = upsertStoryFirstNotes("operator kept this line", long, CHICAGO);
+  assert.ok(notes.length > 9800);
+  assert.ok(notes.length <= 100000);
+  assert.equal(parseStoryFirstNotes(notes).scenes[0].visual, visual);
+  assert.equal(parseStoryFirstNotes(notes).scenes[0].ai_prompt, prompt);
+});
+
+test("storyboard notes stop at the Airtable 100,000-character field", () => {
+  const scenes = Array.from({ length: 12 }, (_, index) => scene(
+    `${index * 10}-${(index + 1) * 10}`,
+    `Scene ${index + 1} visual ` + "skyline ".repeat(1200),
+    { decision: "ai", ai_prompt: `Scene ${index + 1} prompt ` + "light ".repeat(1400), voiceover: `Scene ${index + 1} narration stays distinct.` },
+  ));
+  assert.throws(
+    () => upsertStoryFirstNotes("", { ...idea, target_seconds: 120, scenes }, CHICAGO),
+    /100,000-character Idea notes field/,
+  );
+});
+
 test("repeated partial saves replace the story directive instead of duplicating it",()=>{
   const once=upsertStoryFirstNotes("ez-photo-wait=off",idea,CHICAGO);
   const twice=upsertStoryFirstNotes(once,normalizeStoryFirst(idea,CHICAGO),CHICAGO);

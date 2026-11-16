@@ -509,6 +509,18 @@ test("Tribeca in the title is the scan key even when the location is New York", 
   assert.equal(filter.includes("york"), false);
 });
 
+test("photo pause and production-note merge keep a long storyboard line intact", () => {
+  const story = "[story-first.1] " + JSON.stringify({ schema: "story-first.1", scenes: [{ visual: "x".repeat(12000) }] });
+  const notes = `origin=autonomous\n${story}`;
+  const paused = withIdeaManagePhotoPause(notes, { nowMs: Date.parse("2026-09-27T13:00:00.000Z") });
+  assert.match(paused, /ez-photo-manage-pause=/);
+  assert.ok(paused.includes(story));
+  assert.ok(paused.length > 12000);
+  const merged = mergeIdeaProductionNotes(paused, "Keep the bridge shot.", null);
+  assert.match(merged, /Keep the bridge shot/);
+  assert.ok(merged.includes(story));
+});
+
 test("NYC Jazz Clubs photo uploads remain discoverable for a Greenwich Village jazz idea", () => {
   const keys = buildIdeaLibraryKeys({
     primaryLocation: "Greenwich Village",

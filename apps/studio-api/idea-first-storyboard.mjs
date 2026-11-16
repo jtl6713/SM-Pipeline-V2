@@ -7,10 +7,24 @@ import { assertStoryboardSceneContent } from "./storyboard-scene-content.mjs";
 
 export const STORY_FIRST_SCHEMA = "story-first.1";
 export const STORY_FIRST_PREFIX = "[story-first.1] ";
+/** Airtable long text. This is the only size ceiling for Idea summary and storyboard notes. */
+export const AIRTABLE_LONG_TEXT_MAX = 100000;
+export const STORY_SCENE_LIMITS = Object.freeze({
+  visual: 8000,
+  voiceover: 4000,
+  scene_label: 240,
+  on_screen_text: 1000,
+  on_screen_text_instagram: 1000,
+  voiceover_instagram: 4000,
+  ai_prompt: 8000,
+  capture_note: 4000,
+  candidate_reason: 400,
+  time: 24,
+});
 const RECORD_ID = /^rec[A-Za-z0-9]+$/;
 const DECISIONS = new Set(["unassigned", "library", "ai", "capture"]);
 const MEDIA = new Set(["still", "clip", "still_or_clip"]);
-const trim = (value, max = 800) => String(value == null ? "" : value).replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
+const trim = (value, max = 8000) => String(value == null ? "" : value).replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
 
 function legacyDecision(choice, state, candidate) {
   if (state === "candidate_unverified" || choice === "review_or_replace" || choice === "review_or_capture") return "library";
@@ -61,7 +75,7 @@ export function normalizeStoryFirst(input, profileId = "") {
   if (!Number.isFinite(seconds) || seconds < 5 || seconds > 180) throw new TypeError("Short duration must be 5–180 seconds");
   let priorEnd = 0;
   const scenes = input.scenes.map((raw, index) => {
-    const visual = trim(raw?.visual || raw?.suggested_visual, 340);
+    const visual = trim(raw?.visual || raw?.suggested_visual, STORY_SCENE_LIMITS.visual);
     if (visual.length < 5) throw new TypeError("Every scene needs a specific visual requirement");
     const explicit = trim(raw?.decision, 32);
     const decision = DECISIONS.has(explicit) ? explicit : legacyDecision(trim(raw?.choice), trim(raw?.state), raw?.candidate_asset_id);
@@ -71,7 +85,7 @@ export function normalizeStoryFirst(input, profileId = "") {
     if (candidate && !RECORD_ID.test(candidate)) throw new TypeError("Invalid scene candidate asset");
     const candidateAssets = (Array.isArray(raw?.candidate_assets) ? raw.candidate_assets : [])
       .filter(item => RECORD_ID.test(String(item?.id || ""))).slice(0, 3)
-      .map(item => ({ id: trim(item.id, 64), reason: trim(item.reason, 120) }));
+      .map(item => ({ id: trim(item.id, 64), reason: trim(item.reason, STORY_SCENE_LIMITS.candidate_reason) }));
     const generatedMaster = trim(raw?.generated_master_id, 80);
     const acceptedMaster = trim(raw?.accepted_generated_master_id, 80);
     if (acceptedMaster && !/^aipre[A-Za-z0-9]+$/.test(acceptedMaster)) throw new TypeError("Invalid accepted generated master ID");
@@ -80,7 +94,7 @@ export function normalizeStoryFirst(input, profileId = "") {
       .filter(id => /^aipre[A-Za-z0-9]+$/.test(String(id || ""))).slice(-10);
     const defaultFrom = Math.round(index * seconds / input.scenes.length);
     const defaultTo = Math.round((index + 1) * seconds / input.scenes.length);
-    const time = trim(raw?.time, 24) || (defaultFrom + "-" + defaultTo);
+    const time = trim(raw?.time, STORY_SCENE_LIMITS.time) || (defaultFrom + "-" + defaultTo);
     const match = /^(\d{1,3})\s*-\s*(\d{1,3})$/.exec(time);
     if (!match || +match[1] !== priorEnd || +match[2] <= +match[1] || +match[2] > seconds) {
       throw new TypeError("Scene timings must form one contiguous timeline starting at zero");
@@ -102,11 +116,11 @@ export function normalizeStoryFirst(input, profileId = "") {
     }
     return {
       n: index + 1, time, visual, media,
-      voiceover: trim(raw?.voiceover, 380),
-      scene_label: trim(raw?.scene_label, 90),
-      on_screen_text: trim(raw?.on_screen_text, 280),
-      on_screen_text_instagram: trim(raw?.on_screen_text_instagram, 280),
-      voiceover_instagram: trim(raw?.voiceover_instagram, 380),
+      voiceover: trim(raw?.voiceover, STORY_SCENE_LIMITS.voiceover),
+      scene_label: trim(raw?.scene_label, STORY_SCENE_LIMITS.scene_label),
+      on_screen_text: trim(raw?.on_screen_text, STORY_SCENE_LIMITS.on_screen_text),
+      on_screen_text_instagram: trim(raw?.on_screen_text_instagram, STORY_SCENE_LIMITS.on_screen_text_instagram),
+      voiceover_instagram: trim(raw?.voiceover_instagram, STORY_SCENE_LIMITS.voiceover_instagram),
       music_only_last_seconds: musicOnlyLastSeconds,
       decision, state,
       candidate_asset_id: candidate || null, candidate_assets: candidateAssets,
@@ -116,8 +130,8 @@ export function normalizeStoryFirst(input, profileId = "") {
       accepted_generated_master_id: acceptedMaster || null,
       selected_origin: approved && raw?.selected_origin === "ai" ? "ai" : null,
       rejected_ai_ids: rejected,
-      ai_prompt: trim(raw?.ai_prompt, 850) || visual,
-      capture_note: trim(raw?.capture_note, 450),
+      ai_prompt: trim(raw?.ai_prompt, STORY_SCENE_LIMITS.ai_prompt) || visual,
+      capture_note: trim(raw?.capture_note, STORY_SCENE_LIMITS.capture_note),
     };
   });
   if (priorEnd !== seconds) throw new TypeError("Last scene must end at the requested duration");
@@ -173,10 +187,9 @@ export function upsertStoryFirstNotes(notes, story, profileId = "") {
     .filter(line => line.trim());
   if (!retained.some(line => /^ez-photo-wait=off$/i.test(line.trim()))) retained.unshift("ez-photo-wait=off");
   const next = [...retained, STORY_FIRST_PREFIX + JSON.stringify(validated)].join("\n");
-  // A Script a Short carries prompts and library candidates for every scene.
-  // 9,800 characters rejected that storyboard before the Idea was written.
-  // Airtable long text allows 100,000; stay under that with room for other notes.
-  if (next.length > 90000) throw new RangeError("Storyboard is too large for Idea notes");
+  if (next.length > AIRTABLE_LONG_TEXT_MAX) {
+    throw new RangeError("Storyboard exceeds the 100,000-character Idea notes field");
+  }
   return next;
 }
 
@@ -187,7 +200,7 @@ export function storyFirstShotChecklist(story) {
       : row.decision === "capture" ? "Capture or upload original media"
       : row.decision === "library" ? "Review matching library media" : "Choose AI, library or capture";
     return (index + 1) + ". " + row.time + " — " + row.visual + " | " + candidate + " | " + mode;
-  }).join("\n");
+  }).join("\n").slice(0, AIRTABLE_LONG_TEXT_MAX);
 }
 
 export function storyFirstReadiness(story) {

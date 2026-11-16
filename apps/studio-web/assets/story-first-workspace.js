@@ -91,7 +91,7 @@
     current.title = String($("storyFirstTitle").value || "").trim();
     current.summary = String($("storyFirstSummary").value || "").trim();
     if (!current.title) throw new Error("Give this storyboard a title before saving.");
-    if (current.summary.length > 5000) throw new Error("Creative direction must be 5,000 characters or fewer.");
+    if (current.summary.length > 100000) throw new Error("Creative direction must be 100,000 characters or fewer.");
     sealStoryTimeline(current.story);
     return current.story;
   }
@@ -1226,24 +1226,24 @@
       time.maxLength=24;
       time.oninput=()=>{shot.time=time.value;markEditing();};
       const visual=sceneField(card,"visual","Required visual — do not change just to fit library media",shot.visual);
-      visual.maxLength=340;
+      visual.maxLength=8000;
       visual.oninput=()=>{shot.visual=visual.value;current.attempted.delete(index);delete current.candidates[index];markEditing();};
       const voice=sceneField(card,"voice","Voiceover / narration",shot.voiceover||"");
-      voice.maxLength=380;
+      voice.maxLength=4000;
       voice.oninput=()=>{shot.voiceover=voice.value;markEditing();};
       if (shot.on_screen_text || shot.on_screen_text_instagram) {
         const overlay=sceneField(card,"overlay","Required on-screen text",shot.on_screen_text||"");
-        overlay.maxLength=280;
+        overlay.maxLength=1000;
         overlay.oninput=()=>{shot.on_screen_text=overlay.value;markEditing();};
       }
       if (shot.on_screen_text_instagram) {
         const overlayIg=sceneField(card,"overlay","Instagram on-screen text alternative",shot.on_screen_text_instagram);
-        overlayIg.maxLength=280;
+        overlayIg.maxLength=1000;
         overlayIg.oninput=()=>{shot.on_screen_text_instagram=overlayIg.value;markEditing();};
       }
       if (shot.voiceover_instagram) {
         const voiceIg=sceneField(card,"voice","Instagram-specific voiceover alternative",shot.voiceover_instagram);
-        voiceIg.maxLength=380;
+        voiceIg.maxLength=4000;
         voiceIg.oninput=()=>{shot.voiceover_instagram=voiceIg.value;markEditing();};
       }
       if (shot.music_only_last_seconds) {
@@ -1342,7 +1342,7 @@
           button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
         }else if(mode.value==="ai"){
           const prompt=label(actions,"Editable AI scene prompt (image or video)",shot.ai_prompt||shot.visual);
-          prompt.maxLength=850;prompt.rows=3;
+          prompt.maxLength=8000;prompt.rows=3;
           prompt.oninput=()=>{shot.ai_prompt=prompt.value;markEditing();};
           if(shot.media==="clip")actions.appendChild(node("p","subtle",
             "The AI Image button creates a still. Use Review Video Cost & Generate below for real moving footage, or explicitly override the clip requirement when accepting an AI still."));
@@ -1462,7 +1462,7 @@
           },actions);
         }else if(mode.value==="capture"){
           const capture=label(actions,"My photography / footage instructions",shot.capture_note||shot.visual);
-          capture.maxLength=450;
+          capture.maxLength=4000;
           capture.oninput=()=>{shot.capture_note=capture.value;markEditing();};
           actions.appendChild(node("p","subtle","Awaiting Your Media. You can leave and return to the saved storyboard."));
           button("Generate Again","secondary-button",()=>{
