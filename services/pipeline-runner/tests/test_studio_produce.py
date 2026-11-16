@@ -1244,3 +1244,33 @@ def test_expected_photo_count_never_collapses_partial_studio_asset_plan():
     assert expected_photo_count(ai, one) == 7
     assert expected_photo_count(plan, [{"id": f"asset-{i}"} for i in range(8)]) == 8
     assert expected_photo_count({"fields": {}}, one) == 1
+
+
+def test_caption_narration_fallback_uses_factual_existing_copy_not_hashtags():
+    from studio_produce.steps import voiceover_from_existing_caption
+
+    parent = {"fields": {"Caption": (
+        "Chicago's Lakefront Trail gives you room to walk beside the water. "
+        "The skyline looks incredible from the path. "
+        "Save this for your next Chicago visit! #Chicago #Lakefront #ExploreChicago"
+    )}}
+    result = voiceover_from_existing_caption(parent)
+    assert "room to walk beside the water" in result
+    assert "skyline looks incredible" in result
+    assert "Save this" not in result
+    assert "#" not in result
+
+
+def test_caption_narration_fallback_fails_closed_without_usable_copy():
+    from studio_produce.steps import voiceover_from_existing_caption
+
+    assert voiceover_from_existing_caption({"fields": {"Caption": ""}}) == ""
+    assert voiceover_from_existing_caption({"fields": {"Caption": "#Chicago #Travel"}}) == ""
+    assert voiceover_from_existing_caption({"fields": {"Caption": "Chicago!"}}) == ""
+
+
+def test_caption_narration_fallback_does_not_invent_activities():
+    from studio_produce.steps import voiceover_from_existing_caption
+
+    copy = "A walk along the East River offers wide skyline views at golden hour."
+    assert voiceover_from_existing_caption({"fields": {"Caption": copy}}) == copy
