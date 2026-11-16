@@ -61,8 +61,8 @@ jobs:
           }
           $version = [string]$health.version
           Write-Output ("runner_version=" + $version)
-          if ($version -notmatch "a3-media-content-profile|a3-classify-timeout") {
-            throw ("runner version missing Content_Profile shape fix: " + $version)
+          if ($version -notmatch "a3-media-content-profile|a3-classify-timeout|library-upload-skip-source") {
+            throw ("runner version missing Content_Profile / library-upload fix: " + $version)
           }
           $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
           $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1

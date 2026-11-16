@@ -98,3 +98,4 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-15: Runner 2026-11-15-a3-classify-timeout — A3 OpenAI timeout 45s; never leave Processing parked on skip/miss. Soft SLA: Asset Manager Classifying <60s.
 
 2026-11-15: Runner 2026-11-15-a3-media-content-profile — shape Content_Profile from media metadata so A3 stops skipping Supabase library assets; densify profile/notes/keywords on write; Speakeasy pulse uses Chicago profile.
+2026-11-15: Runner 2026-11-15-library-upload-skip-source — skip sync source-master Drive put on Chicago library ingest so Worker→runner confirm fits under the gateway window.
