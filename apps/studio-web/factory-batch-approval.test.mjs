@@ -254,10 +254,10 @@ test("Global Factory selects Instagram Stories with backend-normalized metadata"
 });
 
 
-test("Factory counts only visible review rows and tolerates one empty active poll", () => {
+test("Factory counts visible review rows and uses the server activity snapshot", () => {
   assert.match(js, /needs_eyes: filtered\(desk\.lanes\?\.needs_eyes\)\.length/);
-  assert.match(js, /state\.emptyActivityPolls = emptyActive/);
-  assert.match(js, /emptyActive && state\.emptyActivityPolls < 2 \? state\.batch : fetched/);
+  assert.doesNotMatch(js, /emptyActivityPolls/);
+  assert.match(js, /const batch = fetched/);
   assert.match(js, /batch === fetched && previousActive\.some/);
 });
 

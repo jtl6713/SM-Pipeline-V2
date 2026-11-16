@@ -845,7 +845,7 @@
       pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
-    if (count) count.textContent = String(state.batch?.totals?.batches || 0);
+    if (count) count.textContent = state.batchActivityError ? "?" : String(state.batch?.totals?.batches || 0);
     if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
     if (toggle) {
       toggle.hidden = state.completedOpen;
@@ -888,6 +888,7 @@
       <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>`;
     if (updated) updated.textContent = state.completedOpen
       ? (state.completedLoading ? "Loading completed batches…" : "Loaded only on request")
+      : state.batchActivityError ? "Status unavailable · last known activity"
       : "Live · batches needing action";
     const latest = batches.find(row => row.job_id === state.inspectedBatchKey) || batches[0] || null;
     if (state.inspectedBatchKey && !batches.some(row => row.job_id === state.inspectedBatchKey)) {
@@ -904,7 +905,7 @@
         const label = row.group ? `Global approval · ${groupLabel}`
           : item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
         const active = ["running", "queued", "enqueuing"].includes(row.status);
-        const stateLabel = active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
+        const stateLabel = !state.completedOpen && state.batchActivityError ? "Unverified (last known status)" : active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
         const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
         const percent = row.total ? Math.round(100 * completed / row.total) : 0;
         const picked = state.batchDetailsOpen && latest?.job_id === row.job_id;
@@ -925,6 +926,7 @@
       }).join("")
       : '<p class="subtle">' + (state.completedOpen
         ? (state.completedLoading ? "Loading completed batches…" : "No completed batches in this page.")
+        : state.batchActivityError ? "Approval status unavailable. Refresh activity to verify."
         : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
@@ -1357,7 +1359,12 @@
   }
 
   async function refreshFactoryBatchActivity(force = false) {
-    if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
+    if (state.batchActivityLoading) {
+      // A manual refresh during a poll must run after it, never disappear.
+      if (force) state.batchActivityRefreshQueued = true;
+      return state.batch;
+    }
+    if (state.submittingBatch && !force) return state.batch;
     const now = Date.now();
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
@@ -1368,12 +1375,13 @@
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
       const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
-      // An empty polling response is not proof that a running batch vanished.
-      // Hold the last nonempty activity snapshot until two consecutive empty polls;
-      // the authoritative Desk will still be reconciled on the confirmed transition.
-      const emptyActive = previousActive.length > 0 && !(fetched.batches || []).length;
-      state.emptyActivityPolls = emptyActive ? (state.emptyActivityPolls || 0) + 1 : 0;
-      const batch = emptyActive && state.emptyActivityPolls < 2 ? state.batch : fetched;
+      if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
+        throw new Error("Invalid approval activity response");
+      }
+      // Every window uses the same server snapshot, including an empty feed.
+      // Retaining a prior nonempty snapshot manufactured phantom Processing jobs.
+      const batch = fetched;
+      state.batchActivityError = null;
       state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
         const before = JSON.stringify([state.batchRollout,state.batchGlobal]);
@@ -1404,11 +1412,17 @@
       }
       return batch;
     } catch (error) {
+      state.batchActivityError = error.message || String(error);
+      renderFactoryBatchActivity(state.batch);
       const summary = $("factoryBatchSummary");
       if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
       return null;
     } finally {
       state.batchActivityLoading = false;
+      if (state.batchActivityRefreshQueued) {
+        state.batchActivityRefreshQueued = false;
+        return await refreshFactoryBatchActivity(true);
+      }
     }
   }
 
