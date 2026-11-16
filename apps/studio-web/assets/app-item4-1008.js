@@ -24902,8 +24902,11 @@ function timedScriptAssetLabel(asset, index) {
         }
         button.disabled = true;
         try {
-          await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
-          setLibraryUploadMessage(`Deleted ${name}.`, "success");
+          const result = await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}), retries: 0, timeoutMs: 30000 });
+          if (result?.deleted !== true || result?.read_source !== "supabase") {
+            throw new Error("Asset deletion was not confirmed by Supabase. The asset was not removed.");
+          }
+          setLibraryUploadMessage(`Deleted ${name} from Supabase and Google Drive.`, "success");
           await loadLibrary();
         } catch (error) {
           setLibraryUploadMessage(error.message, "error-text");
