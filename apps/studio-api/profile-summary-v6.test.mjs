@@ -99,6 +99,7 @@ test("V6 reconciliation and snapshot are wired to the same ledger assembly", () 
   assert.match(controller, /homeApprovedCalendarCounts\(mapped\)/);
   assert.match(controller, /validateStudioProfilesOverviewRows\(expectedRows, profiles\)/);
   assert.match(controller, /validProfileSummaryV6Rows\(summary\.records\)/);
+  assert.match(doSource, /next\.ready_by_platform\[platform\] \+= delta\.ready_by_platform/);
 });
 
 
@@ -122,6 +123,6 @@ test("durable V6 excludes emailed TikTok draft but preserves Manual Needed and u
 
 test("durable summary version invalidates pre-email-handoff calendar dates", () => {
   const source = readFileSync(new URL("./profile-summary-do.mjs", import.meta.url), "utf8");
-  assert.match(source, /v7_home_stage_production_v1/);
+  assert.match(source, /v8_home_ready_inventory_v1/);
   assert.match(source, /putMeta\("future_count_reconcile_required", "true"\)/);
 });
