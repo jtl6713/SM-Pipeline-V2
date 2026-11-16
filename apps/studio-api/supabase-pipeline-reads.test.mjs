@@ -3632,7 +3632,8 @@ test("library batch existing names read from Supabase under Phase6", async () =>
       limit: 500,
     });
     assert.deepEqual(names.sort(), ["Lurie Garden", "Lurie Garden 12", "Lurie Garden 4"].sort());
-    assert.ok(urls.some((url) => url.includes("asset_name.ilike.")));
+    assert.ok(urls.some((url) => url.includes("asset_name=ilike.")));
+    assert.ok(!urls.some((url) => url.includes("asset_name.ilike.")));
     assert.ok(urls.some((url) => url.includes("content_profile_airtable_id=eq.recProfileChicago1")));
     assert.ok(!names.includes("Lurie Garden Annex"));
   } finally {
@@ -3683,7 +3684,7 @@ test("Media Asset Logo/name/Drive list formulas read from Supabase under Phase6"
       { limit: 15 },
     );
     assert.equal(named[0].id, "recMedia000000004");
-    assert.ok(urls.some((url) => url.includes("asset_name.ilike.")));
+    assert.ok(urls.some((url) => url.includes("asset_name=ilike.")));
     const drive = await listSupabaseMediaByFormula(
       env,
       '{Google Drive File ID}="driveLogo"',

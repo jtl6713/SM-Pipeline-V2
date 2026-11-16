@@ -1214,7 +1214,11 @@ export async function listSupabaseLibraryBatchExistingNames(env, baseName, {
   const base = stripLibraryAssetExtension(baseName);
   if (!base) return [];
   const cap = Math.max(1, Math.min(500, Number(limit) || 500));
-  const filters = [`asset_name.ilike.${encodePostgrestValue(`${base}*`)}`];
+  // `asset_name.ilike.<encoded name>` is dropped by PostgREST when the name
+  // contains spaces. The request then returns unrelated rows, the series
+  // filter keeps none, and every upload is numbered 1. `column=ilike.value`
+  // keeps a multi-word prefix such as "Chicago Speakeasy - The Berkshire Room".
+  const filters = [`asset_name=ilike.${encodePostgrestValue(`${base}*`)}`];
   const scopedProfile = String(profileId || "").trim();
   if (/^rec[A-Za-z0-9]+$/.test(scopedProfile)) {
     filters.push(`metadata->>content_profile_airtable_id=eq.${encodePostgrestValue(scopedProfile)}`);
@@ -1411,7 +1415,7 @@ export async function listSupabaseMediaByFormula(env, formula, { limit = 25, vie
   } else if (transferMatch) {
     filter = `metadata->>studio_transfer_id=eq.${encodeURIComponent(transferMatch[2])}`;
   } else if (nameMatch) {
-    filter = `asset_name.ilike.${encodeURIComponent(nameMatch[2])}`;
+    filter = `asset_name=ilike.${encodeURIComponent(nameMatch[2])}`;
   } else if (driveMatch) {
     filter = `google_drive_file_id=eq.${encodeURIComponent(driveMatch[2])}`;
   } else if (viewFilter && !cleaned) {

@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.957-library-overlay-override";
+  const BUILD_ID = "item4-0.6.958-library-sequential-names";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25511,7 +25511,8 @@ function timedScriptAssetLabel(asset, index) {
     }
     // Always one file per request. A named batch of 6+ photos in one Worker call
     // times out while each file is pushed to Drive through the pipeline runner.
-    // Sequential calls still allocate Navy Pier 1, 2, … from existing names.
+    // The first response reserves Navy Pier 1, 2, … for this picker batch.
+    // Later files send that exact asset_name and do not re-read the catalog.
     const chunkSize = 1;
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
@@ -25519,6 +25520,7 @@ function timedScriptAssetLabel(asset, index) {
     const overlayHeldFiles = [];
     const namedUploads = [];
     const uploadedClassifyIds = [];
+    let reservedNames = null;
     let uploaded = 0;
     let completedFiles = 0;
     let lastTransferredBytes = 0;
@@ -25541,7 +25543,12 @@ function timedScriptAssetLabel(asset, index) {
         const form = new FormData();
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
-        if (batchName) form.append("batch_name", batchName);
+        if (batchName) {
+          const reserved = reservedNames && reservedNames[start];
+          if (reserved) form.append("asset_name", reserved);
+          form.append("batch_name", batchName);
+          if (!reserved) form.append("batch_count", String(files.length));
+        }
         form.append("content_profile_id", profileId);
         if (overrideOverlayHold) form.append("override_overlay_hold", "1");
         const video = chunk.find((file) => item4FileLooksLikeVideo(file));
@@ -25565,6 +25572,8 @@ function timedScriptAssetLabel(asset, index) {
           uploaded += count;
           completedFiles += chunk.length;
           renderLibraryUploadProgress({ phase: "saved", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: Number(currentFile?.size) || 0, message: `Server confirmed ${currentFile.name} saved (${uploaded} of ${files.length} assets).` });
+          const reserved = Array.isArray(result?.reserved_names) ? result.reserved_names.filter(Boolean) : [];
+          if (!reservedNames && reserved.length > start) reservedNames = reserved;
           const assigned = Array.isArray(result?.batch_names) ? result.batch_names.filter(Boolean) : [];
           if (assigned.length) namedUploads.push(...assigned);
           else if (Array.isArray(result?.records)) {

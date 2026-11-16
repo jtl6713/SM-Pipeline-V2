@@ -3611,9 +3611,24 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
     String(form.get("override_overlay_hold") || "").trim().toLowerCase(),
   );
   const rawBatchName = String(form.get("batch_name") || form.get("display_name") || "").trim();
+  const explicitAssetName = String(form.get("asset_name") || "").trim();
   let batchBase = null;
   let batchNames = null;
-  if (rawBatchName) {
+  let reservedNames = null;
+  if (explicitAssetName) {
+    // Later files in a browser batch already have their number. Do not read
+    // the catalog again — a missed read restarts the series at 1.
+    if (files.length !== 1) {
+      throw new HttpError(400, "Send one file when asset_name is set");
+    }
+    const sanitized = sanitizeLibraryAssetName(explicitAssetName);
+    if (!sanitized.ok) throw new HttpError(400, sanitized.error);
+    const normalized = normalizeLibraryBatchBase(sanitized.name);
+    if (!normalized.ok) throw new HttpError(400, normalized.error);
+    batchBase = normalized.name;
+    batchNames = [sanitized.name];
+    reservedNames = batchNames;
+  } else if (rawBatchName) {
     const normalized = normalizeLibraryBatchBase(rawBatchName);
     if (!normalized.ok) throw new HttpError(400, normalized.error);
     batchBase = normalized.name;
@@ -3625,14 +3640,21 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
     const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula, {
       profileId: uploadProfile.id,
     });
-    // A name such as "Lurie 5" starts at 5; do not strip it and append a second number.
-    // Large batches are sent as single-file requests, so the catalog's existing
-    // names (Supabase under Phase 6 SoR) also let later requests advance 5, 6, 7
-    // without duplicate titles.
-    batchNames = allocateLibraryUploadNames(rawBatchName, files.length, existingNames);
-    if (batchNames.length !== files.length) {
+    // One catalog read for the whole picker batch. The browser uploads files
+    // one at a time and sends the reserved asset_name for every file after this.
+    const requestedCount = Number(form.get("batch_count"));
+    const reserveCount = Math.min(
+      ASSET_LIBRARY_MAX_FILES,
+      Math.max(
+        files.length,
+        Number.isFinite(requestedCount) && requestedCount > 0 ? Math.trunc(requestedCount) : files.length,
+      ),
+    );
+    reservedNames = allocateLibraryUploadNames(rawBatchName, reserveCount, existingNames);
+    if (reservedNames.length !== reserveCount) {
       throw new HttpError(500, "Could not allocate sequential asset names");
     }
+    batchNames = reservedNames.slice(0, files.length);
   }
   for (const file of files) {
     const isVideo = item4IsSupportedVideoFile(file);
@@ -3794,6 +3816,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
     content_profile_name: f(uploadProfile, "Profile_Name") || null,
     batch_base: batchBase,
     batch_names: batchNames,
+    reserved_names: reservedNames,
     record_ids: uploadedIds,
     message: uploadedIds.length
       ? `${addedMessage} Classifying in the background — refresh to see tags.`
