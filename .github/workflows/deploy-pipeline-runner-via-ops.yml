@@ -46,6 +46,7 @@ jobs:
             services/pipeline-runner/tests/test_r4_render_request.py \
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
+            services/pipeline-runner/tests/test_queue_reads.py \
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
             services/pipeline-runner/tests/test_fbs3_rate_limit_guard.py \
             services/pipeline-runner/tests/test_fbs3_eligibility.py \

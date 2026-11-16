@@ -1,5 +1,5 @@
 from item4.constants import SMV1_PENDING_CROP_FORMULA, SMV1_PRODUCTION_FORMULA
-from queue_reads import queue_formula_filter, try_list_queue_records
+from queue_reads import _shape, queue_formula_filter, try_list_queue_records
 
 
 def test_ready_lists_do_not_require_airtable_depth_probe(monkeypatch):
@@ -34,3 +34,39 @@ def test_crop_and_variant_selectors_translate():
     assert "status.eq.Error" in error
     assert queue_formula_filter(SMV1_PRODUCTION_FORMULA) is not None
     assert queue_formula_filter('FIND("rec", {Error_Message})') is None
+
+
+def test_shape_densifies_platform_variant_crop_fields():
+    """SMV1 needs folder/dims/style from Phase 6 payload or crops never leave Pending."""
+    row = _shape({
+        "airtable_record_id": "recQcrop1",
+        "status": "Pending",
+        "payload": {
+            "transfer_id": "ITEM4-VARIANT-fill-crop-v2-recPR-a1-9x16",
+            "production_request_record_id": "recPR",
+            "asset_kind": "Platform Variant",
+            "source_drive_file_id": "driveSource1",
+            "source_media_asset_id": "recMedia1",
+            "aspect_ratio": "9:16",
+            "target_drive_folder_id": "folderVariants",
+            "target_file_name": "photo 9x16.jpg",
+            "variant_style": "fill-crop-v2",
+            "width": 1080,
+            "height": 1920,
+            "source_mime_type": "image/jpeg",
+            "source_extension": "jpg",
+            "preview_status": "Pending",
+        },
+    })
+    assert row is not None
+    fields = row["fields"]
+    assert fields["Transfer_Status"] == "Pending"
+    assert fields["Target_Drive_Folder_ID"] == "folderVariants"
+    assert fields["Target_File_Name"] == "photo 9x16.jpg"
+    assert fields["Variant_Style"] == "fill-crop-v2"
+    assert fields["Width"] == 1080
+    assert fields["Height"] == 1920
+    assert fields["Source_MIME_Type"] == "image/jpeg"
+    assert fields["Source_Extension"] == "jpg"
+    assert fields["Source_Media_Asset"] == ["recMedia1"]
+    assert fields["Aspect_Ratio"] == "9:16"

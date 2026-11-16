@@ -28,19 +28,33 @@ _FIELDS = {
     "Source_Asset_ID": "payload->>source_asset_id",
 }
 
+# Keep in lockstep with Worker QUEUE_PAYLOAD_FIELDS. Missing crop densification
+# (Target_Drive_Folder_ID / Width / Height / Variant_Style) makes SMV1 raise
+# "missing folder or aspect ratio" before claim, so Preparing stays at 0/N.
 _PAYLOAD_FIELDS = {
     "transfer_id": "Transfer_ID",
     "production_request_record_id": "Production_Request_Record_ID",
     "asset_kind": "Asset_Kind",
     "source_asset_id": "Source_Asset_ID",
     "source_name": "Source_Name",
+    "source_mime_type": "Source_MIME_Type",
+    "source_extension": "Source_Extension",
     "source_drive_file_id": "Source_Drive_File_ID",
     "source_media_asset_id": "Source_Media_Asset",
     "generated_media_asset_id": "Generated_Media_Asset",
     "aspect_ratio": "Aspect_Ratio",
+    "target_drive_folder_id": "Target_Drive_Folder_ID",
+    "target_file_name": "Target_File_Name",
+    "variant_style": "Variant_Style",
     "preview_status": "Preview_Status",
+    "preview_r2_key": "Preview_R2_Key",
+    "preview_url": "Preview_URL",
     "test_run_id": "Test_Run_ID",
     "media_asset_record_id": "Media_Asset_Record_ID",
+    "width": "Width",
+    "height": "Height",
+    "source_size_bytes": "Source_Size_Bytes",
+    "source_order": "Source_Order",
 }
 
 
@@ -180,11 +194,12 @@ def _shape(row: dict) -> dict | None:
     if row.get("updated_at"):
         fields["Updated_At"] = row.get("updated_at")
     for column, airtable_key in _PAYLOAD_FIELDS.items():
-        if payload.get(column):
-            value = payload.get(column)
-            if airtable_key in {"Source_Media_Asset", "Generated_Media_Asset"}:
-                value = [value]
-            fields[airtable_key] = value
+        if column not in payload or payload.get(column) is None or payload.get(column) == "":
+            continue
+        value = payload.get(column)
+        if airtable_key in {"Source_Media_Asset", "Generated_Media_Asset"}:
+            value = [value]
+        fields[airtable_key] = value
     targets = payload.get("target_production_request_output_ids")
     if isinstance(targets, list) and targets:
         fields["Target_Production_Request_Outputs"] = targets
