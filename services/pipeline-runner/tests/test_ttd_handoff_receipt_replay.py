@@ -169,3 +169,35 @@ def test_empty_legacy_token_never_authorizes_form():
     }}
     assert ttd4_form_eligibility_reason(record, token="", signing_secret="unit-test-secret") == "token_mismatch"
     assert ttd4_form_eligibility_reason(record, token="wrong-token", signing_secret="unit-test-secret") == "token_mismatch"
+
+
+def test_ttd4_form_submit_uses_verified_email_token_not_stale_supabase_link(monkeypatch):
+    from ttd import ttd4
+    from ttd.package import stable_completion_token
+
+    output_id = "recABCDEFGHIJKLMN"
+    signed = stable_completion_token(output_id, "draft-123", secret="unit-test-secret")
+    record = {"id": output_id, "fields": {
+        "TikTok_Draft_Publish_ID": "draft-123",
+        "TikTok_Manual_Completion_Token": "old-stale-token",
+        "TikTok_Manual_Completion_URL":
+            "https://pipeline.example/hooks/ttd4?record_id=recABCDEFGHIJKLMN&token=old-stale-token&action=form",
+        "Manual_Completion_Status": "Required",
+        "Publish_Status": "Ready to Publish",
+    }}
+
+    class Client:
+        _settings = {"pipeline_runner_shared_secret": "unit-test-secret"}
+
+        def get_record(self, table, record_id):
+            assert record_id == output_id
+            return record
+
+    monkeypatch.setattr(ttd4, "AirtableClient", Client)
+    monkeypatch.setattr(ttd4, "form_html", lambda record, *, action_url: action_url)
+    outcome = ttd4.process_request(output_record_id=output_id, action="form", token=signed)
+    assert outcome["processed"] is True
+    assert outcome["http_status"] == 200
+    assert f"token={signed}" in outcome["html"]
+    assert "action=submit" in outcome["html"]
+    assert "old-stale-token" not in outcome["html"]
