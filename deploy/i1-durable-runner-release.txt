@@ -108,3 +108,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-16: Deploy runner 2026-11-16-ttd4-signed-link-stability — authenticated stable TikTok email tokens supersede deterministic legacy, reject blank tokens, retain 2041 resend logic, reconcile concurrent DB bag races.
 
 2026-11-16: Post-2041 reconciliation verification trigger — run signed-link regression and release checks on PR #2042 before merge.
+
+2026-11-16: Deploy runner 2026-11-16-smv1-queue-payload-densify — shape Target_Drive_Folder_ID/Width/Height/Variant_Style from Phase 6 queue payload so SMV1 can claim Pending Platform Variants (Frames Preparing 0/N stall since 2026-11-13).
