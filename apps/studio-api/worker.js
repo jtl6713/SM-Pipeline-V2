@@ -5657,6 +5657,18 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     && studioWriteSource(env) === "supabase"
   ) {
     const tableKind = studioAirtableEgressTableKind(env, tableId);
+    // Phase 6 request/media/queue must not soft-echo a missed Supabase commit.
+    // Echoing empty Platform Variant creates made Prepare flip Preparing → None.
+    if (phase6TableKind(env, tableId)) {
+      console.warn("supabase Phase 6 mutation miss; refusing soft echo", {
+        table_kind: tableKind,
+        method,
+      });
+      throw new HttpError(
+        503,
+        `Studio could not save ${tableKind || "Phase 6"} changes. Try again in a moment.`
+      );
+    }
     console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
       table_kind: tableKind,
       method,

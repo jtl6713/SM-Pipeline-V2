@@ -5821,12 +5821,35 @@ function transferQueueWriteThroughRow(record) {
   copy("Asset_Kind", "asset_kind", transferQueueText(fields.Asset_Kind));
   copy("Source_Asset_ID", "source_asset_id", transferQueueText(fields.Source_Asset_ID));
   copy("Source_Name", "source_name", transferQueueText(fields.Source_Name));
+  copy("Source_MIME_Type", "source_mime_type", transferQueueText(fields.Source_MIME_Type));
+  copy("Source_Extension", "source_extension", transferQueueText(fields.Source_Extension));
   copy("Source_Drive_File_ID", "source_drive_file_id", transferQueueText(fields.Source_Drive_File_ID));
   copy("Source_Media_Asset", "source_media_asset_id", transferQueueLinkId(fields.Source_Media_Asset));
   copy("Generated_Media_Asset", "generated_media_asset_id", transferQueueLinkId(fields.Generated_Media_Asset));
   copy("Aspect_Ratio", "aspect_ratio", transferQueueText(fields.Aspect_Ratio));
+  copy("Target_Drive_Folder_ID", "target_drive_folder_id", transferQueueText(fields.Target_Drive_Folder_ID));
+  copy("Target_File_Name", "target_file_name", transferQueueText(fields.Target_File_Name));
+  copy("Variant_Style", "variant_style", transferQueueText(fields.Variant_Style));
   copy("Preview_Status", "preview_status", transferQueueText(selectName(fields.Preview_Status) || fields.Preview_Status));
+  copy("Preview_R2_Key", "preview_r2_key", transferQueueText(fields.Preview_R2_Key));
+  copy("Preview_URL", "preview_url", transferQueueText(fields.Preview_URL));
   copy("Test_Run_ID", "test_run_id", transferQueueText(fields.Test_Run_ID));
+  if ("Width" in fields && fields.Width != null && fields.Width !== "") {
+    const width = Number(fields.Width);
+    if (Number.isFinite(width)) payload.width = Math.trunc(width);
+  }
+  if ("Height" in fields && fields.Height != null && fields.Height !== "") {
+    const height = Number(fields.Height);
+    if (Number.isFinite(height)) payload.height = Math.trunc(height);
+  }
+  if ("Source_Size_Bytes" in fields && fields.Source_Size_Bytes != null && fields.Source_Size_Bytes !== "") {
+    const size = Number(fields.Source_Size_Bytes);
+    if (Number.isFinite(size)) payload.source_size_bytes = Math.trunc(size);
+  }
+  if ("Source_Order" in fields && fields.Source_Order != null && fields.Source_Order !== "") {
+    const order = Number(fields.Source_Order);
+    if (Number.isFinite(order)) payload.source_order = Math.trunc(order);
+  }
   if ("Target_Production_Request_Outputs" in fields) {
     payload.target_production_request_output_ids = transferQueueLinkIds(fields.Target_Production_Request_Outputs);
   }
@@ -7095,13 +7118,24 @@ const QUEUE_PAYLOAD_FIELDS = {
   asset_kind: "Asset_Kind",
   source_asset_id: "Source_Asset_ID",
   source_name: "Source_Name",
+  source_mime_type: "Source_MIME_Type",
+  source_extension: "Source_Extension",
   source_drive_file_id: "Source_Drive_File_ID",
   source_media_asset_id: "Source_Media_Asset",
   generated_media_asset_id: "Generated_Media_Asset",
   aspect_ratio: "Aspect_Ratio",
+  target_drive_folder_id: "Target_Drive_Folder_ID",
+  target_file_name: "Target_File_Name",
+  variant_style: "Variant_Style",
   preview_status: "Preview_Status",
+  preview_r2_key: "Preview_R2_Key",
+  preview_url: "Preview_URL",
   test_run_id: "Test_Run_ID",
   media_asset_record_id: "Media_Asset_Record_ID",
+  width: "Width",
+  height: "Height",
+  source_size_bytes: "Source_Size_Bytes",
+  source_order: "Source_Order",
 };
 
 function tightenQueueFormula(text) {

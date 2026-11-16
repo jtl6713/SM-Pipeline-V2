@@ -202,7 +202,7 @@ test("TTD draft reconcile runs on independent light cron and overdue lists Supab
   assert.doesNotMatch(scheduled.slice(draftLight - 120, draftLight), /!cadence\.heavy && airtableCooldownWaitMs/);
 
 
-  assert.match(cron, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(cron, /0\.10\.990-phase6-plan-mapping/);
   const overdueStart = impl.indexOf("export async function studioReconcileOverdueScheduledPublishes(");
   const overdueEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/", overdueStart);
   assert.ok(overdueStart > 0 && overdueEnd > overdueStart);

@@ -1333,3 +1333,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy Worker 0.10.989-phase6-pr-photo-load — Phase 6 Production Request write-through persists master_assets + Organization/Brand so /item4 can authorize and show photos after Create VO timeline. Verify /health version 0.10.989-phase6-pr-photo-load.
 
 2026-11-16: Deploy Worker 0.10.990-phase6-plan-mapping — mapping aspect fallbacks + Production Request Output SoR commit so /plan stamps Ready and PRO rows persist. Verify /health version 0.10.990-phase6-plan-mapping.
+
+2026-11-16: Worker 0.10.990 also fail-closes Phase 6 queue mutation misses and densifies variant queue Target_Drive_Folder/Width/Height so Prepare cannot soft-echo into None.
