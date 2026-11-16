@@ -38,9 +38,13 @@ REVIEW: similar but ambiguous/partially obscured overlays, or uncertainty about
 the text/logo. CLEAN: confidently no disallowed overlay visible in the supplied media.
 Third-party names *in the pictured environment* (store signs, billboards,
 street signs, building facades, vehicle brands) are NOT overlays.
-Ordinary scene text is not an overlay. Do not flag first-party ChicagoShining,
-New York Shining, Los Angeles Shining, Miami Shining, or Shining Cities marks.
-These marks are allowed solely for this visual-overlay check, not as proof of rights.
+Ordinary scene text is not an overlay. Marketing/promotional copy that is the
+subject of the photo (slogans, event titles, "have you ever been here", menu
+boards, posters as pictured content) is scene text — NOT a photographer credit,
+stock watermark, corner bug, or third-party rights overlay.
+Do not flag first-party ChicagoShining, New York Shining, Los Angeles Shining,
+Miami Shining, or Shining Cities marks. These marks are allowed solely for this
+visual-overlay check, not as proof of rights.
 Do not infer overlays from the file name or unseen frames. Do not claim to
 have checked the entire video; these are representative samples.
 When uncertain choose review, not clean. No removal or editing of any marks."""

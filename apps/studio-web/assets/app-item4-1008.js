@@ -301,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.956-library-upload-async";
+  const BUILD_ID = "item4-0.6.957-library-overlay-override";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25411,6 +25411,22 @@ function timedScriptAssetLabel(asset, index) {
    if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transferred${phase==="verifying"?"; confirmation pending":""}`);}
   }
 
+  let libraryOverlayOverridePending = null;
+
+  function setLibraryOverlayOverridePanel(pending) {
+    libraryOverlayOverridePending = pending || null;
+    const panel = $("libraryOverlayOverridePanel");
+    const hint = $("libraryOverlayOverrideHint");
+    if (!panel) return;
+    const count = Array.isArray(pending?.files) ? pending.files.length : 0;
+    panel.hidden = count < 1;
+    if (hint && count) {
+      hint.textContent = count === 1
+        ? "Studio held 1 file for a possible third-party overlay. If that is wrong (marketing text in the photo is fine — photographer credits are not), override and upload it."
+        : `Studio held ${count} files for a possible third-party overlay. If that is wrong (marketing text in the photo is fine — photographer credits are not), override and upload them.`;
+    }
+  }
+
   function summarizeLibraryUploadErrors(errors, { uploaded = 0, total = 0 } = {}) {
     const rows = (errors || []).map((row) => String(row || "").trim()).filter(Boolean);
     if (!rows.length) return "";
@@ -25419,7 +25435,7 @@ function timedScriptAssetLabel(asset, index) {
     const parts = [];
     if (overlay.length) {
       parts.push(
-        `${overlay.length} file${overlay.length === 1 ? "" : "s"} blocked: photographer/credit watermark or other third-party overlay. Use a clean source (no corner credit).`,
+        `${overlay.length} file${overlay.length === 1 ? "" : "s"} held for possible third-party overlay. Marketing/scene text is not a credit — use Override below if Studio got this wrong.`,
       );
       parts.push(overlay.slice(0, 3).join(" · "));
       if (overlay.length > 3) parts.push(`(+${overlay.length - 3} more overlay holds)`);
@@ -25464,9 +25480,11 @@ function timedScriptAssetLabel(asset, index) {
    });
   }
 
-  async function uploadLibraryFiles(fileList) {
+  async function uploadLibraryFiles(fileList, options = {}) {
     libraryDisarmPicker();
     if (libraryUploadMessageBusy()) return;
+    const overrideOverlayHold = Boolean(options.overrideOverlayHold);
+    if (!overrideOverlayHold) setLibraryOverlayOverridePanel(null);
     let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
@@ -25484,9 +25502,9 @@ function timedScriptAssetLabel(asset, index) {
     }
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
-    const location = String($("libraryLocation")?.value || "").trim();
-    const batchName = String($("libraryBatchName")?.value || "").trim();
-    const profileId = String($("studioProfileSelect")?.value || selectedProfileId || "").trim();
+    const location = String(options.location ?? $("libraryLocation")?.value ?? "").trim();
+    const batchName = String(options.batchName ?? $("libraryBatchName")?.value ?? "").trim();
+    const profileId = String(options.profileId || $("studioProfileSelect")?.value || selectedProfileId || "").trim();
     if (!profileId) {
       setLibraryUploadMessage("Choose a Content Profile in the header before uploading.", "error-text");
       return;
@@ -25498,6 +25516,7 @@ function timedScriptAssetLabel(asset, index) {
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
     const errors = [];
+    const overlayHeldFiles = [];
     const namedUploads = [];
     const uploadedClassifyIds = [];
     let uploaded = 0;
@@ -25524,6 +25543,7 @@ function timedScriptAssetLabel(asset, index) {
         if (location) form.append("location", location);
         if (batchName) form.append("batch_name", batchName);
         form.append("content_profile_id", profileId);
+        if (overrideOverlayHold) form.append("override_overlay_hold", "1");
         const video = chunk.find((file) => item4FileLooksLikeVideo(file));
         if (chunk.length === 1 && video) {
           try {
@@ -25558,6 +25578,9 @@ function timedScriptAssetLabel(asset, index) {
           const raw = String(error?.message || "upload failed");
           const label = chunk[0]?.name || "file";
           errors.push(`${label}: ${raw}`);
+          if (!overrideOverlayHold && /QA-ASSET-THIRD-PARTY-OVERLAY|third-party overlay review/i.test(raw)) {
+            overlayHeldFiles.push(currentFile);
+          }
           renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: summarizeLibraryUploadErrors([`${label}: ${raw}`], { uploaded, total: files.length }) });
         }
       }
@@ -25571,6 +25594,11 @@ function timedScriptAssetLabel(asset, index) {
         : (namedUploads.length > 1
           ? `Added ${namedUploads.length} assets as ${namedUploads[0]}–${namedUploads[namedUploads.length - 1]}.`
           : "");
+      if (overlayHeldFiles.length) {
+        setLibraryOverlayOverridePanel({ files: overlayHeldFiles, location, batchName, profileId });
+      } else if (overrideOverlayHold) {
+        setLibraryOverlayOverridePanel(null);
+      }
       if (item4OversizedClipNotice) {
         const extra = errors.length
           ? `${uploaded ? `${uploaded} added. ` : ""}${errorSummary}`
@@ -25621,6 +25649,25 @@ function timedScriptAssetLabel(asset, index) {
     restoreLibraryClassifyWatch();
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
+    const overrideBtn = $("libraryOverlayOverrideBtn");
+    if (overrideBtn && !overrideBtn.dataset.bound) {
+      overrideBtn.dataset.bound = "true";
+      overrideBtn.addEventListener("click", () => {
+        const pending = libraryOverlayOverridePending;
+        if (!pending?.files?.length) {
+          setLibraryUploadMessage("No overlay-held files left to override.", "error-text");
+          setLibraryOverlayOverridePanel(null);
+          return;
+        }
+        setLibraryOverlayOverridePanel(null);
+        uploadLibraryFiles(pending.files, {
+          overrideOverlayHold: true,
+          location: pending.location,
+          batchName: pending.batchName,
+          profileId: pending.profileId,
+        });
+      });
+    }
     if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
     setLibraryUploadMessage("");

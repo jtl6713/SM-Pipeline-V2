@@ -138,6 +138,7 @@ def ingest_studio_library_asset(
     mime_type: str = "",
     profile_name: str = "",
     skip_source_master: bool = False,
+    override_overlay_hold: bool = False,
 ) -> dict[str, Any]:
     payload = content or b""
     if not payload:
@@ -147,17 +148,30 @@ def ingest_studio_library_asset(
         raise ValueError(f"{filename or 'File'} exceeds the upload limit")
 
     # Screen the source *before* creating a public Drive object or applying our branding.
-    # A suspicious or unscreenable upload remains local and never enters the library.
+    # A suspicious or unscreenable upload remains local and never enters the library
+    # unless the operator explicitly overrides a false-positive hold.
     screen = screen_asset(
         content=payload, filename=filename, mime_type=spec["mime_type"],
         profile_name=profile_name,
     )
     if screen["decision"] != "clean":
-        raise ValueError(
-            f"Asset held for third-party overlay review ({screen['decision']}): "
-            f"{screening_note(screen)}. No asset was uploaded. "
-            "Use a clean source or arrange a manual rights/visual review."
-        )
+        if not override_overlay_hold:
+            raise ValueError(
+                f"Asset held for third-party overlay review ({screen['decision']}): "
+                f"{screening_note(screen)}. No asset was uploaded. "
+                "Use a clean source or override the overlay hold from Asset Manager "
+                "if Studio misread scene text as a third-party credit."
+            )
+        screen = {
+            **screen,
+            "decision": "clean",
+            "operator_override": True,
+            "original_decision": screen.get("decision"),
+            "evidence": (
+                f"OPERATOR_OVERRIDE; original={screen.get('decision')}; "
+                f"{str(screen.get('evidence') or '')}"
+            )[:300],
+        }
 
     duration = probe_library_video_duration(payload, filename) if spec["kind"] == "video" else None
     drive = GoogleDriveClient()
