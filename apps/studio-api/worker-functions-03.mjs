@@ -3406,7 +3406,7 @@ export function mapLibraryAsset(record, profilesById = {}) {
 export async function listAssetLibrary(request, env, url, authorization) {
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
   if (kind === "published") return listPublishedLibraryFiles(request, env, url);
-  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  if (studioAssetsReadSource(env) !== "supabase" && !env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
   const requestedIds = parseLibraryRecordIdsParam(url.searchParams.get("ids"));
   const needsProfile = ["1", "true", "yes"].includes(String(url.searchParams.get("needs_profile") || "").trim().toLowerCase())
@@ -3469,7 +3469,8 @@ export async function listAssetLibrary(request, env, url, authorization) {
           read_source: "supabase",
         };
       } catch (error) {
-        console.warn("supabase asset library list failed; falling back to Airtable", error);
+        console.error("supabase asset library list failed; refusing legacy Airtable fallback", error);
+        throw new HttpError(503, "Supabase Asset Manager is temporarily unavailable. No Airtable fallback was used.");
       }
     }
     const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions);
