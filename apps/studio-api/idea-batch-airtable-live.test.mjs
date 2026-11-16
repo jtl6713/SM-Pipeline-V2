@@ -6,14 +6,13 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test("Idea Batches stay on Airtable under Supabase write source", async () => {
+test("Idea Batches commit to Supabase and do not reopen Airtable", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  const ideas = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
-  assert.match(worker, /function studioAirtableArchiveStaysLive\(tableId\)/);
-  assert.match(worker, /tblpCKSqcTpDtyst3/);
-  assert.match(worker, /method === "GET"\s*&& !studioAirtableArchiveStaysLive\(tableId\)/);
-  assert.match(worker, /method !== "GET"\s*&& studioWriteSource\(env\) === "supabase"\s*&& !studioAirtableArchiveStaysLive\(tableId\)/);
-  assert.match(worker, /0\.10\.976-fb-reel-stage-story-park/);
-  assert.match(ideas, /async function studioMirrorGeneratedIdeas/);
-  assert.match(ideas, /await studioMirrorGeneratedIdeas\(env, linkedRecordIds\(f\(record, "Idea Candidates"\)\)\)/);
+  const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.doesNotMatch(worker, /studioAirtableArchiveStaysLive/);
+  assert.doesNotMatch(worker, /airtableLiveRecord/);
+  assert.match(worker, /0\.10\.977-idea-batches-supabase/);
+  assert.match(reads, /table === "tblpCKSqcTpDtyst3" \|\| table === "Idea Batches"\) return "idea_batch"/);
+  assert.match(reads, /commitIdeaBatchRecords/);
+  assert.match(reads, /listOpenSupabaseIdeaBatches/);
 });
