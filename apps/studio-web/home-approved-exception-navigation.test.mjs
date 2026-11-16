@@ -36,8 +36,8 @@ test("Do not show published or not finally approved outputs", () => {
 });
 
 test("Home city-specific counts link to output-specific Pipeline filters", () => {
-  assert.match(overview, /actionCount\(isTotal \? null : row, "approved_past_due"/);
-  assert.match(overview, /actionCount\(isTotal \? null : row, "approved_missing_date"/);
+  assert.match(overview, /actionCount\(totalRow \? null : r, "approved_past_due"/);
+  assert.match(overview, /actionCount\(totalRow \? null : r, "approved_missing_date"/);
   assert.match(overview, /window\.studioOpenPipelineFilter\(view, \{ profileId: profileId \|\| "" \}\)/);
   assert.match(app, /select\.dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\)/);
   assert.match(app, /showStudioPage\("outputs", \{ pipelineFilter:/);
