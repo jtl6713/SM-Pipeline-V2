@@ -37,6 +37,13 @@ test("timed-script responses stamp Candidate_Title onto production_request.idea_
   assert.match(route, /production_request: mapProductionRequest\(savedRequest, reusedTitle\)/);
 });
 
+test("timed-script notes keep Media Asset rec ids, not item4 hex asset ids", () => {
+  assert.match(route, /Keep Airtable Media Asset ids on the timed-script/);
+  assert.match(route, /matched\?\.media_asset_record_id/);
+  assert.match(route, /\^rec\[A-Za-z0-9\]\+/);
+  assert.doesNotMatch(route, /if \(matched\?\.id\) segment\.asset_id = String\(matched\.id\)/);
+});
+
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {
   assert.match(route, /const requireVoiceoverTimeline = body\.create_voiceover_timeline === true/);
   assert.match(route, /convertPromotedSilent/);

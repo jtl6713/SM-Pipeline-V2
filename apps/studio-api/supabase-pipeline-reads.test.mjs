@@ -950,7 +950,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1056,7 +1056,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1594,6 +1594,105 @@ test("phase 6 production request write-through upserts identity fields without o
       request_status: "Ready",
       requested_title: "Pier lights",
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 production request write-through persists master assets and org auth bag", async () => {
+  const { airtableShapedProductionRequestFromSupabase } = await import("./supabase-pipeline-reads.mjs");
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    calls.push({ url: href, method: init?.method || "GET", body: init?.body || "" });
+    if (href.includes("organizations?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "org-uuid-1", airtable_record_id: "recOrg00000000001" }]);
+        },
+      };
+    }
+    if (href.includes("brands?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "brand-uuid-1", airtable_record_id: "recBrand000000001" }]);
+        },
+      };
+    }
+    if (href.includes("idea_candidates?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "idea-uuid-1", airtable_record_id: "recIdea0000000001" }]);
+        },
+      };
+    }
+    if (href.includes("select=publish_status")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ publish_status: { Active: true } }]);
+        },
+      };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const assets = [{
+      id: "assethex000000001",
+      order: 1,
+      name: "Bow Bridge 2",
+      media_asset_record_id: "recMedia000000001",
+      google_drive_file_id: "drive1",
+      source: "idea_photo_wait",
+    }];
+    const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
+      id: "recRequestAssets1",
+      fields: {
+        Production_Request_ID: "PR-TEST-ASSETS",
+        Request_Status: "Ready",
+        Organization: ["recOrg00000000001"],
+        Brand: ["recBrand000000001"],
+        Idea_Candidate: ["recIdea0000000001"],
+        Studio_Master_Asset_Status: "Ready",
+        Studio_Master_Asset_Count: 1,
+        Studio_Master_Assets_JSON: JSON.stringify(assets),
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, "upsert");
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("production_requests"));
+    assert.ok(post);
+    const rows = JSON.parse(post.body);
+    assert.equal(rows[0].organization_id, "org-uuid-1");
+    assert.equal(rows[0].brand_id, "brand-uuid-1");
+    assert.equal(rows[0].idea_candidate_id, "idea-uuid-1");
+    assert.equal(rows[0].master_asset_status, "Ready");
+    assert.deepEqual(rows[0].master_assets, assets);
+    assert.deepEqual(rows[0].publish_status.Organization, ["recOrg00000000001"]);
+    assert.deepEqual(rows[0].publish_status.Brand, ["recBrand000000001"]);
+    assert.equal(rows[0].publish_status.idea_candidate_airtable_id, "recIdea0000000001");
+    assert.equal(rows[0].publish_status.Active, true);
+
+    const shaped = airtableShapedProductionRequestFromSupabase({
+      airtable_record_id: "recRequestAssets1",
+      production_request_id: "PR-TEST-ASSETS",
+      request_status: "Ready",
+      master_asset_status: "Ready",
+      master_assets: assets,
+      publish_status: rows[0].publish_status,
+      organizations: { airtable_record_id: "recOrg00000000001" },
+      brands: { airtable_record_id: "recBrand000000001" },
+      idea_candidates: { airtable_record_id: "recIdea0000000001" },
+    });
+    assert.deepEqual(shaped.fields.Organization, ["recOrg00000000001"]);
+    assert.deepEqual(shaped.fields.Brand, ["recBrand000000001"]);
+    assert.deepEqual(shaped.fields.Idea_Candidate, ["recIdea0000000001"]);
+    assert.equal(shaped.fields.Studio_Master_Asset_Status, "Ready");
+    assert.equal(JSON.parse(shaped.fields.Studio_Master_Assets_JSON)[0].media_asset_record_id, "recMedia000000001");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2818,7 +2917,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   const worker = readStudioWorkerSource();
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3140,7 +3239,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
   const worker = readStudioWorkerSource();
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3766,7 +3865,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
 });
 
 test("sideTableKind recognizes Platform Outputs and Content Items table names", async () => {
@@ -3794,7 +3893,7 @@ test("Insights Learned settings SoR under STUDIO_WRITE_SOURCE=supabase", async (
   assert.match(fn, /Airtable archive frozen/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
 });
 
 test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", async () => {
@@ -3813,7 +3912,7 @@ test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", as
   assert.match(fn, /Airtable archive frozen/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
 });
 
 
@@ -3830,7 +3929,7 @@ test("studioSettingsByName SoR miss skips Airtable archive", async () => {
   assert.match(fn, /SoR miss: do not GET the frozen Airtable settings archive/);
 
 
-  assert.match(worker, /0\.10\.988-idea-title-carryover/);
+  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
 });
 
 test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {
