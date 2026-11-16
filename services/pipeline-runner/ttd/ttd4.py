@@ -21,7 +21,7 @@ from ttd.constants import (
     STATUS_PUBLISHED,
 )
 from ttd.eligibility import ttd4_form_eligibility_reason
-from ttd.package import form_html, page_html, submit_action_url, tiktok_photo_sound_required
+from ttd.package import completion_url, form_html, page_html, submit_action_url, tiktok_photo_sound_required
 
 
 def process_request(
@@ -87,7 +87,12 @@ def process_request(
             )
             result["http_status"] = 400
             return {"processed": False, "reason": reason, **result}
-        action_url = submit_action_url(form_url or field_str(output, "TikTok_Manual_Completion_URL"))
+        # The emailed token was just validated. NEVER reuse a token from the
+        # mutable Supabase bag for the form action; a concurrent TTD2 poll can
+        # restore a stale URL even while this valid emailed link is open.
+        stored_base = field_str(output, "TikTok_Manual_Completion_URL") or str(form_url or "")
+        base = stored_base.split("?", 1)[0]
+        action_url = submit_action_url(completion_url(base, record_id, str(token or "").strip()))
         result["html"] = form_html(output, action_url=action_url)
         result["http_status"] = 200
         return {"processed": True, **result}
