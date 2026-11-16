@@ -866,19 +866,21 @@ export function airtableShapedOutputFromSupabase(row) {
       Do_Not_Publish: Boolean(row.do_not_publish),
       Test_Run_ID: row.test_run_id || null,
       Output_Title: row.output_title,
-      Output_Caption: row.output_caption,
-      Output_Hashtags: row.output_hashtags,
-      Thumbnail_URL: row.thumbnail_url,
-      Final_File_URL: row.final_file_url,
-      Publish_Asset_URL: row.publish_asset_url,
-      Studio_Preview_URL: row.studio_preview_url,
+      // Undefined (column not selected) must not wipe package evidence from the
+      // error_messages bag — that zeroed Home Awaiting Approval after #2030.
+      ...(row.output_caption !== undefined ? { Output_Caption: row.output_caption } : {}),
+      ...(row.output_hashtags !== undefined ? { Output_Hashtags: row.output_hashtags } : {}),
+      ...(row.thumbnail_url !== undefined ? { Thumbnail_URL: row.thumbnail_url } : {}),
+      ...(row.final_file_url !== undefined ? { Final_File_URL: row.final_file_url } : {}),
+      ...(row.publish_asset_url !== undefined ? { Publish_Asset_URL: row.publish_asset_url } : {}),
+      ...(row.studio_preview_url !== undefined ? { Studio_Preview_URL: row.studio_preview_url } : {}),
       Platform_Post_URL: row.platform_post_url,
       Scheduled_Post_Date: row.scheduled_post_date,
       Studio_Scheduled_At: row.studio_scheduled_at,
       YouTube_Scheduled_Publish_At: row.youtube_scheduled_publish_at,
       Published_At: row.published_at,
       Remotion_Job_ID: row.remotion_job_id,
-      Selected_Clip_Count: row.selected_clip_count,
+      ...(row.selected_clip_count !== undefined ? { Selected_Clip_Count: row.selected_clip_count } : {}),
       Content_Item: contentAirtableId ? [contentAirtableId] : (Array.isArray(bag.Content_Item) ? bag.Content_Item : []),
       Content_Profile: row.content_profile_airtable_id
         ? [row.content_profile_airtable_id]
@@ -1682,8 +1684,11 @@ const OUTPUT_SELECT = [
   "content_profiles(airtable_record_id)",
 ].join(",");
 
-// Home counts do not need captions, hashtags, or content-item joins. Those
-// columns made every overview page too large to finish inside the 26s budget.
+// Home omits hashtags and content-item joins (those blew the 26s overview
+// budget). Package-evidence scalars MUST stay: Awaiting Approval uses the same
+// Factory Needs eyes gate (caption + CDN final/preview/cover + selected count).
+// Omitting them made every Ready for Review row fail formalFactoryApprovalReady
+// after #2030, so Overview showed 0 while Factory Needs eyes still showed 14.
 const OVERVIEW_OUTPUT_SELECT = [
   "airtable_record_id",
   "output_number",
@@ -1701,6 +1706,11 @@ const OVERVIEW_OUTPUT_SELECT = [
   "do_not_publish",
   "test_run_id",
   "output_title",
+  "output_caption",
+  "thumbnail_url",
+  "final_file_url",
+  "studio_preview_url",
+  "selected_clip_count",
   "platform_post_url",
   "scheduled_post_date",
   "studio_scheduled_at",

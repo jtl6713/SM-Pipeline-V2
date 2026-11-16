@@ -47,3 +47,20 @@ test("overview select includes typed tiktok_draft_status for Manual Action", () 
     /studioWriteSource\(env\) === "supabase"\) return rows/,
   );
 });
+
+test("overview select includes package evidence for Awaiting Approval = Needs eyes", () => {
+  const reads = readFileSync(join(root, "supabase-pipeline-reads.mjs"), "utf8");
+  const start = reads.indexOf("const OVERVIEW_OUTPUT_SELECT = [");
+  const end = reads.indexOf("].join(\",\");", start);
+  assert.ok(start > 0 && end > start);
+  const select = reads.slice(start, end);
+  for (const field of [
+    "output_caption",
+    "thumbnail_url",
+    "final_file_url",
+    "studio_preview_url",
+    "selected_clip_count",
+  ]) {
+    assert.match(select, new RegExp(`"${field}"`));
+  }
+});
