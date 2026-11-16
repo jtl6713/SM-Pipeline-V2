@@ -636,6 +636,7 @@ import {
   AUTONOMOUS_OPEN_IDEAS_FORMULA,
   TIKTOK_COMPLETE_ERRORS,
   YOUTUBE_COMPLETE_ERRORS,
+  airtableLiveRecord,
 } from "./worker.js";
 import {
   resolveStudioCronAuthorization,
@@ -649,7 +650,6 @@ import {
   airtableBatchUpdate,
   listRecords,
   listRecordsPage,
-  airtableLiveRecord,
   f,
   studioOutputIsNativePhoto,
   studioYoutubePublicSourceUrl,
