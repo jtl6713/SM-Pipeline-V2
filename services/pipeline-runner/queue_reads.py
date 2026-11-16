@@ -46,6 +46,8 @@ _PAYLOAD_FIELDS = {
     "target_drive_folder_id": "Target_Drive_Folder_ID",
     "target_file_name": "Target_File_Name",
     "variant_style": "Variant_Style",
+    "drive_file_id": "Drive_File_ID",
+    "drive_url": "Drive_URL",
     "preview_status": "Preview_Status",
     "preview_r2_key": "Preview_R2_Key",
     "preview_url": "Preview_URL",

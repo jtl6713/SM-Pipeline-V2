@@ -608,11 +608,21 @@ def _queue_row(record: dict) -> dict:
         ("Asset_Kind", "asset_kind"),
         ("Source_Asset_ID", "source_asset_id"),
         ("Source_Name", "source_name"),
+        ("Source_MIME_Type", "source_mime_type"),
+        ("Source_Extension", "source_extension"),
         ("Source_Drive_File_ID", "source_drive_file_id"),
         ("Source_Media_Asset", "source_media_asset_id"),
         ("Generated_Media_Asset", "generated_media_asset_id"),
         ("Aspect_Ratio", "aspect_ratio"),
+        ("Target_Drive_Folder_ID", "target_drive_folder_id"),
+        ("Target_File_Name", "target_file_name"),
+        ("Variant_Style", "variant_style"),
+        ("Drive_File_ID", "drive_file_id"),
+        ("Drive_URL", "drive_url"),
+        ("Media_Asset_Record_ID", "media_asset_record_id"),
         ("Preview_Status", "preview_status"),
+        ("Preview_R2_Key", "preview_r2_key"),
+        ("Preview_URL", "preview_url"),
         ("Test_Run_ID", "test_run_id"),
     ):
         if airtable_key not in fields:
@@ -622,6 +632,13 @@ def _queue_row(record: dict) -> dict:
             continue
         if value:
             payload[column] = value
+    for airtable_key, column in (("Width", "width"), ("Height", "height"), ("Source_Size_Bytes", "source_size_bytes"), ("Source_Order", "source_order")):
+        if airtable_key not in fields or fields.get(airtable_key) in (None, ""):
+            continue
+        try:
+            payload[column] = int(fields.get(airtable_key))
+        except (TypeError, ValueError):
+            pass
     if "Target_Production_Request_Outputs" in fields:
         payload["target_production_request_output_ids"] = _queue_target_ids(
             fields.get("Target_Production_Request_Outputs")
@@ -629,6 +646,26 @@ def _queue_row(record: dict) -> dict:
     if payload:
         row["payload"] = payload
     return row
+
+
+def _merge_queue_payload(settings: dict, record_id: str, patch_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Partial queue updates must not wipe densified Phase 6 payload keys."""
+    if not patch_payload:
+        return None
+    prior: dict[str, Any] = {}
+    try:
+        existing = _rest(
+            settings,
+            f"studio_media_transfer_queue?airtable_record_id=eq.{record_id}&select=payload&limit=1",
+            "GET",
+            prefer="return=representation",
+        ) or []
+        row0 = existing[0] if isinstance(existing, list) and existing else None
+        if isinstance(row0, dict) and isinstance(row0.get("payload"), dict):
+            prior = dict(row0["payload"])
+    except Exception as error:
+        logger.warning("supabase queue payload merge read failed for %s: %s", record_id, error)
+    return {**prior, **patch_payload}
 
 
 def _mirror_queue_targets(settings: dict, record: dict) -> None:
@@ -691,6 +728,10 @@ def _mirror_queue(settings: dict, record: dict) -> None:
     row = _queue_row(record)
     if not row or not record.get("id"):
         return
+    if isinstance(row.get("payload"), dict):
+        merged = _merge_queue_payload(settings, str(record["id"]), row["payload"])
+        if merged is not None:
+            row["payload"] = merged
     _rest(
         settings,
         "studio_media_transfer_queue?on_conflict=airtable_record_id",
