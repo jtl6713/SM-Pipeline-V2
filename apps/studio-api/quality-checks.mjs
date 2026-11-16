@@ -30,6 +30,7 @@ export const QUALITY_HEALS = Object.freeze([
   "promote_rendered_ready_for_review",
   "return_phantom_rerender_to_review",
   "release_autonomous_revision_lock",
+  "delete_promoted_orphan_ideas",
   "extend_last_clip_requeue_r4",
   "ticket_only",
   "resume_factory_batch",
@@ -179,6 +180,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "autonomous_revision_lock",
     actor: "worker_heal",
     heal: "release_autonomous_revision_lock",
+  }),
+  check({
+    id: "promoted_orphan_idea",
+    title: "Check for Promoted ideas with a blank Promoted_Content_Record_ID and no Content Item (false In production)",
+    lane: "service",
+    kind: "promoted_orphan_idea",
+    actor: "worker_heal",
+    heal: "delete_promoted_orphan_ideas",
   }),
   check({
     id: "autonomous_stalled",

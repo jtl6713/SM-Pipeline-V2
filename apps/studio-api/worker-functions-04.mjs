@@ -133,10 +133,17 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  supabaseRest,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
+import {
+  classifyPromotedOrphanIdea,
+  isPromotedOrphanIdea,
+  PROMOTED_ORPHAN_HEAL_LIMIT,
+  PROMOTED_ORPHAN_MIN_AGE_MS,
+} from "./promoted-orphan-ideas.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
@@ -10227,6 +10234,15 @@ export async function gatherStudioDeskInventory(env) {
     const locked = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, lockedId).catch(() => null);
     push(classifyAutonomousRevisionLock(lastRun, f(locked, "Production_Notes")));
   }
+  scanned("promoted_orphan_idea");
+  const promotedOrphans = await listPromotedOrphanIdeas(env, {
+    limit: 24,
+    minAgeMs: 0,
+    nowMs,
+  }).catch(() => []);
+  for (const row of promotedOrphans || []) {
+    push(classifyPromotedOrphanIdea(row, { nowMs }));
+  }
   scanned("autonomous_stalled", "autonomous_produce_gap", "az_stalled");
   for (const record of [...(autonomousRows || []), ...(azRows || [])]) {
     const job = parseStudioProductionJob(record) || {};
@@ -15297,6 +15313,59 @@ export async function studioHealAutonomousRevisionLock(env) {
   return { healed: 1, fingerprint: finding.fingerprint, record_id: requestId };
 }
 /*__STUDIO_WORKER_END:studioHealAutonomousRevisionLock__*/
+
+/**
+ * Delete Promoted Idea Candidates that never got a Content Item id.
+ * Daily heavy :00 — orphans do not need a 5-minute tick.
+ */
+export async function listPromotedOrphanIdeas(env, {
+  limit = PROMOTED_ORPHAN_HEAL_LIMIT,
+  minAgeMs = PROMOTED_ORPHAN_MIN_AGE_MS,
+  nowMs = Date.now(),
+} = {}) {
+  if (!studioSupabaseConfigured(env)) return [];
+  const cap = Math.max(1, Math.min(200, Number(limit) || PROMOTED_ORPHAN_HEAL_LIMIT));
+  const rows = await supabaseRest(
+    env,
+    "idea_candidates?status=eq.Promoted"
+      + "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)"
+      + "&select=airtable_record_id,candidate_title,status,payload,created_at"
+      + `&order=created_at.asc.nullslast&limit=${cap}`,
+  ).catch(() => []);
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => isPromotedOrphanIdea(row, { nowMs, minAgeMs }));
+}
+/*__STUDIO_WORKER_END:listPromotedOrphanIdeas__*/
+
+export async function studioHealPromotedOrphanIdeas(env, {
+  limit = PROMOTED_ORPHAN_HEAL_LIMIT,
+  minAgeMs = PROMOTED_ORPHAN_MIN_AGE_MS,
+  nowMs = Date.now(),
+} = {}) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) {
+    return { healed: 0, skipped: "supabase_write_required" };
+  }
+  const orphans = await listPromotedOrphanIdeas(env, { limit, minAgeMs, nowMs });
+  const deleted = [];
+  for (const row of orphans) {
+    const id = String(row.airtable_record_id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) continue;
+    try {
+      await supabaseRest(env, `idea_candidates?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" },
+      });
+      deleted.push(id);
+    } catch (error) {
+      console.warn("promoted orphan idea delete failed", id, error);
+    }
+  }
+  if (deleted.length) {
+    console.info("promoted orphan ideas deleted", JSON.stringify({ count: deleted.length, ids: deleted.slice(0, 20) }));
+  }
+  return { healed: deleted.length, deleted };
+}
+/*__STUDIO_WORKER_END:studioHealPromotedOrphanIdeas__*/
 
 export async function releaseAutonomousRevisionLock(env, chicago, { productionRequestId = null, ideaId = null } = {}) {
   return studioSaveAutonomousLastRun(env, autonomousRevisionLockReset({
