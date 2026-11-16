@@ -1395,7 +1395,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.989-phase6-pr-photo-load",
+          version: "0.10.990-phase6-plan-mapping",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -5657,6 +5657,18 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     && studioWriteSource(env) === "supabase"
   ) {
     const tableKind = studioAirtableEgressTableKind(env, tableId);
+    // Phase 6 request/media/queue must not soft-echo a missed Supabase commit.
+    // Echoing empty Platform Variant creates made Prepare flip Preparing → None.
+    if (phase6TableKind(env, tableId)) {
+      console.warn("supabase Phase 6 mutation miss; refusing soft echo", {
+        table_kind: tableKind,
+        method,
+      });
+      throw new HttpError(
+        503,
+        `Studio could not save ${tableKind || "Phase 6"} changes. Try again in a moment.`
+      );
+    }
     console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
       table_kind: tableKind,
       method,
@@ -6271,6 +6283,7 @@ const ITEM4_FBS1_EXPECTED_WEBHOOK_ID = 2639647;
 
 /*__STUDIO_WORKER_EXTRACT:item4EnsureFacebookSlideshowVoiceoverPayload__*/
 /*__STUDIO_WORKER_EXTRACT:item4DynamicRationale__*/
+/*__STUDIO_WORKER_EXTRACT:item4FallbackAspectRatio__*/
 /*__STUDIO_WORKER_EXTRACT:item4MappingIndex__*/
 /*__STUDIO_WORKER_EXTRACT:item4PhotoCountKind__*/
 /*__STUDIO_WORKER_EXTRACT:item4ParseEzOrigin__*/

@@ -950,7 +950,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -1056,7 +1056,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -2917,7 +2917,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
   const worker = readStudioWorkerSource();
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
   assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
@@ -3239,7 +3239,7 @@ test("studioSideTableRead serves Output and Content GETs when the row exists", a
   const worker = readStudioWorkerSource();
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
   const upsert = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(upsert, /studioUpsertSettingOnSupabase\(env, name, value, notes\)/);
   const side = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
@@ -3865,7 +3865,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
 });
 
 test("sideTableKind recognizes Platform Outputs and Content Items table names", async () => {
@@ -3893,7 +3893,7 @@ test("Insights Learned settings SoR under STUDIO_WRITE_SOURCE=supabase", async (
   assert.match(fn, /Airtable archive frozen/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
 });
 
 test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", async () => {
@@ -3912,7 +3912,7 @@ test("Insights Observations settings SoR under STUDIO_WRITE_SOURCE=supabase", as
   assert.match(fn, /Airtable archive frozen/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
 });
 
 
@@ -3929,7 +3929,7 @@ test("studioSettingsByName SoR miss skips Airtable archive", async () => {
   assert.match(fn, /SoR miss: do not GET the frozen Airtable settings archive/);
 
 
-  assert.match(worker, /0\.10\.989-phase6-pr-photo-load/);
+  assert.match(worker, /0\.10\.990-phase6-plan-mapping/);
 });
 
 test("P1 Content view and T1/continuation Output formulas prefer Supabase", async () => {
@@ -4943,6 +4943,52 @@ test("Autonomous idea-library harvest prefers paged Supabase asset library under
   assert.match(harvest, /AUTONOMOUS_LIBRARY_SCAN_CAP/);
   assert.match(harvest, /pageOffset = packed\.offset/);
   assert.match(harvest, /supabase autonomous library catalog failed; falling back to Airtable/);
+});
+
+test("Production Request Outputs POST commit via studioSideTableCommit under write SoR", async () => {
+  const { studioSideTableCommit } = await import("./supabase-pipeline-reads.mjs");
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (method === "POST" || method === "PATCH") {
+        bodies.push({ href, method, body: String(init?.body || "") });
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const created = await studioSideTableCommit(
+      env,
+      "Production Request Outputs",
+      "POST",
+      "",
+      JSON.stringify({
+        fields: {
+          Platform: "Instagram",
+          Output_Type: "Reel",
+          Aspect_Ratio: "9:16",
+          Enabled: true,
+          Production_Request: ["recEa6IAB5oBHvR2a"],
+        },
+      }),
+    );
+    assert.equal(created.ok, true);
+    assert.match(created.records[0].id, /^rec[A-Za-z0-9]{14}$/);
+    assert.equal(created.records[0].fields.Platform, "Instagram");
+    assert.equal(created.records[0].fields.Aspect_Ratio, "9:16");
+    assert.ok(bodies.some((entry) => entry.href.includes("production_request_outputs")));
+    assert.ok(bodies.some((entry) => entry.body.includes("recEa6IAB5oBHvR2a")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Quality Agent Recovery Ledger POST/PATCH commit via studioSideTableCommit under write SoR", async () => {

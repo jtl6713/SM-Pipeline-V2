@@ -2120,7 +2120,7 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
   authoritativeAssets = item4MergeAssetCrops(authoritativeAssets, cropsPayload);
 
   const outputRows = await outputRowsForProductionRequest(env, recordId);
-  await item4UpdateRequestState(env, recordId, {
+  const preparingRecord = await item4UpdateRequestState(env, recordId, {
     Studio_Variant_Status: "Preparing",
     Studio_Variant_Error: null,
     Studio_Item4_State: "Plan Ready",
@@ -2135,7 +2135,22 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
     plan,
     { forceRetry }
   );
-  let reconciled = await item4ReconcileVariants(env, recordId);
+  // Under write SoR, queue creates can soft-echo without persisting. Fail closed
+  // so Prepare never returns 202/None and the UI does not say "did not finish."
+  if (expected.length) {
+    const persisted = await item4VariantQueueRows(env, recordId);
+    const expectedIds = new Set(expected.map((row) => String(row?.transfer_id || "").trim()).filter(Boolean));
+    const scoped = (Array.isArray(persisted) ? persisted : []).filter((row) =>
+      expectedIds.has(String(f(row, "Transfer_ID") || "").trim())
+    );
+    if (!scoped.length) {
+      throw new HttpError(
+        503,
+        "Platform frame queue did not save. Wait a moment, then click Prepare again."
+      );
+    }
+  }
+  let reconciled = await item4ReconcileVariants(env, recordId, preparingRecord);
 
   // Prefer a short sync pulse, then finish in waitUntil/cron so Prepare returns
   // while crops continue instead of holding the HTTP request for the full budget.
