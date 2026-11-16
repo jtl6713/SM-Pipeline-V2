@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.970-home-three-section-dashboard";
+  const BUILD_ID = "item4-0.6.971-asset-fla-parallel-progress";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25214,6 +25214,7 @@ function timedScriptAssetLabel(asset, index) {
       for (const record of records) {
         if (String(record.record_type || "") === "platform_output") continue;
         patchLibraryClassificationCard(record);
+        updateLibraryBatchClassification(record);
         if (libraryClassificationInProgress(record.classification_status)) still += 1;
       }
       if (watchIds.length) {
@@ -25488,6 +25489,68 @@ function timedScriptAssetLabel(asset, index) {
    if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transferred${phase==="verifying"?"; confirmation pending":""}`);}
   }
 
+
+  // Upload and FLA classification progress are independent; never count a send as classified.
+  const libraryBatchClassification = { total: 0, saved: 0, statuses: new Map(), uploadFinished: false };
+  function renderLibraryBatchClassification() {
+    const state = libraryBatchClassification;
+    if (!state.total) return;
+    const statuses = [...state.statuses.values()];
+    const classified = statuses.filter((status) => status === "Classified").length;
+    const failed = statuses.filter((status) => status === "Classification Error").length;
+    const attention = statuses.filter((status) => status && !["Classified", "Classification Error", "Processing", "Queued"].includes(status)).length;
+    const working = statuses.filter((status) => status === "Processing" || status === "Queued").length;
+    const labelParts = [`${classified} of ${state.total} classified`];
+    if (working) labelParts.push(`${working} classifying`);
+    if (failed) labelParts.push(`${failed} failed`);
+    if (attention) labelParts.push(`${attention} needs attention`);
+    if (state.uploadFinished && state.saved < state.total) labelParts.push(`${state.total - state.saved} not uploaded`);
+    if (state.saved > state.statuses.size) labelParts.push(`${state.saved - state.statuses.size} awaiting status`);
+    const label = labelParts.join(" · ");
+    const meter = $("libraryUploadClassificationMeter");
+    if (meter) {
+      meter.max = state.total;
+      meter.value = classified;
+      meter.textContent = label;
+      meter.setAttribute("aria-valuetext", label);
+    }
+    const caption = $("libraryUploadClassificationFiles");
+    if (caption) caption.textContent = label;
+    const track = $("libraryClassificationProgress");
+    if (track) track.dataset.state = (failed || attention || (state.uploadFinished && state.saved < state.total))
+      ? "attention" : classified === state.total ? "complete" : "active";
+  }
+  function resetLibraryBatchClassification(total) {
+    libraryBatchClassification.total = Math.max(1, Math.floor(Number(total) || 1));
+    libraryBatchClassification.saved = 0;
+    libraryBatchClassification.statuses.clear();
+    libraryBatchClassification.uploadFinished = false;
+    renderLibraryBatchClassification();
+  }
+  function registerLibrarySavedClassification(result, savedCount) {
+    const state = libraryBatchClassification;
+    if (!state.total) return;
+    state.saved = Math.min(state.total, state.saved + Math.max(0, Math.floor(Number(savedCount) || 0)));
+    const records = Array.isArray(result?.records) ? result.records : [];
+    for (const id of collectLibraryClassifyIds(result)) {
+      const record = records.find((row) => row?.id === id);
+      const status = String(record?.classification_status || result?.classification_status || "Queued").trim();
+      if (!state.statuses.has(id) || status !== "Queued") state.statuses.set(id, status);
+    }
+    renderLibraryBatchClassification();
+  }
+  function updateLibraryBatchClassification(record) {
+    if (!record?.id || !libraryBatchClassification.statuses.has(record.id)) return;
+    const status = String(record.classification_status || "").trim();
+    if (!status) return;
+    libraryBatchClassification.statuses.set(record.id, status);
+    renderLibraryBatchClassification();
+  }
+  function finishLibraryBatchClassification() {
+    libraryBatchClassification.uploadFinished = true;
+    renderLibraryBatchClassification();
+  }
+
   let libraryOverlayOverridePending = null;
 
   function setLibraryOverlayOverridePanel(pending) {
@@ -25597,6 +25660,7 @@ function timedScriptAssetLabel(asset, index) {
     const overlayHeldFiles = [];
     const namedUploads = [];
     const uploadedClassifyIds = [];
+    resetLibraryBatchClassification(files.length);
     let reservedNames = null;
     let uploaded = 0;
     let completedFiles = 0;
@@ -25658,7 +25722,11 @@ function timedScriptAssetLabel(asset, index) {
               if (record?.name) namedUploads.push(record.name);
             }
           }
-          uploadedClassifyIds.push(...collectLibraryClassifyIds(result));
+          const classifyIds = collectLibraryClassifyIds(result);
+          uploadedClassifyIds.push(...classifyIds);
+          registerLibrarySavedClassification(result, count);
+          // Start polling this record while later files continue to transfer.
+          if (classifyIds.length) watchLibraryClassification(classifyIds);
         } catch (error) {
           completedFiles += chunk.length;
           const raw = String(error?.message || "upload failed");
@@ -25671,6 +25739,7 @@ function timedScriptAssetLabel(asset, index) {
         }
       }
       inputs.forEach((input) => { input.value = ""; });
+      finishLibraryBatchClassification();
       const errorSummary = summarizeLibraryUploadErrors(errors, { uploaded, total: files.length });
       renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: errors.length ? errorSummary : "" });
       if (zone) delete zone.dataset.busy;
@@ -25696,8 +25765,8 @@ function timedScriptAssetLabel(asset, index) {
         setLibraryUploadMessage(errorSummary || "Could not add those assets.", "error-text");
       }
       if (uploadedClassifyIds.length) {
-        watchLibraryClassification(uploadedClassifyIds);
-        markLibraryCardsClassifying(uploadedClassifyIds);
+        // Already being polled: do not reset completed rows to Classifying.
+        if (libraryClassifyWatch.ids.size) markLibraryCardsClassifying([...libraryClassifyWatch.ids]);
       } else if (uploaded && !errors.length) {
         setLibraryUploadMessage(namedSummary
           || (uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`), "success");
