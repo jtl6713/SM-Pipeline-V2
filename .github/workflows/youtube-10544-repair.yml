@@ -1,0 +1,18 @@
+name: YouTube 10544 incident inspection
+on:
+  push:
+    branches: [repair/youtube-10544]
+    paths: ['repair/youtube-10544/**', '.github/workflows/youtube-10544-repair.yml']
+permissions: {contents: read}
+concurrency: {group: youtube-10544-incident, cancel-in-progress: false}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - run: python repair/youtube-10544/ops.py
