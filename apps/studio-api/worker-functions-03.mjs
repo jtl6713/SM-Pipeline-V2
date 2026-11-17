@@ -10777,9 +10777,22 @@ export async function studioContinuationInspectOutput(env, po, cache) {
     context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
   );
   let hasClips = Boolean(sourcePackage?.clips?.length);
-  const matchesCurrentMasterSelection = item4CurrentSourceMatchesSavedSelection(
-    sourcePackage, f(po, "Selected_Assets_JSON")
-  );
+  const matchesCurrentMasterSelection = (() => {
+    if (sourcePackage?.status !== "Ready") return false;
+    const current = item4ParseJson(sourcePackage.selected_assets_json, null);
+    const saved = item4ParseJson(f(po, "Selected_Assets_JSON"), null);
+    const currentClips = Array.isArray(current?.selected_clips) ? current.selected_clips : [];
+    const savedClips = Array.isArray(saved?.selected_clips) ? saved.selected_clips : [];
+    if (!currentClips.length || currentClips.length !== savedClips.length) return false;
+    return currentClips.every((clip, index) => {
+      const prior = savedClips[index];
+      const sourceId = String(clip?.source_asset_id || "").trim();
+      return Boolean(sourceId)
+        && sourceId === String(prior?.source_asset_id || "").trim()
+        && String(clip?.media_asset_record_id || "").trim() === String(prior?.media_asset_record_id || "").trim()
+        && String(clip?.url || clip?.src || "").trim() === String(prior?.url || prior?.src || "").trim();
+    });
+  })();
   const alreadyExact = matchesCurrentMasterSelection
     && /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
     && String(f(po, "Asset_Selection_Status") || "") === "Selected"
