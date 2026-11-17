@@ -39,6 +39,7 @@ import {
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
+  classifyUnclassifiedRenderedReadyForReview,
   classifyPhantomRerender,
   PHANTOM_RERENDER_STALE_MS,
   classifyTesterNightly,
@@ -1105,6 +1106,49 @@ test("awaiting_approval_stale_rfr catches Approved + Ready to Schedule stuck at 
     publish_status: "Ready to Schedule",
   }), null);
   assert.ok(CLASSIFIER_KINDS.includes("awaiting_approval_stale_rfr"));
+});
+
+test("approved Chicago Stories leave In Production only with verified final media", () => {
+  const base = {
+    id: "recChicagoStory",
+    platform: "Instagram",
+    studio_output_type: "Story",
+    output_status: "In Production",
+    render_status: "Ready for Render",
+    review_status: "Approved",
+    publish_status: "Ready to Schedule",
+    final_file_url: "https://media.example/verified.mp4",
+    do_not_publish: false,
+  };
+  assert.equal(classifyAwaitingApprovalStaleRfr(base)?.kind, "awaiting_approval_stale_rfr");
+  assert.equal(classifyAwaitingApprovalStaleRfr({ ...base, final_file_url: null }), null);
+  assert.equal(classifyAwaitingApprovalStaleRfr({ ...base, do_not_publish: true }), null);
+  assert.equal(classifyAwaitingApprovalStaleRfr({ ...base, review_status: "Changes Requested" }), null);
+  assert.equal(classifyAwaitingApprovalStaleRfr({ ...base, publish_status: "Not Ready" }), null);
+});
+
+test("rendered Chicago legacy records with blank status go to review, never automatic approval", () => {
+  const base = {
+    id: "recChicagoRendered",
+    output_status: null, render_status: "Rendered", review_status: null,
+    publish_status: null, final_file_url: "https://media.example/finished.mp4",
+    thumbnail_url: "https://media.example/cover.jpg",
+    output_caption: "A verified Chicago caption",
+    do_not_publish: false, scheduled_post_date: null, studio_scheduled_at: null,
+  };
+  const finding = classifyUnclassifiedRenderedReadyForReview(base);
+  assert.equal(finding.kind, "unclassified_rendered_ready");
+  assert.match(finding.diagnosis, /Ready for Review/);
+  for (const invalid of [
+    { final_file_url: "" }, { thumbnail_url: "" }, { output_caption: "" },
+    { do_not_publish: true }, { review_status: "Changes Requested" },
+    { review_status: "Approved" }, { scheduled_post_date: "2026-11-30T11:30:00Z" },
+    { studio_scheduled_at: "2026-11-30T11:30:00Z" }, { output_status: "In Production" },
+    { publish_status: "Publishing" }, { render_status: "Ready for Render" },
+  ]) {
+    assert.equal(classifyUnclassifiedRenderedReadyForReview({ ...base, ...invalid }), null, JSON.stringify(invalid));
+  }
+  assert.ok(CLASSIFIER_KINDS.includes("unclassified_rendered_ready"));
 });
 
 test("phantom_rerender returns finished native stills and stuck stories to review", () => {
