@@ -1366,3 +1366,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-17: Deploy Worker 0.10.1000-production-supabase-complete-rollups — PR #2117. Hydrate exact missing Platform Output siblings from Supabase before mapping Content lifecycle; fixes 19 known Miami Published ghost rows (Production 20 vs Home 0), preserves NYC seven source-integrity blockers, no writes or approvals. Verify exact Worker /health version and protected rollback gates.
 
 2026-11-17: Deploy Worker 0.10.1001-production-home-parity — merged PR #2119. Priority Supabase query for old/undated In Production output records (NYC Astoria 4), exact Home eligibility output counts for /api/content, fail closed on Supabase errors. Verify /health exact version and protected rollback/binding checks; no Airtable reads/writes.
+
+2026-11-17: Deploy Worker 0.10.1002-la-production-review-inventory. Include old/undated Ready for Review outputs in the Supabase Production priority inventory, then apply existing Home eligibility. Fix LA Home 2 / Production 0 variance without changing records, holds, approvals or publishing.

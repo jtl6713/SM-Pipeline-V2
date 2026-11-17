@@ -3728,7 +3728,9 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   // Older unfinished outputs can have no Output_ID and their parent may have
   // no Created_At (Astoria N-Line Soundscape: four outputs, old parent).
   // An explicit active-stage lane guarantees they are included regardless of
-  // age, while leaving the generic open/recent windows bounded.
+  // age, while leaving the generic open/recent windows bounded. Ready for
+  // Review is not proof of a complete review package: LA outputs can retain
+  // that status while awaiting render and still count as production on Home.
   const [newest, openOutputs, activeProductionOutputs] = await Promise.all([
     supabaseRest(
       env,
@@ -3744,7 +3746,7 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
     supabaseRest(
       env,
       `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false`
-        + `&output_status=in.(In%20Production,Ready%20for%20Render,Rendering,Rendered,Preparing%20Assets,Queued,Blocked,Changes%20Requested,Review%20Held)`
+        + `&output_status=in.(In%20Production,Ready%20for%20Render,Rendering,Rendered,Ready%20for%20Review,Preparing%20Assets,Queued,Blocked,Changes%20Requested,Review%20Held)`
         + `&select=${OUTPUT_SELECT}&order=updated_at.desc.nullslast&limit=500`,
     ),
   ]);
