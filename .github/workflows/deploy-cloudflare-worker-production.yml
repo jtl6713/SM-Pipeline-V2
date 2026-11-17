@@ -1085,6 +1085,25 @@ jobs:
             and .output_failures.verification_recovery.metrics_source=="airtable_quality_agent_recovery_ledger"
             and (.output_failures.verification_recovery.counts.recovered_automatically|type)=="number"' /tmp/failed-output-census.json >/dev/null || {
             echo "Failed-output census verification failed (HTTP $CENSUS_CODE)" >&2
+            # Only scalar status/count/type diagnostics: no output records,
+            # user content, secrets or API data. Do not weaken any gate.
+            jq -c '{
+              request_ok: .ok,
+              scope: .scope,
+              quality_only: .quality_only,
+              batch_monitor_status: .batch_monitor_status,
+              quality_status: .quality_status,
+              output_failures_status: .output_failures.status,
+              failure_count_type: (.output_failures.count | type),
+              items_type: (.output_failures.items | type),
+              items_count_match: ((.output_failures.count | type) == "number"
+                and (.output_failures.items | type) == "array"
+                and .output_failures.count == (.output_failures.items | length)),
+              recovery_status: .output_failures.verification_recovery.status,
+              recovery_source: .output_failures.verification_recovery.metrics_source,
+              recovered_count_type: (.output_failures.verification_recovery.counts.recovered_automatically | type),
+              past_due_status: .approved_past_due.status
+            }' /tmp/failed-output-census.json >&2 || true
             exit 1
           }
           echo "qa_durable_recovery_ledger=PASS"
