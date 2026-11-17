@@ -1,0 +1,156 @@
+name: Chicago Production Recovery 2086 (bounded, no publish)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-production-recovery-2086.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicago-production-recovery-2086
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test production request Supabase readback without external writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_supabase_request_production_roundtrip.py \
+            services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
+            services/pipeline-runner/tests/test_supabase_runner_reads.py \
+            services/pipeline-runner/tests/test_studio_produce_missing_parent_recovery.py
+
+      - name: Select existing authenticated Operations credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/recover-ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "https://ops.chicagoshining.com/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/recover-ops-catalog.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Existing Ops credential did not authenticate" >&2
+          exit 1
+
+      - name: Deploy corrected runner through approved Operations action
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          JOB=''
+          for attempt in $(seq 1 45); do
+            code=$(curl -sS --max-time 30 -o /tmp/recover-deploy.json -w '%{http_code}' -X POST "$BASE/api/run" \
+              -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data '{"action":"deploy","service":"pipeline-runner","confirm":true}' || true)
+            if [[ "$code" == "202" ]] && jq -e '.ok==true and .job.action=="deploy" and .job.service=="pipeline-runner"' /tmp/recover-deploy.json >/dev/null; then
+              JOB=$(jq -er '.job.id' /tmp/recover-deploy.json)
+              break
+            fi
+            if [[ "$code" != "409" ]]; then echo "Deploy initiation failed http=$code" >&2; exit 2; fi
+            sleep 5
+          done
+          test -n "$JOB"
+          echo "New controlled runner deployment job=$JOB"
+          for attempt in $(seq 1 120); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" "$BASE/api/jobs/$JOB" -o /tmp/recover-deploy-status.json
+            state=$(jq -r '.job.status // empty' /tmp/recover-deploy-status.json)
+            case "$state" in
+              ok)
+                jq -e '.job.action=="deploy" and .job.service=="pipeline-runner" and .job.exitCode==0' /tmp/recover-deploy-status.json >/dev/null
+                echo "corrected_runner_deploy=PASS"
+                exit 0 ;;
+              failed)
+                echo "corrected_runner_deploy=FAILED" >&2
+                exit 3 ;;
+            esac
+            sleep 5
+          done
+          echo "corrected_runner_deploy=TIMEOUT" >&2
+          exit 4
+
+      - name: Resume only existing Chicago promoted production requests (no publish)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/chicago-production-resume.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.service -ne "pipeline-runner" -or $health.studio_write_source -ne "supabase") { throw "runner_health_or_supabase_source_not_verified" }
+
+          $source = Join-Path (Get-Location) "Services\pipeline-runner\supabase_reads.py"
+          if (-not (Test-Path $source)) { throw "deployed_source_not_found" }
+          $readback = Get-Content -Raw $source
+          if (-not $readback.Contains('"Studio_Production_Job_JSON": "production_job"')) { throw "deployed_production_job_readback_fix_missing" }
+          if (-not $readback.Contains('"Studio_Master_Assets_JSON": "master_assets"')) { throw "deployed_production_plan_readback_fix_missing" }
+
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_auth_empty" }
+          $headers = @{"X-Pipeline-Secret" = $secret}
+          $records = @("recIH9qBVHQuoiVuA", "recuV9OoDo5YxZF2q")
+          foreach ($record in $records) {
+            $payload = @{production_request_record_id=$record; resume=$false} | ConvertTo-Json -Compress
+            $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-produce" -Method POST -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 45
+            if ($reply.ok -ne $true -or $reply.production_request_record_id -ne $record) { throw "exact_studio_produce_failed_$record" }
+            if ($reply.accepted -eq $false -and $reply.reason -eq "terminal") {
+              Write-Output ("chicago_produce_already_terminal=" + $record)
+              continue
+            }
+            if ($reply.accepted -ne $true -or -not $reply.job.job_id) { throw "exact_studio_produce_not_accepted_$record" }
+            Write-Output ("chicago_produce_started=" + $record + " job=" + $reply.job.job_id + " step=" + $reply.job.step + " already_running=" + $reply.already_running)
+          }
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/chicago-production-resume.json').write_text(json.dumps({
+              "command": Path('/tmp/chicago-production-resume.ps1').read_text(), "confirm": True
+          }))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/chicago-recover-job.json -w '%{http_code}' -X POST \
+            'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/chicago-production-resume.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then echo "ops_recovery_start_http=$code" >&2; exit 1; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/chicago-recover-job.json)
+          for attempt in $(seq 1 45); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/chicago-recover-status.json
+            state=$(jq -r '.job.status // empty' /tmp/chicago-recover-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/chicago-recover-status.json | grep -E '^chicago_produce_(started|already_terminal)='
+              echo "chicago_exact_resume=PASS"
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/chicago-recover-status.json | grep -E '(Exception|Error|deployed_|runner_|chicago_|not_found|missing)' | tail -20 >&2 || true
+              echo "chicago_exact_resume=FAILED" >&2
+              exit 2
+            fi
+            sleep 3
+          done
+          echo "chicago_exact_resume=TIMEOUT" >&2
+          exit 3
