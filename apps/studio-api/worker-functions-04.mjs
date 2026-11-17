@@ -24,10 +24,6 @@ import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs"
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { QA_HOME_FAILED_CANDIDATE_FORMULA, qaHomePastDueCandidateFormula, classifyQualityAgentHomeBuckets } from "./quality-agent-home-parity.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
-import {
-  compareHomeOverviewParity,
-  reconcileHomeOverviewWithAirtable,
-} from "./home-supabase-airtable-parity.mjs";
 import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
@@ -5518,8 +5514,13 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     }
   }
 
-  // Home only needs outstanding schedule/attention rows and unpromoted Ideas.
-  // The per-profile Airtable fallback below applies those filters before paging.
+  // Supabase is authoritative for Home. A transient Supabase failure must
+  // never silently read Airtable or publish an Airtable-derived snapshot.
+  if (studioHomeReadSource(env) === "supabase" && !usedSupabaseOutputs) {
+    throw new Error("Supabase Home output inventory unavailable; Airtable fallback disabled");
+  }
+
+  // Legacy Airtable fallback is available only when Home explicitly uses Airtable.
   let airtableIdeaRows = null;
   if (!usedSupabaseOutputs) {
     // Scan each profile independently and in parallel. Airtable request starts are
@@ -5564,9 +5565,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     outputRows = [...outputById.values()];
     airtableIdeaRows = [...ideaById.values()];
     readSource = "airtable";
-  } else if (forceIdeas && !supabaseIdeasUsable) {
-    // Supabase idea pack timed out or failed. Lean Airtable unpromoted scans
-    // recover Ideas without abandoning the Supabase output path.
+  } else if (forceIdeas && !supabaseIdeasUsable && studioHomeReadSource(env) !== "supabase") {
+    // Legacy Airtable-mode idea scan. Never enter this branch in Supabase mode.
+    // Supabase failures must instead fail closed.
     airtableIdeaRows = await listStudioOverviewUnpromotedIdeas(env, profileList, {
       airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan"
         ? "autonomous_refill_scan"
@@ -5574,17 +5575,13 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     });
   }
 
-  // Only Supabase-backed rows need the Airtable live-publish overlay. A direct
-  // Airtable force scan is already authoritative and should not spend another
-  // request pass rereading the same publication state.
-  let mappedAll = (outputRows || []).map((row) => mapOutput(row, null));
-  if (usedSupabaseOutputs) {
-    try {
-      mappedAll = await overlayLiveTikTokPublishRows(env, mappedAll);
-    } catch (error) {
-      console.warn("overview manual publish overlay failed", error);
-    }
+  if (usedSupabaseOutputs && missingIdeaCounts && !supabaseIdeasUsable) {
+    throw new Error("Supabase Home Ideas inventory incomplete; Airtable fallback disabled");
   }
+
+  // Supabase owns publication evidence and all Home display inventory. Do not
+  // overlay Airtable publication status on a Supabase-authoritative refresh.
+  const mappedAll = (outputRows || []).map((row) => mapOutput(row, null));
   const mappedById = new Map(mappedAll.filter((row) => row?.id).map((row) => [row.id, row]));
 
   if (airtableIdeaRows && commitIdeas) {
@@ -5943,6 +5940,11 @@ export function studioProfilesOverviewIdeasFresh(now = Date.now()) {
 /*__STUDIO_WORKER_END:studioProfilesOverviewIdeasFresh__*/
 
 export async function refreshStudioProfilesOverviewIdeas(env, authorization) {
+  if (studioHomeReadSource(env) === "supabase") {
+    // Rebuild the complete Home snapshot from Supabase; never run the former
+    // Airtable-only unpromoted Ideas background scan while Supabase is SoR.
+    return refreshStudioProfilesOverviewSnapshot(env, authorization);
+  }
   const cache = studioProfilesOverviewCache;
   if (cache.ideasInflight) return cache.ideasInflight;
   if (studioProfilesOverviewIdeasFresh()) return cache.rows || [];
@@ -6183,84 +6185,6 @@ function profilesOverviewRefreshFailureComponents(error) {
   return { outputs: "failed", ideas: "failed" };
 }
 
-async function runHomeOverviewAirtableParityAfterRefresh(env, {
-  operationId,
-  profiles,
-  supabaseRows,
-  baselineGeneration,
-  baselineSnapshotAt,
-}) {
-  let homeParity;
-  try {
-    const airtableRows = await raceStudioOverviewBudget(
-      buildStudioProfilesOverviewRows(env, profiles, {
-        forceIdeas: true,
-        commitIdeas: false,
-        forceAirtable: true,
-      }),
-      45_000,
-      "overview-force-airtable-parity",
-    );
-    validateStudioProfilesOverviewRows(airtableRows, profiles);
-    homeParity = compareHomeOverviewParity(airtableRows, supabaseRows);
-    if (homeParity.status === "mismatch") {
-      const reconciledRows = reconcileHomeOverviewWithAirtable(supabaseRows, airtableRows, homeParity);
-      const parityAt = Math.max(Date.now(), Number(baselineSnapshotAt || 0) + 1);
-      // Keep the same manual generation so concurrent exception-recovery /
-      // Home census audits do not see a mid-census generation rewrite.
-      const parityGeneration = String(baselineGeneration || "");
-      await writeStudioProfilesOverviewSnapshot(
-        env,
-        reconciledRows,
-        studioProfilesOverviewAuthKey(profiles),
-        {
-          at: parityAt,
-          generation: parityGeneration,
-          durableRequired: true,
-          preserveRowIdeas: true,
-          ideasAt: parityAt,
-          ideasSource: reconciledRows[0]?.ideas_source || "airtable",
-          readSource: reconciledRows[0]?.read_source || "supabase_reconciled_airtable",
-        },
-      );
-      await verifyStudioProfilesOverviewSnapshot(env, parityGeneration);
-      homeParity = {
-        ...homeParity,
-        reconciled: true,
-        snapshot_generation: parityGeneration,
-        snapshot_at: parityAt,
-        note: "Mismatched Home display columns (including calendar slots) were overwritten with Airtable values after the Supabase snapshot published.",
-      };
-      await patchProfilesOverviewRefreshState(env, operationId, {
-        snapshot_at: parityAt,
-        snapshot_generation: parityGeneration,
-        ideas_at: parityAt,
-        read_source: "supabase_reconciled_airtable",
-        home_parity: homeParity,
-      });
-    } else {
-      homeParity = { ...homeParity, reconciled: false };
-      await patchProfilesOverviewRefreshState(env, operationId, { home_parity: homeParity });
-    }
-  } catch (error) {
-    homeParity = {
-      status: "airtable_parity_incomplete",
-      reconciled: false,
-      error: String(error?.message || error || "Airtable parity rebuild failed").slice(0, 400),
-      note: "Supabase Home snapshot remains published; Airtable column comparison did not finish.",
-    };
-    await patchProfilesOverviewRefreshState(env, operationId, { home_parity: homeParity }).catch(() => null);
-    throw error;
-  }
-  console.info("profiles overview airtable parity finished", {
-    operation_id: operationId,
-    home_parity_status: homeParity?.status || "unknown",
-    home_parity_differences: homeParity?.differences?.length || 0,
-    reconciled: Boolean(homeParity?.reconciled),
-  });
-  return homeParity;
-}
-
 export async function runStudioProfilesOverviewForceRefresh(env, authorization, refreshState) {
   const operationId = String(refreshState?.operation_id || "");
   const startedMs = Date.now();
@@ -6298,12 +6222,10 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     const rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
 
-    // Publish the Supabase (or Airtable-fallback) snapshot first so the deploy
-    // canary and Home UI leave the 26s critical path. Airtable column parity
-    // runs after status=completed and may rewrite the snapshot if needed.
+    // Publish and verify one Supabase-authoritative snapshot. No Airtable
+    // parity rebuild is permitted to overwrite it after completion.
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
     const generation = `manual-${operationId}`;
-    const needsParity = studioHomeReadSource(env) === "supabase" && rows[0]?.read_source === "supabase";
     const snapshot = await writeStudioProfilesOverviewSnapshot(
       env,
       rows,
@@ -6334,13 +6256,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       duration_ms: durationMs,
       error: "",
       component_status: { outputs: "completed", ideas: "completed" },
-      home_parity: needsParity
-        ? {
-          status: "pending",
-          reconciled: false,
-          note: "Supabase Home snapshot published; Airtable column parity is running after the critical path.",
-        }
-        : null,
+      home_parity: null,
     });
     console.info("profiles overview force refresh completed", {
       operation_id: operationId,
@@ -6349,23 +6265,9 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       snapshot_generation: generation,
       profiles: rows.length,
       read_source: rows[0]?.read_source || "",
-      home_parity_status: needsParity ? "pending" : "skipped",
+      home_parity_status: "disabled_supabase_authoritative",
     });
 
-    if (needsParity) {
-      await runHomeOverviewAirtableParityAfterRefresh(env, {
-        operationId,
-        profiles,
-        supabaseRows: rows,
-        baselineGeneration: generation,
-        baselineSnapshotAt: snapshotAt,
-      }).catch((error) => {
-        console.warn("profiles overview airtable parity follow-up failed", {
-          operation_id: operationId,
-          error: error?.message || String(error || ""),
-        });
-      });
-    }
     return verified;
   } catch (error) {
     const durationMs = Date.now() - startedMs;
