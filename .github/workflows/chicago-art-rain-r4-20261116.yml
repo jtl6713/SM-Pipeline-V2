@@ -1,0 +1,102 @@
+name: Chicago Art Institute Rain Plan exact canonical R4 (no publishing)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-art-rain-r4-20261116.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicago-art-rain-exact-canonical-r4
+  cancel-in-progress: false
+
+jobs:
+  render:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Launch only verified Instagram canonical output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPS_TOKEN:-}"
+          BASE='https://ops.chicagoshining.com'
+          test "$(curl -sS --max-time 20 -o /tmp/art-r4-catalog.json -w '%{http_code}' -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog")" = "200"
+          jq -e '.ok==true' /tmp/art-r4-catalog.json >/dev/null
+
+          cat >/tmp/art-r4.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.service -ne "pipeline-runner" -or $health.studio_write_source -ne "supabase") { throw "runner_health_not_supabase" }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_secret_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_secret_empty" }
+          $headers = @{"X-Pipeline-Secret"=$secret}
+          $out = "recIQJ3cdHvS1vL4x"
+          $uri = "http://127.0.0.1:3350/stages/r4"
+          $preBody = @{output_record_id=$out;extra=@{dry_run=$true}} | ConvertTo-Json -Depth 5 -Compress
+          $pre = Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -Body $preBody -ContentType "application/json" -TimeoutSec 90
+          if ($pre.status -ne "ok" -or $pre.details.run.dry_run -ne $true) {
+            Write-Output ("art_rain_r4_preflight_result=" + [string]$pre.status)
+            Write-Output ("art_rain_r4_preflight_reason=" + [string]$pre.details.run.reason)
+            throw "exact_canonical_r4_preflight_blocked"
+          }
+          Write-Output ("art_rain_r4_preflight=" + $pre.status)
+          $body = @{output_record_id=$out;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
+          for ($attempt=1; $attempt -le 8; $attempt++) {
+            $reply = Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 90
+            if ($reply.status -eq "ok" -and $reply.details.run.processed -eq $true -and $reply.details.run.job_id) {
+              Write-Output ("art_rain_r4_started=" + $out)
+              Write-Output ("art_rain_r4_job_id=" + [string]$reply.details.run.job_id)
+              exit 0
+            }
+            $reason = [string]$reply.details.run.reason
+            if ($reason -eq "render_already_started") {
+              Write-Output ("art_rain_r4_already_started=" + $out)
+              exit 0
+            }
+            if ($reason -ne "waiting_for_remotion_slot") {
+              Write-Output ("art_rain_r4_reason=" + $reason)
+              throw "r4_exact_output_not_started"
+            }
+            Start-Sleep -Seconds 12
+          }
+          throw "r4_remotion_slot_still_busy"
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/art-r4.json').write_text(json.dumps({"command":Path('/tmp/art-r4.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/art-r4-start.json -w '%{http_code}' -X POST "$BASE/api/shell" \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/art-r4.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then echo "art_r4_ops_http=$code" >&2; exit 1; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/art-r4-start.json)
+          for i in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/jobs/$job" -o /tmp/art-r4-status.json
+            state=$(jq -r '.job.status // empty' /tmp/art-r4-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/art-r4-status.json | grep '^art_rain_r4_' || true
+              jq -e '.job.log|contains("art_rain_r4_started=recIQJ3cdHvS1vL4x") or contains("art_rain_r4_already_started=recIQJ3cdHvS1vL4x")' /tmp/art-r4-status.json >/dev/null
+              echo "art_rain_canonical_exact_r4=PASS"
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/art-r4-status.json | grep -E '(art_rain_|r4_|Exception|error|blocked)' | tail -20 || true
+              echo "art_rain_canonical_exact_r4=FAILED" >&2
+              exit 2
+            fi
+            sleep 3
+          done
+          echo "art_rain_canonical_exact_r4=TIMEOUT" >&2
+          exit 3
