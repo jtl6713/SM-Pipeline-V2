@@ -16810,8 +16810,27 @@ function timedScriptAssetLabel(asset, index) {
     if (item4PromotedRequestIds.has(String(activeProductionRequest.id)) && activeProductionRequest?.revision_open !== true) return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
-      setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
-      return;
+      // Output selection Save and plan generation are separate operations.
+      // Refresh persisted workspace first; do not reject a saved plan using stale browser state.
+      const approvalRecordId = String(activeProductionRequest.id);
+      try {
+        await loadItem4Workspace(activeProductionRequest);
+        if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
+        if (item4Workspace?.plan_status !== "Ready") {
+          // Saving selected outputs does not itself build the master platform plan.
+          // Approval is an explicit operator action, so complete the missing plan now.
+          await buildItem4Plan();
+          if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
+          await loadItem4Workspace(activeProductionRequest);
+        }
+      } catch (error) {
+        setRequestMessage("Could not verify or prepare the platform plan: " + (error.message || error), "error-text");
+        return;
+      }
+      if (item4Workspace?.plan_status !== "Ready") {
+        setRequestMessage("Platform plan is not ready. Use Recommend formats to prepare it, then try Approve. Current status: " + String(item4Workspace?.plan_status || "Unknown"), "error-text");
+        return;
+      }
     }
     assignOpenTimelineMedia();
     const scriptedSceneBlocker = scriptedShortMissingSceneMessage(activeProductionRequest);
