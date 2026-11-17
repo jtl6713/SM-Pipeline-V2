@@ -4545,7 +4545,9 @@ export default {
     // before the main cron workload, or stalled Submitted requests never move.
     // The two older inline heal calls below were removed: only one owner per
     // five-minute tick may create missing Platform Outputs.
-    if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+    // Supabase is the write/read SoR: an Airtable-only cooldown must not
+    // silently suppress the bounded, Supabase-backed Submitted recovery pass.
+    if (studioPhase6WriteSource(env) === "supabase" || airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
       ctx.waitUntil(studioHealPromotedMissingFanout(env, { limit: cadence.heavy ? 8 : 4, ctx })
         .catch(error => console.warn("Independent Submitted approval/fanout recovery failed", error)));
     } else {
