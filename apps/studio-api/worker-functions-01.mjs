@@ -67,6 +67,7 @@ import {
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
+  classifyUnclassifiedRenderedReadyForReview,
   classifyPhantomRerender,
   classifyPreparingGap,
   classifyProduceJob,
@@ -12973,29 +12974,34 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const rows = await studioListDeskHealOutputs(env, "stale_rfr", {
-    limit: Math.max(limit * 3, 30),
+    limit: Math.max(limit * 4, 48),
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND(OR({Output_Status}="Ready for Review",{Output_Status}="In Production"),{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing")),AND({Output_Status}=BLANK(),{Render_Status}="Rendered",{Final_File_URL}!="",{Thumbnail_URL}!="",{Output_Caption}!="",{Review_Status}=BLANK(),{Publish_Status}=BLANK(),{Scheduled_Post_Date}=BLANK(),{Studio_Scheduled_At}=BLANK())))',
   }).catch(() => []);
   const healed = [];
   for (const record of rows || []) {
     if (healed.length >= limit) break;
     const row = mapDeskInventoryOutput(record);
-    const finding = classifyAwaitingApprovalStaleRfr(row);
+    const missingStatus = classifyUnclassifiedRenderedReadyForReview(row);
+    const finding = missingStatus || classifyAwaitingApprovalStaleRfr(row);
     if (!finding) continue;
+    // A blank status with a verified rendered package goes to human review;
+    // only an already-final-approved output may enter Ready to Schedule.
+    const fields = { Output_Status: missingStatus ? "Ready for Review" : "Approved for Publishing" };
+    if (!missingStatus && String(row.final_file_url || "").trim()
+      && ["Ready for Render", "Ready to Render", "Waiting in Render Queue"].includes(String(row.render_status || "").trim())) {
+      fields.Render_Status = "Rendered";
+    }
     try {
       const updated = await airtableFetch(env, outputTable, record.id, {
         method: "PATCH",
         skipSupabaseWriteThrough: true,
-        body: JSON.stringify({
-          fields: { Output_Status: "Approved for Publishing" },
-          typecast: true,
-        }),
+        body: JSON.stringify({ fields, typecast: true }),
       });
-      await studioSupabaseWriteThroughOutput(env, updated, "stale-rfr-heal");
+      await studioSupabaseWriteThroughOutput(env, updated, "production-state-heal");
       healed.push({
-        key: "AWAITING_APPROVAL_STALE_RFR",
+        key: missingStatus ? "UNCLASSIFIED_RENDERED_READY" : "AWAITING_APPROVAL_STALE_RFR",
         id: record.id,
         output_id: row.output_id || null,
         fingerprint: finding.fingerprint,

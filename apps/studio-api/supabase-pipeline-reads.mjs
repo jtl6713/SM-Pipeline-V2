@@ -2916,8 +2916,18 @@ export function deskHealOutputFilter(kind, options = {}) {
     const armed = ["Ready to Schedule", "Ready to Publish", "Scheduled", "Publishing"]
       .map(encodeDeskFilterValue)
       .join(",");
-    return `${quiet}&published_at=is.null&output_status=eq.${encodeDeskFilterValue("Ready for Review")}`
-      + `&review_status=eq.Approved&publish_status=in.(${armed})`;
+    const approved = `review_status.eq.Approved,publish_status.in.(${armed})`;
+    const withFile = "final_file_url.not.is.null,final_file_url.neq.";
+    const withCover = "thumbnail_url.not.is.null,thumbnail_url.neq.";
+    const withCaption = "output_caption.not.is.null,output_caption.neq.";
+    // Three verified branches; never mutate a hold, revision, or unpublished
+    // incomplete render. Past recoveries only scanned Ready for Review and
+    // permanently missed approved In Production + rendered blank-status rows.
+    return `${quiet}&published_at=is.null&or=(`
+      + `and(output_status.eq.${encodeDeskFilterValue("Ready for Review")},${approved}),`
+      + `and(output_status.eq.${encodeDeskFilterValue("In Production")},${approved},${withFile}),`
+      + `and(output_status.is.null,render_status.eq.Rendered,review_status.is.null,publish_status.is.null,`
+      + `${withFile},${withCover},${withCaption},scheduled_post_date.is.null,studio_scheduled_at.is.null))`;
   }
   if (kind === "phantom_rerender") {
     const nativeOrFile = `or=(render_status.eq.${encodeDeskFilterValue("Native Photo Route")},`

@@ -429,6 +429,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "heal_stale_rfr_after_approve",
   }),
   check({
+    id: "unclassified_rendered_ready",
+    title: "Check for completed rendered outputs with blank status after migration; route to review without approval",
+    lane: "service",
+    kind: "unclassified_rendered_ready",
+    actor: "worker_heal",
+    heal: "promote_rendered_ready_for_review",
+  }),
+  check({
     id: "native_cover_missing",
     title: "Check for Reels/Shorts that published without attaching the 3D native cover",
     lane: "both",

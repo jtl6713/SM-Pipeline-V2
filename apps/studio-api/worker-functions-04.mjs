@@ -159,6 +159,7 @@ import {
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
+  classifyUnclassifiedRenderedReadyForReview,
   classifyPhantomRerender,
   classifyPreparingGap,
   classifyProduceJob,
@@ -9772,6 +9773,7 @@ export function mapDeskInventoryOutput(record, contentToRequest = new Map(), con
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
     last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
+    studio_scheduled_at: f(record, "Studio_Scheduled_At"),
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     carousel_slide_count: Array.isArray(f(record, "Carousel Slides")) ? f(record, "Carousel Slides").length : 0,
@@ -10346,8 +10348,11 @@ export async function gatherStudioDeskInventory(env) {
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
     });
     scanned("awaiting_approval_stale_rfr");
+    scanned("unclassified_rendered_ready");
     for (const record of staleRfrRows || []) {
-      push(classifyAwaitingApprovalStaleRfr(mapOut(record)));
+      const row = mapOut(record);
+      push(classifyAwaitingApprovalStaleRfr(row));
+      push(classifyUnclassifiedRenderedReadyForReview(row));
     }
   } catch (error) {
     console.warn("desk awaiting-approval stale RFR scan failed", error);
