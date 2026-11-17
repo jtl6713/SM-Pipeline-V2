@@ -41,7 +41,7 @@
     }
   });
 
-  const state = { sequence: 0, profile: "", lastRequest: 0, inFlight: false, failures: [], recovering: false, actionSummary: "", recovery: null, lastView: null, failureFilter: "action", failureShown: 8 };
+  const state = { sequence: 0, profile: "", lastRequest: 0, inFlight: false, failures: [], recovering: false, actionSummary: "", recovery: null, lastView: null, failureFilter: "action", failureShown: 8, overdueShown: 6 };
   const esc = (value) => String(value == null ? "" : value)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
@@ -272,8 +272,8 @@
     const overdueMarkup = overdueOk
       ? '<p class="factory-batch-quality-heading">QA-PUBLISH-001 · Approved past due, unconfirmed: ' +
         (Number(overdue.count) || 0) + '</p>' +
-        (overdue.items.length ? '<ul class="factory-batch-quality-list">' +
-          overdue.items.map(item =>
+        (overdue.items.length ? '<details class="factory-quality-past-due"><summary>Review past-due cases (' + overdue.items.length + ' shown in census)</summary><ul class="factory-batch-quality-list">' +
+          overdue.items.slice(0, state.overdueShown).map(item =>
             '<li class="factory-batch-quality-item" data-qa-output="' + esc(item.record_id || "") +
               '" data-qa-profile="' + esc(item.profile_id || "") + '">' +
               '<button type="button" class="factory-quality-open" data-qa-open="' +
@@ -285,7 +285,9 @@
                 esc(item.minutes_past_due == null ? "Date unavailable" : item.minutes_past_due + " min past due") +
               '</p><p class="factory-batch-quality-action">' + esc(item.action) + '</p>' +
               '<small>Recovery: ' + esc(item.recovery) + ' · No blind republishing</small></li>'
-          ).join("") + '</ul>'
+          ).join("") + '</ul>' +
+          (overdue.items.length > state.overdueShown ? '<button type="button" class="secondary-button" data-qa-overdue-more>Show next past-due cases</button>' : '') +
+          '</details>'
           : '<p>No past-due approvals beyond the reconciliation grace window.</p>')
       : '<p class="factory-batch-quality-unavailable">Past-due Quality Agent scan unavailable. Count unknown; do not treat this as zero.</p>';
     if (!data.job_id) {
@@ -498,6 +500,13 @@
     if (more) {
       event.preventDefault();
       state.failureShown += 8;
+      renderCurrent();
+      return;
+    }
+    const overdueMore = event.target.closest?.("[data-qa-overdue-more]");
+    if (overdueMore) {
+      event.preventDefault();
+      state.overdueShown += 6;
       renderCurrent();
       return;
     }
