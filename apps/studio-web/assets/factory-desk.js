@@ -54,6 +54,8 @@
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
     lastBatchFetchMs: 0,
+    lastBatchSuccessMs: 0,
+    batchActivityError: "",
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -814,6 +816,23 @@
     }
   }
 
+  function updateFactoryBatchFreshness() {
+    const updated = $("factoryBatchUpdated");
+    if (!updated || state.completedOpen) return;
+    if (!state.lastBatchSuccessMs) {
+      updated.textContent = state.batchActivityError || "Waiting for first activity update…";
+      return;
+    }
+    const ageSeconds = Math.floor((Date.now() - state.lastBatchSuccessMs) / 1000);
+    const ageLabel = ageSeconds < 5 ? "just now" : ageSeconds + "s ago";
+    if (state.batchActivityError || ageSeconds > 15) {
+      updated.textContent = "Status delayed · last updated " + ageLabel +
+        (state.batchActivityError ? " · retrying" : "");
+    } else {
+      updated.textContent = "Updated " + ageLabel + " · auto-refreshing";
+    }
+  }
+
   function renderFactoryBatchActivity(batch) {
     if (batch?.view === "completed") state.completedBatch = batch;
     else state.batch = batch || null;
@@ -886,9 +905,9 @@
     overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : "Overall active approval progress"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
       <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
       <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>`;
-    if (updated) updated.textContent = state.completedOpen
-      ? (state.completedLoading ? "Loading completed batches…" : "Loaded only on request")
-      : "Live · batches needing action";
+    if (updated && state.completedOpen) updated.textContent =
+      state.completedLoading ? "Loading completed batches…" : "Loaded only on request";
+    else updateFactoryBatchFreshness();
     const latest = batches.find(row => row.job_id === state.inspectedBatchKey) || batches[0] || null;
     if (state.inspectedBatchKey && !batches.some(row => row.job_id === state.inspectedBatchKey)) {
       state.inspectedBatchKey = latest?.job_id || "";
@@ -1359,7 +1378,7 @@
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
-    const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
+    const minInterval = Number(state.batch?.totals?.active || 0) ? 3000 : 15000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
     const params = new URLSearchParams({ scope: "all" });
     params.set("view", "active");
@@ -1367,7 +1386,17 @@
     state.batchActivityLoading = true;
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
-      const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      // Activity is time-sensitive: fail promptly rather than locking out several
+      // scheduled polls behind the default 35-second Factory request timeout.
+      const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
+        cache: "no-store", timeoutMs: 12000,
+      });
+      if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
+        throw new Error("Approval activity response was incomplete");
+      }
+      if (factoryProfileId() !== (params.get("factory_profile") || "")) return state.batch;
+      state.lastBatchSuccessMs = Date.now();
+      state.batchActivityError = "";
       // An empty polling response is not proof that a running batch vanished.
       // Hold the last nonempty activity snapshot until two consecutive empty polls;
       // the authoritative Desk will still be reconciled on the confirmed transition.
@@ -1404,8 +1433,10 @@
       }
       return batch;
     } catch (error) {
-      const summary = $("factoryBatchSummary");
-      if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
+      state.batchActivityError = String(error?.message || error);
+      // Keep the last verified counts and bars. A timed-out read is not
+      // evidence that approvals stopped or that a batch disappeared.
+      updateFactoryBatchFreshness();
       return null;
     } finally {
       state.batchActivityLoading = false;
@@ -3436,10 +3467,11 @@
       refreshFactoryBatchActivity().catch(() => {});
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
         if (!document.hidden && $("page-factory")?.classList.contains("active")) {
+          updateFactoryBatchFreshness();
           reconcilePersistedFactoryPending().catch(() => {});
           refreshFactoryBatchActivity().catch(() => {});
         }
-      }, 5000);
+      }, 3000);
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
       if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
@@ -3522,7 +3554,7 @@
   });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && $("page-factory")?.classList.contains("active")) {
-      refreshFactoryBatchActivity().catch(() => {});
+      refreshFactoryBatchActivity(true).catch(() => {});
       loadFactoryDesk(true).catch(() => {});
     }
   });
