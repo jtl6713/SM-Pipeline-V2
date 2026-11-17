@@ -33,5 +33,6 @@ test("Quality Agent shows bounded actionable records with filters and no blind r
   assert.match(quality, /quality_rate_limit_preview: true/);
   assert.match(quality, /No blind republishing/);
   assert.match(quality, /overdue\.items\.slice\(0, state\.overdueShown\)/);
-  assert.match(html, /UI build 0\.6\.983/);
+  // Release identity is verified by ui-release-contract; do not pin this behavior test to one build.
+  assert.match(html, /UI build 0\.6\.\d+/);
 });
