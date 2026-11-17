@@ -13768,7 +13768,7 @@ function timedScriptAssetLabel(asset, index) {
       await loadProductionRequestOutputs(activeProductionRequest);
       item4OutputSelectionDirty = false;
       setItem4OutputSelectionHint("Recommended outputs selected and saved. Add or remove checkboxes, then Save output selections.");
-      setRequestMessage("Recommended outputs selected. Edit the checkboxes below or prepare frames.", "success");
+      setRequestMessage("Platform plan saved. Edit output selections and save again if needed, or prepare frames.", "success");
     } catch (error) {
       setRequestMessage(
         isTimeoutError(error)
@@ -16016,7 +16016,7 @@ function timedScriptAssetLabel(asset, index) {
       syncItem4LibraryAdd();
     }
   });
-  $("item4BuildPlan")?.addEventListener("click", () => buildItem4Plan({ persist: false }));
+  $("item4BuildPlan")?.addEventListener("click", () => buildItem4Plan({ persist: true }));
   $("prEditOutputsInFrames")?.addEventListener("click", () => setProductionWorkspaceTab("formats", { focus: true }));
   $("item4SaveOutputSelection")?.addEventListener("click", saveItem4OutputSelection);
   $("prOpenRenderingTab")?.addEventListener("click", () => {
