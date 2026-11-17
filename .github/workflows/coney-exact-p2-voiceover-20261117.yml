@@ -1,0 +1,90 @@
+name: Coney Off-Season Vibes - exact P2 voiceover recovery (no publishing)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/coney-exact-p2-voiceover-20261117.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coney-p2-exact-20261117
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Prove Ops access and run exactly one P2 Content Item
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPS_TOKEN:-}"
+          BASE="https://ops.chicagoshining.com"
+          code=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/art-catalog.json -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" || true)
+          test "$code" = "200"
+          jq -e '.ok==true' /tmp/art-catalog.json >/dev/null
+          cat >/tmp/art-rain-p2.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $h = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($h.ok -ne $true -or $h.service -ne "pipeline-runner" -or $h.studio_write_source -ne "supabase") { throw "supabase_runner_health_not_verified" }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_secret_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_secret_empty" }
+          $headers = @{"X-Pipeline-Secret" = $secret}
+          # Only Content Item 2093, with Generated script and Ready voiceover status.
+          # Fail closed on dry-run denial and never enable rendering/publishing here.
+                    $target = "recG0Y3ii1T0IKngk"
+          $base = "http://127.0.0.1:3350/stages/p2"
+          $dry = @{content_item_record_id=$target;extra=@{dry_run=$true}} | ConvertTo-Json -Depth 5 -Compress
+          $pre = Invoke-RestMethod -Uri $base -Method POST -Headers $headers -Body $dry -ContentType "application/json" -TimeoutSec 45
+          if ($pre.status -ne "ok" -or $pre.details.run.dry_run -ne $true -or $pre.details.run.runs) {
+            # A P2 dry-run must be harmless and exact; never widen the target.
+            if ($pre.status -ne "ok" -or $pre.details.dry_run -ne $true) { throw "p2_preflight_not_ready" }
+          }
+          Write-Output ("coney_p2_preflight=" + $pre.status)
+          $payload = @{content_item_record_id=$target;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
+          $resp = Invoke-RestMethod -Uri $base -Method POST -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 250
+          $processed = ($resp.status -eq "ok" -and $resp.details.run.processed -eq $true)
+          Write-Output ("coney_p2_status=" + $resp.status)
+          Write-Output ("coney_p2_processed=" + $processed)
+          Write-Output ("coney_p2_route=" + [string]$resp.details.run.route)
+          if (-not $processed) { throw "exact_content_p2_did_not_complete" }
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/art-rain-p2.json').write_text(json.dumps({"command":Path('/tmp/art-rain-p2.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/art-start.json -w '%{http_code}' -X POST "$BASE/api/shell" \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/art-rain-p2.json || true)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "coney_ops_start_http=$code" >&2; exit 1; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/art-start.json)
+          for i in $(seq 1 105); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/jobs/$job" -o /tmp/art-status.json
+            state=$(jq -r '.job.status // empty' /tmp/art-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/art-status.json | grep '^coney_p2_' || true
+              jq -e '.job.log|contains("coney_p2_processed=True") or contains("coney_p2_processed=true")' /tmp/art-status.json >/dev/null
+              echo "chicago_coney_exact_p2=PASS"
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/art-status.json | grep -E '(coney_|p2_|error|Exception|missing)' | tail -25 || true
+              echo "chicago_coney_exact_p2=FAILED" >&2
+              exit 2
+            fi
+            sleep 3
+          done
+          echo "chicago_coney_exact_p2=TIMEOUT" >&2
+          exit 3
