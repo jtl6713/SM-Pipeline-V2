@@ -215,5 +215,5 @@ test("Supabase Ideas background refresh reuses Supabase full-snapshot path", () 
   const safeRefresh = ideas.indexOf("return refreshStudioProfilesOverviewSnapshot(env, authorization, { forceIdeas: true })");
   const legacyScan = ideas.indexOf("listStudioOverviewUnpromotedIdeas(env, profiles");
   assert.ok(sourceGate >= 0 && safeRefresh > sourceGate && legacyScan > safeRefresh);
-  assert.match(functions04, /buildStudioProfilesOverviewRows\\(env, profiles, \\{ forceIdeas \\}\\)/);
+  assert.ok(functions04.includes("buildStudioProfilesOverviewRows(env, profiles, { forceIdeas }"));
 });
