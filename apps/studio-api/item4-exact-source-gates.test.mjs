@@ -51,13 +51,25 @@ test("continuation cannot re-stamp incomplete source or reuse an old selected-as
 });
 
 test("saved selected-assets identity must match exact current clip IDs, media IDs, URL and order", () => {
-  const declaration = extract(worker02, "item4CurrentSourceMatchesSavedSelection").replace(/^export /, "");
+  const inspect = worker03.slice(
+    worker03.indexOf("export async function studioContinuationInspectOutput("),
+    worker03.indexOf("/*__STUDIO_WORKER_END:studioContinuationInspectOutput__*/")
+  );
+  const first = inspect.indexOf("  const matchesCurrentMasterSelection = (() => {");
+  const last = inspect.indexOf("  })();", first) + "  })();".length;
+  assert.ok(first >= 0 && last > first, "continuation must embed a pure comparison");
+  const declaration = inspect.slice(first, last);
   const matches = vm.runInNewContext(
-    declaration + "\nitem4CurrentSourceMatchesSavedSelection",
-    { item4ParseJson: (input, fallback) => {
-      if (!input) return fallback;
-      return typeof input === "string" ? JSON.parse(input) : input;
-    }}
+    `(sourcePackage, savedSelected) => {
+      const po = {};
+      const f = () => savedSelected;
+      const item4ParseJson = (input, fallback) => {
+        if (!input) return fallback;
+        return typeof input === "string" ? JSON.parse(input) : input;
+      };
+      ${declaration}
+      return matchesCurrentMasterSelection;
+    }`
   );
   const clips = [
     { source_asset_id: "owner-1", media_asset_record_id: "recAsset1", url: "https://media.example/one.jpg" },
