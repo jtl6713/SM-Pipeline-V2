@@ -67,8 +67,16 @@ _REQUEST_FIELDS = {
     "Request_Status": "request_status",
     "Requested_Title": "requested_title",
     "Production_Notes": "production_notes",
+    "Studio_Master_Asset_Status": "master_asset_status",
     "Studio_Variant_Status": "variant_status",
     "Studio_Output_Plan_Status": "output_plan_status",
+    # The Worker and runner commit these as typed JSONB. If omitted from the
+    # projection, the runner rereads an empty job, generates a fresh spj-* ID,
+    # and loops through production while discarding the source/variant plan.
+    "Studio_Master_Assets_JSON": "master_assets",
+    "Studio_Output_Plan_JSON": "output_plan",
+    "Studio_Variant_Manifest_JSON": "variant_manifest",
+    "Studio_Production_Job_JSON": "production_job",
 }
 _MEDIA_FIELDS = {
     "Asset Name": "asset_name",
@@ -299,7 +307,7 @@ def _list_select(table_id: str) -> str:
     if table_id == CONTENT_ITEMS_TABLE:
         return f"{base},extras,content_profiles(airtable_record_id)"
     if table_id == PRODUCTION_REQUESTS_TABLE:
-        return f"{base},publish_status,production_job"
+        return f"{base},publish_status"
     if table_id == MEDIA_ASSETS_TABLE:
         return f"{base},metadata"
     if table_id == CAROUSEL_SLIDES_TABLE:
