@@ -12,7 +12,7 @@ test("promoted requests only reappear in Production when explicitly opened for r
   assert.ok(start >= 0 && end > start);
   assert.match(block, /listSupabaseRevisionOpenProductionRequests/);
   assert.match(block, /revisions = await listSupabaseRevisionOpenProductionRequests/);
-  assert.match(block, /new Map\(\[\.\.\.revisions, \.\.\.drafts\]/);
+  assert.match(block, /new Map\(\[\.\.\.drafts, \.\.\.revisions\]/);
 });
 
 test("reopened promoted revision is selectable without creating a new draft", () => {
