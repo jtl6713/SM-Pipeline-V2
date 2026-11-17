@@ -10445,6 +10445,9 @@ export async function studioContinuationLoadContext(env, po, cache) {
 export async function studioContinuationStampPackage(env, po, context) {
   const { outputRow, requestRecord, parent, effective } = context;
   const sourcePackage = item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parent);
+  if (!sourcePackage && item4AssetManifest(requestRecord).length > 0) {
+    throw new HttpError(409, "Owner-selected source media is incomplete or changed. Waiting for current authoritative crops instead of stamping fallback images.");
+  }
   const nativePhoto = studioOutputIsNativePhotoRoute(
     effective.platform,
     effective.output_type,
@@ -10774,14 +10777,18 @@ export async function studioContinuationInspectOutput(env, po, cache) {
     context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
   );
   let hasClips = Boolean(sourcePackage?.clips?.length);
-  const alreadyExact = /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
+  const matchesCurrentMasterSelection = item4CurrentSourceMatchesSavedSelection(
+    sourcePackage, f(po, "Selected_Assets_JSON")
+  );
+  const alreadyExact = matchesCurrentMasterSelection
+    && /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
     && String(f(po, "Asset_Selection_Status") || "") === "Selected"
     && String(f(po, "Composition_ID") || "") === "ChicagoShiningPhotoSequence";
   const readyForRender = /ready for render/i.test(renderStatus)
     && String(f(po, "Composition_ID") || "").trim()
     && String(f(po, "Render_Clip_List_JSON") || "").trim();
 
-  if (readyForRender && hasClips && !studioOutputWrongVideoSelectorPath(po)) {
+  if (readyForRender && hasClips && matchesCurrentMasterSelection && !studioOutputWrongVideoSelectorPath(po)) {
     if (studioPhotoSequenceNeedsContainHeal(po)) {
       await studioContinuationStampPackage(env, po, context);
       return { action: "prep_render", reason: "contain_stamp_heal" };
