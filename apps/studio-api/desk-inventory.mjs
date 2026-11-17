@@ -1598,6 +1598,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "native_photo_review_strand",
   "native_photo_approve_incomplete",
   "awaiting_approval_stale_rfr",
+  "unclassified_rendered_ready",
   "rfr_locked_missing_deliverable",
   "health_down",
   "variant_preparing",
