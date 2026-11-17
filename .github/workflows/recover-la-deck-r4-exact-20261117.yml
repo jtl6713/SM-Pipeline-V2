@@ -85,7 +85,7 @@ jobs:
           import json
           from pathlib import Path
           Path('/tmp/recover-reels.json').write_text(json.dumps({
-            "command": Path('/tmp/recover-reels.ps1').read_text(), "confirm": True
+            "command": Path('/tmp/recover-la-deck.ps1').read_text(), "confirm": True
           }))
           PY
           code=$(curl -sS --max-time 25 -o /tmp/recover-reels-job.json -w '%{http_code}' \
