@@ -284,11 +284,10 @@ def test_chicago_library_ingest_defers_when_watermark_unavailable(monkeypatch):
 
 
 def test_chicago_library_ingest_honors_overlay_hold_override(monkeypatch):
-    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
-        "decision": "review", "indicators": ["other"],
-        "evidence": "Visible slogan text", "frames_checked": 1,
-        "signature": "QA-ASSET-THIRD-PARTY-OVERLAY",
-    })
+    def _unwanted_rescreen(**_kwargs):
+        raise AssertionError("Explicit operator override must not re-run AI screening")
+
+    monkeypatch.setattr("studio_library.processor.screen_asset", _unwanted_rescreen)
     calls = []
 
     class _Drive:
@@ -319,6 +318,9 @@ def test_chicago_library_ingest_honors_overlay_hold_override(monkeypatch):
     assert result["google_drive_file_id"] == "overrideDrive1"
     assert result["provenance_screen"]["decision"] == "clean"
     assert result["provenance_screen"]["operator_override"] is True
+    assert result["provenance_screen"]["screen_executed"] is False
+    assert result["provenance_screen"]["frames_checked"] == 0
+    assert result["provenance_screen"]["original_decision"] == "not_rechecked"
     assert "OPERATOR_OVERRIDE" in result["provenance_screen"]["evidence"]
     assert calls
 
@@ -352,3 +354,57 @@ def test_async_library_ingest_job_completes(monkeypatch):
     assert job is not None
     assert job["status"] == "ok"
     assert job["result"]["google_drive_file_id"] == "driveAsync1"
+
+
+def test_async_override_upload_reuses_identical_processing_and_completed_job(monkeypatch):
+    import threading
+    import time
+    from studio_library import async_jobs
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def _ingest(**kwargs):
+        calls.append(kwargs)
+        started.set()
+        assert release.wait(timeout=2), "test must release the processing job"
+        return {
+            "ok": True,
+            "google_drive_file_id": "overrideIdempotent1",
+            "google_drive_url": "https://drive.google.com/file/d/overrideIdempotent1/view",
+        }
+
+    monkeypatch.setattr("studio_library.processor.ingest_studio_library_asset", _ingest)
+    params = {
+        "content": b"override-idempotency-unique-photo-payload",
+        "filename": "Garment-District-14.webp",
+        "mime_type": "image/webp",
+        "profile_name": "New York Shining",
+        "skip_source_master": True,
+        "override_overlay_hold": True,
+    }
+    first = async_jobs.start_library_ingest_job(**params)
+    try:
+        assert started.wait(timeout=1)
+        same_pending = async_jobs.start_library_ingest_job(**params)
+        assert same_pending == first
+    finally:
+        release.set()
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        result = async_jobs.get_library_ingest_job(first)
+        if result and result["status"] == "ok":
+            break
+        time.sleep(0.02)
+    assert result["status"] == "ok"
+    assert result["result"]["google_drive_file_id"] == "overrideIdempotent1"
+    assert "_fingerprint" not in result
+    same_complete = async_jobs.start_library_ingest_job(**params)
+    assert same_complete == first
+    assert len(calls) == 1
+    # Distinct bytes must create a distinct job, not silently reuse Drive media.
+    different = async_jobs.start_library_ingest_job(
+        **{**params, "content": b"different-image-content"}
+    )
+    assert different != first
