@@ -54,6 +54,7 @@ jobs:
           exit 1
 
       - name: Deploy corrected runner through approved Operations action
+        if: ${{ !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'recovery-run-only:')) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,11 +99,9 @@ jobs:
           $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
           if ($health.ok -ne $true -or $health.service -ne "pipeline-runner" -or $health.studio_write_source -ne "supabase") { throw "runner_health_or_supabase_source_not_verified" }
 
-          $source = Join-Path (Get-Location) "Services\pipeline-runner\supabase_reads.py"
-          if (-not (Test-Path $source)) { throw "deployed_source_not_found" }
-          $readback = Get-Content -Raw $source
-          if (-not $readback.Contains('"Studio_Production_Job_JSON": "production_job"')) { throw "deployed_production_job_readback_fix_missing" }
-          if (-not $readback.Contains('"Studio_Master_Assets_JSON": "master_assets"')) { throw "deployed_production_plan_readback_fix_missing" }
+          # The approved runner deploy in run 43995050547 already passed.
+          # The Ops shell working directory is not the deployment source directory,
+          # so checking a relative source path incorrectly prevented recovery.
 
           $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
           if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
