@@ -35,13 +35,12 @@ test("manual refresh bypasses normal snapshot TTL and refreshes Ideas too", () =
   assert.match(functions04, /forceIdeas && !supabaseIdeasUsable/);
   assert.match(functions04, /listStudioOverviewUnpromotedIdeas/);
   assert.match(functions04, /AIRTABLE_IDEA_TABLE_ID/);
-  assert.match(force, /home_parity: needsParity/);
-  assert.match(force, /status: "pending"/);
-  assert.match(force, /runHomeOverviewAirtableParityAfterRefresh/);
-  assert.match(functions04, /compareHomeOverviewParity/);
-  assert.match(functions04, /reconcileHomeOverviewWithAirtable/);
-  assert.match(functions04, /forceAirtable: true/);
-  assert.match(functions04, /overview-force-airtable-parity/);
+  assert.match(force, /home_parity: null/);
+  assert.doesNotMatch(force, /runHomeOverviewAirtableParityAfterRefresh/);
+  assert.doesNotMatch(functions04, /compareHomeOverviewParity/);
+  assert.doesNotMatch(functions04, /reconcileHomeOverviewWithAirtable/);
+  assert.doesNotMatch(functions04, /forceAirtable: true/);
+  assert.match(functions04, /Supabase Home Ideas inventory incomplete; Airtable fallback disabled/);
 });
 
 test("forced result is complete, durable, generation-verified and last-good safe", () => {
@@ -123,7 +122,8 @@ test("Airtable force fallback interleaves lean output and idea scans instead of 
   const build = functions04.slice(start, end);
   assert.match(build, /const \[outputs, ideas\] = await Promise\.all\(\[/);
   assert.match(build, /fields: \["Content_Profile", "Promoted_Content_Record_ID", "Content Items", "Candidate_Status"\]/);
-  assert.match(build, /if \(usedSupabaseOutputs\) \{[\s\S]*overlayLiveTikTokPublishRows/);
+  assert.match(build, /studioHomeReadSource\(env\) === "supabase" && !usedSupabaseOutputs/);
+  assert.doesNotMatch(build, /overlayLiveTikTokPublishRows/);
 });
 
 test("Home Supabase path counts Ideas from the open-idea filtered pack", () => {
