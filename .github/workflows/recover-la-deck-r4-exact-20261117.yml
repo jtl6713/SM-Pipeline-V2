@@ -1,4 +1,6 @@
 name: Recover exact LA Transit and NYC Deck Debate YouTube Short renders (R4 only)
+# Rerun after Supabase typed-to-legacy render projection reconciliation on 2026-11-17.
+# Each output is independently dry-run guarded; cannot approve, schedule, or publish.
 
 on:
   push:
