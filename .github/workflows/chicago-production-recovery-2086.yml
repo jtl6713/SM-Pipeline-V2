@@ -33,6 +33,7 @@ jobs:
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_supabase_request_production_roundtrip.py \
+            services/pipeline-runner/tests/test_supabase_pipeline_setting_p2.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_supabase_runner_reads.py \
             services/pipeline-runner/tests/test_studio_produce_missing_parent_recovery.py
@@ -113,7 +114,7 @@ jobs:
           $records = @("recIH9qBVHQuoiVuA", "recuV9OoDo5YxZF2q")
           foreach ($record in $records) {
             $payload = @{production_request_record_id=$record; resume=$false} | ConvertTo-Json -Compress
-            $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-produce" -Method POST -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 45
+            $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-produce/resume" -Method POST -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 45
             if ($reply.ok -ne $true -or $reply.production_request_record_id -ne $record) { throw "exact_studio_produce_failed_$record" }
             if ($reply.accepted -eq $false -and $reply.reason -eq "terminal") {
               Write-Output ("chicago_produce_already_terminal=" + $record)
