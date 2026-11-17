@@ -56,6 +56,10 @@ const EXPECTED_WRITER_SURFACE = [
   // but never creates, moves, or deletes any authoritative schedule timestamps.
   "worker-functions-01.mjs:azAutoApproveIfReady",
   "worker-functions-01.mjs:studioCompleteNativePhotoPublishArming",
+  // Production exit-state heal only reads Scheduled_Post_Date / Studio_Scheduled_At
+  // to exclude reserved slots; its PATCH updates Output_Status and Render_Status
+  // and cannot assign, shift, delete, or initiate a schedule.
+  "worker-functions-01.mjs:studioHealAwaitingApprovalStaleRfr",
   // Facebook rate-limit recovery preserves Scheduled_Post_Date until the next
   // approved atomic MAE move. It clears only the non-authoritative suggestion marker.
   "worker-functions-02.mjs:fanoutProductionRequestOutputsToContentItems",
