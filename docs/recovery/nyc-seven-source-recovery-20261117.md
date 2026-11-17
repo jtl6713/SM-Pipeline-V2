@@ -17,22 +17,22 @@ The aligned Home/Production counts must remain seven outputs across two NYC piec
 
 ## Coney Island: ten original user-library source candidates
 
-The following are distinct original Media Asset records in the **user's own NYC-profile connected Drive**, not variants from another Production Request. All are `active=true`, `do_not_use=false`, `classification_status=Classified`, `rights_status=Owned`, `content_profile_airtable_id=recgtK8Z7eNADNtVy`. “Owned” is catalog metadata, **not proof that a stock-media license covers reuse**.
+The following are ten visually inspected, distinct original Media Asset records in the **user's own NYC-profile connected Drive**, not variants from another Production Request. All are `active=true`, `do_not_use=false`, `classification_status=Classified`, `rights_status=Owned`, `content_profile_airtable_id=recgtK8Z7eNADNtVy`. “Owned” is catalog metadata, **not proof that a stock-media license covers reuse**.
 
 | Scene | Name | Exact Media Asset record ID | Google Drive file ID | Image verification | Provenance gate |
 |---:|---|---|---|---|---|
 | 1 | Coney Island 2 — snowy/fenced Wonder Wheel | `recoEynFVBD6NJRCq` | `1HgVZIPSSg7SDfHHSAYjU67YrerSqbtXn` | Visually inspected original; snow & fence | Adobe Stock credit string; verify purchase/use rights |
-| 2 | Coney Island 3 — quiet Steeplechase Pier | `recc4Jfo8EBBwwKsm` | `1gdWkLDUGH6Jet3nsyfUiT4dMC2QIBUSr` | Location/subject metadata only | Adobe Stock credit; verify rights and actual frame |
-| 3 | Coney Island 5 — quieter boardwalk | `recX7kZXba4od5RSN` | `1JHItDk3_-TXzECyoDenDZNnXQnTHEoBb` | Location/subject metadata only | Adobe Stock credit; verify rights and actual frame |
-| 4 | Coney Island 8 — empty Cyclone framework | `rec7EEZPZTogBzWnn` | `1kqj53udCrWfGV6bYxMApzYUXxb4DcaVa` | Location/subject metadata only | Adobe Stock credit; verify rights and actual frame |
-| 5 | Coney Island 9 — cloudy Cyclone sign | `rectDvLGoMeqdmLcf` | `1rLviuiq1E5EQkwyZxABToAG453TMvTQ7` | Location/subject metadata only | Adobe Stock credit; verify rights and actual frame |
-| 6 | Coney Island 12 — Nathan's sign and facade | `recmcNAsGMsZLRjuP` | `1Sby896ANOYKPTRg9IMsMHNXp8_hTDXYk` | Location/subject metadata only | Adobe Stock credit; verify rights and actual frame |
+| 2 | Coney Island 18 — low-crowd broad beach/waves | `recfE3qcKp60UgR0J` | `1qOTzgFCYOnTZoTSASDuzbI-elheMgZK1` | Visually inspected original and existing 9:16 variant; genuine Coney beach amusement landmarks | Catalog Owned; independent rights audit |
+| 3 | Coney Island 5 — quieter boardwalk | `recX7kZXba4od5RSN` | `1JHItDk3_-TXzECyoDenDZNnXQnTHEoBb` | Visually inspected original: broad wooden boardwalk, 2 pedestrians, sparse others | Adobe Stock credit; verify rights and actual frame |
+| 4 | Coney Island 8 — empty Cyclone framework | `rec7EEZPZTogBzWnn` | `1kqj53udCrWfGV6bYxMApzYUXxb4DcaVa` | Visually inspected original: white Cyclone coaster support structure | Adobe Stock credit; verify rights and actual frame |
+| 5 | Coney Island 9 — cloudy Cyclone sign | `rectDvLGoMeqdmLcf` | `1rLviuiq1E5EQkwyZxABToAG453TMvTQ7` | Visually inspected original: CYCLONE neon sign and white track | Adobe Stock credit; verify rights and actual frame |
+| 6 | Coney Island 12 — Nathan's sign and facade | `recmcNAsGMsZLRjuP` | `1Sby896ANOYKPTRg9IMsMHNXp8_hTDXYk` | Visually inspected original: Nathan's Famous neon store frontage | Adobe Stock credit; verify rights and actual frame |
 | 7 | Coney Island 14 — shut Luna Park gate | `recPr96mYGBDoRAnY` | `1xs6jgouJAKAtwC-5U4x5T5USrJdoGgZ6` | Visually inspected original | Catalog Owned; independent rights audit |
 | 8 | Coney Island 21 — cloudy Wonder Wheel entrance | `recsmsw8Uwy1UVXJB` | `1xTZIyQydTNrO8vB7AIVmpTYagIR_knod` | Visually inspected original | Catalog Owned; independent rights audit |
 | 9 | Coney Island 15 — Parachute Jump dusk waterfront | `recwaYeoMDp9VsSz7` | `1W1FTr7KkKhzh7WiA-nakurUSgW-wydbY` | Visually inspected original | Catalog Owned; independent rights audit |
 | 10 | Coney Island 16 — night amusement park across water | `recufqIz99EbfBtRK` | `1gIUIODHMnY1pAhhx6-OSXXXsdvIgzGZj` | Visually inspected original | Catalog Owned; independent rights audit |
 
-**Alternative:** `Coney Island 18` original `recfE3qcKp60UgR0J`, Drive `1qOTzgFCYOnTZoTSASDuzbI-elheMgZK1`; its vertical 9:16 derivative was visually inspected and shows relatively empty broad beach, sea and amusement area at golden hour. Can replace a doubtful candidate after verifying original and license.
+**Explicitly excluded after real-image audit:** `Coney Island 3` original `recc4Jfo8EBBwwKsm` / Drive `1gdWkLDUGH6Jet3nsyfUiT4dMC2QIBUSr`. Although the catalog calls it Steeplechase Pier, the actual image shows a long promenade/pier facing a dense skyline across water and a circular installation, inconsistent with an obvious ocean-facing Coney Island scene. Location is **unverified and possibly misclassified**; do not use it unless independently geolocated. `Coney Island 18` was promoted into scene 2 in its place.
 
 **Avoid:** original Coney 19 (crowded summer swimmers, umbrellas and visible lower-right marking), 20 (active crowded rides), 22 (lifestyle portrait not about quiet off-season), and do not use LI City/Statue of Liberty visuals. Source image 14 clearly shows locked gates but should not be claimed to prove an actual winter date.
 
@@ -71,5 +71,5 @@ A safe implementation must:
 ## Safety and audit history
 - The counts-alignment releases (Worker 0.10.1001 / UI 0.6.976) are **display corrections**, not media-recovery evidence.
 - No media, output, approval, render or schedule write was performed while assembling this packet.
-- Compare metadata against actual image bytes; do not claim a metadata-only candidate is visually verified.
+- The ten scene candidates have now all been visually inspected from their original Drive bytes; Coney 3 was excluded as geographically questionable. Image validity **does not** prove stock reuse rights: five candidate originals have Adobe Stock photographer/credit strings and still require rights attestation.
 - Keep all public publishing under operator approval.
