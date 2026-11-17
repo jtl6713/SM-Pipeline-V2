@@ -7754,9 +7754,10 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
   const recordId = item4RequestIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
-  record = await item4UpdateRequestState(env, recordId, {
-    Production_Notes: withProductionPhotoWaitManual(f(record, "Production_Notes")),
-  });
+  // A library selection must not mutate the request before validating the
+  // payload and selected media. In Supabase-only mode the preliminary write
+  // could fail before the replacement was even inspected (HTTP 500/503).
+  // Preserve timed-script notes: a still swap must not rewrite narration.
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const ids = [...new Set((Array.isArray(payload?.media_asset_ids) ? payload.media_asset_ids : [])
