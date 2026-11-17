@@ -102,6 +102,14 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
   const verification = snapshot.verification_recovery;
   const verificationOk = verification?.status === "ok" && Array.isArray(verification.items);
   const verificationRows = verificationOk ? verification.items : [];
+  // Never suppress an exception just because a saved permalink or timestamp exists.
+  // Only explicit independent provider confirmation, tied to the exact output,
+  // may remove an old finding from the active queue.
+  const independentlyResolved = new Set(verificationRows.filter((row) =>
+    row?.verified_public === true
+    && row?.outcome === "verified_published"
+    && has(row?.record_id)
+    && has(row?.remote_id)).map((row) => str(row.record_id)));
   const pending = verificationRows.filter((x) =>
     x?.outcome === "pending_verification" || x?.outcome === "cooldown_waiting");
   const resolved = verificationOk && verification?.counts?.recovered_automatically != null && Number.isFinite(Number(verification.counts.recovered_automatically))
@@ -124,7 +132,7 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
     resolved_last_7_days: observedBucket(resolved, resolved == null ? "unavailable" : "ok",
       "quality_agent_recovery_ledger", "Verified publication reconciliations only, not all forms of resolution."),
   };
-  const items = [...byId.values()].map((item) => ({
+  const items = [...byId.values()].filter((item) => !independentlyResolved.has(item.record_id)).map((item) => ({
     ...item, held: heldIds.has(item.record_id),
   })).sort((a,b) => (b.minutes_past_due || 0) - (a.minutes_past_due || 0)
       || Number(b.output_id || 0) - Number(a.output_id || 0));
@@ -143,6 +151,7 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
     },
     metrics, metric_scope: "all_profiles_unfiltered", items: visibleItems,
     visible_count: visibleItems.length,
+    independently_verified_resolved_excluded: independentlyResolved.size,
     filters: { profile_id: profileFilter || null, platform: platformFilter || null,
       category: categoryFilter || null },
     warning: "QA buckets use Home predicates, but independent exact-ID parity is not proven until a fresh production census matches. Broader diagnostic signals remain separate.",
