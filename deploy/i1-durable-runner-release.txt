@@ -118,3 +118,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-16: Deploy runner 2026-11-16-caption-voiceover-rescue-v2 with PR #2075; recover silent SAI1 narration using existing caption only on non-locked voiceover required content, and keep Factory human approval mandatory. Verify deployed /health exact version. No scheduling or publishing.
 
 2026-11-17: Deploy runner 2026-11-17-asset-override-idempotent-v1 from merged PR #2089. NYC Asset Manager operator override skips redundant visual re-screen, preserves explicit override evidence, reuses identical active/completed Drive ingest job. Verify /health exact runner version; no autonomous media uploads, no publishing.
+
+2026-11-17: Protected runner deploy after merged PR #2111. Restore authoritative Supabase typed Output_Filename/Render_Total_Frames and render_clip_list_text selection in R4, preserve frozen Airtable archive, idempotent job gate and no publish; verify exact /health and focused hermetic tests before any manual exact R4 recovery.
