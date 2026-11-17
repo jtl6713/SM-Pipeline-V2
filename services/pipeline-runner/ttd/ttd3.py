@@ -74,6 +74,15 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
+    # Quality Coach release gate: no email, claim, or side effect may be
+    # generated from an incomplete Supabase Platform Output projection.
+    # In particular never send "TikTok Draft #" or a shared unknown cover.
+    from ttd.handoff_quality import validate_handoff_metadata
+    metadata_errors = validate_handoff_metadata(output)
+    if metadata_errors:
+        return {"processed": False, "reason": "handoff_metadata_incomplete",
+                "quality_errors": metadata_errors, **result}
+
     # Unique Postgres claim serializes concurrent runner processes.
     publish_id = field_str(output, "TikTok_Draft_Publish_ID")
     if not publish_id:

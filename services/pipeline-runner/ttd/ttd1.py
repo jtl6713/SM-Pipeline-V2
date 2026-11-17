@@ -76,6 +76,16 @@ def process_request(
     if reason:
         return {"processed": False, "reason": reason, **result}
 
+    # Prevent malformed output projections from creating new provider drafts.
+    # This is checked before the publish lock, attempt counter, and TikTok API.
+    output_id = str(field(output, "Output_ID") or "").strip()
+    if not output_id.isdecimal() or int(output_id) <= 0 or not field_str(output, "Output_Title"):
+        return {"processed": False, "reason": "missing_output_identity",
+                "quality_errors": [
+                    *([] if output_id.isdecimal() and int(output_id) > 0 else ["missing_numeric_output_id"]),
+                    *([] if field_str(output, "Output_Title") else ["missing_output_title"]),
+                ], **result}
+
     settings = PipelineSettings(client)
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
