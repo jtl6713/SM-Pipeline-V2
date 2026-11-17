@@ -19,6 +19,6 @@ test("routine navigation and focus refreshes reuse coalesced census; explicit re
 });
 test("global identity is kept with stored render state through async changes",()=>{
   assert.match(js,/state\.lastView = \{ profileId, data, error, global \}/);
-  assert.match(js,/panelMarkup\(\{ profileId, data, error, global \}\)/);
+  assert.match(js,/panelMarkup\(\{ profileId, data, error, factoryView: global \}\)/);
   assert.match(js,/state\.lastView\.global/);
 });
