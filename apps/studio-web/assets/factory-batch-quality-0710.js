@@ -161,11 +161,11 @@
       : category === "blocked" ? "Blocked / waiting" : "Investigate";
   }
 
-  function panelMarkup({ profileId, data, error, global = false }) {
-    if (!global && data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
+  function panelMarkup({ profileId, data, error, factoryView = false }) {
+    if (!factoryView && data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
       return recoveryProgressMarkup() + '<p class="subtle">Select a Content Profile to check Factory batches.</p>';
     }
-    if (!data && !error && global) return recoveryProgressMarkup() + '<p class="subtle">Checking Quality Agent findings across all profiles…</p>';
+    if (!data && !error && factoryView) return recoveryProgressMarkup() + '<p class="subtle">Checking Quality Agent findings across all profiles…</p>';
     if (error) {
       return recoveryProgressMarkup() + `<p class="factory-batch-quality-unavailable">Factory batch monitoring temporarily unavailable: ${esc(error)}. Refresh to retry; do not resubmit an uncertain approval.</p>`;
     }
@@ -336,7 +336,7 @@
     if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok" || data?.approved_past_due?.status !== "ok"
       ? "!" : String((data?.quality_signals?.length || 0) +
         (data?.output_failures?.count || 0) + (data?.approved_past_due?.count || 0));
-    const html = panelMarkup({ profileId, data, error, global });
+    const html = panelMarkup({ profileId, data, error, factoryView: global });
     for (const id of panelIds) {
       const node = $(id);
       if (node) node.innerHTML = html;
