@@ -24,13 +24,19 @@ test("Quality Agent is separately bounded from expensive global Factory activity
   assert.match(qualityUI, /}, 30000\)/);
 });
 
-test("Monitor R2 errors remain visible as unavailable instead of an empty all-clear or HTTP 500", () => {
-  assert.match(lowCost, /catch \(error\) \{/);
-  assert.match(lowCost, /quality_status: "unavailable"/);
-  assert.match(lowCost, /ok: false, scope: "all"/);
-  assert.match(qualityUI, /data\?\.quality_status === "unavailable"/);
-  assert.match(qualityUI, /cannot verify authoritative batch status/);
-  assert.match(qualityUI, /Quality Agent cannot verify authoritative batch status/);
+test("R2 batch-history outage must not suppress independent Supabase Quality Agent counts", () => {
+  assert.match(lowCost, /batch_monitor_status: "unavailable"/);
+  assert.match(lowCost, /quality_status: "partial"/);
+  assert.match(lowCost, /totals: \{ batches: null, pending: null, failed: null, findings: null \}/);
+  assert.match(lowCost, /let outputFailures = \{ status: "unavailable"/);
+  assert.match(lowCost, /let approvedPastDue = \{ status: "unavailable"/);
+  assert.match(lowCost, /return respond\(request, env, \{[\s\S]*?\.\.\.report, output_failures: outputFailures, approved_past_due: approvedPastDue/);
+  const failureCatch=lowCost.indexOf('console.warn("Factory quality read-only R2 monitoring degraded"');
+  const independentSnapshot=lowCost.indexOf('const snapshot = await loadStudioFailedOutputSnapshot');
+  assert.ok(failureCatch >= 0 && independentSnapshot > failureCatch,
+    "Supabase census executes after either successful or failed R2 batch read");
+  assert.match(qualityUI, /data\?\.batch_monitor_status === "unavailable"/);
+  assert.match(qualityUI, /Batch counts and findings are unknown/);
 });
 
 test("Partial history is explicitly distinguished from a definitive clean result", () => {
