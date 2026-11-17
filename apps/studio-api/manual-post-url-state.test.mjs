@@ -51,10 +51,11 @@ test("a TikTok draft without a post URL stays Manual Action Required", () => {
   assert.equal(state, "Manual Action Required");
 });
 
-test("overview and Pipeline share the live-post clear", () => {
+test("Pipeline keeps live-post clearance while Supabase Home relies on source receipts", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /function loadManualActionPipelineOutputs/);
-  assert.match(worker, /overlayLiveTikTokPublishRows\(env, mappedAll\)/);
+  assert.doesNotMatch(worker, /overlayLiveTikTokPublishRows\(env, mappedAll\)/);
+  assert.match(worker, /Supabase Home output inventory unavailable; Airtable fallback disabled/);
   assert.match(worker, /schemaVersion: 6/);
   assert.match(app, /function outputHasLivePostUrl/);
   assert.match(app, /function pipelineGroupLivePost/);
