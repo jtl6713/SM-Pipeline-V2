@@ -30,7 +30,7 @@ import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
-import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
+import { submittedApprovalAge, verifySubmittedPromotionOwnership, verifySubmittedAutonomousOrphan, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
   studioReadSource,
   studioPipelineReadSource,
@@ -9858,11 +9858,10 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
   for (const pendingRequest of orderSubmittedRecoveryRequests(pending, f)) {
     if (attemptedSubmitted) break; // one verified fanout attempt per cron tick
     const age = submittedApprovalAge(f(pendingRequest, "Submitted_At"));
-    if (age === null) {
-      console.warn("Studio submitted approval missing timestamp; administrator investigation required", pendingRequest.id);
-      continue;
-    }
-    if (age < SUBMITTED_RECOVERY_GRACE_MS) continue;
+    // Missing Submitted_At is common in Supabase-origin autonomous requests.
+    // Do not silently discard them: the separate two-way I4 ownership proof
+    // below may use the durable Created_At, only when every owner is unique.
+    if (age !== null && age < SUBMITTED_RECOVERY_GRACE_MS) continue;
     try {
       const ideaIds = arrayOrEmpty(f(pendingRequest, "Idea_Candidate"));
       if (ideaIds.length !== 1) {
@@ -9878,42 +9877,75 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
         continue;
       }
       const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, candidateParentId);
-      const proof = verifySubmittedPromotionOwnership({
+      const ownership = {
         requestId: pendingRequest.id,
         requestStatus: String(f(pendingRequest, "Request_Status") || ""),
         requestIdeaIds: ideaIds,
         requestParentIds: f(pendingRequest, "Promoted_Content_Item"),
         submittedAt: f(pendingRequest, "Submitted_At"),
+        requestCreatedAt: f(pendingRequest, "Created_At"),
+        requestNotes: f(pendingRequest, "Production_Notes"),
         ideaId: idea.id,
+        ideaStatus: f(idea, "Candidate_Status"),
         ideaContentIds: f(idea, "Content Items"),
         ideaPromotedContentId: fromI4,
         ideaRequestIds: f(idea, "Production Requests"),
         parentId: parent.id,
         parentRequestIds: f(parent, "Production_Request"),
-      });
+        parentIdeaIds: f(parent, "Source_Candidate"),
+      };
+      const strictProof = verifySubmittedPromotionOwnership(ownership);
+      const proof = strictProof.safe
+        ? strictProof : verifySubmittedAutonomousOrphan(ownership);
       if (!proof.safe) {
-        console.warn("Studio submitted approval ownership recovery withheld", pendingRequest.id, proof.reason);
+        console.warn("Studio submitted approval ownership recovery withheld", pendingRequest.id, strictProof.reason, proof.reason);
         continue;
       }
       // Re-read immediately before any mutation to ensure a concurrent
       // finalizer did not complete or change the parent in the meantime.
       const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, pendingRequest.id);
       if (String(f(latest, "Request_Status") || "") !== "Submitted") continue;
-      const latestProof = verifySubmittedPromotionOwnership({
+      // Re-read both ends of the I4 relationship as well. A concurrent
+      // promotion/claim or Factory revision must invalidate an old proof.
+      const [currentIdea, currentParent] = await Promise.all([
+        airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id),
+        airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parent.id),
+      ]);
+      const currentOwnership = {
         requestId: latest.id,
         requestStatus: String(f(latest, "Request_Status") || ""),
         requestIdeaIds: f(latest, "Idea_Candidate"),
         requestParentIds: f(latest, "Promoted_Content_Item"),
         submittedAt: f(latest, "Submitted_At"),
-        ideaId: idea.id,
-        ideaContentIds: f(idea, "Content Items"),
-        ideaPromotedContentId: fromI4,
-        ideaRequestIds: f(idea, "Production Requests"),
-        parentId: parent.id,
-        parentRequestIds: f(parent, "Production_Request"),
-      });
+        requestCreatedAt: f(latest, "Created_At"),
+        requestNotes: f(latest, "Production_Notes"),
+        ideaId: currentIdea.id,
+        ideaStatus: f(currentIdea, "Candidate_Status"),
+        ideaContentIds: f(currentIdea, "Content Items"),
+        ideaPromotedContentId: f(currentIdea, "Promoted_Content_Record_ID"),
+        ideaRequestIds: f(currentIdea, "Production Requests"),
+        parentId: currentParent.id,
+        parentRequestIds: f(currentParent, "Production_Request"),
+        parentIdeaIds: f(currentParent, "Source_Candidate"),
+      };
+      const latestStrict = verifySubmittedPromotionOwnership(currentOwnership);
+      const latestProof = latestStrict.safe
+        ? latestStrict : verifySubmittedAutonomousOrphan(currentOwnership);
       if (!latestProof.safe) continue;
       attemptedSubmitted = true;
+      if (latestProof.repairParentOwner) {
+        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, currentParent.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Production_Request: [latest.id] },
+            typecast: false,
+          }),
+        });
+        const rebound = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, currentParent.id);
+        const owners = arrayOrEmpty(f(rebound, "Production_Request"));
+        if (owners.length !== 1 || owners[0] !== latest.id)
+          throw new Error("Content Item owner repair failed readback; no fanout performed");
+      }
       if (latestProof.repairLink) {
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
           method: "PATCH",
@@ -9927,7 +9959,7 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
         if (linked.length !== 1 || linked[0] !== latestProof.parentId)
           throw new Error("Promoted_Content_Item repair failed readback; no fanout performed");
       }
-      const finalized = await finalizeProductionRequestPromotion(env, latest.id, idea, ctx);
+      const finalized = await finalizeProductionRequestPromotion(env, latest.id, currentIdea, ctx);
       if (String(f(finalized?.requestRecord, "Request_Status") || "") === "Promoted") {
         // Only a confirmed Promoted readback clears the recovery error.
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
@@ -9940,8 +9972,14 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
             typecast: false,
           }),
         }).catch((diagnosticError) => console.warn("Studio approval recovery success diagnostic failed", latest.id, diagnosticError));
-        console.info("Studio Submitted approval independently recovered", latest.id, parent.id, {
+        // I4 already exists. Resume only the existing, now-linked production
+        // request; never create another content item or replay I3.
+        if (Number(finalized.outputFanout?.routed_count || 0) > 0) {
+          try { await enqueueStudioProductionJob(env, latest.id, { resume: true }); } catch {}
+        }
+        console.info("Studio Submitted approval independently recovered", latest.id, currentParent.id, {
           missing_parent_link_repaired: latestProof.repairLink,
+          missing_content_owner_repaired: Boolean(latestProof.repairParentOwner),
         });
       }
     } catch (error) {
