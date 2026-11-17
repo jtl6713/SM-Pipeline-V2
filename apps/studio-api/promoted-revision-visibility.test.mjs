@@ -10,9 +10,9 @@ test("promoted requests only reappear in Production when explicitly opened for r
   const end = api.indexOf("/*__STUDIO_WORKER_END:listOpenProductionRequests__*/", start);
   const block = api.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(block, /listSupabaseProductionRequestsByFormula/);
-  assert.match(block, /filter\(productionRequestRevisionOpen\)/);
-  assert.match(block, /new Map\(\[\.\.\.drafts, \.\.\.revisions\]/);
+  assert.match(block, /listSupabaseRevisionOpenProductionRequests/);
+  assert.match(block, /revisions = await listSupabaseRevisionOpenProductionRequests/);
+  assert.match(block, /new Map\(\[\.\.\.revisions, \.\.\.drafts\]/);
 });
 
 test("reopened promoted revision is selectable without creating a new draft", () => {
