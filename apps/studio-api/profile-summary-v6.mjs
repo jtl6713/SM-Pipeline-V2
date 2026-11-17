@@ -106,7 +106,8 @@ export function validProfileSummaryV6Rows(rows) {
     }
     const sum = (field) => HOME_PLATFORMS.reduce((n, p) => n + row[field][p], 0);
     const slotCount = HOME_PLATFORMS.reduce((n, p) => n + row.approved_calendar_slots[p].length, 0);
-    if (sum("approved_future_by_platform") !== row.approved_future
+    if (sum("ready_by_platform") !== row.approved_unpublished
+      || sum("approved_future_by_platform") !== row.approved_future
       || sum("awaiting_final_by_platform") !== row.approval
       || sum("pipeline_by_platform") !== row.pipeline_total
       || row.approved_future + row.approved_past_due !== slotCount) return false;
