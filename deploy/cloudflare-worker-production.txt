@@ -1387,3 +1387,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-17: Deploy PR #2165 targeted Factory Quality Agent Supabase census projection reduction. Approval, scheduling and publishing states untouched; preserve all read-only and auth safeguards.
 
 2026-11-17: Deploy merged #2169 Quality Agent Worker isolation: R2 batch history failures do not suppress independent Supabase failed-output and past-due scans. Preserve fail-closed batch status and all publishing controls.
+
+2026-11-17: Retry #2169 Worker after read-only QA census verifier failure. Preserve all guards and auto-rollback; on failure emit sanitized scalar status/type diagnostic only, no PII or credentials.
