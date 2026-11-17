@@ -3413,10 +3413,14 @@ export async function listOpenProductionRequests(env, { limit = 100, fields = PR
     if (!revisions.length) throw error;
     console.warn("ordinary production draft read failed; preserving reopened revisions", error);
   }
-  // Revisions take precedence on identical IDs; never silently lose their marker.
+  // Reopened revisions must own the first slots, not be truncated behind up to
+  // 100 ordinary drafts. Keep the authoritative revision version if IDs collide.
   // No records or output states are written here.
-  const byId = new Map([...drafts, ...revisions].map(row => [row.id, row]));
-  return [...byId.values()].slice(0, limit);
+  const prioritized = new Map(revisions.map(row => [row.id, row]));
+  for (const draft of drafts) {
+    if (!prioritized.has(draft.id)) prioritized.set(draft.id, draft);
+  }
+  return [...prioritized.values()].slice(0, limit);
 }
 /*__STUDIO_WORKER_END:listOpenProductionRequests__*/
 
