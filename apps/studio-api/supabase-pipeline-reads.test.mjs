@@ -46,6 +46,7 @@ import {
   mapAirtableCarouselSlideToSupabase,
   airtableShapedCarouselSlide,
   mapPlanScheduleRow,
+  attachPlanScheduleRequestForeignKeys,
   listSupabasePlanScheduleRows,
   mapRenderHealColumns,
   creativeMasterExtraValue,
@@ -2957,12 +2958,36 @@ test("carousel slides and plan schedules map and read Supabase", async () => {
   assert.equal(plan.enabled, true);
   assert.equal(plan.brand_airtable_id, "recBrand000000001");
   assert.deepEqual(plan.production_request_airtable_ids, ["recRequest0000001"]);
+  const requestMap = new Map([["recRequest0000001", "91807514-7fd9-4163-a6f1-5ee3c6e46ff7"]]);
+  const stamped = attachPlanScheduleRequestForeignKeys([plan], requestMap, { strict: true });
+  assert.equal(stamped[0].production_request_id, "91807514-7fd9-4163-a6f1-5ee3c6e46ff7");
+  assert.equal(stamped[0].production_request_airtable_id, "recRequest0000001");
+  assert.equal("production_request_id" in plan, false, "do not mutate input rows");
+  assert.throws(
+    () => attachPlanScheduleRequestForeignKeys([plan], new Map(), { strict: true }),
+    /FK unresolved/,
+  );
+  assert.throws(
+    () => attachPlanScheduleRequestForeignKeys([{
+      ...plan, production_request_airtable_ids: ["recRequest0000001", "recRequest0000002"],
+    }], requestMap, { strict: true }),
+    /Multiple Production Requests/,
+  );
+  const cleared = attachPlanScheduleRequestForeignKeys([{
+    airtable_record_id: plan.airtable_record_id,
+    production_request_airtable_id: null,
+    production_request_airtable_ids: [],
+  }], requestMap, { strict: true });
+  assert.equal(cleared[0].production_request_id, null);
+
   const partial = mapPlanScheduleRow({
     id: "recPlanOutput0001",
     fields: { Scheduled_At: "2026-11-21T15:30:00.000Z" },
   }, { partial: true });
   assert.equal(partial.scheduled_at, "2026-11-21T15:30:00.000Z");
   assert.equal("enabled" in partial, false);
+  const partialPreservesOwner = attachPlanScheduleRequestForeignKeys([partial], new Map(), { strict: true });
+  assert.equal("production_request_id" in partialPreservesOwner[0], false, "schedule-only patch must not clear owner FK");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     assert.match(String(url), /production_request_outputs\?enabled=eq\.true/);
@@ -4977,6 +5002,12 @@ test("Production Request Outputs POST commit via studioSideTableCommit under wri
         bodies.push({ href, method, body: String(init?.body || "") });
         return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (method === "GET" && href.includes("production_requests?")) {
+        return new Response(JSON.stringify([{
+          id: "8ab85c7e-11c2-4b9d-986c-0e5f6a397d01",
+          airtable_record_id: "recEa6IAB5oBHvR2a",
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
     };
     const created = await studioSideTableCommit(
@@ -5000,6 +5031,7 @@ test("Production Request Outputs POST commit via studioSideTableCommit under wri
     assert.equal(created.records[0].fields.Aspect_Ratio, "9:16");
     assert.ok(bodies.some((entry) => entry.href.includes("production_request_outputs")));
     assert.ok(bodies.some((entry) => entry.body.includes("recEa6IAB5oBHvR2a")));
+    assert.ok(bodies.some((entry) => entry.body.includes("8ab85c7e-11c2-4b9d-986c-0e5f6a397d01")), "typed request FK must be persisted");
   } finally {
     globalThis.fetch = originalFetch;
   }

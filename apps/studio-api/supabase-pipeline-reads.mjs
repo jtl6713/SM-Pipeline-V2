@@ -2523,14 +2523,59 @@ export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, s
     .filter((row) => row?.id && String(row.fields?.Studio_Production_Job_JSON || "").trim());
 }
 
+/** Translate legacy Airtable link ids into authoritative Postgres FKs.
+ * Never write a detached PRO during Supabase write SoR. Partial patches without
+ * Production_Request preserve the existing FK, and an explicit empty link clears it.
+ */
+export function attachPlanScheduleRequestForeignKeys(rows, requestIdMap, { strict = false } = {}) {
+  const mapped = [];
+  for (const source of rows || []) {
+    const row = { ...source };
+    if (!Object.prototype.hasOwnProperty.call(row, "production_request_airtable_id")) {
+      mapped.push(row);
+      continue;
+    }
+    const refs = Array.isArray(row.production_request_airtable_ids) ? row.production_request_airtable_ids : [];
+    if (strict && refs.length > 1) throw new Error("Multiple Production Requests link one output");
+    const key = String(row.production_request_airtable_id || "").trim();
+    if (!key) {
+      row.production_request_id = null;
+    } else {
+      const uuid = requestIdMap.get(key);
+      if (!uuid && strict) throw new Error("Production Request FK unresolved; refusing orphan output");
+      if (uuid) row.production_request_id = uuid;
+    }
+    mapped.push(row);
+  }
+  return mapped;
+}
+
 export async function syncPlanScheduleRowsToSupabase(env, records, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true, updated: 0 };
   const rows = (records || []).map((record) => mapPlanScheduleRow(record, options)).filter(Boolean);
-  const size = options.partial === true ? 1 : 40;
-  for (let index = 0; index < rows.length; index += size) {
-    await upsertChunk(env, "production_request_outputs", rows.slice(index, index + size));
+  const keys = [...new Set(rows
+    .map((row) => String(row.production_request_airtable_id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  const requestIdMap = new Map();
+  for (let i = 0; i < keys.length; i += 40) {
+    const batch = keys.slice(i, i + 40);
+    const linked = await supabaseRest(
+      env, `production_requests?airtable_record_id=in.(${batch.map(encodeURIComponent).join(",")})`
+        + `&select=id,airtable_record_id&limit=${batch.length}`,
+    );
+    if (!Array.isArray(linked)) throw new Error("Production Request FK lookup unavailable");
+    for (const row of linked) {
+      if (row?.id && row?.airtable_record_id) requestIdMap.set(row.airtable_record_id, row.id);
+    }
   }
-  return { ok: true, updated: rows.length };
+  const linkedRows = attachPlanScheduleRequestForeignKeys(rows, requestIdMap, {
+    strict: studioPhase6WriteSource(env) === "supabase",
+  });
+  const size = options.partial === true ? 1 : 40;
+  for (let index = 0; index < linkedRows.length; index += size) {
+    await upsertChunk(env, "production_request_outputs", linkedRows.slice(index, index + size));
+  }
+  return { ok: true, updated: linkedRows.length };
 }
 
 export async function listSupabasePlanScheduleRows(env, { brandAirtableId = "", startIso, endIso } = {}) {
