@@ -91,7 +91,7 @@ test("Supabase autonomous orphan recovery refuses missing identity, ambiguity, a
     requestNotes: String.raw`origin=autonomous\\norigin=prepare-to-review`,
   }).safe, false);
   assert.equal(verifySubmittedAutonomousOrphan({ ...valid,
-    requestNotes: "origin=autonomous\\r\\norigin=prepare-to-review",
+    requestNotes: "origin=autonomous\r\norigin=prepare-to-review",
   }).safe, true);
   for (const wrong of [
     { requestNotes:"origin=manual" },
