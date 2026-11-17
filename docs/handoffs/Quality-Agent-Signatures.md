@@ -2,6 +2,10 @@
 
 This file is the machine-readable/text companion to `docs/handoffs/Quality-Agent.docx`. Quality Agent checks should consult this catalog when scanning failed, retry-pending, or soon-to-publish outputs.
 
+## QA-PRODUCTION-MISSING-PLATFORM-OUTPUTS — stalled production output materialization
+
+All four profiles: proactively detect submitted production requests with ready output plans but missing or dangling Supabase `production_request_outputs.platform_output_id` links. Reconcile the normal promotion/materialization path under a request-scoped lease; never blind-retry stamping or insert guessed Platform Outputs. Escalate ambiguous identity, published/approved outputs, or unknown leases. Full detection, recovery and regression contract: [QA-PRODUCTION-MISSING-PLATFORM-OUTPUTS.md](QA-PRODUCTION-MISSING-PLATFORM-OUTPUTS.md). **Documentation only until runtime integration is verified.**
+
 ## QA-TT-DUPLICATE-SLIDES — TikTok duplicate carousel slide links
 
 **First observed:** Platform Output 997, Content 226, October 5, 2026.
