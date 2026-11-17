@@ -220,7 +220,16 @@ class AirtableClient:
         import requests
 
         from reference_cache import list_reference_records
+        from settings_store import list_settings
         from supabase_reads import try_list_supabase_records
+
+        # Settings live in engagement_settings.payload once Supabase is the SoR.
+        # Without this branch the generic read cannot project Pipeline Settings,
+        # returns None, and the closed Airtable archive returns an empty list.
+        # P2 then blocks every voiceover as missing_voiceover_normalizer_url.
+        setting_rows = list_settings(self._settings, table_id, formula, max_records)
+        if setting_rows is not None:
+            return setting_rows
 
         cached_rows = list_reference_records(
             self._settings,
