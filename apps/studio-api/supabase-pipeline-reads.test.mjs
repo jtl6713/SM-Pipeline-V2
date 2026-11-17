@@ -5002,6 +5002,12 @@ test("Production Request Outputs POST commit via studioSideTableCommit under wri
         bodies.push({ href, method, body: String(init?.body || "") });
         return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (method === "GET" && href.includes("production_requests?")) {
+        return new Response(JSON.stringify([{
+          id: "8ab85c7e-11c2-4b9d-986c-0e5f6a397d01",
+          airtable_record_id: "recEa6IAB5oBHvR2a",
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
     };
     const created = await studioSideTableCommit(
@@ -5025,6 +5031,7 @@ test("Production Request Outputs POST commit via studioSideTableCommit under wri
     assert.equal(created.records[0].fields.Aspect_Ratio, "9:16");
     assert.ok(bodies.some((entry) => entry.href.includes("production_request_outputs")));
     assert.ok(bodies.some((entry) => entry.body.includes("recEa6IAB5oBHvR2a")));
+    assert.ok(bodies.some((entry) => entry.body.includes("8ab85c7e-11c2-4b9d-986c-0e5f6a397d01")), "typed request FK must be persisted");
   } finally {
     globalThis.fetch = originalFetch;
   }
