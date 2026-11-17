@@ -68,6 +68,7 @@ import {
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
   classifyUnclassifiedRenderedReadyForReview,
+  classifyPublishedStatusDrift,
   classifyPhantomRerender,
   classifyPreparingGap,
   classifyProduceJob,
@@ -12979,17 +12980,27 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
     sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND(OR({Output_Status}="Ready for Review",{Output_Status}="In Production"),{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing")),AND({Output_Status}=BLANK(),{Render_Status}="Rendered",{Final_File_URL}!="",{Thumbnail_URL}!="",{Output_Caption}!="",{Review_Status}=BLANK(),{Publish_Status}=BLANK(),{Scheduled_Post_Date}=BLANK(),{Studio_Scheduled_At}=BLANK())))',
   }).catch(() => []);
+  // The publish reconciler may have saved Published_At and Publish_Status but
+  // left an older Output_Status, causing truly live posts to reappear in Review.
+  // Repair the receipt-backed drift independently; never initiate a publish.
+  const publishedRows = await studioListDeskHealOutputs(env, "published_status_drift", {
+    limit: Math.max(limit * 4, 48),
+    sortField: "Output_ID",
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}!="",{Review_Status}="Approved",{Publish_Status}="Published",OR({Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing",{Output_Status}="In Production"))',
+  }).catch(() => []);
   const healed = [];
-  for (const record of rows || []) {
+  for (const record of [...(publishedRows || []), ...(rows || [])]) {
     if (healed.length >= limit) break;
     const row = mapDeskInventoryOutput(record);
-    const missingStatus = classifyUnclassifiedRenderedReadyForReview(row);
-    const finding = missingStatus || classifyAwaitingApprovalStaleRfr(row);
+    const published = classifyPublishedStatusDrift(row);
+    const missingStatus = !published && classifyUnclassifiedRenderedReadyForReview(row);
+    const finding = published || missingStatus || classifyAwaitingApprovalStaleRfr(row);
     if (!finding) continue;
-    // A blank status with a verified rendered package goes to human review;
-    // only an already-final-approved output may enter Ready to Schedule.
-    const fields = { Output_Status: missingStatus ? "Ready for Review" : "Approved for Publishing" };
-    if (!missingStatus && String(row.final_file_url || "").trim()
+    // Only an actual publication receipt permits "Published"; a rendered but
+    // unapproved package must remain in the review lane.
+    const fields = { Output_Status: published ? "Published" : missingStatus ? "Ready for Review" : "Approved for Publishing" };
+    if (!published && !missingStatus && String(row.final_file_url || "").trim()
       && ["Ready for Render", "Ready to Render", "Waiting in Render Queue"].includes(String(row.render_status || "").trim())) {
       fields.Render_Status = "Rendered";
     }
@@ -12999,16 +13010,16 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
         skipSupabaseWriteThrough: true,
         body: JSON.stringify({ fields, typecast: true }),
       });
-      await studioSupabaseWriteThroughOutput(env, updated, "production-state-heal");
+      await studioSupabaseWriteThroughOutput(env, updated, published ? "published-status-drift-heal" : "production-state-heal");
       healed.push({
-        key: missingStatus ? "UNCLASSIFIED_RENDERED_READY" : "AWAITING_APPROVAL_STALE_RFR",
+        key: published ? "PUBLISHED_STATUS_DRIFT" : missingStatus ? "UNCLASSIFIED_RENDERED_READY" : "AWAITING_APPROVAL_STALE_RFR",
         id: record.id,
         output_id: row.output_id || null,
         fingerprint: finding.fingerprint,
       });
     } catch (error) {
       healed.push({
-        key: "AWAITING_APPROVAL_STALE_RFR",
+        key: published ? "PUBLISHED_STATUS_DRIFT" : missingStatus ? "UNCLASSIFIED_RENDERED_READY" : "AWAITING_APPROVAL_STALE_RFR",
         id: record.id,
         output_id: row.output_id || null,
         error: error instanceof Error ? error.message : String(error),
