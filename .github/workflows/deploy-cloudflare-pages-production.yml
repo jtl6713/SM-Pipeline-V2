@@ -53,6 +53,7 @@ jobs:
             apps/studio-web/factory-open-navigation.test.mjs \
             apps/studio-web/factory-revision-approval.test.mjs \
             apps/studio-web/production-record-identity.test.mjs \
+            apps/studio-web/production-active-only.test.mjs \
             apps/studio-web/pipeline-rendering-terminal.test.mjs \
             apps/studio-web/vibe-cut-mode.test.mjs \
             apps/studio-web/vibe-skip-upload-dates.test.mjs \
