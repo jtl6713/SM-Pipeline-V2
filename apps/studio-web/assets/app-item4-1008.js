@@ -16950,10 +16950,12 @@ function timedScriptAssetLabel(asset, index) {
 
   // Submitted requests are no longer drafts, even if status propagation lags.
   function productionRequestIsOpenDraft(record) {
-    if (!record || record.active === false) return false;
+    if (!record) return false;
     const status = String(record.status || "").trim().toLowerCase();
-    const revisionOpen = status === "promoted" && String(record.production_notes || "").split(/\r?\n/).some(line => line.trim().startsWith("[factory-revision-open]"));
-    if (revisionOpen) return true;
+    // The API exposes revision_open explicitly; it strips the internal marker
+    // from production_notes. Promoted revisions may also have Active=false.
+    if (status === "promoted" && record.revision_open === true) return true;
+    if (record.active === false) return false;
     if (status !== "draft" && status !== "ready") return false;
     if (String(record.submitted_at || "").trim()) return false;
     if (Array.isArray(record.promoted_content_item_links) && record.promoted_content_item_links.length > 0) return false;
