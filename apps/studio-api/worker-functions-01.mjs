@@ -1144,7 +1144,7 @@ export function studioReadCachePrune() {
   if (studioHotReadCache.size < 48) return;
   const now = Date.now();
   for (const [key, hit] of studioHotReadCache) {
-    if (!hit?.promise && now - Number(hit?.at || 0) > 120000) studioHotReadCache.delete(key);
+    if (!hit?.loadToken && now - Number(hit?.at || 0) > 120000) studioHotReadCache.delete(key);
   }
 }
 /*__STUDIO_WORKER_END:studioReadCachePrune__*/
@@ -1405,29 +1405,42 @@ export function studioReadCoalesce(key, ttlMs, loader) {
   studioReadCachePrune();
   const now = Date.now();
   const hit = studioHotReadCache.get(key);
-  if (hit && hit.value !== undefined && now - hit.at < ttlMs) return Promise.resolve(hit.value);
-  if (hit?.promise) return hit.promise;
-  const promise = Promise.resolve().then(loader).then((value) => {
+  if (hit && hit.value !== undefined && now - Number(hit.at || 0) < ttlMs) {
+    return Promise.resolve(hit.value);
+  }
+  // Never keep an unresolved Promise in module-level state. A second Worker
+  // request cannot await a Promise created by a previous request: Cloudflare
+  // rejects cross-request Promise settlement and the Pipeline becomes unusable.
+  // Resolved values are safe to reuse; concurrent misses load independently.
+  const loadToken = {};
+  studioHotReadCache.set(key, {
+    at: hit?.at || 0,
+    value: hit?.value,
+    writeGen: hit?.writeGen,
+    loadToken,
+  });
+  return Promise.resolve().then(loader).then((value) => {
     const current = studioHotReadCache.get(key);
-    // A write that dropped this key while the read was in flight must not
-    // put the pre-write snapshot back into the cache.
-    if (current?.promise === promise) studioHotReadCache.set(key, { at: Date.now(), value });
+    // A newer read or a write invalidation must win. Never resurrect stale
+    // data merely because this request finishes after the cache was changed.
+    if (current?.loadToken === loadToken) {
+      studioHotReadCache.set(key, { at: Date.now(), value, writeGen: current.writeGen });
+    }
     return value;
   }).catch((error) => {
     const current = studioHotReadCache.get(key);
-    if (current?.promise === promise) {
-      const cooling = Number(error?.status) === 429 || /cooling down|rate.?limit|too many requests/i.test(String(error?.message || error || ""));
-      if (cooling && current.value !== undefined) {
-        studioHotReadCache.set(key, { at: current.at, value: current.value });
-        return current.value;
+    if (current?.loadToken === loadToken) {
+      if (current.value !== undefined) {
+        studioHotReadCache.set(key, { at: current.at, value: current.value, writeGen: current.writeGen });
+      } else {
+        studioHotReadCache.delete(key);
       }
-      if (current.value !== undefined) studioHotReadCache.set(key, { at: current.at, value: current.value });
-      else studioHotReadCache.delete(key);
+      const cooling = Number(error?.status) === 429 ||
+        /cooling down|rate.?limit|too many requests/i.test(String(error?.message || error || ""));
+      if (cooling && current.value !== undefined) return current.value;
     }
     throw error;
   });
-  studioHotReadCache.set(key, { at: hit?.at || 0, value: hit?.value, promise });
-  return promise;
 }
 /*__STUDIO_WORKER_END:studioReadCoalesce__*/
 
