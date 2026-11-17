@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
+import { submittedApprovalAge, verifySubmittedPromotionOwnership, verifySubmittedAutonomousOrphan, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import { CHICAGO_PROFILE_ID, REVIEW_PILOT, reviewEligibility } from "./rendering-review-policy.mjs";
 
 const requestId = "rec9xNB230bZy3I6K";
@@ -48,6 +48,66 @@ test("failure injection: fresh submission, missing timestamp, clock skew do not 
   assert.equal(probe({submittedAt:null}).reason,"missing_submission_timestamp");
   assert.equal(submittedApprovalAge(submittedAt,nowMs)>SUBMITTED_RECOVERY_GRACE_MS,true);
 });
+test("Supabase-origin Cloud Gate I4 orphan uniquely proves missing reciprocal owner and Submitted timestamp", () => {
+  const params = {
+    requestId: "recWwDHWDqLCt5R9x", requestStatus: "Submitted",
+    requestIdeaIds: ["reca5y3ZPwFkgCPN1"], requestParentIds: [],
+    submittedAt: null, requestCreatedAt: "2026-11-16T14:04:51.663Z",
+    requestNotes: "origin=autonomous\\norigin=prepare-to-review\\nez-photo-wait=off",
+    ideaId: "reca5y3ZPwFkgCPN1", ideaStatus: "Promoted",
+    ideaContentIds: ["recJZpW6lLIy621oY"],
+    ideaPromotedContentId: "recJZpW6lLIy621oY",
+    ideaRequestIds: ["recWwDHWDqLCt5R9x"],
+    parentId: "recJZpW6lLIy621oY", parentRequestIds: [],
+    parentIdeaIds: ["reca5y3ZPwFkgCPN1"],
+    nowMs: Date.parse("2026-11-17T02:05:00Z"),
+  };
+  const result = verifySubmittedAutonomousOrphan(params);
+  assert.deepEqual(result, {
+    safe: true, reason: "uniquely_confirmed_autonomous_i4",
+    parentId: params.parentId, repairLink: true, repairParentOwner: true,
+  });
+  const rebound = verifySubmittedAutonomousOrphan({
+    ...params, parentRequestIds: [params.requestId], requestParentIds: [params.parentId],
+  });
+  assert.equal(rebound.safe, true);
+  assert.equal(rebound.repairLink, false);
+  assert.equal(rebound.repairParentOwner, false);
+});
+
+test("Supabase autonomous orphan recovery refuses missing identity, ambiguity, and fresh requests", () => {
+  const valid = {
+    requestId, requestStatus:"Submitted", requestIdeaIds:[ideaId],
+    requestParentIds:[], submittedAt:null, requestCreatedAt:submittedAt,
+    requestNotes:"origin=autonomous\\norigin=prepare-to-review",
+    ideaId, ideaStatus:"Promoted", ideaContentIds:[parentId],
+    ideaPromotedContentId:parentId, ideaRequestIds:[requestId],
+    parentId, parentRequestIds:[], parentIdeaIds:[ideaId], nowMs,
+  };
+  assert.equal(verifySubmittedAutonomousOrphan(valid).safe,true);
+  for (const wrong of [
+    { requestNotes:"origin=manual" },
+    { requestStatus:"Ready" },
+    { ideaStatus:"Approved" },
+    { requestCreatedAt:null },
+    { nowMs: Date.parse(submittedAt)+SUBMITTED_RECOVERY_GRACE_MS-1 },
+    { requestIdeaIds:[] },
+    { requestIdeaIds:[ideaId,"rec0uVrVeiUM6shp9"] },
+    { ideaRequestIds:[] },
+    { ideaRequestIds:[requestId,"rec0uVrVeiUM6shp9"] },
+    { ideaContentIds:[] },
+    { ideaContentIds:[parentId,"rec0uVrVeiUM6shp9"] },
+    { ideaPromotedContentId:"rec0uVrVeiUM6shp9" },
+    { parentIdeaIds:[] },
+    { parentIdeaIds:["rec0uVrVeiUM6shp9"] },
+    { parentRequestIds:["rec0uVrVeiUM6shp9"] },
+    { parentRequestIds:[requestId,"rec0uVrVeiUM6shp9"] },
+    { requestParentIds:["rec0uVrVeiUM6shp9"] },
+  ]) {
+    assert.equal(verifySubmittedAutonomousOrphan({ ...valid,...wrong }).safe,false,JSON.stringify(wrong));
+  }
+});
+
 test("cron scans Submitted regardless of absent Promoted_Content_Item and readbacks before mutate", () => {
   const source=readFileSync(new URL("./worker-functions-03.mjs",import.meta.url),"utf8");
   const start=source.indexOf("export async function studioHealPromotedMissingFanout");
@@ -60,7 +120,10 @@ test("cron scans Submitted regardless of absent Promoted_Content_Item and readba
   assert.match(body,/if \(!latestProof\.safe\) continue/);
   assert.match(body,/Promoted_Content_Item: \[latestProof\.parentId\]/);
   assert.match(body,/Promoted_Content_Item repair failed readback/);
-  assert.match(body,/finalizeProductionRequestPromotion\(env, latest\.id, idea, ctx\)/);
+  assert.match(body,/finalizeProductionRequestPromotion\(env, latest\.id, currentIdea, ctx\)/);
+  assert.match(body,/verifySubmittedAutonomousOrphan\(/);
+  assert.match(body,/Production_Request: \[latest\.id\]/);
+  assert.match(body,/Content Item owner repair failed readback/);
   assert.doesNotMatch(body,/promoteProductionRequestViaI3I4\(/);
 });
 test("reroute only missing records and preserve already rendered siblings on repeated finalization",()=>{
