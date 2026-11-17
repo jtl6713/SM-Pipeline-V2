@@ -829,3 +829,5 @@ Deploy Studio UI 0.6.973-home-approved-ready-total-refill: Restore per-profile f
 Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issues and Production pipeline aggregate footer columns while preserving non-clickable totals. Add rendered HTML regression tests. 2026-11-16.
 
 2026-11-17: Studio UI 0.6.975-production-active-truth. Production list displays only genuine unfinished render/asset/revision outputs; already Factory-ready reviews move out, and content shells with zero linked outputs cannot masquerade as active production. Preserve native review/approval status and Supabase as SoR; deploy with authenticated Pages verification and regression tests.
+
+2026-11-17: Deploy Studio UI 0.6.976-production-home-parity — merged PR #2119. Production lists only Home-eligible content and labels total as 7 NYC outputs across 2 pieces; Chrome cache keys and BUILD_ID synchronized, no publish or data edits. Verify custom-domain build and asset identity.
