@@ -12,7 +12,10 @@ test("promoted requests only reappear in Production when explicitly opened for r
   assert.ok(start >= 0 && end > start);
   assert.match(block, /listSupabaseRevisionOpenProductionRequests/);
   assert.match(block, /revisions = await listSupabaseRevisionOpenProductionRequests/);
-  assert.match(block, /new Map\(\[\.\.\.drafts, \.\.\.revisions\]/);
+  assert.match(block, /new Map\(revisions\.map\(row => \[row\.id, row\]\)\)/);
+  assert.match(block, /for \(const draft of drafts\)/);
+  assert.match(block, /if \(!prioritized\.has\(draft\.id\)\) prioritized\.set\(draft\.id, draft\)/);
+  assert.match(block, /return \[\.\.\.prioritized\.values\(\)\]\.slice\(0, limit\)/);
 });
 
 test("reopened promoted revision is selectable without creating a new draft", () => {
@@ -32,7 +35,10 @@ test("reopened revisions survive ordinary draft errors and missing Idea metadata
   assert.ok(block.indexOf("listSupabaseRevisionOpenProductionRequests") < block.indexOf("await listRecords("),
     "read authoritative reopened revisions before ordinary drafts");
   assert.match(block, /if \(!revisions\.length\) throw error/);
-  assert.match(block, /new Map\(\[\.\.\.drafts, \.\.\.revisions\]/);
+  assert.match(block, /new Map\(revisions\.map\(row => \[row\.id, row\]\)\)/);
+  assert.match(block, /for \(const draft of drafts\)/);
+  assert.match(block, /if \(!prioritized\.has\(draft\.id\)\) prioritized\.set\(draft\.id, draft\)/);
+  assert.match(block, /return \[\.\.\.prioritized\.values\(\)\]\.slice\(0, limit\)/);
 
   const listStart = api.indexOf("export async function listProductionRequests(");
   const listEnd = api.indexOf("/*__STUDIO_WORKER_END:listProductionRequests__*/", listStart);
