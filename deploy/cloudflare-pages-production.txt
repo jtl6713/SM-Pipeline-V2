@@ -831,3 +831,5 @@ Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issue
 2026-11-17: Studio UI 0.6.975-production-active-truth. Production list displays only genuine unfinished render/asset/revision outputs; already Factory-ready reviews move out, and content shells with zero linked outputs cannot masquerade as active production. Preserve native review/approval status and Supabase as SoR; deploy with authenticated Pages verification and regression tests.
 
 2026-11-17: Deploy Studio UI 0.6.976-production-home-parity — merged PR #2119. Production lists only Home-eligible content and labels total as 7 NYC outputs across 2 pieces; Chrome cache keys and BUILD_ID synchronized, no publish or data edits. Verify custom-domain build and asset identity.
+
+2026-11-17: Deploy Studio Pages UI 0.6.977-mobile-viewport — merged PR #2127. Shared mobile viewport containment across Studio screens and all four profiles; keep calendar/table scrolling local. Verify iPhone viewport, desktop layout and UI build identity. Deployment trigger only; no publishing or data mutations.
