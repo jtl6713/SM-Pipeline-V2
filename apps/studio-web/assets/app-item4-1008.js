@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.974-home-overview-footer-totals";
+  const BUILD_ID = "item4-0.6.975-production-active-truth";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17552,25 +17552,32 @@ function timedScriptAssetLabel(asset, index) {
     const stage = String(record.studio_stage || "").trim().toLowerCase();
     if (stage === "archived") return false;
 
-    // Output states are authoritative. Keep a mixed-status content item here
-    // while ANY output still needs rendering or approval, even when the other
-    // platform outputs have already been approved or scheduled.
+    // The Factory owns review-ready outputs; Production must show only work
+    // that still needs source selection, rendering, or an actual revision.
+    // The old Ready for Review predicate also counted already-finished Factory
+    // packages and kept content such as Gantry and Deck Debate here forever.
     const counts = record.output_state_counts;
     if (counts && typeof counts === "object" && Object.keys(counts).length) {
-      const beforeApproval = new Set([
+      const needsProduction = new Set([
         "queued", "preparing assets", "rendering", "rerendering",
-        "trying again", "waiting in render queue", "ready for review",
+        "trying again", "waiting in render queue", "rendered",
+        "review held", "changes requested",
       ]);
       return Object.entries(counts).some(([state, count]) =>
         Number(count || 0) > 0 && (
-          beforeApproval.has(String(state).trim().toLowerCase())
+          needsProduction.has(String(state).trim().toLowerCase())
           || /^waiting in render queue\b/i.test(String(state))
         )
       );
     }
 
-    // Older items may not have output rollups. Use the available parent state
-    // without treating scheduled/publishing/approved records as production work.
+    // No linked outputs means no actionable production record. In particular,
+    // a duplicate, superseded Content Item with status Generating but zero
+    // Platform Outputs must not be displayed beside the real promoted item.
+    // Draft Production Requests have their own separate list.
+    if (!Array.isArray(record.output_links) || record.output_links.length === 0) return false;
+    // Legacy linked output records without rollups can use parent stage,
+    // preserving their edit/review affordance until the Supabase rollup heals.
     const review = String(record.review_status || record.carousel_review_status || "").trim().toLowerCase();
     if (review === "approved" || review === "complete") return false;
     return !new Set([
