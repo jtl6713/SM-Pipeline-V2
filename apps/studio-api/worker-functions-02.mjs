@@ -3397,20 +3397,25 @@ export function suggestPrimaryLocationFromIdea(idea) {
 /*__STUDIO_WORKER_END:suggestPrimaryLocationFromIdea__*/
 
 export async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
-  const drafts = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit,
-    sortField: "Updated_At",
-    sortDirection: "desc",
-    filterFormula: OPEN_PRODUCTION_REQUEST_FORMULA,
-    fields,
-  });
-  // A promoted request is not active production, but an explicitly opened
-  // Factory revision must remain accessible in Production's revision list.
-  // Fetch only marked revisions; never recreate a draft or alter output state.
+  // Reopened promoted revisions come from the authoritative Supabase store.
+  // They must not depend on an ordinary draft-list read succeeding.
   const revisions = await listSupabaseRevisionOpenProductionRequests(env, { limit });
-  // Revisions first: the ordinary draft cap must never push the very request
-  // an operator deliberately reopened off the Production screen.
-  const byId = new Map([...revisions, ...drafts].map(row => [row.id, row]));
+  let drafts = [];
+  try {
+    drafts = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit,
+      sortField: "Updated_At",
+      sortDirection: "desc",
+      filterFormula: OPEN_PRODUCTION_REQUEST_FORMULA,
+      fields,
+    });
+  } catch (error) {
+    if (!revisions.length) throw error;
+    console.warn("ordinary production draft read failed; preserving reopened revisions", error);
+  }
+  // Revisions take precedence on identical IDs; never silently lose their marker.
+  // No records or output states are written here.
+  const byId = new Map([...drafts, ...revisions].map(row => [row.id, row]));
   return [...byId.values()].slice(0, limit);
 }
 /*__STUDIO_WORKER_END:listOpenProductionRequests__*/
@@ -4005,8 +4010,15 @@ export async function listProductionRequests(request, env, url, authorization) {
       (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
   const ideaIds = filtered.map(ideaRecordIdFromProductionRequest);
-  const { titles: ideaTitles, photoWait: photoWaitStates } = await loadIdeaListMetaByRecordId(env, ideaIds);
+  // Idea metadata is only supplementary to the Production list. If it fails,
+  // leave valid requests visible, particularly promoted requests under revision.
+  const { titles: ideaTitles, photoWait: photoWaitStates } = await loadIdeaListMetaByRecordId(env, ideaIds)
+    .catch((error) => {
+      console.warn("Production idea metadata unavailable; showing saved requests", error);
+      return { titles: new Map(), photoWait: new Map() };
+    });
   const visible = filtered.filter((record) => {
+    if (productionRequestRevisionOpen(record)) return true;
     const ideaId = ideaRecordIdFromProductionRequest(record);
     return !ideaId || !productionRequestPhotoWaitHidden(record, photoWaitStates.get(ideaId));
   });
