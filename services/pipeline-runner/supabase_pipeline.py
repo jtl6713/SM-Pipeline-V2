@@ -889,6 +889,31 @@ def _request_row(record: dict) -> dict:
         row["variant_status"] = _select(fields.get("Studio_Variant_Status"))
     if "Studio_Output_Plan_Status" in fields:
         row["output_plan_status"] = _select(fields.get("Studio_Output_Plan_Status"))
+    if "Studio_Master_Asset_Status" in fields:
+        row["master_asset_status"] = _select(fields.get("Studio_Master_Asset_Status"))
+    # Keep the durable plan and manifest in their typed JSONB columns.
+    # Production steps modify these after ingest/crop; silently dropping
+    # their updates makes subsequent reads appear incomplete.
+    for key, column, empty in (
+        ("Studio_Master_Assets_JSON", "master_assets", []),
+        ("Studio_Output_Plan_JSON", "output_plan", {}),
+        ("Studio_Variant_Manifest_JSON", "variant_manifest", {}),
+    ):
+        if key not in fields:
+            continue
+        raw = fields[key]
+        if raw in (None, ""):
+            row[column] = empty
+        elif isinstance(raw, (dict, list)):
+            row[column] = raw
+        else:
+            try:
+                parsed = json.loads(str(raw))
+            except (ValueError, TypeError):
+                raise ValueError(f"Invalid JSON for {key}; refusing to discard production data")
+            if not isinstance(parsed, type(empty)):
+                raise ValueError(f"Invalid JSON shape for {key}; refusing to discard production data")
+            row[column] = parsed
     if "Studio_Production_Job_JSON" in fields:
         # studio-produce writes only this field when a step advances. Dropping it
         # left Promoted jobs at "themes" forever: the runner re-read the old step
