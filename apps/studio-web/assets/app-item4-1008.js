@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.975-production-active-truth";
+  const BUILD_ID = "item4-0.6.976-production-home-parity";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17517,6 +17517,7 @@ function timedScriptAssetLabel(asset, index) {
       contentRenderLabel(r),
       r.review_status || r.carousel_review_status,
       Array.isArray(r.output_links) ? r.output_links.length : 0,
+      r.production_active_output_count,
       r.lifecycle_complete,
     ]));
   }
@@ -17548,9 +17549,17 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function productionContentNeedsWork(record) {
-    if (!record || record.lifecycle_complete) return false;
+    if (!record) return false;
     const stage = String(record.studio_stage || "").trim().toLowerCase();
     if (stage === "archived") return false;
+    // Authoritative output-level count from the same predicate as Home. The
+    // screen groups outputs by piece, but may not revive old DNP/held rows.
+    if (record.production_active_output_count !== undefined
+      && record.production_active_output_count !== null
+      && Number.isFinite(Number(record.production_active_output_count))) {
+      return Number(record.production_active_output_count) > 0;
+    }
+    if (record.lifecycle_complete) return false;
 
     // The Factory owns review-ready outputs; Production must show only work
     // that still needs source selection, rendering, or an actual revision.
@@ -17607,6 +17616,14 @@ function timedScriptAssetLabel(asset, index) {
     }
     const scrollTop = target.scrollTop;
     renderContentItemsTable(target, active);
+    const outputCount = active.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.production_active_output_count) || 0), 0
+    );
+    if (active.some(item => Number.isFinite(Number(item.production_active_output_count)))) {
+      target.insertAdjacentHTML("afterbegin",
+        `<p class="subtle production-active-summary"><strong>${outputCount} output${outputCount === 1 ? "" : "s"} in production</strong> across ${active.length} content piece${active.length === 1 ? "" : "s"}. Home counts outputs; Production groups them by piece.</p>`
+      );
+    }
     target.scrollTop = scrollTop;
   }
 

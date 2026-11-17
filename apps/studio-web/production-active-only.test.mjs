@@ -81,3 +81,34 @@ test("Draft list uses eligibility guard, collapses empty section, retains errors
   const draftList = source.slice(source.indexOf("  async function loadProductionRequests("), source.indexOf("  function ideaStructureLabel("));
   assert.doesNotMatch(draftList, /new Set\(\["Draft", "Ready", "Submitted"\]\)/);
 });
+
+test("Home eligibility wins over stale Production stage and private revision outputs", () => {
+  assert.equal(needsWork({
+    content_id: 1933, studio_stage: "Needs Attention",
+    output_state_counts: { "Changes Requested": 4, Approved: 2 },
+    production_active_output_count: 0,
+  }), false, "Chicago Do_Not_Publish revisions must not look active");
+  assert.equal(needsWork({
+    content_id: 1535, studio_stage: "Preparing Assets",
+    output_state_counts: { "Preparing Assets": 1 },
+    production_active_output_count: 0,
+  }), false, "Miami ghost row with no Home-eligible outputs must be hidden");
+  assert.equal(needsWork({
+    title: "Coney Off-Season Vibes", production_active_output_count: 3,
+    studio_stage: "Rendering", output_state_counts: { "Preparing Assets": 3 },
+  }), true);
+  assert.equal(needsWork({
+    title: "Astoria N-Line Soundscape", production_active_output_count: 4,
+    studio_stage: "Preparing Assets", output_state_counts: { "Waiting in Render Queue": 1, "Preparing Assets": 3 },
+  }), true, "undated Astoria parent must remain visible");
+  assert.equal(needsWork({
+    title: "Astoria N-Line Soundscape", production_active_output_count: 4,
+    lifecycle_complete: true,
+  }), true, "output proof wins over stale complete parent badge");
+});
+
+test("Production summary explains Home output counts separately from parent content rows", () => {
+  assert.match(source, /production-active-summary/);
+  assert.match(source, /Home counts outputs; Production groups them by piece/);
+  assert.match(source, /r\.production_active_output_count,\s*r\.lifecycle_complete/);
+});
