@@ -763,6 +763,12 @@ jobs:
             if [[ "$code" == "401" || "$code" == "403" ]]; then
               break
             fi
+            # A reset immediately after bridge upload can yield curl 000.
+            # Retry a bounded transport failure; never accept it as an auth pass.
+            if [[ "$code" == "000" ]]; then
+              sleep 3
+              continue
+            fi
             if grep -Fq 'error code: 1042' /tmp/qa-live-denied.json 2>/dev/null || grep -Fq 'error code: 1104' /tmp/qa-live-denied.json 2>/dev/null; then
               sleep 3
               continue
