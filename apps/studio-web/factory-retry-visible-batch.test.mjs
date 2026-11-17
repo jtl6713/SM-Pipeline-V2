@@ -21,11 +21,12 @@ function harness({ completedOpen, inspectedBatchKey, active, completed }) {
     state,
     fetchJson: async (url, options) => {
       calls.push({url, payload: JSON.parse(options.body)});
-      return {job_id:"group-failed",message:"Retry started"};
+      return {job_id:"group-failed",accepted:true,message:"Retry started"};
     },
     setStatus: message => calls.push({message}),
     refreshFactoryBatchActivity: async () => {},
     updateFactoryBatchToolbar: () => {},
+    renderFactoryBatchActivity: () => {},
   };
   const retry = vm.runInNewContext(code + "\nretryFactoryBatchFailures", context);
   return {retry,state,calls};
