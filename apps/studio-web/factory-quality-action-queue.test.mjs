@@ -33,5 +33,5 @@ test("Quality Agent shows bounded actionable records with filters and no blind r
   assert.match(quality, /quality_rate_limit_preview: true/);
   assert.match(quality, /No blind republishing/);
   assert.match(quality, /overdue\.items\.slice\(0, state\.overdueShown\)/);
-  assert.match(html, /UI build 0\.6\.983/);
+  assert.match(html, /<span id="uiBuildLabel">UI build 0\.6\.\d+<\/span>/);
 });
