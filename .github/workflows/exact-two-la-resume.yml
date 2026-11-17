@@ -1,0 +1,54 @@
+name: Resume exact two LA jobs
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/exact-two-la-resume.yml']
+permissions: {contents: read}
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Invoke production runner through authenticated ops bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPS_TOKEN:-}"
+          cat >/tmp/resume.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $health=Invoke-RestMethod 'http://127.0.0.1:3350/health'
+          if ($health.ok -ne $true -or $health.studio_write_source -ne 'supabase') {throw 'Supabase authority required'}
+          $envfile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          $line=@(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          $secret=([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          if (-not $secret) {throw 'Missing runner secret'}
+          foreach($id in @('recicB0690oFkywBl','recZPLeO8cbXZRXFH')) {
+            $body=@{production_request_record_id=$id}|ConvertTo-Json -Compress
+            $r=Invoke-RestMethod 'http://127.0.0.1:3350/jobs/studio-produce/resume' -Method Post -Headers @{'X-Pipeline-Secret'=$secret} -ContentType 'application/json' -Body $body -TimeoutSec 60
+            if($r.ok -ne $true -or $r.accepted -ne $true){throw "Rejected $id"}
+            Write-Output "la_resume_accepted=$id"
+          }
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/request.json').write_text(json.dumps({'command':Path('/tmp/resume.ps1').read_text(),'confirm':True}))
+          PY
+          BASE=https://ops.chicagoshining.com
+          curl -fsS --max-time 25 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" | jq -e '.ok==true'
+          curl -fsS --max-time 25 -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "$BASE/api/shell" >/tmp/response.json
+          job=$(jq -er '.job.id // .jobId' /tmp/response.json)
+          for i in $(seq 1 120); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/jobs/$job" >/tmp/status.json
+            state=$(jq -r '.job.status // empty' /tmp/status.json)
+            if [ "$state" = ok ]; then
+              jq -r '.job.log // ""' /tmp/status.json | grep 'la_resume_accepted='
+              test "$(jq -r '.job.log // ""' /tmp/status.json | grep -c 'la_resume_accepted=')" = 2
+              exit 0
+            fi
+            if [ "$state" = failed ]; then jq -r '.job.log // ""' /tmp/status.json | tail -20; exit 2; fi
+            sleep 3
+          done
+          exit 3
