@@ -318,7 +318,9 @@ def test_r4_style_formula_reads_supabase(monkeypatch):
     assert rows[0]["id"] == "recReady1"
     assert "render_status.eq.Ready" in seen[0]
     assert "error_messages->>Composition_ID" in seen[0]
-    assert "Render_Total_Frames.gt.0" in seen[0]
+    assert "render_total_frames.gt.0" in seen[0]
+    assert "output_filename" in seen[0]
+    assert "render_clip_list_text" in seen[0]
 
 
 def test_get_record_uses_a_marked_projection_and_keeps_links(monkeypatch):
@@ -355,6 +357,53 @@ def test_get_record_uses_a_marked_projection_and_keeps_links(monkeypatch):
     assert row["fields"]["Content_Item"] == ["recContent9"]
     assert row["fields"]["Content_Profile"] == ["recProfile9"]
     assert "_runner_record_projection" not in row["fields"]
+
+
+def test_exact_r4_get_uses_authoritative_typed_filename_frames_and_clips(monkeypatch):
+    """A complete Supabase render package must be R4-eligible without legacy bag copies."""
+    from r4.processor import _eligible_exact_output
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("frozen Airtable archive read forbidden")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        assert method == "GET"
+        assert "airtable_record_id=eq.recR4typed" in url
+        return Response([{
+            "airtable_record_id": "recR4typed",
+            "platform": "YouTube",
+            "output_status": "In Production",
+            "render_status": "Ready for Render",
+            "output_filename": "studio-typed-youtube-short.mp4",
+            "render_total_frames": 900,
+            "render_clip_list": [
+                {"url": "https://media.chicagoshining.com/a.jpg"},
+                {"url": "https://media.chicagoshining.com/b.jpg"},
+            ],
+            "remotion_job_id": None,
+            "final_file_url": None,
+            "test_run_id": None,
+            "error_messages": {
+                "Composition_ID": "ChicagoShiningPhotoSequence",
+                # A stale archived bag must not override typed values.
+                "Output_Filename": "stale-file.mp4",
+                "Render_Total_Frames": 30,
+            },
+            "content_items": {"airtable_record_id": "recParent"},
+            "content_profiles": {"airtable_record_id": "recProfile"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    row = _client(studio_write_source="supabase", studio_runner_output_read_source="supabase").get_record(
+        PLATFORM_OUTPUTS_TABLE, "recR4typed",
+    )
+    assert row["fields"]["Output_Filename"] == "studio-typed-youtube-short.mp4"
+    assert row["fields"]["Render_Total_Frames"] == 900
+    assert len(row["fields"]["Render_Clip_List_JSON"]) == 2
+    assert _eligible_exact_output(row) is True
+    row["fields"]["Remotion_Job_ID"] = "job-existing"
+    assert _eligible_exact_output(row) is False
 
 
 def test_unmarked_get_uses_supabase_bag_when_runner_reads_supabase(monkeypatch):
