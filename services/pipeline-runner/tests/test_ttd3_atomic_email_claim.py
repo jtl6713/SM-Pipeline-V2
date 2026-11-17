@@ -6,6 +6,9 @@ from ttd import ttd3
 def _output():
     return {"id": "recABCDEFGHIJKLMN", "fields": {
         "Platform": "TikTok",
+        "Output_ID": 1234,
+        "Output_Title": "Lakefront Trail Explained",
+        "TikTok_Draft_Type": "Video",
         "TikTok_Draft_Publish_ID": "pub-123",
         "TikTok_Draft_Delivered_At": "2026-11-14T00:00:00Z",
         "TikTok_Draft_Status": "Delivered to Inbox",
