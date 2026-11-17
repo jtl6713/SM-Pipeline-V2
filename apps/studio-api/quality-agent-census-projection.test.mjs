@@ -23,3 +23,10 @@ test("Full-list and all-profile APIs retain their existing projections", async (
   assert.match(source,/const orderLimit = `select=\$\{QA_CENSUS_OUTPUT_SELECT\}/);
   assert.match(source,/if \(failure\) records = records\.filter/);
 });
+
+test("the Quality Agent census has a unique stable order across null output numbers", async () => {
+  const source = await readFile(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  assert.match(source, /order=output_number\.asc\.nullslast,airtable_record_id\.asc&limit=\$\{capped\}&offset=\$\{start\}/);
+  assert.match(source, /if \(failure\) records = records\.filter/);
+  assert.match(source, /batch\.length === capped && next < 12000/);
+});
