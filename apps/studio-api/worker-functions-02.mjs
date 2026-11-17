@@ -6901,24 +6901,6 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
 }
 /*__STUDIO_WORKER_END:item4StudioSourcePackageForOutput__*/
 
-export function item4CurrentSourceMatchesSavedSelection(sourcePackage, selectedAssetsJson) {
-  if (sourcePackage?.status !== "Ready") return false;
-  const current = item4ParseJson(sourcePackage?.selected_assets_json, null);
-  const saved = item4ParseJson(selectedAssetsJson, null);
-  const currentClips = Array.isArray(current?.selected_clips) ? current.selected_clips : [];
-  const savedClips = Array.isArray(saved?.selected_clips) ? saved.selected_clips : [];
-  if (!currentClips.length || currentClips.length !== savedClips.length) return false;
-  return currentClips.every((clip, index) => {
-    const prior = savedClips[index];
-    const sourceId = String(clip?.source_asset_id || "").trim();
-    return Boolean(sourceId)
-      && sourceId === String(prior?.source_asset_id || "").trim()
-      && String(clip?.media_asset_record_id || "").trim() === String(prior?.media_asset_record_id || "").trim()
-      && String(clip?.url || clip?.src || "").trim() === String(prior?.url || prior?.src || "").trim();
-  });
-}
-/*__STUDIO_WORKER_END:item4CurrentSourceMatchesSavedSelection__*/
-
 export function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {
   const route = effective.route;
   const platform = effective.platform;
