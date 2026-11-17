@@ -37,6 +37,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseIdeaLane,
   listSupabaseOpenProductionRequestsForIdea,
+  listSupabaseProductionRequestsByFormula,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -3395,14 +3396,23 @@ export function suggestPrimaryLocationFromIdea(idea) {
 }
 /*__STUDIO_WORKER_END:suggestPrimaryLocationFromIdea__*/
 
-export async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
-  return listRecords(env, PRODUCTION_REQUEST_TABLE, {
+export async async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
+  const drafts = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit,
     sortField: "Updated_At",
     sortDirection: "desc",
     filterFormula: OPEN_PRODUCTION_REQUEST_FORMULA,
     fields,
   });
+  // A promoted request is not active production, but an explicitly opened
+  // Factory revision must remain accessible in Production's revision list.
+  // Fetch only marked revisions; never recreate a draft or alter output state.
+  const promoted = await listSupabaseProductionRequestsByFormula(
+    env, 'AND({Test_Run_ID}=BLANK(),{Request_Status}="Promoted")', { limit: 100 },
+  );
+  const revisions = (promoted || []).filter(productionRequestRevisionOpen);
+  const byId = new Map([...drafts, ...revisions].map(row => [row.id, row]));
+  return [...byId.values()].slice(0, limit);
 }
 /*__STUDIO_WORKER_END:listOpenProductionRequests__*/
 
