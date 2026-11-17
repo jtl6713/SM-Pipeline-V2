@@ -147,31 +147,37 @@ def ingest_studio_library_asset(
     if len(payload) > spec["max_bytes"]:
         raise ValueError(f"{filename or 'File'} exceeds the upload limit")
 
-    # Screen the source *before* creating a public Drive object or applying our branding.
-    # A suspicious or unscreenable upload remains local and never enters the library
-    # unless the operator explicitly overrides a false-positive hold.
-    screen = screen_asset(
-        content=payload, filename=filename, mime_type=spec["mime_type"],
-        profile_name=profile_name,
-    )
-    if screen["decision"] != "clean":
-        if not override_overlay_hold:
+    # An authenticated operator may override an earlier visual-overlay hold.
+    # Do not run the slow AI visual check a second time for that explicit retry:
+    # the effective "clean" decision is an operator release, NOT a new AI verdict.
+    # Keep a distinct audit receipt so skipped screening is never misreported.
+    if override_overlay_hold:
+        screen = {
+            "signature": "QA-ASSET-THIRD-PARTY-OVERLAY",
+            "decision": "clean",
+            "operator_override": True,
+            "original_decision": "not_rechecked",
+            "screen_executed": False,
+            "frames_checked": 0,
+            "indicators": [],
+            "evidence": (
+                "OPERATOR_OVERRIDE; prior hold manually released by Studio operator; "
+                "repeat AI visual screening intentionally skipped"
+            ),
+        }
+    else:
+        # Ordinary intake stays fail-closed and screens BEFORE any Drive write.
+        screen = screen_asset(
+            content=payload, filename=filename, mime_type=spec["mime_type"],
+            profile_name=profile_name,
+        )
+        if screen["decision"] != "clean":
             raise ValueError(
                 f"Asset held for third-party overlay review ({screen['decision']}): "
                 f"{screening_note(screen)}. No asset was uploaded. "
                 "Use a clean source or override the overlay hold from Asset Manager "
                 "if Studio misread scene text as a third-party credit."
             )
-        screen = {
-            **screen,
-            "decision": "clean",
-            "operator_override": True,
-            "original_decision": screen.get("decision"),
-            "evidence": (
-                f"OPERATOR_OVERRIDE; original={screen.get('decision')}; "
-                f"{str(screen.get('evidence') or '')}"
-            )[:300],
-        }
 
     duration = probe_library_video_duration(payload, filename) if spec["kind"] == "video" else None
     drive = GoogleDriveClient()

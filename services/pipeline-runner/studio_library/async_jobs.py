@@ -8,6 +8,7 @@ catalog-ready result exists.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 import uuid
@@ -37,18 +38,33 @@ def start_library_ingest_job(
     skip_source_master: bool = False,
     override_overlay_hold: bool = False,
 ) -> str:
-    job_id = uuid.uuid4().hex
+    # Copy once so the request buffer can be released while the worker runs.
+    payload = bytes(content or b"")
+    # An override response can be lost after Drive succeeds. Reusing its active
+    # or successful job prevents a retry from creating another Drive copy.
+    # Match the actual media bytes and all fields influencing the output.
+    fingerprint = (
+        hashlib.sha256(payload).hexdigest(),
+        str(filename or ""),
+        str(mime_type or ""),
+        str(profile_name or ""),
+        bool(skip_source_master),
+    ) if override_overlay_hold else None
     now = time.time()
     with _LOCK:
         _prune_locked(now)
+        if fingerprint is not None:
+            for existing in _JOBS.values():
+                if (existing.get("_fingerprint") == fingerprint
+                        and existing.get("status") in {"processing", "ok"}):
+                    return str(existing["job_id"])
+        job_id = uuid.uuid4().hex
         _JOBS[job_id] = {
             "job_id": job_id,
             "status": "processing",
             "updated_at": now,
+            "_fingerprint": fingerprint,
         }
-
-    # Copy once so the request buffer can be released while the worker runs.
-    payload = bytes(content or b"")
 
     def _run() -> None:
         from studio_library.processor import ingest_studio_library_asset
@@ -65,6 +81,7 @@ def start_library_ingest_job(
             with _LOCK:
                 _JOBS[job_id] = {
                     "job_id": job_id,
+                    "_fingerprint": fingerprint,
                     "status": "ok",
                     "updated_at": time.time(),
                     "result": result,
@@ -73,6 +90,7 @@ def start_library_ingest_job(
             with _LOCK:
                 _JOBS[job_id] = {
                     "job_id": job_id,
+                    "_fingerprint": fingerprint,
                     "status": "error",
                     "updated_at": time.time(),
                     "error": str(exc),
@@ -82,6 +100,7 @@ def start_library_ingest_job(
             with _LOCK:
                 _JOBS[job_id] = {
                     "job_id": job_id,
+                    "_fingerprint": fingerprint,
                     "status": "error",
                     "updated_at": time.time(),
                     "error": str(exc),
@@ -104,4 +123,6 @@ def get_library_ingest_job(job_id: str) -> dict[str, Any] | None:
     with _LOCK:
         _prune_locked(now)
         job = _JOBS.get(key)
-        return dict(job) if job else None
+        # Keep the deduplication fingerprint internal; the API only needs job
+        # state, errors and the original Drive receipt.
+        return {k: v for k, v in job.items() if k != "_fingerprint"} if job else None
