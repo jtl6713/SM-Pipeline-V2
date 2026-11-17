@@ -250,3 +250,18 @@
   .factory-quality-progress { padding: 0.6rem; }
   .factory-quality-progress-heading { align-items: flex-start; }
 }
+
+/* Focus the Quality Agent on actionable work instead of a full-height failure wall. */
+.factory-quality-filters { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
+.factory-quality-filters [aria-pressed="true"] { background:var(--accent,#245189); color:white; border-color:var(--accent,#245189); }
+.factory-quality-action-label { display:inline-block; margin:4px 0 0; font-size:.72rem; font-weight:700; color:var(--text-muted,#4a6173); }
+.factory-quality-diagnosis { margin-top:6px; font-size:.78rem; }
+.factory-quality-diagnosis summary, .factory-quality-past-due summary { font-weight:650; cursor:pointer; }
+.factory-quality-diagnosis p { margin:6px 0; overflow-wrap:anywhere; }
+.factory-quality-past-due { margin:8px 0; }
+.factory-quality-past-due > summary { padding:8px 0; }
+.factory-batch-failed-details { padding:10px 12px; border:1px solid #d2a85a; border-radius:8px; margin:7px 0; }
+.factory-batch-failed-details ul { margin:6px 0; padding-left:20px; }
+.factory-batch-failed-details li { margin:5px 0; overflow-wrap:anywhere; }
+.factory-batch-failed-details p { margin:3px 0; }
+.factory-batch-retry-result { font-weight:650; padding:8px 10px; border-left:3px solid #3d73a6; background:rgba(70,110,150,.08); }

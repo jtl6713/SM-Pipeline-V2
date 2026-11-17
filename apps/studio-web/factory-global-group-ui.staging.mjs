@@ -143,7 +143,7 @@ try{
   await page.locator("#factoryBatchRefresh").click();
   await page.locator(".factory-batch-activity-choice").first().click();
   assert.equal(await page.locator(".factory-batch-child").count(),2);
-  assert.equal(await page.locator("#factoryBatchDetails li").count(),4);
+  assert.equal(await page.locator("#factoryBatchDetails .factory-batch-item-list > li").count(),4);
   assert.match(await page.locator("#factoryBatchSummary").innerText(),/3 approved/);
   await page.locator("#factoryBatchRetry").click();
   await page.waitForFunction(()=>document.querySelector("#factoryBatchSummary").textContent.includes("4 approved"),null,{timeout:15000});

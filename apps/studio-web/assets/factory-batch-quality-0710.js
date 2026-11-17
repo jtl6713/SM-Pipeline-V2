@@ -41,7 +41,7 @@
     }
   });
 
-  const state = { sequence: 0, profile: "", lastRequest: 0, inFlight: false, failures: [], recovering: false, actionSummary: "", recovery: null, lastView: null };
+  const state = { sequence: 0, profile: "", lastRequest: 0, inFlight: false, failures: [], recovering: false, actionSummary: "", recovery: null, lastView: null, failureFilter: "action", failureShown: 8, overdueShown: 6 };
   const esc = (value) => String(value == null ? "" : value)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
@@ -144,6 +144,23 @@
     return $("operationsAgentView")?.hidden === false
       && ($("page-operations")?.classList.contains("active") || false);
   }
+  function failureCategory(item) {
+    if (item.can_return_to_approved) return "recover";
+    const recovery = String(item.recovery || "").toLowerCase();
+    const error = String(item.error || "").toLowerCase();
+    if (/evidence already exists|never republish|reconcile|verification|confirm.*publish/.test(error + " " + String(item.action || "")) ||
+        /reconcile|verification/.test(recovery)) return "verify";
+    if (/cooldown|blocked|not_failed|rate.limit|safety/.test(recovery + " " + String(item.return_to_approved_blocked || ""))) return "blocked";
+    return "review";
+  }
+  const priority = Object.freeze({ review: 0, recover: 1, verify: 2, blocked: 3 });
+  function failureActionLabel(item) {
+    const category = failureCategory(item);
+    return category === "recover" ? "Eligible for recovery"
+      : category === "verify" ? "Verify publication"
+      : category === "blocked" ? "Blocked / waiting" : "Investigate";
+  }
+
   function panelMarkup({ profileId, data, error }) {
     if (data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
       return recoveryProgressMarkup() + '<p class="subtle">Select a Content Profile to check Factory batches.</p>';
@@ -168,6 +185,16 @@
     for (const item of state.recovery?.items || []) {
       if (!seen.has(item.record_id)) visibleFailures.push(item);
     }
+    const categories = { review: 0, recover: 0, verify: 0, blocked: 0 };
+    for (const item of visibleFailures) categories[failureCategory(item)]++;
+    const filteredFailures = visibleFailures
+      .filter(item => state.failureFilter === "all" ||
+        (state.failureFilter === "action" ? ["review", "recover", "verify"].includes(failureCategory(item)) :
+          failureCategory(item) === state.failureFilter))
+      .sort((a,b) => (priority[failureCategory(a)] - priority[failureCategory(b)]) ||
+        String(a.profile_name || "").localeCompare(String(b.profile_name || "")) ||
+        Number(a.output_id || 0) - Number(b.output_id || 0));
+    const pageFailures = filteredFailures.slice(0, state.failureShown);
     const eligible = allFailures.filter(item => item.can_return_to_approved
       && /^rec[A-Za-z0-9]+$/.test(item.record_id || "")
       && !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status));
@@ -190,11 +217,22 @@
         : '<p class="factory-batch-quality-unavailable">Failed-output Quality Agent status unavailable. Unresolved output count is unknown; do not treat this as zero.</p>') +
       recoveryProgressMarkup() +
       (censusOk && eligible.length ? '<p class="factory-quality-bulk"><button type="button" class="secondary-button" data-qa-reapprove-all ' +
-        (state.recovering ? 'disabled aria-disabled="true"' : '') + '>Return all ' + eligible.length +
-        ' eligible to Approved</button><small>48-hour Facebook cooldown, MAE rescheduling, no immediate posting</small></p>' : '') +
+        (state.recovering ? 'disabled aria-disabled="true"' : '') + '>Recover up to ' + Math.min(10, eligible.length) +
+        ' eligible outputs</button><small>' + eligible.length + ' eligible across the census · batches limited to 10 · 48-hour Facebook cooldown, MAE rescheduling, no immediate posting</small></p>' : '') +
+      (censusOk ? '<div class="factory-quality-filters" role="group" aria-label="Filter output failures">' +
+        [['action', 'Action needed (' + (categories.review + categories.recover + categories.verify) + ')'],
+         ['review', 'Investigate (' + categories.review + ')'],
+         ['recover', 'Recoverable (' + categories.recover + ')'],
+         ['verify', 'Verify (' + categories.verify + ')'],
+         ['blocked', 'Blocked (' + categories.blocked + ')'],
+         ['all', 'All (' + visibleFailures.length + ')']]
+          .map(([value,label]) => '<button type="button" class="secondary-button" data-qa-filter="' + value +
+             '" aria-pressed="' + (state.failureFilter === value) + '">' + esc(label) + '</button>').join('') +
+        '</div><p class="factory-quality-result">Showing ' + Math.min(pageFailures.length, filteredFailures.length) +
+        ' of ' + filteredFailures.length + ' in this view. Select a failure to see diagnosis and next steps.</p>' : '') +
       (state.actionSummary ? '<p class="factory-quality-result" role="status">' + esc(state.actionSummary) + '</p>' : '') +
-      (visibleFailures.length ? '<ul class="factory-batch-quality-list">' +
-        visibleFailures.map(item => {
+      (pageFailures.length ? '<ul class="factory-batch-quality-list">' +
+        pageFailures.map(item => {
           const progress = progressForItem(item);
           const settled = progress?.status === "success";
           return '<li class="factory-batch-quality-item' + (progress ? ' factory-quality-' + progress.status : '') +
@@ -204,11 +242,13 @@
               esc(item.profile_name || item.profile_id || "Profile not linked") + ' · Output ' +
               esc(item.output_id || item.record_id) + ' · ' + esc(item.platform || "Unknown platform") +
               ' ' + esc(item.output_type || "") + ' ↗</button>' +
+            '<span class="factory-quality-action-label">' + esc(failureActionLabel(item)) + '</span>' +
             (progress ? '<p class="factory-quality-item-status" role="status"><strong>' +
               esc(progress.label) + '</strong> · ' + esc(progress.detail) + '</p>' : '') +
-            (settled ? '' : '<p>' + esc(item.error || "No diagnostic provided") + '</p>' +
+            (settled ? '' : '<details class="factory-quality-diagnosis"><summary>Diagnosis & next action</summary><p>' +
+              esc(item.error || "No diagnostic provided") + '</p>' +
               '<p class="factory-batch-quality-action">' + esc(item.action || "Review the failure.") + '</p>' +
-              '<small>Recovery: ' + esc(item.recovery || "needs_attention") + '</small>') +
+              '<small>Recovery: ' + esc(item.recovery || "needs_attention") + '</small></details>') +
             (item.can_return_to_approved && !settled
               ? '<p><button type="button" class="secondary-button" data-qa-reapprove="' +
                 esc(item.record_id || "") + '"' +
@@ -220,8 +260,11 @@
               ? '<small class="factory-quality-blocked">Manual reset blocked: ' +
                 esc(item.return_to_approved_blocked) + '</small>' : '') +
             '</li>';
-        }).join("") + '</ul>'
-        : censusOk ? '<p>No unresolved output failures found in the completed scan.</p>' : '');
+        }).join("") + '</ul>' +
+          (filteredFailures.length > pageFailures.length
+            ? '<p><button type="button" class="secondary-button" data-qa-show-more>Show next ' +
+              Math.min(8, filteredFailures.length - pageFailures.length) + ' failures</button></p>' : '')
+        : censusOk ? '<p>No failures match this filter. Select All or another category.</p>' : '');
     // Separate from failures: elapsed schedule is a diagnostic, not proof of
     // remote publication failure. QA-PUBLISH-001 never provides a repost button.
     const overdue = data.approved_past_due;
@@ -229,8 +272,8 @@
     const overdueMarkup = overdueOk
       ? '<p class="factory-batch-quality-heading">QA-PUBLISH-001 · Approved past due, unconfirmed: ' +
         (Number(overdue.count) || 0) + '</p>' +
-        (overdue.items.length ? '<ul class="factory-batch-quality-list">' +
-          overdue.items.map(item =>
+        (overdue.items.length ? '<details class="factory-quality-past-due"><summary>Review past-due cases (' + overdue.items.length + ' shown in census)</summary><ul class="factory-batch-quality-list">' +
+          overdue.items.slice(0, state.overdueShown).map(item =>
             '<li class="factory-batch-quality-item" data-qa-output="' + esc(item.record_id || "") +
               '" data-qa-profile="' + esc(item.profile_id || "") + '">' +
               '<button type="button" class="factory-quality-open" data-qa-open="' +
@@ -242,7 +285,9 @@
                 esc(item.minutes_past_due == null ? "Date unavailable" : item.minutes_past_due + " min past due") +
               '</p><p class="factory-batch-quality-action">' + esc(item.action) + '</p>' +
               '<small>Recovery: ' + esc(item.recovery) + ' · No blind republishing</small></li>'
-          ).join("") + '</ul>'
+          ).join("") + '</ul>' +
+          (overdue.items.length > state.overdueShown ? '<button type="button" class="secondary-button" data-qa-overdue-more>Show next past-due cases</button>' : '') +
+          '</details>'
           : '<p>No past-due approvals beyond the reconciliation grace window.</p>')
       : '<p class="factory-batch-quality-unavailable">Past-due Quality Agent scan unavailable. Count unknown; do not treat this as zero.</p>';
     if (!data.job_id) {
@@ -441,6 +486,30 @@
   }
 
   document.addEventListener("click", (event) => {
+    const filter = event.target.closest?.("[data-qa-filter]");
+    if (filter) {
+      event.preventDefault();
+      if (["action", "review", "recover", "verify", "blocked", "all"].includes(filter.dataset.qaFilter)) {
+        state.failureFilter = filter.dataset.qaFilter;
+        state.failureShown = 8;
+        renderCurrent();
+      }
+      return;
+    }
+    const more = event.target.closest?.("[data-qa-show-more]");
+    if (more) {
+      event.preventDefault();
+      state.failureShown += 8;
+      renderCurrent();
+      return;
+    }
+    const overdueMore = event.target.closest?.("[data-qa-overdue-more]");
+    if (overdueMore) {
+      event.preventDefault();
+      state.overdueShown += 6;
+      renderCurrent();
+      return;
+    }
     const dismiss = event.target.closest?.("[data-qa-dismiss-recovery]");
     if (dismiss && !state.recovering) {
       event.preventDefault();
@@ -452,8 +521,8 @@
     const bulk = event.target.closest?.("[data-qa-reapprove-all]");
     if (bulk) {
       event.preventDefault();
-      recoverQualityOutputs(state.failures.filter(item =>
-        !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status)), true).catch(error => {
+      recoverQualityOutputs(state.failures.filter(item => item.can_return_to_approved &&
+        !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status)).slice(0,10), true).catch(error => {
         state.recovering = false;
         if (state.recovery) { state.recovery.running = false; state.recovery.phase = "Recovery stopped unexpectedly: " + String(error) + ". Verify status before retrying."; }
         renderCurrent();

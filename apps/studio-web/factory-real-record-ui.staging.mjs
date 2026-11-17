@@ -217,7 +217,7 @@ try {
    document.querySelector("#page-factory").classList.add("active");
  });
  await phone.locator("#factoryBatchInspect").click();
- assert.equal(await phone.locator("#factoryBatchDetails li").count(),20);
+ assert.equal(await phone.locator("#factoryBatchDetails .factory-batch-item-list > li").count(),20);
  await phone.locator("#factoryBatchRetry").click();
  await phone.waitForFunction(()=>document.getElementById("factoryBatchSummary").textContent.includes("20 approved"),null,{timeout:10000});
  assert.equal(starts,1,"No duplicate batch on returning mobile browser");

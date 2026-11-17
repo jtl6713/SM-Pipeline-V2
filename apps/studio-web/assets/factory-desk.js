@@ -54,6 +54,7 @@
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
     lastBatchFetchMs: 0,
+    retryBatchNotice: null,
     lastBatchSuccessMs: 0,
     batchActivityError: "",
   };
@@ -952,6 +953,7 @@
     if (retry) {
       retry.hidden = listCollapsed || !(latest?.failed_count > 0 && latest?.can_retry);
       retry.disabled = state.submittingBatch;
+      retry.textContent = state.submittingBatch ? "Checking retry…" : "Retry Failed";
     }
     details.hidden = listCollapsed || !state.batchDetailsOpen || !latest;
     const items = Array.isArray(latest?.items) ? latest.items : [];
@@ -966,7 +968,16 @@
         <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
       </section>`;
     }).join("")}</div>` : "";
-    details.innerHTML = latest ? `<div class="factory-batch-inspect-heading">
+    const retryNotice = state.retryBatchNotice?.job_id === latest?.job_id ? state.retryBatchNotice : null;
+    const failedItems = items.filter(item => item.status === "failed" || item.error && !["approved", "already_satisfied"].includes(item.status));
+    details.innerHTML = latest ? `${retryNotice ? '<p class="factory-batch-retry-result" role="status">' + esc(retryNotice.message) + '</p>' : ""}
+      ${failedItems.length ? '<section class="factory-batch-failed-details"><strong>Failed outputs (' + failedItems.length + ')</strong><ul>' +
+        failedItems.map(item => '<li><strong>' + esc(item.title || "Output " + item.output_id) + '</strong> · ' +
+          esc(factoryProfileLabel(item.profile_id)) + ' · Output ' + esc(item.output_id || item.id) +
+          '<p>' + esc(item.error || "No error details were returned.") + '</p>' +
+          (item.previous_failure_error ? '<small>Previous failure: ' + esc(item.previous_failure_error) + '</small>' : '') +
+          '</li>').join('') + '</ul><p>Retry only after checking the failure. A retry is not proof of success.</p></section>' : ""}
+      <div class="factory-batch-inspect-heading">
         <strong>${esc(latest.group ? "Global approval · per-profile progress" : factoryProfileLabel(latest.profile_id))}</strong>
         <span>${Number(latest.done_count)||0} / ${Number(latest.total)||0} processed</span>
       </div>
@@ -1697,6 +1708,15 @@
       setStatus("Select the batch showing failed outputs, then retry. No approvals were resubmitted.", true);
       return;
     }
+    // Expose the exact failed outputs before issuing a potentially expensive
+    // recovery request. The server maintains the original group/request IDs.
+    const beforeFailed = (batch.items || []).filter(item => item.status === "failed");
+    state.inspectedBatchKey = batch.job_id;
+    state.batchDetailsOpen = true;
+    state.retryBatchNotice = { job_id: batch.job_id,
+      message: "Retry requested for " + beforeFailed.length +
+        " failed output(s). Checking the authoritative batch result…" };
+    renderFactoryBatchActivity(viewed);
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
     try {
@@ -1707,12 +1727,19 @@
           ...(!batch.group ? {content_profile_id: batch.profile_id} : {}),
         }),
       });
+      if (result.accepted !== true) throw new Error("Retry was not confirmed as accepted by the server");
       state.inspectedBatchKey = result.job_id || batch.job_id;
-      setStatus(result.message || "Failed items sent for retry.");
+      state.retryBatchNotice = { job_id: state.inspectedBatchKey,
+        message: "Retry accepted for original batch. " + beforeFailed.length +
+          " failed output(s) were eligible for recheck. Refreshing counts; failures are not resolved until verified." };
+      setStatus(state.retryBatchNotice.message);
       await refreshFactoryBatchActivity(true);
     } catch (error) {
-      setStatus(`Retry not confirmed: ${error.message || error}`, true);
-      await refreshFactoryBatchActivity();
+      state.retryBatchNotice = { job_id: batch.job_id,
+        message: "Retry not confirmed: " + (error.message || error) +
+          ". Check batch details before retrying again." };
+      setStatus(state.retryBatchNotice.message, true);
+      await refreshFactoryBatchActivity(true);
     } finally {
       state.submittingBatch = false;
       updateFactoryBatchToolbar();
