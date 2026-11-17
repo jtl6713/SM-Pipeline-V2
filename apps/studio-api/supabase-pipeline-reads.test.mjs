@@ -1557,7 +1557,7 @@ test("Supabase Submitted recovery ledger persists proof failures and roundtrips 
       if (method === "GET" && href.includes("production_requests?") && href.includes("select=publish_status")) {
         return new Response(JSON.stringify([{ publish_status: oldStatus }]), { status: 200, headers: { "content-type": "application/json" } });
       }
-      return new Response("", { status: 204 });
+      return new Response(null, { status: 204 });
     };
     const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
       id: "recWwDHWDqLCt5R9x",
