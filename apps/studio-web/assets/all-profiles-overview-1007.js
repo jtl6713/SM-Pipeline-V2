@@ -357,16 +357,16 @@
         return `<tr class="${totalRow ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
           <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${actionCount(totalRow ? null : r, "approved_past_due", "approved past due", calendar.pastDue)}</td>
           <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${actionCount(totalRow ? null : r, "approved_missing_date", "approved with no date", calendar.missingDate)}</td>
-          <td data-label="Manual action required" class="overview-tone-${tone(r.manual, "manual")}">${actionCount(totalRow ? null : r, "manual", "manual action")}</td>
-          <td data-label="Failed" class="overview-tone-${tone(r.failed, "failed")}">${actionCount(totalRow ? null : r, "failed", "failed")}</td>
+          <td data-label="Manual action required" class="overview-tone-${tone(r.manual, "manual")}">${actionCount(totalRow ? null : r, "manual", "manual action", r.manual)}</td>
+          <td data-label="Failed" class="overview-tone-${tone(r.failed, "failed")}">${actionCount(totalRow ? null : r, "failed", "failed", r.failed)}</td>
           <td data-label="Total issue conditions"><strong>${calendar.pastDue + calendar.missingDate + r.manual + r.failed}</strong></td></tr>`;
       }).join(""),
       pipeline: profiles.map((r, i) => {
         const totalRow = i === state.rows.length;
         return `<tr class="${totalRow ? "all-profiles-total" : ""}"><th scope="row">${esc(r.name)}</th>
-          <td data-label="Ideas not in production">${actionCount(totalRow ? null : r, "ideas", "unpromoted ideas")}</td>
-          <td data-label="In production, not approval-ready">${actionCount(totalRow ? null : r, "production", "unfinished production outputs")}</td>
-          <td data-label="Factory awaiting approval" class="overview-tone-${tone(r.approval, "approval")}">${actionCount(totalRow ? null : r, "approval", "Factory items awaiting your approval")}</td>
+          <td data-label="Ideas not in production">${actionCount(totalRow ? null : r, "ideas", "unpromoted ideas", r.ideas)}</td>
+          <td data-label="In production, not approval-ready">${actionCount(totalRow ? null : r, "production", "unfinished production outputs", r.production)}</td>
+          <td data-label="Factory awaiting approval" class="overview-tone-${tone(r.approval, "approval")}">${actionCount(totalRow ? null : r, "approval", "Factory items awaiting your approval", r.approval)}</td>
           <td data-label="Total pipeline items"><strong>${r.ideas + r.production + r.approval}</strong></td></tr>`;
       }).join(""),
     };
