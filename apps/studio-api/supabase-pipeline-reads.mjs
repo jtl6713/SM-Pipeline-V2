@@ -3497,7 +3497,11 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   // OR probe even when translateOutputSideFormula succeeds — the full
   // translated AND/OR string times out deploy verify (~70s, 0 bytes).
   const failure = formula.includes("FIND(");
-  const orderLimit = `select=${QA_CENSUS_OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+  // Output numbers are unique when present, but hundreds of legacy outputs
+  // have no number. PostgREST offset paging without a unique tie-breaker
+  // can reorder those rows between pages and trigger strict duplicate-ID
+  // rejection, leaving Factory Quality Agent status unavailable.
+  const orderLimit = `select=${QA_CENSUS_OUTPUT_SELECT}&order=output_number.asc.nullslast,airtable_record_id.asc&limit=${capped}&offset=${start}`;
   let path = `platform_outputs?test_run_id=is.null&${orderLimit}`;
   const translated = formula ? outputContentListFilter("output", formula) : null;
   if (failure) {
