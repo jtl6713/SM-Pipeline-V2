@@ -9899,6 +9899,18 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
         ? strictProof : verifySubmittedAutonomousOrphan(ownership);
       if (!proof.safe) {
         console.warn("Studio submitted approval ownership recovery withheld", pendingRequest.id, strictProof.reason, proof.reason);
+        // A denied proof is also an attempted recovery. Persist its reason and
+        // timestamp in Supabase so one unprovable request cannot starve others.
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, pendingRequest.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Studio_Approval_Recovery_Error: `ownership proof withheld: strict=${strictProof.reason}; autonomous=${proof.reason}`,
+              Studio_Approval_Recovery_Last_Attempt_At: new Date().toISOString(),
+            },
+            typecast: false,
+          }),
+        }).catch((diagnosticError) => console.warn("Studio Submitted recovery proof diagnostic failed", pendingRequest.id, diagnosticError));
         continue;
       }
       // Re-read immediately before any mutation to ensure a concurrent
