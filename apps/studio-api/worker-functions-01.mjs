@@ -2828,6 +2828,7 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
   const studioJob = job && typeof job === "object" ? job : null;
   return {
     id: record.id,
+    created_at: record.createdTime || f(record, "Created_At") || null,
     output_id: f(record, "Output_ID"),
     platform: f(record, "Platform"),
     format: f(record, "Format"),
