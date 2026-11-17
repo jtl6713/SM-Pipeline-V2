@@ -1,0 +1,127 @@
+name: Recover exact LA and Miami stalled Reels (T1/R4 only, no publishing)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-la-miami-stalled-reels-20261117.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recover-exact-la-miami-reels-20261117
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Preflight exact source selections and launch only T1 then R4
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPS_TOKEN:-}"
+          BASE='https://ops.chicagoshining.com'
+          test "$(curl -sS --max-time 20 -o /tmp/recover-catalog.json -w '%{http_code}' \
+            -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog")" = "200"
+          jq -e '.ok==true' /tmp/recover-catalog.json >/dev/null
+
+          cat >/tmp/recover-reels.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.service -ne "pipeline-runner" -or $health.studio_write_source -ne "supabase") { throw "runner_not_supabase_authoritative" }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_secret_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_secret_empty" }
+          $headers = @{"X-Pipeline-Secret"=$secret}
+          # Exactly the two confirmed historical outputs; never select a whole queue.
+          # LA Griffith Observatory 7153; Miami Little Havana 5715.
+          $outputs = @("recjONaaJ6y8A7x7M", "recgAZ4hB8RE3KUh1")
+          $recovered = 0
+          $blocked = 0
+          foreach ($out in $outputs) {
+            try {
+              Write-Output ("exact_recovery_attempt=" + $out)
+              $timingUri = "http://127.0.0.1:3350/stages/t1"
+              $dryBody = @{output_record_id=$out;extra=@{dry_run=$true;max_runs=1}} | ConvertTo-Json -Depth 5 -Compress
+              $pre = Invoke-RestMethod -Uri $timingUri -Method POST -Headers $headers -Body $dryBody -ContentType "application/json" -TimeoutSec 75
+              if ($pre.status -ne "ok") { throw ("t1_preflight_" + [string]$pre.status) }
+              $timingBody = @{output_record_id=$out;extra=@{dry_run=$false;max_runs=1}} | ConvertTo-Json -Depth 5 -Compress
+              $timed = Invoke-RestMethod -Uri $timingUri -Method POST -Headers $headers -Body $timingBody -ContentType "application/json" -TimeoutSec 210
+              if ($timed.status -ne "ok" -and $timed.status -ne "skipped") { throw ("t1_execution_" + [string]$timed.status) }
+              $r4 = "http://127.0.0.1:3350/stages/r4"
+              $renderDryBody = @{output_record_id=$out;extra=@{dry_run=$true}} | ConvertTo-Json -Depth 5 -Compress
+              $renderPre = Invoke-RestMethod -Uri $r4 -Method POST -Headers $headers -Body $renderDryBody -ContentType "application/json" -TimeoutSec 90
+              if ($renderPre.status -ne "ok" -or $renderPre.details.run.dry_run -ne $true) {
+                throw ("r4_preflight_" + [string]$renderPre.details.run.reason)
+              }
+              $renderBody = @{output_record_id=$out;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
+              $started = $false
+              for ($attempt=1; $attempt -le 6; $attempt++) {
+                $render = Invoke-RestMethod -Uri $r4 -Method POST -Headers $headers -Body $renderBody -ContentType "application/json" -TimeoutSec 90
+                if ($render.status -eq "ok" -and $render.details.run.processed -eq $true -and $render.details.run.job_id) {
+                  Write-Output ("exact_recovery_started=" + $out)
+                  Write-Output ("exact_recovery_job=" + [string]$render.details.run.job_id)
+                  $started = $true
+                  break
+                }
+                $reason = [string]$render.details.run.reason
+                if ($reason -eq "render_already_started") {
+                  Write-Output ("exact_recovery_already_started=" + $out)
+                  $started = $true
+                  break
+                }
+                if ($reason -ne "waiting_for_remotion_slot") { throw ("r4_launch_" + $reason) }
+                Start-Sleep -Seconds 10
+              }
+              if (-not $started) { throw "r4_slot_busy" }
+              $recovered += 1
+            } catch {
+              $blocked += 1
+              Write-Output ("exact_recovery_blocked=" + $out + " reason=" + [string]$_.Exception.Message)
+            }
+          }
+          Write-Output ("exact_recovery_started_count=" + $recovered)
+          Write-Output ("exact_recovery_blocked_count=" + $blocked)
+          if ($recovered -eq 0) { throw "none_of_the_two_safe_renders_started" }
+          PS
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/recover-reels.json').write_text(json.dumps({
+            "command": Path('/tmp/recover-reels.ps1').read_text(), "confirm": True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/recover-reels-job.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+            -H "Content-Type: application/json" --data-binary @/tmp/recover-reels.json || true)
+          test "$code" = "200" -o "$code" = "202"
+          job=$(jq -er '.job.id // .jobId' /tmp/recover-reels-job.json)
+          for i in $(seq 1 120); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/jobs/$job" -o /tmp/recover-reels-status.json
+            state=$(jq -r '.job.status // empty' /tmp/recover-reels-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/recover-reels-status.json | grep '^exact_recovery_' || true
+              jq -e '.job.log | contains("exact_recovery_started_count=")' /tmp/recover-reels-status.json >/dev/null
+              echo 'recovery_exact_two=LAUNCHED_NO_PUBLISH'
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/recover-reels-status.json | grep -E '(exact_recovery_|Exception|error|blocked)' | tail -28 || true
+              echo 'recovery_exact_two=BLOCKED'
+              exit 2
+            fi
+            sleep 3
+          done
+          echo 'recovery_exact_two=TIMEOUT'
+          exit 3
