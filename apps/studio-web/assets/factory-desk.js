@@ -977,7 +977,7 @@
           '<p>' + esc(item.error || "No error details were returned.") + '</p>' +
           (item.previous_failure_error ? '<small>Previous failure: ' + esc(item.previous_failure_error) + '</small>' : '') +
           '</li>').join('') + '</ul><p>Retry only after checking the failure. A retry is not proof of success.</p></section>' : ""}
-      <div class="factory-batch-inspect-heading">`
+      <div class="factory-batch-inspect-heading">
         <strong>${esc(latest.group ? "Global approval · per-profile progress" : factoryProfileLabel(latest.profile_id))}</strong>
         <span>${Number(latest.done_count)||0} / ${Number(latest.total)||0} processed</span>
       </div>
