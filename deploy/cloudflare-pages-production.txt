@@ -851,3 +851,5 @@ Deploy Studio UI 0.6.981 Flatiron promoted production revision visibility after 
 2026-11-17: Deploy Studio UI 0.6.985-flatiron-revision on top of UI 0.6.984 dashboard density. Ship merged #2156 revision_open Production fix, preserve NYC Flatiron's existing six outputs, no data writes or auto-render. Verify exact custom-domain release identity.
 
 2026-11-17: Release Studio Pages UI 0.6.986-production-revision-list. Paint existing reopened NYC Flatiron Production revision without blocking on Ideas cache; synchronize UI BUILD_ID and all cache keys; no approval, rendering or publishing mutations.
+
+2026-11-17: Deploy Studio UI 0.6.987-factory-quality-global from merged #2167. Correct misleading global Quality Agent profile prompt and avoid repeated fresh Supabase census on navigation. Preserve independent Factory profile filter and all publication/approval/scheduling behavior.
