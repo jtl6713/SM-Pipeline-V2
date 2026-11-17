@@ -5883,7 +5883,7 @@ export async function verifyStudioProfilesOverviewSnapshot(env, expectedGenerati
 }
 /*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/
 
-export async function refreshStudioProfilesOverviewSnapshot(env, authorization) {
+export async function refreshStudioProfilesOverviewSnapshot(env, authorization, { forceIdeas = false } = {}) {
   const cache = studioProfilesOverviewCache;
   if (cache.inflight) return cache.inflight;
   const supabase = studioHomeReadSource(env) === "supabase";
@@ -5895,7 +5895,7 @@ export async function refreshStudioProfilesOverviewSnapshot(env, authorization) 
       ? await resolveAuthorizedContentProfiles(env, authorization)
       : (await listContentProfileRecords(env)).filter((record) => Boolean(f(record, "Active")));
     if (!profiles?.length) return cache.rows || [];
-    const rows = await buildStudioProfilesOverviewRows(env, profiles);
+    const rows = await buildStudioProfilesOverviewRows(env, profiles, { forceIdeas });
     await writeStudioProfilesOverviewSnapshot(env, rows, studioProfilesOverviewAuthKey(profiles), {
       readSource: rows[0]?.read_source || "",
       ideasAt: studioProfilesOverviewCache.ideasAt || 0,
@@ -5943,7 +5943,7 @@ export async function refreshStudioProfilesOverviewIdeas(env, authorization) {
   if (studioHomeReadSource(env) === "supabase") {
     // Rebuild the complete Home snapshot from Supabase; never run the former
     // Airtable-only unpromoted Ideas background scan while Supabase is SoR.
-    return refreshStudioProfilesOverviewSnapshot(env, authorization);
+    return refreshStudioProfilesOverviewSnapshot(env, authorization, { forceIdeas: true });
   }
   const cache = studioProfilesOverviewCache;
   if (cache.ideasInflight) return cache.ideasInflight;
