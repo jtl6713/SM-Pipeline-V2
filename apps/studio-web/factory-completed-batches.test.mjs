@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "assets/factory-desk.js"), "utf8");
-const first = source.indexOf("  function renderFactoryBatchActivity(batch) {");
+const first = source.indexOf("  function updateFactoryBatchFreshness() {");
 const last = source.indexOf("  // Batch status is independently polled", first);
 assert.ok(first !== -1 && last > first);
 const body = source.slice(first, last);
