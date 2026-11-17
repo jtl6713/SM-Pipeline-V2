@@ -843,3 +843,5 @@ Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issue
 2026-11-17: Retry UI 0.6.979 production deployment after updating stale Recommend formats regression to assert persisted plan; prior run 44103143477 failed 231 pass / 1 outdated assertion.
 
 2026-11-17: Deploy Studio UI 0.6.980 Pipeline newest-content-first ordering independent of scheduled publish week; preserve separate 7-day calendar and all-view defaults.
+
+Deploy Studio UI 0.6.981 Flatiron promoted production revision visibility after PR #2146, 2026-11-17.
