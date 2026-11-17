@@ -1,0 +1,33 @@
+/* Studio mobile viewport containment — 2026-11-17.
+   Keep document width fixed to the visual viewport; scroll dense data locally. */
+html { width:100%; max-width:100%; overflow-x:clip; }
+body { width:100%; max-width:100%; min-width:0; margin:0; overflow-x:clip; }
+*, *::before, *::after { box-sizing:border-box; }
+.shell, .shell > *, main, .main, .content, .page, .page-content,
+.panel, .card, .section, .workspace, .pipeline, .pipeline-workspace {
+  min-width:0;
+  max-width:100%;
+}
+img, video, canvas, svg { max-width:100%; }
+pre, code { overflow-wrap:anywhere; }
+@media (max-width: 767px) {
+  .shell { width:100%; min-width:0; }
+  .shell > main, .shell > .main, .shell > .content { width:100%; min-width:0; }
+  .topbar, .topbar-leading, .topbar-actions { min-width:0; max-width:100%; }
+  .topbar .brand-wrap, .topbar .brand-studio-copy { min-width:0; }
+  .topbar .brand-name, .topbar .brand-subtitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .panel, .card, .section, .workspace { min-width:0; }
+  .panel-header, .card-header, .section-header,
+  .toolbar, .filters, .filter-row, .actions, .button-row {
+    min-width:0; max-width:100%; flex-wrap:wrap;
+  }
+  input, select, textarea, button { max-width:100%; }
+  .table-wrap, .table-container, .table-responsive,
+  .calendar-wrap, .calendar-container, .calendar-grid,
+  [role="grid"], [role="table"] {
+    max-width:100%; min-width:0; overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  table { max-width:none; }
+  h1, h2, h3, p, .subtitle, .description { overflow-wrap:break-word; }
+}
