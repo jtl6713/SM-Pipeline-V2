@@ -1395,3 +1395,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-17: Deploy merged #2172 NYC reopened Production revisions-first list ordering. Worker 0.10.1004. Read-only list fix; preserve Supabase authority, review gates, and zero automatic approvals or publishing.
 
 2026-11-17: Deploy Worker 0.10.1005 request-bound Promise cache fix for Miami Pipeline. Only reuse settled read values; prevent cross-request unfinished-Promise reuse. Preserve fail-closed stale review gate, Supabase read authority, manual approval and publishing controls.
+
+2026-11-17: Deploy merged PR #2178 bounded Master Original retry and platform crop poll self-heal for Flatiron Item 4 (2/8 stalled; seventh PNG master Error). Reuse existing transfer IDs, preserve assets, output approvals, and publishing protections.
