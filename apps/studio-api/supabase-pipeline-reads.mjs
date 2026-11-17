@@ -3694,6 +3694,31 @@ export async function omitExistingPhase6CronRows(env, table, rows) {
   return list.filter((row) => row?.airtable_record_id && !existingIds.has(row.airtable_record_id));
 }
 
+/**
+ * Recover output identities omitted by the windowed Pipeline list. An older
+ * all-Published Content Item can still be in the newest 100 Content Items, yet
+ * have zero outputs in the 200-recent/1000-open output pack. Without its real
+ * sibling states, Production can display a completed piece as unfinished.
+ *
+ * Supabase Content Items retain their exact Platform Outputs link IDs in extras.
+ * Hydrate only those missing IDs; never guess a terminal status from parent text.
+ */
+export function missingLinkedOutputIdsForContentRows(contentRows = [], packedOutputs = []) {
+  const present = new Set((packedOutputs || [])
+    .map((row) => String(row?.airtable_record_id || "").trim())
+    .filter(Boolean));
+  const missing = new Set();
+  for (const row of contentRows || []) {
+    const links = Array.isArray(row?.extras?.["Platform Outputs"])
+      ? row.extras["Platform Outputs"] : [];
+    for (const link of links) {
+      const id = String(typeof link === "string" ? link : (link?.id || link?.record_id || "")).trim();
+      if (/^rec[A-Za-z0-9]{14}$/.test(id) && !present.has(id)) missing.add(id);
+    }
+  }
+  return [...missing];
+}
+
 export async function listSupabaseContentItems(env, { profileAirtableId, limit = 100 } = {}) {
   const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
   if (!profileId) return { records: [], outputs: [], profileMissing: true };
@@ -3750,6 +3775,24 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   for (const row of [...(recentOutputs || []), ...(openOutputs || [])]) {
     if (!row?.airtable_record_id) continue;
     outputById.set(row.airtable_record_id, flattenOutputRow(row));
+  }
+
+  // The windowed output pack intentionally favours recent/open rows, but it can
+  // omit every sibling of an older Published item in the newest content page.
+  // Resolve the *exact* missing links from Supabase so lifecycle rollups are
+  // authoritative for Production. Never revive a Published item from stale
+  // parent Content_Status or an incomplete output snapshot.
+  const missingOutputIds = missingLinkedOutputIdsForContentRows([...byId.values()], [...outputById.values()]);
+  for (let index = 0; index < missingOutputIds.length; index += 40) {
+    const batch = missingOutputIds.slice(index, index + 40);
+    const siblings = await supabaseRest(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileId}&airtable_record_id=in.(${batch.map(encodeURIComponent).join(",")})`
+        + `&select=${OUTPUT_SELECT}&limit=${batch.length}`,
+    );
+    for (const row of siblings || []) {
+      if (row?.airtable_record_id) outputById.set(row.airtable_record_id, flattenOutputRow(row));
+    }
   }
 
   return {
