@@ -149,3 +149,32 @@ test("canonical failure scan unavailability is unknown, not a false zero or pari
  assert.equal(result.completeness.failed,"unavailable");
  assert.equal(result.metrics.quality_diagnostics.observed,1);
 });
+
+
+test("verified-public recovery is excluded from active queue while historical scan remains preserved", () => {
+  const data=snap({
+    verification_recovery:{status:"ok",counts:{recovered_automatically:1},items:[
+      {record_id:"recAAAAAAAAAAAAAA",outcome:"verified_published",verified_public:true,remote_id:"1234567890"},
+    ]},
+  });
+  const result=buildExceptionRecoveryCenter(data);
+  assert.equal(result.items.length,0);
+  assert.equal(result.independently_verified_resolved_excluded,1);
+  assert.equal(result.metrics.resolved_last_7_days.observed,1);
+});
+
+test("saved URL, unverified resolution, or missing remote identity never suppresses an exception", () => {
+  for (const evidence of [
+    {outcome:"verified_published",verified_public:false,remote_id:"123"},
+    {outcome:"verified_published",verified_public:true},
+    {outcome:"pending_verification",verified_public:true,remote_id:"123"},
+  ]) {
+    const result=buildExceptionRecoveryCenter(snap({
+      rows:[{id:"recAAAAAAAAAAAAAA",fields:{Platform_Post_URL:"https://example.com/123"}}],
+      verification_recovery:{status:"ok",counts:{recovered_automatically:0},items:[
+        {record_id:"recAAAAAAAAAAAAAA",...evidence},
+      ]},
+    }));
+    assert.equal(result.items.length,1);
+  }
+});
