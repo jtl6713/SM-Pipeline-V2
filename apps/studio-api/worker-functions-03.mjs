@@ -9975,8 +9975,17 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
         });
         const rebound = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, currentParent.id);
         const owners = arrayOrEmpty(f(rebound, "Production_Request"));
-        if (owners.length !== 1 || owners[0] !== latest.id)
-          throw new Error("Content Item owner repair failed readback; no fanout performed");
+        if (owners.length !== 1 || owners[0] !== latest.id) {
+          // Supabase Phase 6 stores the reciprocal owner as a UUID FK. The
+          // legacy-shaped Content Item read can omit that inverse link even
+          // after a successful write. Confirm the *exact* pair in the SoR;
+          // never infer ownership from a title or silently skip the guard.
+          const [owner] = await supabaseRest(env,
+            `content_items?airtable_record_id=eq.${encodeURIComponent(currentParent.id)}&production_request_id=eq.${encodeURIComponent((await supabaseRest(env, `production_requests?airtable_record_id=eq.${encodeURIComponent(latest.id)}&select=id&limit=2`))?.[0]?.id || "invalid")}&select=id&limit=2`
+          ).catch(() => []);
+          if (!owner?.id)
+            throw new Error("Content Item owner repair failed readback; no fanout performed");
+        }
       }
       if (latestProof.repairLink) {
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
