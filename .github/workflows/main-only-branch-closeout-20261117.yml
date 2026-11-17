@@ -1,0 +1,192 @@
+name: Archive nine reviewed heads and leave only main (2026-11-17)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/main-only-branch-closeout-20261117.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+concurrency:
+  group: main-only-branch-closeout-20261117
+  cancel-in-progress: false
+jobs:
+  archive-then-retire:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify all exact heads, archive every SHA, safely delete unprotected branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          import urllib.request, urllib.parse, urllib.error
+
+          REPO = "jtl6713/SM-Pipeline-V2"
+          SELF = "chore/main-only-closeout-20261117"
+          TAG_PREFIX = "archive/main-only-20261117/"
+          EXPECTED = {
+              "backup/pr-1992-before-main-rebase-20261115": "98e581535e9d497ddbc97c0dd5dd958457d5b20f",
+              "cursor/closeout-backfill-host": "2b90ede96169c8e43ea712b2d6ae2f711688dc1d",
+              "cursor/closeout-backfill-run": "9768209bcae92ffc34e52b62d9ecbbcf5dd726a6",
+              "cursor/tiktok-handoff-email-qp-apple-mail-d69c": "18cf74dd7d061344f52e4db63f0089dd89abb18f",
+              "diagnostics/factory-10355-timing-20261114": "2a1c314e554c7abb34d588032f933977550f53b9",
+              "fix/chicago-cloud-gate-orphan-promotion-2086": "28efe54fc2a5398d4395d266386638351d712275",
+              "fix/elevenlabs-poc-unbilled-reconciliation-20261109": "3aa739761b369ae8682fdf25b84af0368be8b060",
+              "fix/factory-cross-window-activity": "569393c0b44e17deba62be349e80642d4e7539f6",
+              "fix/home-approval-factory-parity-20261114": "d562e9f53fde72f5ce45d72b94cf08585bceca45",
+          }
+          if os.getenv("GITHUB_REPOSITORY") != REPO or os.getenv("GITHUB_REF") != "refs/heads/main":
+              raise SystemExit("REFUSE: not the exact repository and main ref")
+          expected_main = os.environ["GITHUB_SHA"]
+          headers = {
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def api(path, method="GET", body=None):
+              req = urllib.request.Request(
+                  "https://api.github.com/repos/" + REPO + ("/" + path if path else ""),
+                  headers=headers, method=method,
+                  data=None if body is None else json.dumps(body).encode("utf-8"),
+              )
+              with urllib.request.urlopen(req, timeout=40) as response:
+                  body = response.read().decode("utf-8")
+                  return json.loads(body) if body else None
+          def encoded(name):
+              return urllib.parse.quote(name, safe="/")
+          def inventory():
+              rows = api("branches?per_page=100")
+              if len(rows) >= 100:
+                  raise RuntimeError("REFUSE: truncated branch inventory")
+              return {x["name"]: x for x in rows}
+          def open_prs():
+              rows = api("pulls?state=open&per_page=100")
+              if len(rows) >= 100:
+                  raise RuntimeError("REFUSE: truncated open-PR inventory")
+              if rows:
+                  raise RuntimeError("REFUSE: an open PR exists: " + repr([(x["number"], x["head"]["ref"]) for x in rows]))
+          def preflight(retired=None):
+              retired = set(retired or [])
+              rows = inventory()
+              want = {"main"} | (set(EXPECTED) - retired)
+              extra_allowed = {SELF}
+              if not want.issubset(rows) or set(rows) - (want | extra_allowed) or (set(rows) & retired):
+                  raise RuntimeError("REFUSE: branches changed: " + repr(sorted(rows)))
+              if rows["main"]["commit"]["sha"] != expected_main or not rows["main"].get("protected"):
+                  raise RuntimeError("REFUSE: main changed or lost protection")
+              for name, sha in EXPECTED.items():
+                  if name in retired:
+                      continue
+                  row = rows[name]
+                  if row.get("protected") or row["commit"]["sha"] != sha:
+                      raise RuntimeError("REFUSE: protected/moved head: " + name)
+              open_prs()
+              return rows
+          def active_runs(branch):
+              result = api("actions/runs?per_page=100&branch=" + encoded(branch))
+              if len(result.get("workflow_runs", [])) >= 100:
+                  raise RuntimeError("REFUSE: truncated Actions runs for " + branch)
+              active = [(x["id"],x["status"]) for x in result.get("workflow_runs", [])
+                        if x["status"] != "completed"]
+              if active:
+                  raise RuntimeError("REFUSE: running Actions on " + branch + ": " + repr(active))
+          def archive_tag(branch, sha):
+              tag = TAG_PREFIX + branch.replace("/", "--")
+              path = "git/ref/tags/" + encoded(tag)
+              try:
+                  existing = api(path)
+                  if existing["object"]["sha"] != sha:
+                      raise RuntimeError("REFUSE: archive tag collision: " + tag)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      raise
+                  api("git/refs","POST",{"ref":"refs/tags/"+tag,"sha":sha})
+              for attempt in range(12):
+                  try:
+                      if api(path)["object"]["sha"] == sha:
+                          print("ARCHIVE_VERIFIED",branch,sha,tag,flush=True)
+                          return tag
+                  except urllib.error.HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                  time.sleep(1)
+              raise RuntimeError("REFUSE: archive could not be verified: " + tag)
+
+          # This workflow runs only AFTER a separately reviewed cleanup PR merges.
+          repo = api("")
+          if repo["default_branch"] != "main":
+              raise RuntimeError("REFUSE: main is not default")
+          for pr_id in (1987, 2037):
+              pr = api("pulls/"+str(pr_id))
+              if pr["state"] != "closed" or pr.get("merged_at"):
+                  raise RuntimeError("REFUSE: reviewed stale PR not closed unmerged: "+str(pr_id))
+          source_prs = api("pulls?state=closed&per_page=100&head=" +
+                          urllib.parse.quote("jtl6713:"+SELF,safe=""))
+          merged = [p for p in source_prs
+                    if p.get("merged_at") and p["head"]["ref"] == SELF]
+          if len(merged) != 1:
+              raise RuntimeError("REFUSE: cleanup PR not uniquely merged")
+          self_sha = merged[0]["head"]["sha"]
+          rows = preflight()
+          if SELF in rows and (rows[SELF].get("protected") or rows[SELF]["commit"]["sha"] != self_sha):
+              raise RuntimeError("REFUSE: cleanup branch changed")
+          for branch in EXPECTED:
+              active_runs(branch)
+              prs = api("pulls?state=all&per_page=100&head=" +
+                        urllib.parse.quote("jtl6713:"+branch,safe=""))
+              if len(prs) >= 100 or any(x["state"] != "closed" for x in prs):
+                  raise RuntimeError("REFUSE: open/unknown branch PR: " + branch)
+          print("PREFLIGHT_OK candidates="+str(len(EXPECTED))+" + self",flush=True)
+
+          # Two phases: verify ALL archive tags before touching ANY branch.
+          heads = dict(EXPECTED)
+          heads[SELF] = self_sha
+          tags = {name: archive_tag(name,sha) for name,sha in heads.items()}
+          print("ALL_TEN_TAGS_VERIFIED_BEFORE_ANY_BRANCH_DELETION",flush=True)
+
+          retired = set()
+          for branch, sha in heads.items():
+              rows = preflight(retired)
+              if branch == SELF and branch not in rows:
+                  print("MAINTENANCE_BRANCH_ALREADY_AUTO_DELETED",flush=True)
+                  continue
+              if branch not in rows or rows[branch]["commit"]["sha"] != sha or rows[branch].get("protected"):
+                  raise RuntimeError("REFUSE: moved/missing/protected at deletion: "+branch)
+              if api("git/ref/tags/"+encoded(tags[branch]))["object"]["sha"] != sha:
+                  raise RuntimeError("REFUSE: saved tag changed: "+branch)
+              if branch != SELF:
+                  active_runs(branch)
+              ref = "refs/heads/"+branch
+              subprocess.run(
+                  ["git","push","--force-with-lease="+ref+":"+sha,"origin",":"+ref],
+                  check=True,timeout=65,
+              )
+              for attempt in range(12):
+                  if branch not in inventory():
+                      break
+                  time.sleep(1)
+              else:
+                  raise RuntimeError("REFUSE: branch deletion not verified: "+branch)
+              if branch in EXPECTED:
+                  retired.add(branch)
+              print("DELETED_LEASE_GUARDED",branch,flush=True)
+          final = inventory()
+          if set(final) != {"main"}:
+              raise RuntimeError("REFUSE: final branch set is not main only: "+repr(sorted(final)))
+          open_prs()
+          for branch, sha in heads.items():
+              if api("git/ref/tags/"+encoded(tags[branch]))["object"]["sha"] != sha:
+                  raise RuntimeError("REFUSE: archived tag missing after deletion: "+branch)
+          print("MAIN_ONLY_CLEANUP_COMPLETE archived_heads=10 final_branches=main open_prs=0",flush=True)
+          PY
