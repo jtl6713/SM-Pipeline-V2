@@ -160,6 +160,7 @@ import {
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
   classifyUnclassifiedRenderedReadyForReview,
+  classifyPublishedStatusDrift,
   classifyPhantomRerender,
   classifyPreparingGap,
   classifyProduceJob,
@@ -10356,6 +10357,18 @@ export async function gatherStudioDeskInventory(env) {
     }
   } catch (error) {
     console.warn("desk awaiting-approval stale RFR scan failed", error);
+  }
+  try {
+    const stalePublished = await studioListDeskCatalogOutputs(env, "published_status_drift", {
+      limit: 24,
+      sortField: "Output_ID",
+      sortDirection: "asc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}!="",{Review_Status}="Approved",{Publish_Status}="Published",OR({Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing",{Output_Status}="In Production"))',
+    });
+    scanned("published_status_drift");
+    for (const record of stalePublished || []) push(classifyPublishedStatusDrift(mapOut(record)));
+  } catch (error) {
+    console.warn("desk published-status drift scan failed", error);
   }
   try {
     const phantomRerenderRows = await studioListDeskCatalogOutputs(env, "phantom_rerender", {

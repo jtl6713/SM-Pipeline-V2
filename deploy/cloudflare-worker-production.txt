@@ -1354,3 +1354,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy PR #2093 verified Production exit-state hardening: Supabase-only cron self-heals approved-but-In Production outputs and fully rendered blank-status media, with strict media, approval, hold and scheduled-state guards. No automatic scheduling or publishing. Incident #2086 Chicago recovery; preserve existing worker bindings and release controls.
 
 2026-11-16: Deploy guarded Submitted autonomous I4 orphan repair (issue #2086 Cloud Gate Myth). Exact reciprocal candidate/request/parent proof, no I3 replay or duplicate fanout, preserve Supabase-only authority and all human final scheduling gates.
+
+2026-11-16: Deploy verified published-state drift reconciliation. Receipt-backed Published_At + Publish_Status=Published + Review_Status=Approved may upgrade stale Output_Status=Ready for Review, Approved for Publishing or In Production to Published, without republishing or altering existing schedules/media. Includes bounded Supabase-only cron sweep and QA detection; incident Chicago Production #2086.

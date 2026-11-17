@@ -437,6 +437,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "promote_rendered_ready_for_review",
   }),
   check({
+    id: "published_status_drift",
+    title: "Check for verified published posts still labeled Production, Review or Approved for Publishing",
+    lane: "service",
+    kind: "published_status_drift",
+    actor: "worker_heal",
+    heal: "promote_published",
+  }),
+  check({
     id: "native_cover_missing",
     title: "Check for Reels/Shorts that published without attaching the 3D native cover",
     lane: "both",

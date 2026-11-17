@@ -3051,6 +3051,12 @@ test("render heal columns and creative master registry stay off the lean marker"
   assert.match(stale, /readSupabaseQualityRecoveryEvent\(env, id\)/);
   assert.match(stale, /observed\.id\)/);
   assert.match(deskHealOutputFilter("render_long"), /updated_at=lt\./);
+  const publishedDrift = deskHealOutputFilter("published_status_drift");
+  assert.match(publishedDrift, /published_at=not\.is\.null/);
+  assert.match(publishedDrift, /publish_status=eq\.Published/);
+  assert.match(publishedDrift, /review_status=eq\.Approved/);
+  assert.match(publishedDrift, /In%20Production/);
+  assert.match(publishedDrift, /Ready%20for%20Review/);
   const staleProduction = deskHealOutputFilter("stale_rfr");
   assert.match(staleProduction, /In%20Production/);
   assert.match(staleProduction, /output_status\.is\.null/);

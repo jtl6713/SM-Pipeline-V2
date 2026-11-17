@@ -1397,6 +1397,29 @@ export function classifyAwaitingApprovalStaleRfr(row) {
   }, row);
 }
 
+/** A verified published post must never return to Production or Factory.
+ * Preserve the historical receipt and scheduling fields; only correct the
+ * stale Output_Status. Merely having a scheduled date is NOT publication.
+ */
+export function classifyPublishedStatusDrift(row) {
+  if (!row || String(row.test_run_id || "").trim() || Boolean(row.do_not_publish)) return null;
+  if (String(row.review_status || "").trim() !== "Approved") return null;
+  if (String(row.publish_status || "").trim() !== "Published") return null;
+  const stamped = Date.parse(String(row.published_at || ""));
+  if (!Number.isFinite(stamped) || stamped <= 0) return null;
+  const output = String(row.output_status || "").trim();
+  if (!["Ready for Review", "Approved for Publishing", "In Production"].includes(output)) return null;
+  const recordId = String(row.id || row.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "published_status_drift",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("published_status_drift", recordId || row.output_id || "", "verified_published_receipt"),
+    actor: "worker_heal",
+    diagnosis: "A previously approved output has Publish_Status=Published and a confirmed Published_At timestamp, but Output_Status still shows Production, Review or Approved for Publishing. Repair only Output_Status=Published; do not repost, reschedule, remove holds or change publication receipts.",
+  }, row);
+}
+
 /** Factory per-output send-back paints Rerendering (Changes Requested + In Production) with no render running. */
 export const PHANTOM_RERENDER_STALE_MS = STALE_RENDER_MINUTES * 60 * 1000;
 
@@ -1599,6 +1622,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "native_photo_approve_incomplete",
   "awaiting_approval_stale_rfr",
   "unclassified_rendered_ready",
+  "published_status_drift",
   "rfr_locked_missing_deliverable",
   "health_down",
   "variant_preparing",
