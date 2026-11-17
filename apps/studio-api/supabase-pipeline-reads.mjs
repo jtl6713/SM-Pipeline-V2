@@ -1736,6 +1736,19 @@ const OUTPUT_SELECT = [
   "content_profiles(airtable_record_id)",
 ].join(",");
 
+// Factory Quality Agent scans potentially thousands of rows. Avoid pulling
+// render/media fields and long text for each candidate page. Keep every status,
+// schedule, receipt, ID and JSON evidence field used by the canonical Home
+// classification; linked profile/content IDs remain available for navigation.
+export const QA_CENSUS_OUTPUT_SELECT = OUTPUT_SELECT.split(",").filter((field) =>
+  !new Set([
+    "output_caption", "output_hashtags", "thumbnail_url", "studio_preview_url",
+    "remotion_job_id", "selected_clip_count", "asset_aspect_family",
+    "image_output_selected", "fb_image_publish_mode",
+    "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
+    "asset_set_revision", "tiktok_9x16_ready_count", "assets_ready_count",
+  ]).has(field)).join(",");
+
 // Home omits hashtags and content-item joins (those blew the 26s overview
 // budget). Package-evidence scalars MUST stay: Awaiting Approval uses the same
 // Factory Needs eyes gate (caption + CDN final/preview/cover + selected count).
@@ -3484,7 +3497,7 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   // OR probe even when translateOutputSideFormula succeeds — the full
   // translated AND/OR string times out deploy verify (~70s, 0 bytes).
   const failure = formula.includes("FIND(");
-  const orderLimit = `select=${OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
+  const orderLimit = `select=${QA_CENSUS_OUTPUT_SELECT}&order=output_number.asc.nullslast&limit=${capped}&offset=${start}`;
   let path = `platform_outputs?test_run_id=is.null&${orderLimit}`;
   const translated = formula ? outputContentListFilter("output", formula) : null;
   if (failure) {
