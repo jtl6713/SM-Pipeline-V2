@@ -16952,6 +16952,8 @@ function timedScriptAssetLabel(asset, index) {
   function productionRequestIsOpenDraft(record) {
     if (!record || record.active === false) return false;
     const status = String(record.status || "").trim().toLowerCase();
+    const revisionOpen = status === "promoted" && String(record.production_notes || "").split(/\r?\n/).some(line => line.trim().startsWith("[factory-revision-open]"));
+    if (revisionOpen) return true;
     if (status !== "draft" && status !== "ready") return false;
     if (String(record.submitted_at || "").trim()) return false;
     if (Array.isArray(record.promoted_content_item_links) && record.promoted_content_item_links.length > 0) return false;
@@ -16975,14 +16977,14 @@ function timedScriptAssetLabel(asset, index) {
       }
       await ensureIdeasCache();
       target.innerHTML = `<div class="production-draft-grid">${drafts.map(r => {
-        const ideaName = ideaTitleForRequest(r) || "Untitled piece";
+        const ideaName = r.requested_title || ideaTitleForRequest(r) || "Untitled piece";
         const timing = studioRecordTimingLabel(r);
         const platforms = join(r.platforms);
         return `<article class="production-draft-card">
           <div class="production-draft-meta">${badge(r.status)}${timing ? `<span class="subtle">${escapeHtml(timing)}</span>` : ""}</div>
           <h3>${value(ideaName)}</h3>
           <p>${platforms !== "—" ? platforms : "Platforms not chosen yet"}</p>
-          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Continue</button>
+          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">${String(r.status || "").toLowerCase() === "promoted" ? "Revise" : "Continue"}</button>
         </article>`;
       }).join("")}</div>`;
 
