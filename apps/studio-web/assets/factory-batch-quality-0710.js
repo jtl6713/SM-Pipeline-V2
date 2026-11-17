@@ -292,6 +292,10 @@
           : '<p>No past-due approvals beyond the reconciliation grace window.</p>')
       : '<p class="factory-batch-quality-unavailable">Past-due Quality Agent scan unavailable. Count unknown; do not treat this as zero.</p>';
     if (!data.job_id) {
+      if (data?.batch_monitor_status === "unavailable") {
+        return failureMarkup + overdueMarkup +
+          '<p class="factory-batch-quality-unavailable">Factory batch activity monitor is unavailable. Batch counts and findings are unknown; Supabase output and past-due findings above are independently reported.</p>';
+      }
       return data?.quality_status === "partial"
         ? failureMarkup + overdueMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
         : failureMarkup + overdueMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
