@@ -9,6 +9,7 @@ import {
   validateAssetDescription,
 } from "./manual-classification.mjs";
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
+import { productionOutputLinksFromJoinedRecords } from "./production-output-identity.mjs";
 import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
 import { storyVideoReferenceManifest, verifyStudioReferenceAsset, uploadStoryVideoReferences, deleteStudioElevenReferenceAssets } from "./story-first-ai-video-references.mjs";
 import { reconcileUnbilledChicagoVideoAttempt } from "./story-first-ai-video-unbilled-reconciliation.mjs";
@@ -1550,10 +1551,16 @@ export async function listContent(request, env, url, authorization) {
           activeCountByContent.set(contentId, count);
         }
         return {
-          records: (packed.records || []).map((record) => ({
-            ...mapContent(record, outputsByContent.get(record.id) || []),
-            production_active_output_count: activeCountByContent.get(record.id) || 0,
-          })),
+          records: (packed.records || []).map((record) => {
+            const linkedOutputs = outputsByContent.get(record.id) || [];
+            // The actual Supabase FK-linked outputs win over stale Content extras.
+            // Missing output_number never means that an output does not exist.
+            return {
+              ...mapContent(record, linkedOutputs),
+              output_links: productionOutputLinksFromJoinedRecords(linkedOutputs),
+              production_active_output_count: activeCountByContent.get(record.id) || 0,
+            };
+          }),
           profile: mapStudioContentProfile(profile),
           read_source: "supabase",
         };
