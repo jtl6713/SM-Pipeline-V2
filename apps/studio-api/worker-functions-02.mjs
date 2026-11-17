@@ -6673,6 +6673,26 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
   const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()
     .sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
+  // Never render a cached crop manifest after the owner-selected master set changes.
+  // Count-only validation allowed older or foreign images to be assigned to a new request.
+  const orderedMasters = masters.slice().sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
+  const exactMasters = orderedMasters.length > 0
+    && sourceRowsAll.length === orderedMasters.length
+    && sourceRowsAll.every((source, index) => {
+      const master = orderedMasters[index];
+      return Boolean(String(master?.id || "").trim())
+        && String(source?.id || "").trim() === String(master?.id || "").trim()
+        && String(source?.google_drive_file_id || "").trim() === String(master?.google_drive_file_id || "").trim()
+        && String(source?.media_asset_record_id || "").trim() === String(master?.media_asset_record_id || "").trim()
+        && Boolean(String(master?.google_drive_file_id || "").trim())
+        && Boolean(String(master?.media_asset_record_id || "").trim());
+    });
+  if (!exactMasters) {
+    console.warn("Studio exact source blocked: manifest differs from ordered master authority", {
+      production_request: requestRecord.id, platform, output_type: outputType,
+    });
+    return null;
+  }
   const storyTeaser = String(outputType || "").trim() === "Story";
   const sourceRows = storyTeaser ? sourceRowsAll.slice(0, 1) : sourceRowsAll;
   if (!storyTeaser && sourceRows.length < expected) return null;
@@ -6880,6 +6900,24 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
   };
 }
 /*__STUDIO_WORKER_END:item4StudioSourcePackageForOutput__*/
+
+export function item4CurrentSourceMatchesSavedSelection(sourcePackage, selectedAssetsJson) {
+  if (sourcePackage?.status !== "Ready") return false;
+  const current = item4ParseJson(sourcePackage?.selected_assets_json, null);
+  const saved = item4ParseJson(selectedAssetsJson, null);
+  const currentClips = Array.isArray(current?.selected_clips) ? current.selected_clips : [];
+  const savedClips = Array.isArray(saved?.selected_clips) ? saved.selected_clips : [];
+  if (!currentClips.length || currentClips.length !== savedClips.length) return false;
+  return currentClips.every((clip, index) => {
+    const prior = savedClips[index];
+    const sourceId = String(clip?.source_asset_id || "").trim();
+    return Boolean(sourceId)
+      && sourceId === String(prior?.source_asset_id || "").trim()
+      && String(clip?.media_asset_record_id || "").trim() === String(prior?.media_asset_record_id || "").trim()
+      && String(clip?.url || clip?.src || "").trim() === String(prior?.url || prior?.src || "").trim();
+  });
+}
+/*__STUDIO_WORKER_END:item4CurrentSourceMatchesSavedSelection__*/
 
 export function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {
   const route = effective.route;
@@ -10661,6 +10699,25 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       continue;
     }
     const sourcePackage=item4StudioSourcePackageForOutput(requestRecord,outputRow,effective,parent);
+    if (!sourcePackage && item4AssetManifest(requestRecord).length > 0) {
+      // Exact owner media is a hard prerequisite, not permission to fall back
+      // to an unrelated library/AI selection and then mark the output reviewable.
+      const issue = "Exact owner-selected source images are not ready or do not match the current master manifest. No Platform Output was created or scheduled.";
+      blocked++;
+      await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{
+        method:"PATCH",
+        body:JSON.stringify({fields:{
+          Content_Item:[parent.id],
+          Pipeline_Family:route?.pipeline_family||null,
+          Pipeline_Route_Status:"Blocked",
+          Pipeline_Route_Notes:issue,
+          Routed_At:null,
+          Updated_At:new Date().toISOString(),
+        },typecast:false}),
+      });
+      workItems.push({production_request_output_record_id:outputRow.id,routed:false,issues:[issue]});
+      continue;
+    }
     let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
     let atomicSeedSchedule = null;
     let atomicSeedVacate = false;
