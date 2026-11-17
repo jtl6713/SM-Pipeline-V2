@@ -18037,8 +18037,9 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
       if (factoryProfile && !/^rec[A-Za-z0-9]+$/.test(factoryProfile)) {
         throw new HttpError(400, "Invalid Factory profile filter");
       }
+      let report;
       try {
-        const report = await studioReadCoalesce(
+        report = await studioReadCoalesce(
           `factory-batch-quality-active:${factoryProfile || "all"}`, 12000,
           async () => {
             const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
@@ -18076,37 +18077,40 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             };
           },
         );
-        let outputFailures;
-        let approvedPastDue = { status: "unavailable", error: "Past-due scan pending; count unknown." };
-        try {
-          const snapshot = await loadStudioFailedOutputSnapshot(env, {
-            fresh: url.searchParams.get("fresh_output_failures") === "1",
-          });
-          outputFailures = { status: "ok", count: snapshot.count,
-            scanned_at: snapshot.scanned_at, items: snapshot.items,
-            verification_recovery: snapshot.verification_recovery };
-          approvedPastDue = snapshot.approved_past_due;
-        } catch (error) {
-          console.warn("Factory failed-output Quality Agent scan degraded", error);
-          outputFailures = { status: "unavailable",
-            error: "Failed-output monitoring unavailable; the outstanding count is unknown." };
-        }
-        return respond(request, env, { ...report, output_failures: outputFailures, approved_past_due: approvedPastDue });
       } catch (error) {
         console.warn("Factory quality read-only R2 monitoring degraded",
           String(error?.code || error?.status || error?.name || "unknown"));
-        // Never return a fabricated "no findings" or cascade a monitor read
-        // failure into a Factory approval action. The UI flags degraded data.
-        return respond(request, env, {
-          ok: false, scope: "all", quality_only: true,
-          quality_status: "unavailable",
+        // A batch-history outage must not suppress the independent Supabase
+        // failed-output and past-due censuses. Unknown is not zero.
+        report = {
+          ok: true, scope: "all", quality_only: true,
+          quality_status: "partial", batch_monitor_status: "unavailable",
           monitored_at: new Date().toISOString(),
           job_id: null, batches: [], quality_signals: [],
-          output_failures: { status: "unavailable", error: "Monitoring unavailable; count unknown." },
-          approved_past_due: { status: "unavailable", error: "Monitoring unavailable; past-due count unknown." },
-          totals: { batches: 0, pending: 0, failed: 0, findings: 0 },
-        });
+          totals: { batches: null, pending: null, failed: null, findings: null },
+        };
       }
+      let outputFailures = { status: "unavailable",
+        error: "Failed-output monitoring unavailable; count unknown." };
+      let approvedPastDue = { status: "unavailable",
+        error: "Past-due monitoring unavailable; count unknown." };
+      try {
+        const snapshot = await loadStudioFailedOutputSnapshot(env, {
+          fresh: url.searchParams.get("fresh_output_failures") === "1",
+        });
+        outputFailures = { status: "ok", count: snapshot.count,
+          scanned_at: snapshot.scanned_at, items: snapshot.items,
+          verification_recovery: snapshot.verification_recovery };
+        approvedPastDue = snapshot.approved_past_due;
+      } catch (error) {
+        console.warn("Factory failed-output Quality Agent scan degraded",
+          String(error?.code || error?.status || error?.name || "unknown"));
+      }
+      // Each data source retains its own verification status; do not claim
+      // batch all-clear when the R2 history is unavailable.
+      return respond(request, env, {
+        ...report, output_failures: outputFailures, approved_past_due: approvedPastDue,
+      });
     }
     // Only the explicit view=completed request may load terminal batch history.
     // Default view is actionable work (in progress or requiring operator attention).
