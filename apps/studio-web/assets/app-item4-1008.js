@@ -17548,9 +17548,17 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function productionContentNeedsWork(record) {
-    if (!record || record.lifecycle_complete) return false;
+    if (!record) return false;
     const stage = String(record.studio_stage || "").trim().toLowerCase();
     if (stage === "archived") return false;
+    // Authoritative output-level count from the same predicate as Home. The
+    // screen groups outputs by piece, but may not revive old DNP/held rows.
+    if (record.production_active_output_count !== undefined
+      && record.production_active_output_count !== null
+      && Number.isFinite(Number(record.production_active_output_count))) {
+      return Number(record.production_active_output_count) > 0;
+    }
+    if (record.lifecycle_complete) return false;
 
     // The Factory owns review-ready outputs; Production must show only work
     // that still needs source selection, rendering, or an actual revision.
@@ -17607,6 +17615,14 @@ function timedScriptAssetLabel(asset, index) {
     }
     const scrollTop = target.scrollTop;
     renderContentItemsTable(target, active);
+    const outputCount = active.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.production_active_output_count) || 0), 0
+    );
+    if (active.some(item => Number.isFinite(Number(item.production_active_output_count)))) {
+      target.insertAdjacentHTML("afterbegin",
+        `<p class="subtle production-active-summary"><strong>${outputCount} output${outputCount === 1 ? "" : "s"} in production</strong> across ${active.length} content piece${active.length === 1 ? "" : "s"}. Home counts outputs; Production groups them by piece.</p>`
+      );
+    }
     target.scrollTop = scrollTop;
   }
 
