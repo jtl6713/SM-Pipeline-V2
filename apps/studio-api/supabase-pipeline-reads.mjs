@@ -3724,7 +3724,12 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   if (!profileId) return { records: [], outputs: [], profileMissing: true };
 
   const capped = Math.max(1, Math.min(500, Number(limit) || 100));
-  const [newest, openOutputs] = await Promise.all([
+  // Two bounded output windows alone are insufficient for live Production.
+  // Older unfinished outputs can have no Output_ID and their parent may have
+  // no Created_At (Astoria N-Line Soundscape: four outputs, old parent).
+  // An explicit active-stage lane guarantees they are included regardless of
+  // age, while leaving the generic open/recent windows bounded.
+  const [newest, openOutputs, activeProductionOutputs] = await Promise.all([
     supabaseRest(
       env,
       `content_items?content_profile_id=eq.${profileId}&select=${CONTENT_SELECT}`
@@ -3736,10 +3741,19 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
         + `&output_status=neq.Published&output_status=neq.Cancelled`
         + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=1000`,
     ).catch(() => []),
+    supabaseRest(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false`
+        + `&output_status=in.(In%20Production,Ready%20for%20Render,Rendering,Rendered,Preparing%20Assets,Queued,Blocked,Changes%20Requested,Review%20Held)`
+        + `&select=${OUTPUT_SELECT}&order=updated_at.desc.nullslast&limit=500`,
+    ),
   ]);
+  if (!Array.isArray(activeProductionOutputs) || activeProductionOutputs.length >= 500) {
+    throw new Error("Active Production output inventory exceeds safe page limit");
+  }
 
   const openContentIds = new Set();
-  for (const row of openOutputs || []) {
+  for (const row of [...(openOutputs || []), ...activeProductionOutputs]) {
     const flat = flattenOutputRow(row);
     if (flat.content_item_airtable_id) openContentIds.add(flat.content_item_airtable_id);
   }
@@ -3772,7 +3786,7 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   ).catch(() => []);
 
   const outputById = new Map();
-  for (const row of [...(recentOutputs || []), ...(openOutputs || [])]) {
+  for (const row of [...(recentOutputs || []), ...(openOutputs || []), ...activeProductionOutputs]) {
     if (!row?.airtable_record_id) continue;
     outputById.set(row.airtable_record_id, flattenOutputRow(row));
   }
