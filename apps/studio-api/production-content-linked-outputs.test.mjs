@@ -65,3 +65,37 @@ test("Supabase content route classifies Production by the same output predicate 
   assert.match(method, /refusing Airtable fallback/);
   assert.match(method, /throw error/);
 });
+
+test("LA review-status outputs needing render survive all recent windows and hydrate old parents", async () => {
+  const { listSupabaseContentItems } = await import('./supabase-pipeline-reads.mjs');
+  const profile = { id: 'profile-la', airtable_record_id: id(90) };
+  const parents = [1, 2].map(n => ({
+    airtable_record_id: id(n), content_title: `LA piece ${n}`,
+    created_at: null, content_profiles: profile, extras: {},
+  }));
+  const outputs = parents.map((parent, index) => ({
+    airtable_record_id: id(101 + index), output_number: null,
+    output_status: 'Ready for Review', review_status: 'Review Sent',
+    render_status: index ? 'Waiting in Render Queue' : 'Ready for Render',
+    do_not_publish: false, content_items: parent, content_profiles: profile,
+  }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    assert.equal(url.hostname, 'example.supabase.co', 'Supabase reads only');
+    let rows = [];
+    if (url.pathname.endsWith('/content_profiles')) rows = [profile];
+    else if (url.pathname.endsWith('/platform_outputs')) {
+      const statuses = url.searchParams.get('output_status') || '';
+      if (statuses.startsWith('in.') && statuses.includes('Ready for Review')) rows = outputs;
+    } else if (url.pathname.endsWith('/content_items') && url.searchParams.has('or')) rows = parents;
+    return { ok: true, text: async () => JSON.stringify(rows) };
+  };
+  try {
+    const pack = await listSupabaseContentItems({
+      SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_test',
+    }, { profileAirtableId: profile.airtable_record_id });
+    assert.deepEqual(pack.records.map(r => r.id).sort(), parents.map(r => r.airtable_record_id).sort());
+    assert.deepEqual(pack.outputs.map(r => r.id).sort(), outputs.map(r => r.airtable_record_id).sort());
+  } finally { globalThis.fetch = originalFetch; }
+});
