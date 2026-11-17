@@ -1377,3 +1377,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-17: Deploy PR #2151 Production Supabase-linked output identity count/Open navigation and proof-gated render-status guard. Reconciled Miami 8/8 Ready for Review, preserve all publishing/approval controls; no Airtable reads/writes.
 
 Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 2026-11-17; no publishing or rerender.
+
+2026-11-17: Release Studio API Worker 0.10.1003 Flatiron reopened Production list recovery. Query Supabase revisions independently before ordinary drafts, retain reopened requests if draft or Idea metadata reads fail, no Airtable data mutations, approvals, publishing or rerenders.

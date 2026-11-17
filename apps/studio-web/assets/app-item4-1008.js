@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.985-flatiron-revision";
+  const BUILD_ID = "item4-0.6.986-production-revision-list";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -16977,7 +16977,9 @@ function timedScriptAssetLabel(asset, index) {
         target.innerHTML = "";
         return;
       }
-      await ensureIdeasCache();
+      // Idea titles are supplementary. Never block the saved Production list
+      // (including reopened promoted revisions) on an unrelated Ideas read.
+      void ensureIdeasCache().catch((error) => console.warn("Production idea cache unavailable", error));
       target.innerHTML = `<div class="production-draft-grid">${drafts.map(r => {
         const ideaName = r.requested_title || ideaTitleForRequest(r) || "Untitled piece";
         const timing = studioRecordTimingLabel(r);
