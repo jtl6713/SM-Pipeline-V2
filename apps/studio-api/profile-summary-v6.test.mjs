@@ -84,6 +84,9 @@ test("V6 read eligibility rejects absent platform fields and inconsistent totals
   assert.equal(validProfileSummaryV6Rows(valid), true);
   assert.equal(validProfileSummaryV6Rows(valid.slice(0, 3)), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, ready_by_platform: undefined })), false);
+  assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : {
+    ...row, ready_by_platform: { ...row.ready_by_platform, Facebook: 1 },
+  })), false, "A corrupted platform total may not pass the canonical census");
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, production: undefined })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, approved_calendar_slots: {} })), false);
   assert.equal(validProfileSummaryV6Rows(valid.map((row, i) => i ? row : { ...row, pipeline_total: 10 })), false);
