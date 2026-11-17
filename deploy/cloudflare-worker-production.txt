@@ -1372,3 +1372,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-17: Deploy merged PR #2135 Supabase owner FK readback recovery guard. Verify exact Content Item/Production Request ownership and restore missing Platform Output fanout for the two LA Submitted jobs. No Airtable access or automatic publishing.
 
 2026-11-17: Deploy PR #2137. Skip legacy inverse link writeback only when both exact Supabase production/content UUID FKs already agree; unblock Submitted recovery fanout for GCM First-Timer Orders and Mulholland Pullout Photo Challenge. No publishing.
+
+2026-11-17: Fix Pipeline missing newest outputs: fetch by created_at rather than nullable output_number, preserve created_at through Worker mapping, regression for Calle Ocho Coffee Stops six December-scheduled outputs. No publish/approval mutations.
