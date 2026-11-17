@@ -835,3 +835,5 @@ Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issue
 2026-11-17: Deploy Studio Pages UI 0.6.977-mobile-viewport — merged PR #2127. Shared mobile viewport containment across Studio screens and all four profiles; keep calendar/table scrolling local. Verify iPhone viewport, desktop layout and UI build identity. Deployment trigger only; no publishing or data mutations.
 
 2026-11-17: Deploy merged PR #2139 (ddb48b4) to Studio Pages production; fix saved platform-plan approval for Miami Calle Ocho Coffee Stops. No automatic publishing.
+
+2026-11-17: Deploy UI 0.6.978-approval-plan-fix with synchronized build ID, cache keys, and merged PR #2139 approval handler; resolves unchanged-version production deployment gate. No content approval or publishing.
