@@ -1925,7 +1925,7 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
 
   const newest = await supabaseRest(
     env,
-    `platform_outputs?${filter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${Math.max(1, Math.min(500, Number(limit) || 250))}`,
+    `platform_outputs?${filter}&select=${OUTPUT_SELECT}&order=created_at.desc.nullslast&limit=${Math.max(1, Math.min(500, Number(limit) || 250))}`,
   );
 
   let open = [];
@@ -1946,7 +1946,11 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
     if (!row?.airtable_record_id) continue;
     byId.set(row.airtable_record_id, flattenOutputRow(row));
   }
-  const flat = [...byId.values()].sort((a, b) => Number(b.output_number || 0) - Number(a.output_number || 0));
+  const flat = [...byId.values()].sort((a, b) => {
+    const createdDiff = Date.parse(b.created_at || "") - Date.parse(a.created_at || "");
+    if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff;
+    return Number(b.output_number || 0) - Number(a.output_number || 0);
+  });
   const contentByAirtableId = new Map();
   for (const row of flat) {
     if (row.content_item_airtable_id) {
