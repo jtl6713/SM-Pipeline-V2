@@ -1352,3 +1352,5 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-16: Deploy Worker 0.10.999-home-supabase-only-refresh — PR #2084 prevents Airtable Home parity overwrite, fallback output/Ideas reads and TikTok publication overlay when Home uses Supabase. Force refresh now fails closed, and validated platform totals must sum to approved-unpublished. Preserve PR #2081 per-city 1,000 refill, publishing/approval/MAE guards and Supabase Asset Manager delete; verify /health exact version.
 
 2026-11-16: Deploy PR #2093 verified Production exit-state hardening: Supabase-only cron self-heals approved-but-In Production outputs and fully rendered blank-status media, with strict media, approval, hold and scheduled-state guards. No automatic scheduling or publishing. Incident #2086 Chicago recovery; preserve existing worker bindings and release controls.
+
+2026-11-16: Deploy guarded Submitted autonomous I4 orphan repair (issue #2086 Cloud Gate Myth). Exact reciprocal candidate/request/parent proof, no I3 replay or duplicate fanout, preserve Supabase-only authority and all human final scheduling gates.

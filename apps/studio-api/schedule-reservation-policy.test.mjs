@@ -98,7 +98,7 @@ test("cron independently recovers stale Submitted approvals even when request pa
   assert.match(healer, /verifySubmittedPromotionOwnership\(/);
   assert.match(healer, /Promoted_Content_Item: \[latestProof\.parentId\]/);
   assert.match(healer, /Promoted_Content_Item repair failed readback/);
-  assert.match(healer, /finalizeProductionRequestPromotion\(env, latest\.id, idea, ctx\)/);
+  assert.match(healer, /finalizeProductionRequestPromotion\(env, latest\.id, currentIdea, ctx\)/);
   assert.match(healer, /attemptedSubmitted = true/);
   assert.doesNotMatch(healer, /fetchPromotionHandoff/);
   assert.match(worker, /ctx\.waitUntil\(studioHealPromotedMissingFanout\(env, \{ limit: cadence\.heavy \? 8 : 4, ctx \}\)/);
