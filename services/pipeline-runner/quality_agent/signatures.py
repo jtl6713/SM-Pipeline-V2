@@ -300,3 +300,46 @@ def reconcile_ig_stale_upload(
              "reservation_id": result.get("reservation_id")}
     append_audit(event)
     return event
+
+
+MISSING_PRODUCTION_PLATFORM_OUTPUTS = "QA-PRODUCTION-MISSING-PLATFORM-OUTPUTS"
+
+
+def detect_missing_production_platform_outputs(
+    *, request_id: str, profile: str, request_status: str,
+    output_plan_status: str, expected_output_keys: list[str],
+    linked_output_keys: list[str], missing_or_dangling_keys: list[str],
+    job_step: str = "", job_error: str = "",
+) -> dict[str, Any] | None:
+    """Pure, profile-agnostic detection; never authorizes direct record creation.
+
+    Caller must use fresh authoritative Supabase rows and derive stable planned
+    output keys from production-request-output UUIDs, not display names.
+    """
+    if str(request_status).casefold() not in {"submitted", "in production", "producing", "production"}:
+        return None
+    if str(output_plan_status).casefold() != "ready":
+        return None
+    expected = set(_clean_ids(expected_output_keys))
+    linked = set(_clean_ids(linked_output_keys))
+    broken = set(_clean_ids(missing_or_dangling_keys))
+    missing = sorted((expected - linked) | (expected & broken))
+    if not expected or not missing:
+        return None
+    return {
+        "id": MISSING_PRODUCTION_PLATFORM_OUTPUTS,
+        "request_id": str(request_id),
+        "profile": str(profile),
+        "stage": str(job_step),
+        "error": str(job_error),
+        "expected_count": len(expected),
+        "linked_count": len(expected & linked) - len(expected & linked & broken),
+        "missing_output_keys": missing,
+        "action": "reconcile_promotion_and_materialization_under_request_lease",
+        "auto_repair_safe": False,
+        "requires": [
+            "fresh_supabase_readback", "exclusive_request_fence",
+            "idempotent_promotion", "idempotent_output_materialization",
+            "canonical_identity_verification", "append_only_repair_audit",
+        ],
+    }
