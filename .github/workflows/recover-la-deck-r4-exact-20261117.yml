@@ -59,25 +59,17 @@ jobs:
               }
               Write-Output ("exact_r4_preflight=PASS " + $out)
               $renderBody = @{output_record_id=$out;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
-              $started = $false
-              for ($attempt=1; $attempt -le 6; $attempt++) {
-                $render = Invoke-RestMethod -Uri $r4 -Method POST -Headers $headers -Body $renderBody -ContentType "application/json" -TimeoutSec 90
-                if ($render.status -eq "ok" -and $render.details.run.processed -eq $true -and $render.details.run.job_id) {
-                  Write-Output ("exact_r4_started=" + $out)
-                  Write-Output ("exact_r4_job=" + [string]$render.details.run.job_id)
-                  $started = $true
-                  break
-                }
-                $reason = [string]$render.details.run.reason
-                if ($reason -eq "render_already_started") {
-                  Write-Output ("exact_r4_already_started=" + $out)
-                  $started = $true
-                  break
-                }
-                if ($reason -ne "waiting_for_remotion_slot") { throw ("r4_launch_" + $reason) }
-                Start-Sleep -Seconds 10
+              # One invocation only. A busy renderer parks the output for normal
+              # queue handling; repeated R4 calls must not force new jobs.
+              $render = Invoke-RestMethod -Uri $r4 -Method POST -Headers $headers -Body $renderBody -ContentType "application/json" -TimeoutSec 90
+              if ($render.status -eq "ok" -and $render.details.run.processed -eq $true -and $render.details.run.job_id) {
+                Write-Output ("exact_r4_started=" + $out)
+                Write-Output ("exact_r4_job=" + [string]$render.details.run.job_id)
+              } elseif ([string]$render.details.run.reason -eq "render_already_started") {
+                Write-Output ("exact_r4_already_started=" + $out)
+              } else {
+                throw ("r4_single_attempt_" + [string]$render.details.run.reason)
               }
-              if (-not $started) { throw "r4_slot_busy" }
               $recovered += 1
             } catch {
               $blocked += 1
