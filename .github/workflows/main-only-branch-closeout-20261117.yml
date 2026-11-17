@@ -56,7 +56,7 @@ jobs:
           }
           def api(path, method="GET", body=None):
               req = urllib.request.Request(
-                  "https://api.github.com/repos/" + REPO + "/" + path,
+                  "https://api.github.com/repos/" + REPO + ("/" + path if path else ""),
                   headers=headers, method=method,
                   data=None if body is None else json.dumps(body).encode("utf-8"),
               )
