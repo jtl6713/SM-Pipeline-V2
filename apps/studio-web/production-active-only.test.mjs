@@ -12,7 +12,9 @@ test("keep unapproved or mixed render/review content in Production", () => {
   for (const output_state_counts of [
     { Queued: 1 },
     { Rendering: 1, Approved: 4 },
-    { "Ready for Review": 1, Scheduled: 2 },
+    { Rendered: 1, Scheduled: 2 },
+    { "Review Held": 1, Approved: 2 },
+    { "Changes Requested": 1, Published: 2 },
     { "Waiting in Render Queue": 1, Published: 3 },
     { "Trying Again": 1, Approved: 1 },
   ]) {
@@ -22,6 +24,9 @@ test("keep unapproved or mixed render/review content in Production", () => {
 
 test("approved, scheduled, publishing and terminal outputs move to Pipeline", () => {
   for (const output_state_counts of [
+    { "Ready for Review": 1, Scheduled: 2 },
+    { "Ready for Review": 4 },
+    { "Ready for Review": 1, Failed: 1 },
     { Approved: 6 }, { Scheduled: 2, Approved: 2 },
     { Published: 3 }, { Uploading: 1, Approved: 2 },
     { "Platform Processing": 1, "Draft Delivered": 1 },
@@ -33,9 +38,12 @@ test("approved, scheduled, publishing and terminal outputs move to Pipeline", ()
   assert.equal(needsWork({ output_state_counts: { Rendering: 1 }, studio_stage: "Archived" }), false);
 });
 
-test("legacy content without rollups follows production/review stage", () => {
-  assert.equal(needsWork({ studio_stage: "Configuring" }), true);
-  assert.equal(needsWork({ studio_stage: "Review" }), true);
+test("legacy content without rollups requires real linked outputs", () => {
+  assert.equal(needsWork({ studio_stage: "Configuring", output_links: ["recLegacy1"] }), true);
+  assert.equal(needsWork({ studio_stage: "Review", output_links: ["recLegacy1"] }), true);
+  assert.equal(needsWork({ studio_stage: "Generating", output_links: [] }), false);
+  assert.equal(needsWork({ studio_stage: "Review", output_links: [] }), false);
+  assert.equal(needsWork({ studio_stage: "Generating" }), false);
   assert.equal(needsWork({ studio_stage: "Approved" }), false);
   assert.equal(needsWork({ studio_stage: "Rendering", review_status: "Approved" }), false);
   assert.equal(needsWork({ studio_stage: "Publishing" }), false);
