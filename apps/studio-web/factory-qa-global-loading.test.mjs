@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 const js=readFileSync(new URL("./assets/factory-batch-quality-0710.js",import.meta.url),"utf8");
 
 test("global Factory loading state must not ask for a missing Content Profile",()=>{
-  assert.match(js,/function panelMarkup\(\{ profileId, data, error, global = false \}\)/);
-  assert.match(js,/if \(!global && data\?\.scope !== "all"/);
-  assert.match(js,/if \(!data && !error && global\)/);
+  assert.match(js,/function panelMarkup\(\{ profileId, data, error, factoryView = false \}\)/);
+  assert.match(js,/if \(!factoryView && data\?\.scope !== "all"/);
+  assert.match(js,/if \(!data && !error && factoryView\)/);
   assert.match(js,/Checking Quality Agent findings across all profiles/);
 });
 test("routine navigation and focus refreshes reuse coalesced census; explicit refresh bypasses it",()=>{
