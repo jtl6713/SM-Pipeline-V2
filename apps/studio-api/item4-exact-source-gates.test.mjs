@@ -45,7 +45,7 @@ test("continuation cannot re-stamp incomplete source or reuse an old selected-as
     worker03.indexOf("export async function studioContinuationInspectOutput("),
     worker03.indexOf("/*__STUDIO_WORKER_END:studioContinuationInspectOutput__*/")
   );
-  assert.match(inspect, /item4CurrentSourceMatchesSavedSelection\(/);
+  assert.match(inspect, /const matchesCurrentMasterSelection =/);
   assert.match(inspect, /const alreadyExact = matchesCurrentMasterSelection/);
   assert.match(inspect, /if \(readyForRender && hasClips && matchesCurrentMasterSelection/);
 });
