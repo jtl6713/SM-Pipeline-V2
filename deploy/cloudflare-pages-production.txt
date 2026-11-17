@@ -847,3 +847,5 @@ Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issue
 Deploy Studio UI 0.6.981 Flatiron promoted production revision visibility after PR #2146, 2026-11-17.
 
 2026-11-17: Deploy Studio UI 0.6.984 compact Dashboard density from merged PR #2148 (8d098cec). Includes three dashboard card/table spacing reductions, mobile adjustments, consistent release keys, and Quality Agent regression version assertion repair. Deploy Pages only; no publishing, approval or data mutations.
+
+2026-11-17: Deploy Studio UI 0.6.985-flatiron-revision on top of UI 0.6.984 dashboard density. Ship merged #2156 revision_open Production fix, preserve NYC Flatiron's existing six outputs, no data writes or auto-render. Verify exact custom-domain release identity.
