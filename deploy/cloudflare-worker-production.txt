@@ -1385,3 +1385,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-17: Retry verified Quality Agent #2160/#2161 Worker deploy after transient bridge curl 000. Require explicit auth denial, preserve automatic rollback and all publishing/approval controls.
 
 2026-11-17: Deploy PR #2165 targeted Factory Quality Agent Supabase census projection reduction. Approval, scheduling and publishing states untouched; preserve all read-only and auth safeguards.
+
+2026-11-17: Deploy merged #2169 Quality Agent Worker isolation: R2 batch history failures do not suppress independent Supabase failed-output and past-due scans. Preserve fail-closed batch status and all publishing controls.
