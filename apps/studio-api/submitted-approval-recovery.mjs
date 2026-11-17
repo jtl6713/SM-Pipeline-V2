@@ -84,7 +84,7 @@ export function verifySubmittedAutonomousOrphan({
 }) {
   const fail = reason => ({ safe: false, reason, parentId: null, repairLink: false, repairParentOwner: false });
   if (!validId(requestId) || requestStatus !== "Submitted") return fail("not_submitted");
-  if (!/(?:^|\\n)origin=autonomous(?:\\n|$)/i.test(String(requestNotes || "")))
+  if (!/(?:^|\r?\n)origin=autonomous(?:\r?\n|$)/i.test(String(requestNotes || "")))
     return fail("not_autonomous_origin");
   if (ideaStatus !== "Promoted") return fail("idea_not_promoted");
   // An explicit, current Submitted_At wins; a missing timestamp is only

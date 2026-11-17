@@ -53,7 +53,7 @@ test("Supabase-origin Cloud Gate I4 orphan uniquely proves missing reciprocal ow
     requestId: "recWwDHWDqLCt5R9x", requestStatus: "Submitted",
     requestIdeaIds: ["reca5y3ZPwFkgCPN1"], requestParentIds: [],
     submittedAt: null, requestCreatedAt: "2026-11-16T14:04:51.663Z",
-    requestNotes: "origin=autonomous\\norigin=prepare-to-review\\nez-photo-wait=off",
+    requestNotes: "origin=autonomous\norigin=prepare-to-review\\nez-photo-wait=off",
     ideaId: "reca5y3ZPwFkgCPN1", ideaStatus: "Promoted",
     ideaContentIds: ["recJZpW6lLIy621oY"],
     ideaPromotedContentId: "recJZpW6lLIy621oY",
@@ -79,12 +79,20 @@ test("Supabase autonomous orphan recovery refuses missing identity, ambiguity, a
   const valid = {
     requestId, requestStatus:"Submitted", requestIdeaIds:[ideaId],
     requestParentIds:[], submittedAt:null, requestCreatedAt:submittedAt,
-    requestNotes:"origin=autonomous\\norigin=prepare-to-review",
+    requestNotes:"origin=autonomous\norigin=prepare-to-review",
     ideaId, ideaStatus:"Promoted", ideaContentIds:[parentId],
     ideaPromotedContentId:parentId, ideaRequestIds:[requestId],
     parentId, parentRequestIds:[], parentIdeaIds:[ideaId], nowMs,
   };
   assert.equal(verifySubmittedAutonomousOrphan(valid).safe,true);
+  // Real production notes contain line breaks, not the two-character \\n
+  // sequence. Never mistake a serialized escape for an actual note line.
+  assert.equal(verifySubmittedAutonomousOrphan({ ...valid,
+    requestNotes: String.raw`origin=autonomous\\norigin=prepare-to-review`,
+  }).safe, false);
+  assert.equal(verifySubmittedAutonomousOrphan({ ...valid,
+    requestNotes: "origin=autonomous\r\norigin=prepare-to-review",
+  }).safe, true);
   for (const wrong of [
     { requestNotes:"origin=manual" },
     { requestStatus:"Ready" },
