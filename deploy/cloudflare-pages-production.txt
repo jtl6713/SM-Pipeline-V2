@@ -845,3 +845,5 @@ Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issue
 2026-11-17: Deploy Studio UI 0.6.980 Pipeline newest-content-first ordering independent of scheduled publish week; preserve separate 7-day calendar and all-view defaults.
 
 Deploy Studio UI 0.6.981 Flatiron promoted production revision visibility after PR #2146, 2026-11-17.
+
+2026-11-17: Deploy Studio UI 0.6.984-flatiron-revision after PR #2156. Honor explicit revision_open to reopen existing promoted NYC Flatiron Window Geometry production; preserve existing six outputs, audio and publication gates. Require exact custom-domain build verification.
