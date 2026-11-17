@@ -28,7 +28,7 @@ import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
-import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
+import { homeApprovedExceptionKind, homeIsUnpublishedFailure, homeOutputInProduction } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { submittedApprovalAge, verifySubmittedPromotionOwnership, verifySubmittedAutonomousOrphan, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
@@ -1536,14 +1536,34 @@ export async function listContent(request, env, url, authorization) {
           if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
           outputsByContent.get(contentId).push(output);
         }
+        // Same output-level eligibility used by Home. An item with only
+        // Do_Not_Publish/approved/review-ready siblings must never create a
+        // Production-screen ghost row; NYC's seven real pending outputs must
+        // still be grouped under their two parent Content Items.
+        const activeCountByContent = new Map();
+        for (const [contentId, outputRecords] of outputsByContent) {
+          let count = 0;
+          for (const output of outputRecords) {
+            if (f(output, "Test_Run_ID")) continue;
+            if (homeOutputInProduction(mapOutput(output))) count += 1;
+          }
+          activeCountByContent.set(contentId, count);
+        }
         return {
-          records: (packed.records || []).map((record) => mapContent(record, outputsByContent.get(record.id) || [])),
+          records: (packed.records || []).map((record) => ({
+            ...mapContent(record, outputsByContent.get(record.id) || []),
+            production_active_output_count: activeCountByContent.get(record.id) || 0,
+          })),
           profile: mapStudioContentProfile(profile),
           read_source: "supabase",
         };
       }
+      // This is an authoritative Supabase route. Never consult Airtable
+      // archive when the requested profile is absent.
+      throw new Error("Content profile missing from authoritative Supabase read");
     } catch (error) {
-      console.warn("supabase content list read failed; falling back to Airtable", error);
+      console.warn("supabase content list read failed; refusing Airtable fallback", error);
+      throw error;
     }
   }
   const profileFormula = contentProfileFilterFormula(profile);
