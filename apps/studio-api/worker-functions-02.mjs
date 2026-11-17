@@ -2311,9 +2311,20 @@ export async function getItem4Variants(request, env, url, authorization, ctx = n
   if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil((async () => {
       try {
-        await item4ResumePendingVariants(env, recordId, reconciled.record);
+        // Crop queue creation requires ALL masters to have Drive + Media Asset
+        // authority. A failed original previously blocked every later crop,
+        // while /variants polling only retried variants (not the missing master).
+        const initial = item4AssetManifest(reconciled.record);
+        const missingMaster = initial.some((asset) =>
+          !String(asset?.google_drive_file_id || "").trim()
+          || !String(asset?.media_asset_record_id || "").trim());
+        const resumedMaster = missingMaster
+          ? await item4ResumePendingMasterAuthority(env, recordId, reconciled.record)
+          : null;
+        await item4ResumePendingVariants(
+          env, recordId, resumedMaster?.record || reconciled.record);
       } catch (error) {
-        console.warn("Item 4 variant poll resume deferred", error);
+        console.warn("Item 4 variant/master poll resume deferred", error);
       }
     })());
   }

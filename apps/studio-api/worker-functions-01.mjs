@@ -5837,6 +5837,15 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
     const current = byTransferId.get(transferId) || null;
     const currentStatus = current ? item4QueueStatus(current) : "";
     const currentPreviewStatus = current ? String(f(current, "Preview_Status") || "").trim() : "";
+    const lastAttemptMs = Date.parse(String(current ? (f(current, "Last_Attempt_At") ||
+      f(current, "Updated_At") || f(current, "Created_At") || "") : "")) || 0;
+    const attempts = Math.max(0, Number(current ? f(current, "Attempt_Count") : 0) || 0);
+    // Previously Error was copied back unchanged forever, even when the
+    // original staged R2 object remained available. Retry only the SAME
+    // master transfer identity, with a cooldown and a hard cap.
+    const retryFailedMaster = ["Error", "Failed"].includes(currentStatus)
+      && attempts < 4
+      && (!lastAttemptMs || Date.now() - lastAttemptMs >= 120000);
     const preserveStatus = ["Ready", "Drive Uploaded", "Processing"].includes(currentStatus);
     const fields = {
       Transfer_ID: transferId,
@@ -5856,8 +5865,12 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
       Staging_Delete_Ready: false,
     };
     if (!preserveStatus) {
-      fields.Transfer_Status = currentStatus === "Failed" ? "Pending" : (currentStatus || "Pending");
-      fields.Error_Message = null;
+      // Preserve terminal/Error identity for diagnostics until cooldown permits
+      // a bounded retry of the SAME staged source and transfer ID.
+      fields.Transfer_Status = retryFailedMaster ? "Pending" : (currentStatus || "Pending");
+      if (retryFailedMaster || !["Error", "Failed"].includes(currentStatus)) {
+        fields.Error_Message = null;
+      }
     }
     if (item4LooksLikeVideoAsset(asset) && item4LooksLikeImagePreviewUrl(asset?.poster_url || asset?.preview_url)) {
       fields.Preview_Status = "Ready";
