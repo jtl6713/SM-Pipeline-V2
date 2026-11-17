@@ -5816,6 +5816,22 @@ export async function item4MasterQueueRows(env, recordId) {
 }
 /*__STUDIO_WORKER_END:item4MasterQueueRows__*/
 
+// Master Originals can fail after a transient SMV1/Drive handoff. Previously
+// "Error" was preserved forever on Upsert, even with a live staged R2 object;
+// the photo never retried and its downstream crops could not be queued.
+export function item4MasterQueueRecovery(status, attempts, lastAttemptMs, nowMs = Date.now()) {
+  const current = String(status || "").trim();
+  const n = Math.max(0, Number(attempts) || 0);
+  if (!["Failed", "Error"].includes(current)) return { requeue: false, reason: "not-failed" };
+  if (n >= 4) return { requeue: false, reason: "retry-exhausted" };
+  if (Number.isFinite(lastAttemptMs) && lastAttemptMs > 0
+    && nowMs - lastAttemptMs < 120000) {
+    return { requeue: false, reason: "retry-cooldown" };
+  }
+  return { requeue: true, reason: "bounded-master-retry" };
+}
+/*__STUDIO_WORKER_END:item4MasterQueueRecovery__*/
+
 export async function item4UpsertMasterQueue(env, recordId, assets) {
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
@@ -5837,6 +5853,10 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
     const current = byTransferId.get(transferId) || null;
     const currentStatus = current ? item4QueueStatus(current) : "";
     const currentPreviewStatus = current ? String(f(current, "Preview_Status") || "").trim() : "";
+    const lastAttemptMs = Date.parse(String(current ? (f(current, "Last_Attempt_At") ||
+      f(current, "Updated_At") || f(current, "Created_At") || "") : "")) || 0;
+    const recovery = item4MasterQueueRecovery(
+      currentStatus, current ? f(current, "Attempt_Count") : 0, lastAttemptMs);
     const preserveStatus = ["Ready", "Drive Uploaded", "Processing"].includes(currentStatus);
     const fields = {
       Transfer_ID: transferId,
@@ -5856,8 +5876,12 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
       Staging_Delete_Ready: false,
     };
     if (!preserveStatus) {
-      fields.Transfer_Status = currentStatus === "Failed" ? "Pending" : (currentStatus || "Pending");
-      fields.Error_Message = null;
+      // Preserve terminal/Error identity for diagnostics until cooldown permits
+      // a bounded retry of the SAME staged source and transfer ID.
+      fields.Transfer_Status = recovery.requeue ? "Pending" : (currentStatus || "Pending");
+      if (recovery.requeue || !["Error", "Failed"].includes(currentStatus)) {
+        fields.Error_Message = null;
+      }
     }
     if (item4LooksLikeVideoAsset(asset) && item4LooksLikeImagePreviewUrl(asset?.poster_url || asset?.preview_url)) {
       fields.Preview_Status = "Ready";
