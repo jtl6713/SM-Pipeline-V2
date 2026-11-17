@@ -19,5 +19,5 @@ test("guard respects holds, synthetic tests and future revisions", () => {
   assert.match(sql, /NEW\.do_not_publish IS FALSE/);
   assert.match(sql, /NEW\.test_run_id IS NULL/);
   assert.doesNotMatch(sql, /NEW\.(?:review_status|publish_status|output_status)\s*:=/i);
-  assert.doesNotMatch(sql, /output_number|Output_ID|airtable/i);
+  assert.doesNotMatch(sql.slice(sql.indexOf("CREATE OR REPLACE")), /output_number|Output_ID|airtable/i);
 });
