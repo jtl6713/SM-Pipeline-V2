@@ -1374,3 +1374,4 @@ Deploy 2026-11-15 Worker 0.10.971-incomplete-dupe-sweep: Purge 79 incomplete-con
 2026-11-17: Deploy PR #2137. Skip legacy inverse link writeback only when both exact Supabase production/content UUID FKs already agree; unblock Submitted recovery fanout for GCM First-Timer Orders and Mulholland Pullout Photo Challenge. No publishing.
 
 2026-11-17: Fix Pipeline missing newest outputs: fetch by created_at rather than nullable output_number, preserve created_at through Worker mapping, regression for Calle Ocho Coffee Stops six December-scheduled outputs. No publish/approval mutations.
+2026-11-17: Deploy PR #2151 Production Supabase-linked output identity count/Open navigation and proof-gated render-status guard. Reconciled Miami 8/8 Ready for Review, preserve all publishing/approval controls; no Airtable reads/writes.
