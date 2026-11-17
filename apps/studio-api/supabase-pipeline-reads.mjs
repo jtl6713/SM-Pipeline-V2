@@ -1655,6 +1655,9 @@ export function airtableShapedProductionRequestFromSupabase(row) {
       Created_At: bag.Created_At || row.created_at || null,
       Updated_At: bag.Updated_At || row.updated_at || null,
       Test_Run_ID: bag.Test_Run_ID || null,
+      Submitted_At: bag.Submitted_At || null,
+      Studio_Approval_Recovery_Error: bag.Studio_Approval_Recovery_Error || null,
+      Studio_Approval_Recovery_Last_Attempt_At: bag.Studio_Approval_Recovery_Last_Attempt_At || null,
     },
   };
 }
@@ -5575,6 +5578,11 @@ function productionRequestPublishStatusPatch(fields) {
   if ("Created_At" in fields) bag.Created_At = fields.Created_At || null;
   if ("Updated_At" in fields) bag.Updated_At = fields.Updated_At || null;
   if ("Test_Run_ID" in fields) bag.Test_Run_ID = fields.Test_Run_ID || null;
+  // Persist the Submitted recovery ledger in the authoritative Supabase bag.
+  // These diagnostic writes never modify approval state or schedule/publish media.
+  for (const key of ["Submitted_At", "Studio_Approval_Recovery_Error", "Studio_Approval_Recovery_Last_Attempt_At"]) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) bag[key] = fields[key] ?? null;
+  }
   if ("Created_By" in fields) {
     const createdBy = firstLink(fields.Created_By);
     bag.Created_By = createdBy ? [createdBy] : [];

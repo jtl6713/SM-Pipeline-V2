@@ -172,6 +172,8 @@ test("Submitted recovery persists failure diagnostics but never fabricates appro
   const body = source.split("export async function studioHealPromotedMissingFanout(")[1].split("/*__STUDIO_WORKER_END:studioHealPromotedMissingFanout__*/")[0];
   assert.match(body, /for \(const pendingRequest of orderSubmittedRecoveryRequests\(pending, f\)\)/);
   assert.match(body, /Studio_Approval_Recovery_Error: String\(error\?\.message \|\| error\)/);
+  assert.match(body, /Studio_Approval_Recovery_Error: `ownership proof withheld:/);
+  assert.match(body, /Studio Submitted recovery proof diagnostic failed/);
   assert.match(body, /Studio_Approval_Recovery_Last_Attempt_At: new Date\(\)\.toISOString\(\)/);
   assert.match(body, /if \(attemptedSubmitted\) break/);
   assert.match(body, /FIND\('\$\{proRec\}',ARRAYJOIN\(\{Production_Request_Output\}\)&""\)/);
@@ -185,5 +187,5 @@ test("Submitted approval recovery owns an independent cron task, never two overl
   const independent = entry.indexOf("ctx.waitUntil(studioHealPromotedMissingFanout(env,");
   const publish = entry.indexOf("await studioReconcileOverdueScheduledPublishes(env");
   assert.ok(independent >= 0 && independent < publish, "recovery begins before lengthy publish maintenance");
-  assert.match(entry, /airtableCooldownWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx.waitUntil\(studioHealPromotedMissingFanout/);
+  assert.match(entry, /studioPhase6WriteSource\(env\) === "supabase" \|\| airtableCooldownWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx.waitUntil\(studioHealPromotedMissingFanout/);
 });
