@@ -28,7 +28,7 @@ test("Platforms & Frames owns the only visible editable output matrix", () => {
   assert.doesNotMatch(app, /<select data-item4-format/);
 });
 
-test("Recommend checks visible boxes before Save and the persist path stays available", () => {
+test("Recommend persists the platform plan and output selections can still be saved", () => {
   const start = app.indexOf("async function buildItem4Plan(options = {})");
   const end = app.indexOf("function selectedRequestPlatforms()", start);
   const recommend = app.slice(start, end);
@@ -40,7 +40,7 @@ test("Recommend checks visible boxes before Save and the persist path stays avai
   assert.match(recommend, /extras: \[\]/);
   assert.match(recommend, /await loadProductionRequestOutputs\(activeProductionRequest\)/);
   assert.doesNotMatch(recommend, /restoreProductionOutputSelection\(/);
-  assert.match(app, /buildItem4Plan\(\{ persist: false \}\)/);
+  assert.match(app, /"item4BuildPlan"\)\?\.addEventListener\("click", \(\) => buildItem4Plan\(\{ persist: true \}\)\)/);
   assert.match(app, /async function saveItem4OutputSelection\(\)/);
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
   assert.match(app, /Saving selected formats before preparing frames/);
