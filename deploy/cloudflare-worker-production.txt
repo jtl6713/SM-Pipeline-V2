@@ -1381,3 +1381,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-17: Release Studio API Worker 0.10.1003 Flatiron reopened Production list recovery. Query Supabase revisions independently before ordinary drafts, retain reopened requests if draft or Idea metadata reads fail, no Airtable data mutations, approvals, publishing or rerenders.
 
 2026-11-17: Deploy merged Quality Agent PRs #2160 and #2161. Verified-existing-publication exception filter and fail-closed Supabase carousel slide reads. Preserve all approvals, leases, MAE, and publishing protections; no automatic reposts.
+
+2026-11-17: Retry verified Quality Agent #2160/#2161 Worker deploy after transient bridge curl 000. Require explicit auth denial, preserve automatic rollback and all publishing/approval controls.
