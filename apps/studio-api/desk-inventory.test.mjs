@@ -40,6 +40,7 @@ import {
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
   classifyUnclassifiedRenderedReadyForReview,
+  classifyPublishedStatusDrift,
   classifyPhantomRerender,
   PHANTOM_RERENDER_STALE_MS,
   classifyTesterNightly,
@@ -1149,6 +1150,31 @@ test("rendered Chicago legacy records with blank status go to review, never auto
     assert.equal(classifyUnclassifiedRenderedReadyForReview({ ...base, ...invalid }), null, JSON.stringify(invalid));
   }
   assert.ok(CLASSIFIER_KINDS.includes("unclassified_rendered_ready"));
+});
+
+test("publish-confirmed stale Production/Review outputs reconcile without publication or schedule mutations", () => {
+  const live = {
+    id: "recAlreadyPublished", output_status: "Ready for Review",
+    review_status: "Approved", publish_status: "Published",
+    published_at: "2026-10-08T10:35:40Z",
+    do_not_publish: false, test_run_id: null,
+  };
+  const finding = classifyPublishedStatusDrift(live);
+  assert.equal(finding?.kind, "published_status_drift");
+  assert.match(finding?.diagnosis || "", /only Output_Status=Published/);
+  assert.equal(classifyPublishedStatusDrift({ ...live, output_status: "Approved for Publishing" })?.kind, "published_status_drift");
+  assert.equal(classifyPublishedStatusDrift({ ...live, output_status: "In Production" })?.kind, "published_status_drift");
+  for (const changed of [
+    { published_at: null }, { published_at: "not-a-date" },
+    { publish_status: "Ready to Schedule" }, { publish_status: null },
+    { review_status: "Review Sent" }, { review_status: "Changes Requested" },
+    { do_not_publish: true }, { test_run_id: "qa" },
+    { output_status: "Published" }, { output_status: "Changes Requested" },
+    { output_status: "Ready for Render" },
+  ]) {
+    assert.equal(classifyPublishedStatusDrift({ ...live, ...changed }), null, JSON.stringify(changed));
+  }
+  assert.ok(CLASSIFIER_KINDS.includes("published_status_drift"));
 });
 
 test("phantom_rerender returns finished native stills and stuck stories to review", () => {
