@@ -9965,7 +9965,23 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
         ? latestStrict : verifySubmittedAutonomousOrphan(currentOwnership);
       if (!latestProof.safe) continue;
       attemptedSubmitted = true;
-      if (latestProof.repairParentOwner) {
+      // The legacy-shaped readback can omit both reciprocal link arrays even
+      // when Supabase already has the exact, durable ownership pair. Do not
+      // rewrite a correct FK through the compatibility adapter: doing so
+      // repeatedly blocked output fanout for existing LA promotions.
+      let authoritativeOwnerLinked = false;
+      if (studioPhase6WriteSource(env) === "supabase") {
+        const requests = await supabaseRest(env,
+          `production_requests?airtable_record_id=eq.${encodeURIComponent(latest.id)}&select=id,promoted_content_item_id&limit=2`);
+        const parents = await supabaseRest(env,
+          `content_items?airtable_record_id=eq.${encodeURIComponent(currentParent.id)}&select=id,production_request_id&limit=2`);
+        if (requests?.length === 1 && parents?.length === 1) {
+          authoritativeOwnerLinked =
+            parents[0].production_request_id === requests[0].id &&
+            requests[0].promoted_content_item_id === parents[0].id;
+        }
+      }
+      if (latestProof.repairParentOwner && !authoritativeOwnerLinked) {
         await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, currentParent.id, {
           method: "PATCH",
           body: JSON.stringify({
@@ -9987,7 +10003,7 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
             throw new Error("Content Item owner repair failed readback; no fanout performed");
         }
       }
-      if (latestProof.repairLink) {
+      if (latestProof.repairLink && !authoritativeOwnerLinked) {
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
           method: "PATCH",
           body: JSON.stringify({
