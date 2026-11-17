@@ -20,13 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      OPS_TOKEN: \${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
     steps:
       - name: Preflight exact source selections and launch only T1 then R4
         shell: bash
         run: |
           set -euo pipefail
-          test -n "\${OPS_TOKEN:-}"
+          test -n "${OPS_TOKEN:-}"
           BASE='https://ops.chicagoshining.com'
           test "$(curl -sS --max-time 20 -o /tmp/recover-catalog.json -w '%{http_code}' \
             -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog")" = "200"
