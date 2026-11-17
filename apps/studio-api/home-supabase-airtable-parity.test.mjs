@@ -178,20 +178,41 @@ test("reconcile replaces the full Airtable display payload for mismatched profil
   assert.equal(reconciled[0].parity_reconciled, true);
 });
 
-test("force refresh publishes first, then runs Airtable parity off the critical path with a stable generation", () => {
+test("Supabase Home force refresh verifies one snapshot without Airtable parity", () => {
   const functions04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
   const start = functions04.indexOf("export async function runStudioProfilesOverviewForceRefresh");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:runStudioProfilesOverviewForceRefresh__*/", start);
   const force = functions04.slice(start, end);
-  const completedAt = force.indexOf('status: "completed"');
-  const parityAt = force.indexOf("runHomeOverviewAirtableParityAfterRefresh");
-  assert.ok(completedAt > 0 && parityAt > completedAt, "parity must run after status=completed");
-  assert.match(force, /status: "pending"/);
-  assert.match(functions04, /compareHomeOverviewParity/);
-  assert.match(functions04, /reconcileHomeOverviewWithAirtable/);
-  assert.match(functions04, /forceAirtable: true/);
-  assert.match(functions04, /overview-force-airtable-parity/);
-  assert.match(functions04, /options\.forceAirtable !== true && studioHomeReadSource\(env\) === "supabase"/);
-  assert.match(functions04, /const parityGeneration = String\(baselineGeneration \|\| ""\)/);
-  assert.doesNotMatch(functions04, /\$\{baselineGeneration\}-parity/);
+  assert.ok(start > 0 && end > start);
+  assert.match(force, /writeStudioProfilesOverviewSnapshot/);
+  assert.match(force, /verifyStudioProfilesOverviewSnapshot/);
+  assert.match(force, /status: "completed"/);
+  assert.match(force, /home_parity: null/);
+  assert.doesNotMatch(force, /runHomeOverviewAirtableParityAfterRefresh/);
+  assert.doesNotMatch(functions04, /forceAirtable: true/);
+  assert.doesNotMatch(functions04, /reconcileHomeOverviewWithAirtable\(/);
+  assert.doesNotMatch(functions04, /compareHomeOverviewParity\(/);
+});
+
+test("Supabase Home scans fail closed rather than opening Airtable on source failure", () => {
+  const functions04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = functions04.indexOf("export async function buildStudioProfilesOverviewRows(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
+  const build = functions04.slice(start, end);
+  assert.match(build, /Supabase Home output inventory unavailable; Airtable fallback disabled/);
+  assert.match(build, /Supabase Home Ideas inventory incomplete; Airtable fallback disabled/);
+  assert.match(build, /studioHomeReadSource\(env\) !== "supabase"/);
+  assert.doesNotMatch(build, /overlayLiveTikTokPublishRows\(env, mappedAll\)/);
+});
+
+test("Supabase Ideas background refresh reuses Supabase full-snapshot path", () => {
+  const functions04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = functions04.indexOf("export async function refreshStudioProfilesOverviewIdeas(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:refreshStudioProfilesOverviewIdeas__*/", start);
+  const ideas = functions04.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  const sourceGate = ideas.indexOf('studioHomeReadSource(env) === "supabase"');
+  const safeRefresh = ideas.indexOf("return refreshStudioProfilesOverviewSnapshot(env, authorization)");
+  const legacyScan = ideas.indexOf("listStudioOverviewUnpromotedIdeas(env, profiles");
+  assert.ok(sourceGate >= 0 && safeRefresh > sourceGate && legacyScan > safeRefresh);
 });
