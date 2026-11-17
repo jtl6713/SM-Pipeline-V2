@@ -94,6 +94,10 @@ def list_settings(settings: dict, table_id: str, formula: str | None, limit: int
     parts = [f"payload->>source=eq.{source}", "select=airtable_record_id,payload", f"limit={max(1, min(int(limit or 10), 100))}"]
     if parsed["name"]:
         parts.append(f"payload->>Setting_Name=eq.{quote(parsed['name'], safe='')}")
+    if parsed["active"]:
+        # Apply the active filter *before* the row limit: a duplicate inactive
+        # historical setting must never hide the live canonical value.
+        parts.append("payload->>Active=eq.true")
     if parsed["prefix"]:
         parts.append(f"payload->>Setting_Name=like.{quote(parsed['prefix'], safe='')}*")
     if parsed.get("names"):
