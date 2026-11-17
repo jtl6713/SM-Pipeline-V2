@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.979-recommend-plan-save";
+  const BUILD_ID = "item4-0.6.980-pipeline-newest-first";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22776,7 +22776,20 @@ function timedScriptAssetLabel(asset, index) {
       index.get(key).records.push(record);
     }
     for (const group of groups) group.records = sortedPipelineRecords(group.records);
-    groups.sort((a, b) => Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber)));
+    // The Pipeline is an inventory of content, not a seven-day calendar.
+    // Order packages by creation time, newest first, regardless of publish date.
+    // Legacy rows without a timestamp retain the numeric output-id fallback.
+    const newestCreated = (group) => Math.max(0, ...group.records.map((record) => {
+      const raw = record.created_at || record.created || record.content_created_at || "";
+      const ms = Date.parse(String(raw));
+      return Number.isFinite(ms) ? ms : 0;
+    }));
+    groups.sort((a, b) => {
+      const aCreated = newestCreated(a);
+      const bCreated = newestCreated(b);
+      if (aCreated && bCreated && aCreated !== bCreated) return bCreated - aCreated;
+      return Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber));
+    });
     return groups;
   }
 
