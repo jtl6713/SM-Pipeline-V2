@@ -3396,7 +3396,7 @@ export function suggestPrimaryLocationFromIdea(idea) {
 }
 /*__STUDIO_WORKER_END:suggestPrimaryLocationFromIdea__*/
 
-export async async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
+export async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
   const drafts = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit,
     sortField: "Updated_At",
