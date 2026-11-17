@@ -27,7 +27,16 @@ from airtable.constants import (
 )
 from supabase_pipeline import CONTENT_PATCH_COLUMNS, OUTPUT_PATCH_COLUMNS
 
-_OUTPUT_COLUMNS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
+# R4's bulk selector must evaluate authoritative render columns, not empty
+# archived error_messages fields. The JSON package text column is the searchable
+# mirror of render_clip_list; actual record reads use the typed JSONB array.
+_OUTPUT_COLUMNS = {
+    **OUTPUT_PATCH_COLUMNS,
+    "Do_Not_Publish": "do_not_publish",
+    "Output_Filename": "output_filename",
+    "Render_Total_Frames": "render_total_frames",
+    "Render_Clip_List_JSON": "render_clip_list_text",
+}
 _CONTENT_COLUMNS = dict(CONTENT_PATCH_COLUMNS)
 _REQUEST_COLUMNS = {
     "Production_Request_ID": "production_request_id",
