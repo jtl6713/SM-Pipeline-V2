@@ -434,7 +434,7 @@ export const QUALITY_CHECKS = Object.freeze([
     lane: "service",
     kind: "unclassified_rendered_ready",
     actor: "worker_heal",
-    heal: "heal_unclassified_rendered_to_review",
+    heal: "promote_rendered_ready_for_review",
   }),
   check({
     id: "native_cover_missing",
