@@ -1133,6 +1133,21 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
     if not ctx.get("outputs"):
         raise StepBlocked("No Platform Outputs found for this Production Request")
+    # R4's visual-integrity refusal is terminal until the source plan changes.
+    # Previously blocked outputs fell through the loop as "remaining", leaving
+    # requests in endless "Rendering 0/N" even though re-rendering one source
+    # still cannot produce a legitimate long-form sequence.
+    for output in ctx["outputs"]:
+        if (
+            field_str(output, "Render_Status").lower() == "blocked"
+            and "studio visual integrity guard:" in field_str(output, "Remotion_Error_Message").lower()
+        ):
+            raise StepBlocked(
+                "Insufficient distinct source imagery for the requested video. "
+                "Replace or add relevant source assets, regenerate the output plan, "
+                "then resume production. Do not reuse the same still or bypass "
+                "the visual-integrity guard."
+            )
     if voiceover_missing(ctx["request"], ctx.get("parent")):
         # R4 refuses to start without narration. Generate it here instead of
         # looping on "Rendering 0/N" with no Remotion job.
