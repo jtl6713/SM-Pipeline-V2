@@ -46,6 +46,7 @@ import {
   mapAirtableCarouselSlideToSupabase,
   airtableShapedCarouselSlide,
   mapPlanScheduleRow,
+  attachPlanScheduleRequestForeignKeys,
   listSupabasePlanScheduleRows,
   mapRenderHealColumns,
   creativeMasterExtraValue,
@@ -2957,12 +2958,36 @@ test("carousel slides and plan schedules map and read Supabase", async () => {
   assert.equal(plan.enabled, true);
   assert.equal(plan.brand_airtable_id, "recBrand000000001");
   assert.deepEqual(plan.production_request_airtable_ids, ["recRequest0000001"]);
+  const requestMap = new Map([["recRequest0000001", "91807514-7fd9-4163-a6f1-5ee3c6e46ff7"]]);
+  const stamped = attachPlanScheduleRequestForeignKeys([plan], requestMap, { strict: true });
+  assert.equal(stamped[0].production_request_id, "91807514-7fd9-4163-a6f1-5ee3c6e46ff7");
+  assert.equal(stamped[0].production_request_airtable_id, "recRequest0000001");
+  assert.equal("production_request_id" in plan, false, "do not mutate input rows");
+  assert.throws(
+    () => attachPlanScheduleRequestForeignKeys([plan], new Map(), { strict: true }),
+    /FK unresolved/,
+  );
+  assert.throws(
+    () => attachPlanScheduleRequestForeignKeys([{
+      ...plan, production_request_airtable_ids: ["recRequest0000001", "recRequest0000002"],
+    }], requestMap, { strict: true }),
+    /Multiple Production Requests/,
+  );
+  const cleared = attachPlanScheduleRequestForeignKeys([{
+    airtable_record_id: plan.airtable_record_id,
+    production_request_airtable_id: null,
+    production_request_airtable_ids: [],
+  }], requestMap, { strict: true });
+  assert.equal(cleared[0].production_request_id, null);
+
   const partial = mapPlanScheduleRow({
     id: "recPlanOutput0001",
     fields: { Scheduled_At: "2026-11-21T15:30:00.000Z" },
   }, { partial: true });
   assert.equal(partial.scheduled_at, "2026-11-21T15:30:00.000Z");
   assert.equal("enabled" in partial, false);
+  const partialPreservesOwner = attachPlanScheduleRequestForeignKeys([partial], new Map(), { strict: true });
+  assert.equal("production_request_id" in partialPreservesOwner[0], false, "schedule-only patch must not clear owner FK");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     assert.match(String(url), /production_request_outputs\?enabled=eq\.true/);
