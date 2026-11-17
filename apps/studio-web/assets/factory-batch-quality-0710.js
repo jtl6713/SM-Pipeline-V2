@@ -189,7 +189,7 @@
     for (const item of visibleFailures) categories[failureCategory(item)]++;
     const filteredFailures = visibleFailures
       .filter(item => state.failureFilter === "all" ||
-        (state.failureFilter === "action" ? ["review", "recover"].includes(failureCategory(item)) :
+        (state.failureFilter === "action" ? ["review", "recover", "verify"].includes(failureCategory(item)) :
           failureCategory(item) === state.failureFilter))
       .sort((a,b) => (priority[failureCategory(a)] - priority[failureCategory(b)]) ||
         String(a.profile_name || "").localeCompare(String(b.profile_name || "")) ||
@@ -220,7 +220,7 @@
         (state.recovering ? 'disabled aria-disabled="true"' : '') + '>Recover up to ' + Math.min(10, eligible.length) +
         ' eligible outputs</button><small>' + eligible.length + ' eligible across the census · batches limited to 10 · 48-hour Facebook cooldown, MAE rescheduling, no immediate posting</small></p>' : '') +
       (censusOk ? '<div class="factory-quality-filters" role="group" aria-label="Filter output failures">' +
-        [['action', 'Action needed (' + (categories.review + categories.recover) + ')'],
+        [['action', 'Action needed (' + (categories.review + categories.recover + categories.verify) + ')'],
          ['review', 'Investigate (' + categories.review + ')'],
          ['recover', 'Recoverable (' + categories.recover + ')'],
          ['verify', 'Verify (' + categories.verify + ')'],
