@@ -14,6 +14,7 @@ const extract = (source, name) => {
 
 test("production exact-source package rejects a stale or partially transferred master manifest", () => {
   const body = extract(worker02, "item4StudioSourcePackageForOutput");
+  assert.match(body, /orderedMasters\\.length === 0 \\|\\|/); // legacy empty-mirror compatibility
   assert.match(body, /sourceRowsAll\.length === orderedMasters\.length/);
   assert.match(body, /sourceRowsAll\.every\(\(source, index\)/);
   assert.match(body, /source\?\.id/);
