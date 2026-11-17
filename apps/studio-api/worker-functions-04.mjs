@@ -5702,6 +5702,8 @@ function studioProfilesOverviewRowsHealthy(rows) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
+    if (["Facebook", "Instagram", "TikTok", "YouTube"]
+      .reduce((total, platform) => total + row.ready_by_platform[platform], 0) !== row.approved_unpublished) return false;
     for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
       const slots = row?.approved_calendar_slots?.[platform];
       if (!Array.isArray(slots) || slots.some((stamp) => !Number.isFinite(stamp) || stamp <= 0)) return false;
@@ -6164,6 +6166,10 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
       if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
       }
+    }
+    if (["Facebook", "Instagram", "TikTok", "YouTube"]
+      .reduce((total, platform) => total + row.ready_by_platform[platform], 0) !== row.approved_unpublished) {
+      throw new Error("Profiles overview approved/unpublished total differs from the platform inventory");
     }
     for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
       if (!Array.isArray(row?.approved_calendar_slots?.[platform])
