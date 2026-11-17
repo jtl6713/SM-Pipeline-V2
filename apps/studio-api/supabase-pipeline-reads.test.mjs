@@ -1544,6 +1544,49 @@ test("phase 6 production request write-through patches one present column", asyn
   }
 });
 
+test("Supabase Submitted recovery ledger persists proof failures and roundtrips for fair retries", async () => {
+  const { airtableShapedProductionRequestFromSupabase } = await import("./supabase-pipeline-reads.mjs");
+  const priorFetch = globalThis.fetch;
+  const calls = [];
+  const oldStatus = { Active: true, Created_At: "2026-11-16T14:04:51.663Z" };
+  try {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      const method = String(init?.method || "GET").toUpperCase();
+      calls.push({ href, method, body: String(init?.body || "") });
+      if (method === "GET" && href.includes("production_requests?") && href.includes("select=publish_status")) {
+        return new Response(JSON.stringify([{ publish_status: oldStatus }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("", { status: 204 });
+    };
+    const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
+      id: "recWwDHWDqLCt5R9x",
+      fields: {
+        Studio_Approval_Recovery_Error: "ownership proof withheld: strict=missing_submission_timestamp; autonomous=parent_source_idea_mismatch",
+        Studio_Approval_Recovery_Last_Attempt_At: "2026-11-17T03:00:00.000Z",
+      },
+    });
+    assert.equal(result.mode, "patch");
+    const patch = calls.find((call) => call.method === "PATCH" && call.href.includes("/production_requests?"));
+    assert.ok(patch, "diagnostics-only request mutation must not be silently dropped");
+    const body = JSON.parse(patch.body);
+    assert.equal(body.publish_status.Active, true, "retain prior record authority fields");
+    assert.equal(body.publish_status.Studio_Approval_Recovery_Last_Attempt_At, "2026-11-17T03:00:00.000Z");
+    assert.match(body.publish_status.Studio_Approval_Recovery_Error, /parent_source_idea_mismatch/);
+    assert.equal("request_status" in body, false, "diagnostics never move approval state");
+    const shaped = airtableShapedProductionRequestFromSupabase({
+      airtable_record_id: "recWwDHWDqLCt5R9x",
+      request_status: "Submitted",
+      publish_status: body.publish_status,
+    });
+    assert.equal(shaped.fields.Studio_Approval_Recovery_Last_Attempt_At, "2026-11-17T03:00:00.000Z");
+    assert.match(shaped.fields.Studio_Approval_Recovery_Error, /parent_source_idea_mismatch/);
+    assert.equal(shaped.fields.Request_Status, "Submitted");
+  } finally {
+    globalThis.fetch = priorFetch;
+  }
+});
+
 test("phase 6 create without request identity inserts a minted Supabase row", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
