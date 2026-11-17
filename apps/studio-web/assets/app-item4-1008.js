@@ -17517,6 +17517,7 @@ function timedScriptAssetLabel(asset, index) {
       contentRenderLabel(r),
       r.review_status || r.carousel_review_status,
       Array.isArray(r.output_links) ? r.output_links.length : 0,
+      r.production_active_output_count,
       r.lifecycle_complete,
     ]));
   }
