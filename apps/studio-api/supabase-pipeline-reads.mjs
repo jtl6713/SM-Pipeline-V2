@@ -2929,6 +2929,12 @@ export function deskHealOutputFilter(kind, options = {}) {
       + `and(output_status.is.null,render_status.eq.Rendered,review_status.is.null,publish_status.is.null,`
       + `${withFile},${withCover},${withCaption},scheduled_post_date.is.null,studio_scheduled_at.is.null))`;
   }
+  if (kind === "published_status_drift") {
+    const stale = ["Ready for Review", "Approved for Publishing", "In Production"]
+      .map(encodeDeskFilterValue).join(",");
+    return `${quiet}&published_at=not.is.null&publish_status=eq.Published&review_status=eq.Approved`
+      + `&output_status=in.(${stale})`;
+  }
   if (kind === "phantom_rerender") {
     const nativeOrFile = `or=(render_status.eq.${encodeDeskFilterValue("Native Photo Route")},`
       + "and(final_file_url.not.is.null,final_file_url.neq.))";
