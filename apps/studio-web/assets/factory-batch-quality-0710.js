@@ -111,7 +111,7 @@
       : { label: "Waiting", detail: "Queued for sequential recovery", status: "waiting" };
   }
   function renderCurrent() {
-    if (state.lastView) render(state.lastView.profileId, state.lastView.data, state.lastView.error);
+    if (state.lastView) render(state.lastView.profileId, state.lastView.data, state.lastView.error, state.lastView.global);
   }
   function setRecoveryPhase(phase, activeId = "") {
     if (!state.recovery) return;
@@ -161,10 +161,11 @@
       : category === "blocked" ? "Blocked / waiting" : "Investigate";
   }
 
-  function panelMarkup({ profileId, data, error }) {
-    if (data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
+  function panelMarkup({ profileId, data, error, global = false }) {
+    if (!global && data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
       return recoveryProgressMarkup() + '<p class="subtle">Select a Content Profile to check Factory batches.</p>';
     }
+    if (!data && !error && global) return recoveryProgressMarkup() + '<p class="subtle">Checking Quality Agent findings across all profiles…</p>';
     if (error) {
       return recoveryProgressMarkup() + `<p class="factory-batch-quality-unavailable">Factory batch monitoring temporarily unavailable: ${esc(error)}. Refresh to retry; do not resubmit an uncertain approval.</p>`;
     }
@@ -328,21 +329,21 @@
          : `<p class="factory-batch-quality-clear">No Quality Agent findings in ${global ? "recent Factory batches" : "the latest batch"} (approval batches only).</p>`}`;
   }
 
-  function render(profileId, data, error = "") {
-    state.lastView = { profileId, data, error };
+  function render(profileId, data, error = "", global = isFactoryView()) {
+    state.lastView = { profileId, data, error, global };
     if (data?.output_failures?.status === "ok") state.failures = data.output_failures.items || [];
     const metric = $("factoryBatchQualityMetric");
     if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok" || data?.approved_past_due?.status !== "ok"
       ? "!" : String((data?.quality_signals?.length || 0) +
         (data?.output_failures?.count || 0) + (data?.approved_past_due?.count || 0));
-    const html = panelMarkup({ profileId, data, error });
+    const html = panelMarkup({ profileId, data, error, global });
     for (const id of panelIds) {
       const node = $(id);
       if (node) node.innerHTML = html;
     }
   }
 
-  async function refresh(force = false) {
+  async function refresh(force = false, freshCensus = false) {
     const profileId = selectedProfile();
     const global = isFactoryView();
     const now = Date.now();
@@ -359,7 +360,7 @@
       const query = global ? new URLSearchParams({ scope: "all" }) : new URLSearchParams({ profile: profileId });
       if (global && profileId) query.set("factory_profile", profileId);
       if (global) query.set("quality_only", "1");
-      if (global && force) query.set("fresh_output_failures", "1");
+      if (global && freshCensus) query.set("fresh_output_failures", "1");
       const response = await fetch("/api/factory/approval-batches?" + query, {
         method: "GET", credentials: "same-origin", cache: "no-store",
         headers: { Accept: "application/json" }
@@ -550,8 +551,9 @@
   });
 
   function refreshSoon() { window.setTimeout(() => { refresh(true).catch(() => {}); }, 0); }
-  $("factoryBatchQualityRefresh")?.addEventListener("click", refreshSoon);
-  $("operationsFactoryBatchQualityRefresh")?.addEventListener("click", refreshSoon);
+  function refreshCensusSoon() { window.setTimeout(() => { refresh(true, true).catch(() => {}); }, 0); }
+  $("factoryBatchQualityRefresh")?.addEventListener("click", refreshCensusSoon);
+  $("operationsFactoryBatchQualityRefresh")?.addEventListener("click", refreshCensusSoon);
   $("studioProfileSelect")?.addEventListener("change", () => { if (!isFactoryView()) refreshSoon(); });
   $("factoryProfileFilter")?.addEventListener("change", refreshSoon);
   document.addEventListener("click", (event) => {
