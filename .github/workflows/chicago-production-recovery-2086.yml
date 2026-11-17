@@ -34,6 +34,7 @@ jobs:
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_supabase_request_production_roundtrip.py \
             services/pipeline-runner/tests/test_supabase_pipeline_setting_p2.py \
+            services/pipeline-runner/tests/test_studio_produce_visual_integrity_block.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_supabase_runner_reads.py \
             services/pipeline-runner/tests/test_studio_produce_missing_parent_recovery.py
@@ -111,7 +112,8 @@ jobs:
           $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
           if (-not $secret) { throw "runner_auth_empty" }
           $headers = @{"X-Pipeline-Secret" = $secret}
-          $records = @("recIH9qBVHQuoiVuA", "recuV9OoDo5YxZF2q")
+          # Lakefront completed all four outputs. Do not restart a finished job.
+          $records = @("recIH9qBVHQuoiVuA")
           foreach ($record in $records) {
             $payload = @{production_request_record_id=$record; resume=$false} | ConvertTo-Json -Compress
             $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-produce/resume" -Method POST -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 45
