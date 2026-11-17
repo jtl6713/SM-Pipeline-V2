@@ -6676,8 +6676,11 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
   // Never render a cached crop manifest after the owner-selected master set changes.
   // Count-only validation allowed older or foreign images to be assigned to a new request.
   const orderedMasters = masters.slice().sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
-  const exactMasters = orderedMasters.length > 0
-    && sourceRowsAll.length === orderedMasters.length
+  // Legacy migrated requests can have no mirrored masters even when their
+  // authoritative variant package already exists. Preserve that legacy route,
+  // but never tolerate disagreement when an explicit master set is present.
+  const exactMasters = orderedMasters.length === 0 || (
+    sourceRowsAll.length === orderedMasters.length
     && sourceRowsAll.every((source, index) => {
       const master = orderedMasters[index];
       return Boolean(String(master?.id || "").trim())
@@ -6686,7 +6689,8 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
         && String(source?.media_asset_record_id || "").trim() === String(master?.media_asset_record_id || "").trim()
         && Boolean(String(master?.google_drive_file_id || "").trim())
         && Boolean(String(master?.media_asset_record_id || "").trim());
-    });
+    })
+  );
   if (!exactMasters) {
     console.warn("Studio exact source blocked: manifest differs from ordered master authority", {
       production_request: requestRecord.id, platform, output_type: outputType,
