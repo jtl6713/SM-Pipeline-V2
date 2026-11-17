@@ -826,3 +826,4 @@ Deploy Studio UI 0.6.970-home-three-section-dashboard: Three per-profile dashboa
 
 2026-11-16: Deploy Pages UI 0.6.972-asset-manager-supabase-delete — PR #2080. Require verified Supabase delete receipt, preserve the concurrent saved-assets and FLA progress bars from 0.6.971.
 Deploy Studio UI 0.6.973-home-approved-ready-total-refill: Restore per-profile final-approved unpublished platform counts (scheduled or ready), add Total to Issues and Pipeline cards, and enforce 1,000 approved-ready outputs per city for hourly/daily idea refill. Preserve latest parallel Asset/FLA progress. 2026-11-16.
+Deploy Studio UI 0.6.974-home-overview-footer-totals: Fix zero-valued Home Issues and Production pipeline aggregate footer columns while preserving non-clickable totals. Add rendered HTML regression tests. 2026-11-16.
