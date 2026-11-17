@@ -60,7 +60,15 @@ FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset({
     IDEA_BATCHES_TABLE,
 })
 
-_OUTPUT_FIELDS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
+# Legacy R4 expects these Airtable-named fields. Render package details are
+# authoritative typed columns in Supabase; old error_messages copies are often
+# missing or stale. Read them without widening the generic write mapper.
+_OUTPUT_FIELDS = {
+    **OUTPUT_PATCH_COLUMNS,
+    "Do_Not_Publish": "do_not_publish",
+    "Output_Filename": "output_filename",
+    "Render_Total_Frames": "render_total_frames",
+}
 _CONTENT_FIELDS = dict(CONTENT_PATCH_COLUMNS)
 _REQUEST_FIELDS = {
     "Production_Request_ID": "production_request_id",
