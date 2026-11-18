@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1002-vibe-master-source";
+  const BUILD_ID = "item4-0.6.1003-idea-direct-upload";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3715,6 +3715,9 @@
       ideaAssignedMediaLoading = false;
     }
     activeIdea = idea;
+    const ideaName = $("ideaDirectAssetName");
+    if (ideaName && !sameIdea) ideaName.value = String(idea?.primary_location || idea?.title || "").replace(/\s+/g," ").trim().slice(0,120);
+    if ($("ideaDirectUploadInput")) $("ideaDirectUploadInput").disabled = ideaIsPromoted(idea) || Boolean(idea?.is_on_hold) || idea?.photo_wait_status === "Not Needed";
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
     $("ideaDetailCandidate").textContent = idea?.candidate_id ? `#${idea.candidate_id}` : idea?.id || "—";
@@ -4025,6 +4028,7 @@
   }
 
   async function closeIdeaDrawer({ save = true, resumePhotoListening = true } = {}) {
+    if (ideaDirectUploadBusy) { setManageMessage("Photos are still uploading. Keep this panel open until upload confirmation.", ""); return false; }
     if (save && activeIdea?.id && ideaCanModify(activeIdea) && (managedIdeaDraftDirty() || managedIdeaProductionDirty())) {
       try {
         await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
@@ -16194,6 +16198,73 @@ function timedScriptAssetLabel(asset, index) {
     item4Drop.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("item4MediaInput")?.click(); } });
   }
   bindEzIntake();
+
+  let ideaDirectUploadBusy = false;
+  async function uploadDirectIdeaPhotos(fileList) {
+    if (!activeIdea?.id || ideaDirectUploadBusy) return;
+    const ideaId = activeIdea.id, profileId = String(activeIdea.content_profile_links?.[0] || "");
+    const name = String($("ideaDirectAssetName")?.value || "").trim();
+    const photos = Array.from(fileList || []).filter(file =>
+      /^image\//i.test(String(file.type || "")) || /\.(jpe?g|png|webp|heic|heif)$/i.test(String(file.name || "")));
+    const input = $("ideaDirectUploadInput");
+    const status = text => { if ($("ideaDirectUploadProgress")) $("ideaDirectUploadProgress").textContent = text; };
+    if (!photos.length) return;
+    if (photos.length > 20) { status("Upload up to 20 photos at a time to preserve automatic numbering."); if (input) input.value = ""; return; }
+    if (!profileId || !name) { status("Enter an asset name and select a Content Profile."); if (input) input.value = ""; return; }
+    if (photos.some(f => Number(f.size || 0) > 25 * 1024 * 1024)) {
+      status("Photos must be 25 MB or smaller. No files were uploaded."); if (input) input.value = ""; return;
+    }
+    const batchId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + String(Math.random()).slice(2);
+    const endpoint = "/api/ideas/" + encodeURIComponent(ideaId) + "/uploaded-assets";
+    let reserved = null;
+    const ids = [], names = [], errors = [];
+    ideaDirectUploadBusy = true;
+    if (input) input.disabled = true;
+    try {
+      for (let i = 0; i < photos.length; i++) {
+        const file = photos[i], form = new FormData();
+        form.append("files",file,file.name);
+        form.append("content_profile_id",profileId);
+        form.append("batch_name",name);
+        if (reserved?.[i]) form.append("asset_name",reserved[i]);
+        else form.append("batch_count",String(photos.length));
+        status("Uploading " + (i+1) + "/" + photos.length + ": " + file.name);
+        try {
+          const receipt = await uploadLibraryFileWithProgress(form, {profileId,file,onTransfer:({stage,loadedBytes})=>{
+            const percent = file.size ? Math.round(100*loadedBytes/file.size) : 0;
+            status((i+1) + "/" + photos.length + " " + file.name +
+              (stage === "verifying" ? " — verifying Drive save" : " — " + percent + "%"));
+          }});
+          if (!reserved && Array.isArray(receipt.reserved_names)) reserved = receipt.reserved_names;
+          const saved = collectLibraryClassifyIds(receipt);
+          if (!saved.length) throw new Error("No verified asset IDs returned");
+          ids.push(...saved);
+          names.push(...(receipt.batch_names || receipt.records?.map(row=>row.name).filter(Boolean) || []));
+          await api(endpoint,{method:"POST",body:JSON.stringify({batch_id:batchId,media_asset_ids:saved,complete:false}),timeoutMs:45000,retries:1});
+          status("Saved and linked " + ids.length + " of " + photos.length + " photos");
+        } catch(error) {
+          errors.push(file.name + ": " + String(error?.message || error));
+          if (/unconfirmed|timed out|timeout/i.test(String(error?.message || ""))) break;
+        }
+      }
+      if (!ids.length) { status("No saved photos confirmed. " + errors.join(" · ")); return; }
+      // Finalize exact, idempotent receipts. If an intermediate link failed,
+      // this one repairs the association without re-uploading the file.
+      await api(endpoint,{method:"POST",body:JSON.stringify({batch_id:batchId,media_asset_ids:[...new Set(ids)],complete:true}),timeoutMs:45000,retries:1});
+      if (activeIdea?.id === ideaId) await refreshIdeaAfterPhotoMatch(ideaId).catch(()=>null);
+      status("Saved " + ids.length + " photos" +
+        (names.length ? " as " + names[0] + (names.length>1?"–"+names[names.length-1]:"") : "") +
+        ". Classification and production will resume automatically when ready." +
+        (errors.length ? " Attention: " + errors.join(" · ") : ""));
+    } catch(error) {
+      status("Library saved " + ids.length + " photo(s), but Idea linkage was not verified. Do not upload duplicates. " +
+        String(error?.message || error));
+    } finally {
+      ideaDirectUploadBusy = false;
+      if (input) { input.disabled = false; input.value = ""; }
+    }
+  }
+  $("ideaDirectUploadInput")?.addEventListener("change",e=>{ uploadDirectIdeaPhotos(e.target?.files); });
 
   $("configureProductionButton")?.addEventListener("click", async () => {
     if (!activeIdea) return;
