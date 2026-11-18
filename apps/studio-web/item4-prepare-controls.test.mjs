@@ -115,7 +115,7 @@ test("runtime does not hide missing frame jobs behind a generic retry", async ()
   assert.ok(start >= 0 && end > start);
   const helper = runtime.slice(start, end);
   assert.match(helper, /return variantStatus === "Preparing"/);
-  assert.doesNotMatch(helper, /request failed \\(5/);
+  assert.doesNotMatch(helper, /request failed/);
   assert.match(runtime, /Frame preparation did not start on the server/);
 });
 
