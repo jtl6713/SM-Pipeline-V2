@@ -170,3 +170,19 @@ test("conditional update rejects concurrent status/version change and never retr
   assert.equal(mock.rows[0].output_status, "Changes Requested");
   assert.equal(mock.rows[0].review_status, "Review Sent");
 });
+
+test("single-profile Factory pilot cannot approve a Carousel after preflight", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)]);
+  const pilotRollout = {
+    enabled: true, mode: "chicago_ig_reel_v1", profile_id: PROFILE_ID,
+    platform: "Instagram", output_type: "Reel", max_items: 1,
+  };
+  await assert.rejects(
+    factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+      requestId: "factory_test_pilot_scope", pilotRollout,
+      verifyImages: async readiness => readiness,
+    }),
+    /outside the authorized Factory pilot/,
+  );
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});
