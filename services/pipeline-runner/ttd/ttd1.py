@@ -270,6 +270,31 @@ def _init_failure(
         result["manual_fallback"] = True
         return {"processed": True, "terminal": True, **result}
 
+    # A 5xx/unknown response can occur after TikTok has accepted a create.
+    # Without a saved publish ID we cannot prove it is safe to call init again.
+    # Quarantine this exact output for remote verification, not a blind retry.
+    if status_code <= 0 or status_code >= 500:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                **unlock_fields(),
+                "Output_Notes": append_note(output, f"{stage} ambiguous draft initialization at {stamp_minutes()}; remote verification required."),
+                "Publish_Status": PUBLISH_STATUS_FAILED,
+                "Publish_Error_Stage": stage,
+                "TikTok_Draft_Status": STATUS_MANUAL_FALLBACK,
+                "Publish_Error_Message": message,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
+                "Manual_Fallback_Required": True,
+                "TikTok_Draft_Response_JSON": response_json(body),
+            },
+        )
+        result["http_status"] = status_code
+        result["manual_fallback"] = True
+        result["ambiguous_remote_outcome"] = True
+        return {"processed": True, "terminal": True, **result}
+
     if status_code in {401, 403} and attempt >= 5:
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
