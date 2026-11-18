@@ -857,3 +857,5 @@ Deploy Studio UI 0.6.981 Flatiron promoted production revision visibility after 
 2026-11-17: Deploy UI 0.6.988-factory-quality-r2-isolation from merged PR #2169 after successful protected Worker recovery 44187580036. Show independent verified Supabase Quality Agent failures/past-due even if R2 batch history is unavailable, without false batch-zero claims. No publishing or approvals.
 
 Deploy Studio UI 0.6.1000 Vibe upload confirmed-source false-stall fix PR #2185, commit 9e5700f2d01a1d6169d691d578cfa7bca0041483. Verify custom domain.
+
+2026-11-18: Deploy Studio UI 0.6.1001 from PR #2187; preserve Vibe persisted notes and suppress stale timed-script editor.
