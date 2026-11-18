@@ -26,6 +26,7 @@ import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction
 import {
   studioFactoryOpsReadSource,
   studioWriteSource,
+  studioPhase6WriteSource,
   studioSupabaseConfigured,
   readSupabaseMaeOutput,
   listSupabasePipelineOutputs,
@@ -1704,7 +1705,7 @@ export async function item4ListPendingQueueRequestIds(env) {
  * Never advances approval or publishes while the source lacks Drive authority.
  */
 export async function item4HealPendingVibeMasterTransfer(env) {
-  if (studioWriteSource(env) !== "supabase" || String(env.STUDIO_PHASE6_WRITE_SOURCE || "").toLowerCase() !== "supabase") {
+  if (studioWriteSource(env) !== "supabase" || studioPhase6WriteSource(env) !== "supabase") {
     return { attempted: false, reason: "supabase-authority-required" };
   }
   const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
