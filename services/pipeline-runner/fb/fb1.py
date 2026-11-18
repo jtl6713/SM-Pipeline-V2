@@ -26,6 +26,7 @@ from fb.constants import (
     STATUS_PHOTO_READY,
     STATUS_READY_FOR_PHOTO,
     STATUS_RETRY,
+    STATUS_MANUAL_FALLBACK,
 )
 from fb.eligibility import fb1_eligibility_reason
 from fb.graph import FacebookPhotoClient, FacebookPhotoError, load_facebook_page_settings
@@ -136,6 +137,9 @@ def process_request(
                 },
                 typecast=True,
             )
+            error = data.get("error") if isinstance(data, dict) else {}
+            if isinstance(error, dict) and str(error.get("code") or "") == "190" and str(error.get("error_subcode") or "") == "459":
+                return _fail_auth_checkpoint(client, record_id, result, slide_number=field(slide, "Slide Number"))
             return _fail_output(
                 client,
                 record_id,
@@ -198,6 +202,43 @@ def _commit_photo_progress(
     result["photo_media_ready"] = complete
     result["fb_publish_status"] = STATUS_PHOTO_READY if complete else STATUS_READY_FOR_PHOTO
     return {"processed": True, **result}
+
+
+def _fail_auth_checkpoint(
+    client: AirtableClient,
+    record_id: str,
+    result: dict[str, Any],
+    *,
+    slide_number: Any,
+) -> dict[str, Any]:
+    """Meta OAuth 190/459 requires account verification, not a retry storm.
+
+    FB1 has already preserved the exact Meta response on the failed slide.
+    Existing saved unpublished photo IDs are not a public-post receipt.
+    """
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        record_id,
+        {
+            **unlock_fields(),
+            "Publish_Status": PUBLISH_STATUS_FAILED,
+            "FB_Publish_Status": STATUS_MANUAL_FALLBACK,
+            "Publish_Error_Stage": "FB1_META_CHECKPOINT",
+            "Publish_Error_Message": (
+                f"Facebook account checkpoint 190/459 while preparing slide {slide_number}. "
+                "Account verification and a read-only photo-id check are required "
+                "before any further create or post."
+            ),
+            "Publish_Next_Retry_At": None,
+            "Publish_Retry_Eligible": False,
+            "Manual_Fallback_Required": True,
+        },
+        typecast=True,
+    )
+    result["slide_number"] = slide_number
+    result["manual_fallback"] = True
+    result["auth_checkpoint"] = True
+    return {"processed": True, "terminal": True, "reason": "meta_account_checkpoint", **result}
 
 
 def _fail_output(
