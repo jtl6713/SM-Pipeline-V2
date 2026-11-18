@@ -1407,3 +1407,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-18: Deploy exact Vibe Master Original orphan Processing lease recovery after runner restart, preserving 45-minute protection, exact original R2 identity, and human Final Approval. No automatic publishing.
 
 2026-11-18: Deploy verified Vibe Cut Ready-to-Produce planning priority after original Drive/media receipt; preserve two-slot monitor fairness, per-profile caps, retry leases, all human Final Approval and no publication.
+
+2026-11-18: Deploy verified single-video Vibe variant pass-through recovery after master Drive/media authority, preserving explicit Prepare for non-Vibe, no photo-crop queue, no automatic publishing, and human Final Approval.
