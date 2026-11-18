@@ -231,9 +231,14 @@ export function readyProductionSelectJobs(jobs, {
   nowMs = Date.now(),
   maxConcurrency = READY_PRODUCTION_MAX_CONCURRENCY,
   maxPerProfile = READY_PRODUCTION_MAX_PER_PROFILE,
+  priorityIdeaIds = [],
 } = {}) {
   const selected = [];
   const perProfile = new Map();
+  // A newly verified user-uploaded Vibe must not wait indefinitely behind
+  // older photo-ready planning claims. Priority changes scheduling order only:
+  // the same lease, eligibility, media, revision and human-approval gates apply.
+  const priority = new Set(priorityIdeaIds || []);
   const cap = Math.max(0, Math.min(8, Math.trunc(maxConcurrency) || 0));
   const profileCap = Math.max(1, Math.min(4, Math.trunc(maxPerProfile) || 1));
   const available = (Array.isArray(jobs) ? jobs : []).filter((job) => {
@@ -244,7 +249,8 @@ export function readyProductionSelectJobs(jobs, {
   // Planning and rendering are separate lanes. Reserve one slot for a due
   // render/QA monitor, but never let oldest awaiting_review jobs consume both
   // global slots and block new photo-ready planning indefinitely.
-  const planning = available.filter((job) => job.status !== "awaiting_review");
+  const planning = available.filter((job) => job.status !== "awaiting_review")
+    .sort((left, right) => Number(priority.has(right.idea_id)) - Number(priority.has(left.idea_id)));
   const monitoring = available.filter((job) => job.status === "awaiting_review");
   const take = (candidates, quota) => {
     let taken = 0;
