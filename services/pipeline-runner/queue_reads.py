@@ -37,6 +37,8 @@ _PAYLOAD_FIELDS = {
     "asset_kind": "Asset_Kind",
     "source_asset_id": "Source_Asset_ID",
     "source_name": "Source_Name",
+    "source_r2_key": "Source_R2_Key",
+    "source_url": "Source_URL",
     "source_mime_type": "Source_MIME_Type",
     "source_extension": "Source_Extension",
     "source_drive_file_id": "Source_Drive_File_ID",
