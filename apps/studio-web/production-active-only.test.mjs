@@ -74,6 +74,26 @@ test("submitted, promoted, cancelled and inactive requests never appear in Draft
   assert.equal(isOpenDraft(null), false);
 });
 
+test("Factory send-back Draft with linked content remains visible in Production", () => {
+  const chicagoRevision = {
+    status: "Draft",
+    active: true,
+    revision_open: true,
+    promoted_content_item_links: ["recRFZDxZ1vx8Mkvn"],
+    studio_item4_state: "Review",
+    submitted_at: "2026-11-17T23:00:00.000Z",
+  };
+  assert.equal(isOpenDraft(chicagoRevision), true,
+    "verified revision marker wins over historic content/Submitted fields");
+  assert.equal(isOpenDraft({ ...chicagoRevision, status: "Ready" }), true);
+  assert.equal(isOpenDraft({ ...chicagoRevision, status: "Promoted", active: false }), true);
+  assert.equal(isOpenDraft({ ...chicagoRevision, revision_open: false }), false,
+    "old promoted Draft without a live revision cannot reappear");
+  assert.equal(isOpenDraft({ ...chicagoRevision, status: "Cancelled" }), false);
+  assert.equal(isOpenDraft({ status: "Submitted", revision_open: false }), false,
+    "Cloud Gate Myth remains in Pipeline rather than editable Drafts");
+});
+
 test("Draft list uses eligibility guard, collapses empty section, retains errors", () => {
   assert.match(source, /records\.filter\(productionRequestIsOpenDraft\)/);
   assert.match(source, /if \(listPanel\) listPanel\.hidden = !drafts\.length/);
