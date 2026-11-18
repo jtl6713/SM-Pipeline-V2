@@ -154,8 +154,18 @@ class GoogleDriveClient:
                     )
                 except requests.RequestException:
                     response = None
-                if response is not None and response.status_code in (200, 201, 308):
+                if response is not None and response.status_code in (200, 201):
                     break
+                if response is not None and response.status_code == 308:
+                    acknowledged = response.headers.get("Range", "")
+                    confirmed = int(acknowledged.rsplit("-", 1)[-1]) + 1 if "-" in acknowledged else 0
+                    if confirmed > offset:
+                        break
+                    # 308 with no Range acknowledges ZERO bytes. Never skip a chunk.
+                    if retry == 4:
+                        raise RuntimeError("Drive did not acknowledge any progress on upload chunk")
+                    time.sleep(min(8, 2 ** retry))
+                    continue
                 # Query the acknowledged Drive offset before a retry: a timed
                 # out response may have already committed the entire chunk.
                 probe = requests.put(
