@@ -57,7 +57,7 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(reconcile, /renderDesk\(desk\)/);
   assert.match(reconcile, /confirmed\.every\(\(id\) => !stillReviewing\.has\(id\)\)/,
     "Stale read copies must be retried, not considered successfully reconciled");
-  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
+  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,550}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
@@ -156,7 +156,7 @@ test("A rejected submission stays visible across the automatic Desk refresh", ()
   assert.match(js, /sessionStorage\.setItem\(FACTORY_SUBMISSION_ERROR_KEY/);
   assert.match(js, /setBatchSubmissionError\(`Confirmed \$\{acceptedOutputs\} of \$\{ready\.length\} outputs accepted/);
   assert.match(js, /if \(state\.batchSubmissionError\) setStatus\(state\.batchSubmissionError, true\);\s*else setStatus\(desk\.warning \|\| "Factory Desk ready\."\);/);
-  assert.match(js, /submitFactoryBatchApprovals\(\)\.catch\(\(error\) => setBatchSubmissionError/);
+  assert.match(js, /submitFactoryBatchApprovals\(\)[\s\S]{0,100}\.catch\(\(error\) => setBatchSubmissionError/);
 });
 
 test("Retryable Factory failures retain an exact payload for bounded background retry", () => {
@@ -211,16 +211,55 @@ test("Expired browser-only submissions clear only after an authoritative exact-I
   assert.match(js, /Factory confirmed was never created/);
 });
 
-test("Factory preserves server Needs Eyes counts and rows while pending/accepted hints disable duplicate clicks", () => {
-  assert.match(js, /state\.submittingOutputIds = new Set\(selectionIds\)/);
-  assert.match(js, /state\.submittingOutputIds = new Set\(ready\.map\(card => card\.id\)\)/);
-  assert.match(js, /const visibleDesk = desk;/);
-  assert.match(js, /needs_eyes: filtered\(desk\.lanes\?\.needs_eyes\)\.length/);
-  assert.match(js, /renderLane\("factoryLaneNeedsEyes", filtered\(desk\.lanes\?\.needs_eyes\)/);
-  assert.doesNotMatch(js.slice(js.indexOf("  function renderDesk(desk) {"), js.indexOf("  const ACTION_STATUS")), /hiddenApprovals|recentFactoryAccepted/);
-  assert.match(js, /bindCardActions\(visibleDesk\)/);
-  assert.match(js, /recentFactoryAccepted\(\)\[String\(card\?\.id \|\| ""\)\]/);
-  assert.match(js, /if \(state\.desk\) renderDesk\(state\.desk\)/);
+test("Factory removes submitted outputs from the checkable Needs Eyes lane immediately", () => {
+  assert.match(js, /submissionIntentIds: new Set\(\)/);
+  assert.match(js, /function factorySubmittedApprovalIds\(\)/);
+  assert.match(js, /function factoryVisibleNeedsEyes\(cards\)/);
+  assert.match(js, /const visibleNeedsEyes = factoryVisibleNeedsEyes\(desk\.lanes\?\.needs_eyes\)/);
+  assert.equal((js.match(/needs_eyes: filtered\(visibleNeedsEyes\)\.length/g) || []).length, 2,
+    "Both global and profile-filtered counts must use the visible list");
+  assert.match(js, /renderLane\("factoryLaneNeedsEyes", filtered\(visibleNeedsEyes\)/);
+  assert.match(js, /for \(const id of clicked\) state\.submissionIntentIds\.add\(id\)/);
+  assert.match(js, /if \(clicked\.length && state\.desk\) renderDesk\(state\.desk\)/);
+  assert.match(js, /submitFactoryBatchApprovals\(\)[\s\S]{0,260}\.finally\(\(\) => \{/);
+  assert.match(js, /const selected = readyFactoryOutputs\(true, true\)/,
+    "The original selection must remain available to the POST after the optimistic hide");
+  assert.doesNotMatch(js, /localStorage\.removeItem\(FACTORY_ACCEPTED_OUTPUTS_KEY\)/,
+    "Clear selection must not bring previously submitted outputs back");
+});
+
+test("Factory submitted-output projection covers click, durable queue, reload and Active Approvals", () => {
+  const names = ["factoryActivityRows", "factorySubmittedApprovalIds", "factoryVisibleNeedsEyes"];
+  const sources = names.map(name => extractNamedFunction(js, name)).join("\n");
+  const A = "recAAAA1111AAAA11", B = "recBBBB2222BBBB22";
+  const C = "recCCCC3333CCCC33", D = "recDDDD4444DDDD44";
+  const E = "recEEEE5555EEEE55", F = "recFFFF6666FFFF66";
+  const G = "recGGGG7777GGGG77", H = "recHHHH8888HHHH88";
+  const state = {
+    submissionIntentIds: new Set([A]),
+    submittingOutputIds: new Set([B]),
+    batch: { batches: [{
+      status: "running", items: [{id: F, status: "failed"}, {id: G, status: "pending"}],
+    }]},
+  };
+  const submitted = new Function(
+    "state", "recentFactoryAccepted", "pendingFactoryApproval", "factoryRecoveryEntries",
+    sources + "\nreturn {factorySubmittedApprovalIds, factoryVisibleNeedsEyes};",
+  )(state, () => ({[C]: Date.now()}), () => ({ids: [D]}),
+    () => [{ saved: { ids: [E] } }]);
+  assert.deepEqual([...submitted.factorySubmittedApprovalIds()].sort(), [A,B,C,D,E,F,G].sort());
+  const cards = [A,B,C,D,E,F,G,H].map(id => ({id, kind: "output"}));
+  cards.push({id: "request-1", kind: "request"});
+  assert.deepEqual(submitted.factoryVisibleNeedsEyes(cards).map(card => card.id),
+    [H, "request-1"], "Only never-submitted outputs should remain selectable");
+
+  const noBatch = new Function("state", "recentFactoryAccepted",
+    "pendingFactoryApproval", "factoryRecoveryEntries",
+    sources + "\nreturn factoryVisibleNeedsEyes;",
+  )({submissionIntentIds: new Set(), submittingOutputIds: null, batch: null},
+    () => ({}), () => null, () => []);
+  assert.deepEqual(noBatch(cards).map(card => card.id), cards.map(card => card.id),
+    "Explicit preflight refusal without a saved request must restore the review queue");
 });
 
 test("Global Factory selects Instagram Stories with backend-normalized metadata", () => {
@@ -255,7 +294,7 @@ test("Global Factory selects Instagram Stories with backend-normalized metadata"
 
 
 test("Factory counts only visible review rows and tolerates one empty active poll", () => {
-  assert.match(js, /needs_eyes: filtered\(desk\.lanes\?\.needs_eyes\)\.length/);
+  assert.match(js, /needs_eyes: filtered\(visibleNeedsEyes\)\.length/);
   assert.match(js, /state\.emptyActivityPolls = emptyActive/);
   assert.match(js, /emptyActive && state\.emptyActivityPolls < 2 \? state\.batch : fetched/);
   assert.match(js, /batch === fetched && previousActive\.some/);
@@ -672,20 +711,28 @@ test('stale unrecoverable recovery fences clear without another POST',async()=>{
   assert.ok(h.messages.some(message=>/Cleared 1 stuck saved submission/i.test(String(message||''))));
 });
 
-test('readyFactoryOutputs keeps Ready-for-Review rows despite local accepted fence',()=>{
-  assert.match(js,/Hide only accepted outputs that left Ready for Review/);
-  assert.match(js,/output_status \|\| ""\)\.trim\(\)\.toLowerCase\(\) !== "ready for review"/);
+test('submitted approvals stay outside Needs Eyes even with a stale Ready-for-Review snapshot',()=>{
+  assert.match(js,/function factorySubmittedApprovalIds\(\)/);
   assert.match(js,/clearFactoryRecoveryFences\(\{ onlyUnrecoverable: false \}\)/);
-  assert.match(js,/localStorage\.removeItem\(FACTORY_ACCEPTED_OUTPUTS_KEY\)/);
   assert.match(js,/factoryUnrecoverableSubmitError/);
   const readyFn=extractNamedFunction(js,'readyFactoryOutputs');
-  const compile=new Function('state','recentFactoryAccepted','factoryMatchesProfile',
+  const compile=new Function('state','factorySubmittedApprovalIds','factoryMatchesProfile',
     'canReviewActions','canSelectBatchOutput','withResolvedFactoryProfile',
     readyFn+'; return readyFactoryOutputs;');
   const card={id:'recTribune',kind:'output',output_status:'Ready for Review',profile_id:'recChicago'};
-  const state={desk:{lanes:{needs_eyes:[card]}},submittingOutputIds:new Set()};
-  const ready=compile(state,()=>({recTribune:Date.now()}),()=>true,()=>true,()=>true,c=>c);
-  assert.deepEqual(ready(true).map(row=>row.id),['recTribune']);
+  const state={desk:{lanes:{needs_eyes:[card]}},submissionIntentIds:new Set()};
+  const submitted=new Set(['recTribune']);
+  const ready=compile(state,()=>submitted,()=>true,
+    row=>row.output_status==='Ready for Review',()=>true,c=>c);
+  assert.deepEqual(ready(true).map(row=>row.id),[],
+    'A stale Ready-for-Review row must not be resubmitted while batch-owned');
+  submitted.clear();
+  assert.deepEqual(ready(true).map(row=>row.id),['recTribune'],
+    'A proven preflight refusal may release a card into Needs Eyes');
+  submitted.add('recTribune');
+  state.submissionIntentIds.add('recTribune');
+  assert.deepEqual(ready(true,true).map(row=>row.id),['recTribune'],
+    'The original click must still be able to reach its first POST');
   const gone={...card,output_status:'Approved for Publishing'};
   state.desk.lanes.needs_eyes=[gone];
   assert.deepEqual(ready(true).map(row=>row.id),[]);

@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1002-idea-direct-upload";
+  const BUILD_ID = "item4-0.6.1003-idea-direct-upload";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -16198,7 +16198,6 @@ function timedScriptAssetLabel(asset, index) {
     item4Drop.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("item4MediaInput")?.click(); } });
   }
   bindEzIntake();
-
 
   let ideaDirectUploadBusy = false;
   async function uploadDirectIdeaPhotos(fileList) {
