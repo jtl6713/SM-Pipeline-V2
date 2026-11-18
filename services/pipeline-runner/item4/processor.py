@@ -220,7 +220,11 @@ def requeue_stale_processing(
     for row in rows:
         fields = row.get("fields") or {}
         stamp = _row_stamp_ms(row)
-        if stamp and (now_ms - stamp) < STALE_PROCESSING_MS:
+        # Video master copies may legitimately run for tens of minutes.
+        # Reclaiming them after 90s uploads duplicate Drive originals.
+        recovery_age = (45 * 60 * 1000 if str(fields.get("Asset_Kind") or "") == "Master Original"
+                        else STALE_PROCESSING_MS)
+        if stamp and (now_ms - stamp) < recovery_age:
             continue
         attempts = int(fields.get("Attempt_Count") or 0)
         if _row_has_authority(fields):

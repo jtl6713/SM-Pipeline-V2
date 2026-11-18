@@ -303,7 +303,9 @@ export function formatVibeCutRenderSettings(config) {
 }
 
 export function mergeVibeCutIntoNotes(notes, config) {
-  let next = stripVibeCutDirective(notes);
+  // Narrated still timelines are mutually exclusive with music-driven Vibe.
+  // Strip them on *every* save, not only when beginning a new upload.
+  let next = stripVibeCutDirective(sanitizeVibeCutSourceNotes(notes));
   next = String(next || "")
     .replace(/(?:^|\n)\[render-settings\]\s*[^\n]*(?=\n|$)/gi, "")
     .replace(/^\s*\n/, "")

@@ -5858,7 +5858,12 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
       Source_URL: String(asset.url || ""),
       Source_MIME_Type: String(asset.mime_type || "application/octet-stream"),
       Source_Extension: String(asset.source_format || item4FileExtension(asset.name) || "").toLowerCase(),
-      Source_Size_Bytes: Number(asset.size_bytes || 0) || null,
+      // The R2 object is the original MOV, not the smaller FFmpeg preview.
+      Source_Size_Bytes: Number(
+        asset.original_r2_key && String(asset.original_r2_key) === r2Key
+          ? (asset.original_size_bytes || asset.size_bytes)
+          : asset.size_bytes
+      ) || null,
       Source_Order: Number(asset.order || 0) || null,
       Target_Drive_Folder_ID: driveFolderId,
       Target_File_Name: String(asset.name || item4SafeFileName(asset.name || "photo")),
@@ -9828,7 +9833,8 @@ export async function item4RequeueStaleProcessing(env, rows) {
       continue;
     }
     const stamp = Date.parse(String(f(row, "Updated_At") || f(row, "Started_At") || f(row, "Created_At") || "")) || 0;
-    if (stamp && (now - stamp) < 90000) {
+    const leaseMs = String(f(row, "Asset_Kind") || "") === "Master Original" ? 45 * 60 * 1000 : 90000;
+    if (stamp && (now - stamp) < leaseMs) {
       next.push(row);
       continue;
     }

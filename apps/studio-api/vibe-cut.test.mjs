@@ -362,3 +362,17 @@ test("Vibe Cut draft removes still-timeline and voiceover directives", () => {
   assert.equal(cleaned.includes("[timed-script]"), false);
   assert.equal(cleaned.includes("ez-photo-wait=off"), true);
 });
+
+
+test("repeated Vibe draft saves strip inherited seven-scene narration", () => {
+  const notes = `[timed-script] {"mode":"timed_script","duration_seconds":40}
+[vibe-cut] {"mode":"vibe_cut","target_seconds":15}
+idea-vo-timeline=1
+origin=ez-wizard; ez-input=vibe-cut`;
+  const merged = mergeVibeCutIntoNotes(notes, { target_seconds: 15, style: "beat-cut" });
+  assert.equal(merged.includes("[timed-script]"), false);
+  assert.equal(merged.includes("idea-vo-timeline=1"), false);
+  assert.equal(merged.includes("[vibe-cut]"), true);
+  assert.equal(parseVibeCutDirective(merged).target_seconds, 15);
+  assert.equal(isVibeCutNotes(merged), true);
+});

@@ -89,6 +89,11 @@ class GoogleDriveClient:
         content: bytes,
         mime_type: str,
     ) -> dict[str, Any]:
+        # Google multipart upload is not reliable for 700+ MB iPhone MOVs:
+        # requests buffers the entire file and times out on slow links. Use
+        # chunked resumable Drive upload and preserve the original bytes.
+        if len(content) > 20 * 1024 * 1024:
+            return self._upload_file_resumable(folder_id, filename, content, mime_type)
         token = self.access_token()
         metadata = {"name": filename, "parents": [folder_id]}
         files = {
@@ -108,6 +113,76 @@ class GoogleDriveClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def _upload_file_resumable(
+        self, folder_id: str, filename: str, content: bytes, mime_type: str,
+    ) -> dict[str, Any]:
+        """Upload large files using bounded 8 MiB HTTP chunks, not multipart."""
+        import time
+
+        token = self.access_token()
+        total = len(content)
+        metadata = {"name": filename, "parents": [folder_id]}
+        session = requests.post(
+            "https://www.googleapis.com/upload/drive/v3/files",
+            params={"uploadType": "resumable", "supportsAllDrives": "true",
+                    "fields": "id,webViewLink,webContentLink"},
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json; charset=UTF-8",
+                     "X-Upload-Content-Type": mime_type,
+                     "X-Upload-Content-Length": str(total)},
+            data=json.dumps(metadata), timeout=60,
+        )
+        session.raise_for_status()
+        location = str(session.headers.get("Location") or "")
+        if not location.startswith("https://"):
+            raise RuntimeError("Drive resumable session did not return HTTPS location")
+        step = 8 * 1024 * 1024
+        offset = 0
+        while offset < total:
+            end = min(total, offset + step)
+            chunk = memoryview(content)[offset:end]
+            response = None
+            for retry in range(5):
+                try:
+                    response = requests.put(
+                        location,
+                        headers={"Content-Type": mime_type,
+                                 "Content-Length": str(len(chunk)),
+                                 "Content-Range": f"bytes {offset}-{end - 1}/{total}"},
+                        data=chunk, timeout=180,
+                    )
+                except requests.RequestException:
+                    response = None
+                if response is not None and response.status_code in (200, 201, 308):
+                    break
+                # Query the acknowledged Drive offset before a retry: a timed
+                # out response may have already committed the entire chunk.
+                probe = requests.put(
+                    location,
+                    headers={"Content-Range": f"bytes */{total}",
+                             "Content-Length": "0"}, timeout=60,
+                )
+                if probe.status_code in (200, 201):
+                    return probe.json()
+                if probe.status_code == 308:
+                    acknowledged = probe.headers.get("Range", "")
+                    committed = int(acknowledged.rsplit("-", 1)[-1]) + 1 if "-" in acknowledged else 0
+                    if committed > offset:
+                        offset = committed
+                        break
+                if retry == 4:
+                    raise RuntimeError("Drive resumable upload retries exhausted")
+                time.sleep(min(8, 2 ** retry))
+            if response is not None and response.status_code in (200, 201):
+                return response.json()
+            if response is not None and response.status_code == 308:
+                acknowledged = response.headers.get("Range", "")
+                committed = int(acknowledged.rsplit("-", 1)[-1]) + 1 if "-" in acknowledged else end
+                offset = max(offset, committed)
+            else:
+                offset = max(offset, end)
+        raise RuntimeError("Drive resumable upload completed without a file receipt")
 
     def list_files(
         self,
