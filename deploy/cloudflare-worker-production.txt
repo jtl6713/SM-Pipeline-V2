@@ -1419,3 +1419,4 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 Deploy Factory Supabase authoritative batch review approval — Issue #2214 / PR #2218, merge acd35f7622e377237e8e0d89819e651966a99e25. Preserve operator-controlled scheduling: no automatic post dispatch on approval.
 Deploy Worker 0.10.1006-factory-review-parent: restore Factory Request Changes parent association for existing promoted Chicago River review outputs. PR #2222. 2026-11-18.
 Deploy Worker 0.10.1007-factory-content-outputs: restore Supabase FK content output lookup for Factory Request Changes and Producer revisions. PR #2226. 2026-11-18.
+Deploy Worker 0.10.1008-production-returned-drafts: restore Supabase Factory-revision Drafts to Production; retain tenant checks and existing approval hold. PR recovery. 2026-11-18.
