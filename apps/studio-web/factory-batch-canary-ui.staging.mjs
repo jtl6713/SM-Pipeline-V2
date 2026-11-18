@@ -146,12 +146,14 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  // New browser context starts without the desktop's local acceptance cache.
-  // The synthetic Desk is intentionally stale, but Activity is restored
-  // without sending a second approval.
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),4,
-    "All synthetic Needs Eyes outputs remain visible in a fresh phone context");
-  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),1);
+  // A fresh browser context starts without desktop local acceptance state.
+  // Activity is restored from the confirmed batch receipt, so the *approved*
+  // Reel must disappear from Needs Eyes even though this synthetic Desk
+  // deliberately returns its stale four-output snapshot. The other three
+  // outputs remain visible but ineligible for the Reel-only pilot.
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),3,
+    "Already-approved Reel must disappear from Needs Eyes after status restoration");
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),0);
   assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
   assert.deepEqual(posts.map(x=>x.record_ids),[[cards[0].id]]);
   assert.deepEqual(jsErrors,[]);
