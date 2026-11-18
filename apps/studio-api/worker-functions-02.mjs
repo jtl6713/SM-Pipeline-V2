@@ -1762,6 +1762,38 @@ export async function item4HealPendingVibeMasterTransfer(env) {
     return { attempted: true, request_id: id,
       authority_status: reconciled.status || null, reason: "verified-drive-receipt-reconciled" };
   }
+  // A runner deployment can terminate the daemon thread after SMV1 claimed
+  // a large original. Pending-only scans would abandon that durable Processing
+  // row permanently. Respect the same 45-minute master lease as SMV1 and only
+  // reclaim an exact, verified Vibe source that has no Drive/media receipt.
+  const processingRows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+    limit: 10,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Asset_Kind}="Master Original",{Transfer_Status}="Processing")',
+  });
+  for (const row of processingRows) {
+    const id = String(f(row, "Production_Request_Record_ID") || "").trim();
+    const assetId = String(f(row, "Source_Asset_ID") || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || !assetId
+        || String(f(row, "Transfer_ID") || "") !== `ITEM4-MASTER-${id}-${assetId}`
+        || String(f(row, "Drive_File_ID") || "")
+        || String(f(row, "Media_Asset_Record_ID") || "")) continue;
+    const claimedAt = Date.parse(String(f(row, "Last_Attempt_At") || f(row, "Updated_At") || ""));
+    if (!Number.isFinite(claimedAt) || Date.now() - claimedAt < 45 * 60 * 1000) continue;
+    const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id).catch(() => null);
+    if (!request || !studioIsVibeCut(request) || productionRequestRevisionOpen(request)) continue;
+    if (!["Draft", "Ready"].includes(String(f(request, "Request_Status") || ""))) continue;
+    const assets = item4AssetManifest(request);
+    if (assets.length !== 1 || String(assets[0]?.id || "") !== assetId
+        || String(assets[0]?.upload_status || "") !== "complete"
+        || !["ready", "skipped"].includes(String(assets[0]?.compression_status || "").toLowerCase())
+        || String(assets[0]?.r2_key || "") !== String(f(row, "Source_R2_Key") || "")
+        || assets[0]?.google_drive_file_id || assets[0]?.media_asset_record_id) continue;
+    const requeued = await item4RequeueStaleProcessing(env, [row]);
+    if (item4QueueStatus(requeued[0]) !== "Pending") continue;
+    // The next scheduled tick reuses the exact existing transfer ID.
+    return { attempted: true, request_id: id, asset_id: assetId,
+      reason: "expired-vibe-master-processing-claim-requeued" };
+  }
   return { attempted: false, reason: "no-eligible-vibe-master" };
 }
 /*__STUDIO_WORKER_END:item4HealPendingVibeMasterTransfer__*/

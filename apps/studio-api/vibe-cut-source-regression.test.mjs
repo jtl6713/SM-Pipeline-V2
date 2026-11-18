@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 
@@ -20,4 +21,20 @@ test("vibe plan allows validated photo montage while retaining source guards", (
   assert.ok(source.includes("validateVibeCutSourceAssets(assets, { allowPhotoMontage:") && source.includes("allow-vibe-cut-photo-montage=1"));
   assert.ok(source.includes("Vibe Cut requires its original uploaded and processed video"));
   assert.ok(source.includes("if (studioIsVibeCut(record)) return false;"));
+});
+
+
+test("orphan Vibe Processing transfers are reclaimed only after the 45-minute master lease", () => {
+  const workerModule = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const start = workerModule.indexOf("export async function item4HealPendingVibeMasterTransfer");
+  const end = workerModule.indexOf("/*__STUDIO_WORKER_END:item4HealPendingVibeMasterTransfer__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const body = workerModule.slice(start, end);
+  assert.match(body, /\{Transfer_Status\}="Processing"/);
+  assert.match(body, /Date\.now\(\) - claimedAt < 45 \* 60 \* 1000/);
+  assert.match(body, /item4RequeueStaleProcessing\(env, \[row\]\)/);
+  assert.match(body, /item4QueueStatus\(requeued\[0\]\) !== "Pending"/);
+  assert.match(body, /Source_R2_Key/);
+  assert.match(body, /expired-vibe-master-processing-claim-requeued/);
+  assert.doesNotMatch(body, /publish.*true/i);
 });
