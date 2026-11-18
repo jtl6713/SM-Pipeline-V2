@@ -87,6 +87,10 @@ import {
   readyProductionSelectJobs,
 } from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
+import {
+  factorySupabaseApprovalRows, factorySupabaseApprovalDisposition,
+  factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
+} from "./factory-supabase-approval.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
@@ -18230,6 +18234,17 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
 
+async function factoryRequireSupabaseProfiles(env) {
+  if (studioWriteSource(env) !== "supabase") return;
+  // The membership ACL still runs through resolveWorkingContentProfile, but
+  // the profile list must never fall back to a frozen Airtable archive.
+  const profiles = await listSupabaseContentProfiles(env, { limit: 100 });
+  if (!Array.isArray(profiles) || !profiles.length) {
+    throw new HttpError(503, "Supabase Content Profiles unavailable; Factory did not access Airtable");
+  }
+  env.__contentProfilesCache = profiles;
+}
+
 export async function factoryBatchProcess(env, profileId, requestId, ctx = null, options = {}) {
   // Do not let an old queued job bypass an operator's active rollout scope.
   // This guard also runs on cron recovery, not only on fresh HTTP requests.
@@ -18260,6 +18275,23 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
     let timeZone = null;
     let horizonDays = null;
     try {
+      // Once Outputs are Supabase SoR, Factory must never use the legacy
+      // Airtable canonical reread, scheduling occupancy, or approval writer.
+      if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        return factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
+          approve: (id, currentJob, checkpoint = () => {}) =>
+            withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+              checkpoint("supabase_approval_started");
+              const result = await factorySupabaseApproveOutput(env, id, profileId, {
+                requestId: parentId || requestId,
+                policy: parentId ? globalPolicy : null,
+              });
+              checkpoint("supabase_approval_finished");
+              return result;
+            }),
+        });
+      }
       const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
         profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
         approve: async (id, currentJob, checkpoint = () => {}) => {
@@ -18386,6 +18418,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
   const action = String(payload?.action || "start").toLowerCase();
+  await factoryRequireSupabaseProfiles(env);
   if (action==="start_group"||action==="retry_group"||action==="validate_group") {
     return factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx);
   }
@@ -18425,6 +18458,17 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   // Existing request IDs can be replayed idempotently after an earlier success.
   if (rollout.mode !== "isolated_staging" &&
       !(await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId))) {
+    if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+      const exact = await factorySupabaseApprovalRows(env, records.map(row => row.id));
+      for (const item of records) {
+        const entry = exact.get(item.id);
+        if (entry?.profileId !== profile.id || !factoryBatchRolloutAcceptsOutput(rollout, entry.record)) {
+          throw new HttpError(409, "Selected output does not belong to the authorized pilot profile");
+        }
+        const state = factorySupabaseApprovalDisposition(entry);
+        if (!state.eligible) throw new HttpError(409, "Output #" + item.id + ": " + state.reason);
+      }
+    } else {
     for (const item of records) {
       const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, item.id);
       const owner = await studioContentProfileRecordIdForOutput(env, record);
@@ -18435,6 +18479,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
       if (!studioOutputReadyForPublishApproval(record)) {
         throw new HttpError(409, "Selected Reel is no longer Ready for Review");
       }
+    }
     }
   }
   // The legacy single-profile route must participate in the same CAS registry
@@ -18597,6 +18642,7 @@ function factoryGroupRecordsFromClientHints(ids, payload, policy) {
 async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx) {
   const policy=factoryGlobalPolicy(env);
   if (!policy.enabled) throw new HttpError(403,"Global multi-profile approvals are not enabled");
+  await factoryRequireSupabaseProfiles(env);
   const requestId=String(payload?.request_id||"").trim();
   if (!/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) throw new HttpError(400,"Invalid group request ID");
   const action=String(payload.action||"");
@@ -18646,17 +18692,30 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   // Fail closed before claims: browser desk cards are not proof of current
   // readiness, ownership, or Do_Not_Publish state. The authoritative preflight
   // below uses bounded batch reads and never falls back to serial per-row GETs.
-  const coolMs = airtableCooldownWaitMs();
-  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
-    throw new HttpError(503,
-      `Airtable is busy (${Math.ceil(coolMs / 1000)}s); Factory cannot accept a new batch yet. Retry shortly.`);
+  const supabaseAuthority = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
+  if (!supabaseAuthority) {
+    const coolMs = airtableCooldownWaitMs();
+    if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+      throw new HttpError(503,
+        `Airtable is busy (${Math.ceil(coolMs / 1000)}s); Factory cannot accept a new batch yet. Retry shortly.`);
+    }
   }
 
-  // Client hints are display metadata, never proof of eligibility or profile
-  // ownership. Validate Airtable's canonical records before reserving IDs.
-  const records = await factoryGroupRecordsFromAirtablePreflight(
-    env, authorization, ids, payload, policy,
-  );
+  // Supabase is the sole authority when STUDIO_WRITE_SOURCE=supabase.
+  // Never let a frozen Airtable past_review value veto a live Needs Eyes row.
+  let records;
+  if (supabaseAuthority) {
+    try {
+      records = await factorySupabaseGroupPreflight(env, ids, policy);
+    } catch (error) {
+      const message = String(error?.message || error);
+      throw new HttpError(/No new batch was accepted/.test(message) ? 409 : 503, message);
+    }
+  } else {
+    records = await factoryGroupRecordsFromAirtablePreflight(
+      env, authorization, ids, payload, policy,
+    );
+  }
 
   const verifiedProfiles = new Set();
   for (const row of records) {
@@ -18903,6 +18962,30 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(item.id || "")) ||
       !Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) {
     return "invalid_identity";
+  }
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    // Legacy failure handling would query/write Airtable Exception Messages.
+    // In Supabase SoR mode it must not touch the archived source. Preserve a
+    // retriable explicit failure unless exact Supabase state proves success.
+    let entry;
+    try { entry = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id); }
+    catch { return "supabase_failure_evidence_unavailable"; }
+    if (!entry || entry.profileId !== profileId
+        || Number(entry.row.output_number) !== Number(item.output_id)) {
+      return "supabase_failure_identity_unverified";
+    }
+    const status = factorySupabaseApprovalDisposition(entry);
+    if (!status.already_satisfied) return "supabase_failure_requires_manual_review";
+    await factoryBatchMarkAlreadySatisfied(env.STUDIO_MEDIA, {
+      profileId, requestId, recordId: item.id, outputId: item.output_id,
+      verifySatisfied: async () => {
+        const fresh = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id);
+        return fresh?.profileId === profileId
+          && Number(fresh.row.output_number) === Number(item.output_id)
+          && factorySupabaseApprovalDisposition(fresh).already_satisfied === true;
+      },
+    });
+    return "already_authoritative_success";
   }
   const owner = "factory-failure-" + crypto.randomUUID();
   if (!await factoryBatchLock(env.STUDIO_MEDIA, profileId, owner, Date.now())) return "profile_busy";
