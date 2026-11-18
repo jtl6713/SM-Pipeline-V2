@@ -9832,7 +9832,7 @@ export async function item4RequeueStaleProcessing(env, rows) {
       next.push(row);
       continue;
     }
-    const stamp = Date.parse(String(f(row, "Updated_At") || f(row, "Started_At") || f(row, "Created_At") || "")) || 0;
+    const stamp = Date.parse(String(f(row, "Last_Attempt_At") || f(row, "Updated_At") || f(row, "Started_At") || f(row, "Created_At") || "")) || 0;
     const leaseMs = String(f(row, "Asset_Kind") || "") === "Master Original" ? 45 * 60 * 1000 : 90000;
     if (stamp && (now - stamp) < leaseMs) {
       next.push(row);
