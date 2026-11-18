@@ -107,7 +107,7 @@ test("record-ID rejection refuses missing proof, different ID or multiple candid
 });
 
 test("releasing rejected saved request repaints the visible review list", () => {
-  assert.match(source, /if \(droppedPoison && state\.desk\) renderDesk\(state\.desk\)/);
+  assert.match(source, /if \(droppedPoison\) \{[\s\S]{0,350}if \(state\.desk\) renderDesk\(state\.desk\)/);
   assert.match(source, /if \(result\?\.dropped\) \{[\s\S]{0,170}if \(state\.desk\) renderDesk\(state\.desk\)/);
 });
 
