@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.988-factory-quality-r2-isolation";
+  const BUILD_ID = "item4-0.6.1000-vibe-stall-reconcile";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6956,7 +6956,7 @@ function timedScriptAssetLabel(asset, index) {
         count: "0 of 1 ready.",
       };
     }
-    if (phase === "stalled") {
+    if (phase === "stalled" && !uploadConfirmed) {
       return {
         heal: "error",
         title: "This upload may be stalled.",
@@ -7048,7 +7048,10 @@ function timedScriptAssetLabel(asset, index) {
   function renderVibeUploadUi(status = item4Workspace) {
     const retryActions = $("ezUploadRetryActions");
     const retry = $("ezUploadRetry");
-    const needsRetry = ezIsVibeCut() && ["stalled", "failed"].includes(String(vibeUploadUi.phase || ""));
+    const savedSource = vibeCutPersistedSource(status);
+    const savedUploadState = String(savedSource?.upload_status || "").toLowerCase();
+    const savedUploadConfirmed = Boolean(savedSource && (["complete", "completed", "uploaded", "ready"].includes(savedUploadState) || savedSource.uploaded_at));
+    const needsRetry = ezIsVibeCut() && ["stalled", "failed"].includes(String(vibeUploadUi.phase || "")) && !savedUploadConfirmed;
     if (retryActions) retryActions.hidden = !needsRetry;
     if (retry) {
       retry.disabled = vibeUploadRetryInFlight || item4Uploading || ezStarting;
@@ -7066,7 +7069,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!ezIsVibeCut()) return;
     const previousKey = String(vibeUploadUi.activityKey || "");
     const nextKey = String(activityKey || phase || "");
-    if (vibeUploadUi.phase === "stalled" && phase !== "failed" && phase !== "ready" && nextKey === previousKey) {
+    if (vibeUploadUi.phase === "stalled" && !["failed", "ready", "processing", "saving"].includes(phase) && nextKey === previousKey) {
       renderVibeUploadUi(item4Workspace);
       updateItem4MasterProgress(item4Workspace || {});
       return;
@@ -7087,6 +7090,12 @@ function timedScriptAssetLabel(asset, index) {
       const expectedKey = nextKey;
       vibeUploadStallTimer = window.setTimeout(() => {
         if (vibeCutReadySource() || vibeUploadUi.activityKey !== expectedKey) return;
+        const persisted = vibeCutPersistedSource(item4Workspace);
+        const uploadState = String(persisted?.upload_status || "").toLowerCase();
+        if (persisted && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || persisted.uploaded_at)) {
+          syncVibeUploadUiFromWorkspace(item4Workspace);
+          return;
+        }
         vibeUploadUi = {
           ...vibeUploadUi,
           phase: "stalled",
