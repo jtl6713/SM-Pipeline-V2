@@ -150,3 +150,18 @@ test("cron grants planning priority only to verified Vibe sources and preserves 
   assert.match(cron, /final_approval: "human_only"/);
   assert.doesNotMatch(cron, /approveOutputRecordForPublishing/);
 });
+
+test("verified single-video Vibe auto-reconciles its video passthrough instead of waiting for photo crops", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export async function item4ReconcileVariants(");
+  const end = source.indexOf("/*__STUDIO_WORKER_END:item4ReconcileVariants__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const reconcile = source.slice(start, end);
+  assert.match(reconcile, /const verifiedVibePassThrough = videoOnly/);
+  assert.match(reconcile, /!productionRequestRevisionOpen\(record\)/);
+  assert.match(reconcile, /vibeAutoReviewVerifiedSource\(\{/);
+  assert.match(reconcile, /currentStatus === "Ready" \|\| verifiedVibePassThrough/);
+  assert.match(reconcile, /item4BuildDriveManifest\(recordId, assets, ratios, \[\], planRatios\)/);
+  assert.match(reconcile, /Studio_Variant_Status: status/);
+  assert.doesNotMatch(reconcile, /publish.*true/i);
+});
