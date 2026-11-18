@@ -44,11 +44,13 @@ test("release newness comparison is numeric and rejects unchanged versions", () 
   assert.equal(compareUiVersions("0.6.709", "0.6.735"), -1);
 });
 
-test("Manage Idea direct-upload action is visible and navigates to named upload controls", () => {
-  assert.match(html, /id="ideaDirectUploadJumpButton"[^>]*>Upload photos to idea<\/button>/);
+test("Manage Idea has exactly one direct upload control and preserves Production access", () => {
+  assert.match(html, /id="ideaDirectUpload"[^>]*>/);
   assert.match(html, /id="ideaDirectAssetName"/);
   assert.match(html, /id="ideaDirectUploadInput"/);
-  assert.match(app, /\$\("ideaDirectUploadJumpButton"\)\?\.addEventListener\("click"/);
-  assert.match(app, /section\.scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
-  assert.match(app, /\$\("ideaDirectUploadJumpButton"\)\.disabled/);
+  assert.match(html, /id="configureProductionButton"/);
+  assert.match(html, /id="useExistingLibraryButton"/);
+  assert.doesNotMatch(html, /id="ideaDirectUploadJumpButton"/);
+  assert.doesNotMatch(app, /ideaDirectUploadJumpButton/);
+  assert.match(app, /\$\("ideaDirectUploadInput"\)\?\.addEventListener\("change"/);
 });
