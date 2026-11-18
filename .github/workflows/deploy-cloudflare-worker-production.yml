@@ -66,6 +66,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Verify Post Insights Supabase published-post and refresh regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --test apps/studio-api/post-insights-supabase-regression.test.mjs
+
       - name: Gate dormant reservation namespace bootstrap
         if: env.BOOTSTRAP_RESERVATION == 'true'
         shell: bash

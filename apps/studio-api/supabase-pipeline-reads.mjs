@@ -8207,7 +8207,16 @@ const CONTENT_SIDE_VIEW_FILTERS = {
 };
 CONTENT_SIDE_VIEW_FILTERS["C1 - Ready for Carousel Planning"] = CONTENT_SIDE_VIEW_FILTERS.viwT0B4SmJLL1qPlp;
 
+// PostgREST timestamp columns cannot be compared with an empty string.
+// A failed Published_At != "" filter made Post Insights return zero posts and
+// prevented the scheduled first-party analytics sweep from reaching due rows.
+const OUTPUT_SIDE_TIMESTAMP_COLUMNS = new Set([
+  "published_at", "scheduled_post_date", "studio_scheduled_at",
+  "youtube_scheduled_publish_at", "publish_next_retry_at",
+  "ig_carousel_next_retry_at",
+]);
 function outputSideBlankFilter(column) {
+  if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(column)) return `${column}.is.null`;
   return `or(${column}.is.null,${column}.eq.)`;
 }
 
@@ -8333,6 +8342,7 @@ function outputSideLeafFilter(cleaned) {
   }
   if (notBlank && OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]];
+    if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(col)) return `${col}.not.is.null`;
     return `and(${col}.not.is.null,${col}.neq.)`;
   }
   const empty = cleaned.match(/^\{([A-Za-z0-9_]+)\}=""$/);
@@ -8342,6 +8352,7 @@ function outputSideLeafFilter(cleaned) {
   const notEmpty = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=""$/);
   if (notEmpty && OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]];
+    if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(col)) return `${col}.not.is.null`;
     // jsonb clip lists have no text mirror; presence is non-null.
     if (col === "render_clip_list" || col === "selected_assets") {
       return `${col}.not.is.null`;
@@ -8704,7 +8715,7 @@ function splitContentProfileScope(formula) {
   };
 }
 
-async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "") {
+async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "", options = {}) {
   const profileScope = splitContentProfileScope(formula);
   let profileFilter = null;
   let formulaForTranslate = formula;
@@ -8737,10 +8748,15 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
     const andClause = andParts.length === 1
       ? andParts[0]
       : `and(${andParts.join(",")})`;
+    // Respect Post Insights' published-date ordering; a numeric Output_ID
+    // sort can starve newer posts and individual platforms during collection.
+    const outputOrder = options.sortField === "Published_At"
+      ? `published_at.${options.sortDirection === "asc" ? "asc" : "desc"}.nullslast,output_number.desc`
+      : "output_number.desc.nullslast";
     const rows = await supabaseRest(
       env,
       `platform_outputs?select=${OUTPUT_SELECT}`
-        + `&order=output_number.desc.nullslast&limit=${limit}&offset=${offset}`
+        + `&order=${outputOrder}&limit=${limit}&offset=${offset}`
         + `&and=(${andClause})`,
     );
     if (!Array.isArray(rows)) return null;
@@ -9081,7 +9097,11 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (kind === "content" && viewName && !CONTENT_SIDE_VIEW_FILTERS[viewName]) {
       return null;
     }
-    const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName);
+    const query = sideQuery(pathOrParams);
+    const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName, {
+      sortField: query.get("sort[0][field]") || "",
+      sortDirection: query.get("sort[0][direction]") || "desc",
+    });
     if (!records) return null;
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);
