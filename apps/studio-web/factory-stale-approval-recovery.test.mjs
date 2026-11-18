@@ -79,6 +79,38 @@ test("exact server-identified stale output is removed without discarding other a
   assert.deepEqual(JSON.parse(store.get(waitingKey)), [A, C]);
 });
 
+test("preflight past_review with exact rec ID removes only the already-approved member", () => {
+  const row = saved(`Output #${B}: past_review. No new batch was accepted. You can submit other selections.`);
+  const { api, store, state } = fixture(row);
+  assert.equal(api.factoryRejectedOutputId(row), B,
+    "The Worker reports an Airtable record ID, not always an output number");
+  const result = api.clearFactoryRecoveryFences({ onlyUnrecoverable: true });
+  assert.equal(result, 1);
+  assert.equal(store.has(recoveryKey), false, "Terminal browser fence must not strand 8 outputs");
+  assert.deepEqual([...state.selectedOutputs].sort(), [A, C].sort(),
+    "Other members must remain eligible for a safe new request");
+  assert.deepEqual(JSON.parse(store.get(waitingKey)), [A, C]);
+});
+
+test("record-ID rejection refuses missing proof, different ID or multiple candidates", () => {
+  for (const message of [
+    `Output #${B}: past_review`,
+    "Output #recZZZZ9999ZZZZ99: past_review. No new batch was accepted.",
+    `Output #${B}: past_review. No new batch was accepted. Output #${C}: past_review. No new batch was accepted.`,
+  ]) {
+    const row = saved(message);
+    const { api, store } = fixture(row);
+    assert.equal(api.factoryRejectedOutputId(row), null);
+    assert.equal(api.dropFactoryRecoveryEntry(recoveryKey, row).dropped, false);
+    assert.equal(store.has(recoveryKey), true);
+  }
+});
+
+test("releasing rejected saved request repaints the visible review list", () => {
+  assert.match(source, /if \(droppedPoison\) \{[\s\S]{0,350}if \(state\.desk\) renderDesk\(state\.desk\)/);
+  assert.match(source, /if \(result\?\.dropped\) \{[\s\S]{0,170}if \(state\.desk\) renderDesk\(state\.desk\)/);
+});
+
 test("generic missing-record 409 cannot silently discard or retry unknown output IDs", () => {
   const row = saved("At least one selected output could not be loaded for global batch approval");
   const { api, store, state } = fixture(row);

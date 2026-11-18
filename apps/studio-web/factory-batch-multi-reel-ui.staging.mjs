@@ -148,12 +148,14 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  // The accepted five-output batch is restored from Activity. Confirmed
-  // approved outputs must no longer appear in selectable Needs Eyes, even
-  // though the synthetic desk intentionally returns the old eight outputs.
+  // Server Activity confirms the five Reels already approved in the old
+  // desktop context, even though the fake Desk still returns all eight.
+  // New devices must hide those five from review; only three ineligible
+  // formats remain, and no second approval may be submitted.
   assert.equal(await phone.locator("[data-factory-select-output]").count(),3);
   assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),0);
   assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
+  assert.equal((await phone.locator("#factoryCountNeedsEyes").innerText()).trim(),"3");
   assert.deepEqual(posts.map(x=>x.record_ids),[cards.slice(0,5).map(card=>card.id)]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);
