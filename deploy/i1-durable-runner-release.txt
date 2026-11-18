@@ -126,3 +126,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-17: Deploy runner 2026-11-17-ttd-retry-fence-v1 from merged PR #2181. TTD0 and TTD1 now apply bounded failed-stage retries and cooldowns; quarantine ambiguous HTTP 500/unknown TikTok draft initialization instead of re-initializing. Four currently failed outputs were already safely fenced by exact Supabase record ID (Chicago Lions Along the Mile, Navy Pier Sunset Walk, Windy City Name Myth; NYC Gantry Sunset Minute). Release alone does not rearm them or authorize any public post. Require regression green, exact /health version and no Airtable egress; preserve all existing approved schedules and holds. Issue #2182.
 
 2026-11-18: Deploy PR #2187 runner queue source R2 key/URL mirror for Master Original only; preserve all approval gates.
+
+2026-11-18: Follow-up runner queue read mapping: project Source_R2_Key and Source_URL back into Master Original transfer records for PR #2184 recovery.
