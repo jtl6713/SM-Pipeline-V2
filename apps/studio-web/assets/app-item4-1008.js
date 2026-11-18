@@ -16999,22 +16999,40 @@ function timedScriptAssetLabel(asset, index) {
       // Output selection Save and plan generation are separate operations.
       // Refresh persisted workspace first; do not reject a saved plan using stale browser state.
       const approvalRecordId = String(activeProductionRequest.id);
+      const requestedKeys = productionOutputSelectionKeys();
       try {
         await loadItem4Workspace(activeProductionRequest);
         if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
-        if (item4Workspace?.plan_status !== "Ready") {
-          // Saving selected outputs does not itself build the master platform plan.
-          // Approval is an explicit operator action, so complete the missing plan now.
-          await buildItem4Plan();
+        // A saved operator selection is not the same as a persisted plan. Keep
+        // unsaved changes visible, but never silently rebuild over them.
+        if (item4OutputSelectionDirty) {
+          setRequestMessage("Save output selections before Approve. Your current choices are preserved.", "error-text");
+          return;
+        }
+        let planConfirmed = String(item4Workspace?.plan_status || "") === "Ready"
+          && item4SavedPlanMatchesCurrentSelection(item4Workspace?.plan, requestedKeys);
+        if (!planConfirmed) {
+          // The heavy /item4 reconcile path can return stale Needs Plan while
+          // Supabase already has a Ready plan. Verify its exact saved outputs
+          // before making any further plan writes or showing a false blocker.
+          planConfirmed = await item4AdoptReadyPlanFromReadback(approvalRecordId, requestedKeys);
+        }
+        if (!planConfirmed) {
+          // Only a genuinely unconfirmed plan enters the existing build path.
+          // The click is operator-initiated; this does not approve or publish.
+          await buildItem4Plan({ throwOnError: true });
           if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
-          await loadItem4Workspace(activeProductionRequest);
+          // A second full /item4 load can overwrite a good plan with a stale
+          // snapshot. Read the authoritative /plan endpoint instead.
+          planConfirmed = await item4AdoptReadyPlanFromReadback(
+            approvalRecordId, productionOutputSelectionKeys());
+        }
+        if (!planConfirmed) {
+          setRequestMessage("The saved platform plan could not be verified against your selected output formats. No approval was submitted. Review the output selections and retry.", "error-text");
+          return;
         }
       } catch (error) {
         setRequestMessage("Could not verify or prepare the platform plan: " + (error.message || error), "error-text");
-        return;
-      }
-      if (item4Workspace?.plan_status !== "Ready") {
-        setRequestMessage("Platform plan is not ready. Use Recommend formats to prepare it, then try Approve. Current status: " + String(item4Workspace?.plan_status || "Unknown"), "error-text");
         return;
       }
     }
