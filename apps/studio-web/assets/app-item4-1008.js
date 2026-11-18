@@ -17156,9 +17156,12 @@ function timedScriptAssetLabel(asset, index) {
   function productionRequestIsOpenDraft(record) {
     if (!record) return false;
     const status = String(record.status || "").trim().toLowerCase();
-    // The API exposes revision_open explicitly; it strips the internal marker
-    // from production_notes. Promoted revisions may also have Active=false.
-    if (status === "promoted" && record.revision_open === true) return true;
+    // The API exposes revision_open explicitly and strips the internal marker
+    // from production_notes. A Factory send-back reopens a previously promoted
+    // package as Draft/Ready, even though it retains its linked Content Item.
+    // Only verified revision_open records bypass ordinary fresh-draft filters.
+    if (record.revision_open === true
+      && (status === "promoted" || status === "draft" || status === "ready")) return true;
     if (record.active === false) return false;
     if (status !== "draft" && status !== "ready") return false;
     if (String(record.submitted_at || "").trim()) return false;
