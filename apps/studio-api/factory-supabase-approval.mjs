@@ -13,6 +13,18 @@ import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages }
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 
 const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
+// Exact Factory read: avoid downloading multi-MB Remotion props, media manifests
+// and analytics for every item in a 20-output approval batch.
+const FACTORY_APPROVAL_SELECT = [
+  "id", "airtable_record_id", "output_number",
+  "content_item_id", "content_item_airtable_id", "content_profile_id",
+  "platform", "format", "studio_output_type", "platform_output_type",
+  "output_title", "output_status", "review_status", "publish_status", "render_status",
+  "do_not_publish", "test_run_id", "output_caption", "thumbnail_url",
+  "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets",
+  "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
+  "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
+].join(",");
 const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
 const satisfied = row => ["Approved for Publishing", "Published"].includes(String(row?.output_status || ""))
   || String(row?.review_status || "") === "Approved"
@@ -29,7 +41,7 @@ const listFilter = values => "in.(" + [...new Set(values)].map(encodeURIComponen
 export async function factorySupabaseApprovalRows(env, ids) {
   const unique = validIds(ids);
   const rows = await supabaseRest(env,
-    "platform_outputs?airtable_record_id=" + listFilter(unique) + "&select=*&limit=21");
+    "platform_outputs?airtable_record_id=" + listFilter(unique) + "&select=" + FACTORY_APPROVAL_SELECT + "&limit=21");
   if (!Array.isArray(rows) || rows.length !== unique.length) {
     throw Error("Factory Supabase output selection missing or ambiguous; no approval accepted");
   }
@@ -169,11 +181,19 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
       SM_Factory_Supabase_Approval_Receipt: receipt,
     },
   };
+  // Match the full observed review-cycle identity, not merely Output_Status.
+  // Conditional zero-row responses are not success and must be reread.
+  const valueFilter = (column, value) => column + "="
+    + (value == null ? "is.null" : "eq." + encodeURIComponent(String(value)));
   const selector = "platform_outputs?id=eq." + encodeURIComponent(row.id)
     + "&airtable_record_id=eq." + encodeURIComponent(id)
     + "&updated_at=eq." + encodeURIComponent(row.updated_at)
     + "&output_status=eq." + encodeURIComponent("Ready for Review")
-    + "&do_not_publish=eq.false";
+    + "&" + valueFilter("review_status", row.review_status)
+    + "&" + valueFilter("publish_status", row.publish_status)
+    + (row.content_profile_id ? "&content_profile_id=eq." + encodeURIComponent(row.content_profile_id) : "")
+    + "&do_not_publish=eq.false"
+    + "&" + valueFilter("test_run_id", row.test_run_id);
   const updated = await supabaseRest(env, selector, {
     method: "PATCH", body: fields, headers: { Prefer: "return=representation" },
   });
