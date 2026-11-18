@@ -218,6 +218,53 @@ test("listSupabaseFactoryDeskPack strips superseded twins before lane filters", 
 });
 
 
+test("Factory resolves a completed review parent beyond the recent request sample", async () => {
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  const contentId = "recCont1234567890";
+  const requestId = "recReq12345678901";
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    calls.push(href);
+    let rows = [];
+    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+      rows = [{
+        airtable_record_id: "recOut12345678901",
+        content_items: { airtable_record_id: contentId },
+        output_number: 9754,
+        output_status: "Ready for Review",
+        review_status: "Review Sent",
+        do_not_publish: false,
+      }];
+    } else if (href.includes("production_requests?")
+      && href.includes("promoted_content_airtable_id=in.")) {
+      rows = [{
+        airtable_record_id: requestId,
+        production_request_id: "PR-9754",
+        request_status: "Promoted",
+        publish_status: { promoted_content_airtable_id: contentId },
+      }];
+    }
+    return { ok: true, async text() { return JSON.stringify(rows); } };
+  };
+  try {
+    const pack = await listSupabaseFactoryDeskPack({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "secret",
+    });
+    assert.equal(pack.requests.length, 0, "completed parent must not enter active production lane");
+    assert.equal(pack.reviewParentRequests.length, 1);
+    assert.equal(pack.reviewParentRequests[0].id, requestId);
+    assert.deepEqual(pack.reviewParentRequests[0].fields.Promoted_Content_Item, [contentId]);
+    assert.ok(calls.some((url) => url.includes("promoted_content_airtable_id=in.")),
+      "Factory must fetch review parents from Supabase by content link");
+    assert.ok(calls.every((url) => url.startsWith("https://example.supabase.co/")),
+      "Factory parent lookup must not read Airtable");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
 test("studioReadSource defaults to airtable and requires supabase secrets", () => {
   assert.equal(studioReadSource({}), "airtable");
   assert.equal(studioReadSource({ STUDIO_READ_SOURCE: "supabase" }), "airtable");
