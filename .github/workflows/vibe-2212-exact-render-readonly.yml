@@ -16,16 +16,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          URL='https://render.chicagoshining.com/status/job-20261118032632-f3fe33a8'
+          URL='https://render.chicagoshining.com/status/job-20261118033117-75a4518d'
           CODE=$(curl -sS --retry 1 --connect-timeout 10 --max-time 30 -o /tmp/vibe-render-status.json -w '%{http_code}' "$URL" || true)
           echo "render_http=$CODE"
           if [[ "$CODE" != "200" ]]; then
             echo "render_status_fetch_failed"
             exit 1
           fi
-          jq -c '{status:(.status//.state//null), jobId:(.jobId//.job_id//null), progress:(.progress//.percent//null), frames:(.framesRendered//.renderedFrames//null), totalFrames:(.totalFrames//null), error:(.error//.message//null), outputPresent:((.outputUrl//.output_url//.url//"")|length>0), fields:(keys|sort)}' /tmp/vibe-render-status.json
+          jq -c '{status:(.status//.state//null), jobId:(.jobId//.job_id//null), progress:(.progress//.percent//null), frames:(.framesRendered//.renderedFrames//null), totalFrames:(.totalFrames//null), error:(.error//.message//null), outputPresent:((.renderUrl//.outputUrl//.output_url//.url//"")|length>0), exitCode:(.exitCode//null), completedAt:(.completedAt//null), updatedAt:(.updatedAt//null), fields:(keys|sort)}' /tmp/vibe-render-status.json
           HEALTH=$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/vibe-render-health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
           echo "render_health_http=$HEALTH"
           if [[ "$HEALTH" == "200" ]]; then
-            jq -c '{ok:(.ok//null), status:(.status//.state//null), service:(.service//null), fields:(keys|sort)}' /tmp/vibe-render-health.json
+            jq -c '{ok:(.ok//null), status:(.status//.state//null), service:(.service//null), active:(.remotionActiveRenders//null), queued:(.remotionQueuedRenders//null), inFlight:(.remotionInFlightJobs//null), maxConcurrent:(.remotionMaxConcurrent//null)}' /tmp/vibe-render-health.json
           fi
