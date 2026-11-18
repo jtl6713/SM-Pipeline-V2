@@ -14046,7 +14046,7 @@ function timedScriptAssetLabel(asset, index) {
       item4OutputSelectionDirty = false;
       setItem4OutputSelectionHint("Saved. Platforms & Frames now uses exactly these selected outputs.");
       setRequestMessage(item4Workspace?.plan_status === "Ready"
-        ? "Six or more selected outputs are saved. Platform plan verified; click Prepare."
+        ? "Selected outputs saved. Platform plan verified; click Prepare."
         : "Selected outputs saved. Click Prepare to verify or build the platform plan.", "success");
     } catch (error) {
       setItem4OutputSelectionHint(error?.message || "Could not save outputs.", true);
