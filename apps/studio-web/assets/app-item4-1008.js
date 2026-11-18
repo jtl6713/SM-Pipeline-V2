@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1004-idea-direct-upload";
+  const BUILD_ID = "item4-0.6.1005-idea-upload-discoverable";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3718,6 +3718,7 @@
     const ideaName = $("ideaDirectAssetName");
     if (ideaName && !sameIdea) ideaName.value = String(idea?.primary_location || idea?.title || "").replace(/\s+/g," ").trim().slice(0,120);
     if ($("ideaDirectUploadInput")) $("ideaDirectUploadInput").disabled = ideaIsPromoted(idea) || Boolean(idea?.is_on_hold) || idea?.photo_wait_status === "Not Needed";
+    if ($("ideaDirectUploadJumpButton")) $("ideaDirectUploadJumpButton").disabled = $("ideaDirectUploadInput")?.disabled ?? true;
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
     $("ideaDetailCandidate").textContent = idea?.candidate_id ? `#${idea.candidate_id}` : idea?.id || "—";
@@ -16264,6 +16265,12 @@ function timedScriptAssetLabel(asset, index) {
       if (input) { input.disabled = false; input.value = ""; }
     }
   }
+  $("ideaDirectUploadJumpButton")?.addEventListener("click", () => {
+    const section = $("ideaDirectUpload");
+    if (!section) return;
+    section.scrollIntoView({ behavior: "smooth", block: "center" });
+    $("ideaDirectAssetName")?.focus({ preventScroll: true });
+  });
   $("ideaDirectUploadInput")?.addEventListener("change",e=>{ uploadDirectIdeaPhotos(e.target?.files); });
 
   $("configureProductionButton")?.addEventListener("click", async () => {
