@@ -7392,7 +7392,10 @@ export async function listSupabaseRevisionOpenProductionRequests(env, { limit = 
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
   const rows = await supabaseRest(
     env,
-    `production_requests?request_status=eq.Promoted&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
+    // A sent-back Promoted request becomes Draft. Keep that revision visible
+    // even after the status transition; the explicit Factory marker, not an
+    // arbitrary Draft, is the authorization to show an existing promoted item.
+    `production_requests?request_status=in.(Promoted,Draft,Ready)&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .map(airtableShapedProductionRequestFromSupabase)

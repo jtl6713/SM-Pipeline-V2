@@ -37,6 +37,7 @@ import {
   RUNNER_RECORD_PROJECTION,
   supabaseRestAll,
   listSupabaseFactoryDeskPack,
+  listSupabaseRevisionOpenProductionRequests,
   listSupabaseContentPlatformOutputs,
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
@@ -218,6 +219,42 @@ test("listSupabaseFactoryDeskPack strips superseded twins before lane filters", 
   assert.match(slice, /purgeOrphanDuplicateOutputNumbers/);
 });
 
+
+test("Production includes a Factory returned Draft in Supabase revision-open lookup", async () => {
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  const requestId = "recwSzrkVi1LuwuJW";
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    calls.push(url);
+    assert.equal(url.hostname, "example.supabase.co");
+    assert.equal(url.pathname.endsWith("/production_requests"), true);
+    assert.equal(url.searchParams.get("request_status"), "in.(Promoted,Draft,Ready)");
+    assert.match(url.searchParams.get("production_notes") || "", /factory-revision-open/);
+    return { ok: true, async text() { return JSON.stringify([{
+      airtable_record_id: requestId,
+      request_status: "Draft",
+      production_notes: "Music revision\\n[factory-revision-open] at=2026-11-18T04:45:45.570Z",
+      publish_status: {
+        idea_candidate_airtable_id: "recOBKABTNVnxFiny",
+        promoted_content_airtable_id: "recRFZDxZ1vx8Mkvn",
+      },
+    }]); } };
+  };
+  try {
+    const rows = await listSupabaseRevisionOpenProductionRequests({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "secret",
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, requestId);
+    assert.equal(rows[0].fields.Request_Status, "Draft");
+    assert.equal(rows[0].fields.Promoted_Content_Item[0], "recRFZDxZ1vx8Mkvn");
+    assert.equal(calls.length, 1, "read the Supabase authority once and never use Airtable");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
 
 test("Factory resolves a completed review parent beyond the recent request sample", async () => {
   const oldFetch = globalThis.fetch;

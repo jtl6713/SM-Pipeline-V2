@@ -874,3 +874,4 @@ Deploy Studio UI 0.6.1000 Vibe upload confirmed-source false-stall fix PR #2185,
 
 2026-11-18: Deploy Studio UI 0.6.1008-prepare-saved-media from merged PR #2224 (bbe64369d1a5b0a7c7c4cbeeb93ade068a3e9345). Unblock Prepare after 7 saved assets and 6 Ready outputs via read-only saved-workspace verification; update Not Started after Recommend/Save. Preserve human approval, publishing gates, and original media. Pages only, no Worker/data mutations. Verify exact custom-domain build.
 Deploy Studio UI 0.6.1009-approve-saved-plan: Production Approve verifies Supabase Ready plan by read-only /plan before rebuild; preserve format selection and approval gates. PR #2229. 2026-11-18.
+Deploy Studio UI 0.6.1010-revision-drafts: show explicitly returned Draft revisions with the existing promoted-content link, no resurrected published or cancelled content. 2026-11-18.
