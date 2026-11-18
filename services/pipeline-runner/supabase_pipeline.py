@@ -632,6 +632,11 @@ def _queue_row(record: dict) -> dict:
             continue
         if value:
             payload[column] = value
+    if _queue_text(fields.get("Asset_Kind")) == "Master Original":
+        for key, name in (("Source_R2_Key", "source_r2_key"), ("Source_URL", "source_url")):
+            value = _queue_text(fields.get(key))
+            if value:
+                payload[name] = value
     for airtable_key, column in (("Width", "width"), ("Height", "height"), ("Source_Size_Bytes", "source_size_bytes"), ("Source_Order", "source_order")):
         if airtable_key not in fields or fields.get(airtable_key) in (None, ""):
             continue

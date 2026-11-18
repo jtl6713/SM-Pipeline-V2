@@ -198,6 +198,8 @@ export const TRANSFER_QUEUE_SYNC_FIELDS = Object.freeze([
   "Asset_Kind",
   "Source_Asset_ID",
   "Source_Name",
+  "Source_R2_Key",
+  "Source_URL",
   "Source_Drive_File_ID",
   "Source_Media_Asset",
   "Generated_Media_Asset",
@@ -6128,6 +6130,12 @@ function transferQueueWriteThroughRow(record) {
   copy("Asset_Kind", "asset_kind", transferQueueText(fields.Asset_Kind));
   copy("Source_Asset_ID", "source_asset_id", transferQueueText(fields.Source_Asset_ID));
   copy("Source_Name", "source_name", transferQueueText(fields.Source_Name));
+  // Only a Studio master-original transfer needs the private R2 source locator.
+  // Generic library queue projections deliberately omit source URLs.
+  if (transferQueueText(fields.Asset_Kind) === "Master Original") {
+    copy("Source_R2_Key", "source_r2_key", transferQueueText(fields.Source_R2_Key));
+    copy("Source_URL", "source_url", transferQueueText(fields.Source_URL));
+  }
   copy("Source_MIME_Type", "source_mime_type", transferQueueText(fields.Source_MIME_Type));
   copy("Source_Extension", "source_extension", transferQueueText(fields.Source_Extension));
   copy("Source_Drive_File_ID", "source_drive_file_id", transferQueueText(fields.Source_Drive_File_ID));
@@ -7461,6 +7469,8 @@ const QUEUE_PAYLOAD_FIELDS = {
   asset_kind: "Asset_Kind",
   source_asset_id: "Source_Asset_ID",
   source_name: "Source_Name",
+  source_r2_key: "Source_R2_Key",
+  source_url: "Source_URL",
   source_mime_type: "Source_MIME_Type",
   source_extension: "Source_Extension",
   source_drive_file_id: "Source_Drive_File_ID",

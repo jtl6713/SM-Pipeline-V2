@@ -6496,3 +6496,44 @@ test("Schedule-regen LOWER(Platform) and Meta Studio_Output_Notes FIND prefer Su
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Supabase transfer queue retains original R2 source identity for Vibe master handoff", async () => {
+  const source = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.match(source, /"Source_R2_Key",\s*"Source_URL",\s*"Source_Drive_File_ID"/);
+  assert.match(source, /copy\("Source_R2_Key", "source_r2_key", transferQueueText\(fields.Source_R2_Key\)\)/);
+  assert.match(source, /copy\("Source_URL", "source_url", transferQueueText\(fields.Source_URL\)\)/);
+  assert.match(source, /source_r2_key: "Source_R2_Key"/);
+  assert.match(source, /source_url: "Source_URL"/);
+});
+
+
+test("Master Original queue write-through retains R2 locator without copying video bytes", async () => {
+  const calls = [];
+  const prior = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
+      id: "recMasterQueue1",
+      fields: {
+        Transfer_ID: "ITEM4-MASTER-recReq-asset1",
+        Asset_Kind: "Master Original",
+        Transfer_Status: "Pending",
+        Source_R2_Key: "studio/master-assets/recReq/asset1-video.mov",
+        Source_URL: "https://media.chicagoshining.com/studio/previews/asset1.mp4",
+      },
+    });
+    const post = calls.find(call => call.method === "POST" && call.url.includes("studio_media_transfer_queue"));
+    assert.ok(post);
+    const row = JSON.parse(post.body)[0];
+    assert.equal(row.payload.source_r2_key, "studio/master-assets/recReq/asset1-video.mov");
+    assert.equal(row.payload.source_url, "https://media.chicagoshining.com/studio/previews/asset1.mp4");
+    assert.equal(row.status, "Pending");
+    assert.equal(row.file_bytes, undefined);
+  } finally {
+    globalThis.fetch = prior;
+  }
+});
