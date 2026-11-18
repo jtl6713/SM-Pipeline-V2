@@ -97,6 +97,9 @@ _FIND_REQUEST_OUTPUT = re.compile(
 _FIND_PO_OUTPUT = re.compile(
     r'^FIND\("([^"]+)",\s*ARRAYJOIN\(\{PO_Output_ID\}\)\)(?:>0)?$'
 )
+_FIND_PLATFORM_OUTPUT = re.compile(
+    r'^FIND\\("(rec[A-Za-z0-9]{14})",\\s*ARRAYJOIN\\(\\{Platform Output\\}\\)\\)(?:>0)?$'
+)
 _IS_BEFORE_NOW = re.compile(r"^IS_BEFORE\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
 _IS_AFTER_NOW = re.compile(r"^IS_AFTER\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
 _SLIDE_SAFE_FIELDS = frozenset({
@@ -343,6 +346,18 @@ def _find_text_filter(table_id: str, text: str) -> str | None:
     return f"or({ref}.is.null,{ref}.eq.,{ref}.not.like.*{needle}*)"
 
 
+def _slide_platform_output_filter(table_id: str, text: str) -> str | None:
+    """Immutable record-ID slide link query, used when Output_ID is nullable."""
+    if table_id != CAROUSEL_SLIDES_TABLE:
+        return None
+    match = _FIND_PLATFORM_OUTPUT.match(text)
+    if not match:
+        return None
+    # PostgREST uses the slide's densified array in the Supabase fields bag.
+    # Callers must additionally verify the exact one-output linked array.
+    return f"fields->>Platform Output.like.*{match.group(1)}*"
+
+
 def _slide_po_output_filter(table_id: str, text: str) -> str | None:
     if table_id != CAROUSEL_SLIDES_TABLE:
         return None
@@ -427,6 +442,9 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     linked = _produce_link_filter(table_id, text)
     if linked:
         return linked
+    slide_owner = _slide_platform_output_filter(table_id, text)
+    if slide_owner:
+        return slide_owner
     slide = _slide_po_output_filter(table_id, text)
     if slide:
         return slide
