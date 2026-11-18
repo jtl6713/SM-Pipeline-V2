@@ -165,3 +165,19 @@ test("verified single-video Vibe auto-reconciles its video passthrough instead o
   assert.match(reconcile, /Studio_Variant_Status: status/);
   assert.doesNotMatch(reconcile, /publish.*true/i);
 });
+
+test("production bridge preflight uses a complete Supabase request after variant write", () => {
+  const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const start = worker.indexOf("export async function finishAutonomousProductionRequest(");
+  const end = worker.indexOf("/*__STUDIO_WORKER_END:finishAutonomousProductionRequest__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const continuation = worker.slice(start, end);
+  const reload = continuation.indexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", continuation.indexOf("const continueAfterPlan"));
+  const safeReload = continuation.indexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", reload + 1);
+  const gate = continuation.indexOf("if (!autonomousPlanVariantsReady(current)) {", safeReload);
+  const preflight = continuation.indexOf("item4SourceToProductionBridgePreflight(env, current, idea)", gate);
+  assert.ok(safeReload >= 0 && gate > safeReload && preflight > gate,
+    "must re-read the full saved request and confirm variant Ready before bridge preflight");
+  assert.match(continuation, /if \(!preflight\.ready\) \{/);
+  assert.match(continuation, /promoteProductionRequestViaI3I4/);
+});
