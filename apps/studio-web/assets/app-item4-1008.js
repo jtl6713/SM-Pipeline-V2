@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1009-approve-saved-plan";
+  const BUILD_ID = "item4-0.6.1010-revision-drafts";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17158,7 +17158,10 @@ function timedScriptAssetLabel(asset, index) {
     const status = String(record.status || "").trim().toLowerCase();
     // The API exposes revision_open explicitly; it strips the internal marker
     // from production_notes. Promoted revisions may also have Active=false.
-    if (status === "promoted" && record.revision_open === true) return true;
+    // A Factory send-back moves the existing promoted request to Draft but
+    // deliberately retains its promoted-content link. Show only explicitly
+    // marked revisions; normal promoted or completed rows stay in Pipeline.
+    if (record.revision_open === true && ["promoted", "draft", "ready"].includes(status)) return true;
     if (record.active === false) return false;
     if (status !== "draft" && status !== "ready") return false;
     if (String(record.submitted_at || "").trim()) return false;
@@ -17192,7 +17195,7 @@ function timedScriptAssetLabel(asset, index) {
           <div class="production-draft-meta">${badge(r.status)}${timing ? `<span class="subtle">${escapeHtml(timing)}</span>` : ""}</div>
           <h3>${value(ideaName)}</h3>
           <p>${platforms !== "—" ? platforms : "Platforms not chosen yet"}</p>
-          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">${String(r.status || "").toLowerCase() === "promoted" ? "Revise" : "Continue"}</button>
+          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">${r.revision_open === true || String(r.status || "").toLowerCase() === "promoted" ? "Revise" : "Continue"}</button>
         </article>`;
       }).join("")}</div>`;
 
