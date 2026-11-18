@@ -608,6 +608,8 @@ def _queue_row(record: dict) -> dict:
         ("Asset_Kind", "asset_kind"),
         ("Source_Asset_ID", "source_asset_id"),
         ("Source_Name", "source_name"),
+        ("Source_R2_Key", "source_r2_key"),
+        ("Source_URL", "source_url"),
         ("Source_MIME_Type", "source_mime_type"),
         ("Source_Extension", "source_extension"),
         ("Source_Drive_File_ID", "source_drive_file_id"),
