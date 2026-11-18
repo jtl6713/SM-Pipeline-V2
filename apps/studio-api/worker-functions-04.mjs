@@ -14742,6 +14742,14 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
         return { waiting: true, production_request_id: requestId, idea_id: idea.id };
       }
     }
+    // Phase 6 variant reconciliation may echo only patched status fields.
+    // Load the complete persisted master/plan/variant state before strict
+    // source-to-production preflight. Recheck Ready rather than bypass a gate.
+    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (!autonomousPlanVariantsReady(current)) {
+      return { waiting: true, waiting_reason: "variants_still_preparing",
+        production_request_id: requestId, idea_id: idea.id };
+    }
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
       const blockers = (preflight.issues || []).filter((issue) => !/preview image is still catching up/i.test(String(issue || "")));
