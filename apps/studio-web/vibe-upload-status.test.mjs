@@ -136,3 +136,34 @@ test("Vibe processing stage and leave guidance cannot falsely confirm a partial 
   assert.match(scenario({ ready: true }).guidance.steps[2].state, /done/);
   assert.doesNotMatch(scenario({ upload: "multipart_pending", time: "" }).body, /safely uploaded/);
 });
+
+
+test("Confirmed Vibe uploads override stale stalled UI and suppress transfer retry", () => {
+  const state = section("function setVibeUploadUi(", "function beginVibeUploadFeedback(");
+  assert.match(state, /const persisted = vibeCutPersistedSource\(item4Workspace\)/);
+  assert.match(state, /syncVibeUploadUiFromWorkspace\(item4Workspace\)/);
+  const markup = section("function vibeUploadProgressMarkup(", "function renderVibeUploadUi(");
+  assert.match(markup, /phase === "stalled" && !uploadConfirmed/);
+  const render = section("function renderVibeUploadUi(", "function setVibeUploadUi(");
+  assert.match(render, /savedUploadConfirmed/);
+  assert.match(render, /&& !savedUploadConfirmed/);
+  const code = markup + "\n globalThis.testMarkup = vibeUploadProgressMarkup;";
+  const context = vm.createContext({
+    globalThis: {},
+    item4Workspace: { assets: [{ id: "asset-1", name: "video.mov", media_kind: "video", upload_status: "complete", compression_status: "compressing", compression_progress: 40 }] },
+    item4Uploading: false,
+    activeProductionRequest: { id: "recTest", status: "Draft" },
+    vibeAutoReviewErrors: new Map(), vibeAutoReviewQueued: new Set(),
+    vibeUploadUi: { phase: "stalled", detail: "No segment progress was confirmed.", fileName: "video.mov" },
+    ezIsVibeCut: () => true,
+    vibeCutReadySource: () => null,
+    vibeCutPersistedSource: status => status.assets[0],
+    vibeUploadFileSizeLabel: () => "10 MB",
+    item4CompressionProgressLabel: () => "40%",
+  });
+  vm.runInContext(code, context);
+  const result = context.globalThis.testMarkup(context.item4Workspace);
+  assert.match(result.title, /Upload complete/);
+  assert.doesNotMatch(result.title, /stalled/);
+  assert.match(result.count, /0 of 1 ready/);
+});
