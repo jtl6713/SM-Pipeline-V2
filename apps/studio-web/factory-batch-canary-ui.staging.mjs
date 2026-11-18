@@ -146,13 +146,16 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  // New browser context starts without the desktop's local acceptance cache.
-  // The synthetic Desk is intentionally stale, but Activity is restored
-  // without sending a second approval.
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),4,
-    "All synthetic Needs Eyes outputs remain visible in a fresh phone context");
-  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),1);
+  // A fresh browser context has no desktop local acceptance cache, but
+  // authoritative Activity reports the Reel as approved. The old Desk still
+  // includes it: suppress that submitted checkbox and count it only in
+  // Active Approvals, across devices, without making another POST.
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),3,
+    "Server-confirmed approved Reel must stay out of Needs Eyes on a fresh phone");
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),0);
   assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
+  assert.equal((await phone.locator("#factoryCountNeedsEyes").innerText()).trim(),"3",
+    "Visible Needs Eyes count must agree with its remaining checkbox rows");
   assert.deepEqual(posts.map(x=>x.record_ids),[[cards[0].id]]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);
