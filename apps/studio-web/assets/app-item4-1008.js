@@ -13870,9 +13870,17 @@ function timedScriptAssetLabel(asset, index) {
       renderProductionRequestOutputCards();
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
+      // Full status reconciliation may be stale after the plan POST. Re-read
+      // immutable saved state so Recommend cannot remain falsely Not Started.
+      if (item4CanConfirmMediaForPrepare(item4Workspace)) {
+        try { await item4ConfirmSavedWorkspaceForPrepare(activeProductionRequest.id); }
+        catch (error) { console.warn("Recommend saved-plan snapshot refresh deferred", error); }
+      }
       item4OutputSelectionDirty = false;
       setItem4OutputSelectionHint("Recommended outputs selected and saved. Add or remove checkboxes, then Save output selections.");
-      setRequestMessage("Platform plan saved. Edit output selections and save again if needed, or prepare frames.", "success");
+      setRequestMessage(item4Workspace?.plan_status === "Ready"
+        ? "Platform plan verified and saved. Next: Prepare frames."
+        : "Selections saved. Click Prepare to verify the plan before frames.", "success");
     } catch (error) {
       setRequestMessage(
         isTimeoutError(error)
@@ -14031,9 +14039,15 @@ function timedScriptAssetLabel(asset, index) {
       }
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
+      if (item4CanConfirmMediaForPrepare(item4Workspace)) {
+        try { await item4ConfirmSavedWorkspaceForPrepare(requestId); }
+        catch (error) { console.warn("Saved outputs snapshot refresh deferred", error); }
+      }
       item4OutputSelectionDirty = false;
       setItem4OutputSelectionHint("Saved. Platforms & Frames now uses exactly these selected outputs.");
-      setRequestMessage("Platform output selections saved. Frames reflects the same output set.", "success");
+      setRequestMessage(item4Workspace?.plan_status === "Ready"
+        ? "Six or more selected outputs are saved. Platform plan verified; click Prepare."
+        : "Selected outputs saved. Click Prepare to verify or build the platform plan.", "success");
     } catch (error) {
       setItem4OutputSelectionHint(error?.message || "Could not save outputs.", true);
       setRequestMessage(error?.message || "Could not save outputs.", "error-text");
