@@ -390,3 +390,23 @@ test("P0 #907 releases invalid empty-plan retry once without losing lease or ret
   assert.notEqual(untouched.revived, true);
   assert.equal(untouched.job.next_attempt_ms, 1_802_000);
 });
+
+test("a verified Vibe idea can use the planning slot without starving due review monitoring", () => {
+  const jobs = [
+    { idea_id: "old-photo", profile_id: "chicago", status: "queued", created_at: "2026-11-01T00:00:00Z" },
+    { idea_id: "new-vibe", profile_id: "chicago", status: "queued", created_at: "2026-11-18T02:50:00Z" },
+    { idea_id: "due-review", profile_id: "nyc", status: "awaiting_review", next_attempt_ms: 0, created_at: "2026-11-01T00:01:00Z" },
+  ];
+  const normal = readyProductionSelectJobs(jobs, { nowMs: Date.parse("2026-11-18T03:00:00Z") });
+  assert.deepEqual(normal.map((job) => job.idea_id), ["old-photo", "due-review"]);
+  const prioritized = readyProductionSelectJobs(jobs, {
+    nowMs: Date.parse("2026-11-18T03:00:00Z"),
+    priorityIdeaIds: ["new-vibe"],
+  });
+  assert.deepEqual(prioritized.map((job) => job.idea_id), ["new-vibe", "due-review"]);
+  const notDue = readyProductionSelectJobs([
+    { idea_id: "new-vibe", profile_id: "chicago", status: "retry_wait", next_attempt_ms: Date.parse("2026-11-19T00:00:00Z") },
+    { idea_id: "old-photo", profile_id: "chicago", status: "queued" },
+  ], { nowMs: Date.parse("2026-11-18T03:00:00Z"), priorityIdeaIds: ["new-vibe"] });
+  assert.deepEqual(notDue.map((job) => job.idea_id), ["old-photo"]);
+});
