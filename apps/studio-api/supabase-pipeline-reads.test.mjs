@@ -37,6 +37,7 @@ import {
   RUNNER_RECORD_PROJECTION,
   supabaseRestAll,
   listSupabaseFactoryDeskPack,
+  listSupabaseRevisionOpenProductionRequests,
   listSupabaseContentPlatformOutputs,
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
@@ -341,6 +342,53 @@ test("Supabase content output lookup refuses truncated sibling inventory", async
     );
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("Production lists Factory reopened Draft, Ready and Promoted requests from Supabase without Airtable", async () => {
+  const before = globalThis.fetch;
+  const contentRec = "recRFZDxZ1vx8Mkvn";
+  const requestId = "recwSzrkVi1LuwuJW";
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    calls.push(u);
+    assert.match(u, /production_requests\?request_status=in\.\(Draft,Ready,Promoted\)/);
+    assert.match(u, /production_notes=like\.\*%5Bfactory-revision-open%5D\*/);
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify([
+          {
+            airtable_record_id: requestId,
+            request_status: "Draft",
+            production_notes: "Music request saved.\\n[factory-revision-open] at=2026-11-18T04:45:45Z",
+            publish_status: {
+              Active: true,
+              Organization: ["recLwmq0WzpG3MHQj"],
+              Brand: ["recjLbnpXhVnqHBgG"],
+              promoted_content_airtable_id: contentRec,
+              idea_candidate_airtable_id: "recOBKABTNVnxFiny",
+            },
+          },
+        ]);
+      },
+    };
+  };
+  try {
+    const rows = await listSupabaseRevisionOpenProductionRequests({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test_key",
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, requestId);
+    assert.equal(rows[0].fields.Request_Status, "Draft");
+    assert.deepEqual(rows[0].fields.Promoted_Content_Item, [contentRec]);
+    assert.match(rows[0].fields.Production_Notes, /\[factory-revision-open\]/);
+    assert.equal(calls.length, 1);
+    assert.ok(calls.every(url => url.startsWith("https://example.supabase.co/")));
+  } finally {
+    globalThis.fetch = before;
   }
 });
 
