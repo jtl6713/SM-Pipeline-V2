@@ -63,13 +63,11 @@ export function item4PrepareButtonView({
 
 export function item4IsRetryablePrepareFailure(error, status) {
   const variantStatus = String(status?.variant_status || "");
+  // Only an authoritative Preparing readback proves an actual job exists.
+  // In particular, a 5xx/timeout with status None must surface the original
+  // server error instead of polling None and replacing it with "try again".
   if (String(error?.bodyStatus || "") === "Error" || variantStatus === "Error") return false;
-  if (variantStatus === "Preparing") return true;
-  const message = String(error?.message || error || "");
-  return /request failed \(5\d{2}\)/i.test(message)
-    || /timed?\s*out|timeout|aborterror/i.test(message)
-    || /platform media preparation is still running/i.test(message)
-    || /attaching .* clip frames/i.test(message);
+  return variantStatus === "Preparing";
 }
 
 export function item4BridgeIssuesAreDestinationLinks(issues) {
