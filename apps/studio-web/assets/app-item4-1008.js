@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1000-vibe-stall-reconcile";
+  const BUILD_ID = "item4-0.6.1001-vibe-master-source";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4728,7 +4728,7 @@
   function ezIsVibeCut() {
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "vibe-cut") return true;
-    const notes = String($("prProductionNotes")?.value || $("ezProductionNotes")?.value || "").trim();
+    const notes = [activeProductionRequest?.production_notes, $("prProductionNotes")?.value, $("ezProductionNotes")?.value].map(value => String(value || "")).join("\n");
     return Boolean(vibeCutApi()?.isVibeCutNotes?.(notes) || /ez-input=vibe-cut/i.test(notes));
   }
 
