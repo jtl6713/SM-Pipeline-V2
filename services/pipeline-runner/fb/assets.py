@@ -95,7 +95,9 @@ def ready_photo_formula(
     output_id: str, package_revision: str, *, output_record_id: str | None = None,
 ) -> str:
     owner = _slide_owner_clause(output_id, output_record_id=output_record_id)
-    revision = str(package_revision or "").replace("\\\\", "\\\\\\\\").replace('"', '\\\\"')
+    revision = str(package_revision or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]*", revision):
+        raise ValueError("invalid_facebook_package_revision")
     return (
         f'AND({owner},'
         f'{{FB_Photo_Status}}="Ready",{{FB_Photo_ID}}!=BLANK(),{{FB_Photo_Package_Revision}}="{revision}")'
