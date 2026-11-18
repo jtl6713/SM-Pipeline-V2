@@ -7414,6 +7414,9 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:rankVideosForScriptedShortProposal__*/
 /*__STUDIO_WORKER_EXTRACT:unfinishedIntakeBatchIds__*/
 /*__STUDIO_WORKER_EXTRACT:applyLibraryAssetsToProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:directIdeaUploadState__*/
+/*__STUDIO_WORKER_EXTRACT:linkIdeaUploadedAssets__*/
+/*__STUDIO_WORKER_EXTRACT:resumeIdeaDirectUploadedAssets__*/
 /*__STUDIO_WORKER_EXTRACT:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:matchNewlyCreatedIdeaPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:scanIdeaPhotoMatchingQuality__*/

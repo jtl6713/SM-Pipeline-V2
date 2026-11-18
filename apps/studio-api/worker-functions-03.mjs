@@ -26,7 +26,7 @@ import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verificati
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview, mergeIdeaProductionNotes } from "./idea-photo-wait.mjs";
+import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure, homeOutputInProduction } from "./profile-summary-classification.mjs";
@@ -1178,13 +1178,14 @@ async function ideaPhotoWaitStage(stage, operation) {
 
 // A completed direct upload is an exact, durable media selection, never a
 // fuzzy-match suggestion. Keep it in the existing Idea photo-match JSON column.
-function directIdeaUploadState(idea) {
+export function directIdeaUploadState(idea) {
   try {
     const json = JSON.parse(String(f(idea, "Studio_Photo_Match_JSON") || "{}"));
     if (json?.source !== "idea_direct_upload" || !Array.isArray(json.ids)) return null;
     return { ...json, ids: [...new Set(json.ids.filter(id => /^rec[A-Za-z0-9]+$/.test(String(id))))] };
   } catch { return null; }
 }
+/*__STUDIO_WORKER_END:directIdeaUploadState__*/
 
 export async function linkIdeaUploadedAssets(request, env, url, authorization) {
   const id = url.pathname.match(/^\/api\/ideas\/(rec[A-Za-z0-9]+)\/uploaded-assets$/)?.[1];
@@ -1240,8 +1241,9 @@ export async function linkIdeaUploadedAssets(request, env, url, authorization) {
   return respond(request, env, {ok:true, idea_id:updated.id,
     saved:ids.length, complete:done, message:"Photos linked to Idea; classification and automatic resume will follow."});
 }
+/*__STUDIO_WORKER_END:linkIdeaUploadedAssets__*/
 
-async function resumeIdeaDirectUploadedAssets(env, idea, state, {authorization=null, productionRequest=null}={}) {
+export async function resumeIdeaDirectUploadedAssets(env, idea, state, {authorization=null, productionRequest=null}={}) {
   if (!state.complete || !state.ids.length) return {action:"wait",reason:"upload_in_progress",idea,production_request:productionRequest};
   const profile = firstLinkedRecordId(f(idea, "Content_Profile"));
   const photos = await Promise.all(state.ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
@@ -1291,6 +1293,7 @@ async function resumeIdeaDirectUploadedAssets(env, idea, state, {authorization=n
   }
   return {action:"ready",reason:"operator_photos_attached",idea:updated,production_request:draft};
 }
+/*__STUDIO_WORKER_END:resumeIdeaDirectUploadedAssets__*/
 
 export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
   // Always refresh before matching. Manage Idea writes a short-lived pause token and
