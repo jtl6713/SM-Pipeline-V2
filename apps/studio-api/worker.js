@@ -732,6 +732,7 @@ import {
   item4PulsePipelineStage,
   handleRr2ReviewDecision,
   item4DrainAllPendingWork,
+  item4HealPendingVibeMasterTransfer,
   prepareItem4Variants,
   getItem4Variants,
   item4HealTimelineAutoPrepare,
@@ -4470,6 +4471,12 @@ export default {
       // for minutes under load; awaiting it first starves every Ready draft.
       // Cloudflare tracks both promises, and a failure in either must not
       // suppress the other.
+      // Reconcile upload-complete Vibe masters that reached compression Ready
+      // but never acquired their canonical Google Drive source. Independent
+      // of the more expensive cron and of the operator's open browser tab.
+      ctx.waitUntil(item4HealPendingVibeMasterTransfer(env).catch((error) => {
+        console.warn("Vibe master-transfer recovery deferred", String(error?.message || error));
+      }));
       ctx.waitUntil((async () => {
         try {
           const outcome = await studioReadyProductionCronResume(env, ctx);
