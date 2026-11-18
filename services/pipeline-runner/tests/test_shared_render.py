@@ -278,3 +278,64 @@ def test_global_youtube_first_frame_isolation_and_platform_unaffected(monkeypatc
     assert plan["recIG"]["role"] == "canonical"
     monkeypatch.setenv("YOUTUBE_FIRST_FRAME_MODE", "off")
     assert build_shared_render_plan([ig, fb, yt])["recYT"]["role"] == "sibling"
+
+
+def test_multicut_vibe_remount_shares_only_exact_identical_video_edits():
+    import json
+
+    notes = "origin=ez-wizard; ez-input=finished-video. Vibe Cut — remounting music montage."
+    clips = [
+        {"id": "source-1", "url": "https://drive.google.com/file/d/source/view",
+         "mediaKind": "video", "inSeconds": 7.171, "outSeconds": 8.1043, "durationFrames": 28},
+        {"id": "source-2", "url": "https://drive.google.com/file/d/source/view",
+         "mediaKind": "video", "inSeconds": 3.152, "outSeconds": 4.0853, "durationFrames": 28},
+    ]
+    common = dict(
+        Aspect_Ratio="9:16",
+        Composition_ID="ChicagoShiningPhotoSequence",
+        Render_Clip_List_JSON=json.dumps(clips),
+        Output_Notes=notes,
+        Music_Volume=0,
+        Timing_Status="Skipped",
+    )
+    ig = _output(id="recIG", Platform="Instagram", Studio_Output_Type="Reel", Output_ID="1", **common)
+    fb = _output(id="recFB", Platform="Facebook", Studio_Output_Type="Reel", Output_ID="2", **common)
+    tt = _output(id="recTT", Platform="TikTok", Studio_Output_Type="Video Draft", Output_ID="3", **common)
+    yt = _output(id="recYT", Platform="YouTube", Studio_Output_Type="Short", Output_ID="4", **common)
+    assert all(is_shared_render_eligible(row) for row in [ig, fb, tt, yt])
+    plan = build_shared_render_plan([ig, fb, tt, yt])
+    assert plan["recIG"]["role"] == "canonical"
+    assert set(plan["recIG"]["sibling_ids"]) == {"recFB", "recTT", "recYT"}
+
+    # Same file and overlays but different source cut ranges must not share
+    # even though the old generic normalizer would collapse both timelines.
+    changed = json.loads(json.dumps(clips))
+    changed[0]["inSeconds"] = 1.234
+    other = _output(
+        id="recAlternate", Platform="Facebook", Studio_Output_Type="Reel",
+        **{**common, "Render_Clip_List_JSON": json.dumps(changed)}
+    )
+    assert render_equivalence_key(other) != render_equivalence_key(ig)
+    assert build_shared_render_plan([ig, other])["recIG"]["role"] == "solo"
+
+
+def test_vibe_shared_render_never_exempts_finished_passthrough_or_single_clip():
+    import json
+    clips = [
+        {"url": "https://example.com/v.mp4", "mediaKind": "video", "inSeconds": 0, "durationFrames": 28},
+        {"url": "https://example.com/v.mp4", "mediaKind": "video", "inSeconds": 2, "durationFrames": 28},
+    ]
+    base = dict(Platform="Instagram", Studio_Output_Type="Reel", Aspect_Ratio="9:16",
+                Render_Clip_List_JSON=json.dumps(clips))
+    normal = _output(id="recFinished", Output_Notes="ez-input=finished-video", **base)
+    fake = _output(id="recOneCut",
+                   Output_Notes="ez-input=finished-video. Vibe Cut — remounting music montage.",
+                   **{**base, "Render_Clip_List_JSON": json.dumps(clips[:1])})
+    passthrough = _output(
+        id="recPass",
+        Output_Notes="ez-input=finished-video. Vibe Cut — remounting music montage. finished passthrough.",
+        **base,
+    )
+    assert is_shared_render_eligible(normal) is False
+    assert is_shared_render_eligible(fake) is False
+    assert is_shared_render_eligible(passthrough) is False
