@@ -4087,6 +4087,38 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const reviewOutputs = shapedOutputs.filter((row) => matchesOpsQueueReviewFormula(row.fields));
   const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
+  // Factory reviews can outlive the recent Production Request window. Resolve
+  // their parent from Supabase by the durable promoted-content key; do not
+  // require the parent to remain an active request/production job.
+  // These parents enrich review cards only, not the active production lane.
+  const reviewContentIds = [...new Set((reviewReadyRows || [])
+    .map((row) => String(
+      row?.content_items?.airtable_record_id
+      || row?.error_messages?.Content_Item?.[0]
+      || "",
+    ).trim())
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  const reviewContentSet = new Set(reviewContentIds);
+  const reviewParentByContent = new Map();
+  for (let index = 0; index < reviewContentIds.length; index += 35) {
+    const chunk = reviewContentIds.slice(index, index + 35);
+    const linked = await supabaseRest(
+      env,
+      `production_requests?publish_status->>promoted_content_airtable_id=in.(${chunk.map(encodeURIComponent).join(",")})`
+        + `&request_status=neq.Cancelled&select=${REQUEST_SELECT}`
+        + `&order=updated_at.desc.nullslast&limit=${chunk.length * 5}`,
+    ).catch((error) => {
+      console.warn("Factory review-parent lookup unavailable", String(error?.message || error));
+      return [];
+    });
+    for (const row of linked || []) {
+      const contentId = String(row?.publish_status?.promoted_content_airtable_id || "").trim();
+      if (!reviewContentSet.has(contentId) || reviewParentByContent.has(contentId)
+        || !/^rec[A-Za-z0-9]{14}$/.test(String(row?.airtable_record_id || ""))) continue;
+      reviewParentByContent.set(contentId, airtableShapedProductionRequestFromSupabase(row));
+    }
+  }
+
   const requests = (requestRows || [])
     .map(airtableShapedProductionRequestFromSupabase)
     .filter((row) => matchesOpsQueueRequestFormula(row.fields));
@@ -4151,6 +4183,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     reviewOutputs,
     activeHolds,
     requests,
+    reviewParentRequests: [...reviewParentByContent.values()],
     contentById,
     ideas,
     photoWaitIdeas,
