@@ -1704,7 +1704,7 @@ export async function item4ListPendingQueueRequestIds(env) {
  * Never advances approval or publishes while the source lacks Drive authority.
  */
 export async function item4HealPendingVibeMasterTransfer(env) {
-  if (studioWriteSource(env) !== "supabase" || studioPhase6WriteSource(env) !== "supabase") {
+  if (studioWriteSource(env) !== "supabase" || String(env.STUDIO_PHASE6_WRITE_SOURCE || "").toLowerCase() !== "supabase") {
     return { attempted: false, reason: "supabase-authority-required" };
   }
   const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
@@ -1715,7 +1715,7 @@ export async function item4HealPendingVibeMasterTransfer(env) {
     const id = String(f(row, "Production_Request_Record_ID") || "").trim();
     const assetId = String(f(row, "Source_Asset_ID") || "").trim();
     const transferId = String(f(row, "Transfer_ID") || "").trim();
-    if (!/^rec[A-Za-z0-9]+$/.test(id) || !assetId || transferId !== item4MasterTransferId(id, assetId)) continue;
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || !assetId || transferId !== `ITEM4-MASTER-${id}-${assetId}`) continue;
     const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id).catch(() => null);
     if (!request || !studioIsVibeCut(request) || productionRequestRevisionOpen(request)) continue;
     if (!["Draft", "Ready"].includes(String(f(request, "Request_Status") || ""))) continue;
