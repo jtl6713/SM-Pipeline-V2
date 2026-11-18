@@ -94,6 +94,13 @@ test("Factory send-back Draft with linked content remains visible in Production"
     "Cloud Gate Myth remains in Pipeline rather than editable Drafts");
 });
 
+test("Mobile Safari foreground recovery clears stale Production paused banner", () => {
+  assert.match(source, /window\.addEventListener\("focus", resumeProductionForeground\)/);
+  assert.match(source, /window\.addEventListener\("pageshow", resumeProductionForeground\)/);
+  assert.match(source, /if \(document\.hidden \|\| !productionPageActive\(\)\) return/);
+  assert.match(source, /refreshProductionPage\(\{ silent: true \}\)\.finally\(scheduleProductionPoll\)/);
+});
+
 test("Draft list uses eligibility guard, collapses empty section, retains errors", () => {
   assert.match(source, /records\.filter\(productionRequestIsOpenDraft\)/);
   assert.match(source, /if \(listPanel\) listPanel\.hidden = !drafts\.length/);
