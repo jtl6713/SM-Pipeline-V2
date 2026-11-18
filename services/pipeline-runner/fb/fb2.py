@@ -93,7 +93,7 @@ def process_request(
     )
 
     settings = PipelineSettings(client)
-    photos = list_ready_photos(client, field_str(output, "Output_ID"), field_str(output, "FB_Package_Revision"))
+    photos = list_ready_photos(client, field_str(output, "Output_ID"), field_str(output, "FB_Package_Revision"), output_record_id=record_id)
     ids = photo_ids(photos)
     expected = parse_int(field(output, "Image_Count"), 0) or 0
     result["photo_count"] = len(ids)

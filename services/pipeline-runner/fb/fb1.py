@@ -91,11 +91,11 @@ def process_request(
     recreate_hours = parse_int(settings.get("FB_UNPUBLISHED_PHOTO_RECREATE_HOURS"), DEFAULT_UNPUBLISHED_RECREATE_HOURS) or DEFAULT_UNPUBLISHED_RECREATE_HOURS
     max_photos = parse_int(settings.get("FB_MAX_PHOTOS"), DEFAULT_MAX_PHOTOS) or DEFAULT_MAX_PHOTOS
     package_rev = field_str(output, "FB_Package_Revision")
-    slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max_photos)
+    slides = list_ready_slides(client, field_str(output, "Output_ID"), output_record_id=record_id, max_photos=max_photos)
     needed = [slide for slide in slides if photo_needs_create(slide, package_rev=package_rev, recreate_hours=recreate_hours)]
     result["needed_count"] = len(needed)
     if not needed:
-        ready = list_ready_photos(client, field_str(output, "Output_ID"), package_rev)
+        ready = list_ready_photos(client, field_str(output, "Output_ID"), package_rev, output_record_id=record_id)
         return _commit_photo_progress(client, output, record_id, ready, result)
 
     try:
@@ -164,7 +164,7 @@ def process_request(
         )
         created += 1
 
-    ready = list_ready_photos(client, field_str(output, "Output_ID"), package_rev)
+    ready = list_ready_photos(client, field_str(output, "Output_ID"), package_rev, output_record_id=record_id)
     result["created_count"] = created
     return _commit_photo_progress(client, output, record_id, ready, result)
 
