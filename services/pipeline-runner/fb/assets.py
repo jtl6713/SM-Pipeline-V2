@@ -35,13 +35,29 @@ def is_slideshow_route(record: dict[str, Any]) -> bool:
     return _ci(resolved_publish_mode(record)) == _ci(MODE_SLIDESHOW)
 
 
-def slide_formula(output_id: str) -> str:
-    safe = str(output_id or "").replace("\\", "\\\\").replace('"', '\\"')
+def _slide_owner_clause(output_id: str, *, output_record_id: str | None = None) -> str:
+    """Select by immutable output record ID, never a nullable or partial number.
+
+    Empty numeric Output_ID previously produced FIND("", ARRAYJOIN(...)), which
+    matches unrelated slide sets and may trigger forbidden Airtable fallbacks.
+    """
+    record_id = str(output_record_id or "").strip()
+    if record_id:
+        if not re.fullmatch(r"rec[A-Za-z0-9]{14}", record_id):
+            raise ValueError("invalid_facebook_output_record_id")
+        return f'FIND("{record_id}",ARRAYJOIN({{Platform Output}}))>0'
+    number = str(output_id or "").strip()
+    if not re.fullmatch(r"[0-9]+", number):
+        raise ValueError("missing_facebook_output_identity")
+    return f'FIND("{number}",ARRAYJOIN({{PO_Output_ID}}))>0'
+
+
+def slide_formula(output_id: str, *, output_record_id: str | None = None) -> str:
+    owner = _slide_owner_clause(output_id, output_record_id=output_record_id)
     return (
-        f'AND(FIND("{safe}",ARRAYJOIN({{PO_Output_ID}}))>0,'
+        f'AND({owner},'
         '{Shared_Asset_Approved}=1,{Asset_4x5_Public_Status}="Ready",{Asset_4x5_Public_URL}!=BLANK())'
     )
-
 
 
 def recover_approved_photo_count(slides: list[dict[str, Any]], *, max_photos: int = DEFAULT_MAX_PHOTOS) -> int | None:
@@ -75,11 +91,13 @@ def recover_approved_photo_count(slides: list[dict[str, Any]], *, max_photos: in
     return count if seen == set(range(1, count + 1)) else None
 
 
-def ready_photo_formula(output_id: str, package_revision: str) -> str:
-    safe = str(output_id or "").replace("\\", "\\\\").replace('"', '\\"')
-    revision = str(package_revision or "").replace("\\", "\\\\").replace('"', '\\"')
+def ready_photo_formula(
+    output_id: str, package_revision: str, *, output_record_id: str | None = None,
+) -> str:
+    owner = _slide_owner_clause(output_id, output_record_id=output_record_id)
+    revision = str(package_revision or "").replace("\\\\", "\\\\\\\\").replace('"', '\\\\"')
     return (
-        f'AND(FIND("{safe}",ARRAYJOIN({{PO_Output_ID}}))>0,'
+        f'AND({owner},'
         f'{{FB_Photo_Status}}="Ready",{{FB_Photo_ID}}!=BLANK(),{{FB_Photo_Package_Revision}}="{revision}")'
     )
 
@@ -95,10 +113,19 @@ def list_ready_slides(
     client: AirtableClient,
     output_id: str,
     *,
+    output_record_id: str | None = None,
     max_photos: int = DEFAULT_MAX_PHOTOS,
 ) -> list[dict[str, Any]]:
-    formula = slide_formula(output_id)
-    rows = client.list_records(CAROUSEL_SLIDES_TABLE, formula=formula, max_records=max_photos)
+    formula = slide_formula(output_id, output_record_id=output_record_id)
+    # +1 ensures a surplus beyond the allowed cardinality cannot look complete.
+    rows = client.list_records(CAROUSEL_SLIDES_TABLE, formula=formula, max_records=max_photos + 1)
+    record_id = str(output_record_id or "").strip()
+    if record_id:
+        rows = [
+            slide for slide in rows
+            if isinstance(field(slide, "Platform Output"), list)
+            and field(slide, "Platform Output") == [record_id]
+        ]
     return sorted(rows, key=_sort_key)
 
 
@@ -202,9 +229,24 @@ def canonical_doubled_slide_repair(
     return keep, surplus, url_updates
 
 
-def list_ready_photos(client: AirtableClient, output_id: str, package_revision: str) -> list[dict[str, Any]]:
-    formula = ready_photo_formula(output_id, package_revision)
+def list_ready_photos(
+    client: AirtableClient,
+    output_id: str,
+    package_revision: str,
+    *,
+    output_record_id: str | None = None,
+) -> list[dict[str, Any]]:
+    formula = ready_photo_formula(
+        output_id, package_revision, output_record_id=output_record_id,
+    )
     rows = client.list_records(CAROUSEL_SLIDES_TABLE, formula=formula, max_records=25)
+    record_id = str(output_record_id or "").strip()
+    if record_id:
+        rows = [
+            slide for slide in rows
+            if isinstance(field(slide, "Platform Output"), list)
+            and field(slide, "Platform Output") == [record_id]
+        ]
     return sorted(rows, key=_sort_key)
 
 
