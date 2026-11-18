@@ -148,12 +148,13 @@ test("scheduled gates insights and ingest to heavy cadence", () => {
   assert.match(scheduled, /item4PulsePipelineStage\(env, "a2"/);
 });
 
-test("insights backlog list is capped near the per-profile select size", () => {
+test("insights Supabase backlog scan stays bounded while allowing all platforms a slot", () => {
   const sweep = worker.slice(
     worker.indexOf("async function studioSweepPublishedInsights"),
     worker.indexOf("async function studioSweepSimilarAccountTimes")
   );
-  assert.match(sweep, /Math\.max\(perProfileLimit \* 4, 40\)/);
+  assert.match(sweep, /Math\.max\(perProfileLimit \* 12, 100\)/);
+  assert.match(sweep, /const byPlatform = new Map/);
   assert.doesNotMatch(sweep, /limit:\s*250/);
 });
 
