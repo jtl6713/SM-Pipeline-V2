@@ -1420,3 +1420,4 @@ Deploy Factory Supabase authoritative batch review approval — Issue #2214 / PR
 Deploy Worker 0.10.1006-factory-review-parent: restore Factory Request Changes parent association for existing promoted Chicago River review outputs. PR #2222. 2026-11-18.
 Deploy Worker 0.10.1007-factory-content-outputs: restore Supabase FK content output lookup for Factory Request Changes and Producer revisions. PR #2226. 2026-11-18.
 Deploy Worker 0.10.1008-production-returned-drafts: restore Supabase Factory-revision Drafts to Production; retain tenant checks and existing approval hold. PR recovery. 2026-11-18.
+Deploy Worker 0.10.1009-creative-supabase-fastpath: unblock Creative Editor read-only GET from Supabase without frozen Airtable narration/catalog fallback; preserve output approval, publishing status, schedules, and credentials. Merged PR #2234 7c5ad20a93e3c46e9304c185dc8a56e57b960b54. 2026-11-18.
