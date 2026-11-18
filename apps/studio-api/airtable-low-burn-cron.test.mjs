@@ -135,7 +135,10 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);
-  assert.doesNotMatch(beforeHeavy, /studioSweepPublishedInsights/);
+  // Supabase-only analytics may run independently before Factory/Airtable
+  // maintenance. This is read-only against providers and does not publish.
+  assert.match(beforeHeavy, /if \(cadence\.insights && studioWriteSource\(env\) === "supabase"\)/);
+  assert.match(beforeHeavy, /ctx\.waitUntil\(\(async \(\) => \{[\s\S]*studioSweepPublishedInsights\(env, \{ limit: 8 \}\)/);
   assert.doesNotMatch(beforeHeavy, /item4PulsePipelineStage/);
 });
 

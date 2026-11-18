@@ -101,3 +101,19 @@ test("analytics sweep samples enough due posts and allocates slots across platfo
   assert.match(sweep, /for \(const platform of byPlatform\.keys\(\)\)/);
   assert.match(sweep, /selected\.push\(next\)/);
 });
+
+test("Supabase first-party analytics cron starts independently before Airtable cooldown or Factory recovery", async () => {
+  const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+  const scheduled = worker.slice(worker.indexOf("async scheduled(event, env, ctx)"));
+  const head = scheduled.indexOf("if (cadence.insights && studioWriteSource(env) === \"supabase\")");
+  const main = scheduled.indexOf("// Fail-safe Factory recovery before the Airtable cooldown return");
+  const cooling = scheduled.indexOf("const coolMs = airtableCooldownWaitMs()", main);
+  assert.ok(head > 0 && main > head && cooling > main);
+  const independent = scheduled.slice(head, main);
+  assert.match(independent, /ctx\.waitUntil/);
+  assert.match(independent, /studioSweepPublishedInsights\(env, \{ limit: 8 \}\)/);
+  assert.match(independent, /studioRecomputeInsightsLearned/);
+  assert.doesNotMatch(independent, /studioReconcilePublishing|studioDispatchApprovedPublish/);
+  const late = scheduled.slice(main, scheduled.indexOf("if (cadence.ingest)", main));
+  assert.match(late, /if \(studioWriteSource\(env\) !== "supabase"\)/);
+});
