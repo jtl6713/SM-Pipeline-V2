@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -150,9 +151,23 @@ def canonical_doubled_slide_repair(
         seen_drive_ids.add(source)
         rows = ordered[position]
         for row in rows:
+            # New Supabase-native Carousel Slides may store the immutable Drive
+            # source only in Asset_4x5_File_URL. Legacy Google Drive File ID
+            # and Asset_Family_Key are absent on those rows. Accept that shape
+            # only when the exact source Drive ID matches the *approved* output
+            # manifest and the slide has Final Approved review evidence.
+            saved_source = field_str(row, "Google Drive File ID")
+            drive_url = field_str(row, "Asset_4x5_File_URL")
+            source_match = re.fullmatch(
+                r"https://drive\.google\.com/file/d/([A-Za-z0-9_-]+)/view(?:\?.*)?",
+                drive_url,
+            )
+            verified_source = saved_source or (source_match.group(1) if source_match else "")
+            saved_family = field_str(row, "Asset_Family_Key")
             if (
-                field_str(row, "Google Drive File ID") != source
-                or field_str(row, "Asset_Family_Key") != family
+                verified_source != source
+                or (saved_family and saved_family != family)
+                or (not saved_family and field_str(row, "Review Status") != "Final Approved")
                 or field_str(row, "Asset_4x5_Public_Status").casefold() != "ready"
                 or field(row, "Shared_Asset_Approved") is not True
                 or field_str(row, "FB_Photo_ID")
@@ -165,16 +180,23 @@ def canonical_doubled_slide_repair(
         duplicate = next(row for row in rows if row["id"] != canonical["id"])
         keep.append(canonical)
         surplus.append(duplicate)
+        changes = {}
+        if not field_str(canonical, "Google Drive File ID"):
+            changes["Google Drive File ID"] = source
+        if not field_str(canonical, "Asset_Family_Key"):
+            changes["Asset_Family_Key"] = family
         if field_str(canonical, "Asset_4x5_Public_URL") != exact:
-            url_updates[canonical["id"]] = {
+            changes.update({
                 "Asset_4x5_Public_URL": exact,
                 "Current Image URL": exact,
                 "Final Image URL": exact,
                 "Watermarked Image URL": exact,
-            }
+            })
+        if changes:
+            url_updates[canonical["id"]] = changes
             canonical = dict(canonical, fields={
                 **canonical.get("fields", {}),
-                **url_updates[canonical["id"]],
+                **changes,
             })
             keep[-1] = canonical
     return keep, surplus, url_updates
