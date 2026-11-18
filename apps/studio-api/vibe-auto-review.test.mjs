@@ -179,3 +179,17 @@ test("source-to-production bridge uses complete saved request after variant PATC
   assert.match(continuation, /if \(!preflight\.ready\) \{/);
   assert.match(continuation, /promoteProductionRequestViaI3I4/);
 });
+
+test("cron revives only verified Vibe bridge error and admits exact job off the rotating page", () => {
+  const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const start = worker.indexOf("async function studioReadyProductionCronResume(");
+  const end = worker.indexOf("export { studioReadyProductionCronResume };", start);
+  assert.ok(start >= 0 && end > start);
+  const cron = worker.slice(start, end);
+  assert.match(cron, /verifiedVibeDraft = readyProductionVerifiedVibeDraft\(draft\)/);
+  assert.match(cron, /readyProductionRead\(env\.STUDIO_MEDIA, ideaId\)/);
+  assert.match(cron, /prior\.status === "retry_wait" && verifiedVibeDraft/);
+  assert.match(cron, /readyProductionRecoverVerifiedVibeBridge\(env\.STUDIO_MEDIA, ideaId\)/);
+  assert.match(cron, /if \(recovered\.revived && recovered\.job\)/);
+  assert.match(cron, /final_approval: "human_only"/);
+});

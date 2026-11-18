@@ -79,6 +79,7 @@ import {
   readyProductionClaim,
   readyProductionRead,
   readyProductionEnqueue,
+  readyProductionRecoverVerifiedVibeBridge,
   readyProductionFailure,
   readyProductionFinishClaim,
   readyProductionListPage,
@@ -13898,7 +13899,30 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     if (backfilled >= Math.min(8, Math.max(1, Number(options.maxBackfillPerTick) || 8))) break;
     const ideaId = firstLinkedRecordId(f(draft, "Idea_Candidate"));
     if (!ideaId || !/^rec[A-Za-z0-9]{14}$/.test(ideaId)) continue;
-    const prior = known.get(ideaId);
+    const verifiedVibeDraft = readyProductionVerifiedVibeDraft(draft);
+    // The rotating 500-job R2 page may omit this newly verified upload.
+    // Read only the exact known Idea key so the old retry lease cannot hide it.
+    const prior = known.get(ideaId) || (verifiedVibeDraft
+      ? await readyProductionRead(env.STUDIO_MEDIA, ideaId).catch(() => null) : null);
+    if (verifiedVibeDraft && prior && !known.has(ideaId)) {
+      jobs.push(prior);
+      known.set(ideaId, prior);
+    }
+    // After the full-request bridge preflight fix, release only its obsolete
+    // status-snapshot error. Source authority, exact request/Idea identity,
+    // revision hold and human approval are revalidated on every real claim.
+    if (prior && prior.status === "retry_wait" && verifiedVibeDraft
+        && String(prior.last_error || "").startsWith(
+          "Autonomous bridge not ready: Master media must be Ready before source-to-production handoff.")) {
+      const recovered = await readyProductionRecoverVerifiedVibeBridge(env.STUDIO_MEDIA, ideaId);
+      if (recovered.revived && recovered.job) {
+        const index = jobs.findIndex((job) => job.idea_id === ideaId);
+        if (index >= 0) jobs[index] = recovered.job;
+        else jobs.push(recovered.job);
+        known.set(ideaId, recovered.job);
+        backfilled += 1;
+      }
+    }
     if (prior && !(prior.status === "blocked" && prior.completed_reason === "no_longer_eligible")) continue;
     try {
       const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);

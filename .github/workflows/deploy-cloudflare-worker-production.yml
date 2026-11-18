@@ -1197,9 +1197,9 @@ jobs:
           # Read existing R2 jobs for each key profile without mutating records.
           # In particular, these three master-ready Drafts should not be marked
           # healthy merely because the old completed canaries are healthy.
-          TARGETS="rec0vF6sXMezZIhWQ,rec7YWfCWZEMA7sCd,recI69eD9p2wFhOLx,recjeoGFgKv5GnUrQ"
+          TARGETS="rec0vF6sXMezZIhWQ,rec7YWfCWZEMA7sCd,recI69eD9p2wFhOLx,recjeoGFgKv5GnUrQ,recOBKABTNVnxFiny"
           CODE=$(curl -sS --max-time 60 -o /tmp/ready-production-city-jobs.json -w '%{http_code}' "${URL}?ideas=${TARGETS}" || true)
-          if [[ "$CODE" != "200" ]] || ! jq -e '.ok==true and .read_only==true and (.jobs|length)==4' /tmp/ready-production-city-jobs.json >/dev/null 2>&1; then
+          if [[ "$CODE" != "200" ]] || ! jq -e '.ok==true and .read_only==true and (.jobs|length)==5' /tmp/ready-production-city-jobs.json >/dev/null 2>&1; then
             echo "Multi-profile Ready-production read-only diagnostic unavailable http=$CODE" >&2
             exit 1
           fi

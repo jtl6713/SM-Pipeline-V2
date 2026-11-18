@@ -174,6 +174,46 @@ export async function readyProductionEnqueue(bucket, options) {
   return { job: prior.value, created: false };
 }
 
+
+/**
+ * One-time release of the exact obsolete Vibe bridge snapshot error after the
+ * source has independently become a fully verified single-video Ready draft.
+ * The caller must revalidate the actual request; this helper never trusts the
+ * stale R2 job as media/approval authority. Preserve all normal claim gates.
+ */
+export async function readyProductionRecoverVerifiedVibeBridge(bucket, ideaId) {
+  assertBucket(bucket);
+  const key = readyProductionJobKey(ideaId);
+  const initial = await read(bucket, key);
+  if (!initial) return { job: null, revived: false };
+  const obsolete = "Autonomous bridge not ready: Master media must be Ready before source-to-production handoff.";
+  if (initial.value.status !== "retry_wait"
+      || !String(initial.value.last_error || "").startsWith(obsolete)
+      || initial.value.vibe_bridge_snapshot_recovered_at
+      || (initial.value.owner && Number(initial.value.lease_expires_ms || 0) > Date.now())) {
+    return { job: initial.value, revived: false };
+  }
+  const recovered = await cas(bucket, key, (value) => {
+    if (value.status !== "retry_wait"
+        || !String(value.last_error || "").startsWith(obsolete)
+        || value.vibe_bridge_snapshot_recovered_at
+        || (value.owner && Number(value.lease_expires_ms || 0) > Date.now())) return null;
+    return {
+      ...value,
+      status: "queued",
+      stage: "recovered_vibe_bridge_snapshot",
+      next_attempt_ms: 0,
+      owner: null,
+      lease_expires_ms: 0,
+      last_error: null,
+      vibe_bridge_snapshot_recovered_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  });
+  return { job: recovered,
+    revived: recovered.status === "queued" && recovered.stage === "recovered_vibe_bridge_snapshot" };
+}
+
 export async function readyProductionRead(bucket, ideaId) {
   assertBucket(bucket);
   return (await read(bucket, readyProductionJobKey(ideaId)))?.value || null;

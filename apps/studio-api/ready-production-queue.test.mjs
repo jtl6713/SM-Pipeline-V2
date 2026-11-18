@@ -5,6 +5,7 @@ import {
   READY_PRODUCTION_MAX_CONCURRENCY,
   readyProductionClaim,
   readyProductionEnqueue,
+  readyProductionRecoverVerifiedVibeBridge,
   readyProductionFinishClaim,
   readyProductionList,
   readyProductionOutputsAwaitingFinalApproval,
@@ -409,4 +410,31 @@ test("a verified Vibe idea can use the planning slot without starving due review
     { idea_id: "old-photo", profile_id: "chicago", status: "queued" },
   ], { nowMs: Date.parse("2026-11-18T03:00:00Z"), priorityIdeaIds: ["new-vibe"] });
   assert.deepEqual(notDue.map((job) => job.idea_id), ["old-photo"]);
+});
+
+test("only the verified obsolete Vibe bridge snapshot error is requeued once", async () => {
+  const bucket = new FakeR2();
+  const ideaId = "recVibeBridge01001";
+  await readyProductionEnqueue(bucket, { ideaId, profileId: "recProfileChicago01" });
+  const lease = await readyProductionClaim(bucket, ideaId, "test-owner");
+  assert.ok(lease);
+  const oldError = "Autonomous bridge not ready: Master media must be Ready before source-to-production handoff. Platform output plan must be Ready before source-to-production handoff.";
+  await readyProductionFinishClaim(bucket, lease, {
+    status: "retry_wait", stage: "retry", last_error: oldError,
+    retry_delay_ms: 30 * 60 * 1000,
+  });
+  const recovered = await readyProductionRecoverVerifiedVibeBridge(bucket, ideaId);
+  assert.equal(recovered.revived, true);
+  assert.equal(recovered.job.status, "queued");
+  assert.equal(recovered.job.next_attempt_ms, 0);
+  assert.ok(recovered.job.vibe_bridge_snapshot_recovered_at);
+  assert.equal((await readyProductionRecoverVerifiedVibeBridge(bucket, ideaId)).revived, false);
+  const otherId = "recVibeBridge01002";
+  await readyProductionEnqueue(bucket, { ideaId: otherId });
+  const otherLease = await readyProductionClaim(bucket, otherId, "test-owner-2");
+  await readyProductionFinishClaim(bucket, otherLease, {
+    status: "retry_wait", last_error: "Real media authority is missing",
+    retry_delay_ms: 30 * 60 * 1000,
+  });
+  assert.equal((await readyProductionRecoverVerifiedVibeBridge(bucket, otherId)).revived, false);
 });
