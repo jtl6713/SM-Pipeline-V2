@@ -140,6 +140,10 @@ def process_request(
             client.update_record(CAROUSEL_SLIDES_TABLE, row["id"], {
                 "Deleted From Carousel": True,
                 "Platform Output": [],
+                # Supabase stores the former Airtable lookup value in fields.
+                # Clearing only the link can leave stale PO_Output_ID and
+                # the same detached row will still match FB0's FIND formula.
+                "PO_Output_ID": [],
             }, typecast=True)
         # Read back from Airtable, not an assumed successful mutation: publication
         # is gated on the exact ordered set being present and approved.
