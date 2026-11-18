@@ -34,6 +34,7 @@
     needsEyesSearch: "",
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
+    submissionIntentIds: new Set(),
     heldCreativeAccepted: new Set(),
     submittingBatch: false,
     batch: null,
@@ -121,6 +122,37 @@
   function factoryRecoveringIds() {
     return new Set(factoryRecoveryEntries().flatMap(({ saved }) => saved.ids || []));
   }
+
+  // Submitted work belongs in Active Approvals, not the selectable Needs Eyes
+  // lane. Include the click itself, saved/recovered requests and server Activity
+  // so a slow Desk response or browser reload cannot resurrect checkboxes.
+  function factorySubmittedApprovalIds() {
+    const ids = new Set();
+    const add = (values) => {
+      for (const id of values || []) {
+        if (/^rec[A-Za-z0-9]+$/.test(String(id))) ids.add(String(id));
+      }
+    };
+    add(state.submissionIntentIds);
+    add(state.submittingOutputIds);
+    add(Object.keys(recentFactoryAccepted()));
+    add(pendingFactoryApproval()?.ids);
+    for (const { saved } of factoryRecoveryEntries()) add(saved.ids);
+    for (const batch of factoryActivityRows(state.batch)) {
+      add((batch?.items || []).map(item => item?.id));
+      for (const child of batch?.children || []) {
+        add((child?.items || []).map(item => item?.id));
+      }
+    }
+    return ids;
+  }
+
+  function factoryVisibleNeedsEyes(cards) {
+    const submitted = factorySubmittedApprovalIds();
+    return (cards || []).filter(card =>
+      card?.kind !== "output" || !submitted.has(String(card?.id || "")));
+  }
+
   const FACTORY_WAITING_SELECTION_KEY = "studio.factory.waiting-selection.v1";
   function waitingFactorySelection() {
     try { return JSON.parse(localStorage.getItem(FACTORY_WAITING_SELECTION_KEY) || "[]"); } catch { return []; }
@@ -705,19 +737,13 @@
   function factoryMatchesProfile(card) {
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
   }
-  function readyFactoryOutputs(includeOtherProfiles=false) {
-    // Hide only accepted outputs that left Ready for Review. A UX fence must
-    // not zero the selection counter while Needs Eyes still shows RFR checkboxes.
-    const accepted = recentFactoryAccepted();
-    const submitting = state.submittingOutputIds || new Set();
+  function readyFactoryOutputs(includeOtherProfiles=false, includeClickIntent=false) {
+    const submitted = factorySubmittedApprovalIds();
     return (state.desk?.lanes?.needs_eyes || [])
       .filter((card) => {
         if (!(includeOtherProfiles || factoryMatchesProfile(card)) || card?.kind !== "output") return false;
-        if (submitting.has(card.id)) return false;
-        if (accepted[String(card.id || "")]
-            && String(card?.output_status || "").trim().toLowerCase() !== "ready for review") {
-          return false;
-        }
+        if (submitted.has(String(card.id || ""))
+            && !(includeClickIntent && state.submissionIntentIds.has(card.id))) return false;
         return canReviewActions(card) && canSelectBatchOutput(card);
       })
       .map(withResolvedFactoryProfile);
@@ -1425,8 +1451,12 @@
         updateFactoryBatchToolbar();
         if (state.desk && before !== JSON.stringify([state.batchRollout,state.batchGlobal])) renderDesk(state.desk);
       }
+      const hiddenBefore = [...factorySubmittedApprovalIds()].sort().join("|");
       renderFactoryBatchActivity(batch);
       reconcilePendingGlobalSelection(batch);
+      if (state.desk && hiddenBefore !== [...factorySubmittedApprovalIds()].sort().join("|")) {
+        renderDesk(state.desk);
+      }
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       reconcilePersistedFactoryPending().catch(() => {});
@@ -1590,7 +1620,7 @@
     }
     if (state.submittingBatch) return;
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
-    const selected = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id)
+    const selected = readyFactoryOutputs(true, true).filter(card => state.selectedOutputs.has(card.id)
       && (!requestedIds || requestedIds.includes(card.id)));
     const recovering = factoryRecoveringIds();
     if (!requestedIds) {
@@ -3240,11 +3270,9 @@
     state.desk = desk;
     syncFactoryFilterOptions();
     const searching = Boolean(String(state.needsEyesSearch || "").trim());
-    // The server's current Needs Eyes lane owns both the count and visible rows.
-    // A 48-hour browser-side "recently accepted" hint is NOT a completed Airtable
-    // approval: uncertain/failed batches can leave the output Ready for Review.
-    // Keep such rows visible and counted. canReviewActions still prevents a
-    // duplicate submit while the saved approval is being reconciled.
+    // Display exactly the still-selectable review queue, excluding every
+    // submitted output while durable Activity owns its progress and failures.
+    const visibleNeedsEyes = factoryVisibleNeedsEyes(desk.lanes?.needs_eyes);
     const filtered = (cards) => (cards || []).filter(card =>
       searching || factoryMatchesProfile(card));
     const visibleDesk = desk;
@@ -3252,19 +3280,19 @@
     // filter, only rows in the returned snapshot are counted and labelled.
     const summary = factoryProfileId() ? {
       auto_high: filtered(desk.lanes?.auto_high).length,
-      needs_eyes: filtered(desk.lanes?.needs_eyes).length,
+      needs_eyes: filtered(visibleNeedsEyes).length,
       needs_assets_pile: filtered(desk.lanes?.needs_assets).length,
       needs_assets_max: desk.summary?.needs_assets_max || 3,
       manual: filtered(desk.lanes?.manual).length,
     } : { ...desk.summary,
-      needs_eyes: filtered(desk.lanes?.needs_eyes).length,
+      needs_eyes: filtered(visibleNeedsEyes).length,
     };
     renderSummary(summary);
     const visibleNote = $("factoryProfileScopeNote");
     if (visibleNote) visibleNote.textContent = factoryProfileId()
       ? "Filtered counts show visible queue rows." : "Global counts from the Factory queue.";
     renderLane("factoryLaneAutoHigh", filtered(desk.lanes?.auto_high), "Nothing in active produce/render right now.", { lane: "auto_high" });
-    renderLane("factoryLaneNeedsEyes", filtered(desk.lanes?.needs_eyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
+    renderLane("factoryLaneNeedsEyes", filtered(visibleNeedsEyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
     renderLane("factoryLaneNeedsAssets", filtered(desk.lanes?.needs_assets), "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
     renderLane("factoryLaneManual", filtered(desk.lanes?.manual), "No stuck or failed work in view.", { lane: "manual" });
     renderLane(
@@ -3531,16 +3559,30 @@
   });
 
   $("factoryBatchSubmit")?.addEventListener("click", () => {
-    submitFactoryBatchApprovals().catch((error) => setBatchSubmissionError(error.message || String(error)));
+    if (state.submittingBatch) return;
+    // Do this synchronously on click, before the policy fetch or approval POST.
+    // If preflight definitively refuses the request, the finally block restores
+    // the selectable rows. Accepted/uncertain batches remain hidden via the
+    // durable pending, recovery, accepted and Activity fences.
+    const clicked = readyFactoryOutputs(true)
+      .filter(card => state.selectedOutputs.has(card.id))
+      .map(card => card.id);
+    for (const id of clicked) state.submissionIntentIds.add(id);
+    if (clicked.length && state.desk) renderDesk(state.desk);
+    submitFactoryBatchApprovals()
+      .catch((error) => setBatchSubmissionError(error.message || String(error)))
+      .finally(() => {
+        for (const id of clicked) state.submissionIntentIds.delete(id);
+        if (state.desk) renderDesk(state.desk);
+      });
   });
   $("factoryBatchClear")?.addEventListener("click", () => {
     if (state.submittingBatch) return;
     localStorage.removeItem(FACTORY_WAITING_SELECTION_KEY);
     state.selectedOutputs.clear();
     const dropped = clearFactoryRecoveryFences({ onlyUnrecoverable: false });
-    // Operator Clear is an explicit reset: drop the local "already accepted"
-    // UX fence so still-Ready-for-Review checkboxes can count toward Submit.
-    try { localStorage.removeItem(FACTORY_ACCEPTED_OUTPUTS_KEY); } catch {}
+    // Clear selection does not cancel a server-owned approval. Never restore
+    // accepted outputs to Needs Eyes just by clearing the checkbox selection.
     setBatchSubmissionError(null);
     setStatus(dropped
       ? `Selection cleared. Removed ${dropped} stuck saved submission${dropped === 1 ? "" : "s"} from this browser.`
