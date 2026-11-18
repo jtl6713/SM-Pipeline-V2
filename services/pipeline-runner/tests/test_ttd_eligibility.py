@@ -69,6 +69,70 @@ def test_ttd0_gates():
     )
 
 
+def test_ttd_retry_backoff_and_attempt_ceiling():
+    future = (datetime.now(timezone.utc) + timedelta(minutes=25)).isoformat()
+    for stage in ("TTD0_ASSETS", "TTD0_ROUTE"):
+        base = dict(
+            Platform="TikTok", Auto_Publish_Enabled=True,
+            TikTok_Draft_Status="Retry Pending", Publish_Error_Stage=stage,
+        )
+        assert ttd0_eligibility_reason(_record(**base, Publish_Attempt_Count=5)) == (
+            "tiktok_draft_retry_limit_reached"
+        )
+        assert ttd0_eligibility_reason(_record(**base, Publish_Attempt_Count=4, Publish_Next_Retry_At=future)) == (
+            "tiktok_retry_backoff"
+        )
+        assert ttd0_eligibility_reason(_record(**base, Publish_Attempt_Count=4)) is None
+
+    for stage in ("TTD1_PHOTO_INIT", "TTD_CAPACITY"):
+        base = dict(
+            Platform="TikTok", Auto_Publish_Enabled=True,
+            TikTok_Draft_Status="Retry Pending", Publish_Error_Stage=stage,
+        )
+        assert ttd1_eligibility_reason(_record(**base, Publish_Attempt_Count=5)) == (
+            "tiktok_draft_retry_limit_reached"
+        )
+        assert ttd1_eligibility_reason(_record(**base, Publish_Attempt_Count=4, Publish_Next_Retry_At=future)) == (
+            "tiktok_retry_backoff"
+        )
+        assert ttd1_eligibility_reason(_record(**base, Publish_Attempt_Count=4)) is None
+
+    # A genuinely fresh, intentionally rearmed stage is not blocked just
+    # because its prior total attempt counter was high.
+    assert ttd0_eligibility_reason(_record(
+        Platform="TikTok", Auto_Publish_Enabled=True,
+        TikTok_Draft_Status="Ready for Assets", Publish_Attempt_Count=701,
+    )) is None
+
+
+def test_ttd1_unknown_remote_result_is_not_retried():
+    class FakeClient:
+        def __init__(self):
+            self.updates = []
+
+        def update_record(self, table, record_id, fields):
+            self.updates.append((table, record_id, fields))
+            return {"id": record_id, "fields": fields}
+
+    client = FakeClient()
+    result = ttd1_module._init_failure(
+        client, _record(Platform="TikTok", Output_Title="Gantry Sunset Minute"),
+        "recABCDEFGHIJKLMN", {}, status_code=500,
+        body={"raw": "<html>upstream error</html>"}, stage="TTD1_PHOTO_INIT",
+        message="TikTok photo init HTTP 500", attempt=1,
+    )
+    assert result["terminal"] is True
+    assert result["ambiguous_remote_outcome"] is True
+    assert len(client.updates) == 1
+    fields = client.updates[0][2]
+    assert fields["Publish_Status"] == "Failed"
+    assert fields["TikTok_Draft_Status"] == "Manual Fallback"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Publish_Next_Retry_At"] is None
+    assert fields["Publish_Error_Stage"] == "TTD1_PHOTO_INIT"
+    assert fields["Manual_Fallback_Required"] is True
+
+
 def test_ttd1_and_poll_gates():
     ready = _record(Platform="TikTok", Auto_Publish_Enabled=True, TikTok_Draft_Status="Ready for Delivery")
     assert ttd1_eligibility_reason(ready) is None
