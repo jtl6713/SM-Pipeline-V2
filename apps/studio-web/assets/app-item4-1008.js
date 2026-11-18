@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1007-production-plan-readback";
+  const BUILD_ID = "item4-0.6.1008-prepare-saved-media";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -11672,6 +11672,46 @@ function timedScriptAssetLabel(asset, index) {
     </article>`;
   }
 
+  function item4CanConfirmMediaForPrepare(status = item4Workspace) {
+    // The drawer can show Needs Plan / Uploading after the server has already
+    // persisted all masters. A saved asset makes a READ-ONLY verification safe.
+    // Do not unlock while local uploads, reorder or removal are in progress.
+    if (item4Uploading || item4PendingRemoves.size || item4ReorderBusy) return false;
+    return (Array.isArray(status?.assets) ? status.assets : []).some(asset => {
+      const id = String(asset?.id || "").trim();
+      return Boolean(id) && !id.startsWith("local:") && !id.startsWith("staged:");
+    });
+  }
+
+  async function item4ConfirmSavedWorkspaceForPrepare(requestId) {
+    // Snapshot bypasses expensive status reconciliation and reads saved
+    // master/plan state without writing or rebuilding any existing crops.
+    const snapshot = await api(`/api/production-requests/${encodeURIComponent(requestId)}/item4?snapshot=1`, {
+      timeoutMs: 20000, retries: 0,
+    });
+    if (activeProductionRequest?.id !== requestId) return false;
+    if (item4Uploading || item4PendingRemoves.size || item4ReorderBusy) return false;
+    if (!Array.isArray(snapshot?.assets) || !snapshot.assets.length) {
+      throw new Error("Studio could not confirm the saved photos. Refresh this request; do not upload them again.");
+    }
+    if (snapshot.assets.some(asset => {
+      const id = String(asset?.id || "");
+      return !id || id.startsWith("local:") || id.startsWith("staged:");
+    })) {
+      throw new Error("Some photos are still being saved. Finish the upload before preparing frames.");
+    }
+    // Invalidate any earlier in-flight full /item4 load so it cannot repaint
+    // the verified Ready state with an older Needs Plan snapshot.
+    item4WorkspaceLoadSequence += 1;
+    item4WorkspaceRequestId = requestId;
+    renderItem4Workspace({
+      ...(item4Workspace || {}),
+      ...snapshot,
+      assets: snapshot.assets,
+    });
+    return true;
+  }
+
   function renderItem4Variants(status) {
     const badge = $("item4VariantStatus");
     const hint = $("item4VariantHint");
@@ -11716,18 +11756,18 @@ function timedScriptAssetLabel(asset, index) {
         readyCount,
         targetCount,
         inFlight: item4PreparingVariants,
-        canAutoPlan: Boolean(status?.assets?.length) && String(status?.assets_status || "") === "Ready",
+        canAutoPlan: item4CanConfirmMediaForPrepare(status),
       });
       button.disabled = view.disabled;
       button.textContent = view.label;
     }
     if (hint) {
-      const canAutoPlan = Boolean(status?.assets?.length) && String(status?.assets_status || "") === "Ready";
+      const canAutoPlan = item4CanConfirmMediaForPrepare(status);
       hint.textContent = status?.plan_status !== "Ready"
         ? (canAutoPlan
           ? (String(status?.plan_status || "") === "Needs Review"
             ? "Platform plan needs aspect ratios. Click Prepare to rebuild the plan, then prepare frames."
-            : "Click Prepare. Studio will build the platform plan first, then prepare frames.")
+            : "Click Prepare. Studio will verify your saved media and platform plan first.")
           : "Finish adding media before preparing frames.")
         : variantStatus === "Preparing"
           ? (clipRequest
@@ -12374,18 +12414,26 @@ function timedScriptAssetLabel(asset, index) {
 
   async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
-    if (item4MastersNeedSave(item4Workspace || {})) {
-      const message = item4UnsavedPrepareMessage();
-      setRequestMessage(message, "error-text");
-      item4ShowVariantError(message);
-      return;
-    }
-    // Prepare is an explicit action to use the currently visible selections.
-    // Recommend formats is intentionally non-persistent, so Prepare must save
-    // those choices rather than silently refusing to advance.
+    // Prepare may be offered even when the full workspace refresh is stale.
+    // A read-only server snapshot proves readiness before any variants POST.
     const requestId = activeProductionRequest.id;
     const requestedKeys = productionOutputSelectionKeys();
     try {
+      if (item4CanConfirmMediaForPrepare(item4Workspace)
+        && (String(item4Workspace?.assets_status || "") !== "Ready"
+          || String(item4Workspace?.plan_status || "") !== "Ready")) {
+        setRequestMessage("Checking saved photos and platform plan…", "success");
+        const confirmed = await item4ConfirmSavedWorkspaceForPrepare(requestId);
+        if (activeProductionRequest?.id !== requestId || !confirmed) return;
+      }
+      if (item4MastersNeedSave(item4Workspace || {})) {
+        throw new Error(item4UnsavedPrepareMessage());
+      }
+      if (String(item4Workspace?.assets_status || "") !== "Ready") {
+        throw new Error("Studio has not confirmed that all media is ready. The saved photos are preserved; use Refresh to recheck.");
+      }
+      // Prepare uses operator-selected formats. Only genuine missing plans
+      // proceed to the existing explicit build, never auto-approval.
       if (item4OutputSelectionDirty) {
         if (!requestedKeys.length) throw new Error("Choose at least one output format before preparing frames.");
         setRequestMessage("Saving selected formats before preparing frames…", "success");
