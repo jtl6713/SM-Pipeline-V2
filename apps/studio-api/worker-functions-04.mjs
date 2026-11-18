@@ -14742,6 +14742,15 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
         return { waiting: true, production_request_id: requestId, idea_id: idea.id };
       }
     }
+    // The variant reconciler may return only the patched status fields under
+    // Supabase Phase 6 write authority. Preflight needs the complete persisted
+    // request (master/plan/variant manifests), never a partial PATCH echo.
+    // Revalidate Ready after the fresh read; do not bypass any bridge checks.
+    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (!autonomousPlanVariantsReady(current)) {
+      return { waiting: true, waiting_reason: "variants_still_preparing",
+        production_request_id: requestId, idea_id: idea.id };
+    }
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
       const blockers = (preflight.issues || []).filter((issue) => !/preview image is still catching up/i.test(String(issue || "")));
