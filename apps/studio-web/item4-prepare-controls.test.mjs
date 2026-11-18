@@ -172,3 +172,47 @@ test("Prepare reuses the exact persisted Ready plan without resetting selected o
   assert.match(prepare, /!item4SavedPlanMatchesCurrentSelection\(item4Workspace\?\.plan, requestedKeys\)/);
   assert.match(runtime, /if \(options\.throwOnError === true\) throw error;/);
 });
+
+test("saved master photos unlock a read-only Prepare check despite stale workspace statuses", async () => {
+  const fs = await import("node:fs");
+  const runtime = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
+  const first = runtime.indexOf("  function item4CanConfirmMediaForPrepare(");
+  const second = runtime.indexOf("  async function item4ConfirmSavedWorkspaceForPrepare(", first);
+  assert.ok(first >= 0 && second > first);
+  const source = runtime.slice(first, second);
+  const getCanConfirm = (uploading, pendingRemoves, reordering) =>
+    new Function("item4Workspace", "item4Uploading", "item4PendingRemoves", "item4ReorderBusy",
+      source + "; return item4CanConfirmMediaForPrepare;")(
+      null, uploading, new Set(pendingRemoves), reordering);
+  const persisted = { plan_status: "Needs Plan", assets_status: "Uploading",
+    assets: [{ id: "d9af19ec3cdc49a4ab", name: "Getty Center 1" }] };
+  assert.equal(getCanConfirm(false, [], false)(persisted), true);
+  assert.equal(getCanConfirm(false, [], false)({ assets: [{ id: "local:1" }] }), false);
+  assert.equal(getCanConfirm(false, [], false)({ assets: [{ id: "staged:1" }] }), false);
+  assert.equal(getCanConfirm(true, [], false)(persisted), false);
+  assert.equal(getCanConfirm(false, ["asset-to-remove"], false)(persisted), false);
+  assert.equal(getCanConfirm(false, [], true)(persisted), false);
+  assert.match(runtime, /canAutoPlan: item4CanConfirmMediaForPrepare\(status\)/);
+  assert.match(runtime, /const canAutoPlan = item4CanConfirmMediaForPrepare\(status\)/);
+  assert.match(runtime, /\?snapshot=1/);
+  const start = runtime.indexOf("  async function prepareItem4Variants(");
+  const end = runtime.indexOf("  function renderItem4Workspace(", start);
+  const prepare = runtime.slice(start, end);
+  assert.match(prepare, /await item4ConfirmSavedWorkspaceForPrepare\(requestId\)/);
+  assert.match(prepare, /if \(item4MastersNeedSave\(item4Workspace \|\| \{\}\)\)/);
+  assert.match(prepare, /String\(item4Workspace\?\.assets_status \|\| ""\) !== "Ready"/);
+});
+
+test("Recommend and Save output selections re-read saved status instead of leaving Not Started", async () => {
+  const fs = await import("node:fs");
+  const runtime = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
+  const start = runtime.indexOf("  async function saveItem4OutputSelection(");
+  const end = runtime.indexOf("  function productionOutputSelectionKeys(", start);
+  const save = runtime.slice(start, end);
+  assert.match(save, /await item4ConfirmSavedWorkspaceForPrepare\(requestId\)/);
+  const startBuild = runtime.indexOf("  async function buildItem4Plan(");
+  const endBuild = runtime.indexOf("  function selectedRequestPlatforms(", startBuild);
+  const build = runtime.slice(startBuild, endBuild);
+  assert.match(build, /await item4ConfirmSavedWorkspaceForPrepare\(activeProductionRequest\.id\)/);
+  assert.match(build, /Platform plan verified and saved/);
+});
