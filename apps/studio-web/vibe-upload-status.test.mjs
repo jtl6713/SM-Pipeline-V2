@@ -147,7 +147,7 @@ test("Confirmed Vibe uploads override stale stalled UI and suppress transfer ret
   const render = section("function renderVibeUploadUi(", "function setVibeUploadUi(");
   assert.match(render, /savedUploadConfirmed/);
   assert.match(render, /&& !savedUploadConfirmed/);
-  const code = markup + "\\n globalThis.testMarkup = vibeUploadProgressMarkup;";
+  const code = markup + "\n globalThis.testMarkup = vibeUploadProgressMarkup;";
   const context = vm.createContext({
     globalThis: {},
     item4Workspace: { assets: [{ id: "asset-1", name: "video.mov", media_kind: "video", upload_status: "complete", compression_status: "compressing", compression_progress: 40 }] },
