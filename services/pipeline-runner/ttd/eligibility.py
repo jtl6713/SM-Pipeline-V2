@@ -74,6 +74,22 @@ def _retry_not_due(record: dict[str, Any]) -> bool:
         return False
 
 
+def _retry_attempt_ceiling_reached(record: dict[str, Any], *, limit: int = 5) -> bool:
+    """Fence a repeatedly failed stage until a verified repair explicitly rearms it.
+
+    The current attempt counter spans stages, so this is deliberately
+    conservative and only applies while the record is Retry Pending.
+    An invalid nonblank counter must not allow unlimited provider retries.
+    """
+    raw = field_str(record, "Publish_Attempt_Count").strip()
+    if not raw:
+        return False
+    try:
+        return int(raw) >= limit
+    except ValueError:
+        return True
+
+
 def _inbox_lead_hold(record: dict[str, Any]) -> str | None:
     if tiktok_inbox_is_due(record):
         return None
@@ -109,7 +125,15 @@ def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
     status = _ci(field_str(record, "TikTok_Draft_Status"))
     if status == _ci(STATUS_WAITING_FOR_SCHEDULE):
         return "tiktok_draft_waiting_for_schedule"
-    if status == _ci(STATUS_READY_FOR_ASSETS) or is_retry_for(record, STAGE_TTD0):
+    if status == _ci(STATUS_READY_FOR_ASSETS):
+        if not tiktok_inbox_is_due(record):
+            return "tiktok_draft_before_inbox_lead_window"
+        return None
+    if is_retry_for(record, STAGE_TTD0):
+        if _retry_attempt_ceiling_reached(record):
+            return "tiktok_draft_retry_limit_reached"
+        if _retry_not_due(record):
+            return "tiktok_retry_backoff"
         if not tiktok_inbox_is_due(record):
             return "tiktok_draft_before_inbox_lead_window"
         return None
@@ -142,6 +166,8 @@ def ttd1_eligibility_reason(
     if status in {_ci(STATUS_READY_FOR_DELIVERY), _ci(STATUS_WAITING_FOR_SCHEDULE)}:
         return _inbox_lead_hold(record) or ("tiktok_retry_backoff" if _retry_not_due(record) else None)
     if is_retry_for(record, STAGE_TTD1) or is_retry_for(record, STAGE_CAPACITY):
+        if _retry_attempt_ceiling_reached(record):
+            return "tiktok_draft_retry_limit_reached"
         return _inbox_lead_hold(record) or ("tiktok_retry_backoff" if _retry_not_due(record) else None)
     return "tiktok_draft_not_ready_for_delivery"
 
