@@ -9993,9 +9993,10 @@ export async function studioSweepPublishedInsights(env, options = {}) {
     const profileId = profileRecord.id;
     const profileFormula = contentProfileFilterFormula(profileRecord);
     const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      // Only need enough backlog to pick perProfileLimit due rows. A 250-row
-      // scan every cron tick was a top Airtable credit burner (3 pages/profile).
-      limit: Math.max(perProfileLimit * 4, 40),
+      // Under Supabase SoR, allow enough published-date candidates to give all
+      // four platforms a chance, even when Meta publishes more frequently than
+      // YouTube. Still bounded; no Airtable archive reads or publish writes.
+      limit: Math.max(perProfileLimit * 12, 100),
       sortField: "Published_At",
       sortDirection: "desc",
       filterFormula: 'AND(' + profileFormula + ',{Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
@@ -10019,7 +10020,25 @@ export async function studioSweepPublishedInsights(env, options = {}) {
       return aNext - bNext;
     });
 
-    const selected = eligible.slice(0, perProfileLimit);
+    // One platform's volume, expired token, or missing native IDs must not
+    // monopolize every cron slot. Preserve priority within each platform.
+    const byPlatform = new Map(
+      ["Instagram", "Facebook", "YouTube", "TikTok"].map((platform) => [
+        platform, eligible.filter((row) => String(f(row, "Platform") || "").trim() === platform),
+      ]),
+    );
+    const selected = [];
+    while (selected.length < perProfileLimit) {
+      let added = false;
+      for (const platform of byPlatform.keys()) {
+        const next = byPlatform.get(platform).shift();
+        if (!next) continue;
+        selected.push(next);
+        added = true;
+        if (selected.length >= perProfileLimit) break;
+      }
+      if (!added) break;
+    }
     profileStats[profile] = {
       profile_id: profileId,
       scanned: rows.length,
