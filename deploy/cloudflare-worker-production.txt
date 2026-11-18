@@ -1409,3 +1409,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-18: Deploy verified Vibe Cut Ready-to-Produce planning priority after original Drive/media receipt; preserve two-slot monitor fairness, per-profile caps, retry leases, all human Final Approval and no publication.
 
 2026-11-18: Deploy verified single-video Vibe variant pass-through recovery after master Drive/media authority, preserving explicit Prepare for non-Vibe, no photo-crop queue, no automatic publishing, and human Final Approval.
+
+2026-11-18: Deploy merged PR #2200 Idea direct photo upload Worker, Supabase photo linkage, and classified-photo autonomous resume. Preserve current bindings, operator Factory approval, and no automatic publishing; original merge 3b7f9713801cc9359c1ca10f02538a780542b78a.
