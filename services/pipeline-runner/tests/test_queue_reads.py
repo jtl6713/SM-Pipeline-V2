@@ -70,3 +70,17 @@ def test_shape_densifies_platform_variant_crop_fields():
     assert fields["Source_Extension"] == "jpg"
     assert fields["Source_Media_Asset"] == ["recMedia1"]
     assert fields["Aspect_Ratio"] == "9:16"
+
+
+def test_master_original_source_locator_survives_supabase_queue_read():
+    row = _shape({
+        "airtable_record_id": "recMaster1",
+        "status": "Pending",
+        "payload": {
+            "asset_kind": "Master Original",
+            "source_r2_key": "studio/master-assets/recReq/video.mov",
+            "source_url": "https://media.chicagoshining.com/studio/previews/video.mp4",
+        },
+    })
+    assert row["fields"]["Source_R2_Key"] == "studio/master-assets/recReq/video.mov"
+    assert row["fields"]["Source_URL"].endswith("/video.mp4")
