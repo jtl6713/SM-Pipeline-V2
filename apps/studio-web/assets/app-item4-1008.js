@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1006-idea-upload-dedup";
+  const BUILD_ID = "item4-0.6.1007-production-plan-readback";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12344,6 +12344,34 @@ function timedScriptAssetLabel(asset, index) {
     return true;
   }
 
+  function item4SavedPlanMatchesCurrentSelection(plan, requestedKeys = []) {
+    const items = Array.isArray(plan?.items) ? plan.items : [];
+    if (!items.length || items.some(item => !String(item?.platform || "").trim()
+      || !String(item?.output_type || "").trim() || !String(item?.aspect_ratio || "").trim())) return false;
+    const plannedKeys = new Set(items.map(item => `${item.platform}::${item.output_type}`));
+    const chosenKeys = new Set(Array.isArray(requestedKeys) ? requestedKeys : []);
+    return !chosenKeys.size || (plannedKeys.size === chosenKeys.size
+      && [...chosenKeys].every(key => plannedKeys.has(key)));
+  }
+
+  async function item4AdoptReadyPlanFromReadback(requestId, requestedKeys) {
+    try {
+      const saved = await api(`/api/production-requests/${encodeURIComponent(requestId)}/plan`, {
+        timeoutMs: 20000, retries: 0,
+      });
+      if (activeProductionRequest?.id !== requestId) return false;
+      if (String(saved?.status || "") !== "Ready"
+        || !item4SavedPlanMatchesCurrentSelection(saved?.plan, requestedKeys)) return false;
+      item4Workspace = { ...(item4Workspace || {}), plan_status: "Ready", plan: saved.plan };
+      renderItem4Plan(item4Workspace);
+      syncEzPlanChrome();
+      return true;
+    } catch (error) {
+      console.warn("Saved platform plan readback deferred; Prepare will use the normal build path", error);
+      return false;
+    }
+  }
+
   async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
     if (item4MastersNeedSave(item4Workspace || {})) {
@@ -12368,20 +12396,35 @@ function timedScriptAssetLabel(asset, index) {
         await loadItem4Workspace(activeProductionRequest);
       }
       if (String(item4Workspace?.plan_status || "") !== "Ready") {
-        setRequestMessage("Building the platform plan before preparing frames…", "success");
-        await buildItem4Plan();
-        if (activeProductionRequest?.id !== requestId) return;
-        if (String(item4Workspace?.plan_status || "") !== "Ready") {
+        // The saved Supabase plan can be Ready while a heavy /item4 workspace
+        // reconciliation or overlapping poll still exposes Needs Plan. Read the
+        // authoritative plan first instead of destructively rebuilding good crops.
+        const savedReady = await item4AdoptReadyPlanFromReadback(requestId, requestedKeys);
+        if (!savedReady) {
+          setRequestMessage("Building the platform plan before preparing frames…", "success");
+          await buildItem4Plan({ throwOnError: true });
+          if (activeProductionRequest?.id !== requestId) return;
+          // An overlapping /item4 poll can discard the fresh Ready status;
+          // confirm the exact persisted plan independently before refusing.
+          await item4AdoptReadyPlanFromReadback(requestId, requestedKeys);
+          if (String(item4Workspace?.plan_status || "") === "Ready") {
+            // Server recommendations must not overwrite operator-selected formats.
+            if (requestedKeys.length && restoreProductionOutputSelection(requestedKeys)) {
+              await saveProductionRequestOutputs(activeProductionRequest);
+              item4OutputSelectionDirty = false;
+              await loadItem4Workspace(activeProductionRequest);
+              if (String(item4Workspace?.plan_status || "") !== "Ready") {
+                await item4AdoptReadyPlanFromReadback(requestId, requestedKeys);
+              }
+            }
+          }
+        }
+        if (String(item4Workspace?.plan_status || "") !== "Ready"
+          || !item4SavedPlanMatchesCurrentSelection(item4Workspace?.plan, requestedKeys)) {
           const planStatus = String(item4Workspace?.plan_status || "Needs Plan");
           throw new Error(planStatus === "Needs Review"
             ? "The platform plan is still missing aspect ratios. Tap Recommend formats, then Prepare again."
-            : "The platform plan is not ready. Check the recommendation message and try Prepare again.");
-        }
-        // Server plan recommendations must not overwrite user-edited formats.
-        if (requestedKeys.length && restoreProductionOutputSelection(requestedKeys)) {
-          await saveProductionRequestOutputs(activeProductionRequest);
-          item4OutputSelectionDirty = false;
-          await loadItem4Workspace(activeProductionRequest);
+            : "The saved platform plan could not be confirmed. Try Refresh and Prepare again; your selected photos and outputs are preserved.");
         }
       }
     } catch (error) {
@@ -13789,6 +13832,7 @@ function timedScriptAssetLabel(asset, index) {
           : (error.message || "Could not build the platform plan."),
         "error-text"
       );
+      if (options.throwOnError === true) throw error;
     } finally {
       if (button) {
         button.hidden = false;
