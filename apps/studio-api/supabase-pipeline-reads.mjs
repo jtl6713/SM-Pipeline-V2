@@ -7386,13 +7386,17 @@ export function translateProductionRequestFormula(formula) {
 }
 
 /** Allowlisted Production Request list formulas under Phase6 SoR. */
-/** Only explicitly reopened promoted productions; never page through all promoted records. */
+/** Explicit Factory revisions may be Draft/Ready after send-back or still Promoted.
+ * The marker, not the original request status, is the authoritative evidence
+ * that an already-promoted content package is editable in Production.
+ * Restrict the query to marked rows; never load all promoted packages.
+ */
 export async function listSupabaseRevisionOpenProductionRequests(env, { limit = 100 } = {}) {
   if (!studioSupabaseConfigured(env)) return [];
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
   const rows = await supabaseRest(
     env,
-    `production_requests?request_status=eq.Promoted&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
+    `production_requests?request_status=in.(Draft,Ready,Promoted)&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .map(airtableShapedProductionRequestFromSupabase)
