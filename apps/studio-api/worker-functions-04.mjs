@@ -18286,6 +18286,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
                 policy: parentId ? globalPolicy : null,
+                pilotRollout: parentId ? null : rollout,
               });
               checkpoint("supabase_approval_finished");
               return result;
