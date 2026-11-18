@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1008-prepare-saved-media";
+  const BUILD_ID = "item4-0.6.1009-prepare-error-visibility";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12270,7 +12270,7 @@ function timedScriptAssetLabel(asset, index) {
           ? item4UnsavedPrepareMessage()
           : (clips
             ? "Prepare did not finish attaching those clips. Click Prepare again."
-            : "Prepare did not finish. Click Prepare again.");
+            : "Frame preparation did not start on the server. No frame job is recorded; the saved photos and outputs are unchanged.");
         setRequestMessage(message, "error-text");
         item4ShowVariantError(message);
         renderItem4Variants(item4Workspace || {});
@@ -12346,13 +12346,10 @@ function timedScriptAssetLabel(asset, index) {
 
   function item4IsRetryablePrepareFailure(error, status) {
     const variantStatus = String(status?.variant_status || "");
+    // Never interpret a failed POST as a running job when Supabase still says
+    // None. Preserve the true API error instead of starting a poll that hides it.
     if (String(error?.bodyStatus || "") === "Error" || variantStatus === "Error") return false;
-    if (variantStatus === "Preparing") return true;
-    const message = String(error?.message || error || "");
-    return /request failed \(5\d{2}\)/i.test(message)
-      || isTimeoutError(error)
-      || /platform media preparation is still running/i.test(message)
-      || /attaching .* clip frames/i.test(message);
+    return variantStatus === "Preparing";
   }
 
   function item4TimelineAutoPrepareEligibleUi(status = item4Workspace, record = activeProductionRequest) {
