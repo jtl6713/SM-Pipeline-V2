@@ -101,6 +101,6 @@ test("Profile switch clears old Pipeline rows and does not display stale output 
   const refresh = block("async function refreshPipelineOutputs(", "async function loadOutputs(");
   assert.match(refresh, /catch \(e\) \{[\s\S]{0,350}if \(profileAtRequest !== selectedProfileId\) return;/);
   const open = block("async function openCreativeEditor(", "function collectCreativePayload(");
-  assert.match(open, /await api\(.*?\/creative\x60\);\s*if \(!profileActionIsCurrent\(profileAtRequest, revisionAtRequest, recordId\)\) return;/s);
+  assert.match(open, /await api\(.*?\/creative\x60(?:,\s*\{[^}]*\})?\);\s*if \(!profileActionIsCurrent\(profileAtRequest, revisionAtRequest, recordId\)\) return;/s);
   assert.match(open, /catch \(e\) \{\s*if \(!profileActionIsCurrent\(profileAtRequest, revisionAtRequest, recordId\)\) return;/);
 });
