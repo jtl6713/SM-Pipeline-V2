@@ -144,3 +144,31 @@ test("production runtime uses the same count fallback as the tested controls", a
   assert.match(runtime, /variant_progress: \{ ready: progressReady, target: progressTarget \}/);
   assert.doesNotMatch(runtime, /targetCount \|\| "\?"/);
 });
+
+test("Prepare reuses the exact persisted Ready plan without resetting selected outputs", async () => {
+  const fs = await import("node:fs");
+  const runtime = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
+  const start = runtime.indexOf("  function item4SavedPlanMatchesCurrentSelection(");
+  const end = runtime.indexOf("  async function item4AdoptReadyPlanFromReadback(", start);
+  assert.ok(start >= 0 && end > start, "saved-plan validation helper exists");
+  const helper = new Function(runtime.slice(start, end) +
+    "; return item4SavedPlanMatchesCurrentSelection;")();
+  const six = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft",
+    "YouTube::Short", "Instagram::Story", "Facebook::Story"];
+  const plan = { items: six.map(key => {
+    const [platform, output_type] = key.split("::");
+    return { platform, output_type, aspect_ratio: "9:16" };
+  }) };
+  assert.equal(helper(plan, six), true, "persisted six-format plan is accepted");
+  assert.equal(helper(plan, [...six, "TikTok::Multi-Photo"]), false, "not for different selections");
+  assert.equal(helper({ items: plan.items.slice(0, 5) }, six), false, "partial plan is rejected");
+  assert.equal(helper({ items: plan.items.map((i, n) =>
+    n === 0 ? { ...i, aspect_ratio: "" } : i) }, six), false, "missing ratio is rejected");
+  const prepare = runtime.slice(runtime.indexOf("  async function prepareItem4Variants("),
+    runtime.indexOf("  function renderItem4Workspace(", runtime.indexOf("  async function prepareItem4Variants(")));
+  assert.match(prepare, /const savedReady = await item4AdoptReadyPlanFromReadback\(requestId, requestedKeys\)/);
+  assert.match(prepare, /if \(!savedReady\) \{/);
+  assert.match(prepare, /await buildItem4Plan\(\{ throwOnError: true \}\)/);
+  assert.match(prepare, /!item4SavedPlanMatchesCurrentSelection\(item4Workspace\?\.plan, requestedKeys\)/);
+  assert.match(runtime, /if \(options\.throwOnError === true\) throw error;/);
+});
