@@ -30,3 +30,5 @@ jobs:
           if [[ "$HEALTH" == "200" ]]; then
             jq -c '{ok:(.ok//null), status:(.status//.state//null), service:(.service//null), active:(.remotionActiveRenders//null), queued:(.remotionQueuedRenders//null), inFlight:(.remotionInFlightJobs//null), preparing:(.remotionPreparingJobs//null), maxConcurrent:(.remotionMaxConcurrent//null)}' /tmp/vibe-render-health.json
           fi
+
+# Repeat read-only exact job observation after source localization window.
