@@ -33,6 +33,7 @@ import {
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
+  listSupabaseContentPlatformOutputs,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
   listSupabasePlanScheduleRows,
@@ -4900,6 +4901,12 @@ export function productionRequestTimedScriptRecordIdFromPath(url) {
 /*__STUDIO_WORKER_END:productionRequestTimedScriptRecordIdFromPath__*/
 
 export async function loadContentPlatformOutputs(env, contentId) {
+  // In Supabase SoR, Content Item reciprocal Platform Outputs links are not
+  // populated. Read the authoritative FK before producer revision or rerender.
+  // A failed Supabase read must fail closed, never silently read the Airtable archive.
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    return listSupabaseContentPlatformOutputs(env, contentId);
+  }
   const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
   const links = f(content, "Platform Outputs");
   const ids = [...new Set((Array.isArray(links) ? links : [])
