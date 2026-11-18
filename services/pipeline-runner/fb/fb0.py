@@ -104,7 +104,7 @@ def process_request(
             normalize["FB_Image_Publish_Mode"] = "Multi-Photo Collage"
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, normalize, typecast=True)
 
-    slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max(2, max_photos * 2))
+    slides = list_ready_slides(client, field_str(output, "Output_ID"), output_record_id=record_id, max_photos=max(2, max_photos * 2))
     # A published photo set must not be stranded because its parent Image_Count
     # was omitted at Supabase output creation. Recover only when every ordered,
     # approved public slide can be verified and no provider objects exist.
@@ -147,7 +147,7 @@ def process_request(
             }, typecast=True)
         # Read back from Airtable, not an assumed successful mutation: publication
         # is gated on the exact ordered set being present and approved.
-        slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max(2, max_photos * 2))
+        slides = list_ready_slides(client, field_str(output, "Output_ID"), output_record_id=record_id, max_photos=max(2, max_photos * 2))
         if len(slides) != expected_count or [
             row["id"] for row in slides
         ] != [row["id"] for row in canonical]:
