@@ -11540,6 +11540,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   let activeHolds = [];
   let renderLaneOutputs = [];
   let reviewOutputs = [];
+  let reviewParentRequests = [];
   let contentMap = new Map();
   let ideaMetaById = new Map();
   let queueReadSource = "airtable";
@@ -11557,6 +11558,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
         activeHolds = pack.activeHolds || [];
         renderLaneOutputs = pack.renderLaneOutputs || [];
         reviewOutputs = pack.reviewOutputs || [];
+        reviewParentRequests = pack.reviewParentRequests || [];
         contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
         for (const idea of pack.ideas || []) {
           if (!idea?.id) continue;
@@ -11747,6 +11749,20 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     });
     requestRows.push(row);
     if (contentId) requestByContent.set(contentId, row);
+  }
+
+  // Completed/older Production Requests do not belong in active Ops lanes,
+  // but their reviewable outputs must still carry a verified parent link.
+  // These records came from a bounded Supabase lookup by promoted content ID.
+  for (const record of reviewParentRequests) {
+    const contentId = firstOpsLinkedId(f(record, "Promoted_Content_Item"));
+    if (!contentId || requestByContent.has(contentId)) continue;
+    requestByContent.set(contentId, {
+      production_request_id: record.id,
+      production_request_number: f(record, "Production_Request_ID") || null,
+      title: String(f(record, "Requested_Title") || "").trim(),
+      produce_paused: false,
+    });
   }
 
   const outputRows = mergedOutputs.map((record) => {
