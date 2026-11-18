@@ -805,6 +805,7 @@ import {
   listAssetLibrary,
   manualLibraryClassificationRoute,
   uploadAssetLibraryItems,
+  linkIdeaUploadedAssets,
   storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
   classifyAllLibraryAssets,
@@ -992,6 +993,7 @@ export default {
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isIdeaWatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/watch-photos$/.test(url.pathname);
+      const isIdeaUploadedAssetsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/uploaded-assets$/.test(url.pathname);
       const isIdeaPhotoListeningSessionRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/photo-listening-session$/.test(url.pathname);
       const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
       const isIdeaTimedScriptRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
@@ -1166,6 +1168,7 @@ export default {
       const isFactoryDeskWrite = isFactoryDeskRoute && request.method === "POST";
       const isFactoryBatchWrite = isFactoryBatchRoute && request.method === "POST";
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
+      const isIdeaUploadedAssetsWrite = isIdeaUploadedAssetsRoute && request.method === "POST";
       const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
       const isIdeaTimedScriptWrite = isIdeaTimedScriptRoute && request.method === "POST";
@@ -1263,6 +1266,7 @@ export default {
         isIdeaPromoteWrite ||
         isIdeaPrepareToReviewWrite ||
         isIdeaWatchPhotosWrite ||
+        isIdeaUploadedAssetsWrite ||
         isIdeaPhotoListeningSessionWrite ||
         isIdeaMatchPhotosWrite ||
         isIdeaTimedScriptWrite ||
@@ -3883,6 +3887,13 @@ export default {
         requirePermission(authorization, "ideas_edit");
         requirePermission(authorization, "production_configure");
         return ideaPhotoListeningSessionRoute(request, env, url, authorization);
+      }
+
+      if (isIdeaUploadedAssetsRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization,"ideas_edit");
+        requirePermission(authorization,"production_configure");
+        return await linkIdeaUploadedAssets(request,env,url,authorization);
       }
 
       if (isIdeaWatchPhotosRoute) {

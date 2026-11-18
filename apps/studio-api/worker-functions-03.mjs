@@ -26,7 +26,7 @@ import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verificati
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
+import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview, mergeIdeaProductionNotes } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure, homeOutputInProduction } from "./profile-summary-classification.mjs";
@@ -1175,6 +1175,123 @@ async function ideaPhotoWaitStage(stage, operation) {
   }
 }
 
+
+// A completed direct upload is an exact, durable media selection, never a
+// fuzzy-match suggestion. Keep it in the existing Idea photo-match JSON column.
+function directIdeaUploadState(idea) {
+  try {
+    const json = JSON.parse(String(f(idea, "Studio_Photo_Match_JSON") || "{}"));
+    if (json?.source !== "idea_direct_upload" || !Array.isArray(json.ids)) return null;
+    return { ...json, ids: [...new Set(json.ids.filter(id => /^rec[A-Za-z0-9]+$/.test(String(id))))] };
+  } catch { return null; }
+}
+
+export async function linkIdeaUploadedAssets(request, env, url, authorization) {
+  const id = url.pathname.match(/^\/api\/ideas\/(rec[A-Za-z0-9]+)\/uploaded-assets$/)?.[1];
+  if (!id) throw new HttpError(404, "Idea not found");
+  let body;
+  try { body = await request.json(); } catch { throw new HttpError(400, "Invalid upload receipt"); }
+  const batchId = String(body?.batch_id || "");
+  const submitted = body?.media_asset_ids;
+  if (!/^[A-Za-z0-9._-]{8,100}$/.test(batchId) || !Array.isArray(submitted)
+      || submitted.length > 50 || submitted.some(mid => !/^rec[A-Za-z0-9]+$/.test(String(mid)))) {
+    throw new HttpError(400, "Invalid uploaded asset identifiers or batch");
+  }
+  const assetIds = [...new Set(submitted)];
+  const idea = await loadAuthorizedIdea(env, id, authorization);
+  assertIdeaUnpromoted(idea, "Adding photos");
+  assertIdeaNotApproved(idea, "Adding photos");
+  if (["On Hold", "Rejected"].includes(String(f(idea, "Candidate_Status") || "").trim())
+    || String(f(idea, "Studio_Photo_Wait_Status") || "") === "Not Needed") {
+    throw new HttpError(409, "Restore or reopen photo listening before adding photos");
+  }
+  const profile = firstLinkedRecordId(f(idea, "Content_Profile"));
+  if (!profile) throw new HttpError(409, "Idea has no Content Profile");
+  for (const mid of assetIds) {
+    const photo = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, mid);
+    if (firstLinkedRecordId(f(photo, "Content_Profile")) !== profile
+      || String(f(photo, "Media_Class") || "").trim() !== "Image"
+      || !googleDriveFileId(photo) || f(photo, "Active") === false
+      || Boolean(f(photo, "Do_Not_Use")) || String(f(photo, "Rights_Status") || "") !== "Owned") {
+      throw new HttpError(403, "Photo must be owned, stored in Drive, and assigned to the Idea's exact profile");
+    }
+  }
+  const before = directIdeaUploadState(idea);
+  const ids = [...new Set([...(before?.ids || []), ...assetIds])];
+  const done = Boolean(body.complete === true || (before?.batch_id === batchId && before.complete));
+  const state = {
+    source: "idea_direct_upload", ids, batch_id: batchId, complete: done,
+    action: done ? "wait" : "uploading", reason: done ? "classification_pending" : "upload_in_progress",
+    high_count: ids.length, selected: ids.map(mid => ({id:mid,confidence:"operator_selected"})),
+    evaluated_at: new Date().toISOString(),
+  };
+  const selected = [...new Set([
+    ...(Array.isArray(f(idea, "Studio_Matched_Media_Assets")) ? f(idea, "Studio_Matched_Media_Assets") : []),
+    ...ids,
+  ])];
+  const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id, {
+    method: "PATCH", body: JSON.stringify({fields:{
+      Studio_Matched_Media_Assets: selected,
+      Studio_Photo_Wait_Status: "Waiting",
+      Studio_Photo_Match_JSON: JSON.stringify(state),
+      Production_Config_Notes: mergeIdeaProductionNotes(f(idea,"Production_Config_Notes"), undefined, selected),
+    },typecast:true}),
+  });
+  return respond(request, env, {ok:true, idea_id:updated.id,
+    saved:ids.length, complete:done, message:"Photos linked to Idea; classification and automatic resume will follow."});
+}
+
+async function resumeIdeaDirectUploadedAssets(env, idea, state, {authorization=null, productionRequest=null}={}) {
+  if (!state.complete || !state.ids.length) return {action:"wait",reason:"upload_in_progress",idea,production_request:productionRequest};
+  const profile = firstLinkedRecordId(f(idea, "Content_Profile"));
+  const photos = await Promise.all(state.ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
+  for (const photo of photos) {
+    if (firstLinkedRecordId(f(photo, "Content_Profile")) !== profile || !googleDriveFileId(photo)) {
+      return {action:"wait",reason:"invalid_photo_scope",idea,production_request:productionRequest};
+    }
+    if (String(f(photo, "Classification_Status") || "").trim() !== "Classified") {
+      return {action:"wait",reason:"classifying_uploaded_photos",idea,production_request:productionRequest};
+    }
+  }
+  let draft = productionRequest
+    || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
+    || await findDraftProductionRequestForIdea(env, idea.id);
+  if (!draft && authorization) draft = await createDraftForIdea(env, idea, authorization);
+  if (!draft) return {action:"wait",reason:"missing_draft",idea,production_request:null};
+  const already = new Set(item4AssetManifest(draft).map(a => String(a?.media_asset_record_id || "")).filter(Boolean));
+  const missing = state.ids.filter(id => !already.has(id));
+  if (missing.length) {
+    const applied = await applyLibraryAssetsToProductionRequest(env, draft, missing, {
+      replaceWaitAssets:false, requireAll:true,
+    });
+    if (applied.skipped) return {action:"wait",reason:applied.reason || "asset_not_ready",idea,production_request:applied.record || draft};
+    draft = applied.record;
+  }
+  const accepted = new Set(item4AssetManifest(draft).map(a => String(a?.media_asset_record_id || "")).filter(Boolean));
+  const count = state.ids.filter(id => accepted.has(id)).length;
+  const min = Math.max(1, Number(f(idea,"Production_Carousel_Slide_Count_Min") || 1));
+  if (count < min) return {action:"wait",reason:"more_photos_needed",count,min,idea,production_request:draft};
+  const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method:"PATCH",body:JSON.stringify({fields:{
+      Studio_Photo_Wait_Status:"Ready",
+      Studio_Photo_Match_JSON:JSON.stringify({...state,action:"ready",reason:"operator_photos_attached",high_count:count}),
+      Production_Carousel_Slide_Count:Math.min(20,count),
+    },typecast:true}),
+  });
+  draft = await stampPhotoReadyIdeaForAutonomousProduce(env, updated, draft);
+  if (env.STUDIO_MEDIA) {
+    try {
+      await readyProductionEnqueue(env.STUDIO_MEDIA, {
+        ideaId:updated.id,profileId:profile,
+        createdAt:f(updated,"Create_Date") || updated.createdTime || null,
+      });
+    } catch(error) {
+      console.warn("Idea direct photo ready queue deferred",updated.id,String(error?.message || error).slice(0,180));
+    }
+  }
+  return {action:"ready",reason:"operator_photos_attached",idea:updated,production_request:draft};
+}
+
 export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
   // Always refresh before matching. Manage Idea writes a short-lived pause token and
   // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
@@ -1194,6 +1311,11 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   }
   if (waitStatusNow === "Not Needed") {
     return { action: "manual", idea, production_request: productionRequest || null, skipped: true };
+  }
+  const exactUploads = directIdeaUploadState(idea);
+  if (exactUploads) {
+    if (waitStatusNow === "Ready") return {action:"ready",idea,production_request:productionRequest};
+    return resumeIdeaDirectUploadedAssets(env, idea, exactUploads, {authorization,productionRequest});
   }
 
   let requestRecord = productionRequest
@@ -3695,7 +3817,7 @@ export async function listLibraryBatchExistingNames(env, baseName, scopeFormula 
       limit: 500,
     }).catch(() => null);
     if (Array.isArray(names)) return names;
-    if (studioWriteSource(env) === "supabase") return [];
+    if (studioWriteSource(env) === "supabase") throw new HttpError(503, "Existing asset numbering could not be verified in Supabase. Upload stopped to avoid duplicates.");
   }
   const filterFormula = combineAirtableFormulas(libraryBatchNameFilterFormula(baseName), scopeFormula);
   if (!filterFormula) return [];
