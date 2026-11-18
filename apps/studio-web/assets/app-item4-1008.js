@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1010-revision-drafts";
+  const BUILD_ID = "item4-0.6.1011-creative-load-recovery";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20511,12 +20511,26 @@ function timedScriptAssetLabel(asset, index) {
     activeCreativeOutputId = recordId;
     $("creativeEditorPanel").hidden = false;
     window.scrollTo(0, 0);
+    activeCreativeOutput = null;
+    creativeSlides = [];
     $("creativeEditorTitle").textContent = "Loading creative review…";
+    $("creativeEditorSubtitle").textContent = "Loading saved creative values…";
+    $("creativeSaveState").textContent = "Loading";
+    $("creativeSaveState").classList.remove("saved");
+    ["creativeRenderPreview", "creativeRenderPreviewStill", "creativeRenderPreviewDrive"].forEach((id) => {
+      const media = $(id);
+      if (media) media.hidden = true;
+    });
+    $("creativeRenderPreviewEmpty").hidden = false;
+    $("creativeOutputMeta").replaceChildren();
+    $("creativeMetaComplete").hidden = true;
+    $("creativeTiktokComplete").hidden = true;
+    $("creativeYoutubeComplete").hidden = true;
     $("creativeSlidesList").innerHTML = '<div class="empty">Loading creative directives…</div>';
     phase6Message("Loading saved creative values…");
     setCreativeBusy(true);
     try {
-      const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
+      const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`, { timeoutMs: 25000, retries: 1 });
       if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
       populateCreativeEditor(data);
       const still = creativeSimpleVideoKind(data?.output) === "still";
@@ -20532,8 +20546,28 @@ function timedScriptAssetLabel(asset, index) {
       }
     } catch (e) {
       if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
-      phase6Message(e.message, "error-text");
+      activeCreativeOutput = null;
+      creativeSlides = [];
+      $("creativeEditorTitle").textContent = "Creative review unavailable";
+      $("creativeEditorSubtitle").textContent = "The saved creative data could not be loaded. No changes were made.";
+      $("creativeSafetyBadge").textContent = "Load failed";
+      $("creativeSafetyBadge").className = "badge tone-danger";
+      $("creativeSafetyBanner").textContent = "Creative review did not load. Retry below or close this editor. Publishing is not available from this incomplete view.";
+      $("creativeOutputMeta").replaceChildren();
+      $("creativeMetaComplete").hidden = true;
+      $("creativeTiktokComplete").hidden = true;
+      $("creativeYoutubeComplete").hidden = true;
+      $("creativeSlidesList").innerHTML = '<div class="empty">Creative data failed to load. <button type="button" class="secondary-button" id="retryCreativeEditorLoad">Retry loading</button></div>';
+      $("retryCreativeEditorLoad").addEventListener("click", () => openCreativeEditor(recordId));
+      $("creativeRenderPreviewEmpty").textContent = "Preview unavailable until creative details load.";
+      phase6Message(`Creative review load failed: ${String(e?.message || e || "Request failed")}`, "error-text");
       setCreativeBusy(false);
+      $("creativeSaveState").textContent = "Load failed";
+      $("creativeSaveState").classList.remove("saved");
+      ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "creativePublishNow", "creativeSaveSchedule", "creativeScheduleCalendar", "creativeUnlockTitles"].forEach((id) => {
+        const button = $(id);
+        if (button) button.disabled = true;
+      });
     }
   }
 
