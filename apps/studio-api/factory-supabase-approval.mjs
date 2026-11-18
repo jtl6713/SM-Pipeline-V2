@@ -11,6 +11,7 @@ import {
 } from "./supabase-pipeline-reads.mjs";
 import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages } from "./review-package-readiness.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
+import { factoryBatchRolloutAcceptsOutput } from "./factory-batch-rollout.mjs";
 
 const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 // Exact Factory read: avoid downloading multi-MB Remotion props, media manifests
@@ -101,10 +102,13 @@ export async function factorySupabaseApprovalRows(env, ids) {
   return result;
 }
 
-export function factorySupabaseApprovalDisposition(entry, policy = null) {
+export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRollout = null) {
   const row = entry?.row;
   const record = entry?.record;
   if (!row || !record || !entry.profileId) return { eligible: false, reason: "Supabase output identity missing" };
+  if (pilotRollout && !factoryBatchRolloutAcceptsOutput(pilotRollout, record)) {
+    return { eligible: false, reason: "output outside the authorized Factory pilot" };
+  }
   if (policy && !factoryGlobalAcceptsOutput(policy, record)) {
     return { eligible: false, reason: "platform/output type is not eligible" };
   }
@@ -124,7 +128,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
   const rows = await factorySupabaseApprovalRows(env, unique);
   return unique.map(id => {
     const entry = rows.get(id);
-    const state = factorySupabaseApprovalDisposition(entry, policy);
+    const state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
     const number = entry?.row?.output_number || id;
     if (!state.eligible) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
@@ -139,7 +143,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
 }
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
-  requestId = "", policy = null, verifyImages = verifyReviewImages,
+  requestId = "", policy = null, pilotRollout = null, verifyImages = verifyReviewImages,
 } = {}) {
   const entries = await factorySupabaseApprovalRows(env, [id]);
   const entry = entries.get(id);
