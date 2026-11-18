@@ -850,6 +850,14 @@ jobs:
             for bridge_attempt in 1 2 3 4 5 6; do
               code=$(curl -sS --max-time 60 -o "$output" -w '%{http_code}' "$target" || true)
               if [[ "$code" == "200" ]]; then return 0; fi
+              # The read-only overview can return a transient 500 while the
+              # Supabase connection pool is saturated during media ingestion.
+              # Retry the same GET, but NEVER accept a persistent 5xx as success.
+              if [[ "$code" =~ ^50[0234]$ ]] && (( bridge_attempt < 6 )); then
+                echo "Overview bridge GET transient http=$code ($bridge_attempt/6); retrying read-only probe" >&2
+                sleep 6
+                continue
+              fi
               if [[ "$code" == "404" ]] && grep -Fq "error code: 1042" "$output"; then
                 echo "Temporary verification bridge GET routing 1042 (attempt $bridge_attempt/6)" >&2
                 sleep 5
