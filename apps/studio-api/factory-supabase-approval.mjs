@@ -128,7 +128,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
   const rows = await factorySupabaseApprovalRows(env, unique);
   return unique.map(id => {
     const entry = rows.get(id);
-    const state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
+    const state = factorySupabaseApprovalDisposition(entry, policy);
     const number = entry?.row?.output_number || id;
     if (!state.eligible) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
@@ -150,7 +150,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (!entry || entry.profileId !== profileId) {
     throw Error("Factory output ownership changed; no approval committed");
   }
-  const state = factorySupabaseApprovalDisposition(entry, policy);
+  const state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
   if (!state.eligible) throw Error("Cannot approve: " + state.reason);
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
