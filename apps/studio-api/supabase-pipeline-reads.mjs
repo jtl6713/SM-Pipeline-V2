@@ -3487,6 +3487,39 @@ export async function readSupabaseShapedOutput(env, airtableId) {
   return shapeDeskHealRecord(row);
 }
 
+/**
+ * Read the exact Platform Outputs belonging to one Content Item using the
+ * Supabase content_item_id foreign key. The former Airtable reciprocal
+ * "Platform Outputs" array is not maintained by Supabase SoR.
+ * Never silently fall back to an Airtable read or return a truncated set:
+ * Producer send-back and post-production review must see all siblings.
+ */
+export async function listSupabaseContentPlatformOutputs(env, contentAirtableId, { limit = 100 } = {}) {
+  const id = String(contentAirtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new Error("Invalid Content Item identity");
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Content Item lookup is not configured");
+  const contents = await supabaseRest(
+    env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(id)}&select=id,airtable_record_id&limit=1`,
+  );
+  const uuid = Array.isArray(contents) ? contents[0]?.id : null;
+  if (!uuid) throw new Error("Content Item could not be resolved in Supabase");
+  const cap = Math.max(1, Math.min(100, Number(limit) || 100));
+  const outputs = await supabaseRest(
+    env,
+    `platform_outputs?content_item_id=eq.${encodeURIComponent(uuid)}&select=${OUTPUT_SELECT}`
+      + `&order=airtable_record_id.asc&limit=${cap + 1}`,
+  );
+  if (!Array.isArray(outputs)) throw new Error("Platform Output lookup returned no inventory");
+  if (outputs.length > cap) throw new Error("Platform Output inventory exceeds safe bound; refusing partial revision");
+  return outputs.map((row) => airtableShapedOutputFromSupabase({
+    ...flattenOutputRow(row),
+    // This FK was verified by the Supabase query. Do not require a legacy
+    // reciprocal Airtable link or an extra profile/content list query.
+    content_item_airtable_id: id,
+  })).filter((row) => row?.id);
+}
+
 /** One page of a Platform Output census. Offset is a raw row count. */
 export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 0, filterFormula = "" } = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase output census is not configured");
