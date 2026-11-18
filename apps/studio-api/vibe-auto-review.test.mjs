@@ -165,3 +165,17 @@ test("verified single-video Vibe auto-reconciles its video passthrough instead o
   assert.match(reconcile, /Studio_Variant_Status: status/);
   assert.doesNotMatch(reconcile, /publish.*true/i);
 });
+
+test("source-to-production bridge uses complete saved request after variant PATCH echo", () => {
+  const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const start = worker.indexOf("export async function finishAutonomousProductionRequest(");
+  const end = worker.indexOf("/*__STUDIO_WORKER_END:finishAutonomousProductionRequest__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const continuation = worker.slice(start, end);
+  const preflight = continuation.indexOf("item4SourceToProductionBridgePreflight(env, current, idea)");
+  const reread = continuation.lastIndexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", preflight);
+  const gate = continuation.indexOf("if (!autonomousPlanVariantsReady(current)) {", reread);
+  assert.ok(reread >= 0 && gate > reread && preflight > gate);
+  assert.match(continuation, /if \(!preflight\.ready\) \{/);
+  assert.match(continuation, /promoteProductionRequestViaI3I4/);
+});
