@@ -708,7 +708,7 @@ test('stale unrecoverable recovery fences clear without another POST',async()=>{
   assert.equal(h.factoryRecoveryEntries().length,1);
   await h.reconcilePersistedFactoryPending(true);
   assert.equal(h.factoryRecoveryEntries().length,0);
-  assert.ok(h.messages.some(message=>/Cleared 1 stuck saved submission/i.test(String(message||''))));
+  assert.ok(h.messages.some(message=>/Resolved 1 saved Factory submission/i.test(String(message||''))));
 });
 
 test('submitted approvals stay outside Needs Eyes even with a stale Ready-for-Review snapshot',()=>{

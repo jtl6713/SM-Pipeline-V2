@@ -343,9 +343,16 @@
     const missingBeforeAccept = /At least one selected output could not be loaded for global batch approval/i.test(text);
     if (!definiteNoAccept && !missingBeforeAccept) return null;
     if (ids.length === 1) return ids[0];
-    // For multi-output batches, ONLY the precise server-confirmed output
-    // number can be skipped. Never infer an ID from list order or stale UI.
+    // For multi-output batches, only a single exact server-identified member
+    // may be removed, and only when the server explicitly confirms that no
+    // new batch was accepted. The Worker can report either a numeric Output #
+    // or an Airtable record ID prefixed by "Output #". Never guess from order.
     if (!definiteNoAccept) return null;
+    const recordMatches = [...text.matchAll(/Output #(rec[A-Za-z0-9]{14}):[^\n]*?No new batch was accepted[.!]?/gi)];
+    if (recordMatches.length) {
+      const recordId = recordMatches[0][1];
+      return recordMatches.length === 1 && ids.includes(recordId) ? recordId : null;
+    }
     const match = text.match(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/i);
     if (!match) return null;
     const member = (saved?.batches || []).flatMap(plan =>
@@ -1176,7 +1183,8 @@
       const droppedPoison = clearFactoryRecoveryFences({ onlyUnrecoverable: true });
       if (droppedPoison) {
         setBatchSubmissionError(null);
-        setStatus(`Cleared ${droppedPoison} stuck saved submission${droppedPoison === 1 ? "" : "s"} that referenced outputs Airtable can no longer load.`);
+        setStatus(`Resolved ${droppedPoison} saved Factory submission${droppedPoison === 1 ? "" : "s"} rejected before acceptance. Unapproved outputs are visible in Needs Eyes again.`);
+        if (state.desk) renderDesk(state.desk);
       }
       pruneFactorySelectionToNeedsEyes();
       // Independent of Desk/Activity success; one failed request cannot starve others.
@@ -1189,6 +1197,7 @@
         catch (error) { result = {resolved:false,message:String(error.message || error)}; }
         if (result?.dropped) {
           if (result.message) setStatus(result.message);
+          if (state.desk) renderDesk(state.desk);
           continue;
         }
         const touchesSelection = (saved.ids || []).some(id => state.selectedOutputs.has(id));
