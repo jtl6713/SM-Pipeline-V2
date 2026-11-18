@@ -37,6 +37,7 @@ import {
   RUNNER_RECORD_PROJECTION,
   supabaseRestAll,
   listSupabaseFactoryDeskPack,
+  listSupabaseContentPlatformOutputs,
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -262,6 +263,84 @@ test("Factory resolves a completed review parent beyond the recent request sampl
       "Factory parent lookup must not read Airtable");
   } finally {
     globalThis.fetch = oldFetch;
+  }
+});
+
+test("Factory Producer reads six linked outputs from Supabase when reciprocal Content Item links are empty", async () => {
+  const oldFetch = globalThis.fetch;
+  const urls = [];
+  const contentId = "recRFZDxZ1vx8Mkvn";
+  const contentUuid = "11111111-2222-3333-4444-555555555555";
+  const outputs = [
+    "recbVMreBYGm99u37", "recjotbYbkRmdSIJE", "recg02Ah7elYAdnk8",
+    "recmlvNlHnUbyHVYh", "recyhFQCSLlq3ncqh", "recnUdAtZS57NqoBJ",
+  ].map((airtable_record_id, i) => ({
+    airtable_record_id,
+    output_number: 8000 + i,
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    platform: ["TikTok", "Instagram", "Facebook", "Facebook", "Instagram", "YouTube"][i],
+    do_not_publish: false,
+    // The actual Supabase content FK, not the old Airtable reciprocal array.
+    content_item_id: contentUuid,
+    content_items: { airtable_record_id: contentId },
+    error_messages: {},
+  }));
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    urls.push(href);
+    if (href.includes("content_items?airtable_record_id=eq.")) {
+      return { ok: true, async text() {
+        return JSON.stringify([{ id: contentUuid, airtable_record_id: contentId }]);
+      } };
+    }
+    if (href.includes("platform_outputs?content_item_id=eq.")) {
+      return { ok: true, async text() { return JSON.stringify(outputs); } };
+    }
+    throw new Error("Unexpected request, possible Airtable fallback: " + href);
+  };
+  try {
+    const rows = await listSupabaseContentPlatformOutputs({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test_secret",
+    }, contentId);
+    assert.equal(rows.length, 6);
+    assert.deepEqual(rows.map((row) => row.id), outputs.map((row) => row.airtable_record_id));
+    assert.ok(rows.every((row) => row.fields.Content_Item[0] === contentId));
+    assert.ok(rows.every((row) => row.fields.Output_Status === "Ready for Review"));
+    assert.ok(urls.every((href) => href.startsWith("https://example.supabase.co/")));
+    const source = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+    assert.match(source, /return listSupabaseContentPlatformOutputs\(env, contentId\)/);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("Supabase content output lookup refuses truncated sibling inventory", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("content_items?")) {
+      return { ok: true, async text() {
+        return JSON.stringify([{ id: "11111111-2222-3333-4444-555555555555" }]);
+      } };
+    }
+    return { ok: true, async text() {
+      return JSON.stringify(Array.from({ length: 3 }, (_, index) => ({
+        airtable_record_id: "rec" + String(index).padStart(14, "0"),
+      })));
+    } };
+  };
+  try {
+    await assert.rejects(
+      listSupabaseContentPlatformOutputs({
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "test_secret",
+      }, "recRFZDxZ1vx8Mkvn", { limit: 2 }),
+      /exceeds safe bound/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
