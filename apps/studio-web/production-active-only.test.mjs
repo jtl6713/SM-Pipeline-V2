@@ -74,6 +74,29 @@ test("submitted, promoted, cancelled and inactive requests never appear in Draft
   assert.equal(isOpenDraft(null), false);
 });
 
+test("Factory returned Chicago River Draft remains visible with its promoted content link", () => {
+  const revision = {
+    id: "recwSzrkVi1LuwuJW",
+    status: "Draft",
+    active: true,
+    revision_open: true,
+    promoted_content_item_links: ["recRFZDxZ1vx8Mkvn"],
+    studio_item4_state: "Review",
+  };
+  assert.equal(isOpenDraft(revision), true);
+  assert.equal(isOpenDraft({ ...revision, active: false }), true,
+    "the verified return marker overrides an older promoted Active=false");
+  assert.equal(isOpenDraft({ ...revision, status: "Promoted" }), true);
+  assert.equal(isOpenDraft({ ...revision, status: "Ready" }), true);
+  assert.equal(isOpenDraft({ ...revision, revision_open: false }), false,
+    "an ordinary promoted-content Draft must remain hidden");
+  assert.equal(isOpenDraft({ ...revision, status: "Submitted" }), false,
+    "the normal submitted pipeline stage remains separate");
+  assert.equal(isOpenDraft({ ...revision, status: "Cancelled" }), false,
+    "the return marker cannot resurrect cancelled requests");
+  assert.match(source, /r\.revision_open === true \|\| String\(r\.status \|\| ""\)\.toLowerCase\(\) === "promoted" \? "Revise"/);
+});
+
 test("Draft list uses eligibility guard, collapses empty section, retains errors", () => {
   assert.match(source, /records\.filter\(productionRequestIsOpenDraft\)/);
   assert.match(source, /if \(listPanel\) listPanel\.hidden = !drafts\.length/);
