@@ -6130,8 +6130,12 @@ function transferQueueWriteThroughRow(record) {
   copy("Asset_Kind", "asset_kind", transferQueueText(fields.Asset_Kind));
   copy("Source_Asset_ID", "source_asset_id", transferQueueText(fields.Source_Asset_ID));
   copy("Source_Name", "source_name", transferQueueText(fields.Source_Name));
-  copy("Source_R2_Key", "source_r2_key", transferQueueText(fields.Source_R2_Key));
-  copy("Source_URL", "source_url", transferQueueText(fields.Source_URL));
+  // Only a Studio master-original transfer needs the private R2 source locator.
+  // Generic library queue projections deliberately omit source URLs.
+  if (transferQueueText(fields.Asset_Kind) === "Master Original") {
+    copy("Source_R2_Key", "source_r2_key", transferQueueText(fields.Source_R2_Key));
+    copy("Source_URL", "source_url", transferQueueText(fields.Source_URL));
+  }
   copy("Source_MIME_Type", "source_mime_type", transferQueueText(fields.Source_MIME_Type));
   copy("Source_Extension", "source_extension", transferQueueText(fields.Source_Extension));
   copy("Source_Drive_File_ID", "source_drive_file_id", transferQueueText(fields.Source_Drive_File_ID));
