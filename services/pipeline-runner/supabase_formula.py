@@ -98,7 +98,9 @@ _FIND_PO_OUTPUT = re.compile(
     r'^FIND\("([^"]+)",\s*ARRAYJOIN\(\{PO_Output_ID\}\)\)(?:>0)?$'
 )
 _FIND_PLATFORM_OUTPUT = re.compile(
-    r'^FIND\("(rec[A-Za-z0-9]{14})",\s*ARRAYJOIN\(\{Platform Output\}\)\)(?:>0)?_IS_BEFORE_NOW = re.compile(r"^IS_BEFORE\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
+    r'^FIND\("(rec[A-Za-z0-9]{14})",\s*ARRAYJOIN\(\{Platform Output\}\)\)(?:>0)?$'
+)
+_IS_BEFORE_NOW = re.compile(r"^IS_BEFORE\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
 _IS_AFTER_NOW = re.compile(r"^IS_AFTER\(\{([A-Za-z0-9_]+)\},NOW\(\)\)$")
 _SLIDE_SAFE_FIELDS = frozenset({
     "PO_Output_ID",
