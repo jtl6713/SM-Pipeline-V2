@@ -20515,6 +20515,13 @@ function timedScriptAssetLabel(asset, index) {
     creativeSlides = [];
     $("creativeEditorTitle").textContent = "Loading creative review…";
     $("creativeEditorSubtitle").textContent = "Loading saved creative values…";
+    $("creativeSaveState").textContent = "Loading";
+    $("creativeSaveState").classList.remove("saved");
+    ["creativeRenderPreview", "creativeRenderPreviewStill", "creativeRenderPreviewDrive"].forEach((id) => {
+      const media = $(id);
+      if (media) media.hidden = true;
+    });
+    $("creativeRenderPreviewEmpty").hidden = false;
     $("creativeOutputMeta").replaceChildren();
     $("creativeMetaComplete").hidden = true;
     $("creativeTiktokComplete").hidden = true;
@@ -20555,6 +20562,8 @@ function timedScriptAssetLabel(asset, index) {
       $("creativeRenderPreviewEmpty").textContent = "Preview unavailable until creative details load.";
       phase6Message(`Creative review load failed: ${String(e?.message || e || "Request failed")}`, "error-text");
       setCreativeBusy(false);
+      $("creativeSaveState").textContent = "Load failed";
+      $("creativeSaveState").classList.remove("saved");
       ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "creativePublishNow", "creativeSaveSchedule", "creativeScheduleCalendar", "creativeUnlockTitles"].forEach((id) => {
         const button = $(id);
         if (button) button.disabled = true;
