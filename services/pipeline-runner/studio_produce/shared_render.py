@@ -18,9 +18,39 @@ CANONICAL_PLATFORM_ORDER = ("Instagram", "Facebook", "YouTube", "TikTok")
 SHARED_RENDER_PADDING_FRAMES = 15
 
 
+def _is_exact_vibe_remount(output: dict[str, Any]) -> bool:
+    """Allow only genuine multi-cut Vibe sources, never a finished passthrough.
+
+    The exact render-clip JSON is hashed for Vibe outputs, because ordinary
+    shared-render normalization intentionally ignores source video in/out
+    offsets. That normalization is not safe for two different beat cuts of
+    the same original video.
+    """
+    notes = field_str(output, "Output_Notes").lower()
+    if "vibe cut" not in notes or "remounting music montage" not in notes:
+        return False
+    raw = field_str(output, "Render_Clip_List_JSON")
+    try:
+        clips = json.loads(raw)
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(clips, list)
+        and len(clips) >= 2
+        and all(isinstance(clip, dict)
+                and str(clip.get("mediaKind") or clip.get("media_kind") or "").lower() == "video"
+                for clip in clips)
+    )
+
+
 def is_shared_render_eligible(output: dict[str, Any]) -> bool:
     notes = field_str(output, "Output_Notes").lower()
-    if "ez-input=finished-video" in notes or "finished passthrough" in notes:
+    # A true finished-video passthrough is platform-specific; do not share.
+    # Vibe Cut remounts are newly edited multi-cut videos, despite the legacy
+    # finished-video marker in their stamped Output_Notes.
+    if "finished passthrough" in notes:
+        return False
+    if "ez-input=finished-video" in notes and not _is_exact_vibe_remount(output):
         return False
     if field_str(output, "Render_Status") == "Rendered" and not field_str(output, "Composition_ID"):
         return False
@@ -127,9 +157,11 @@ def render_equivalence_key(output: dict[str, Any], *, ignore_duration: bool = Fa
     if not is_shared_render_eligible(output):
         return None
     voiceover = field_str(output, "Voiceover_URL")
-    clip_key = _normalized_clip_key(
-        field_str(output, "Render_Clip_List_JSON"),
-        ignore_duration=ignore_duration and bool(voiceover),
+    raw_clips = field_str(output, "Render_Clip_List_JSON")
+    clip_key = (
+        hashlib.sha256(raw_clips.encode("utf-8")).hexdigest()
+        if _is_exact_vibe_remount(output)
+        else _normalized_clip_key(raw_clips, ignore_duration=ignore_duration and bool(voiceover))
     )
     if not clip_key:
         return None
