@@ -1417,3 +1417,4 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-18: Deploy one-time exact verified Vibe master Ready obsolete bridge preflight backoff recovery; no existing R2 job duplication, preserve all leases and human Final Approval. Inspect recOBKABTNVnxFiny read-only diagnostic.
 
 Deploy Factory Supabase authoritative batch review approval — Issue #2214 / PR #2218, merge acd35f7622e377237e8e0d89819e651966a99e25. Preserve operator-controlled scheduling: no automatic post dispatch on approval.
+Deploy Worker 0.10.1006-factory-review-parent: restore Factory Request Changes parent association for existing promoted Chicago River review outputs. PR #2222. 2026-11-18.
