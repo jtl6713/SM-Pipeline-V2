@@ -6654,6 +6654,7 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:item4SetSmv1SelectorFormula__*/
 /*__STUDIO_WORKER_EXTRACT:item4DrainVariantWorker__*/
 /*__STUDIO_WORKER_EXTRACT:item4ListPendingQueueRequestIds__*/
+/*__STUDIO_WORKER_EXTRACT:item4HealPendingVibeMasterTransfer__*/
 /*__STUDIO_WORKER_EXTRACT:item4DrainAllPendingWork__*/
 /*__STUDIO_WORKER_EXTRACT:item4BuildDriveManifest__*/
 /*__STUDIO_WORKER_EXTRACT:item4VariantManifestPlanComplete__*/
