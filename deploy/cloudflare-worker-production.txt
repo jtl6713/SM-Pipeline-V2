@@ -1399,3 +1399,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-17: Deploy merged PR #2178 bounded Master Original retry and platform crop poll self-heal for Flatiron Item 4 (2/8 stalled; seventh PNG master Error). Reuse existing transfer IDs, preserve assets, output approvals, and publishing protections.
 
 2026-11-18: Deploy PR #2187 Master Original Supabase queue source R2 key and source URL retention; recover Vibe upload without duplicate media or auto-publish.
+
+2026-11-18: Release PR #2193 Vibe upload recovery (original master size, bounded Supabase cron, async runner copy, resumable Drive transfer, preserve hands-free human Final Approval). No automatic publishing.

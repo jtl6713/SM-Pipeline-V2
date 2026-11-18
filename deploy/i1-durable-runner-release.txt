@@ -130,3 +130,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-18: Follow-up runner queue read mapping: project Source_R2_Key and Source_URL back into Master Original transfer records for PR #2184 recovery.
 
 2026-11-18: Deploy runner 2026-11-18-fb0-approved-photo-recovery-v1 after merged PR #2190. FB0 recovers missing Image_Count only from a completely approved, unique ordered 4:5 Facebook Photo Set and persists Multi-Photo Collage route; successful native photo preparation clears stale Publish_Status=Failed to Ready to Publish. Duplicate/absent slides, missing public-ready statuses, previously created provider objects remain blocked. Does not rearm or authorize publishing any held output; no Airtable egress; required exact /health and safety regression verification. Supabase-only exact prior recovery #8060; see #2182.
+
+2026-11-18: Release PR #2193 Vibe upload recovery (original master size, bounded Supabase cron, async runner copy, resumable Drive transfer, preserve hands-free human Final Approval). No automatic publishing.
