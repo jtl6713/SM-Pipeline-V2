@@ -172,10 +172,9 @@ test("production bridge preflight uses a complete Supabase request after variant
   const end = worker.indexOf("/*__STUDIO_WORKER_END:finishAutonomousProductionRequest__*/", start);
   assert.ok(start >= 0 && end > start);
   const continuation = worker.slice(start, end);
-  const reload = continuation.indexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", continuation.indexOf("const continueAfterPlan"));
-  const safeReload = continuation.indexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", reload + 1);
+  const preflight = continuation.indexOf("item4SourceToProductionBridgePreflight(env, current, idea)");
+  const safeReload = continuation.lastIndexOf("current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);", preflight);
   const gate = continuation.indexOf("if (!autonomousPlanVariantsReady(current)) {", safeReload);
-  const preflight = continuation.indexOf("item4SourceToProductionBridgePreflight(env, current, idea)", gate);
   assert.ok(safeReload >= 0 && gate > safeReload && preflight > gate,
     "must re-read the full saved request and confirm variant Ready before bridge preflight");
   assert.match(continuation, /if \(!preflight\.ready\) \{/);
