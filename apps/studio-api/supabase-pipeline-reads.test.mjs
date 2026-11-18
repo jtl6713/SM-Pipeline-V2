@@ -6506,3 +6506,34 @@ test("Supabase transfer queue retains original R2 source identity for Vibe maste
   assert.match(source, /source_r2_key: "Source_R2_Key"/);
   assert.match(source, /source_url: "Source_URL"/);
 });
+
+
+test("Master Original queue write-through retains R2 locator without copying video bytes", async () => {
+  const calls = [];
+  const prior = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
+      id: "recMasterQueue1",
+      fields: {
+        Transfer_ID: "ITEM4-MASTER-recReq-asset1",
+        Asset_Kind: "Master Original",
+        Transfer_Status: "Pending",
+        Source_R2_Key: "studio/master-assets/recReq/asset1-video.mov",
+        Source_URL: "https://media.chicagoshining.com/studio/previews/asset1.mp4",
+      },
+    });
+    const post = calls.find(call => call.method === "POST" && call.url.includes("studio_media_transfer_queue"));
+    assert.ok(post);
+    const row = JSON.parse(post.body)[0];
+    assert.equal(row.payload.source_r2_key, "studio/master-assets/recReq/asset1-video.mov");
+    assert.equal(row.payload.source_url, "https://media.chicagoshining.com/studio/previews/asset1.mp4");
+    assert.equal(row.status, "Pending");
+    assert.equal(row.file_bytes, undefined);
+  } finally {
+    globalThis.fetch = prior;
+  }
+});
