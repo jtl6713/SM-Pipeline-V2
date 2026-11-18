@@ -29364,6 +29364,19 @@ function timedScriptAssetLabel(asset, index) {
     if (homePageActive()) loadDashboard(true);
   });
 
+  // Mobile Safari can restore a foreground tab without firing the usual
+  // visibilitychange event. Resume a stale paused Production hint on focus or
+  // pageshow; refresh only when the operator is actually viewing Production.
+  function resumeProductionForeground() {
+    if (document.hidden || !productionPageActive()) return;
+    const hint = $("productionLiveHint");
+    if (!hint || !String(hint.textContent || "").startsWith("Paused while this tab")) return;
+    setProductionLiveHint("Live · refreshing…");
+    refreshProductionPage({ silent: true }).finally(scheduleProductionPoll);
+  }
+  window.addEventListener("focus", resumeProductionForeground);
+  window.addEventListener("pageshow", resumeProductionForeground);
+
   phase6DecorateTooltips(document);
   productionDecorateTooltips($("page-content"));
   phase6BindTooltipTarget($("pipelineApproveAll"), PRODUCTION_BUTTON_HELP.pipelineApproveAll);
