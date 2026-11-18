@@ -42,6 +42,38 @@ def slide_formula(output_id: str) -> str:
     )
 
 
+
+def recover_approved_photo_count(slides: list[dict[str, Any]], *, max_photos: int = DEFAULT_MAX_PHOTOS) -> int | None:
+    """Recover a missing FB photo-set count only from a complete approved set.
+
+    The shared Asset_4x5_Public_Status/URL contract alone is not enough:
+    duplicated slide positions or unapproved media must never create a false
+    Ready package. Do not alter links, order, or source images.
+    """
+    count = len(slides)
+    if not 1 <= count <= max_photos:
+        return None
+    seen: set[int] = set()
+    for slide in slides:
+        order = parse_int(field(slide, "Current Order"), None)
+        number = parse_int(field(slide, "Slide Number"), None)
+        if order is None or number != order or order < 1 or order > count or order in seen:
+            return None
+        seen.add(order)
+        if field(slide, "Deleted From Carousel") is True:
+            return None
+        if field(slide, "Shared_Asset_Approved") is not True:
+            return None
+        if _ci(field_str(slide, "Asset_4x5_Public_Status")) != "ready":
+            return None
+        if not field_str(slide, "Asset_4x5_Public_URL").startswith("https://media.chicagoshining.com/"):
+            return None
+        if field_str(slide, "FB_Photo_ID"):
+            # Already-created provider objects need reconciliation, not re-arming.
+            return None
+    return count if seen == set(range(1, count + 1)) else None
+
+
 def ready_photo_formula(output_id: str, package_revision: str) -> str:
     safe = str(output_id or "").replace("\\", "\\\\").replace('"', '\\"')
     revision = str(package_revision or "").replace("\\", "\\\\").replace('"', '\\"')

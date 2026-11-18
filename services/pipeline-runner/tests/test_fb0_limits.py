@@ -103,3 +103,69 @@ def test_fb0_stops_retrying_after_configured_limit(monkeypatch):
     assert final["Publish_Retry_Eligible"] is False
     assert final["Publish_Next_Retry_At"] is None
     assert final["Manual_Fallback_Required"] is True
+
+
+def _approved_photo_slides(count, *, duplicate=False):
+    slides = []
+    for i in range(1, count + 1):
+        slides.append({
+            "id": f"recSLIDE{i:02d}ABCDEFG",
+            "fields": {
+                "Current Order": i if not duplicate or i != count else count - 1,
+                "Slide Number": i if not duplicate or i != count else count - 1,
+                "Shared_Asset_Approved": True,
+                "Deleted From Carousel": False,
+                "Asset_4x5_Public_Status": "Ready",
+                "Asset_4x5_Public_URL": f"https://media.chicagoshining.com/studio/previews/lettered/recABCDEFGHIJKLMN/{i-1}.jpg",
+            }
+        })
+    return slides
+
+
+def test_fb0_restores_missing_count_only_from_complete_approved_photo_set(monkeypatch):
+    output = _record(
+        Platform="Facebook", Studio_Output_Type="Multi-Image Post",
+        Platform_Output_Type="Facebook Photo Set",
+        Auto_Publish_Enabled=True,
+        FB_Publish_Status="Retry Pending", Publish_Status="Failed",
+        Publish_Error_Stage="FB0_ASSETS",
+        Output_ID="8060", Publish_Attempt_Count=0,
+        # Missing Image_Count and Image_Output_Selected reflect the live issue.
+    )
+    client = FakeClient(output)
+    monkeypatch.setattr(fb0, "AirtableClient", lambda: client)
+    monkeypatch.setattr(fb0, "PipelineSettings", lambda _client: FakeSettings({
+        "FB_MAX_PHOTOS": 10, "FB_IMAGE_STAGE_MAX_RETRIES": 3,
+    }))
+    monkeypatch.setattr(fb0, "list_ready_slides", lambda *_args, **_kwargs: _approved_photo_slides(4))
+    result = fb0.process_request(output_record_id=output["id"])
+    assert result["processed"] is True
+    assert result["approved_image_count_repaired"] == 4
+    assert result["slideshow_route"] is False
+    assert result["fb_publish_status"] == STATUS_READY_FOR_PHOTO
+    assert output["fields"]["Image_Count"] == 4
+    assert output["fields"]["FB_Resolved_Publish_Mode"] == "Multi-Photo Collage"
+    assert output["fields"]["Image_Output_Selected"] is True
+    assert output["fields"]["Publish_Status"] == "Ready to Publish"
+
+
+def test_fb0_never_inferrs_count_from_duplicate_slide_order(monkeypatch):
+    output = _record(
+        Platform="Facebook", Studio_Output_Type="Multi-Image Post",
+        Platform_Output_Type="Facebook Photo Set",
+        Auto_Publish_Enabled=True,
+        FB_Publish_Status="Retry Pending", Publish_Status="Failed",
+        Publish_Error_Stage="FB0_ASSETS", Output_ID="8060",
+        Publish_Attempt_Count=0,
+    )
+    client = FakeClient(output)
+    monkeypatch.setattr(fb0, "AirtableClient", lambda: client)
+    monkeypatch.setattr(fb0, "PipelineSettings", lambda _client: FakeSettings({
+        "FB_MAX_PHOTOS": 10, "FB_IMAGE_STAGE_MAX_RETRIES": 3,
+    }))
+    monkeypatch.setattr(fb0, "list_ready_slides", lambda *_args, **_kwargs: _approved_photo_slides(4, duplicate=True))
+    result = fb0.process_request(output_record_id=output["id"])
+    assert result["reason"] == "asset_mismatch"
+    assert "approved_image_count_repaired" not in result
+    assert "Image_Count" not in output["fields"]
+    assert output["fields"]["Publish_Status"] == "Failed"

@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array
+from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count
 from fb.common import append_note, preview, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     DEFAULT_IMAGE_STAGE_MAX_RETRIES,
@@ -105,6 +105,29 @@ def process_request(
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, normalize, typecast=True)
 
     slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max(2, max_photos * 2))
+    # A published photo set must not be stranded because its parent Image_Count
+    # was omitted at Supabase output creation. Recover only when every ordered,
+    # approved public slide can be verified and no provider objects exist.
+    # Preserve the intended multi-image PHOTO route rather than converting a
+    # Facebook Photo Set to a slideshow simply because count > 1.
+    if expected is None and (
+        field_str(output, "Studio_Output_Type") == "Multi-Image Post"
+        and field_str(output, "Platform_Output_Type") == "Facebook Photo Set"
+    ):
+        inferred = recover_approved_photo_count(slides, max_photos=max_photos)
+        if inferred is not None:
+            repaired = {
+                "Image_Count": inferred,
+                "Image_Output_Selected": True,
+                "FB_Image_Publish_Mode": "Multi-Photo Collage",
+                "FB_Resolved_Publish_Mode": "Multi-Photo Collage",
+            }
+            client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, repaired, typecast=True)
+            output.setdefault("fields", {}).update(repaired)
+            requested = inferred
+            expected = inferred
+            slideshow_route = is_slideshow_route(output)
+            result["approved_image_count_repaired"] = inferred
     expected_count = expected if expected is not None else 0
     recovery = canonical_doubled_slide_repair(output, slides, expected_count)
     if recovery:
@@ -214,6 +237,7 @@ def process_request(
             "FB_Photo_Count": 0,
             "FB_Photo_IDs_JSON": "",
             "FB_Publish_Status": STATUS_READY_FOR_PHOTO,
+            "Publish_Status": PUBLISH_STATUS_READY,
             "Asset_Set_Revision": revision,
             "Assets_Ready_Count": actual,
             "FB_Package_Revision": revision,
