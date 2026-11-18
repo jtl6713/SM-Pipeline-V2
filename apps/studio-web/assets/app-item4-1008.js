@@ -16210,6 +16210,7 @@ function timedScriptAssetLabel(asset, index) {
     const input = $("ideaDirectUploadInput");
     const status = text => { if ($("ideaDirectUploadProgress")) $("ideaDirectUploadProgress").textContent = text; };
     if (!photos.length) return;
+    if (photos.length > 20) { status("Upload up to 20 photos at a time to preserve automatic numbering."); if (input) input.value = ""; return; }
     if (!profileId || !name) { status("Enter an asset name and select a Content Profile."); if (input) input.value = ""; return; }
     if (photos.some(f => Number(f.size || 0) > 25 * 1024 * 1024)) {
       status("Photos must be 25 MB or smaller. No files were uploaded."); if (input) input.value = ""; return;

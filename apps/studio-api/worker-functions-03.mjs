@@ -1201,7 +1201,12 @@ export async function linkIdeaUploadedAssets(request, env, url, authorization) {
   const assetIds = [...new Set(submitted)];
   const idea = await loadAuthorizedIdea(env, id, authorization);
   assertIdeaUnpromoted(idea, "Adding photos");
-  assertIdeaNotApproved(idea, "Adding photos");
+  // Approved Ideas can legitimately remain in the photo-wait lane. Do not
+  // block supplying their missing media, but never reopen a separately
+  // approved, non-listening Idea during promotion.
+  if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Waiting") {
+    assertIdeaNotApproved(idea, "Adding photos");
+  }
   if (["On Hold", "Rejected"].includes(String(f(idea, "Candidate_Status") || "").trim())
     || String(f(idea, "Studio_Photo_Wait_Status") || "") === "Not Needed") {
     throw new HttpError(409, "Restore or reopen photo listening before adding photos");
@@ -1251,8 +1256,9 @@ export async function resumeIdeaDirectUploadedAssets(env, idea, state, {authoriz
     if (firstLinkedRecordId(f(photo, "Content_Profile")) !== profile || !googleDriveFileId(photo)) {
       return {action:"wait",reason:"invalid_photo_scope",idea,production_request:productionRequest};
     }
-    if (String(f(photo, "Classification_Status") || "").trim() !== "Classified") {
-      return {action:"wait",reason:"classifying_uploaded_photos",idea,production_request:productionRequest};
+    const state = String(f(photo, "Classification_Status") || "").trim();
+    if (state !== "Classified") {
+      return {action:"wait",reason:["Failed","Error"].includes(state) ? "uploaded_photo_classification_failed" : "classifying_uploaded_photos",idea,production_request:productionRequest};
     }
   }
   let draft = productionRequest
@@ -1273,6 +1279,23 @@ export async function resumeIdeaDirectUploadedAssets(env, idea, state, {authoriz
   const count = state.ids.filter(id => accepted.has(id)).length;
   const min = Math.max(1, Number(f(idea,"Production_Carousel_Slide_Count_Min") || 1));
   if (count < min) return {action:"wait",reason:"more_photos_needed",count,min,idea,production_request:draft};
+  // Reretrieve the Idea after slow Drive/provenance work. A Hold, promotion,
+  // manual deselection, or new batch must win over this earlier cron attempt.
+  const current = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id);
+  const stillSelected = new Set(Array.isArray(f(current,"Studio_Matched_Media_Assets"))
+    ? f(current,"Studio_Matched_Media_Assets") : []);
+  const activeBatch = directIdeaUploadState(current);
+  if (["On Hold","Rejected","Promoted"].includes(String(f(current,"Candidate_Status") || "").trim())
+      || String(f(current,"Promoted_Content_Record_ID") || "").trim()
+      || firstLinkedRecordId(f(current,"Content Items"))
+      || String(f(current,"Studio_Photo_Wait_Status") || "") === "Not Needed"
+      || !activeBatch?.complete || activeBatch.batch_id !== state.batch_id
+      || state.ids.some(id => !stillSelected.has(id))) {
+    return {action:"skipped",reason:"operator_or_batch_changed",idea:current,production_request:draft};
+  }
+  if (ideaManagePhotoPauseActive(f(current,"Production_Config_Notes"))) {
+    return {action:"paused",idea:current,production_request:draft};
+  }
   const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
     method:"PATCH",body:JSON.stringify({fields:{
       Studio_Photo_Wait_Status:"Ready",
