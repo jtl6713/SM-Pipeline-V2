@@ -1738,6 +1738,30 @@ export async function item4HealPendingVibeMasterTransfer(env) {
       payload?.message || payload?.error || "Vibe master transfer was not accepted by runner");
     return { attempted: true, request_id: id, asset_id: assetId, runner_status: payload?.status || null };
   }
+  // A background SMV1 job may finish after its initiating HTTP request has
+  // closed. Reconcile the actual Drive/media receipts on the next minute tick;
+  // this unlocks the existing automated Vibe-to-human-review dispatcher.
+  const readyRows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+    limit: 10,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Asset_Kind}="Master Original",{Transfer_Status}="Ready",{Preview_Status}="Pending")',
+  });
+  for (const row of readyRows) {
+    const id = String(f(row, "Production_Request_Record_ID") || "").trim();
+    const assetId = String(f(row, "Source_Asset_ID") || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || !assetId
+      || String(f(row, "Transfer_ID") || "") !== `ITEM4-MASTER-${id}-${assetId}`
+      || !String(f(row, "Drive_File_ID") || "")
+      || !String(f(row, "Media_Asset_Record_ID") || "")) continue;
+    const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id).catch(() => null);
+    if (!request || !studioIsVibeCut(request)
+      || String(f(request, "Studio_Master_Asset_Status") || "") === "Ready") continue;
+    const assets = item4AssetManifest(request);
+    if (assets.length !== 1 || String(assets[0]?.id || "") !== assetId
+      || String(assets[0]?.upload_status || "") !== "complete") continue;
+    const reconciled = await item4ReconcileMasterAuthority(env, id, request);
+    return { attempted: true, request_id: id,
+      authority_status: reconciled.status || null, reason: "verified-drive-receipt-reconciled" };
+  }
   return { attempted: false, reason: "no-eligible-vibe-master" };
 }
 /*__STUDIO_WORKER_END:item4HealPendingVibeMasterTransfer__*/
