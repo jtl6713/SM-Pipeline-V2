@@ -24,8 +24,9 @@ jobs:
             exit 1
           fi
           jq -c '{status:(.status//.state//null), jobId:(.jobId//.job_id//null), progress:(.progress//.percent//null), frames:(.framesRendered//.renderedFrames//null), totalFrames:(.totalFrames//null), error:(.error//.message//null), outputPresent:((.renderUrl//.outputUrl//.output_url//.url//"")|length>0), exitCode:(.exitCode//null), completedAt:(.completedAt//null), updatedAt:(.updatedAt//null), fields:(keys|sort)}' /tmp/vibe-render-status.json
+          jq -c '{logCount:((.logs//[])|length), logStages:[(.logs//[])[-10:][] | (if type=="string" then . else (.message//.text//"") end) | if test("reus";"i") then "cache_reuse" elif test("downloa";"i") then "download" elif test("localiz";"i") then "localization" elif test("acquir";"i") then "slot_acquire" elif test("render";"i") then "render" elif test("fail|error";"i") then "error" else "other" end]}' /tmp/vibe-render-status.json
           HEALTH=$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/vibe-render-health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
           echo "render_health_http=$HEALTH"
           if [[ "$HEALTH" == "200" ]]; then
-            jq -c '{ok:(.ok//null), status:(.status//.state//null), service:(.service//null), active:(.remotionActiveRenders//null), queued:(.remotionQueuedRenders//null), inFlight:(.remotionInFlightJobs//null), maxConcurrent:(.remotionMaxConcurrent//null)}' /tmp/vibe-render-health.json
+            jq -c '{ok:(.ok//null), status:(.status//.state//null), service:(.service//null), active:(.remotionActiveRenders//null), queued:(.remotionQueuedRenders//null), inFlight:(.remotionInFlightJobs//null), preparing:(.remotionPreparingJobs//null), maxConcurrent:(.remotionMaxConcurrent//null)}' /tmp/vibe-render-health.json
           fi
