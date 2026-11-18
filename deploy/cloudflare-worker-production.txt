@@ -1415,3 +1415,5 @@ Deploy merged PR #2154 Flatiron revision Production Supabase lookup correction, 
 2026-11-18: Release Vibe full persisted Supabase snapshot re-read before strict source-to-production bridge after variant Ready. Preserve latest concurrent main changes, no publish and human Final Approval required.
 
 2026-11-18: Deploy one-time exact verified Vibe master Ready obsolete bridge preflight backoff recovery; no existing R2 job duplication, preserve all leases and human Final Approval. Inspect recOBKABTNVnxFiny read-only diagnostic.
+
+Deploy Factory Supabase authoritative batch review approval — Issue #2214 / PR #2218, merge acd35f7622e377237e8e0d89819e651966a99e25. Preserve operator-controlled scheduling: no automatic post dispatch on approval.
