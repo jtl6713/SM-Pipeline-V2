@@ -1,3 +1,4 @@
+import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
@@ -1985,7 +1986,22 @@ export async function item4ReconcileVariants(env, recordId, record = null, optio
   if (!scoped.length) {
     const currentStatus = String(f(record, "Studio_Variant_Status") || "").trim();
     const videoOnly = assets.length > 0 && assets.every(item4LooksLikeVideoAsset);
-    if (videoOnly && (currentStatus === "Preparing" || currentStatus === "Ready")) {
+    // Vibe Cut explicitly promises hands-free advancement after its one
+    // original video is verified on Drive. Video has no photo crop queue:
+    // without this case, a Ready source whose variant state is still "None"
+    // remains trapped in waiting_variants forever. Only verified, unrevised
+    // single-video Vibe requests may synthesize the existing pass-through
+    // manifest; all other video/photo requests retain explicit Prepare.
+    const verifiedVibePassThrough = videoOnly
+      && !productionRequestRevisionOpen(record)
+      && ["Draft", "Ready", "Submitted"].includes(String(f(record, "Request_Status") || "").trim())
+      && vibeAutoReviewVerifiedSource({
+        notes: f(record, "Production_Notes"),
+        assets,
+        masterStatus: f(record, "Studio_Master_Asset_Status"),
+        masterCount: f(record, "Studio_Master_Asset_Count"),
+      });
+    if (videoOnly && (currentStatus === "Preparing" || currentStatus === "Ready" || verifiedVibePassThrough)) {
       const manifest = item4BuildDriveManifest(recordId, assets, ratios, [], planRatios);
       const missing = assets.filter((asset) => !item4VideoVariantReady(asset));
       let status = "Preparing";
