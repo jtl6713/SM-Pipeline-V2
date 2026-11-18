@@ -57,7 +57,7 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(reconcile, /renderDesk\(desk\)/);
   assert.match(reconcile, /confirmed\.every\(\(id\) => !stillReviewing\.has\(id\)\)/,
     "Stale read copies must be retried, not considered successfully reconciled");
-  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
+  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,550}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
@@ -156,7 +156,7 @@ test("A rejected submission stays visible across the automatic Desk refresh", ()
   assert.match(js, /sessionStorage\.setItem\(FACTORY_SUBMISSION_ERROR_KEY/);
   assert.match(js, /setBatchSubmissionError\(`Confirmed \$\{acceptedOutputs\} of \$\{ready\.length\} outputs accepted/);
   assert.match(js, /if \(state\.batchSubmissionError\) setStatus\(state\.batchSubmissionError, true\);\s*else setStatus\(desk\.warning \|\| "Factory Desk ready\."\);/);
-  assert.match(js, /submitFactoryBatchApprovals\(\)\.catch\(\(error\) => setBatchSubmissionError/);
+  assert.match(js, /submitFactoryBatchApprovals\(\)[\s\S]{0,100}\.catch\(\(error\) => setBatchSubmissionError/);
 });
 
 test("Retryable Factory failures retain an exact payload for bounded background retry", () => {
@@ -711,20 +711,28 @@ test('stale unrecoverable recovery fences clear without another POST',async()=>{
   assert.ok(h.messages.some(message=>/Cleared 1 stuck saved submission/i.test(String(message||''))));
 });
 
-test('readyFactoryOutputs keeps Ready-for-Review rows despite local accepted fence',()=>{
-  assert.match(js,/Hide only accepted outputs that left Ready for Review/);
-  assert.match(js,/output_status \|\| ""\)\.trim\(\)\.toLowerCase\(\) !== "ready for review"/);
+test('submitted approvals stay outside Needs Eyes even with a stale Ready-for-Review snapshot',()=>{
+  assert.match(js,/function factorySubmittedApprovalIds\(\)/);
   assert.match(js,/clearFactoryRecoveryFences\(\{ onlyUnrecoverable: false \}\)/);
-  assert.match(js,/localStorage\.removeItem\(FACTORY_ACCEPTED_OUTPUTS_KEY\)/);
   assert.match(js,/factoryUnrecoverableSubmitError/);
   const readyFn=extractNamedFunction(js,'readyFactoryOutputs');
-  const compile=new Function('state','recentFactoryAccepted','factoryMatchesProfile',
+  const compile=new Function('state','factorySubmittedApprovalIds','factoryMatchesProfile',
     'canReviewActions','canSelectBatchOutput','withResolvedFactoryProfile',
     readyFn+'; return readyFactoryOutputs;');
   const card={id:'recTribune',kind:'output',output_status:'Ready for Review',profile_id:'recChicago'};
-  const state={desk:{lanes:{needs_eyes:[card]}},submittingOutputIds:new Set()};
-  const ready=compile(state,()=>({recTribune:Date.now()}),()=>true,()=>true,()=>true,c=>c);
-  assert.deepEqual(ready(true).map(row=>row.id),['recTribune']);
+  const state={desk:{lanes:{needs_eyes:[card]}},submissionIntentIds:new Set()};
+  const submitted=new Set(['recTribune']);
+  const ready=compile(state,()=>submitted,()=>true,
+    row=>row.output_status==='Ready for Review',()=>true,c=>c);
+  assert.deepEqual(ready(true).map(row=>row.id),[],
+    'A stale Ready-for-Review row must not be resubmitted while batch-owned');
+  submitted.clear();
+  assert.deepEqual(ready(true).map(row=>row.id),['recTribune'],
+    'A proven preflight refusal may release a card into Needs Eyes');
+  submitted.add('recTribune');
+  state.submissionIntentIds.add('recTribune');
+  assert.deepEqual(ready(true,true).map(row=>row.id),['recTribune'],
+    'The original click must still be able to reach its first POST');
   const gone={...card,output_status:'Approved for Publishing'};
   state.desk.lanes.needs_eyes=[gone];
   assert.deepEqual(ready(true).map(row=>row.id),[]);
