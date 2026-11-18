@@ -1697,6 +1697,50 @@ export async function item4ListPendingQueueRequestIds(env) {
 }
 /*__STUDIO_WORKER_END:item4ListPendingQueueRequestIds__*/
 
+/**
+ * Rescue a verified Vibe original whose upload and compression finished but
+ * whose Google Drive authority queue never received a runner claim.
+ * One bounded request per minute; only the exact existing transfer is resumed.
+ * Never advances approval or publishes while the source lacks Drive authority.
+ */
+export async function item4HealPendingVibeMasterTransfer(env) {
+  if (studioWriteSource(env) !== "supabase" || studioPhase6WriteSource(env) !== "supabase") {
+    return { attempted: false, reason: "supabase-authority-required" };
+  }
+  const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+    limit: 5,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Asset_Kind}="Master Original",{Transfer_Status}="Pending")',
+  });
+  for (const row of rows) {
+    const id = String(f(row, "Production_Request_Record_ID") || "").trim();
+    const assetId = String(f(row, "Source_Asset_ID") || "").trim();
+    const transferId = String(f(row, "Transfer_ID") || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || !assetId || transferId !== item4MasterTransferId(id, assetId)) continue;
+    const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id).catch(() => null);
+    if (!request || !studioIsVibeCut(request) || productionRequestRevisionOpen(request)) continue;
+    if (!["Draft", "Ready"].includes(String(f(request, "Request_Status") || ""))) continue;
+    const assets = item4AssetManifest(request);
+    if (assets.length !== 1 || String(assets[0]?.id || "") !== assetId) continue;
+    const asset = assets[0];
+    if (String(asset?.upload_status || "") !== "complete"
+        || !["ready", "skipped"].includes(String(asset?.compression_status || "").toLowerCase())
+        || !String(asset?.r2_key || "").startsWith("studio/master-assets/")
+        || String(asset.r2_key) !== String(f(row, "Source_R2_Key") || "")
+        || asset.google_drive_file_id || asset.media_asset_record_id) continue;
+    // Master transfer is a large, long-running operation. Let the runner
+    // acknowledge immediately, and process in its deduplicated background job.
+    const { response, payload } = await item4PulsePipelineStage(env, "smv1/drain", {
+      production_request_record_id: id,
+      extra: { max_runs: 1, async_master_recovery: true, source_asset_id: assetId },
+    }, "SMV1");
+    if (!response.ok) throw new HttpError(response.status,
+      payload?.message || payload?.error || "Vibe master transfer was not accepted by runner");
+    return { attempted: true, request_id: id, asset_id: assetId, runner_status: payload?.status || null };
+  }
+  return { attempted: false, reason: "no-eligible-vibe-master" };
+}
+/*__STUDIO_WORKER_END:item4HealPendingVibeMasterTransfer__*/
+
 export async function item4DrainAllPendingWork(env, options = {}) {
   // Worker owns the Item 4 queue. Browser polling and HTTP timeboxes may stop;
   // cron must keep draining until every pending master/variant row is gone.
