@@ -110,3 +110,17 @@ def test_requeue_stale_processing_returns_pending():
     assert count == 1
     fields = client.update_record.call_args.args[2]
     assert fields["Transfer_Status"] == "Pending"
+
+
+def test_processing_master_gets_long_lease_to_avoid_duplicate_drive_upload():
+    from datetime import datetime, timedelta, timezone
+    recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    client = MagicMock()
+    client.list_records.return_value = [
+        {"id": "recVIDEO", "fields": {
+            "Asset_Kind": "Master Original", "Transfer_Status": "Processing",
+            "Attempt_Count": 1, "Last_Attempt_At": recent, "Updated_At": recent,
+        }}
+    ]
+    assert requeue_stale_processing(client, production_request_record_id="recVibe") == 0
+    client.update_record.assert_not_called()
