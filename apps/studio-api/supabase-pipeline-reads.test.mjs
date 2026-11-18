@@ -6496,3 +6496,13 @@ test("Schedule-regen LOWER(Platform) and Meta Studio_Output_Notes FIND prefer Su
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Supabase transfer queue retains original R2 source identity for Vibe master handoff", async () => {
+  const source = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.match(source, /"Source_R2_Key",\s*"Source_URL",\s*"Source_Drive_File_ID"/);
+  assert.match(source, /copy\("Source_R2_Key", "source_r2_key", transferQueueText\(fields.Source_R2_Key\)\)/);
+  assert.match(source, /copy\("Source_URL", "source_url", transferQueueText\(fields.Source_URL\)\)/);
+  assert.match(source, /source_r2_key: "Source_R2_Key"/);
+  assert.match(source, /source_url: "Source_URL"/);
+});
