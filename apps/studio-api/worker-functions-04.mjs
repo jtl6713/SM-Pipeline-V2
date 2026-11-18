@@ -13922,9 +13922,19 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   jobs.sort((left, right) =>
     (Date.parse(left.created_at || left.updated_at || "") || 0)
     - (Date.parse(right.created_at || right.updated_at || "") || 0));
+  // Recently verified uploaded Vibes are already backed by exact Google Drive
+  // and Media Asset receipts. Do not starve their first human-review render
+  // behind the oldest planning backlog; still apply every normal claim gate.
+  // Limit priority to verified, unpromoted drafts found by the exact selector.
+  const priorityVibeIdeaIds = [...new Set((Array.isArray(recentVibes) ? recentVibes : [])
+    .filter((draft) => ["Draft", "Ready", "Submitted"].includes(String(f(draft, "Request_Status") || "").trim()))
+    .filter(readyProductionVerifiedVibeDraft)
+    .map((draft) => firstLinkedRecordId(f(draft, "Idea_Candidate")))
+    .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id || ""))))];
   const selected = readyProductionSelectJobs(jobs, {
     maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
     maxPerProfile: 1,
+    priorityIdeaIds: priorityVibeIdeaIds,
   });
   stage = "claim";
   const claims = [];

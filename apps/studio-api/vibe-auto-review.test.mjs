@@ -139,3 +139,14 @@ test("Vibe review continuation preserves original media and final human approval
   assert.doesNotMatch(method, /publish-kick|publish-now|approve-all/);
   assert.match(logic, /readyProductionOutputsAwaitingFinalApproval/);
 });
+
+test("cron grants planning priority only to verified Vibe sources and preserves human final approval", () => {
+  const source = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const cron = source.slice(source.indexOf("async function studioReadyProductionCronResume("),
+    source.indexOf("export { studioReadyProductionCronResume };"));
+  assert.match(cron, /priorityVibeIdeaIds/);
+  assert.match(cron, /filter\(readyProductionVerifiedVibeDraft\)/);
+  assert.match(cron, /priorityIdeaIds: priorityVibeIdeaIds/);
+  assert.match(cron, /final_approval: "human_only"/);
+  assert.doesNotMatch(cron, /approveOutputRecordForPublishing/);
+});
