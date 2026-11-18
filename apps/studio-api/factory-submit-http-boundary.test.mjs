@@ -49,3 +49,51 @@ test('upstream outage stays JSON 503 and does not turn into uncaught 500',async 
  const {env,counts}=setup(t,{failedRead:true}); const response=await worker.fetch(request('start_group'),env,{});
  assert.equal(response.status,503);assert.match((await response.json()).error,/fixture outage/);assert.equal(counts().r2Writes,0);
 });
+
+test('real Worker HTTP validate_group uses Supabase review state, never Airtable outputs or content', async t => {
+ const {env,calls,counts}=setup(t);
+ env.STUDIO_WRITE_SOURCE='supabase';
+ env.SUPABASE_URL='https://example.supabase.co';
+ env.SUPABASE_SERVICE_ROLE_KEY='fixture';
+ const legacyFetch=globalThis.fetch;
+ const touched=[];
+ const contentUuid='91cb9fd0-7c20-434c-b5ef-03af2832c940';
+ const profileUuid='3d0d5221-9e53-4513-972c-67b70963a97d';
+ globalThis.fetch=async (input,options={})=>{
+   const url=new URL(input);
+   if(url.hostname!=='example.supabase.co')return legacyFetch(input,options);
+   touched.push(url.pathname);
+   assert.equal(options.method||'GET','GET','read-only preflight');
+   if(url.pathname.endsWith('/content_profiles'))return Response.json([{
+     id:profileUuid,airtable_record_id:profile,
+     profile_name:'Fixture',brand_name:'Chicago',market_name:'Chicago',
+     active:true,platform_setup:{},
+   }]);
+   if(url.pathname.endsWith('/content_items'))return Response.json([{
+     id:contentUuid,airtable_record_id:'recTestContent01',content_profile_id:profileUuid,
+   }]);
+   if(url.pathname.endsWith('/platform_outputs'))return Response.json([{
+     id:'d178139e-87a7-4ab6-9137-2ed4f4c24ddd',
+     airtable_record_id:row.id,output_number:10001,
+     content_item_id:contentUuid,content_item_airtable_id:'recTestContent01',
+     content_profile_id:profileUuid,platform:'Instagram',
+     studio_output_type:'Reel',format:'Reel',output_status:'Ready for Review',
+     review_status:'Review Sent',publish_status:'Not Ready',
+     render_status:'Rendered',do_not_publish:false,test_run_id:null,
+     output_caption:'Fixture',final_file_url:'https://example.invalid/test.mp4',
+     thumbnail_url:'https://media.chicagoshining.com/studio/previews/thumbnails/test.jpg',
+     error_messages:{},updated_at:'2026-11-18T03:00:00+00:00',
+   }]);
+   throw Error('unexpected Supabase route: '+url.pathname);
+ };
+ const response=await worker.fetch(request(),env,{});
+ const body=await response.json();
+ assert.equal(response.status,200,JSON.stringify(body));
+ assert.equal(body.preflight_valid,true);
+ assert.equal(body.records[0].profile_id,profile);
+ assert.ok(touched.some(x=>x.endsWith('/platform_outputs')),'used Supabase output authority');
+ assert.ok(touched.some(x=>x.endsWith('/content_items')),'checked Supabase content ownership');
+ assert.ok(!calls.includes('outputs')&&!calls.includes('content')&&!calls.includes('Content Profiles'),
+   'zero Airtable output, content or profile reads');
+ assert.deepEqual(counts(),{r2Reads:0,r2Writes:0});
+});
