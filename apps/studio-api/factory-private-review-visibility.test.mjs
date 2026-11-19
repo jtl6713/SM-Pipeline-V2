@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { OPS_QUEUE_REVIEW_FORMULA } from "./ops-queue.mjs";
-import { evaluateReviewPackage, factoryReviewVisibility, safeReviewPromotion } from "./review-package-readiness.mjs";
+import { evaluateReviewPackage, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility, formalFactoryApprovalReady, safeReviewPromotion } from "./review-package-readiness.mjs";
 import { partitionFactoryLanes } from "./factory-desk.mjs";
 
 const media = "https://media.chicagoshining.com/";
@@ -72,4 +72,48 @@ test("private but unfinished or changes-requested rows do not inflate actionable
   const approved = privateReviewRecord("recPrivateApproved1");
   approved.fields.Review_Status = "Approved";
   assert.equal(evaluateReviewPackage(approved).readiness, "BLOCKED");
+});
+
+test("Factory's Supabase review scan includes complete held outputs, independent of the main publishing queue", () => {
+  const source = readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export async function listSupabaseFactoryDeskPack");
+  const end = source.indexOf("// Merge by authoritative output identity", start);
+  assert.ok(start > 0 && end > start, "authoritative Factory Supabase pack exists");
+  const pack = source.slice(start, end);
+  assert.match(pack, /platform_outputs\\?do_not_publish=eq\\.false&output_status=neq\\.Published/);
+  assert.match(pack, /platform_outputs\\?or=\\(output_status\\.eq\\.Ready%20for%20Review,review_status\\.eq\\.Review%20Sent\\)/);
+  assert.doesNotMatch(pack, /platform_outputs\\?do_not_publish=eq\\.false`\\s*\\+\\s*`&or=\\(output_status/);
+});
+
+test("Museum Mile #2212: all six complete held outputs are visible for inspection but neither approvable nor releaseable", () => {
+  const numbers = [10827, 10828, 10829, 10830, 10831, 10832];
+  const rows = numbers.map((number, index) => {
+    const record = privateReviewRecord("recMuseumHeld" + String(number).padStart(5, "0"));
+    record.fields.Review_Status = "";
+    record.fields.Publish_Status = index === 5 ? "Publishing" : index > 2 ? "Ready to Publish" : "Not Ready";
+    record.fields.Factory_Review_Handoff_Safety_Hold_At = "2026-11-19T17:03:00Z";
+    const readiness = evaluateReviewPackage(record);
+    assert.equal(readiness.readiness, "READY", number);
+    const visibility = factoryReviewVisibility(record, readiness, "Review Held", true);
+    assert.equal(visibility.visible, true, number);
+    assert.equal(visibility.held_preview_only, true, number);
+    assert.equal(formalFactoryApprovalReady(record, readiness), false, number);
+    assert.equal(factoryApprovalHoldReleaseEligibility(record, readiness).eligible, false, number);
+    return {
+      kind: "output", id: record.id, output_id: number, studio_state: "Review Held",
+      output_status: "Ready for Review", review_status: "",
+      render_status: "Rendered", publish_status: record.fields.Publish_Status,
+      do_not_publish: true, safety_hold_active: true, review_package_ready: visibility.visible,
+      final_file_url: record.fields.Final_File_URL,
+      thumbnail_url: record.fields.Thumbnail_URL,
+    };
+  });
+  const desk = partitionFactoryLanes(rows);
+  assert.equal(desk.summary.needs_eyes, 6);
+  assert.deepEqual(desk.lanes.needs_eyes.map((row) => row.output_id), numbers);
+  assert.ok(desk.lanes.needs_eyes.every((row) => row.do_not_publish && row.safety_hold_active && row.can_preview));
+
+  const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
+  assert.match(ui, /card\\.safety_hold_active === true/);
+  assert.match(ui, /card\\.safety_hold_active !== true/);
 });
