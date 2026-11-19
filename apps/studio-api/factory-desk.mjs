@@ -313,6 +313,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     review_package_reason: row.review_package_reason || null,
     render_status: row.render_status || null,
     review_hold_active: row.review_hold_active === true,
+    safety_hold_active: row.safety_hold_active === true,
     do_not_publish: row.do_not_publish === true,
     platform: row.platform || null,
     studio_output_type: row.studio_output_type || row.format || null,
