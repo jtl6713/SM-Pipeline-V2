@@ -1799,6 +1799,7 @@
     }
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
     if (card?.review_hold_active === true) return "Publishing approval is held for media QA. You can accept V2 creatively or request another revision.";
+    if (card?.safety_hold_active === true) return "Safety hold: an unapproved publisher attempted to proceed. Preview is available; approval and release remain disabled.";
     if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
     const render = String(card?.render_status || "").trim().toLowerCase();
     if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
@@ -1830,6 +1831,7 @@
     return card?.kind === "output"
       && card.do_not_publish === true
       && card.review_hold_active !== true
+      && card.safety_hold_active !== true
       && card.review_package_ready !== false
       && output === "ready for review"
       && ["", "review sent", "pending review"].includes(review)
