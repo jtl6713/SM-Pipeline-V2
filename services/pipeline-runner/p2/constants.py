@@ -29,6 +29,9 @@ Do not invent, draw, simulate, approximate, or generate any ChicagoShining logo 
 PHOTOREALISM:
 The scene must look like a real photograph of the place or subject — natural camera, real light, real textures, believable weather and materials. Do not make it illustrated, CGI, painterly, plastic, or like a luxury-ad composite.
 
+COMPOSITION OPTION:
+When one recognizable detail tells the story, consider an extreme close-up that fills the frame. The Wrigley Clock cover is a framing reference: its rim can extend beyond the edges while its hands and numerals remain recognizable on a phone. Apply that framing to the actual subject. Keep identifying features and title inside the platform safe area. Choose a wider view when the setting matters more.
+
 CHICAGOSHINING THUMBNAIL TEXT STYLE:
 When the thumbnail includes text, use clean, readable block lettering with this mix:
 1) DEFAULT (≥ ~80% of posts): restrained gold or black-and-gold lettering — soft brushed or matte gold, or black letters with a thin gold edge. Quiet and sophisticated. Keep lettering secondary to the photo. Do not use chrome, mirror-foil, glow, sparkle, giant arched 3D slabs, or gold-on-everything.
