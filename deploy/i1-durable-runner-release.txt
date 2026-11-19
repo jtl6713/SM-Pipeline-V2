@@ -138,3 +138,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-18: Deploy rebased Vibe #2193 recovery and 5xx read-only verification retry, with original master claim-clock guard and resumable Google Drive 308 safety. No publishing.
 
 2026-11-19: Deploy pipeline-runner 2026-11-19-ig-carousel-supabase-allowlist-v1 (PR #2244). Exact Supabase-native AP0C/1C/2C carousel readiness and child-container readback; verify regressions and /health via protected Ops workflow. No direct publish, retry override, or Meta permission change.
+
+2026-11-19: Deploy optional frame-filling composition guidance for generated thumbnails (PR #2250).
