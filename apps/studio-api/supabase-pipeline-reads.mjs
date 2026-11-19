@@ -4070,8 +4070,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).catch(() => []),
     supabaseRestAll(
       env,
-      `platform_outputs?do_not_publish=eq.false`
-        + `&or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)`
+      `platform_outputs?or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)`
         + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
       { pageSize: 500, maxRows: 10000 },
     ).then((rows) => {

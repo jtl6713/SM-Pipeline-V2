@@ -117,6 +117,9 @@ function isPastEyes(row) {
   // Ready for Review output from Factory's Needs Eyes lane.
   if (row?.kind === "output" && output === "ready for review") {
     const reviewCompleted = ["approved", "rejected", "skipped"].includes(review);
+    // Publishing can drift ahead of an unapproved review. A held output must
+    // still be visible to the operator, even when an orphan upload started.
+    if (!reviewCompleted && row?.do_not_publish === true) return false;
     const publicationStarted = /^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish);
     if (!reviewCompleted && !publicationStarted) return false;
   }
@@ -310,6 +313,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     review_package_reason: row.review_package_reason || null,
     render_status: row.render_status || null,
     review_hold_active: row.review_hold_active === true,
+    safety_hold_active: row.safety_hold_active === true,
     do_not_publish: row.do_not_publish === true,
     platform: row.platform || null,
     studio_output_type: row.studio_output_type || row.format || null,
