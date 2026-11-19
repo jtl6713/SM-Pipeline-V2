@@ -127,6 +127,39 @@ def test_carousel_po_output_find_and_retry_now():
     ) is None
 
 
+
+def test_apc_carousel_supabase_ready_and_child_predicates():
+    """AP0C/1C/2C stage readback must not silently query the closed archive."""
+    ready = formula_to_postgrest_filter(
+        CAROUSEL_SLIDES_TABLE,
+        'AND(FIND("10631",ARRAYJOIN({PO_Output_ID}))>0,'
+        '{IG_Public_Asset_Status}="Ready")',
+    )
+    assert ready is not None
+    assert "fields->>PO_Output_ID.like.*10631*" in ready
+    assert "fields->>IG_Public_Asset_Status.eq.Ready" in ready
+    assert "IG_Public_Asset_Status.eq.Ready" in attach_formula_filter(
+        "carousel_slides?select=*", ready,
+    )
+
+    child = formula_to_postgrest_filter(
+        CAROUSEL_SLIDES_TABLE,
+        'AND(FIND("10631",ARRAYJOIN({PO_Output_ID}))>0,'
+        '{IG_Child_Container_ID}!=BLANK())',
+    )
+    assert child is not None
+    assert "IG_Child_Container_ID.not.is.null" in child
+
+    finished = formula_to_postgrest_filter(
+        CAROUSEL_SLIDES_TABLE,
+        'AND(FIND("10631",ARRAYJOIN({PO_Output_ID}))>0,'
+        '{IG_Child_Container_Status}="FINISHED",'
+        '{IG_Child_Container_ID}!=BLANK())',
+    )
+    assert finished is not None
+    assert "fields->>IG_Child_Container_Status.eq.FINISHED" in finished
+    assert "IG_Child_Container_ID.not.is.null" in finished
+
 def test_produce_output_link_finds():
     content_number = formula_to_postgrest_filter(
         PLATFORM_OUTPUTS_TABLE,
