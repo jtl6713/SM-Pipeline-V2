@@ -242,6 +242,6 @@ export function factoryReviewVisibility(record, readiness, studioState, creative
       || heldVisible || canReleaseHold || heldReviewOnly,
     incomplete: lower(read(record, "Output_Status")) === "ready for review"
       && readiness?.readiness !== "READY" && !heldVisible,
-    held_preview_only: heldVisible || heldReviewOnly,
+    held_preview_only: heldVisible || (heldReviewOnly && !canReleaseHold),
   };
 }
