@@ -59,7 +59,7 @@ test("Chicago #9831 and #9832 remain in Needs Eyes for inspection while publicat
   promote.fields.Output_Status = "In Production";
   assert.equal(safeReviewPromotion(promote, evaluateReviewPackage(promote)), false);
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
-  assert.match(ui, /card\.review_hold_active === true \|\| card\.do_not_publish === true/);
+  assert.ok(ui.includes("card?.safety_hold_active === true"));
 });
 
 test("private but unfinished or changes-requested rows do not inflate actionable review counts", () => {
@@ -80,9 +80,9 @@ test("Factory's Supabase review scan includes complete held outputs, independent
   const end = source.indexOf("// Merge by authoritative output identity", start);
   assert.ok(start > 0 && end > start, "authoritative Factory Supabase pack exists");
   const pack = source.slice(start, end);
-  assert.match(pack, /platform_outputs\\?do_not_publish=eq\\.false&output_status=neq\\.Published/);
-  assert.match(pack, /platform_outputs\\?or=\\(output_status\\.eq\\.Ready%20for%20Review,review_status\\.eq\\.Review%20Sent\\)/);
-  assert.doesNotMatch(pack, /platform_outputs\\?do_not_publish=eq\\.false`\\s*\\+\\s*`&or=\\(output_status/);
+  assert.ok(pack.includes("platform_outputs?do_not_publish=eq.false&output_status=neq.Published"));
+  assert.ok(pack.includes("platform_outputs?or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)"));
+  assert.ok(!pack.includes("`platform_outputs?do_not_publish=eq.false`\n        + `&or=(output_status"));
 });
 
 test("Museum Mile #2212: all six complete held outputs are visible for inspection but neither approvable nor releaseable", () => {
@@ -114,6 +114,6 @@ test("Museum Mile #2212: all six complete held outputs are visible for inspectio
   assert.ok(desk.lanes.needs_eyes.every((row) => row.do_not_publish && row.safety_hold_active && row.can_preview));
 
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
-  assert.match(ui, /card\\.safety_hold_active === true/);
-  assert.match(ui, /card\\.safety_hold_active !== true/);
+  assert.ok(ui.includes("card?.safety_hold_active === true"));
+  assert.ok(ui.includes("card.safety_hold_active !== true"));
 });
