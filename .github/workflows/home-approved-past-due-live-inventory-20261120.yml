@@ -1,0 +1,97 @@
+name: Read exact live Approved Past Due Home totals (Supabase only)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/home-approved-past-due-live-inventory-20261120.yml']
+permissions:
+  contents: read
+concurrency:
+  group: home-approved-past-due-live-inventory-20261120
+  cancel-in-progress: false
+jobs:
+  readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Query authenticated live Studio Home via ephemeral service binding (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          WORKER="studio-home-past-due-audit-$GITHUB_RUN_ID"
+          http=$(curl -sS --max-time 20 -o /tmp/exists.json -w '%{http_code}' -H "$AUTH" "$ROOT/workers/scripts/$WORKER/settings" || true)
+          test "$http" = 404 || { echo "worker already exists, refusing overwrite"; exit 3; }
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" = 1 ]]; then
+              curl -sS --max-time 20 -X DELETE -H "$AUTH" "$ROOT/workers/scripts/$WORKER" -o /dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN=$(openssl rand -hex 32)
+          cat >/tmp/audit.mjs <<'JS'
+          export default {
+            async fetch(request, env) {
+              if (new URL(request.url).pathname !== "/inventory" || request.method !== "GET")
+                return new Response("not found", {status:404});
+              if (request.headers.get("Authorization") !== "Bearer "+env.AUDIT_TOKEN)
+                return new Response("unauthorized", {status:401});
+              const read = async path => {
+                const res = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+path,{
+                  method:"GET",headers:{
+                    "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                    "Origin":"https://studio.chicagoshining.com",
+                    "Accept":"application/json"
+                  }
+                }));
+                const data = await res.json().catch(()=>({}));
+                return {http:res.status, data};
+              };
+              const overview = await read("/api/profiles/overview");
+              const triage = await read("/api/admin/approved-past-due/triage");
+              const records = Array.isArray(overview.data.records)?overview.data.records:[];
+              const r=records.map(x=>({
+                id:x.id,city:x.city_label||x.name,
+                past_due:x.approved_past_due,missing_date:x.approved_missing_date,
+                future:x.approved_future,read_source:x.read_source||null
+              }));
+              return Response.json({
+                ok:overview.http===200&&overview.data.ok===true&&r.length===4,
+                overview_http:overview.http,overview_cached:overview.data.cached,
+                overview_stale:overview.data.stale,overview_snapshot:overview.data.snapshot,
+                overview_read_source:overview.data.read_source,
+                snapshot_at:overview.data.snapshot_at,
+                snapshot_generation:overview.data.snapshot_generation,
+                records:r,
+                home_total:r.reduce((n,x)=>n+Number(x.past_due||0),0),
+                triage_http:triage.http,
+                triage_ok:triage.data.ok===true,
+                triage_keys:Object.keys(triage.data||{}).slice(0,20),
+                strictly_readonly:true
+              },{status:overview.http===200&&r.length===4?200:409});
+            }
+          };
+          JS
+          cat >/tmp/meta.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT=$(curl -sS --max-time 35 -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/meta.json;type=application/json' -F 'worker.mjs=@/tmp/audit.mjs;type=application/javascript+module;filename=worker.mjs')
+          [[ "$PUT" =~ ^2[0-9][0-9]$ ]] && jq -e '.success==true' /tmp/upload.json >/dev/null || { echo "Worker installation rejected http=$PUT"; exit 4; }
+          OWNED=1
+          curl -fsS --max-time 25 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$ROOT/workers/scripts/$WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/sub.json
+          jq -e '.success==true' /tmp/sub.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 20 -H "$AUTH" "$ROOT/workers/subdomain" | jq -er '.result.subdomain')
+          http=000
+          for i in $(seq 1 12); do
+            http=$(curl -sS --max-time 70 -o /tmp/result.json -w '%{http_code}' "https://$WORKER.$SUBDOMAIN.workers.dev/inventory" -H "Authorization: Bearer $TOKEN" || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/result.json >/dev/null; then break; fi
+            if [[ "$http" == 409 ]]; then break; fi
+            sleep 4
+          done
+          jq -c '{ok,overview_http,overview_cached,overview_stale,overview_snapshot,overview_read_source,snapshot_at,snapshot_generation,records,home_total,triage_http,triage_ok,triage_keys,strictly_readonly}' /tmp/result.json || true
+          [[ "$http" == 200 ]] && jq -e '.ok==true and .strictly_readonly==true' /tmp/result.json >/dev/null
