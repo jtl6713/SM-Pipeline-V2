@@ -71,8 +71,18 @@ jobs:
               $o.test_run_id -or $o.published_at -or $o.platform_post_url -or
               $o.error_messages.TikTok_Draft_Delivered_At -or
               $o.error_messages.Platform_Post_ID) { throw 'output_unexpected_safety_state' }
-          $assets=@([string]$o.error_messages.TikTok_Draft_Assets_JSON | ConvertFrom-Json)
+          $manifestRaw=[string]$o.error_messages.TikTok_Draft_Assets_JSON
+          $parsed=ConvertFrom-Json -InputObject $manifestRaw
+          $assets=@()
+          foreach ($item in $parsed) { $assets+=([string]$item) }
+          if ($assets.Count -eq 1 -and $assets[0].StartsWith('[')) {
+            $parsedAgain=ConvertFrom-Json -InputObject $assets[0]
+            $assets=@()
+            foreach ($item in $parsedAgain) { $assets+=([string]$item) }
+          }
           $source='https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/3.jpg'
+          Write-Output ('tt10733_ops_manifest_count='+$assets.Count)
+          Write-Output ('tt10733_ops_manifest_last_exact='+[string]($assets.Count -eq 5 -and $assets[4] -eq $source))
           if ($assets.Count -ne 5 -or $assets[4] -ne $source) { throw 'wrong_exact_tiktok_manifest' }
           Write-Output 'tt10733_ops_original_manifest=PASS'
           Add-Type -AssemblyName System.Drawing
