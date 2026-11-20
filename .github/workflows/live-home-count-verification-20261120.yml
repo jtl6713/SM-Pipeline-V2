@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/live-home-count-verification-20261120.yml'
+      - 'repair/scripts/live-home-count-verification-20261120.mjs'
   workflow_dispatch:
 permissions:
   contents: read

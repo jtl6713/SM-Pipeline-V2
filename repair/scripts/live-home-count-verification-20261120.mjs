@@ -19,8 +19,12 @@ try{
  const bindings=version.resources?.bindings||[];
  const binding=name=>{const x=bindings.find(x=>x.name===name);return x?.type==="plain_text"?x.text:null;};
  const source=binding("STUDIO_HOME_READ_SOURCE"),write=binding("STUDIO_WRITE_SOURCE");
- if(source!=="supabase")throw new Error("refuse_non_supabase_home_source");
- if(write!=="supabase" && binding("STUDIO_PHASE6_WRITE_SOURCE")!=="supabase")throw new Error("refuse_non_supabase_write_source");
+ const durableSummary=binding("STUDIO_HOME_PROFILE_SUMMARY_READS")==="true";
+ console.log("HOME_SOURCE_FLAGS="+JSON.stringify({home_read_source:source||"absent",home_summary_reads:durableSummary,
+   studio_write_source:write||"absent",studio_phase6_write_source:binding("STUDIO_PHASE6_WRITE_SOURCE")||"absent"}));
+ // Metadata hides secret_text flags. Inspect the deployed health endpoint
+ // through the same GET-only service binding before allowing any Home read.
+ // Never invoke Home if runtime says it would fall back to Airtable.
  const script=`export default {async fetch(request,env){
    const url=new URL(request.url);
    if(request.method!=="GET")return new Response("Method not allowed",{status:405});
@@ -48,11 +52,16 @@ try{
   throw Error(path+"_route_unavailable");
  }
  const health=await read("health");
+ console.log("HOME_RUNTIME_SOURCE="+JSON.stringify({studio_home_read_source:health.studio_home_read_source||"unavailable",studio_write_source:health.studio_write_source||"unavailable"}));
+ if(health.studio_home_read_source!=="supabase" && !durableSummary)
+   throw new Error("refuse_non_supabase_runtime_home_source");
+ if(health.studio_write_source!=="supabase")
+   throw new Error("refuse_non_supabase_runtime_write_source");
  const overview=await read("overview");
  if(overview.ok!==true||!Array.isArray(overview.records)||overview.records.length!==4)throw Error("incomplete_home_overview");
  const rows=overview.records.map(r=>({profile:r.name||r.city_label||r.id,approved_past_due:r.approved_past_due,approved_no_date:r.approved_missing_date,read_source:r.read_source||null}));
  if(rows.some(r=>!Number.isInteger(r.approved_past_due)))throw Error("invalid_past_due_counts");
- const report={read_only:true,worker_version_id:selected,worker_health:health.version,home_read_source:source,
+ const report={read_only:true,worker_version_id:selected,worker_health:health.version,home_read_source:health.studio_home_read_source,
   home_summary_read_flag:binding("STUDIO_HOME_PROFILE_SUMMARY_READS"),snapshot_generation:overview.snapshot_generation||null,
   snapshot_at:overview.snapshot_at||null,approved_past_due_total:rows.reduce((s,r)=>s+r.approved_past_due,0),profiles:rows,checked_at:new Date().toISOString(),temporary_bridge_deleted:false};
  console.log("HOME_COUNTS_RESULT="+JSON.stringify(report));
