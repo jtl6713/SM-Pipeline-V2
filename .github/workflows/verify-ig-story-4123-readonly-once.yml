@@ -109,6 +109,7 @@ jobs:
           $root = Join-Path (Get-Location) "Services\pipeline-runner"
           if (-not (Test-Path $root)) { throw "IG4123 runner source unavailable" }
           if (-not (Test-Path (Join-Path $root "config.py"))) { throw "IG4123 runner config.py unavailable" }
+          Write-Output "IG4123_STAGE=runner_root_verified"
           $env:PYTHONPATH = $root
           $python = Get-Command python -ErrorAction SilentlyContinue
           if (-not $python) { throw "IG4123 Python unavailable" }
@@ -119,7 +120,9 @@ jobs:
             Push-Location $root
             # Explicitly add the real runner source directory to sys.path even
             # when the temporary script lives elsewhere on the Windows host.
-            & $python.Source -c 'import os,sys,runpy;sys.path.insert(0,os.getcwd());runpy.run_path(sys.argv[1],run_name="__main__")' $probePath
+            Write-Output "IG4123_STAGE=python_invoked"
+            & $python.Source -c 'import os,sys,runpy;sys.path.insert(0,os.getcwd());runpy.run_path(sys.argv[1])' $probePath
+            Write-Output ("IG4123_STAGE=python_exit_code_"+$LASTEXITCODE)
             if ($LASTEXITCODE -ne 0) { throw "IG4123 read-only Python diagnostic failed" }
           } finally {
             Pop-Location
@@ -161,7 +164,7 @@ jobs:
               if [[ "$state" == "failed" ]]; then
                 echo "ig4123_shell_probe_failed_no_provider_verification"
                 # Print only specific known safe exception categories; never raw Ops output.
-                jq -r '.job.log // ""' /tmp/ig4123-job.json | grep -E 'IG4123_RESULT=|IG4123 |IG4123_|ModuleNotFoundError|Python unavailable|runner source unavailable|runner not healthy|Traceback|ParserError|CommandNotFoundException' | head -15 || true
+                jq -r '.job.log // ""' /tmp/ig4123-job.json | grep -E 'IG4123_STAGE=|IG4123_RESULT=|IG4123 |IG4123_|ModuleNotFoundError|SyntaxError|NameError|ImportError|FileNotFoundError|Traceback|ParserError|CommandNotFoundException' | tail -20 || true
                 exit 4
               fi
             fi
