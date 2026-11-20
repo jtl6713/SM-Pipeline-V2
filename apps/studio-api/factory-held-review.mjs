@@ -21,14 +21,23 @@ export function heldReviewEligibility(row) {
     return "A review decision has already been recorded";
   if (!["Rendered", "Native Photo Route"].includes(String(row.render_status || "")))
     return "Review media has not finished rendering";
-  if (livePublish.test(String(row.publish_status || "")) ||
+  const incidentReviewOnly = Boolean(row.error_messages?.Factory_Review_Handoff_Safety_Hold_At);
+  if (row.error_messages?.SM_Factory_Held_Review_Receipt)
+    return "A held creative review decision has already been recorded";
+  // A detected preapproval publisher attempt must never be reset here.
+  // It can receive a separate creative decision without altering publish state.
+  if (!incidentReviewOnly && (livePublish.test(String(row.publish_status || "")) ||
+
       row.published_at || row.platform_post_url ||
-      row.error_messages?.Publish_Started_At && !row.error_messages?.Factory_Review_Handoff_Safety_Hold_At)
+      row.error_messages?.Publish_Started_At))
     return "Publication already started; verify the external receipt";
+  if (incidentReviewOnly && (row.published_at || row.platform_post_url ||
+      row.platform_publish_response))
+    return "Provider evidence exists; verify external publication before creative decision";
   if (row.auto_publish_enabled === true || row.scheduled_post_date ||
       row.studio_scheduled_at || row.youtube_scheduled_publish_at)
     return "Existing scheduling or automatic publishing must be safely disarmed before review";
-  if (!["", "Not Ready"].includes(String(row.publish_status || "")))
+  if (!incidentReviewOnly && !["", "Not Ready"].includes(String(row.publish_status || "")))
     return "Publisher state must be reconciled before review";
   return null;
 }
@@ -56,11 +65,16 @@ export async function factoryHeldReviewDecision(env, id, actor, decision, note =
     decision, actor: String(actor || "Factory operator").slice(0, 140),
     note: String(note || "").slice(0, 3000), at: stamp,
     publishing_authorized: false, publishing_hold_preserved: true,
+    incident_creative_only: Boolean(row.error_messages?.Factory_Review_Handoff_Safety_Hold_At),
+    publish_state_at_decision: row.publish_status || null,
   };
+  const incidentReviewOnly = Boolean(row.error_messages?.Factory_Review_Handoff_Safety_Hold_At);
   const fields = {
-    output_status: decision === "approve" ? "Approved for Publishing" : "Changes Requested",
-    review_status: decision === "approve" ? "Approved" : "Changes Requested",
-    publish_status: "Not Ready",
+    ...(incidentReviewOnly ? {} : {
+      output_status: decision === "approve" ? "Approved for Publishing" : "Changes Requested",
+      review_status: decision === "approve" ? "Approved" : "Changes Requested",
+      publish_status: "Not Ready",
+    }),
     do_not_publish: true, auto_publish_enabled: false,
     updated_at: stamp,
     error_messages: {
@@ -84,16 +98,27 @@ export async function factoryHeldReviewDecision(env, id, actor, decision, note =
     throw Error("Held review changed concurrently; refresh Factory before deciding");
   const check = (await factorySupabaseApprovalRows(env, [id])).get(id)?.row;
   if (!check || check.do_not_publish !== true || check.auto_publish_enabled !== false ||
-      check.publish_status !== "Not Ready" || check.published_at ||
-      check.output_status !== fields.output_status ||
-      check.review_status !== fields.review_status ||
+      (incidentReviewOnly ? (
+        check.publish_status !== row.publish_status ||
+        check.output_status !== row.output_status ||
+        check.review_status !== row.review_status
+      ) : (
+        check.publish_status !== "Not Ready" ||
+        check.output_status !== fields.output_status ||
+        check.review_status !== fields.review_status
+      )) || check.published_at ||
       check.error_messages?.SM_Factory_Held_Review_Receipt?.at !== stamp)
     throw Error("Held review readback failed; publication lock must be inspected");
   return {
     id, held_review_decision: decision, publishing_authorized: false,
-    publishing_hold_preserved: true, scheduled: false, published: false,
+    publishing_hold_preserved: true, incident_creative_only: incidentReviewOnly,
+    scheduled: false, published: false,
     message: decision === "approve"
-      ? "Creative approved. Publishing remains blocked pending separate authorized release."
-      : "Changes requested. Publishing remains blocked.",
+      ? (incidentReviewOnly
+        ? "Creative review recorded. Publisher incident is unresolved; publication status and safety hold were preserved."
+        : "Creative approved. Publishing remains blocked pending separate authorized release.")
+      : (incidentReviewOnly
+        ? "Creative changes requested. Publisher incident is unresolved; publication status and safety hold were preserved."
+        : "Changes requested. Publishing remains blocked."),
   };
 }
