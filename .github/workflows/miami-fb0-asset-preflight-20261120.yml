@@ -1,0 +1,56 @@
+name: Miami FB photo-set asset preflight (exact 20; read only)
+
+on:
+  push:
+    branches: ['fix/miami-fb0-preflight-10638-10671-10694']
+    paths: ['.github/workflows/miami-fb0-asset-preflight-20261120.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  asset-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify all 20 lettered public JPEGs actually exist and are 4x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, subprocess, tempfile, struct
+          sets = [('10638','recWvmgW3HdfyKEK5',4),('10671','recNvok6XMN6zOSHa',8),('10694','recg9sZggvNOGQO54',8)]
+          def dimensions_jpeg(data):
+              if data[:2] != b'\xff\xd8':
+                  raise ValueError('not_jpeg')
+              pos=2
+              while pos + 4 < len(data):
+                  if data[pos] != 255:
+                      pos+=1; continue
+                  marker=data[pos+1]; pos+=2
+                  if marker in (0xd8, 0xd9, 0x01) or 0xd0 <= marker <= 0xd7: continue
+                  size=int.from_bytes(data[pos:pos+2],'big')
+                  if size<2 or pos+size>len(data): break
+                  if marker in (0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf):
+                      h=int.from_bytes(data[pos+3:pos+5],'big'); w=int.from_bytes(data[pos+5:pos+7],'big')
+                      return w,h
+                  pos+=size
+              raise ValueError('jpeg_dimensions_unavailable')
+          for output,ref,count in sets:
+              for index in range(count):
+                  url=f'https://media.chicagoshining.com/studio/previews/lettered/{ref}/{index}.jpg'
+                  with tempfile.NamedTemporaryFile(suffix='.jpg') as tmp:
+                      p=subprocess.run(['curl','--retry','2','-sSL','--connect-timeout','15','--max-time','35','--fail','-o',tmp.name,'-w','%{http_code} %{content_type}',url],capture_output=True,text=True)
+                      if p.returncode:
+                          raise RuntimeError(f'preflight_failed output={output} image={index+1} curl={p.returncode}')
+                      http,ctype=p.stdout.strip().split(' ',1)
+                      body=open(tmp.name,'rb').read()
+                  if http!='200' or not ctype.lower().startswith('image/jpeg'):
+                      raise RuntimeError(f'not_public_jpeg output={output} image={index+1} http={http} type={ctype}')
+                  w,h=dimensions_jpeg(body)
+                  if abs(w/h - 0.8)>0.012:
+                      raise RuntimeError(f'wrong_aspect output={output} image={index+1} dims={w}x{h}')
+                  print(f'FB0_IMAGE_PASS output={output} image={index+1}/{count} http={http} type={ctype} dimensions={w}x{h} bytes={len(body)}',flush=True)
+          print('FB0_ALL_20_PUBLIC_4X5_IMAGES_PASS',flush=True)
+          PY
