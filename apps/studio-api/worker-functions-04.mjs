@@ -17,6 +17,7 @@ import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
 import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-autonomous-schedule.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
+import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -10545,6 +10546,62 @@ export async function gatherStudioDeskInventory(env) {
  * Read-only, shared Quality Agent snapshot. No new scan loop or publisher.
  * Authorization is enforced by the /api/admin/exception-recovery route.
  */
+/**
+ * Complete Supabase-only classification of the approved past-due backlog.
+ * No Airtable reads, no Graph/upload API calls and no output PATCH or release.
+ * Includes explicitly held and retry-disabled records so they never vanish.
+ */
+export async function getStudioApprovedPastDueTriage(request, env) {
+  if (!studioSupabaseConfigured(env)) throw new HttpError(503,"Supabase approved-past-due source is unavailable");
+  const url=new URL(request.url);
+  const scanAt=new Date().toISOString();
+  const pageSize=100;
+  const records=[];
+  let offset=0;
+  while (offset<2000) {
+    const page=await listSupabaseDeskHealPage(env,{
+      kind:"approved_past_due_all",limit:pageSize,offset,cutoffIso:scanAt
+    });
+    if (!Array.isArray(page?.records)) throw new HttpError(503,"Supabase overdue census incomplete");
+    records.push(...page.records);
+    if (!page.offset) break;
+    const next=Number(page.offset);
+    if (!Number.isInteger(next)||next<=offset||next>=2000)
+      throw new HttpError(503,"Supabase overdue census exceeded safe full-scan bound");
+    offset=next;
+  }
+  const ids=new Set();
+  const items=records.map(row=>{
+    if(!row?.id||ids.has(row.id)) throw new HttpError(503,"Supabase overdue census has missing or duplicate output identity");
+    ids.add(row.id);
+    return classifyApprovedPastDueOutput(row,{nowMs:Date.parse(scanAt)});
+  });
+  const counts=new Map();
+  for (const item of items) {
+    const current=counts.get(item.action_group)||{group:item.action_group,count:0,platforms:{}};
+    current.count++;
+    current.platforms[item.platform]=(current.platforms[item.platform]||0)+1;
+    counts.set(item.action_group,current);
+  }
+  const profileFilter=String(url.searchParams.get("profile_id")||"").trim();
+  const platformFilter=String(url.searchParams.get("platform")||"").trim().toLowerCase();
+  const groupFilter=String(url.searchParams.get("group")||"").trim();
+  const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")||500)||500));
+  const visible=items.filter(item=>
+    (!profileFilter||records.find(r=>r.id===item.record_id)?.fields?.Content_Profile?.includes(profileFilter))
+    &&(!platformFilter||item.platform.toLowerCase()===platformFilter)
+    &&(!groupFilter||item.action_group===groupFilter)
+  );
+  return respond(request,env,{
+    status:"ok",source_of_truth:"supabase",read_only:true,publish_actions_enabled:false,
+    scanned_at:scanAt,total:items.length,groups:[...counts.values()].sort((a,b)=>a.group.localeCompare(b.group)),
+    visible_count:visible.length,truncated:visible.length>limit,
+    items:visible.slice(0,limit),
+    safety_note:"No saved external ID is not evidence that a post never published. Categories never authorize a provider POST.",
+  });
+}
+/*__STUDIO_WORKER_END:getStudioApprovedPastDueTriage__*/
+
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
     const url = new URL(request.url);
