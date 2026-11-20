@@ -106,7 +106,7 @@ jobs:
               $health.airtable_activity.any_read -ne $false -or $health.airtable_activity.any_write -ne $false) {
             throw "IG4123 preflight failed: trusted Supabase runner not healthy"
           }
-          $root = Join-Path (Get-Location) "Services\pipeline-runner"
+          $root = Join-Path (Get-Location) "Services\pipeline-runner\service"
           if (-not (Test-Path $root)) { throw "IG4123 runner source unavailable" }
           if (-not (Test-Path (Join-Path $root "config.py"))) { throw "IG4123 runner config.py unavailable" }
           Write-Output "IG4123_STAGE=runner_root_verified"
