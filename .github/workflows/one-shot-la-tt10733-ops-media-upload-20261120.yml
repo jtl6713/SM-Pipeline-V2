@@ -1,0 +1,153 @@
+name: Exact TikTok 10733 corrected slide via existing authenticated R2 upload worker
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-la-tt10733-ops-media-upload-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: exact-tt10733-original-immutable-r2-worker-upload
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate existing Operations shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "exact10733_ops_auth_unavailable"; exit 1
+      - name: Rebuild only oversized slide and stage through existing R2 upload Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/exact-tt10733-stage.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $record='recge6qNpnbV8Vi7h'
+          $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or
+              $health.studio_runner_output_read_source -ne 'supabase' -or
+              $health.supabase_pipeline_writes -ne $true) { throw 'runner_not_supabase_authoritative' }
+          $envfile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path $envfile)) { throw 'runner_env_missing' }
+          function EnvVal([string]$key) {
+            $line=@(Get-Content $envfile | Where-Object { $_ -match ('^\s*'+[regex]::Escape($key)+'\s*=') }) | Select-Object -Last 1
+            if (-not $line) { return '' }
+            return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $dburl=EnvVal 'SUPABASE_URL'
+          $dbkey=EnvVal 'SUPABASE_SERVICE_ROLE_KEY'
+          $r2secret=EnvVal 'R2_UPLOAD_WORKER_SECRET'
+          $r2endpoint=EnvVal 'R2_UPLOAD_WORKER_URL'
+          if (-not $dburl -or -not $dbkey) { throw 'supabase_readback_unavailable' }
+          if (-not $r2secret) { throw 'r2_upload_worker_secret_not_on_runner' }
+          if (-not $r2endpoint) { $r2endpoint='https://chicagoshining-r2-upload.joseph-t-logan.workers.dev' }
+          if (-not ($r2endpoint -match '^https://(chicagoshining-r2-upload\.joseph-t-logan\.workers\.dev|[a-zA-Z0-9-]+\.chicagoshining\.com)/?$')) { throw 'r2_upload_endpoint_not_trusted' }
+          $dbheaders=@{ apikey=$dbkey;Authorization=('Bearer '+$dbkey) }
+          $u=$dburl.TrimEnd('/')+'/rest/v1/platform_outputs?airtable_record_id=eq.'+$record+'&select=airtable_record_id,output_number,output_title,platform,platform_output_type,review_status,output_status,publish_status,tiktok_draft_status,do_not_publish,auto_publish_enabled,test_run_id,published_at,platform_post_url,error_messages'
+          $rows=@(Invoke-RestMethod -Uri $u -Headers $dbheaders -TimeoutSec 25)
+          if ($rows.Count -ne 1) { throw 'exact_output_lookup_not_unique' }
+          $o=$rows[0]
+          if ($o.output_number -ne 10733 -or $o.output_title -ne 'Santa Monica Pier Myths' -or
+              $o.platform -ne 'TikTok' -or $o.platform_output_type -ne 'TikTok Slideshow' -or
+              $o.review_status -ne 'Approved' -or $o.output_status -ne 'Approved for Publishing' -or
+              $o.do_not_publish -eq $true -or $o.auto_publish_enabled -ne $true -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or
+              $o.error_messages.TikTok_Draft_Delivered_At -or
+              $o.error_messages.Platform_Post_ID) { throw 'output_unexpected_safety_state' }
+          $assets=@([string]$o.error_messages.TikTok_Draft_Assets_JSON | ConvertFrom-Json)
+          $source='https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/3.jpg'
+          if ($assets.Count -ne 5 -or $assets[4] -ne $source) { throw 'wrong_exact_tiktok_manifest' }
+          Write-Output 'tt10733_ops_original_manifest=PASS'
+          Add-Type -AssemblyName System.Drawing
+          $srcbytes=(Invoke-WebRequest -Uri $source -UseBasicParsing -TimeoutSec 50).Content
+          if (-not ($srcbytes -is [byte[]])) { throw 'source_not_binary' }
+          $mem=[System.IO.MemoryStream]::new([byte[]]$srcbytes)
+          $image=[System.Drawing.Image]::FromStream($mem)
+          if ($image.Width -ne 2988 -or $image.Height -ne 5312 -or
+              $image.RawFormat.Guid -ne [System.Drawing.Imaging.ImageFormat]::Jpeg.Guid) {
+            throw 'source_dimensions_or_format_unexpected'
+          }
+          $bitmap=[System.Drawing.Bitmap]::new(1080,1920)
+          $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+          $graphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+          $graphics.DrawImage($image,0,0,1080,1920)
+          $out=[System.IO.MemoryStream]::new()
+          $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object MimeType -eq 'image/jpeg' | Select-Object -First 1
+          if (-not $codec) { throw 'jpeg_encoder_unavailable' }
+          $ep=[System.Drawing.Imaging.EncoderParameters]::new(1)
+          $ep.Param[0]=[System.Drawing.Imaging.EncoderParameter]::new([System.Drawing.Imaging.Encoder]::Quality,[long]92)
+          $bitmap.Save($out,$codec,$ep)
+          $bytes=$out.ToArray()
+          $graphics.Dispose(); $bitmap.Dispose(); $image.Dispose(); $mem.Dispose(); $out.Dispose()
+          if ($bytes.Length -lt 5000 -or $bytes.Length -gt 20000000) { throw 'corrected_jpeg_size_invalid' }
+          $sha=[System.BitConverter]::ToString(([System.Security.Cryptography.SHA256]::Create()).ComputeHash($bytes)).Replace('-','').ToLowerInvariant()
+          $key='publish/platform-output-10733/tiktok-slide-4-1080x1920-ops-'+$sha.Substring(0,12)+'.jpg'
+          $url='https://media.chicagoshining.com/'+$key
+          Write-Output ('tt10733_ops_corrected_bytes='+$bytes.Length)
+          $uploadUrl=$r2endpoint.TrimEnd('/')+'/?key='+[uri]::EscapeDataString($key)
+          $headers=@{'x-pipeline-secret'=$r2secret;'x-output-id'='10733';'x-retain-class'='publish'}
+          $reply=Invoke-RestMethod -Uri $uploadUrl -Method PUT -ContentType 'image/jpeg' -Body $bytes -Headers $headers -TimeoutSec 120
+          if ($reply.ok -ne $true) { throw 'authorized_r2_upload_rejected' }
+          Write-Output 'tt10733_ops_upload_worker=PASS'
+          $local=Join-Path $env:TEMP 'tt10733-corrected-verification.jpg'
+          Invoke-WebRequest -Uri $url -OutFile $local -TimeoutSec 50
+          $readbytes=[System.IO.File]::ReadAllBytes($local)
+          $readsha=[System.BitConverter]::ToString(([System.Security.Cryptography.SHA256]::Create()).ComputeHash($readbytes)).Replace('-','').ToLowerInvariant()
+          if ($readsha -ne $sha) { throw 'cdn_bytes_mismatch_no_manifest_write' }
+          $readmem=[System.IO.MemoryStream]::new($readbytes)
+          $readImage=[System.Drawing.Image]::FromStream($readmem)
+          if ($readImage.Width -ne 1080 -or $readImage.Height -ne 1920) { throw 'cdn_wrong_dimensions' }
+          $readImage.Dispose(); $readmem.Dispose()
+          Write-Output 'tt10733_ops_corrected_public_asset=PASS'
+          Write-Output ('tt10733_ops_corrected_url='+$url)
+          Write-Output ('tt10733_ops_corrected_sha256='+$sha)
+          Write-Output 'tt10733_ops_existing_manifest_untouched=true'
+          PS
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/exact-tt10733-stage.json').write_text(json.dumps({
+            'command':Path('/tmp/exact-tt10733-stage.ps1').read_text(),
+            'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/exact-tt10733-stage.json || true)
+          if [[ "$code" != '200' && "$code" != '202' ]]; then
+            echo "tt10733_ops_submit_http=$code"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 145); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == 'ok' ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^tt10733_ops_' || true
+              exit 0
+            elif [[ "$status" == 'failed' ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep -E '^tt10733_ops_|Exception|Error|error|_missing|_invalid|unavailable|not_binary' | tail -28 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'tt10733_ops_job_unconfirmed'; exit 4
