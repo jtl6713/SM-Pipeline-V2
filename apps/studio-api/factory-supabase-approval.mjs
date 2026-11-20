@@ -25,6 +25,7 @@ const FACTORY_APPROVAL_SELECT = [
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
+  "platform_publish_response",
 ].join(",");
 const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
 const satisfied = row => ["Approved for Publishing", "Published"].includes(String(row?.output_status || ""))
