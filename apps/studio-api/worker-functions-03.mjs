@@ -22,7 +22,7 @@ import {
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
-import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
 import { overdueSkipReceiptFields } from "./overdue-retry-receipt.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
@@ -13078,7 +13078,8 @@ export async function studioPublishFacebookPageStory(env, record) {
       /(?:QA-FB-STORY-368|FB-STORY-GRAPH|remote.verification)/i.test(
         String(f(record, "Studio_Publish_Dispatch_Note") || "") + " " +
         String(f(record, "Publish_Error_Stage") || "")) &&
-      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))) {
+      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))
+      && !facebookStoryDefiniteAuthRejection(record)) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
         Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",

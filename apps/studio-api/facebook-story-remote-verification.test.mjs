@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
-import { facebookStoryPublishedMatch, verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { facebookStoryPublishedMatch, verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
 
 const media = "117822233344455";
 const page = "102445566778899";
@@ -141,4 +141,35 @@ test("a positive Story match cannot reconcile until all Graph cursor pages compl
   });
   assert.equal(valid.verdict, "verified_published");
   assert.equal(valid.pages_read, 2);
+});
+
+test("only confirmed pre-create authentication errors without Graph identity may retry", () => {
+  const base = {fields:{
+    Studio_Publish_Dispatch_Note:"overdue-rescue: target=FB-STORY-GRAPH | webhook=FAILED Error validating access token: Session has expired.",
+    Review_Status:"Approved",Output_Status:"Approved for Publishing",Auto_Publish_Enabled:true,
+  }};
+  assert.equal(facebookStoryDefiniteAuthRejection(base),true);
+  for (const property of ["Platform_Media_ID","Platform_Post_ID","Platform_Post_URL","Published_At","Publish_Locked_By","Publish_Locked_At","Publish_Started_At"]) {
+    assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,[property]:"nonempty"}}),false,property);
+  }
+  for (const note of ["overdue-rescue: target=FB-STORY-GRAPH | webhook=FAILED We limit how often you can post",
+    "overdue-rescue: target=FB-STORY-GRAPH | webhook=FAILED #4 Application request limit reached",
+    "overdue-rescue: target=FB-STORY-GRAPH | webhook=FAILED timeout",
+    "overdue-rescue: target=FB-STORY-GRAPH | webhook=ok",
+    "overdue-rescue: target=FB-STORY-GRAPH | webhook=FAILED network unavailable",
+  ]) assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,Studio_Publish_Dispatch_Note:note}}),false,note);
+  assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,Do_Not_Publish:true}}),false);
+  assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,Auto_Publish_Enabled:false}}),false);
+  assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,Review_Status:"Pending"}}),false);
+  assert.equal(facebookStoryDefiniteAuthRejection({fields:{...base.fields,Output_Status:"Rejected"}}),false);
+});
+
+test("native Story dispatcher remains fail-closed for legacy ambiguous dispatch", () => {
+  const src=fs.readFileSync(new URL("./worker-functions-03.mjs",import.meta.url),"utf8");
+  const start=src.indexOf("export async function studioPublishFacebookPageStory(");
+  const end=src.indexOf("/*__STUDIO_WORKER_END:studioPublishFacebookPageStory__*/",start);
+  const body=src.slice(start,end);
+  assert.match(body,/facebookStoryDefiniteAuthRejection\(record\)/);
+  assert.match(body,/legacy-dispatch-no-remote-identity/);
+  assert.match(body,/Platform_Media_ID: String\(start\.video_id\)/);
 });
