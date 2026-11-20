@@ -136,9 +136,11 @@ def process_request(
             ),
         )
         return {"processed": False, "reason": "container_terminal", "status": status, **preview}
-    if code and code != "FINISHED":
+    # Missing/unknown status is not FINISHED; never media_publish without
+    # explicit provider confirmation, even if a Graph GET returned HTTP 200.
+    if code != "FINISHED":
         _mark_still_processing(client, output, status)
-        return {"processed": True, "still_processing": True, "status": status, **preview}
+        return {"processed": True, "still_processing": True, "reason": "container_not_confirmed_finished", "status": status, **preview}
 
     try:
         published = graph.publish(container_id)
@@ -214,7 +216,7 @@ def _mark_still_processing(client: AirtableClient, output: dict[str, Any], statu
         field_str(output, "Output_Notes"),
         (
             f"AP1-IGS-POLL checked container {container_id} and Meta still reports "
-            f"IN_PROGRESS at {stamp_minutes()}. IG_Story_Status remains Publishing for the next poll."
+            f"not FINISHED at {stamp_minutes()}. IG_Story_Status remains Publishing for the next poll."
         ),
     )
     client.update_record(
