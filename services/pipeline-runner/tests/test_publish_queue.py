@@ -57,3 +57,34 @@ def test_apply_replaces_a_stale_snapshot():
     apply_publish_queue_fields(fields, NOW)
     assert fields["YouTube_Action_Due_Now"] == 1
     assert fields["FB_Resolved_Publish_Mode"] == "Single Photo"
+
+
+def test_multi_image_facebook_photo_set_uses_native_photo_route_without_explicit_mode():
+    # Supabase Photo Set #9894 had four approved slides but no stored image
+    # publish mode. The old generic >1 image fallback incorrectly sent FB0 to
+    # "Preparing Slideshow", leaving these posts overdue.
+    fields = {
+        "Platform": "Facebook",
+        "Platform_Output_Type": "Facebook Photo Set",
+        "Studio_Output_Type": "Multi-Image Post",
+        "Image_Count": 4,
+        "Image_Output_Selected": True,
+        "Auto_Publish_Enabled": True,
+        "Do_Not_Publish": False,
+        "Publish_Status": "Ready to Publish",
+        "FB_Publish_Status": "Ready for Assets",
+    }
+    assert fb_resolved_publish_mode(fields) == "Multi-Photo Collage"
+    apply_publish_queue_fields(fields, NOW)
+    assert fields["FB_Resolved_Publish_Mode"] == "Multi-Photo Collage"
+    assert fields["FB_Action_Due_Now"] == 1
+    fields["FB_Image_Publish_Mode"] = "Slideshow Reel"
+    assert fb_resolved_publish_mode(fields) == "Slideshow Reel"
+
+
+def test_other_multi_image_formats_keep_slideshow_fallback():
+    generic = {"Platform_Output_Type": "Facebook Reel", "Image_Count": 4}
+    assert fb_resolved_publish_mode(generic) == "Slideshow Reel"
+    native_lowercase = {"platform_output_type": "Facebook Photo Set",
+                        "studio_output_type": "Multi-Image Post", "image_count": 4}
+    assert fb_resolved_publish_mode(native_lowercase) == "Multi-Photo Collage"

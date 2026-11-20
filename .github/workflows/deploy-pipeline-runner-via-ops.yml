@@ -9,6 +9,8 @@ on:
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
+      - 'services/pipeline-runner/publish_queue.py'
+      - 'services/pipeline-runner/tests/test_publish_queue.py'
 
 permissions:
   contents: read
@@ -70,6 +72,7 @@ jobs:
             services/pipeline-runner/tests/test_public_cover.py \
             services/pipeline-runner/tests/test_ap0_eligibility.py \
             services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py \
+            services/pipeline-runner/tests/test_publish_queue.py \
             services/pipeline-runner/tests/test_rendering_review_publication.py \
             services/pipeline-runner/tests/test_rendering_review_producer.py \
             services/pipeline-runner/tests/test_rendering_review_producer_http.py \
