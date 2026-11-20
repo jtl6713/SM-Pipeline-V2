@@ -91,6 +91,7 @@ import {
   factorySupabaseApprovalRows, factorySupabaseApprovalDisposition,
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
+import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
@@ -12994,7 +12995,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -13003,6 +13004,15 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "approve_held_review" || action === "reject_held_review") {
+      if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
+      requirePermission(authorization, "outputs_review");
+      try {
+        resultExtra = await factoryHeldReviewDecision(env, id, actor,
+          action === "approve_held_review" ? "approve" : "reject", note);
+      } catch (error) {
+        throw new HttpError(409, String(error?.message || error));
+      }
     } else if (action === "release_for_approval") {
       if (kind !== "output") throw new HttpError(400, "Formal review release is only for platform outputs");
       requirePermission(authorization, "outputs_review");
@@ -13043,7 +13053,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, approve_held_review, reject_held_review, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -13053,6 +13063,10 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
+  if (action === "approve_held_review" || action === "reject_held_review") {
+    return respond(request, env, { ok: true, page: "factory-desk", action,
+      result: resultExtra, message: resultExtra.message, refresh_required: true });
+  }
   if (action === "release_for_approval") {
     // Do not turn a committed canonical hold release into a 500 while reloading the Desk.
     return respond(request, env, { ok: true, page: "factory-desk", action,
