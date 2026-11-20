@@ -19,8 +19,12 @@ try{
  const bindings=version.resources?.bindings||[];
  const binding=name=>{const x=bindings.find(x=>x.name===name);return x?.type==="plain_text"?x.text:null;};
  const source=binding("STUDIO_HOME_READ_SOURCE"),write=binding("STUDIO_WRITE_SOURCE");
- if(source!=="supabase")throw new Error("refuse_non_supabase_home_source");
- if(write!=="supabase" && binding("STUDIO_PHASE6_WRITE_SOURCE")!=="supabase")throw new Error("refuse_non_supabase_write_source");
+ const durableSummary=binding("STUDIO_HOME_PROFILE_SUMMARY_READS")==="true";
+ console.log("HOME_SOURCE_FLAGS="+JSON.stringify({home_read_source:source||"absent",home_summary_reads:durableSummary,
+   studio_write_source:write||"absent",studio_phase6_write_source:binding("STUDIO_PHASE6_WRITE_SOURCE")||"absent"}));
+ if(source!=="supabase" && !durableSummary)throw new Error("refuse_non_supabase_home_source");
+ if(write!=="supabase" && binding("STUDIO_PHASE6_WRITE_SOURCE")!=="supabase" && !durableSummary)
+   throw new Error("refuse_non_supabase_write_source");
  const script=`export default {async fetch(request,env){
    const url=new URL(request.url);
    if(request.method!=="GET")return new Response("Method not allowed",{status:405});
