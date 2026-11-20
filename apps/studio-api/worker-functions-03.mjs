@@ -13078,7 +13078,7 @@ export async function studioPublishFacebookPageStory(env, record) {
       /(?:QA-FB-STORY-368|FB-STORY-GRAPH|remote.verification)/i.test(
         String(f(record, "Studio_Publish_Dispatch_Note") || "") + " " +
         String(f(record, "Publish_Error_Stage") || "")) &&
-      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record))))
+      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))
       && !facebookStoryDefiniteAuthRejection(record)) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
