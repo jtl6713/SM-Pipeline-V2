@@ -1,0 +1,55 @@
+name: Read-only TikTok 10733 five-image size and accessibility audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-la-tt10733-asset-check-20261120.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check the five exact URL assets without writes or platform calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install -q pillow requests
+          python3 - <<'PY'
+          from io import BytesIO
+          from PIL import Image,ImageOps
+          import requests
+          urls=[
+            ('cover','https://media.chicagoshining.com/publish/platform-output-10733/cover.jpg'),
+            ('slide-1','https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/0.jpg'),
+            ('slide-2','https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/1.jpg'),
+            ('slide-3','https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/2.jpg'),
+            ('slide-4','https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/3.jpg'),
+          ]
+          issues=0
+          for label,url in urls:
+            try:
+              response=requests.get(url,timeout=28,headers={'User-Agent':'SM-Pipeline-V2-exact-asset-size-audit/1.0'})
+              mime=response.headers.get('content-type','').split(';',1)[0].lower()
+              size=len(response.content)
+              if response.status_code!=200: raise ValueError(f'http_{response.status_code}')
+              if size > 20_000_000: raise ValueError(f'file_size_over_20MB_{size}')
+              with Image.open(BytesIO(response.content)) as im:
+                im.load()
+                w,h=ImageOps.exif_transpose(im).size
+                fmt=im.format
+              reason=[]
+              if w>1080 or h>1920: reason.append('over_1080x1920')
+              if w<360 or h<360: reason.append('under_360')
+              if fmt not in ('JPEG','WEBP'): reason.append('format_not_supported')
+              print(f'tt10733_image={label} http={response.status_code} mime={mime} fmt={fmt} pixels={w}x{h} bytes={size} constraints={",".join(reason) or "PASS"}')
+              if reason: issues+=1
+            except Exception as exc:
+              issues+=1
+              print(f'tt10733_image={label} check_failed={type(exc).__name__}:{str(exc)[:150]}')
+          print(f'tt10733_issues={issues} of {len(urls)}')
+          # Read-only diagnostics: do not return false success if assets violate published restrictions.
+          if issues: raise SystemExit(1)
+          PY
