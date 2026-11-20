@@ -108,6 +108,7 @@ jobs:
           }
           $root = Join-Path (Get-Location) "Services\pipeline-runner"
           if (-not (Test-Path $root)) { throw "IG4123 runner source unavailable" }
+          if (-not (Test-Path (Join-Path $root "config.py"))) { throw "IG4123 runner config.py unavailable" }
           $env:PYTHONPATH = $root
           $python = Get-Command python -ErrorAction SilentlyContinue
           if (-not $python) { throw "IG4123 Python unavailable" }
@@ -115,9 +116,13 @@ jobs:
           $probe = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__PYBASE64__"))
           [IO.File]::WriteAllText($probePath,$probe)
           try {
-            & $python.Source $probePath
+            Push-Location $root
+            # Explicitly add the real runner source directory to sys.path even
+            # when the temporary script lives elsewhere on the Windows host.
+            & $python.Source -c 'import os,sys,runpy;sys.path.insert(0,os.getcwd());runpy.run_path(sys.argv[1],run_name="__main__")' $probePath
             if ($LASTEXITCODE -ne 0) { throw "IG4123 read-only Python diagnostic failed" }
           } finally {
+            Pop-Location
             Remove-Item $probePath -Force -ErrorAction SilentlyContinue
           }
           PS
