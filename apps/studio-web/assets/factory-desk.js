@@ -2059,17 +2059,18 @@
     }
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
+    // Each Platform Output is independently approvable. A held or unfinished
+    // sibling must not disable selection of review-ready outputs in this content.
+    // The approval endpoint still revalidates every submitted output.
     const approveAll = ready.length > 1
-      ? (pending.length || heldRevisions.length
-        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="${heldRevisions.length ? "Review-held V2 is not yet eligible for publishing" : "Wait until sibling Stories finish rendering, then Approve all together"}">${esc(`Approve all (${ready.length}) — ${heldRevisions.length ? "review held" : "wait for Stories"}`)}</button>`
-        : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
+      ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve eligible (${ready.length})</button>`
       : "";
     const batchReady = ready.filter(canSelectBatchOutput);
     const contentSelected = batchReady.length > 0 && batchReady.every((card) => state.selectedOutputs.has(card.id));
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
+        ${contentSelected ? "checked" : ""} ${!batchReady.length ? "disabled" : ""}>
       ${safetyHeld.length && !batchReady.length ? "Preview only — approval held" : "Select eligible outputs"}</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
@@ -3394,21 +3395,8 @@
     }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
-    if (cards.some(card => card.review_hold_active === true)) {
-      setStatus("This content has a protected V2 review hold. Preview it first; Factory cannot approve this group.", true);
-      return;
-    }
     if (ready.length < 2) {
       setStatus("This content does not have multiple outputs waiting for approval.", true);
-      return;
-    }
-    const pending = pendingSiblingOutputsForGroup({ cards });
-    if (pending.length) {
-      const pendingLabel = pendingSiblingMeta(pending);
-      setStatus(`Approve all is waiting — ${pendingLabel}. Approve when the whole content is Ready for Review so Stories do not come back alone.`, true);
-      window.alert(
-        `Approve all is held until sibling outputs finish.\n\n${pendingLabel}.\n\nStories usually land in Needs eyes a few minutes after Reels/Shorts. Wait, then Approve all together.`,
-      );
       return;
     }
     const title = ready[0].title || "this content";

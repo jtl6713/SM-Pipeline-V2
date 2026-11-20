@@ -533,7 +533,9 @@ test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-app
   assert.ok(js.includes("card.review_hold_active === true || card.do_not_publish === true"));
   assert.ok(js.includes("function reviewGroupMatchesSearch"));
   assert.ok(js.includes("state.needsEyesSearch"));
-  assert.ok(js.includes("cards.some(card => card.review_hold_active === true)"));
+  // Protected V2 output remains individually ineligible without vetoing eligible siblings.
+  assert.ok(js.includes("card.review_hold_active === true || card.do_not_publish === true"));
+  assert.ok(!js.includes("cards.some(card => card.review_hold_active === true)"));
   assert.ok(html.includes('id="factoryNeedsEyesSearch"'));
 });
 
