@@ -1835,7 +1835,8 @@
       && output === "ready for review"
       && ["", "review sent", "pending review", "pending"].includes(review)
       && ["rendered", "native photo route"].includes(render)
-      && ["", "not ready"].includes(publish)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
       && card.auto_publish_enabled !== true
       && !card.scheduled_post_date && !card.studio_scheduled_at
       && !card.youtube_scheduled_publish_at && !card.published_at
@@ -1854,7 +1855,8 @@
       && output === "ready for review"
       && ["", "review sent", "pending review", "pending"].includes(review)
       && ["rendered", "native photo route"].includes(render)
-      && ["", "not ready"].includes(publish)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
       && card.auto_publish_enabled !== true
       && !card.scheduled_post_date && !card.studio_scheduled_at
       && !card.youtube_scheduled_publish_at && !card.published_at
