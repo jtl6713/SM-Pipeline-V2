@@ -19,6 +19,7 @@ from ap1_igs.constants import (
     STORY_STATUS_PUBLISHED,
 )
 from ap1_igs.eligibility import poll_eligibility_reason
+from ap1_igs.rate_limit import graph_container_poll_rate_limited, next_story_poll_retry_at, RATE_LIMIT_STAGE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
@@ -100,6 +101,9 @@ def process_request(
         if code == "PUBLISHED":
             _mark_published_unverified(client, output, {"status_code": code, "status": exc.status})
             return {"processed": False, "reason": "existing_story_published_requires_verification", **preview}
+        if graph_container_poll_rate_limited(exc):
+            _mark_story_poll_rate_limited(client, output)
+            return {"processed": False, "reason": "graph_container_rate_limited", "container_id": container_id, **preview}
         if "IN_PROGRESS" in code or "in progress" in str(exc).lower():
             _mark_still_processing(client, output, {"status_code": exc.status_code, "status": exc.status})
             return {"processed": True, "still_processing": True, "error": str(exc), **preview}
@@ -118,6 +122,9 @@ def process_request(
     if code == "PUBLISHED":
         _mark_published_unverified(client, output, status)
         return {"processed": False, "reason": "existing_story_published_requires_verification", **preview}
+    if graph_container_poll_rate_limited(status):
+        _mark_story_poll_rate_limited(client, output)
+        return {"processed": False, "reason": "graph_container_rate_limited", "container_id": container_id, **preview}
     if "ERROR" in status_blob.upper() or "EXPIRED" in status_blob.upper() or code in {"ERROR", "EXPIRED"}:
         _mark_container_failed(
             client,
@@ -157,6 +164,41 @@ def process_request(
         "first_class_finalized": _ci(field_str(output, "Platform_Output_Type")) == _ci(PLATFORM_OUTPUT_TYPE),
         **preview,
     }
+
+
+
+def _mark_story_poll_rate_limited(client: AirtableClient, output: dict[str, Any]) -> None:
+    """A Graph GET limit is not container processing failure.
+
+    Keep the original container and publication identity. This update records
+    only an hour-or-longer retry pause; the next native poll must check the
+    existing container, never create a replacement Story.
+    """
+    container_id = field_str(output, "IG_Story_Container_ID")
+    retry_at = next_story_poll_retry_at(field(output, "Publish_Next_Retry_At"))
+    message = (
+        "Meta Graph API request limit while polling existing Instagram Story "
+        f"container {container_id}; no evidence that the container failed. "
+        f"Poll existing container no earlier than {retry_at}. Do not create a new Story."
+    )
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output["id"],
+        {
+            "IG_Story_Status": "Publishing",
+            "IG_Story_Error_Message": message[:1500],
+            "IG_Story_Last_Attempt_At": iso_utc(),
+            "IG_Story_Response_JSON": "AP1-IGS-POLL Graph GET rate-limited; no media_publish called.",
+            "Publish_Error_Stage": RATE_LIMIT_STAGE,
+            "Publish_Error_Message": message[:900],
+            "Publish_Next_Retry_At": retry_at,
+            "Output_Notes": _append_notes(
+                field_str(output, "Output_Notes"),
+                f"AP1-IGS-POLL rate-limit cooldown for existing container {container_id} at {stamp_minutes()}.",
+            ),
+        },
+        typecast=True,
+    )
 
 
 def _mark_still_processing(client: AirtableClient, output: dict[str, Any], status: dict[str, Any]) -> None:
