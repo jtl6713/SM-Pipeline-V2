@@ -2955,6 +2955,16 @@ function igOpenCarouselFilter() {
  */
 export function deskHealOutputFilter(kind, options = {}) {
   const quiet = "test_run_id=is.null&do_not_publish=eq.false";
+  if (kind === "approved_past_due_all") {
+    // Include both dated clocks and ALL unconfirmed statuses, even when
+    // Do_Not_Publish or retry-ineligible. These rows need visible decisions,
+    // not automatic dispatch. Provider actions are never driven by this query.
+    const clock = String(options.cutoffIso || new Date().toISOString());
+    if (!/^\\d{4}-\\d{2}-\\d{2}T/.test(clock)) throw new Error("Approved past-due scan needs a UTC clock");
+    const at = encodeDeskFilterValue(clock);
+    return `test_run_id=is.null&review_status=eq.Approved&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&publish_status=neq.Published&or=(scheduled_post_date.lt.${at},studio_scheduled_at.lt.${at})`;
+  }
   if (kind === "native_photo") {
     const statuses = ["Ready for Review", "Approved for Publishing", "Published"]
       .map(encodeDeskFilterValue)
@@ -3399,7 +3409,7 @@ export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset 
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${deskHealSelect(kind)}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
+    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${deskHealSelect(kind)}&order=output_number.desc.nullslast,airtable_record_id.asc&limit=${capped}&offset=${start}`,
   );
   const batch = Array.isArray(rows) ? rows : [];
   const records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
