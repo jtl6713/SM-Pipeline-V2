@@ -1,0 +1,48 @@
+name: Miami FB #10643 eight 4x5 photos preflight
+
+on:
+  push:
+    branches: ['repair/miami-fb-photo-10643-preflight']
+    paths: ['.github/workflows/miami-10643-photo-asset-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify 8 published-source JPEG files (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess,tempfile
+          ref='recX9bKulI9yzbeJO'
+          def dimensions_jpeg(data):
+              if data[:2]!=bytes([255,216]): raise ValueError('not_jpeg')
+              at=2
+              while at+4<len(data):
+                  if data[at]!=255: at+=1;continue
+                  marker=data[at+1];at+=2
+                  if marker in (216,217,1) or 208<=marker<=215: continue
+                  size=int.from_bytes(data[at:at+2],'big')
+                  if size<2 or at+size>len(data): break
+                  if marker in (192,193,194,195,197,198,199,201,202,203,205,206,207):
+                      return int.from_bytes(data[at+5:at+7],'big'),int.from_bytes(data[at+3:at+5],'big')
+                  at+=size
+              raise ValueError('jpeg_dimensions_unavailable')
+          for idx in range(8):
+              url=f'https://media.chicagoshining.com/studio/previews/lettered/{ref}/{idx}.jpg'
+              with tempfile.NamedTemporaryFile(suffix='.jpg') as f:
+                  proc=subprocess.run(['curl','-sSL','--fail','--connect-timeout','12','--max-time','35','--retry','2','-o',f.name,'-w','%{http_code} %{content_type}',url],capture_output=True,text=True)
+                  if proc.returncode: raise RuntimeError(f'image={idx+1} http_fetch_failed code={proc.returncode}')
+                  status,mime=proc.stdout.strip().split(' ',1)
+                  body=open(f.name,'rb').read()
+              w,h=dimensions_jpeg(body)
+              if status!='200' or not mime.lower().startswith('image/jpeg') or (w,h)!=(1080,1350):
+                  raise RuntimeError(f'image={idx+1} invalid status={status} mime={mime} dimensions={w}x{h}')
+              print(f'PHOTO_PASS output=10643 image={idx+1}/8 status={status} mime={mime} dimensions={w}x{h} bytes={len(body)}',flush=True)
+          print('OUTPUT_10643_ALL_8_IMAGES_PASS',flush=True)
+          PY
