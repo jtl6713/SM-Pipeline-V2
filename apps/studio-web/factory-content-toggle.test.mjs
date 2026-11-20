@@ -130,6 +130,8 @@ test("Museum Mile 2212: six rendered safety-held outputs show previews instead o
     pendingSiblingOutputsForGroup: () => [],
     pendingSiblingMeta: () => "",
     canPreview: card => card.can_preview,
+    canReviewHeldOutput: card => card.do_not_publish === true && card.safety_hold_active === true && card.render_status === "Rendered",
+    canRejectHeldOutput: card => card.do_not_publish === true && card.safety_hold_active === true && card.render_status === "Rendered",
     canSelectBatchOutput: () => false,
     state,
     esc: value => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;"),
@@ -154,7 +156,8 @@ test("Museum Mile 2212: six rendered safety-held outputs show previews instead o
   assert.match(html,/Content 2212/);
   assert.match(html,/LA - Los Angeles/);
   assert.match(html,/6 rendered for preview/);
-  assert.match(html,/0 approvable/);
+  assert.match(html,/6 ready for creative review/);
+  assert.match(html,/0 publishing-approvable/);
   assert.match(html,/Publishing safety hold/);
   assert.match(html,/Preview only — approval held/);
   assert.doesNotMatch(html,/0 ready/);
