@@ -26,7 +26,11 @@ jobs:
           cat > /tmp/ig4123-readonly.py <<'PY'
           """Single-account, single-container Graph GET with strict Supabase preflight."""
           import json
+          import os
           from datetime import datetime, timezone
+          # Ops sets PORT="" for child shells; the installed runner expects int(PORT).
+          # This is the diagnostic Python subprocess only, never a service mutation.
+          os.environ["PORT"]="3350"
           from config import load_settings
           from airtable.client import AirtableClient
           from airtable.constants import PLATFORM_OUTPUTS_TABLE
