@@ -11010,6 +11010,8 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     const scanAtMs=Date.now();
     const counts=reconcileExceptionCensus(all,mapOutput,{
       atMs:scanAtMs,qaFailed:null,qaPastDue:null,
+      source:studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env)
+        ? "supabase" : "airtable",
     });
     const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
