@@ -1,0 +1,131 @@
+name: Inspect exact Instagram Reel 6243 for remote publication (read-only)
+
+on:
+  push:
+    branches: ['repair/miami-fb-photo-10643-preflight']
+    paths: ['.github/workflows/ig-6243-meta-remote-readonly.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  remote-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate approved Ops API (no token output)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-check.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-check.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECON_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Ops credentials absent"; exit 1
+      - name: Compare exact approved caption with live Meta IG media (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/ig-6243-meta-proof.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or
+              $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) {
+              throw "runner_supabase_authority_not_verified"
+          }
+          $repoRoot=(Get-Location).Path
+          $envfile=Join-Path $repoRoot "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          foreach ($line in Get-Content $envfile) {
+             if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
+                $key=$matches[1]
+                $val=$matches[2].Trim().Trim('"',"'")
+                [Environment]::SetEnvironmentVariable($key,$val,"Process")
+             }
+          }
+          $env:STUDIO_WRITE_SOURCE="supabase"
+          $env:STUDIO_RUNNER_OUTPUT_READ_SOURCE="supabase"
+          $env:PYTHONPATH=Join-Path $repoRoot "Services\pipeline-runner"
+          $py=@'
+          from airtable.client import AirtableClient
+          from airtable.constants import PLATFORM_OUTPUTS_TABLE
+          from item4.settings import PipelineSettings
+          from ap1_ig.graph import load_instagram_graph_settings
+          from render.fields import field_str
+          import requests,datetime,sys
+          client=AirtableClient()
+          output=client.get_record(PLATFORM_OUTPUTS_TABLE,"recJv1IxrKUxrvNI3")
+          expected=field_str(output,"Output_Caption")
+          if (field_str(output,"Platform")!="Instagram" or field_str(output,"Review_Status")!="Approved"
+              or field_str(output,"Platform_Output_Type")!="Instagram Reel" or not expected
+              or field_str(output,"Published_At") or field_str(output,"Platform_Post_ID")
+              or field_str(output,"Platform_Media_ID")):
+              raise RuntimeError("6243_exact_preflight_denied")
+          settings=load_instagram_graph_settings(PipelineSettings(client),output,client=client)
+          url=f"https://graph.facebook.com/{settings['version']}/{settings['ig_user_id']}/media"
+          params={"fields":"id,caption,media_type,media_product_type,timestamp,permalink","limit":"100","access_token":settings["token"]}
+          cutoff=datetime.datetime(2026,11,18,tzinfo=datetime.timezone.utc)
+          matches=[];page_count=0;total=0;oldest=None
+          while url and page_count<10:
+              response=requests.get(url,params=params,timeout=40)
+              if not response.ok:
+                  raise RuntimeError(f"meta_read_rejected_http_{response.status_code}")
+              data=response.json()
+              page_count+=1
+              batch=data.get("data") or []
+              total+=len(batch)
+              for item in batch:
+                  stamp=item.get("timestamp","")
+                  dt=datetime.datetime.fromisoformat(stamp.replace("Z","+00:00")) if stamp else None
+                  if dt and (oldest is None or dt<oldest):oldest=dt
+                  if item.get("caption","").strip()==expected.strip():
+                      matches.append((item.get("id"),item.get("permalink")))
+              if oldest and oldest<cutoff:break
+              url=data.get("paging",{}).get("next")
+              params=None
+          if not oldest or oldest>=cutoff:
+              raise RuntimeError(f"meta_history_coverage_unverified pages={page_count} posts={total}")
+          print(f"IG_6243_READONLY_META_PAGES={page_count}",flush=True)
+          print(f"IG_6243_READONLY_META_ROWS={total}",flush=True)
+          print(f"IG_6243_OLDEST_UTC={oldest.isoformat()}",flush=True)
+          print(f"IG_6243_EXACT_CAPTION_MATCHES={len(matches)}",flush=True)
+          for mid,permalink in matches:
+              print(f"IG_6243_EXISTING_PROVIDER_ID={mid}",flush=True)
+              print(f"IG_6243_EXISTING_PERMALINK={permalink}",flush=True)
+          print("IG_6243_REMOTE_READONLY_VERIFIED",flush=True)
+          '@
+          $script=Join-Path $env:TEMP "ig-6243-provider-proof.py"
+          Set-Content -Path $script -Value $py -Encoding UTF8
+          python $script
+          if ($LASTEXITCODE -ne 0) { throw "ig_6243_meta_read_script_failed" }
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/ig-6243-meta-proof.json').write_text(json.dumps({
+            "command":pathlib.Path('/tmp/ig-6243-meta-proof.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $RECON_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/ig-6243-meta-proof.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops read-only inspection rejected http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for i in $(seq 1 100); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $RECON_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^IG_6243_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -15
+              exit 3
+            fi
+            sleep 3
+          done
+          echo "Ops inspection timeout"; exit 4
