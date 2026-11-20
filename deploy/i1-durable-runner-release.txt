@@ -140,3 +140,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-19: Deploy pipeline-runner 2026-11-19-ig-carousel-supabase-allowlist-v1 (PR #2244). Exact Supabase-native AP0C/1C/2C carousel readiness and child-container readback; verify regressions and /health via protected Ops workflow. No direct publish, retry override, or Meta permission change.
 
 2026-11-19: Deploy optional frame-filling composition guidance for generated thumbnails (PR #2250).
+
+2026-11-20: Deploy native runner 2026-11-20-ig-story-graph-limit-cooldown-v1 (merged PR #2299, commit 929af3dfb5fff58618c37e0e964fb805ecfab946). Correct Meta Graph (#4) request-limit errors from existing Instagram Story container GET: preserve container, cooldown one hour or longer, never treat as terminal failure or create a new Story on this error; require explicit FINISHED before media_publish. Verify Supabase-only reads/writes, six-hour Airtable archive idle, all regression tests and deployed /health. No historical status/retry reset or public publication in this deployment.
