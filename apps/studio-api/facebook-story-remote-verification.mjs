@@ -93,3 +93,22 @@ export async function verifyFacebookStoryByMediaId({
   // Even a positive match is inconclusive when Graph pagination is truncated.
   return { verdict: "unknown", reason: "incomplete_meta_pagination", pages_read: pagesRead };
 }
+
+/**
+ * A rejected pre-create Graph authentication request is strong evidence that no
+ * Facebook Story upload session was ever started. Unlike rate limits or timeouts,
+ * it is safe to retry ONLY when no remote identity, publication or active lock
+ * was persisted and the recorded dispatch outcome explicitly says FAILED.
+ * Preserve the historical failure note; do not silently erase evidence.
+ */
+export function facebookStoryDefiniteAuthRejection(record) {
+  const f = record?.fields || record || {};
+  const note = String(f.Studio_Publish_Dispatch_Note || "");
+  if (!/^overdue-rescue: target=FB-STORY-GRAPH\s*\|\s*webhook=FAILED\b/i.test(note)) return false;
+  if (!/Error validating access token|session has expired|session has been invalidated|This method must be called with a Page Access Token|You cannot access the app till you log in/i.test(note)) return false;
+  if (f.Platform_Media_ID || f.Platform_Post_ID || f.Platform_Post_URL || f.Published_At
+    || f.Publish_Locked_By || f.Publish_Locked_At || f.Publish_Started_At) return false;
+  if (f.Do_Not_Publish || f.Review_Status !== "Approved"
+    || f.Output_Status !== "Approved for Publishing" || f.Auto_Publish_Enabled !== true) return false;
+  return true;
+}
