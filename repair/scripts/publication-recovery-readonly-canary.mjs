@@ -13,6 +13,7 @@ const igRecoveryTargets=[
 // Only existing canonical YouTube uploads, no provider mutation. Their inclusion
 // is for live channel-owned GET-only verification, not proof they are public.
 const ytRecoveryTargets=[
+ {route:'yt5201',record:'recARfalxM25191R4',output_id:5201,video_id:'Ls65TemEHSo'},
  {route:'yt5321',record:'recLzqmtWJGQvLNTZ',output_id:5321,video_id:'ekWGUhmlnaQ'},
  {route:'yt4140',record:'recT2eb5eOeioD0nY',output_id:4140,video_id:'PGNXR-WNI3g'},
  {route:'yt4050',record:'rec0259hg7cjoKl3j',output_id:4050,video_id:'gm9Mxa8ScnM'},
@@ -68,6 +69,7 @@ try {
     '/${token}/instagram':'/api/admin/exception-recovery/${instagramCanaryRecord}/receipt?authenticated=1',
     '/${token}/ig9098':'/api/admin/exception-recovery/recxIx0ZiWkR1n0ZW/receipt?authenticated=1',
     '/${token}/ig5246':'/api/admin/exception-recovery/rec6Th7faYoS9tJtN/receipt?authenticated=1',
+    '/${token}/yt5201':'/api/admin/exception-recovery/recARfalxM25191R4/receipt?authenticated=1',
     '/${token}/yt5321':'/api/admin/exception-recovery/recLzqmtWJGQvLNTZ/receipt?authenticated=1',
     '/${token}/yt4140':'/api/admin/exception-recovery/recT2eb5eOeioD0nY/receipt?authenticated=1',
     '/${token}/yt4050':'/api/admin/exception-recovery/rec0259hg7cjoKl3j/receipt?authenticated=1',
