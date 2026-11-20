@@ -1,0 +1,47 @@
+name: Diagnose Studio Worker version activation (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-studio-worker-version-activation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect active deployment and last six uploaded versions, no mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl --fail-with-body --silent --show-error --retry 2 --max-time 25 "$API/deployments" -H "$AUTH" -o /tmp/deployments.json
+          curl --fail-with-body --silent --show-error --retry 2 --max-time 25 "$API/versions?per_page=6" -H "$AUTH" -o /tmp/versions.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/deployments.json'))
+          v=json.load(open('/tmp/versions.json'))
+          if d.get('success') is not True or v.get('success') is not True:
+              raise SystemExit('Cloudflare versions/deployments API failed (response bodies suppressed)')
+          deps=(d.get('result') or {}).get('deployments') or []
+          items=(v.get('result') or {}).get('items') or []
+          if not deps or not items:
+              raise SystemExit('No deployment or version returned; fail closed')
+          active=max(deps[0].get('versions') or [],key=lambda x:x.get('percentage',0))
+          print('current_active_version='+str(active.get('version_id')))
+          print('current_active_percentage='+str(active.get('percentage')))
+          print('latest_uploaded_version='+str(items[0].get('id')))
+          print('latest_equals_active='+str(items[0].get('id')==active.get('version_id')).lower())
+          for index,row in enumerate(items[:6]):
+              meta=row.get('metadata') or {}
+              print(f'version_{index} id={row.get("id")} created_on={meta.get("created_on")} source={meta.get("source")} number={row.get("number")}')
+          print('deployment_count_in_page='+str(len(deps)))
+          PY
