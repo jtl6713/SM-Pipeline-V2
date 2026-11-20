@@ -136,3 +136,21 @@ test("global Exception Recovery census keeps emailed TikTok drafts in Manual Nee
  assert.equal(data.exception_items.filter(x=>x.categories.includes("approved_past_due")).length,1);
  assert.equal(data.exception_items.find(x=>x.record_id===rows[0].id),undefined);
 });
+
+test("Supabase full exception census returns every case beyond historical 500-item truncation",()=>{
+  const rows=Array.from({length:650},(_,i)=>r("rec"+i.toString(36).padStart(14,"0"),{
+    Output_ID:i+1,Platform:"Facebook",Do_Not_Publish:true,
+  }));
+  const actual=reconcileExceptionCensus(rows,mapOutput,{source:"supabase"});
+  assert.equal(actual.source,"supabase");
+  assert.equal(actual.totals.held_deferred,650);
+  assert.equal(actual.exception_items_count,650);
+  assert.equal(actual.exception_items.length,650);
+  assert.equal(actual.exception_items_truncated,false);
+  assert.equal(new Set(actual.exception_items.map(x=>x.record_id)).size,650);
+  assert.ok(actual.exception_items.every(x=>x.actions_enabled===false));
+});
+test("unknown census authority cannot be mislabeled Airtable or Supabase",()=>{
+  const actual=reconcileExceptionCensus([],mapOutput,{source:"nonsense"});
+  assert.equal(actual.source,"unknown");
+});
