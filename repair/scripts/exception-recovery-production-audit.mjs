@@ -247,7 +247,8 @@ try {
  let census;
  try{census=await probe('counts');}catch(error){report.counts={status:'unavailable',reason:String(error?.message||error).slice(0,130)};}
  const c=census?.body||{};
- if(census)report.counts={http_status:census.status,status:c.status||null,source_rows:c.source_row_count??null,
+ if(census)report.counts={http_status:census.status,status:c.status||null,source:c.source||null,source_rows:c.source_row_count??null,
+  case_count:c.exception_items_count??null,truncated:c.exception_items_truncated??null,
   totals:c.totals||null,quality_agent_disagreements:c.comparisons||null,
   home_snapshot_comparison:c.home_snapshot_comparison||null,cache_status:c.census_cache_status||null,
   scanned_at:c.scan_completed_at||null};
