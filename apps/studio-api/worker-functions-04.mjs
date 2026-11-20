@@ -10977,7 +10977,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
   const fresh=url.searchParams.get("fresh")==="1";
   // Normal page navigation never triggers the 8k-record, cursor-paginated
-  // Airtable census. Only the administrator's explicit Reconcile action does.
+  // Supabase census. Only the administrator's explicit Reconcile action does.
   if(!fresh){
     const cached=await readExceptionRecoveryCensusCache(env.STUDIO_MEDIA);
     if(!cached) return respond(request,env,{
@@ -10992,13 +10992,12 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     // comparison stays unavailable instead of claiming the wrong cache.
     const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
-    const all=await scanOutstandingFailedOutputs((options)=>(
-      (studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env))
-        ? listSupabaseOutputCensusPage(env, options)
-        : listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
-          ...options,fields:EXCEPTION_CENSUS_FIELDS,
-        })
-    ),{
+    // Supabase is the production source of truth. Never fall back to Airtable
+    // during the quiet migration window or on a missing Supabase credential.
+    if(studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+      throw new HttpError(503,"Authoritative Supabase census unavailable; Airtable fallback prohibited");
+    const all=await scanOutstandingFailedOutputs(
+      (options)=>listSupabaseOutputCensusPage(env,options),{
         filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
     // A source-canonical census must not launch a second expensive QA scan.
@@ -11010,6 +11009,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     const scanAtMs=Date.now();
     const counts=reconcileExceptionCensus(all,mapOutput,{
       atMs:scanAtMs,qaFailed:null,qaPastDue:null,
+      source:"supabase",
     });
     const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
@@ -11020,7 +11020,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
   const cached=await persistExceptionRecoveryCensusCache(env.STUDIO_MEDIA,data);
   return respond(request,env,{...data,census_cache_status:cached.status,
     census_cache_note:cached.status==="durable_verified"
-      ? "Next navigation can reuse this verified census without rescanning Airtable."
+      ? "Next navigation can reuse this verified census without rescanning Supabase."
       : "Census completed, but durable cache could not be verified; later navigation will show unavailable."});
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/
