@@ -88,3 +88,40 @@ def test_rate_limit_recovery_only_stamps_existing_container_and_preserves_identi
                    "Published_At", "Publish_Status", "Output_Status", "Publish_Retry_Eligible",
                    "Studio_Publish_Dispatch_Count", "Do_Not_Publish"):
         assert denied not in fields, denied
+
+
+def test_native_poll_does_not_publish_on_throttled_or_unknown_status(monkeypatch):
+    import ap1_igs.poll as native
+    for graph_reply, expected_reason in [
+        ({"error": {"code": 4, "message": "(#4) Application request limit reached"}}, "graph_container_rate_limited"),
+        ({}, "container_not_confirmed_finished"),
+    ]:
+        client = _CaptureClient()
+        record = {"id": "recABCDEFGHIJKLMN", "fields": {
+            "Platform": "Instagram",
+            "Review_Status": "Approved",
+            "Do_Not_Publish": False,
+            "IG_Story_Status": "Publishing",
+            "IG_Story_Container_ID": "18115349108139610",
+        }}
+        client.get_record = lambda table, record_id: record
+
+        class FakeGraph:
+            def wait_for_container(self, container):
+                assert container == "18115349108139610"
+                return graph_reply
+
+            def publish(self, container):
+                raise AssertionError("media_publish must never run without verified FINISHED")
+
+        monkeypatch.setattr(native, "AirtableClient", lambda: client)
+        monkeypatch.setattr(native, "PipelineSettings", lambda value: {})
+        monkeypatch.setattr(native, "load_instagram_graph_settings",
+                            lambda settings, output, client: {"ig_user_id": "1", "token": "fake", "version": "v26.0"})
+        monkeypatch.setattr(native, "InstagramReelClient", lambda **kwargs: FakeGraph())
+        result = native.process_request(output_record_id=record["id"], wait=True)
+        assert result["reason"] == expected_reason
+        assert result.get("post_id") is None
+        assert len(client.calls) == 1
+        assert "Published_At" not in client.calls[0][2]
+        assert "IG_Story_Post_ID" not in client.calls[0][2]
