@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { overdueSkipReceiptFields } from "./overdue-retry-receipt.mjs";
+import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
 
 const nowMs = Date.parse("2026-11-20T07:00:00Z");
 
@@ -25,4 +25,29 @@ test("eligible skip sets bounded delay without changing eligibility", () => {
 });
 test("successful dispatch must not create a retry/skip patch", () => {
   assert.deepEqual(overdueSkipReceiptFields({note:"webhook=ok",retryEligible:true,nowMs}),{});
+});
+
+test("skipped scheduled hold never consumes a real publish attempt", () => {
+  for (const note of [
+    "skipped: scheduled-hold",
+    "overdue-rescue: skipped: no-dispatch",
+    "reconcile: skipped: missing-ai-caption",
+    "held until 2026-11-20T14:00:00Z",
+  ]) {
+    assert.deepEqual(publishDispatchAttemptStampFields({ note, priorCount: 8, nowIso: "2026-11-20T14:00:00Z" }), {}, note);
+  }
+});
+test("accepted or ambiguous dispatch retains the real attempt counter", () => {
+  const nowIso = "2026-11-20T14:00:00Z";
+  for (const note of ["accepted: AP1-IGS", "target=AP1-IGS | webhook=ok", "dispatch failed: upstream timeout", "overdue-rescue: skipped: graph_create_failed"]) {
+    assert.deepEqual(publishDispatchAttemptStampFields({ note, priorCount: 3, nowIso }), {
+      Studio_Publish_Dispatch_At: nowIso,
+      Studio_Publish_Dispatch_Count: 4,
+    }, note);
+  }
+});
+test("do not erase existing eight skipped counts when logging another skip", () => {
+  assert.equal(Object.keys(publishDispatchAttemptStampFields({
+    note: "overdue-rescue: skipped: scheduled-hold", priorCount: 8,
+  })).length, 0);
 });

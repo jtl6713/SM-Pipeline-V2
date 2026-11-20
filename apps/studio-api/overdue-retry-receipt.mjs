@@ -23,3 +23,25 @@ export function overdueSkipReceiptFields({ note, retryEligible, retryAt, errorSt
   }
   return fields;
 }
+
+/**
+ * A dispatch receipt and a provider attempt are not equivalent. A skipped
+ * candidate can be recorded diagnostically without burning the eight-attempt
+ * publisher budget or moving the last-attempt cooldown clock.
+ *
+ * Count ambiguous exceptions conservatively; this helper only excludes a
+ * concrete, explicit skipped/held receipt.
+ */
+export function publishDispatchAttemptStampFields({ note, priorCount = 0, nowIso = new Date().toISOString() } = {}) {
+  const message = String(note || "").trim();
+  // Only proven *pre-dispatch* refusals are safe to exempt. Unknown skipped
+  // outcomes might have reached a remote provider and must retain the budget.
+  const skippedReason = /(?:^|\s)skipped:\s*([a-z0-9_-]+)/i.exec(message)?.[1]?.toLowerCase() || "";
+  const noProviderCall = ["scheduled-hold", "no-dispatch", "missing-ai-caption"].includes(skippedReason);
+  const held = /^(?:(?:overdue-rescue|reconcile):\s*)*held until\b/i.test(message);
+  if (noProviderCall || held) return {};
+  return {
+    Studio_Publish_Dispatch_At: nowIso,
+    Studio_Publish_Dispatch_Count: Math.max(0, Number(priorCount) || 0) + 1,
+  };
+}
