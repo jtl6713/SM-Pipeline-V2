@@ -41,11 +41,13 @@ jobs:
           def output(**data):
               print("IG4123_RESULT="+json.dumps({"output_id":4123,"container_id":container_id,"read_only":True,**data},sort_keys=True),flush=True)
           
+          stage="settings_load"
           try:
               settings=load_settings()
               if settings.get("studio_write_source")!="supabase" or settings.get("studio_runner_output_read_source")!="supabase" or not settings.get("supabase_url"):
                   output(status="blocked",reason="supabase_authority_unavailable")
                   raise SystemExit(0)
+              stage="canonical_output_read"
               client=AirtableClient(settings)
               row=client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
               f=row.get("fields",{})
@@ -67,9 +69,11 @@ jobs:
               if datetime.now(timezone.utc)<retry_at:
                   output(status="blocked",reason="cooldown_active")
                   raise SystemExit(0)
+              stage="account_theme_verification"
               if resolve_publish_theme(output=row,client=client)!="chicago":
                   output(status="blocked",reason="unexpected_profile_theme")
                   raise SystemExit(0)
+              stage="profile_graph_credentials"
               provider=load_instagram_graph_settings(PipelineSettings(client),row,client=client)
               token=provider["token"]
               version=provider["version"]
@@ -78,6 +82,7 @@ jobs:
                   raise SystemExit(0)
               # Exactly one authenticated GET; no media_publish, create_story, PATCH, POST or Airtable egress.
               url="https://graph.facebook.com/"+version+"/"+container_id
+              stage="meta_graph_get"
               response=requests.get(url,params={"fields":"status_code,status"},headers={"Authorization":"Bearer "+token},timeout=25,allow_redirects=False)
               try: body=response.json()
               except ValueError: body={}
@@ -93,8 +98,8 @@ jobs:
                   account_scope_verified_by_config=True,provider_action="GET_only")
           except SystemExit:
               raise
-          except Exception:
-              output(status="blocked",reason="provider_read_or_supabase_preflight_failed")
+          except Exception as error:
+              output(status="blocked",reason="provider_read_or_supabase_preflight_failed",failure_stage=stage,failure_class=type(error).__name__)
           PY
           cat > /tmp/ig4123-readonly.ps1 <<'PS'
           $ErrorActionPreference = "Stop"
@@ -158,7 +163,7 @@ jobs:
               if [[ "$state" == "ok" ]]; then
                 jq -r '.job.log // ""' /tmp/ig4123-job.json | grep '^IG4123_RESULT=' | tail -1 | sed 's/^IG4123_RESULT=//' > /tmp/ig4123-result.json
                 jq -e '.output_id==4123 and .container_id=="17910781752575604" and .read_only==true' /tmp/ig4123-result.json >/dev/null
-                jq -c '{output_id,container_id,status,reason,provider_http,container_status,provider_error_code,provider_error_transient,provider_action}' /tmp/ig4123-result.json
+                jq -c '{output_id,container_id,status,reason,failure_stage,failure_class,provider_http,container_status,provider_error_code,provider_error_transient,provider_action}' /tmp/ig4123-result.json
                 exit 0
               fi
               if [[ "$state" == "failed" ]]; then
