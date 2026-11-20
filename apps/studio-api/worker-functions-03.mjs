@@ -24,7 +24,7 @@ import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
-import { overdueSkipReceiptFields } from "./overdue-retry-receipt.mjs";
+import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
@@ -14360,14 +14360,16 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
-  const count = Number(f(record, "Studio_Publish_Dispatch_Count") || 0) + 1;
+  const attemptStamp = publishDispatchAttemptStampFields({
+    note,
+    priorCount: f(record, "Studio_Publish_Dispatch_Count"),
+  });
   try {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
       method: "PATCH",
       body: JSON.stringify({
         fields: {
-          Studio_Publish_Dispatch_At: new Date().toISOString(),
-          Studio_Publish_Dispatch_Count: count,
+          ...attemptStamp,
           Studio_Publish_Dispatch_Note: String(note || "").slice(0, 900),
           // A rescue skip used to leave Publish_Status at Ready to Publish, so
           // the row stayed Past Due. Park the reason without calling it Failed.
