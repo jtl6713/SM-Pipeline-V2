@@ -25,3 +25,16 @@ test("reject cannot write without a reason or valid identity", async()=>{
   await assert.rejects(factoryHeldReviewDecision({},id,"reviewer","reject"),/requires a reason|Supabase/);
   await assert.rejects(factoryHeldReviewDecision({},"bad","reviewer","approve"),/Invalid exact/);
 });
+
+test("unresolved safety incident permits creative-only decision, never publishing release",()=>{
+  const incident={...valid,publish_status:"Publishing",
+    error_messages:{Factory_Review_Handoff_Safety_Hold_At:"2026-11-19T17:02:40Z"}};
+  assert.equal(heldReviewEligibility(incident),null);
+  assert.equal(heldReviewEligibility({...incident,publish_status:"Ready to Publish"}),null);
+  assert.match(heldReviewEligibility({...incident,platform_post_url:"https://instagram.com/p/example"}),/Provider evidence exists/);
+  assert.match(heldReviewEligibility({...incident,platform_publish_response:{id:"123"}}),/Provider evidence exists/);
+  assert.match(heldReviewEligibility({...incident,error_messages:{
+    ...incident.error_messages,
+    SM_Factory_Held_Review_Receipt:{decision:"approve"},
+  }}),/already been recorded/);
+});
