@@ -8,7 +8,7 @@ import vm from "node:vm";
 const here = dirname(fileURLToPath(import.meta.url));
 const js = readFileSync(join(here, "assets/factory-desk.js"), "utf8");
 const index = readFileSync(join(here, "index.html"), "utf8");
-const start = js.indexOf("  function factoryVisibleNeedsEyes(");
+const start = js.indexOf("  function factoryHasHumanReviewAction(");
 const end = js.indexOf("  const FACTORY_WAITING_SELECTION_KEY", start);
 assert.ok(start >= 0 && end > start, "Review/attention partition functions exist");
 
