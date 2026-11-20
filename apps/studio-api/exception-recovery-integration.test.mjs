@@ -106,10 +106,12 @@ test("mutating FB3 route requires POST, admin, origin safety and no other stage"
  assert.match(handler,/persistVerifiedRecoveryInAirtable/);
  assert.doesNotMatch(handler,/studioPulseFb0|studioPulseFb1|studioPulseFb2|studioPublish|DELETE/);
 });
-test("canonical output scan paginates full Airtable table with Home mapping",()=>{
+test("canonical recovery census pages Supabase only and fails closed on missing authority",()=>{
  const code=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
  assert.match(code,/scanOutstandingFailedOutputs/);
- assert.match(code,/listRecordsPage\(env,env.AIRTABLE_OUTPUT_TABLE_ID/);
+ assert.match(code,/listSupabaseOutputCensusPage\(env,options\)/);
+ assert.match(code,/Authoritative Supabase census unavailable; Airtable fallback prohibited/);
+ assert.doesNotMatch(code,/listRecordsPage\(/);
  assert.match(code,/reconcileExceptionCensus\(all,mapOutput/);
  assert.doesNotMatch(code,/limit:\s*250|method:\s*"PATCH"|method:\s*"POST"/);
 });
@@ -122,22 +124,25 @@ test("explicit complete source census avoids a duplicate expensive Quality Agent
  assert.ok(section.includes('quality_agent_scan_at:null'));
  assert.ok(section.includes('home_snapshot_comparison'));
 });
-test("full all-profile source census requests a bounded classification field projection",()=>{
- const section=service.slice(service.indexOf("export const EXCEPTION_CENSUS_FIELDS"),
+test("full Supabase source census uses bounded deterministic and lean projection",()=>{
+ const section=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),
   service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
- assert.ok(section.includes("fields:EXCEPTION_CENSUS_FIELDS"));
- assert.ok(section.includes('filterFormula:"{Test_Run_ID}=BLANK()"'));
- for(const key of ["Output_ID","Content_Profile","Platform","Review_Status","Output_Status",
-   "Publish_Status","Do_Not_Publish","Scheduled_Post_Date","Published_At","Render_Status",
-   "Platform_Post_URL","Manual_Published_URL","Platform_Post_ID",
-   "YouTube_Video_ID","IG_Carousel_Published_Media_ID","Studio_Publish_Dispatch_At"]) {
-   assert.ok(section.includes('"'+key+'"'),"source census omits "+key);
- }
- for(const excessive of ["Studio_Photo_Match_JSON","Creative_Render_Manifest_JSON",
-   "Render_Timeline_JSON","Production_Request_JSON","IG_Carousel_Parent_Response_JSON"]) {
-   assert.ok(!section.includes('"'+excessive+'"'),"census fetched large unrelated JSON: "+excessive);
- }
- assert.ok(section.includes("qaFailed:null,qaPastDue:null"),"QA parity must remain unavailable without same-generation readback");
+ const supabase=fs.readFileSync(path.join(dir,"supabase-pipeline-reads.mjs"),"utf8");
+ const select=supabase.slice(supabase.indexOf("const QA_CENSUS_OUTPUT_SELECT"),
+  supabase.indexOf("const OVERVIEW_OUTPUT_SELECT"));
+ const scan=supabase.slice(supabase.indexOf("export async function listSupabaseOutputCensusPage"),
+  supabase.indexOf("export async function mirrorQualityRecoveryEvent"));
+ assert.match(select,/QA_CENSUS_OUTPUT_SELECT = OUTPUT_SELECT.split/);
+ assert.match(select,/output_caption/);
+ assert.match(select,/output_hashtags/);
+ assert.match(scan,/Math.min\(100, Number\(limit\)/);
+ assert.match(scan,/QA_CENSUS_OUTPUT_SELECT/);
+ assert.match(scan,/order=output_number.asc.nullslast,airtable_record_id.asc/);
+ assert.match(scan,/test_run_id=is.null/);
+ assert.match(section,/filterFormula:"\{Test_Run_ID\}=BLANK\(\)"/);
+ assert.match(section,/source:"supabase"/);
+ assert.doesNotMatch(section,/listRecordsPage\(/);
+ assert.match(section,/qaFailed:null,qaPastDue:null/);
 });
 test("UI requires explicit receipt inspection and post-ID confirmation before FB3",()=>{
  assert.match(html,/id="ercReconcileCounts"/);
