@@ -265,7 +265,7 @@ test("Factory resolves a completed review parent beyond the recent request sampl
     const href = String(url);
     calls.push(href);
     let rows = [];
-    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+    if (href.includes("platform_outputs?or=(")) {
       rows = [{
         airtable_record_id: "recOut12345678901",
         content_items: { airtable_record_id: contentId },
@@ -3071,7 +3071,7 @@ test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled p
     const href = String(url);
     urls.push(href);
     let rows = [];
-    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+    if (href.includes("platform_outputs?or=(")) {
       const q = new URL(href).searchParams;
       rows = olderReview.slice(Number(q.get("offset") || 0),
         Number(q.get("offset") || 0) + Number(q.get("limit") || 500));
@@ -3099,7 +3099,7 @@ test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled p
 test("Factory review-ready query errors must not become a misleading empty lane", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    if (String(url).includes("&or=(")) {
+    if (String(url).includes("platform_outputs?or=(")) {
       return { ok: false, status: 503, async text() { return '{"message":"review scan unavailable"}'; } };
     }
     return { ok: true, async text() { return "[]"; } };
