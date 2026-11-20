@@ -6,6 +6,9 @@ on:
     paths:
       - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
       - 'deploy/i1-durable-runner-release.txt'
+      - 'services/pipeline-runner/ap0/eligibility.py'
+      - 'services/pipeline-runner/ap0/public_mp4.py'
+      - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
 
 permissions:
   contents: read
@@ -65,6 +68,8 @@ jobs:
             services/pipeline-runner/tests/test_ttd2_delivery_recovery.py \
             services/pipeline-runner/tests/test_ttd4_manual_hold_completion.py \
             services/pipeline-runner/tests/test_public_cover.py \
+            services/pipeline-runner/tests/test_ap0_eligibility.py \
+            services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py \
             services/pipeline-runner/tests/test_rendering_review_publication.py \
             services/pipeline-runner/tests/test_rendering_review_producer.py \
             services/pipeline-runner/tests/test_rendering_review_producer_http.py \
