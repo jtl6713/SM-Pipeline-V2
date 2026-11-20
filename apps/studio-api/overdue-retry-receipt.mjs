@@ -34,9 +34,12 @@ export function overdueSkipReceiptFields({ note, retryEligible, retryAt, errorSt
  */
 export function publishDispatchAttemptStampFields({ note, priorCount = 0, nowIso = new Date().toISOString() } = {}) {
   const message = String(note || "").trim();
-  const skipped = /(?:^|\s)skipped:/i.test(message);
+  // Only proven *pre-dispatch* refusals are safe to exempt. Unknown skipped
+  // outcomes might have reached a remote provider and must retain the budget.
+  const skippedReason = /(?:^|\s)skipped:\s*([a-z0-9_-]+)/i.exec(message)?.[1]?.toLowerCase() || "";
+  const noProviderCall = ["scheduled-hold", "no-dispatch", "missing-ai-caption"].includes(skippedReason);
   const held = /^(?:(?:overdue-rescue|reconcile):\s*)*held until\b/i.test(message);
-  if (skipped || held) return {};
+  if (noProviderCall || held) return {};
   return {
     Studio_Publish_Dispatch_At: nowIso,
     Studio_Publish_Dispatch_Count: Math.max(0, Number(priorCount) || 0) + 1,
