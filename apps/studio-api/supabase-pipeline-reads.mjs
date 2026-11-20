@@ -876,7 +876,14 @@ export function airtableShapedOutputFromSupabase(row) {
       Publish_Method: row.publish_method || null,
       Do_Not_Publish: Boolean(row.do_not_publish),
       Test_Run_ID: row.test_run_id || null,
-      Output_Title: row.output_title,
+      // An output-specific title wins; for blank TikTok titles, inherit the
+      // linked Content Item title from the same Supabase read. TTD1 requires
+      // a title and must not create a provider draft with a generic label.
+      Output_Title: row.output_title || (
+        String(row.platform || "").trim().toLowerCase() === "tiktok"
+          ? (row.content_title || row.content_items?.content_title || null)
+          : null
+      ),
       // Undefined (column not selected) must not wipe package evidence from the
       // error_messages bag — that zeroed Home Awaiting Approval after #2030.
       ...(row.output_caption !== undefined ? { Output_Caption: row.output_caption } : {}),
