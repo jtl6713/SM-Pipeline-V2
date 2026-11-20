@@ -1,0 +1,105 @@
+name: One-shot normalized 10733 TikTok slide-4 upload (original preserved)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-la-tt10733-fixed-slide-upload-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: normalize-la-10733-slide4-once
+  cancel-in-progress: false
+jobs:
+  normalized-slide:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Build output-owned 1080x1920 JPEG from exactly the oversized original
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow requests
+          python3 - <<'PY'
+          import hashlib
+          from io import BytesIO
+          from pathlib import Path
+          import requests
+          from PIL import Image, ImageOps
+          original='https://media.chicagoshining.com/studio/previews/lettered/recge6qNpnbV8Vi7h/3.jpg'
+          r=requests.get(original,timeout=35)
+          if r.status_code!=200 or len(r.content)>20_000_000: raise SystemExit('source_not_verified')
+          with Image.open(BytesIO(r.content)) as im:
+              im.load()
+              original_size=im.size
+              if im.format!='JPEG' or original_size!=(2988,5312): raise SystemExit('unexpected_source_image_do_not_replace')
+              transformed=ImageOps.exif_transpose(im).convert('RGB').resize((1080,1920),Image.Resampling.LANCZOS)
+              out=Path('/tmp/tt10733-slide4-1080x1920.jpg')
+              transformed.save(out,format='JPEG',quality=92,optimize=True,subsampling=0)
+          data=out.read_bytes()
+          digest=hashlib.sha256(data).hexdigest()
+          with Image.open(BytesIO(data)) as check:
+              check.verify()
+          if len(data)>20_000_000 or len(data)<5_000: raise SystemExit('normalized_jpeg_invalid')
+          key=f'publish/platform-output-10733/tiktok-slide-4-1080x1920-{digest[:12]}.jpg'
+          Path('/tmp/tt10733-object-key').write_text(key)
+          Path('/tmp/tt10733-sha256').write_text(digest)
+          print('tt10733_source=2988x5312')
+          print(f'tt10733_normalized=1080x1920 bytes={len(data)} sha256={digest}')
+          print('tt10733_original_untouched=true')
+          PY
+      - name: Write only a new immutable media object to the existing Cloudflare R2 bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" && test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 35 "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/tt10733-deploy.json
+          VERSION=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/tt10733-deploy.json)
+          curl -fsS --max-time 35 "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/tt10733-version.json
+          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name == "STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/tt10733-version.json)
+          test -n "$BUCKET"
+          KEY=$(cat /tmp/tt10733-object-key)
+          [[ "$KEY" =~ ^publish/platform-output-10733/tiktok-slide-4-1080x1920-[a-f0-9]{12}\.jpg$ ]]
+          npm install --prefix /tmp/tt10733-wrangler --no-save --silent wrangler@4.123.0
+          /tmp/tt10733-wrangler/node_modules/.bin/wrangler r2 object put "$BUCKET/$KEY" \
+            --file /tmp/tt10733-slide4-1080x1920.jpg --content-type image/jpeg --remote
+          echo "tt10733_r2_upload_complete=true"
+      - name: Verify CDN image body exactly matches corrected bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,time
+          from io import BytesIO
+          from pathlib import Path
+          from PIL import Image
+          import requests
+          key=Path('/tmp/tt10733-object-key').read_text().strip()
+          expected=Path('/tmp/tt10733-sha256').read_text().strip()
+          url='https://media.chicagoshining.com/'+key
+          for attempt in range(6):
+              try:
+                  r=requests.get(url,timeout=30)
+                  if r.status_code==200 and hashlib.sha256(r.content).hexdigest()==expected:
+                      with Image.open(BytesIO(r.content)) as im:
+                          if im.size!=(1080,1920) or im.format!='JPEG': raise RuntimeError('wrong_image_geometry')
+                      print('tt10733_fixed_slide_cdn_verified=PASS')
+                      print('tt10733_fixed_slide_url='+url)
+                      break
+              except requests.RequestException:
+                  pass
+              if attempt==5: raise SystemExit('corrected_cdn_asset_not_verified')
+              time.sleep(5)
+          PY
+      - name: Retain corrected image as reversible diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tt10733-slide4-1080x1920-${{ github.run_id }}
+          path: /tmp/tt10733-slide4-1080x1920.jpg
+          retention-days: 7
+          if-no-files-found: warn
