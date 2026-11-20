@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ap1_igs.asset import story_asset_url
+from ap1_igs.rate_limit import story_poll_cooldown_reason
 from ap1_igs.constants import (
     OUTPUT_STATUS,
     PLATFORM,
@@ -146,6 +147,12 @@ def poll_eligibility_reason(
         return "missing_story_container"
     if field_str(record, "IG_Story_Post_ID"):
         return "already_has_story_post"
+    cooldown = story_poll_cooldown_reason(
+        field_str(record, "Publish_Error_Stage"),
+        field_str(record, "Publish_Next_Retry_At"),
+    )
+    if cooldown:
+        return cooldown
     return _replace_mismatch(
         record,
         replace_transaction_id=replace_transaction_id,
