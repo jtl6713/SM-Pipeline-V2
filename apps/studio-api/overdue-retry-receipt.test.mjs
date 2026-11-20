@@ -39,7 +39,7 @@ test("skipped scheduled hold never consumes a real publish attempt", () => {
 });
 test("accepted or ambiguous dispatch retains the real attempt counter", () => {
   const nowIso = "2026-11-20T14:00:00Z";
-  for (const note of ["accepted: AP1-IGS", "target=AP1-IGS | webhook=ok", "dispatch failed: upstream timeout"]) {
+  for (const note of ["accepted: AP1-IGS", "target=AP1-IGS | webhook=ok", "dispatch failed: upstream timeout", "overdue-rescue: skipped: graph_create_failed"]) {
     assert.deepEqual(publishDispatchAttemptStampFields({ note, priorCount: 3, nowIso }), {
       Studio_Publish_Dispatch_At: nowIso,
       Studio_Publish_Dispatch_Count: 4,
