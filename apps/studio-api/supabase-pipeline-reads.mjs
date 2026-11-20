@@ -4025,11 +4025,30 @@ function matchesOpsQueueRenderFormula(fields = {}) {
   ].includes(render) || ["Ready for Render", "Rendering"].includes(output);
 }
 
-function matchesOpsQueueReviewFormula(fields = {}) {
+/**
+ * Supabase must mirror OPS_QUEUE_REVIEW_FORMULA (the legacy read's treatment
+ * of review-only held outputs). The dedicated read query includes held RFR,
+ * but filtering again here previously removed every one of those records.
+ *
+ * Visibility is inspection ONLY; Factory approval, scheduling, publisher
+ * routes and safety-hold release have their own independent authority checks.
+ */
+export function matchesOpsQueueReviewFormula(fields = {}) {
   if (String(fields.Test_Run_ID || "").trim()) return false;
-  if (fields.Do_Not_Publish) return false;
-  const output = String(fields.Output_Status || "");
-  const review = String(fields.Review_Status || "");
+  const output = String(fields.Output_Status || "").trim();
+  const review = String(fields.Review_Status || "").trim();
+  const publish = String(fields.Publish_Status || "").trim();
+  if (fields.Do_Not_Publish === true) {
+    // Held outputs must remain inspectable without reopening any completed,
+    // rejected, scheduled, or previously published work. In particular,
+    // Publishing may be the unsafe background status being investigated.
+    return output === "Ready for Review"
+      && ["", "Review Sent", "Pending Review"].includes(review)
+      && !["Scheduled", "Published", "Published Privately", "Draft Delivered"].includes(publish)
+      && !String(fields.Published_At || "").trim()
+      && !String(fields.Platform_Post_URL || "").trim()
+      && !String(fields.Platform_Post_ID || "").trim();
+  }
   if (output === "Ready for Review") return true;
   if (review !== "Review Sent") return false;
   return !["Approved", "Approved for Publishing", "Scheduled", "Published"].includes(output);

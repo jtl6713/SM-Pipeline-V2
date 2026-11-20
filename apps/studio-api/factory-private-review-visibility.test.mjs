@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { OPS_QUEUE_REVIEW_FORMULA } from "./ops-queue.mjs";
 import { evaluateReviewPackage, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility, formalFactoryApprovalReady, safeReviewPromotion } from "./review-package-readiness.mjs";
 import { partitionFactoryLanes } from "./factory-desk.mjs";
+import { matchesOpsQueueReviewFormula } from "./supabase-pipeline-reads.mjs";
 
 const media = "https://media.chicagoshining.com/";
 const publishedMedia = "https://drive.google.com/file/d/factory-private-test/view";
@@ -116,4 +117,69 @@ test("Museum Mile #2212: all six complete held outputs are visible for inspectio
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
   assert.ok(ui.includes("card?.safety_hold_active === true"));
   assert.ok(ui.includes("card.safety_hold_active !== true"));
+});
+
+test("Supabase Factory second review filter keeps all six completed safety-held Museum Mile outputs", () => {
+  for (const [number, publish] of [
+    [10827, "Not Ready"],
+    [10828, "Not Ready"],
+    [10829, "Not Ready"],
+    [10830, "Ready to Publish"],
+    [10831, "Ready to Publish"],
+    [10832, "Publishing"],
+  ]) {
+    assert.equal(matchesOpsQueueReviewFormula({
+      Output_ID: number, Output_Status: "Ready for Review",
+      Review_Status: null, Publish_Status: publish,
+      Do_Not_Publish: true,
+      Final_File_URL: "https://drive.google.com/file/d/existing/view",
+      Thumbnail_URL: "https://media.chicagoshining.com/studio/previews/cover.png",
+    }), true, "Rendered #"+number+" must remain visible in Factory despite its hold");
+  }
+});
+
+test("Supabase Factory second review filter refuses held outputs that are not pending fresh human review", () => {
+  const base = {
+    Output_Status: "Ready for Review", Review_Status: null,
+    Publish_Status: "Not Ready", Do_Not_Publish: true,
+  };
+  const excluded = [
+    { Test_Run_ID: "test-synthetic" },
+    { Output_Status: "Approved for Publishing" },
+    { Output_Status: "Published" },
+    { Output_Status: "In Production" },
+    { Review_Status: "Approved" },
+    { Review_Status: "Rejected" },
+    { Review_Status: "Changes Requested" },
+    { Review_Status: "Skipped" },
+    { Publish_Status: "Published" },
+    { Publish_Status: "Scheduled" },
+    { Published_At: "2026-11-19T16:40:00Z" },
+    { Platform_Post_URL: "https://www.youtube.com/shorts/already-posted" },
+    { Platform_Post_ID: "video-already-created" },
+  ];
+  for (const change of excluded) {
+    assert.equal(matchesOpsQueueReviewFormula({ ...base, ...change }), false,
+      "must not resurrect "+JSON.stringify(change));
+  }
+  // The published/nonheld operations lane still follows its original behavior.
+  assert.equal(matchesOpsQueueReviewFormula({
+    Output_Status: "Ready for Review", Do_Not_Publish: false,
+  }), true);
+});
+
+test("Supabase Factory pack retains held output through BOTH the query and post-query review predicate", () => {
+  const source = readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const marker = "export async function listSupabaseFactoryDeskPack";
+  const start = source.indexOf(marker);
+  const end = source.indexOf("/**\n * PostgREST rejects batch POST bodies", start);
+  assert.ok(start >= 0 && end > start, "Factory pack source exists");
+  const pack = source.slice(start,end);
+  assert.ok(pack.includes("platform_outputs?or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)"));
+  assert.ok(pack.includes("matchesOpsQueueReviewFormula(row.fields)"),
+    "second held-safe filter must govern the actual independently scanned review outputs");
+  assert.equal(matchesOpsQueueReviewFormula({
+    Output_Status: "Ready for Review", Review_Status: "",
+    Publish_Status: "Publishing", Do_Not_Publish: true,
+  }), true);
 });

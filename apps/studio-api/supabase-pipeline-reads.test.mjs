@@ -265,7 +265,7 @@ test("Factory resolves a completed review parent beyond the recent request sampl
     const href = String(url);
     calls.push(href);
     let rows = [];
-    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+    if (href.includes("platform_outputs?or=(")) {
       rows = [{
         airtable_record_id: "recOut12345678901",
         content_items: { airtable_record_id: contentId },
@@ -300,6 +300,85 @@ test("Factory resolves a completed review parent beyond the recent request sampl
       "Factory parent lookup must not read Airtable");
   } finally {
     globalThis.fetch = oldFetch;
+  }
+});
+
+test("LA Museum Mile #2212 survives the complete Supabase Factory review pack with six safety-held outputs", async () => {
+  const original = globalThis.fetch;
+  const contentLegacy = "recsEpUkN36Bx6TLP";
+  const profileLegacy = "recF7UAn0LkMZZrWZ";
+  const contentUuid = "3ab42ced-2065-4cc3-929a-219d5515cc1c";
+  const profileUuid = "aa4b857d-e588-46aa-97ba-77cdd3c25dff";
+  const variants = [
+    [10827, "Instagram", "Reel", "Not Ready"],
+    [10828, "Instagram", "Story", "Not Ready"],
+    [10829, "Facebook", "Reel", "Not Ready"],
+    [10830, "Facebook", "Story", "Ready to Publish"],
+    [10831, "TikTok", "Video Draft", "Ready to Publish"],
+    [10832, "YouTube", "Short", "Publishing"],
+  ];
+  const held = variants.map(([number, platform, studioType, publish]) => ({
+    id: "00000000-0000-4000-8000-" + String(number).padStart(12, "0"),
+    airtable_record_id: "rec" + String(number).padStart(14, "0"),
+    output_number: number,
+    content_item_id: contentUuid, content_profile_id: profileUuid,
+    content_items: { airtable_record_id: contentLegacy },
+    content_profiles: { airtable_record_id: profileLegacy },
+    output_status: "Ready for Review", review_status: null,
+    render_status: "Rendered", publish_status: publish,
+    do_not_publish: true, auto_publish_enabled: false,
+    platform, studio_output_type: studioType,
+    output_caption: "Approved source-based caption waiting for human inspection.",
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/thumbnails/recsEpUkN36Bx6TLP/cover-9x16.png",
+    final_file_url: "https://drive.google.com/file/d/example/view",
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/example.mp4",
+    error_messages: { Factory_Review_Handoff_Safety_Hold_At: "2026-11-19T17:02:40Z" },
+  }));
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    urls.push(href);
+    let rows = [];
+    if (href.includes("platform_outputs?or=(output_status.eq.Ready%20for%20Review")) {
+      const query = new URL(href).searchParams;
+      const offset = Number(query.get("offset") || 0);
+      const limit = Number(query.get("limit") || 500);
+      rows = held.slice(offset, offset + limit);
+    } else if (href.includes("content_profiles?")) {
+      rows = [{ id: profileUuid, airtable_record_id: profileLegacy, profile_name: "LA Shining", active: true }];
+    } else if (href.includes("content_items?or=(")) {
+      rows = [{
+        id: contentUuid, airtable_record_id: contentLegacy, content_number: 2212,
+        content_title: "Museum Mile Day Plan", content_profile_id: profileUuid,
+        content_profiles: { airtable_record_id: profileLegacy },
+      }];
+    } else if (href.includes("production_requests?")
+        && href.includes("promoted_content_airtable_id=in.")) {
+      rows = [{
+        airtable_record_id: "rectZptYzSfHtDsGt",
+        production_request_id: "PR-20261118033503-LQA5WT",
+        request_status: "Promoted",
+        publish_status: { promoted_content_airtable_id: contentLegacy },
+      }];
+    }
+    return { ok: true, async text() { return JSON.stringify(rows); } };
+  };
+  try {
+    const pack = await listSupabaseFactoryDeskPack({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "redacted_fake_test_key",
+    });
+    assert.deepEqual(pack.reviewOutputs.map(row => row.fields.Output_ID), variants.map(row => row[0]));
+    assert.equal(pack.reviewOutputs.length, 6);
+    assert.ok(pack.reviewOutputs.every(row => row.fields.Do_Not_Publish === true));
+    assert.ok(pack.reviewOutputs.every(row => row.fields.Content_Item[0] === contentLegacy));
+    assert.ok(pack.reviewOutputs.every(row => row.fields.Content_Profile[0] === profileLegacy));
+    assert.equal(pack.contentById.get(contentLegacy)?.fields.Content_ID, 2212);
+    assert.equal(pack.reviewParentRequests.length, 1);
+    assert.ok(urls.some(url => url.includes("platform_outputs?or=(output_status.eq.Ready%20for%20Review")));
+    assert.ok(urls.every(url => url.startsWith("https://example.supabase.co/")), "No Airtable reads");
+  } finally {
+    globalThis.fetch = original;
   }
 });
 
@@ -3071,7 +3150,7 @@ test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled p
     const href = String(url);
     urls.push(href);
     let rows = [];
-    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+    if (href.includes("platform_outputs?or=(")) {
       const q = new URL(href).searchParams;
       rows = olderReview.slice(Number(q.get("offset") || 0),
         Number(q.get("offset") || 0) + Number(q.get("limit") || 500));
@@ -3099,7 +3178,7 @@ test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled p
 test("Factory review-ready query errors must not become a misleading empty lane", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    if (String(url).includes("&or=(")) {
+    if (String(url).includes("platform_outputs?or=(")) {
       return { ok: false, status: 503, async text() { return '{"message":"review scan unavailable"}'; } };
     }
     return { ok: true, async text() { return "[]"; } };
