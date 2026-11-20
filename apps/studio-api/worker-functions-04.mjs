@@ -11838,6 +11838,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       publish_status: mapped.publish_status,
       review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
       safety_hold_active: Boolean(String(f(record, "Factory_Review_Handoff_Safety_Hold_At") || "").trim()),
+      held_review_decision: f(record, "SM_Factory_Held_Review_Receipt")?.decision || null,
       do_not_publish: f(record, "Do_Not_Publish") === true,
       thumbnail_url: mapped.thumbnail_url || null,
       final_file_url: mapped.final_file_url || null,
