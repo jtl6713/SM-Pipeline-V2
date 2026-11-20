@@ -53,7 +53,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(factory, /pin_needs_assets/);
   assert.match(factory, /data-factory-approve/);
   assert.match(factory, /data-factory-approve-content/);
-  assert.match(factory, /Approve all \(\$\{ready\.length\}\)/);
+  assert.match(factory, /Approve eligible \(\$\{ready\.length\}\)/);
   assert.match(factory, /pendingSiblingOutputsForGroup/);
   assert.match(factory, /still rendering/);
   assert.match(factory, /wait for Stories/);
