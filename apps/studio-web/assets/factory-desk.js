@@ -1842,6 +1842,25 @@
       && !card.platform_post_url;
   }
 
+  function canRejectHeldOutput(card) {
+    // Rejection is allowed even when a caption/thumbnail is incomplete, so
+    // the operator can request the necessary fixes without releasing a hold.
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    const publish = String(card?.publish_status || "").trim().toLowerCase();
+    return card?.kind === "output" && card.do_not_publish === true
+      && card.review_hold_active !== true
+      && output === "ready for review"
+      && ["", "review sent", "pending review", "pending"].includes(review)
+      && ["rendered", "native photo route"].includes(render)
+      && ["", "not ready"].includes(publish)
+      && card.auto_publish_enabled !== true
+      && !card.scheduled_post_date && !card.studio_scheduled_at
+      && !card.youtube_scheduled_publish_at && !card.published_at
+      && !card.platform_post_url;
+  }
+
   function canReleaseForApproval(card) {
     const output = String(card?.output_status || "").trim().toLowerCase();
     const review = String(card?.review_status || "").trim().toLowerCase();
@@ -1891,6 +1910,8 @@
       }
       if (needsEyesOutput && canReviewHeldOutput(card)) {
         actions.push(`<button type="button" class="primary-button" data-factory-held-review="approve:${esc(card.id)}" title="Approve creative review only; publishing stays blocked.">Approve review (publish held)</button>`);
+      }
+      if (needsEyesOutput && canRejectHeldOutput(card)) {
         actions.push(`<button type="button" class="secondary-button" data-factory-held-review="reject:${esc(card.id)}" title="Reject or request changes while preserving the publishing hold.">Reject / Request Changes</button>`);
       }
       if (needsEyesOutput && canReleaseForApproval(card)) {
@@ -2078,7 +2099,7 @@
       bits.push(`${ready.length} approvable`);
       bits.push("Publishing safety hold");
     } else {
-      const heldForReview = (group.cards || []).filter(canReviewHeldOutput);
+      const heldForReview = (group.cards || []).filter(canRejectHeldOutput);
       if (ready.length) bits.push(`${ready.length} ready`);
       if (heldForReview.length) bits.push(`${heldForReview.length} ready for your review · publishing held`);
       if (!ready.length && !heldForReview.length) bits.push("0 approvable · inspect hold or render status");
@@ -3188,7 +3209,7 @@
       button.addEventListener("click", async () => {
         const [decision, id] = String(button.getAttribute("data-factory-held-review") || "").split(":");
         const card = byId.get(id);
-        if (!card || !canReviewHeldOutput(card)) {
+        if (!card || !(decision === "reject" ? canRejectHeldOutput(card) : canReviewHeldOutput(card))) {
           setStatus("Held output status changed. Refresh Factory before deciding.", true);
           return;
         }
