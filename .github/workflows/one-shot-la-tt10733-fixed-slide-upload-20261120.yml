@@ -111,12 +111,12 @@ jobs:
           p.write_text(json.dumps({
             'name':'tt10733-ephemeral-bound-r2',
             'main':'./worker.mjs',
-            'compatibility_date':'2026-11-20',
+            'compatibility_date':'2026-08-18',
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':os.environ['BUCKET'],'remote':True}]
           }))
           PY
             CI=true WRANGLER_SEND_METRICS=false /tmp/tt10733-wrangler/node_modules/.bin/wrangler dev \
-              --config /tmp/tt10733-bound-worker/wrangler.jsonc --local --ip 127.0.0.1 --port 8977 \
+              --config /tmp/tt10733-bound-worker/wrangler.jsonc --ip 127.0.0.1 --port 8977 \
               >/tmp/tt10733-bound-worker.log 2>&1 &
             ready=0
             for i in $(seq 1 40); do
