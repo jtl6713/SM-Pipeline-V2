@@ -2960,7 +2960,7 @@ export function deskHealOutputFilter(kind, options = {}) {
     // Do_Not_Publish or retry-ineligible. These rows need visible decisions,
     // not automatic dispatch. Provider actions are never driven by this query.
     const clock = String(options.cutoffIso || new Date().toISOString());
-    if (!/^\\d{4}-\\d{2}-\\d{2}T/.test(clock)) throw new Error("Approved past-due scan needs a UTC clock");
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(clock)) throw new Error("Approved past-due scan needs a UTC clock");
     const at = encodeDeskFilterValue(clock);
     return `test_run_id=is.null&review_status=eq.Approved&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
       + `&publish_status=neq.Published&or=(scheduled_post_date.lt.${at},studio_scheduled_at.lt.${at})`;
