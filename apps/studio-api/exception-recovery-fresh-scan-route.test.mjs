@@ -19,3 +19,15 @@ test("ordinary Center navigation remains read-only with cached QA diagnostics",(
  const worker=fs.readFileSync(path.join(dir,"worker.js"),"utf8");
  assert.match(worker,/getStudioExceptionRecoveryCenter\(request, env\)/);
 });
+
+test("full publication exception census is Supabase-only and never falls back to Airtable",()=>{
+ const start=source.indexOf("export async function getStudioExceptionRecoveryCounts");
+ const end=source.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts",start);
+ assert.ok(start>=0 && end>start);
+ const scope=source.slice(start,end);
+ assert.match(scope,/studioWriteSource\(env\)!=="supabase"/);
+ assert.match(scope,/Authoritative Supabase census unavailable; Airtable fallback prohibited/);
+ assert.match(scope,/listSupabaseOutputCensusPage\(env,options\)/);
+ assert.doesNotMatch(scope,/listRecordsPage\(/);
+ assert.match(scope,/source:"supabase"/);
+});
