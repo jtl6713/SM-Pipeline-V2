@@ -153,7 +153,13 @@ jobs:
                 jq -c '{output_id,container_id,status,reason,provider_http,container_status,provider_error_code,provider_error_transient,provider_action}' /tmp/ig4123-result.json
                 exit 0
               fi
-              if [[ "$state" == "failed" ]]; then echo "ig4123_shell_probe_failed_no_provider_verification"; exit 4; fi
+              if [[ "$state" == "failed" ]]; then
+      echo "ig4123_shell_probe_failed_no_provider_verification"
+      # Only public, diagnostic sentinel/error-category lines. Never dump raw Ops logs,
+      # response bodies, service .env, URLs containing credentials, or provider tokens.
+      jq -r '.job.log // ""' /tmp/ig4123-job.json | grep -E 'IG4123_RESULT=|IG4123 |IG4123_|ModuleNotFoundError|Python unavailable|runner source unavailable|runner not healthy|Traceback|ParserError|CommandNotFoundException' | head -15 || true
+      exit 4
+    fi
             fi
             sleep 3
           done
