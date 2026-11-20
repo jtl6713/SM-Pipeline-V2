@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test("Factory Needs eyes and Overview Awaiting Approval claim the same package-ready queue", async () => {
+test("Factory explains that only genuinely reviewable outputs appear in Needs eyes", async () => {
   const html = await readFile(path.join(here, "index.html"), "utf8");
   const overview = await readFile(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
-  assert.match(html, /Same queue as Studio overview Awaiting Approval/);
-  assert.match(html, /Incomplete packages sit in Repair/);
+  assert.match(html, /Only genuinely reviewable outputs/);
+  assert.match(html, /non-ready items are in Needs Attention/);
   assert.match(
     overview,
     /Factory items awaiting your approval/,
