@@ -17520,6 +17520,15 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
       TIKTOK_RESEND_ERRORS[reason] || reason,
     );
   }
+  // Fail before clearing an existing delivery receipt if the Supabase row
+  // cannot supply the identity TTD1 requires. The read projection inherits
+  // a TikTok title from its linked Content Item when the output title is blank.
+  const numericOutputId = Number(f(existing, "Output_ID"));
+  const outputTitle = String(f(existing, "Output_Title") || "").trim();
+  if (!Number.isSafeInteger(numericOutputId) || numericOutputId <= 0 || !outputTitle) {
+    throw new HttpError(409,
+      "TikTok output ID or title is missing in Supabase. Resend was not rearmed.");
+  }
   const scheduledPostDate = f(existing, "Scheduled_Post_Date");
   const fields = tiktokResendRearmFields({
     now: new Date().toISOString(),
@@ -17532,8 +17541,12 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
   });
   // Supabase SoR archive mode returns the PATCH bag only. Dispatch needs the
   // full output (Platform, caption, Final_File_URL) or TTD1 never starts.
-  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1])
-    .catch(() => existing);
+  // Never dispatch a stale pre-rearm record when the authoritative reread
+  // fails. Its previous publish_id can be from another delivery generation.
+  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1]);
+  if (!rearmed?.id) {
+    throw new HttpError(503, "TikTok resend state could not be verified in Supabase.");
+  }
   const dueNow = fields.TikTok_Draft_Status === "Ready for Delivery";
   const dispatch = dueNow
     ? await studioDispatchApprovedPublishNow(env, rearmed)
