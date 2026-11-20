@@ -147,19 +147,27 @@
     return ids;
   }
 
+  // A publication hold blocks *publishing approval*, not a separate human
+  // creative review. Keep held rendered outputs with eligible review decisions
+  // in Needs Eyes. They remain non-selectable for batch publishing approval.
+  function factoryHasHumanReviewAction(card) {
+    return canReviewActions(card) || canReviewHeldOutput(card) || canRejectHeldOutput(card);
+  }
+
   function factoryVisibleNeedsEyes(cards) {
     const submitted = factorySubmittedApprovalIds();
     return (cards || []).filter(card =>
-      card?.kind === "output" && !submitted.has(String(card?.id || "")) && canReviewActions(card));
+      card?.kind === "output" && !submitted.has(String(card?.id || "")) &&
+      factoryHasHumanReviewAction(card));
   }
 
-  // The server may project a held, incomplete, or stale review row into
-  // needs_eyes. Preserve it, but never give it a disabled checkbox in the
-  // approval queue. Remediation is an independent, non-publishing lane.
+  // Only genuinely unreviewable items move to Needs Attention. Moving safe
+  // creative-only decisions there caused the Museum Mile Day Plan outputs
+  // 10827–10832 to disappear from the main Factory review queue.
   function factoryReviewAttentionCards(cards) {
     const submitted = factorySubmittedApprovalIds();
     return (cards || []).filter(card => card?.kind === "output" &&
-      !submitted.has(String(card?.id || "")) && !canReviewActions(card))
+      !submitted.has(String(card?.id || "")) && !factoryHasHumanReviewAction(card))
       .map(card => ({ ...card, _factoryAttention: true }));
   }
 
@@ -2118,8 +2126,11 @@
     if (contentId) bits.push(`Content ${contentId}`);
     if (safetyHeld.length) {
       if (first.profile_name) bits.push(String(first.profile_name));
+      const creativeReviewReady = (group.cards || []).filter(card =>
+        canReviewHeldOutput(card) || canRejectHeldOutput(card)).length;
       bits.push(`${heldRendered.length} rendered for preview`);
-      bits.push(`${ready.length} approvable`);
+      if (creativeReviewReady) bits.push(`${creativeReviewReady} ready for creative review`);
+      bits.push(`${ready.length} publishing-approvable`);
       bits.push("Publishing safety hold");
     } else {
       const heldForReview = (group.cards || []).filter(canRejectHeldOutput);
