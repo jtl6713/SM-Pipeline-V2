@@ -1830,6 +1830,7 @@
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output"
       && card.do_not_publish === true
+      && !card.held_review_decision
       && card.review_hold_active !== true
       && card.review_package_ready !== false
       && output === "ready for review"
@@ -1870,6 +1871,7 @@
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output"
       && card.do_not_publish === true
+      && !card.held_review_decision
       && card.review_hold_active !== true
       && card.safety_hold_active !== true
       && card.review_package_ready !== false
@@ -1909,6 +1911,9 @@
         }else{
           actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
+      }
+      if (needsEyesOutput && card.held_review_decision && card.do_not_publish === true) {
+        actions.push(`<span class="factory-batch-unavailable" role="status">Creative ${esc(card.held_review_decision)} · publishing safety hold retained</span>`);
       }
       if (needsEyesOutput && canReviewHeldOutput(card)) {
         actions.push(`<button type="button" class="primary-button" data-factory-held-review="approve:${esc(card.id)}" title="Approve creative review only; publishing stays blocked.">Approve review (publish held)</button>`);
