@@ -85,11 +85,27 @@ jobs:
           if ([DateTimeOffset]::Parse([string]$before.scheduled_post_date).UtcDateTime -gt [DateTime]::UtcNow) {
             throw 'exact_output_not_due'
           }
-          $images = @([string]$before.error_messages.TikTok_Draft_Assets_JSON | ConvertFrom-Json)
+          if ($before.error_messages.TikTok_10733_Previous_Failed_Publish_ID -ne 'p_inbox_url~v2.7710392309136918542' -or
+              -not $before.error_messages.TikTok_10733_Image_Repair_Applied_At) {
+            throw 'exact_failed_provider_id_not_archived'
+          }
+          $parsed = ConvertFrom-Json -InputObject ([string]$before.error_messages.TikTok_Draft_Assets_JSON)
+          $images = @()
+          foreach ($item in $parsed) { $images += ([string]$item) }
+          if ($images.Count -eq 1 -and $images[0].StartsWith('[')) {
+            $parsedAgain=ConvertFrom-Json -InputObject $images[0]
+            $images=@()
+            foreach ($item in $parsedAgain) { $images+=([string]$item) }
+          }
           if ($images.Count -ne 5 -or @($images | Select-Object -Unique).Count -ne 5) { throw 'approved_photo_manifest_invalid' }
+          if ($images[0] -ne 'https://media.chicagoshining.com/publish/platform-output-10733/cover.jpg' -or
+              $images[4] -ne 'https://media.chicagoshining.com/publish/platform-output-10733/tiktok-slide-4-1080x1920-ops-674d2f5817a9.jpg') {
+            throw 'corrected_tiktok_manifest_not_exact'
+          }
           if (@($images | Where-Object { $_ -notmatch '^https://media\.chicagoshining\.com/' }).Count -ne 0) {
             throw 'approved_photo_source_unexpected'
           }
+          Write-Output 'exact_tt10733_corrected_manifest=PASS'
           Write-Output 'exact_tt10733_identity_assets=PASS'
           $h = @{ 'X-Pipeline-Secret'=$secret }
           function StageCall([string]$name, [bool]$dry) {
