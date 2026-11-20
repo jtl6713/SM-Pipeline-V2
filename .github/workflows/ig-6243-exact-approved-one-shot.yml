@@ -13,10 +13,6 @@ concurrency:
   group: exact-approved-ig-6243-one-shot
   cancel-in-progress: false
 
-concurrency:
-  group: meta-ig-canary-6243-20261119
-  cancel-in-progress: false
-
 jobs:
   exact-canary:
     runs-on: ubuntu-latest
