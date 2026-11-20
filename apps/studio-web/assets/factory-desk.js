@@ -1840,12 +1840,14 @@
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output"
       && card.do_not_publish === true
+      && !card.held_review_decision
       && card.review_hold_active !== true
       && card.review_package_ready !== false
       && output === "ready for review"
       && ["", "review sent", "pending review", "pending"].includes(review)
       && ["rendered", "native photo route"].includes(render)
-      && ["", "not ready"].includes(publish)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
       && card.auto_publish_enabled !== true
       && !card.scheduled_post_date && !card.studio_scheduled_at
       && !card.youtube_scheduled_publish_at && !card.published_at
@@ -1860,11 +1862,13 @@
     const render = String(card?.render_status || "").trim().toLowerCase();
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output" && card.do_not_publish === true
+      && !card.held_review_decision
       && card.review_hold_active !== true
       && output === "ready for review"
       && ["", "review sent", "pending review", "pending"].includes(review)
       && ["rendered", "native photo route"].includes(render)
-      && ["", "not ready"].includes(publish)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
       && card.auto_publish_enabled !== true
       && !card.scheduled_post_date && !card.studio_scheduled_at
       && !card.youtube_scheduled_publish_at && !card.published_at
@@ -1920,6 +1924,9 @@
         }else{
           actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
+      }
+      if (reviewActionOutput && card.held_review_decision && card.do_not_publish === true) {
+        actions.push(`<span class="factory-batch-unavailable" role="status">Creative ${esc(card.held_review_decision)} · publishing safety hold retained</span>`);
       }
       if (reviewActionOutput && canReviewHeldOutput(card)) {
         actions.push(`<button type="button" class="primary-button" data-factory-held-review="approve:${esc(card.id)}" title="Approve creative review only; publishing stays blocked.">Approve review (publish held)</button>`);
