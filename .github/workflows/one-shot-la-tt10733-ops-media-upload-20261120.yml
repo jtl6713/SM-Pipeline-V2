@@ -76,8 +76,10 @@ jobs:
           if ($assets.Count -ne 5 -or $assets[4] -ne $source) { throw 'wrong_exact_tiktok_manifest' }
           Write-Output 'tt10733_ops_original_manifest=PASS'
           Add-Type -AssemblyName System.Drawing
-          $srcbytes=(Invoke-WebRequest -Uri $source -UseBasicParsing -TimeoutSec 50).Content
-          if (-not ($srcbytes -is [byte[]])) { throw 'source_not_binary' }
+          $sourceFile=Join-Path $env:TEMP 'tt10733-original-slide-for-resize.jpg'
+          Invoke-WebRequest -Uri $source -OutFile $sourceFile -TimeoutSec 50
+          $srcbytes=[System.IO.File]::ReadAllBytes($sourceFile)
+          if ($srcbytes.Length -lt 5000 -or $srcbytes.Length -gt 20000000) { throw 'source_not_binary' }
           $mem=[System.IO.MemoryStream]::new([byte[]]$srcbytes)
           $image=[System.Drawing.Image]::FromStream($mem)
           if ($image.Width -ne 2988 -or $image.Height -ne 5312 -or
