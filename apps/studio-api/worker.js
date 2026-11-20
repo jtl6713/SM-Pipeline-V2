@@ -912,6 +912,7 @@ import {
   studioIdeaGenerationStatus,
   chicagoNowParts,
   getStudioDeskInventory,
+  getStudioApprovedPastDueTriage,
   getStudioExceptionRecoveryCenter,
   getStudioExceptionRecoveryConversation,
   getStudioExceptionRecoveryPreflight,
@@ -1080,6 +1081,7 @@ export default {
       const isOpsMiamiTikTokSecretRoute = url.pathname === "/api/ops/tiktok/miami/pipeline-secret";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isQaRoute = url.pathname.startsWith("/api/admin/qa/");
+      const isAdminApprovedPastDueTriageRoute = url.pathname === "/api/admin/approved-past-due/triage";
       const isAdminExceptionRecoveryRoute = url.pathname === "/api/admin/exception-recovery";
       const isAdminExceptionConversationRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/conversation$/.test(url.pathname);
       const isAdminExceptionPreflightRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/preflight$/.test(url.pathname);
@@ -2880,6 +2882,12 @@ export default {
           return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isAdminApprovedPastDueTriageRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioApprovedPastDueTriage(request, env);
       }
 
       if (isAdminExceptionRecoveryRoute) {
@@ -8709,6 +8717,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:deskOutputsForRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioQualityAuditApprovedPastDue__*/
 /*__STUDIO_WORKER_EXTRACT:gatherStudioDeskInventory__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioApprovedPastDueTriage__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCenter__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryConversation__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryPreflight__*/
