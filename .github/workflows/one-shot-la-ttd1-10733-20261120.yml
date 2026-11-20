@@ -1,0 +1,168 @@
+name: One-shot exact LA TikTok output 10733 handoff repair
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-la-ttd1-10733-20261120.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-la-tiktok-10733-ttd1
+  cancel-in-progress: false
+
+jobs:
+  one-output:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate existing Ops control
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "exact_tt10733_ops_auth=FAILED"
+          exit 1
+
+      - name: Verify single Supabase output and initialize exactly one draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/exact-tt10733.ps1 <<'PS'
+          $ErrorActionPreference = 'Stop'
+          $record = 'recge6qNpnbV8Vi7h'
+          $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or
+              $health.studio_runner_output_read_source -ne 'supabase' -or
+              $health.supabase_pipeline_writes -ne $true) { throw 'runner_not_supabase_authoritative' }
+          $envfile = Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path $envfile)) { throw 'runner_env_missing' }
+          function EnvValue([string]$key) {
+            $line = @(Get-Content $envfile | Where-Object { $_ -match ('^\s*' + [regex]::Escape($key) + '\s*=') }) | Select-Object -Last 1
+            if (-not $line) { throw 'runner_env_setting_missing' }
+            return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret = EnvValue 'PIPELINE_RUNNER_SHARED_SECRET'
+          $dburl = EnvValue 'SUPABASE_URL'
+          $dbkey = EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw 'runner_credentials_missing' }
+          $dbheaders = @{ apikey=$dbkey; Authorization=('Bearer '+$dbkey) }
+          $u = $dburl.TrimEnd('/') + '/rest/v1/platform_outputs?airtable_record_id=eq.' + $record +
+            '&select=airtable_record_id,output_number,output_title,platform,platform_output_type,review_status,output_status,publish_status,tiktok_draft_status,do_not_publish,auto_publish_enabled,test_run_id,scheduled_post_date,published_at,platform_post_url,error_messages'
+          function ReadOne {
+            $rows = @(Invoke-RestMethod -Uri $u -Headers $dbheaders -TimeoutSec 25)
+            if ($rows.Count -ne 1) { throw 'exact_output_readback_ambiguous' }
+            return $rows[0]
+          }
+          $before = ReadOne
+          if ($before.output_number -ne 10733 -or $before.airtable_record_id -ne $record -or
+              $before.output_title -ne 'Santa Monica Pier Myths' -or
+              $before.platform -ne 'TikTok' -or $before.platform_output_type -ne 'TikTok Slideshow' -or
+              $before.review_status -ne 'Approved' -or $before.output_status -ne 'Approved for Publishing' -or
+              $before.publish_status -ne 'Ready to Publish' -or $before.tiktok_draft_status -ne 'Ready for Delivery' -or
+              $before.do_not_publish -eq $true -or $before.auto_publish_enabled -ne $true -or
+              $before.test_run_id -or $before.published_at -or $before.platform_post_url -or
+              $before.error_messages.TikTok_Draft_Publish_ID -or
+              $before.error_messages.TikTok_Draft_Delivered_At -or
+              $before.error_messages.TikTok_Draft_Email_Sent_At -or
+              $before.error_messages.Platform_Post_ID -or
+              $before.error_messages.Publish_Locked_By) { throw 'exact_output_not_safe_for_new_draft' }
+          if ([DateTimeOffset]::Parse([string]$before.scheduled_post_date).UtcDateTime -gt [DateTime]::UtcNow) {
+            throw 'exact_output_not_due'
+          }
+          $images = @([string]$before.error_messages.TikTok_Draft_Assets_JSON | ConvertFrom-Json)
+          if ($images.Count -ne 5 -or @($images | Select-Object -Unique).Count -ne 5) { throw 'approved_photo_manifest_invalid' }
+          if (@($images | Where-Object { $_ -notmatch '^https://media\.chicagoshining\.com/' }).Count -ne 0) {
+            throw 'approved_photo_source_unexpected'
+          }
+          Write-Output 'exact_tt10733_identity_assets=PASS'
+          $h = @{ 'X-Pipeline-Secret'=$secret }
+          function StageCall([string]$name, [bool]$dry) {
+            $b = @{ output_record_id=$record; extra=@{ dry_run=$dry } } | ConvertTo-Json -Depth 5 -Compress
+            return Invoke-RestMethod -Uri ('http://127.0.0.1:3350/stages/' + $name) -Method POST -Headers $h -Body $b -ContentType 'application/json' -TimeoutSec 230
+          }
+          $dry = StageCall 'ttd1' $true
+          if ($dry.status -ne 'ok' -or $dry.details.run.dry_run -ne $true -or
+              $dry.details.run.eligibility_reason -or $dry.details.run.reason) {
+            Write-Output ('exact_tt10733_dry_reason=' + [string]$dry.details.run.reason)
+            throw 'exact_ttd1_dry_preflight_refused'
+          }
+          $justBefore = ReadOne
+          if ($justBefore.tiktok_draft_status -ne 'Ready for Delivery' -or
+              $justBefore.error_messages.TikTok_Draft_Publish_ID -or
+              $justBefore.published_at -or $justBefore.platform_post_url) {
+            throw 'draft_started_concurrently'
+          }
+          Write-Output 'exact_tt10733_ttd1_dry=PASS'
+          # One provider draft-init call only. HTTP 5xx is ambiguous and must never be retried here.
+          $init = StageCall 'ttd1' $false
+          Write-Output ('exact_tt10733_ttd1_status=' + [string]$init.status)
+          Write-Output ('exact_tt10733_ttd1_processed=' + [string]$init.details.run.processed)
+          $id = [string]$init.details.run.publish_id
+          if ($init.status -ne 'ok' -or $init.details.run.processed -ne $true -or -not $id) {
+            Write-Output ('exact_tt10733_ttd1_reason=' + [string]$init.details.run.reason)
+            throw 'draft_not_confirmed_no_second_init'
+          }
+          $after = ReadOne
+          if ([string]$after.error_messages.TikTok_Draft_Publish_ID -ne $id -or
+              $after.tiktok_draft_status -ne 'Processing') { throw 'draft_receipt_not_stored_no_reinit' }
+          Write-Output 'exact_tt10733_ttd1_receipt=PASS'
+          Start-Sleep -Seconds 20
+          $poll = StageCall 'ttd2' $false
+          Write-Output ('exact_tt10733_ttd2_status=' + [string]$poll.status)
+          Write-Output ('exact_tt10733_ttd2_reason=' + [string]$poll.details.run.reason)
+          $final = ReadOne
+          Write-Output ('exact_tt10733_db_draft_status=' + [string]$final.tiktok_draft_status)
+          Write-Output ('exact_tt10733_delivery_confirmed=' + [string][bool]$final.error_messages.TikTok_Draft_Delivered_At)
+          if ($final.error_messages.TikTok_Draft_Delivered_At -and
+              -not $final.error_messages.TikTok_Draft_Email_Sent_At) {
+            $email = StageCall 'ttd3' $false
+            Write-Output ('exact_tt10733_ttd3_status=' + [string]$email.status)
+          }
+          if ($poll.status -eq 'error') { throw 'draft_poll_error_no_reinit' }
+          Write-Output 'exact_tt10733_one_draft_initialized=PASS'
+          PS
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/exact-tt10733.json').write_text(json.dumps({
+              'command':Path('/tmp/exact-tt10733.ps1').read_text(), 'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/exact-tt10733.json || true)
+          if [[ "$code" != '200' && "$code" != '202' ]]; then
+            echo "exact_tt10733_ops_submit_http=$code"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 130); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == 'ok' ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^exact_tt10733_' || true
+              exit 0
+            elif [[ "$status" == 'failed' ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep -E 'exact_tt10733_|Exception|error|failed' | tail -25 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'exact_tt10733_ops_job_not_verified'; exit 4
