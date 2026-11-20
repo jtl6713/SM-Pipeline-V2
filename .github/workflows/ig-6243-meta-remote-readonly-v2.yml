@@ -1,0 +1,123 @@
+name: Inspect IG 6243 Meta receipt without publishing v2
+on:
+  push:
+    branches: ['repair/miami-fb-photo-10643-preflight']
+    paths: ['.github/workflows/ig-6243-meta-remote-readonly-v2.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-check.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-check.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "OPS_AUTH=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops token unavailable"; exit 1
+      - name: Inspect exact caption against provider media through Supabase-managed settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/ig6243-readonly.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) {
+              throw "supabase_authority_not_verified"
+          }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$key) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "missing_required_env" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          $dburl=$dburl.TrimEnd('/')
+          $dbheaders=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $outputUri=$dburl+"/rest/v1/platform_outputs?airtable_record_id=eq.recJv1IxrKUxrvNI3&select=output_number,output_caption,output_status,review_status,publish_status,published_at,platform_post_url,error_messages"
+          $outputs=@(Invoke-RestMethod -Uri $outputUri -Headers $dbheaders -TimeoutSec 30)
+          if ($outputs.Count -ne 1) { throw "ig_6243_output_missing_or_duplicate" }
+          $o=$outputs[0]
+          if ($o.output_number -ne 6243 -or $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Failed" -or
+              $o.published_at -or $o.platform_post_url -or -not $o.output_caption -or $o.error_messages.Platform_Post_ID -or $o.error_messages.Platform_Media_ID) {
+              throw "ig_6243_remote_check_preflight_denied"
+          }
+          function ReadSetting([string]$name) {
+              $uri=$dburl+"/rest/v1/engagement_settings?select=payload&payload-%3E%3Esource=eq.pipeline&payload-%3E%3ESetting_Name=eq."+$name+"&payload-%3E%3EActive=eq.true&limit=2"
+              $rows=@(Invoke-RestMethod -Uri $uri -Headers $dbheaders -TimeoutSec 30)
+              if ($rows.Count -ne 1) { throw "required_pipeline_setting_not_unique" }
+              return [string]$rows[0].payload.Setting_Value
+          }
+          $igUser=ReadSetting "MIAMI_INSTAGRAM_BUSINESS_ACCOUNT_ID"
+          $token=ReadSetting "MIAMI_META_GRAPH_API_ACCESS_TOKEN"
+          if (-not $token) { $token=ReadSetting "MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN" }
+          $version=ReadSetting "FACEBOOK_GRAPH_API_VERSION"
+          if ($version -notmatch '^v[0-9]+\.[0-9]+$' -or $igUser -notmatch '^[0-9]+$' -or -not $token) { throw "invalid_meta_destination_settings" }
+          $headers=@{Authorization=("Bearer "+$token)}
+          $url="https://graph.facebook.com/"+$version+"/"+$igUser+"/media?fields=id%2Ccaption%2Cmedia_product_type%2Ctimestamp%2Cpermalink&limit=100"
+          $cutoff=[DateTimeOffset]::Parse("2026-11-18T00:00:00Z")
+          $oldest=[DateTimeOffset]::MaxValue
+          $pages=0;$total=0;$matches=@()
+          while ($url -and $pages -lt 10) {
+              $reply=Invoke-RestMethod -Uri $url -Headers $headers -Method Get -TimeoutSec 40
+              $pages++
+              $batch=@($reply.data)
+              $total+=$batch.Count
+              foreach ($post in $batch) {
+                  if ($post.timestamp) {
+                      $dt=[DateTimeOffset]::Parse([string]$post.timestamp)
+                      if ($dt -lt $oldest) { $oldest=$dt }
+                  }
+                  if (([string]$post.caption).Trim() -ceq ([string]$o.output_caption).Trim()) {
+                      $matches+= $post
+                  }
+              }
+              if ($oldest -lt $cutoff) { break }
+              $url=[string]$reply.paging.next
+          }
+          if ($oldest -ge $cutoff) { throw "provider_history_coverage_incomplete" }
+          Write-Output ("IG_6243_META_PAGES="+$pages)
+          Write-Output ("IG_6243_META_ROWS="+$total)
+          Write-Output ("IG_6243_META_OLDEST="+$oldest.ToString("o"))
+          Write-Output ("IG_6243_EXACT_CAPTION_MATCHES="+$matches.Count)
+          foreach($match in $matches) {
+             Write-Output ("IG_6243_EXISTING_PROVIDER_ID="+[string]$match.id)
+             Write-Output ("IG_6243_EXISTING_PERMALINK="+[string]$match.permalink)
+          }
+          Write-Output "IG_6243_REMOTE_READONLY_PASS"
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/ig6243-payload.json').write_text(json.dumps({"command":pathlib.Path('/tmp/ig6243-readonly.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $OPS_AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/ig6243-payload.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops denied proof http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for i in $(seq 1 120); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $OPS_AUTH" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^IG_6243_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -16
+              exit 3
+            fi
+            sleep 3
+          done
+          echo "Ops check unverified"; exit 4
