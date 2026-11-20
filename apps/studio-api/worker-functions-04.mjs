@@ -11840,6 +11840,14 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       safety_hold_active: Boolean(String(f(record, "Factory_Review_Handoff_Safety_Hold_At") || "").trim()),
       held_review_decision: f(record, "SM_Factory_Held_Review_Receipt")?.decision || null,
       do_not_publish: f(record, "Do_Not_Publish") === true,
+      // Keep preview-only decisions in sync with the server's publication
+      // disarming preflight. Missing card fields previously looked "safe".
+      auto_publish_enabled: f(record, "Auto_Publish_Enabled") === true,
+      scheduled_post_date: f(record, "Scheduled_Post_Date") || null,
+      studio_scheduled_at: f(record, "Studio_Scheduled_At") || null,
+      youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At") || null,
+      published_at: f(record, "Published_At") || null,
+      platform_post_url: f(record, "Platform_Post_URL") || null,
       thumbnail_url: mapped.thumbnail_url || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
