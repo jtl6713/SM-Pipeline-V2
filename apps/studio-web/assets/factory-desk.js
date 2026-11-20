@@ -2035,13 +2035,28 @@
     const ready = readyContentCards(group);
     const pending = pendingSiblingOutputsForGroup(group);
     const heldRevisions = (group.cards || []).filter(card => card.review_hold_active === true);
+    // A completed Safety-Held render is visible in Needs eyes but cannot
+    // be selected/approved. Count the actual reviewable video previews
+    // separately from operator-approvable outputs (LA Content 2212: six
+    // rendered, zero eligible). Never equate "0 ready" with a failed render.
+    const safetyHeld = (group.cards || []).filter(card =>
+      card?.kind === "output" && card.safety_hold_active === true && card.do_not_publish === true);
+    const heldRendered = safetyHeld.filter(card =>
+      ["rendered", "native photo route"].includes(String(card.render_status || "").trim().toLowerCase()) && canPreview(card));
     const pendingLabel = heldRevisions.length ? "Review-held V2 — preview only" : pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
     const bits = [];
     if (contentId) bits.push(`Content ${contentId}`);
-    bits.push(`${ready.length} ready`);
+    if (safetyHeld.length) {
+      if (first.profile_name) bits.push(String(first.profile_name));
+      bits.push(`${heldRendered.length} rendered for preview`);
+      bits.push(`${ready.length} approvable`);
+      bits.push("Publishing safety hold");
+    } else {
+      bits.push(`${ready.length} ready`);
+    }
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
     const approveAll = ready.length > 1
@@ -2055,7 +2070,7 @@
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
         ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
-      Select eligible outputs</label>`;
+      ${safetyHeld.length && !batchReady.length ? "Preview only — approval held" : "Select eligible outputs"}</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">

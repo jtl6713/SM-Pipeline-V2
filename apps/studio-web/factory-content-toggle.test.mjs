@@ -119,3 +119,45 @@ test("Legacy projections group by linked ID or numeric Content_ID but never by t
     ["content:recOtherParent",1],["solo:recOrphan1",1],["solo:recOrphan2",1],
   ]);
 });
+
+test("Museum Mile 2212: six rendered safety-held outputs show previews instead of misleading zero-ready status", () => {
+  const barStart = source.indexOf("  function renderContentBar(");
+  const barEnd = source.indexOf("  function renderLane(", barStart);
+  assert.ok(barStart >= 0 && barEnd > barStart);
+  const state = { selectedOutputs: new Set() };
+  const renderContentBar = vm.runInNewContext(source.slice(barStart,barEnd) + "\nrenderContentBar", {
+    readyContentCards: () => [],
+    pendingSiblingOutputsForGroup: () => [],
+    pendingSiblingMeta: () => "",
+    canPreview: card => card.can_preview,
+    canSelectBatchOutput: () => false,
+    state,
+    esc: value => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;"),
+  });
+  const group = {
+    key: "content:recsEpUkN36Bx6TLP",
+    cards: [10827,10828,10829,10830,10831,10832].map((number,i) => ({
+      id: "rec" + String(number).padStart(14,"0"),
+      kind: "output",
+      output_id: number,
+      title: "Museum Mile Day Plan",
+      content_id: 2212,
+      profile_name: "LA - Los Angeles",
+      platform: ["Instagram","Instagram","Facebook","Facebook","TikTok","YouTube"][i],
+      render_status: "Rendered",
+      do_not_publish: true,
+      safety_hold_active: true,
+      can_preview: true,
+    })),
+  };
+  const html = renderContentBar(group,false);
+  assert.match(html,/Content 2212/);
+  assert.match(html,/LA - Los Angeles/);
+  assert.match(html,/6 rendered for preview/);
+  assert.match(html,/0 approvable/);
+  assert.match(html,/Publishing safety hold/);
+  assert.match(html,/Preview only — approval held/);
+  assert.doesNotMatch(html,/0 ready/);
+  assert.match(html, /data-factory-select-content="content:recsEpUkN36Bx6TLP"[^>]*disabled/);
+  assert.match(html, /data-factory-toggle-content="content:recsEpUkN36Bx6TLP"/);
+});
