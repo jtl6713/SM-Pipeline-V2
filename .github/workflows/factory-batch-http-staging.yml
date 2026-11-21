@@ -1,31 +1,32 @@
-name: Factory Batch Staging HTTP - Isolated Worker
+name: Factory Batch Supabase HTTP Boundary (Hermetic Only)
+# This is NOT deployed-Worker staging acceptance. The retired staging harness
+# used a live Airtable PAT; it must never be run to obtain a green CI result.
+# Production Supabase canaries and external-integration audits remain separate
+# hard release gates documented in docs/supabase-migration/.
 on:
   pull_request:
     paths:
-      - 'apps/studio-api/factory-batch-staging-worker.template.mjs'
-      - 'apps/studio-api/generate-factory-batch-staging-worker.mjs'
-      - 'apps/studio-api/factory-batch-deployed-http.staging.mjs'
-      - 'apps/studio-api/run-factory-staging-http.sh'
-      - 'wrangler.factory-staging.jsonc'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-*.mjs'
+      - 'apps/studio-api/factory-submit-http-boundary.test.mjs'
+      - 'apps/studio-api/factory-batch-approval.test.mjs'
+      - 'apps/studio-api/airtable-retirement.test.mjs'
       - '.github/workflows/factory-batch-http-staging.yml'
   push:
     branches: [main]
     paths:
-      - 'apps/studio-api/factory-batch-staging-worker.template.mjs'
-      - 'apps/studio-api/generate-factory-batch-staging-worker.mjs'
-      - 'apps/studio-api/factory-batch-deployed-http.staging.mjs'
-      - 'apps/studio-api/run-factory-staging-http.sh'
-      - 'wrangler.factory-staging.jsonc'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-*.mjs'
+      - 'apps/studio-api/factory-submit-http-boundary.test.mjs'
+      - 'apps/studio-api/factory-batch-approval.test.mjs'
+      - 'apps/studio-api/airtable-retirement.test.mjs'
       - '.github/workflows/factory-batch-http-staging.yml'
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: isolated-factory-batch-staging-http
-  cancel-in-progress: false
 jobs:
-  check-source:
-    runs-on: ubuntu-latest
+  supabase-hermetic-boundary:
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
@@ -34,49 +35,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Extract exact canonical Factory handlers and validate syntax
-        shell: bash
+      - name: Verify canonical Worker syntax
         run: |
           set -euo pipefail
-          node apps/studio-api/generate-factory-batch-staging-worker.mjs
-          node --check apps/studio-api/factory-batch-staging-worker.generated.mjs
-          node --check apps/studio-api/factory-batch-deployed-http.staging.mjs
-          bash -n apps/studio-api/run-factory-staging-http.sh
-          node --test apps/studio-api/factory-batch-approval.test.mjs
-      - name: Cloudflare Wrangler dry-run bundle, without staging secrets
-        shell: bash
+          node --check apps/studio-api/worker.js
+          for src in apps/studio-api/worker-functions-*.mjs; do node --check "$src"; done
+      - name: Exercise real Worker HTTP boundary with isolated Supabase fixtures
         run: |
           set -euo pipefail
-          npm install --no-save wrangler@4.123.0 >/dev/null
-          ./node_modules/.bin/wrangler deploy --config wrangler.factory-staging.jsonc --dry-run \
-            >/tmp/factory-stage-bundle.log 2>&1 || { tail -90 /tmp/factory-stage-bundle.log; exit 1; }
-          echo "FACTORY_STAGING_WORKER_BUILD=PASS"
-  deployed-http:
-    needs: [check-source]
-    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      STAGING_AIRTABLE_API_TOKEN: ${{ secrets.STAGING_AIRTABLE_API_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Execute real HTTPS staging acceptance with always-relock safety
-        shell: bash
-        run: bash apps/studio-api/run-factory-staging-http.sh
-      - name: Upload only sanitized staging test state (never tokens or secret material)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: factory-stage-http-${{ github.run_id }}
-          path: |
-            /tmp/factory-staging-final-health.json
-            /tmp/factory-staging-r2-cleanup.json
-          if-no-files-found: ignore
-          retention-days: 14
+          node --test --test-reporter=tap \
+            apps/studio-api/factory-submit-http-boundary.test.mjs \
+            apps/studio-api/factory-batch-approval.test.mjs \
+            apps/studio-api/airtable-retirement.test.mjs
+      - name: Record remaining release block explicitly
+        run: |
+          echo 'HERMETIC_SUPABASE_HTTP_BOUNDARY=TESTED'
+          echo 'DEPLOYED_STAGING_HTTP=NOT_TESTED'
+          echo 'PRODUCTION_SUPABASE_CANARY=NOT_TESTED'
+          echo 'LIVE_ZERO_AIRTABLE_EGRESS=NOT_VERIFIED'
