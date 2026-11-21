@@ -1894,6 +1894,61 @@ function flattenIdeaRow(row) {
 
 
 /**
+ * Exact Home Past Due / Failed Pipeline drill-down candidates, Supabase only.
+ * Server-side filtering reduces work; the shared Home classifier is the final
+ * authority. No provider writes, Airtable requests, or side-effect purges.
+ */
+export function supabaseFocusedExceptionFilter(mode, nowIso) {
+  const modes = ["approved_exceptions", "approved_past_due", "approved_missing_date", "failed"];
+  if (!modes.includes(mode)) throw new Error("Unknown Home exception mode");
+  const base = "test_run_id=is.null";
+  if (mode === "failed") {
+    // Failed can be derived from any of these four statuses in mapOutput.
+    return base + "&or=(output_status.eq.Failed,render_status.eq.Failed,"
+      + "publish_status.eq.Failed,error_messages->>Studio_State.eq.Failed)";
+  }
+  const clock = String(nowIso || "");
+  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(clock)
+    || !Number.isFinite(Date.parse(clock))) throw new Error("Invalid Home snapshot clock");
+  const due = encodeDeskFilterValue(clock);
+  const approved = base + "&review_status=eq.Approved&do_not_publish=eq.false";
+  if (mode === "approved_past_due") return approved + "&scheduled_post_date=lte." + due;
+  if (mode === "approved_missing_date") return approved + "&scheduled_post_date=is.null";
+  return approved + "&or=(scheduled_post_date.is.null,scheduled_post_date.lte." + due + ")";
+}
+
+export async function listSupabaseFocusedExceptionOutputs(env, {
+  profileAirtableId, mode, nowIso = new Date().toISOString(),
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Home exception source unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Home exception profile missing");
+  const filter = supabaseFocusedExceptionFilter(mode, nowIso);
+  const pageSize = 100;
+  const maxCandidates = 5000;
+  const all = [];
+  const seen = new Set();
+  let complete = false;
+  for (let offset = 0; offset < maxCandidates; offset += pageSize) {
+    const page = await supabaseRest(env, "platform_outputs?content_profile_id=eq."
+      + encodeURIComponent(profileId) + "&" + filter
+      + "&select=" + OUTPUT_SELECT
+      + "&order=output_number.desc.nullslast,airtable_record_id.asc"
+      + "&limit=" + pageSize + "&offset=" + offset);
+    if (!Array.isArray(page)) throw new Error("Supabase Home exception page unavailable");
+    for (const row of page) {
+      if (!row?.airtable_record_id) throw new Error("Supabase Home exception record lacks stable identity");
+      if (seen.has(row.airtable_record_id)) throw new Error("Supabase Home exception scan duplicated identity");
+      seen.add(row.airtable_record_id);
+      all.push(airtableShapedOutputFromSupabase(flattenOutputRow(row)));
+    }
+    if (page.length < pageSize) { complete = true; break; }
+  }
+  if (!complete) throw new Error("Supabase Home exception scan hit full-census safety limit");
+  return stripDeletedDuplicateOutputRecords(all);
+}
+
+/**
  * Profile-scoped Manual Action candidates for Pipeline rescue + Home click-through.
  * Mirrors the Airtable loadManualActionPipelineOutputs formula against typed
  * columns + error_messages bag fields. Callers still run mapOutput /
