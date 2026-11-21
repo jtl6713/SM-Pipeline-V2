@@ -33,12 +33,32 @@ jobs:
       - name: Reject executable GitHub Actions with Airtable API endpoints
         shell: bash
         run: |
-          host="api." && host+="airtable.com"
-          if git grep -n -F "$host" -- '.github/workflows/*.yml' '.github/workflows/*.yaml'; then
-            echo 'FAIL: direct Airtable HTTP endpoint found in a GitHub Actions workflow'
-            exit 1
-          fi
-          echo 'PASS: no direct Airtable API endpoints in GitHub Actions workflows'
+          set -euo pipefail
+          # Two issue2374 read-only audit workflows mention the hostname only
+          # as a forbidden token in their static-safety negative checks.
+          # Verify that single exact occurrence rather than exempting a file.
+          python - <<'PY'
+          from pathlib import Path
+          host="api."+"airtable.com"
+          allowed={
+              ".github/workflows/issue2374-all-profiles-provider-batch-audit.yml",
+              ".github/workflows/issue2374-exact-provider-ids-audit.yml",
+          }
+          bad=[]
+          for f in sorted(Path(".github/workflows").glob("*.y*ml")):
+              lines=f.read_text().splitlines()
+              matches=[(i,line.strip()) for i,line in enumerate(lines) if host in line]
+              for index,line in matches:
+                  context="\n".join(lines[max(0,index-7):index])
+                  exact=(str(f) in allowed and len(matches)==1
+                      and line.endswith('"'+host+'"]:')
+                      and "for bad in [" in context)
+                  if not exact:
+                      bad.append(f"{f}:{index+1}")
+          if bad:
+              raise SystemExit("Direct Airtable endpoint in executable workflow: "+",".join(bad))
+          print("PASS: no executable Airtable endpoints; two static negative checks validated")
+          PY
       - name: Reject tracked encrypted Airtable credential envelope and restoration jobs
         shell: bash
         run: |
