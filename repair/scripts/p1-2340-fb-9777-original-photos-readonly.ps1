@@ -2,9 +2,10 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $report=[ordered]@{
   output_number=9777;profile='Miami';read_only=$true;provider_writes=0;output_writes=0;airtable_reads=0;
-  expected=8;verified_owned=0;all_photo_ids_retained=$false;page_owned=$false;observations=@();reason='not_started'
+  expected=8;verified_owned=0;all_photo_ids_retained=$false;page_owned=$false;observations=@();reason='not_started';stage='preflight'
 }
 try {
+  $report.stage='authority-health'
   $health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -Method Get -TimeoutSec 20
   if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase'){throw 'not_supabase_authoritative'}
   $ef=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
@@ -14,16 +15,21 @@ try {
     if($lines.Count -ne 1){throw 'runner_config_unavailable'}
     return ([string]$lines[0] -split '=',2)[1].Trim().Trim('"',"'")
   }
+  $report.stage='production-config'
   $url=(E 'SUPABASE_URL').TrimEnd('/');$key=E 'SUPABASE_SERVICE_ROLE_KEY'
   if($url -ne 'https://vkwvscgisqsbuwagdvtb.supabase.co' -or -not $key){throw 'production_project_mismatch'}
   $h=@{apikey=$key;Authorization=('Bearer '+$key)}
+  $report.stage='read-original-output'
   $r=Invoke-RestMethod ($url+'/rest/v1/platform_outputs?output_number=eq.9777&select=output_number,airtable_record_id,content_profile_id,platform,platform_output_type,publish_status,do_not_publish,auto_publish_enabled,image_count,published_at,platform_post_url,error_messages&limit=2') -Headers $h -Method Get -TimeoutSec 25
   if(@($r).Count -ne 1){throw 'source_output_unavailable'}
   $o=$r[0]
   if($o.airtable_record_id -ne 'recmd8mSZlqbRBh8K' -or $o.platform -ne 'Facebook' -or $o.platform_output_type -ne 'Facebook Photo Set' -or $o.publish_status -ne 'Ready to Schedule' -or $o.image_count -ne 8 -or $o.do_not_publish -ne $false -or $o.auto_publish_enabled -ne $false -or $o.platform_post_url -or $o.published_at){throw 'output_state_changed'}
+  $report.stage='read-profile'
   $p=Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o.content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 20
   if(@($p).Count -ne 1 -or $p[0].market_name -ne 'Miami'){throw 'profile_mismatch'}
+  $report.stage='read-original-slides'
   $slides=Invoke-RestMethod ($url+'/rest/v1/carousel_slides?fields->>PO_Output_ID=eq.%5B9777%5D&select=airtable_record_id,current_order,deleted_from_carousel,fields&limit=20') -Headers $h -Method Get -TimeoutSec 30
+  $report.stage='check-ordered-approved-slides'
   $owned=@($slides|Where-Object { @($_.fields.'Platform Output') -contains $o.airtable_record_id }|Sort-Object current_order)
   if($owned.Count -ne 8){throw 'ordered_slide_count_mismatch'}
   $ids=@();$n=0
@@ -39,6 +45,7 @@ try {
   if(@($ids|Select-Object -Unique).Count -ne 8){throw 'duplicate_photo_receipts'}
   # ConvertFrom-Json can emit one nested array rather than eight scalar
   # pipeline elements; keep the JSON array shape explicit using System.Text.Json.
+  $report.stage='compare-saved-photo-identities'
   $saved=[string]$o.error_messages.FB_Photo_IDs_JSON
   if(-not $saved){throw 'parent_photo_receipts_differ'}
   $doc=[System.Text.Json.JsonDocument]::Parse($saved)
@@ -57,6 +64,7 @@ try {
     if([string]$savedIds[$i] -cne [string]$ids[$i]){throw 'parent_photo_receipts_differ'}
   }
   $report.all_photo_ids_retained=$true
+  $report.stage='read-owner-config'
   $rows=Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 25
   $cfg=@{}
   foreach($item in $rows){
@@ -76,9 +84,11 @@ try {
     $result=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+'/'+$id+'?fields='+$fields) -Method Get -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 35
     return $result
   }
+  $report.stage='meta-page-owner-get'
   $owner=G $page 'id'
   if([string]$owner.id -ne $page){throw 'page_identity_get_mismatch'}
   $report.page_owned=$true
+  $report.stage='meta-photo-ids-get'
   foreach($id in $ids){
     try{
       $photo=G $id 'id,from,page_story_id,created_time'
@@ -95,6 +105,7 @@ try {
       $report.observations+=@{id=$id;get_ok=$false;page_owned=$false;possible_existing_story=$null}
     }
   }
+  $report.stage='completed'
   $report.reason=if($report.verified_owned -eq 8 -and @($report.observations|Where-Object{$_.possible_existing_story -eq $true}).Count -eq 0){'all_eight_original_photo_receipts_owned_no_saved_story_but_public_post_not_proven_absent'}else{'original_photo_ids_incomplete_or_ambiguous_no_publish'}
 }catch{
   $reason=[string]$_.Exception.Message
