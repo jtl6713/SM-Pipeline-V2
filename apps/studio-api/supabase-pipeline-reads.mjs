@@ -9300,7 +9300,24 @@ async function commitIdeaRecords(env, records) {
     await linkIdeaCandidateToBatch(env, record.id, firstLink(fields.Idea_Batch) || firstLink(prior.Idea_Batch)).catch((error) => {
       console.warn("idea batch link failed", String(error?.message || error));
     });
-    saved.push({ id: record.id, fields: payload });
+    // The numeric Candidate_ID is assigned by Supabase's insert trigger.
+    // Read it back on CREATE so the first Studio save response displays the
+    // real Idea number instead of falling back to the internal rec... key.
+    // A temporary readback error must never turn a committed create into an
+    // ambiguous failure that encourages a duplicate retry.
+    let canonicalNumber = payload.Candidate_ID ?? null;
+    if (!existing && !canonicalNumber) {
+      const readback = await supabaseRest(
+        env,
+        `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+      ).catch(() => []);
+      canonicalNumber = readback?.[0]?.payload?.Candidate_ID ?? null;
+    }
+    saved.push({ id: record.id, fields: {
+      ...payload,
+      ...(String(canonicalNumber || "").match(/^[0-9]+$/)
+        ? { Candidate_ID: Number(canonicalNumber) } : {}),
+    } });
   }
   return saved;
 }
