@@ -39,6 +39,14 @@ PYTHON_GUARDS = {
         "assert bad not in s,",
     ),
 }
+# Exact previous forbidden-token list lines for split, multiline Python
+# assertions. Both lines are negative-only source checks, not API operations.
+PYTHON_MULTILINE_PREVIOUS = {
+    ".github/workflows/issue2374-fb-gallery-http-audit.yml":
+        "for bad in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','-Method Post',",
+    ".github/workflows/issue2374-ig-carousels-owner-auth-audit.yml":
+        '"Invoke-Sqlcmd", "/media_publish", "AIRTABLE_PAT",',
+}
 POWERSHELL_GUARDS = {
     ".github/workflows/p1-2340-la-youtube-inventory-readonly.yml": (
         ",'AIRTABLE_PAT','https://__AIRT_HOST__','Write-Output $key','Write-Host $key')){",
@@ -97,15 +105,24 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             i for i, line in enumerate(lines)
             if AIRT_HOST in line or "AIRTABLE_PAT" in line
         ]
-        if len(matches) != 1:
-            continue
-        i = matches[0]
+        previous = PYTHON_MULTILINE_PREVIOUS.get(filename)
+        if previous is not None:
+            if (len(matches) != 2 or matches[1] != matches[0] + 1
+                or lines[matches[0]].strip() != previous):
+                continue
+            i = matches[1]
+        else:
+            if len(matches) != 1:
+                continue
+            i = matches[0]
         context = "\n".join(lines[max(0, i - 8):i])
         if (lines[i].strip().endswith(tail)
             and ("for bad in [" in context or "for bad in (" in context)
             and i + 1 < len(lines)
             and lines[i + 1].strip().startswith(post_assertion)):
             safe.add((filename, i))
+            if previous is not None:
+                safe.add((filename, matches[0]))
 
     for filename, (tail, post_assertion, expected_count) in POWERSHELL_GUARDS.items():
         tail, post_assertion = _expand_guard(tail), _expand_guard(post_assertion)
