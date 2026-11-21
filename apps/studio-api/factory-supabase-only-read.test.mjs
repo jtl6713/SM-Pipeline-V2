@@ -10,7 +10,7 @@ const get = (file) => readFileSync(path.join(dir,file),"utf8");
 
 function extractExportedFunction(source, name) {
   const start = source.indexOf("export async function " + name + "(");
-  const end = source.indexOf("/*__STUDIO_WORKER_END:" + name + "*/",start);
+  const end = source.indexOf("/*__STUDIO_WORKER_END:" + name + "__*/",start);
   assert.ok(start >= 0 && end > start, "missing source function: " + name);
   return source.slice(start,end).replace(/^export /,"");
 }
