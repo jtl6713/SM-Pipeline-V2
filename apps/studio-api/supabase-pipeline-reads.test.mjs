@@ -460,225 +460,52 @@ test("Supabase content output lookup refuses truncated sibling inventory", async
   }
 });
 
-test("studioReadSource defaults to airtable and requires supabase secrets", () => {
-  assert.equal(studioReadSource({}), "airtable");
-  assert.equal(studioReadSource({ STUDIO_READ_SOURCE: "supabase" }), "airtable");
+test("all Studio storage selectors require Supabase and ignore retired Airtable rollback flags", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const staleFlags = {
+    STUDIO_READ_SOURCE: "airtable",
+    STUDIO_PIPELINE_READ_SOURCE: "airtable",
+    STUDIO_CONTENT_READ_SOURCE: "airtable",
+    STUDIO_FACTORY_OPS_READ_SOURCE: "airtable",
+    STUDIO_HOME_READ_SOURCE: "airtable",
+    STUDIO_MUSIC_READ_SOURCE: "airtable",
+    STUDIO_ASSETS_READ_SOURCE: "airtable",
+    STUDIO_AUTH_READ_SOURCE: "airtable",
+    STUDIO_WRITE_SOURCE: "airtable",
+    STUDIO_PHASE6_WRITE_SOURCE: "airtable",
+  };
+  const selectors = [
+    studioReadSource, studioPipelineReadSource, studioContentReadSource,
+    studioFactoryOpsReadSource, studioHomeReadSource, studioMusicReadSource,
+    studioAssetsReadSource, studioAuthReadSource, studioPhase6WriteSource,
+  ];
   assert.equal(studioSupabaseConfigured({}), false);
-  assert.equal(
-    studioReadSource({
-      STUDIO_READ_SOURCE: "supabase",
-      SUPABASE_URL: "https://example.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
-    }),
-    "airtable",
-  );
-});
-
-test("studioPipelineReadSource restores Phase 3 only when flagged and configured", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
-  };
-  assert.equal(studioPipelineReadSource({}), "airtable");
-  assert.equal(studioPipelineReadSource({ STUDIO_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioPipelineReadSource({ ...configured }), "airtable");
-  assert.equal(
-    studioPipelineReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase" }),
-    "supabase",
-  );
-  assert.equal(
-    studioPipelineReadSource({ ...configured, STUDIO_PIPELINE_READ_SOURCE: "supabase" }),
-    "supabase",
-  );
-  assert.equal(
-    studioPipelineReadSource({
-      ...configured,
-      STUDIO_READ_SOURCE: "supabase",
-      STUDIO_PIPELINE_READ_SOURCE: "airtable",
-    }),
-    "airtable",
-  );
-  // Global pause still covers Factory/Ops/Home even when Pipeline is restored.
-  assert.equal(
-    studioReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-  assert.equal(
-    studioContentReadSource({ ...configured, STUDIO_PIPELINE_READ_SOURCE: "supabase", STUDIO_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-});
-
-test("studioContentReadSource restores the content list only when its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
-  };
-  assert.equal(studioContentReadSource({}), "airtable");
-  assert.equal(studioContentReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(studioContentReadSource({ STUDIO_CONTENT_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(
-    studioContentReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "airtable" }),
-    "airtable",
-  );
-  assert.equal(
-    studioPipelineReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-  assert.equal(
-    studioFactoryOpsReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "supabase", STUDIO_PIPELINE_READ_SOURCE: "supabase", STUDIO_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-});
-
-test("studioFactoryOpsReadSource restores Factory desk and Ops queue only when its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
-  };
-  assert.equal(studioFactoryOpsReadSource({}), "airtable");
-  assert.equal(studioFactoryOpsReadSource({ STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioFactoryOpsReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(
-    studioFactoryOpsReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "airtable" }),
-    "airtable",
-  );
-  assert.equal(
-    studioFactoryOpsReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase", STUDIO_PIPELINE_READ_SOURCE: "supabase", STUDIO_CONTENT_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-  assert.equal(
-    studioContentReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-  assert.equal(
-    studioReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-  assert.equal(
-    studioHomeReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }),
-    "airtable",
-  );
-});
-
-test("studioHomeReadSource restores Home overview only when its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
-  };
-  assert.equal(studioHomeReadSource({}), "airtable");
-  assert.equal(studioHomeReadSource({ STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioHomeReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(studioHomeReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: " Supabase " }), "supabase");
-  assert.equal(studioHomeReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "airtable" }), "airtable");
-  assert.equal(
-    studioHomeReadSource({
-      ...configured,
-      STUDIO_READ_SOURCE: "supabase",
-      STUDIO_PIPELINE_READ_SOURCE: "supabase",
-      STUDIO_CONTENT_READ_SOURCE: "supabase",
-      STUDIO_FACTORY_OPS_READ_SOURCE: "supabase",
-    }),
-    "airtable",
-  );
-  assert.equal(studioReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioContentReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioFactoryOpsReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioPipelineReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_HOME_READ_SOURCE: "supabase" }), "airtable");
-});
-
-test("studioMusicReadSource restores music list only when its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "service-role",
-  };
-  assert.equal(studioMusicReadSource({}), "airtable");
-  assert.equal(studioMusicReadSource({ STUDIO_MUSIC_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_MUSIC_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_MUSIC_READ_SOURCE: " Supabase " }), "supabase");
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_MUSIC_READ_SOURCE: "airtable" }), "airtable");
-  assert.equal(studioHomeReadSource({ ...configured, STUDIO_MUSIC_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioContentReadSource({ ...configured, STUDIO_MUSIC_READ_SOURCE: "supabase" }), "airtable");
-  assert.ok(STUDIO_SUPABASE_MUSIC_READ_ROUTES.includes("/api/music"));
-  assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/music"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Rights_Status"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Studio_Transfer_ID"));
-});
-
-test("studioAssetsReadSource restores Asset Manager list only when its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "service-role",
-  };
-  assert.equal(studioAssetsReadSource({}), "airtable");
-  assert.equal(studioAssetsReadSource({ STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: " Supabase " }), "supabase");
-  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "airtable" }), "airtable");
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioAuthReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
-  assert.ok(STUDIO_SUPABASE_ASSETS_READ_ROUTES.includes("/api/library"));
-  assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/library"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Content_Profile"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Classification_Status"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Manual_Classification_JSON"));
-  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Search_Keywords"));
-});
-
-test("phase 6 update source stays airtable until its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "service-role",
+  for (const select of selectors) {
+    assert.equal(select({}), "unavailable");
+    assert.equal(select(staleFlags), "unavailable");
+    assert.equal(select(configured), "supabase");
+    assert.equal(select({ ...configured, ...staleFlags }), "supabase");
+  }
+  const phase = {
+    ...configured, ...staleFlags,
     AIRTABLE_PRODUCTION_REQUEST_TABLE_ID: "tblRequests",
     AIRTABLE_MEDIA_TABLE_ID: "tblMedia",
     AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
   };
-  assert.equal(studioPhase6WriteSource(configured), "airtable");
-  assert.equal(studioPhase6WritesMode(configured), "airtable_sor_write_through");
-  assert.equal(studioPhase6LegacyExportEnabled({
-    ...configured,
-    STUDIO_WRITE_SOURCE: "supabase",
-  }, "Production Requests"), false);
-  assert.equal(studioPhase6LegacyExportEnabled({
-    ...configured,
-    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
-  }, "Production Requests"), true);
-  assert.equal(studioPhase6LegacyExportEnabled({
-    ...configured,
-    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
-  }, "tblOutputs"), false);
-  assert.equal(studioPhase6WritesMode({
-    ...configured,
-    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
-  }), "supabase_sor_airtable_archived");
-  assert.match(readStudioWorkerSource(), /Airtable phase6 legacy export failed; keeping Supabase commit/);
-  assert.match(readStudioWorkerSource(), /supabase phase6 update commit failed; Airtable remains required/);
-});
-
-test("studioAuthReadSource stays airtable until its own flag is set", () => {
-  const configured = {
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "service-role",
-  };
-  assert.equal(studioAuthReadSource({}), "airtable");
-  assert.equal(studioAuthReadSource({ STUDIO_AUTH_READ_SOURCE: "supabase" }), "airtable");
-  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "supabase" }), "supabase");
-  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: " Supabase " }), "supabase");
-  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "airtable" }), "airtable");
-  assert.equal(
-    studioAuthReadSource({
-      ...configured,
-      STUDIO_READ_SOURCE: "supabase",
-      STUDIO_PIPELINE_READ_SOURCE: "supabase",
-      STUDIO_CONTENT_READ_SOURCE: "supabase",
-      STUDIO_HOME_READ_SOURCE: "supabase",
-      STUDIO_MUSIC_READ_SOURCE: "supabase",
-      STUDIO_WRITE_SOURCE: "supabase",
-    }),
-    "airtable",
-  );
-  assert.equal(studioMusicReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioPhase6WritesMode(phase), "supabase_sor_airtable_archived");
+  assert.equal(studioPhase6LegacyExportEnabled(phase, "Production Requests"), true);
+  assert.equal(studioPhase6LegacyExportEnabled(phase, "tblOutputs"), false);
+  assert.ok(STUDIO_SUPABASE_MUSIC_READ_ROUTES.includes("/api/music"));
+  assert.ok(STUDIO_SUPABASE_ASSETS_READ_ROUTES.includes("/api/library"));
+  assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/music"));
+  assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/library"));
+  for (const field of [
+    "Rights_Status", "Studio_Transfer_ID", "Content_Profile",
+    "Classification_Status", "Manual_Classification_JSON", "Search_Keywords",
+  ]) assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes(field), field);
 });
 
 test("supabase circuit opens on repeated pool or statement timeouts", () => {
