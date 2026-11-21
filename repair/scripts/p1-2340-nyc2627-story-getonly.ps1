@@ -104,15 +104,7 @@ try {
        [string]$remote.permalink -ne [string]$candidate.permalink -or
        [DateTimeOffset]::Parse([string]$remote.timestamp) -ne $utc){throw 'provider_exact_media_metadata_mismatch'}
     $cdn=[uri]([string]$remote.media_url)
-    if($cdn.Scheme -ne 'https' -or $cdn.Host -notmatch '(^|\.)(fbcdn\.net|cdninstagram\.com)
-  if(-not $report.content_verified){$report.reason=if(-not $report.scan_complete){'pagination_incomplete_no_conclusion'}elseif($report.candidate_count -eq 1){'one_timestamp_candidate_but_media_identity_unproven_no_source_change'}elseif($report.candidate_count -eq 0){'no_timed_story_candidate_not_proof_of_nonpublication'}else{'multiple_candidates_no_identity_conclusion'}}
-}catch {
-  $msg=[string]$_.Exception.Message
-  $approved=@('authority_not_supabase','runner_env_missing','config_missing','project_identity_mismatch','source_row_missing','source_original_state_not_exact','saved_original_and_replacement_not_exact','ambiguous_publish_fence_not_verified','profile_not_nyc','duplicate_active_owner_setting','owner_credentials_unavailable','owner_id_not_verified','old_container_owner_check_failed','old_container_not_expired','new_container_owner_check_failed','untrusted_meta_pagination','recent_story_media_id_unverified','recent_story_permalink_unverified','candidate_id_or_permalink_drift','candidate_timestamp_not_tied_to_fence','original_approved_video_asset_changed','provider_exact_media_metadata_mismatch','provider_video_url_host_untrusted','ffmpeg_not_available_to_compare_media','video_download_size_out_of_bounds','original_frame_decode_failed','provider_frame_decode_failed','decoded_frame_size_not_exact','provider_and_approved_frames_not_similar_enough')
-  $report.reason=if($approved -contains $msg){$msg}else{'provider_get_unavailable_no_writes'}
-}
-Write-Output ('P1_2340_2627_OWNED_STORY_GETONLY='+($report|ConvertTo-Json -Compress -Depth 8))
-){throw 'provider_video_url_host_untrusted'}
+    if($cdn.Scheme -ne 'https' -or $cdn.Host -notmatch '(^|\.)(fbcdn\.net|cdninstagram\.com)$'){throw 'provider_video_url_host_untrusted'}
     $ff=Get-Command ffmpeg -ErrorAction SilentlyContinue
     if($null -eq $ff -or -not $ff.Source){throw 'ffmpeg_not_available_to_compare_media'}
     $tmp=Join-Path ([System.IO.Path]::GetTempPath()) ('p1-2340-2627-'+[guid]::NewGuid().ToString('N'))
@@ -148,10 +140,10 @@ Write-Output ('P1_2340_2627_OWNED_STORY_GETONLY='+($report|ConvertTo-Json -Compr
   }
   $report.stage='completed'
   $report.state='read_only_evidence'
-  $report.reason=if(-not $report.scan_complete){'pagination_incomplete_no_conclusion'}elseif($report.candidate_count -eq 1){'one_timestamp_candidate_but_media_identity_unproven_no_source_change'}elseif($report.candidate_count -eq 0){'no_timed_story_candidate_not_proof_of_nonpublication'}else{'multiple_candidates_no_identity_conclusion'}
+  if(-not $report.content_verified){$report.reason=if(-not $report.scan_complete){'pagination_incomplete_no_conclusion'}elseif($report.candidate_count -eq 1){'one_timestamp_candidate_but_media_identity_unproven_no_source_change'}elseif($report.candidate_count -eq 0){'no_timed_story_candidate_not_proof_of_nonpublication'}else{'multiple_candidates_no_identity_conclusion'}}
 }catch {
   $msg=[string]$_.Exception.Message
-  $approved=@('authority_not_supabase','runner_env_missing','config_missing','project_identity_mismatch','source_row_missing','source_original_state_not_exact','saved_original_and_replacement_not_exact','ambiguous_publish_fence_not_verified','profile_not_nyc','duplicate_active_owner_setting','owner_credentials_unavailable','owner_id_not_verified','old_container_owner_check_failed','old_container_not_expired','new_container_owner_check_failed','untrusted_meta_pagination','recent_story_media_id_unverified','recent_story_permalink_unverified')
+  $approved=@('authority_not_supabase','runner_env_missing','config_missing','project_identity_mismatch','source_row_missing','source_original_state_not_exact','saved_original_and_replacement_not_exact','ambiguous_publish_fence_not_verified','profile_not_nyc','duplicate_active_owner_setting','owner_credentials_unavailable','owner_id_not_verified','old_container_owner_check_failed','old_container_not_expired','new_container_owner_check_failed','untrusted_meta_pagination','recent_story_media_id_unverified','recent_story_permalink_unverified','candidate_id_or_permalink_drift','candidate_timestamp_not_tied_to_fence','original_approved_video_asset_changed','provider_exact_media_metadata_mismatch','provider_video_url_host_untrusted','ffmpeg_not_available_to_compare_media','video_download_size_out_of_bounds','original_frame_decode_failed','provider_frame_decode_failed','decoded_frame_size_not_exact','provider_and_approved_frames_not_similar_enough')
   $report.reason=if($approved -contains $msg){$msg}else{'provider_get_unavailable_no_writes'}
 }
 Write-Output ('P1_2340_2627_OWNED_STORY_GETONLY='+($report|ConvertTo-Json -Compress -Depth 8))
