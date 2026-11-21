@@ -911,4 +911,4 @@ Deploy #2531 Pipeline all-week history pagination and production-approved sortin
 Deploy #2536 Pipeline Content ID UI 0.6.1031-pipeline-content-pages from PR #2537: native 10/20/25/50 content groups, creation-date bounds and Prev/Next; preserve all publishing guards, verify UI release after deployment.
 2026-11-21: Retry #2536 Pages release 0.6.1031-pipeline-content-pages after fixing obsolete Ideas browser selectors and verifying Content ID pagination controls, with full protected production deployment and live custom-domain identity gates.
 
-# 2026-11-21 PR #2533 issue #2532: release owner-scoped Supabase global generation prompt, editable per-profile every-generation guidance, I1/ITS1/SAI1/P1/thumbnail inheritance, and UI 0.6.1035. Preserve publication holds; no publishing on deployment.
+Deploy #2546 Studio Ideas UI 0.6.1030: single AI Idea Generation card with Quantity, Quality, Generate Ideas, and countdown to next hourly Chicago-time idea pull above Current Ideas. Verify production custom domain and cache keys. 2026-11-21.
