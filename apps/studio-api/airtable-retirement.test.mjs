@@ -111,6 +111,18 @@ test("Issue 2374 independent production deploy requires Supabase identity and a 
   assert.ok(!flow.includes("STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
 });
 
+test("retirement merge does not silently deploy runner before coordinated Worker cutover", () => {
+  const flow = source(".github/workflows/deploy-pipeline-runner-via-ops.yml");
+  const triggers = flow.slice(flow.indexOf("on:"), flow.indexOf("permissions:"));
+  assert.ok(triggers.includes("'deploy/i1-durable-runner-release.txt'"));
+  assert.ok(!triggers.includes("'services/pipeline-runner/config.py'"));
+  assert.ok(!triggers.includes("'.github/workflows/deploy-pipeline-runner-via-ops.yml'"));
+  assert.ok(triggers.includes("workflow_dispatch:"));
+  assert.ok(flow.includes('test "$CUTOVER_CONFIRMATION" = "DEPLOY-SUPABASE-RUNNER"'));
+  assert.ok(flow.includes("if: github.event_name == 'workflow_dispatch'"));
+});
+
+
 test("tracked Airtable credential envelope cannot be restored accidentally", () => {
   for (const path of [
     ".github/workflows/airtable-secret-envelope-bootstrap.yml",
