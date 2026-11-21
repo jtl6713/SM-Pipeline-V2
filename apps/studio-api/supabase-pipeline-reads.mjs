@@ -4008,7 +4008,9 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     // project's PostgREST, and a rejected filter fell through to an Airtable scan
     // that cannot finish inside the refresh budget. Blank statuses still count.
     const openOutputFilter = [
-      "do_not_publish=eq.false",
+      // A safety hold prevents dispatch; it must NOT erase an unresolved
+      // Failed output from Home. Include only terminal failures among held rows.
+      "or=(do_not_publish.eq.false,publish_status.eq.Failed,output_status.eq.Failed,render_status.eq.Failed)",
       "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))",
       "or=(publish_status.is.null,publish_status.neq.Published)",
     ].join("&");
