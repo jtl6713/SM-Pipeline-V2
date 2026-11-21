@@ -28,7 +28,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $s=Get-Content -Raw $f
-          foreach($required in @('fresh_story_canary_not_proven_stop_all','vkwvscgisqsbuwagdvtb','prior_original_container_not_expired','quality_agent_recovery_events','approved_original_row_not_exact','safety_hold_origin_not_verified','prior_original_container_not_expired','unique_create_fence_not_durable','new_container_not_saved_no_publish','unique_publish_fence_not_durable','published_verified','P1_2340_TEN_FRESH_STORIES=')){
+          foreach($required in @('fresh_story_canary_not_proven_stop_all','vkwvscgisqsbuwagdvtb','prior_original_container_not_expired','quality_agent_recovery_events','approved_original_row_not_exact','safety_hold_origin_not_verified','prior_original_container_not_expired','unique_create_fence_not_durable','existing_create_fence_unverified','saved_original_container_not_exact','existing_new_container_status_get_unavailable','new_container_not_saved_no_publish','unique_publish_fence_not_durable','published_verified','P1_2340_TEN_FRESH_STORIES=')){
             if(-not $s.Contains($required)){throw ('missing_required_fence_or_guard: '+$required)}
           }
           if(-not $s.Contains('fence.previous_do_not_publish -ne $false') -or
@@ -112,9 +112,9 @@ jobs:
             status=$(jq -r '.job.status // empty' /tmp/p1-story-batch-job.json)
             if [[ "$status" == ok ]];then
               jq -r '.job.log // ""' /tmp/p1-story-batch-job.json | grep '^P1_2340_TEN_FRESH_STORIES=' | tail -1 | sed 's/^P1_2340_TEN_FRESH_STORIES=//' > /tmp/p1-story-batch-evidence.json
-              jq -e '.canary_3522_proven==true and .targets==10 and .provider_create_calls<=10 and .provider_publish_calls<=10 and .airtable_ops==0 and (.outcomes|length)<=10' /tmp/p1-story-batch-evidence.json >/dev/null
-              jq -c '{targets,canary_3522_proven,verified_published,provider_create_calls,provider_publish_calls,skipped_copyright_sensitive,outcomes}' /tmp/p1-story-batch-evidence.json
-              if jq -e '.verified_published==10 and .provider_create_calls==10 and .provider_publish_calls==10' /tmp/p1-story-batch-evidence.json >/dev/null;then
+              jq -e '.canary_3522_proven==true and .targets==10 and .provider_create_calls<=9 and .reused_saved_containers<=1 and .provider_publish_calls<=10 and .airtable_ops==0 and (.outcomes|length)<=10' /tmp/p1-story-batch-evidence.json >/dev/null
+              jq -c '{targets,canary_3522_proven,verified_published,provider_create_calls,reused_saved_containers,provider_publish_calls,skipped_copyright_sensitive,outcomes}' /tmp/p1-story-batch-evidence.json
+              if jq -e '.verified_published==10 and .provider_create_calls==9 and .reused_saved_containers==1 and .provider_publish_calls==10' /tmp/p1-story-batch-evidence.json >/dev/null;then
                 echo 'P1_2340_TEN_GENUINELY_PUBLISHED=PASS';exit 0
               fi
               echo 'Partial verified Story results; no replay allowed';exit 3
