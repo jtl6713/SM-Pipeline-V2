@@ -73,7 +73,17 @@ jobs:
                 started_at,finished_at
               }' "/tmp/nyc-receipts/$request.json"
             else
-              printf '{"request":"%s","receipt":"not_readable_or_not_found"}\n' "$request"
+              reason="unknown_read_failure"
+              if grep -Eqi 'not found|404|does not exist|no such key' /tmp/nyc-object-get.log; then
+                reason="object_not_found"
+              elif grep -Eqi '403|401|forbidden|permission|not authorized|authentication error|scope' /tmp/nyc-object-get.log; then
+                reason="token_lacks_r2_object_read"
+              elif grep -Eqi 'unknown argument|unknown command|error parsing arguments' /tmp/nyc-object-get.log; then
+                reason="wrangler_cli_syntax"
+              elif grep -Eqi 'internal error|network|connection|timeout' /tmp/nyc-object-get.log; then
+                reason="network_or_internal_error"
+              fi
+              printf '{"request":"%s","receipt":"unreadable","reason":"%s"}\n' "$request" "$reason"
             fi
           done </tmp/nyc-allowlist | tee /tmp/nyc-handoff-receipts-sanitized.jsonl
           test "$(wc -l </tmp/nyc-handoff-receipts-sanitized.jsonl)" -eq 19
