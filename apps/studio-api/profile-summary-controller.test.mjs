@@ -71,8 +71,8 @@ test("confirmed Supabase mutation notifies summary; uncommitted CRUD fails befor
   const uncommitted = gateway.indexOf("supabase_only_crud_uncommitted");
   const notify = gateway.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
   assert.ok(uncommitted >= 0 && notify > uncommitted);
-  assert.match(gateway, /throw new HttpError\\(/);
-  assert.doesNotMatch(gateway, /await fetch\\(endpoint/);
+  assert.match(gateway, /throw new HttpError\(/);
+  assert.doesNotMatch(gateway, /await fetch\(endpoint/);
 });
 
 test("reconciliation fences updates and never publishes staged partial totals", () => {
