@@ -11,43 +11,26 @@ class AirtableClient:
 
     def __init__(self, settings: dict | None = None) -> None:
         settings = settings or load_settings()
-        pat = settings.get("airtable_pat", "")
-        if not pat:
-            raise RuntimeError("AIRTABLE_PAT is required for Airtable operations")
+        from supabase_pipeline import supabase_configured
+
+        if not supabase_configured(settings):
+            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for pipeline CRUD")
         self._settings = settings
-        self._base_id = settings["airtable_base_id"]
-        self._headers = {
-            "Authorization": f"Bearer {pat}",
-            "Content-Type": "application/json",
-        }
-        self._api_root = "https://api.airtable.com/v0"
 
     def _archive_closed(self) -> bool:
-        """Quiet-window closeout: never hit Airtable when write SoR is supabase."""
-        from supabase_pipeline import studio_write_source, supabase_configured
-
-        return (
-            studio_write_source(self._settings) == "supabase"
-            and supabase_configured(self._settings)
-        )
+        """Airtable is permanently read-only/offline to this runner."""
+        return True
 
     def _request(self, method: str, url: str, *, table_id: str, **kwargs):
-        """Use the verb-specific requests API; runner-wide Session.send records egress."""
-        import requests
-
-        if self._archive_closed():
-            # Belt-and-suspenders: no Airtable HTTP under write SoR, even if a
-            # caller forgot the soft miss path. Egress monitor must stay at zero.
-            raise RuntimeError(
-                f"Airtable archive closed under STUDIO_WRITE_SOURCE=supabase "
-                f"({str(method or '').upper()} {table_id})"
-            )
-        return getattr(requests, method.lower())(url, **kwargs)
+        """Hard-stop any legacy Airtable transport caller."""
+        raise RuntimeError(f"Airtable HTTP access retired: {method} {table_id}")
 
     def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
         from supabase_pipeline import mirror_airtable_records
 
-        mirror_airtable_records(self._settings, table_id, records, partial=partial)
+        result = mirror_airtable_records(self._settings, table_id, records, partial=partial)
+        if not isinstance(result, dict) or result.get("ok") is not True or result.get("count") != len(records):
+            raise RuntimeError(f"Supabase mutation not confirmed for {table_id}")
 
     def _legacy_export(self, table_id: str) -> bool:
         from supabase_pipeline import legacy_export_enabled
@@ -98,47 +81,19 @@ class AirtableClient:
             # Match Airtable's missing-record shape so stage callers keep their
             # existing 404 / HTTPError handling without archive egress.
             err = requests.HTTPError(
-                f"404 Client Error: Not Found for url: "
-                f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
+                f"404 Client Error: Not Found for Supabase record {table_id}/{record_id}"
             )
             err.response = type("R", (), {"status_code": 404, "reason": "Not Found", "ok": False})()
             raise err from None
         if supabase_row is not None:
             return supabase_row
 
-        if self._archive_closed():
-            logger.info(
-                "supabase SoR record miss; skipping Airtable archive GET %s %s",
-                table_id,
-                record_id,
-            )
-            err = requests.HTTPError(
-                f"404 Client Error: Not Found for url: "
-                f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-            )
-            err.response = type("R", (), {"status_code": 404, "reason": "Not Found", "ok": False})()
-            raise err
-
-        url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-        response = self._request("GET", url, table_id=table_id, headers=self._headers, timeout=60)
-        response.raise_for_status()
-        return response.json()
+        raise RuntimeError(
+            f"Supabase record lookup unsupported or unavailable for {table_id}/{record_id}; no Airtable fallback"
+        )
 
     def _patch_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
-        import requests
-
-        url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-        body = {"fields": fields}
-        if typecast:
-            body["typecast"] = True
-        response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
-        if not response.ok:
-            detail = (response.text or "").strip().replace("\n", " ")[:500]
-            message = f"{response.status_code} {response.reason} for url: {url}"
-            if detail:
-                message = f"{message} {detail}"
-            raise requests.HTTPError(message, response=response)
-        return response.json()
+        raise RuntimeError(f"Supabase update mapping required for {table_id}; no Airtable fallback")
 
     def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
         from settings_store import commit_setting
@@ -196,12 +151,9 @@ class AirtableClient:
                 )
                 return pending
         if self._archive_closed():
-            logger.info(
-                "supabase SoR mutation miss; skipping Airtable archive WRITE %s %s",
-                table_id,
-                record_id,
+            raise RuntimeError(
+                f"Supabase update uncommitted for {table_id}/{record_id}; no Airtable fallback"
             )
-            return {"id": record_id, "fields": fields}
         record = self._patch_record(table_id, record_id, fields, typecast=typecast)
         self._mirror(table_id, [record])
         return record
@@ -253,55 +205,39 @@ class AirtableClient:
         if supabase_rows is not None:
             return supabase_rows
 
-        if self._archive_closed():
-            logger.info(
-                "supabase SoR list miss; skipping Airtable archive GET %s",
-                table_id,
-            )
-            return []
-
-        params: dict = {"maxRecords": max_records}
-        if formula:
-            params["filterByFormula"] = formula
-        if view:
-            params["view"] = view
-        if fields:
-            params["fields[]"] = fields
-        if sort_field:
-            params["sort[0][field]"] = sort_field
-            params["sort[0][direction]"] = sort_direction
-
-        url = f"{self._api_root}/{self._base_id}/{table_id}"
-        records: list[dict] = []
-        offset = None
-
-        while True:
-            if offset:
-                params["offset"] = offset
-            response = self._request("GET", url, table_id=table_id, headers=self._headers, params=params, timeout=60)
-            response.raise_for_status()
-            payload = response.json()
-            records.extend(payload.get("records", []))
-            offset = payload.get("offset")
-            if not offset or len(records) >= max_records:
-                break
-
-        return records[:max_records]
+        raise RuntimeError(
+            f"Supabase list query unsupported or unavailable for {table_id}; no Airtable fallback"
+        )
 
     def delete_record(self, table_id: str, record_id: str) -> dict[str, Any]:
-        import requests
+        """DELETE must be confirmed by exactly one row returned from Supabase."""
+        from urllib.parse import quote
+        from settings_store import settings_source
+        from supabase_pipeline import _rest
+        from supabase_reads import _supabase_table
 
-        if self._archive_closed():
-            logger.info(
-                "supabase SoR mutation miss; skipping Airtable archive DELETE %s %s",
-                table_id,
-                record_id,
-            )
-            return {"id": record_id, "deleted": True}
-        url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-        response = self._request("DELETE", url, table_id=table_id, headers=self._headers, timeout=60)
-        response.raise_for_status()
-        return response.json()
+        table = _supabase_table(table_id)
+        source = settings_source(table_id)
+        if source:
+            table = "engagement_settings"
+        if not table:
+            raise RuntimeError(f"No Supabase delete mapping for {table_id}")
+        filters = f"airtable_record_id=eq.{quote(record_id, safe='')}"
+        if source:
+            filters += f"&payload->>source=eq.{source}"
+        rows = _rest(
+            self._settings,
+            f"{table}?{filters}&select=airtable_record_id",
+            "DELETE",
+            prefer="return=representation",
+        )
+        if (
+            not isinstance(rows, list)
+            or len(rows) != 1
+            or str(rows[0].get("airtable_record_id") or "") != record_id
+        ):
+            raise RuntimeError(f"Supabase delete not confirmed for {table_id}/{record_id}")
+        return {"id": record_id, "deleted": True}
 
     def create_records(self, table_id: str, records: list[dict[str, Any]], *, typecast: bool = True) -> list[dict[str, Any]]:
         import requests
@@ -351,57 +287,7 @@ class AirtableClient:
                 created.extend(minted)
                 continue
             if self._archive_closed():
-                logger.info(
-                    "supabase SoR create miss; skipping Airtable archive POST %s",
-                    table_id,
-                )
-                if minted:
-                    created.extend(minted)
-                else:
-                    created.extend({"id": f"recArchiveClosed{i:07d}", "fields": dict(item)}
-                                   for i, item in enumerate(chunk))
-                continue
-            body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
-            if typecast:
-                body["typecast"] = True
-            response = self._request("POST", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
-            if not response.ok and committed:
-                logger.warning(
-                    "Airtable legacy export create failed for %s: %s %s",
-                    table_id,
-                    response.status_code,
-                    (response.text or "")[:300],
-                )
-                created.extend(minted)
-                continue
-            response.raise_for_status()
-            batch = response.json().get("records", [])
-            if committed:
-                try:
-                    if legacy:
-                        commit_minted_creates(self._settings, table_id, batch)
-                        release_minted_record_ids(
-                            self._settings, table_id, [row["id"] for row in minted],
-                        )
-                    else:
-                        adopted = commit_phase6_creates(self._settings, table_id, batch)
-                        if adopted:
-                            release_phase6_minted_ids(
-                                self._settings, table_id, [row["id"] for row in minted],
-                            )
-                        else:
-                            logger.warning(
-                                "supabase phase6 create id adoption skipped for %s",
-                                table_id,
-                            )
-                except Exception as error:
-                    logger.warning(
-                        "supabase create id adoption failed for %s: %s",
-                        table_id,
-                        error,
-                    )
-            created.extend(batch)
-            self._mirror(table_id, batch)
+                raise RuntimeError(f"Supabase create uncommitted for {table_id}; no Airtable fallback")
         return created
 
     def update_records(
@@ -483,40 +369,7 @@ class AirtableClient:
                     )
                     continue
             if self._archive_closed():
-                logger.info(
-                    "supabase SoR batch mutation miss; skipping Airtable archive WRITE %s",
-                    table_id,
-                )
-                updated.extend(
-                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
-                    for item in chunk
-                )
-                continue
-            if typecast:
-                body["typecast"] = True
-            response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
-            if not response.ok and legacy:
-                logger.warning(
-                    "Airtable legacy export batch failed for %s: %s %s",
-                    table_id,
-                    response.status_code,
-                    (response.text or "")[:300],
-                )
-                updated.extend({"id": str(item["id"]), "fields": dict(item.get("fields") or {})} for item in chunk)
-                continue
-            if not response.ok and phase6_committed:
-                logger.warning(
-                    "Airtable phase6 legacy export batch failed for %s: %s %s",
-                    table_id,
-                    response.status_code,
-                    (response.text or "")[:300],
-                )
-                updated.extend({"id": str(item["id"]), "fields": dict(item.get("fields") or {})} for item in chunk)
-                continue
-            response.raise_for_status()
-            batch = response.json().get("records", [])
-            updated.extend(batch)
-            self._mirror(table_id, batch)
+                raise RuntimeError(f"Supabase batch update uncommitted for {table_id}; no Airtable fallback")
         return updated
 
     def upsert_record(
@@ -539,36 +392,7 @@ class AirtableClient:
         if not key:
             raise ValueError(f"{merge_field} must be set for atomic upsert")
         if self._archive_closed():
-            logger.info(
-                "supabase SoR upsert miss; skipping Airtable archive WRITE %s",
-                table_id,
+            raise RuntimeError(
+                f"Atomic Supabase upsert not implemented for {table_id}/{merge_field}; no Airtable fallback"
             )
-            return {"id": f"recArchiveClosedUpsert", "fields": fields}, True
-        url = f"{self._api_root}/{self._base_id}/{table_id}"
-        body = {
-            "records": [{"fields": fields}],
-            "performUpsert": {"fieldsToMergeOn": [merge_field]},
-            "typecast": typecast,
-        }
-        response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
-        if not response.ok:
-            detail = (response.text or "").strip().replace("\n", " ")[:500]
-            message = f"{response.status_code} {response.reason} for url: {url}"
-            if detail:
-                message = f"{message} {detail}"
-            raise requests.HTTPError(message, response=response)
-        payload = response.json()
-        records = payload.get("records") or []
-        if len(records) != 1 or not records[0].get("id"):
-            raise RuntimeError("Airtable upsert returned no unambiguous record; do not retry as create")
-        record = records[0]
-        record_id = record["id"]
-        created_ids = payload.get("createdRecords") or []
-        updated_ids = payload.get("updatedRecords") or []
-        if record_id in created_ids and record_id not in updated_ids:
-            self._mirror(table_id, [record])
-            return record, True
-        if record_id in updated_ids and record_id not in created_ids:
-            self._mirror(table_id, [record])
-            return record, False
-        raise RuntimeError("Airtable did not confirm whether upsert created or updated; do not retry as create")
+        raise RuntimeError("Supabase atomic upsert required; no Airtable fallback")
