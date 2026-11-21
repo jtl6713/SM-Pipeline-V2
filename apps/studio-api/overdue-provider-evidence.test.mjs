@@ -57,5 +57,39 @@ test("canonical census separates creation objects from provider-publication proo
  assert.equal(actual.overdue_provider_evidence_lanes.prior_dispatch_without_saved_remote_identity,1);
  assert.equal(actual.overdue_provider_evidence_lanes.no_saved_dispatch_provider_preflight_required,1);
  assert.equal(actual.overdue_provider_evidence_lanes.published_label_without_saved_public_receipt,1);
+ assert.equal(actual.overdue_provider_evidence_count,7);
+ assert.equal(actual.overdue_provider_evidence_cases.length,7);
+ assert.equal(actual.overdue_provider_evidence_cases_truncated,false);
+ assert.ok(actual.overdue_provider_evidence_cases.every(x=>!x.actions_enabled && !x.provider_reconciliation.authorized_to_reupload));
  assert.ok(actual.exception_items.every(x=>!x.provider_reconciliation || !x.provider_reconciliation.authorized_to_reupload));
+});
+
+test("contradictory Published label remains in provider drilldown even when Home omits it",()=>{
+ const rows=[
+  row("1",{Platform:"TikTok",Output_ID:5094,Publish_Status:"Published"}),
+  row("2",{Platform:"Instagram",Output_ID:3149,Publish_Status:"Ready to Schedule",IG_Story_Container_ID:"18111111111111111",Do_Not_Publish:true,Publish_Retry_Eligible:false})
+ ];
+ const actual=reconcileExceptionCensus(rows,mapped,{atMs:Date.parse("2026-11-20T20:00:00Z"),source:"supabase"});
+ assert.equal(actual.totals.approved_past_due,0);
+ assert.equal(actual.overdue_provider_evidence_count,2);
+ const published=actual.overdue_provider_evidence_cases.find(x=>x.output_id==="5094");
+ assert.equal(published.provider_reconciliation.lane,"published_label_without_saved_public_receipt");
+ assert.equal(published.provider_reconciliation.published_post_verified,false);
+ assert.equal(published.actions_enabled,false);
+ const story=actual.overdue_provider_evidence_cases.find(x=>x.output_id==="3149");
+ assert.equal(story.held,true);
+ assert.equal(story.publish_retry_eligible,false);
+ assert.equal(story.provider_reconciliation.authorized_to_reupload,false);
+});
+
+test("provider-only audit reports full count and explicit truncation, never hidden success",()=>{
+ const rows=Array.from({length:1501},(_,i)=>row(i.toString(36),{
+  Platform:"TikTok",Output_ID:i+1,Publish_Status:"Published"
+ }));
+ const actual=reconcileExceptionCensus(rows,mapped,{atMs:Date.parse("2026-11-20T20:00:00Z")});
+ assert.equal(actual.overdue_provider_evidence_count,1501);
+ assert.equal(actual.overdue_provider_evidence_cases.length,1500);
+ assert.equal(actual.overdue_provider_evidence_cases_truncated,true);
+ assert.equal(actual.overdue_provider_evidence_lanes.published_label_without_saved_public_receipt,1501);
+ assert.ok(actual.overdue_provider_evidence_cases.every(x=>x.actions_enabled===false));
 });
