@@ -13,6 +13,14 @@
   let loadedProfile = "";
   let requestSerial = 0;
   let pending = false;
+  let canEdit = false;
+  let savedCreative = null;
+  const currentCreative = () => Object.fromEntries(fields.map((key) => [key, controls[key].value.trim()]));
+  function refreshSaveState() {
+    save.disabled = pending || !canEdit || !loadedProfile || loadedProfile !== profileSelect.value ||
+      !savedCreative || fields.every((key) => currentCreative()[key] === savedCreative[key]);
+  }
+  fields.forEach((key) => controls[key]?.addEventListener("input", refreshSaveState));
   const cardsHost = $("operationsProfiles");
 
   // The older Operations renderer still fetches all profiles to populate
@@ -45,6 +53,7 @@
   function disable(value) {
     for (const control of Object.values(controls)) control.disabled = value;
     save.disabled = value;
+    if (!value) refreshSaveState();
     reload.disabled = value;
   }
   async function call(path, options = {}) {
@@ -66,6 +75,8 @@
     const serial = ++requestSerial;
     loadedProfile = "";
     revision = "0";
+    canEdit = false;
+    savedCreative = null;
     disable(true);
     if (!/^rec[A-Za-z0-9]{14}$/.test(id)) {
       status("Select a Content Profile in the header to edit its creative instructions.");
@@ -115,7 +126,10 @@
           ["User Prompt Template", ref.user_prompt_template],
         ]));
       }
-      disable(!data.can_edit);
+      canEdit = Boolean(data.can_edit);
+      savedCreative = currentCreative();
+      disable(!canEdit);
+      refreshSaveState();
       status("Loaded existing Airtable prompts and profile overrides. Save creates a selected-profile version; shared Brand, Persona and P1/P2 templates remain unchanged.");
     } catch (error) {
       if (serial !== requestSerial) return;
@@ -137,6 +151,7 @@
       });
       if (serial !== requestSerial || profileSelect.value !== id) return;
       revision = String(data.revision || revision);
+      savedCreative = Object.fromEntries(fields.map((key) => [key, String(data.creative?.[key] || "").trim()]));
       fields.forEach((key) => {
         controls[key].value = data.creative?.[key] || "";
         const source = $("operationsCreativeSource_" + key);
@@ -147,7 +162,10 @@
       if (serial === requestSerial) status(error.message || String(error), true);
     } finally {
       pending = false;
-      if (serial === requestSerial && profileSelect.value === id) disable(false);
+      if (serial === requestSerial && profileSelect.value === id) {
+        disable(!canEdit);
+        refreshSaveState();
+      }
     }
   });
   reload.addEventListener("click", load);
