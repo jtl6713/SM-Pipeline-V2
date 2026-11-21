@@ -3155,7 +3155,7 @@
   $("ideaGenerateForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (ideaGenerationInFlight) return;
-    const count = Number($("ideaGenerateCount")?.value || 5);
+    const count = Number($("ideaGenerateCount")?.value ?? "");
     const quality = String($("ideaGenerateQuality")?.value || "Highest Quality");
     const button = $("ideaGenerateSubmit");
     if (!Number.isInteger(count) || count < 1 || count > 10) {
