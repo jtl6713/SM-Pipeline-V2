@@ -6,11 +6,36 @@
  */
 export const PROTECTED_MEDIA_REWORK_MARKER = "Studio_Overdue_Preflight_Repair_20261120";
 export const NEW_MEDIA_REWORK_MARKER = "Studio_Overdue_UnsafeGallery_Hold_20261121";
-function sourceHold(row) {
-  return isObject(row?.[PROTECTED_MEDIA_REWORK_MARKER])
-    ? row[PROTECTED_MEDIA_REWORK_MARKER]
-    : isObject(row?.[NEW_MEDIA_REWORK_MARKER])
-      ? row[NEW_MEDIA_REWORK_MARKER] : null;
+// Exactly the ten independently checked zero-slide output identities. The
+// original 82 marker remains separately authoritative and unchanged.
+export const NEW_MEDIA_REWORK_IDENTITIES = Object.freeze({
+  recgS5wXiWnlhgVm0: 10546,
+  rec37Q0BeKga1ydGC: 10564,
+  rec1fQzlWCRm53MQ4: 10598,
+  reczJBifoU2F95yEM: 10759,
+  recNu1iOFpzuzIHEu: 10766,
+  recbqPtRfK3EZagWm: 10792,
+  recYnHtxkSljy762z: 10793,
+  recEbgk1H0rNqEr8h: 10800,
+  recr4kD97CT3X2JLX: 10802,
+  recWgwW0HYmgq4EZG: 10818,
+});
+function sourceHold(row, sourceId, outputNumber) {
+  if (isObject(row?.[PROTECTED_MEDIA_REWORK_MARKER])) {
+    return row[PROTECTED_MEDIA_REWORK_MARKER];
+  }
+  const evidence = row?.[NEW_MEDIA_REWORK_MARKER];
+  if (!isObject(evidence)
+      || !Number.isInteger(Number(outputNumber))
+      || NEW_MEDIA_REWORK_IDENTITIES[sourceId] !== Number(outputNumber)
+      || evidence.output_number !== Number(outputNumber)
+      || evidence.source_slide_count !== 0
+      || evidence.no_provider_retry_authorized !== true
+      || evidence.reconstruction_and_fresh_approval_required !== true
+      || evidence.original_approval_and_errors_preserved !== true
+      || evidence.historical_schedule_preserved !== true
+      || evidence.provider_calls_performed !== 0) return null;
+  return evidence;
 }
 
 const recordId = (value) => /^rec[A-Za-z0-9]{14}$/.test(String(value || ""));
@@ -20,7 +45,7 @@ const isBlank = (value) => value == null || String(value).trim() === "";
 /** Validate canonical typed Supabase source before importing a held row. */
 export function protectedMediaReworkSourceRow(row) {
   if (!row || !recordId(row.airtable_record_id)) return false;
-  if (!sourceHold(row.error_messages)) return false;
+  if (!sourceHold(row.error_messages, row.airtable_record_id, row.output_number)) return false;
   return row.review_status === "Changes Requested"
     && row.output_status === "Changes Requested"
     && row.publish_status === "Not Ready"
@@ -39,7 +64,7 @@ export function protectedMediaReworkSourceRow(row) {
 export function protectedMediaReworkShapedRecord(record) {
   const fields = record?.fields;
   if (!recordId(record?.id) || !isObject(fields)) return false;
-  if (!sourceHold(fields)) return false;
+  if (!sourceHold(fields, record.id, fields.Output_ID)) return false;
   return fields.Review_Status === "Changes Requested"
     && fields.Output_Status === "Changes Requested"
     && fields.Publish_Status === "Not Ready"
@@ -93,7 +118,7 @@ export function protectedMediaReworkOriginalPreviewGallery(record) {
 export function protectedMediaReworkSummary(record) {
   if (!protectedMediaReworkShapedRecord(record)) return null;
   const fields = record.fields;
-  const evidence = sourceHold(fields);
+  const evidence = sourceHold(fields, record.id, fields.Output_ID);
   const previewSequence = isObject(
     fields.Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121
   );
