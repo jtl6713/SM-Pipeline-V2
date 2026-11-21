@@ -163,7 +163,7 @@ class AirtableClient:
                 # missing row, or partial write cannot return a fake success.
                 # A retry must reconcile any uncertain prior commit first.
                 raise RuntimeError(
-                    f"Supabase authoritative update not confirmed for {table_id} {record_id}"
+                    "Supabase authoritative update not confirmed"
                 )
             logger.info(
                 "Supabase authoritative update committed without Airtable export %s %s",
@@ -176,7 +176,7 @@ class AirtableClient:
             committed = self._commit_phase6(table_id, [pending])
             if not committed:
                 raise RuntimeError(
-                    f"Supabase Phase6 authoritative update not confirmed for {table_id} {record_id}"
+                    "Supabase Phase6 authoritative update not confirmed"
                 )
             else:
                 logger.info(
@@ -190,7 +190,7 @@ class AirtableClient:
             committed = self._commit_side_table(table_id, [pending])
             if not committed:
                 raise RuntimeError(
-                    f"Supabase side-table authoritative update not confirmed for {table_id} {record_id}"
+                    "Supabase side-table authoritative update not confirmed"
                 )
             else:
                 logger.info(
@@ -360,7 +360,7 @@ class AirtableClient:
                     # Never manufacture rec IDs or claim a successful create;
                     # the caller must reconcile exact canonical identities.
                     raise RuntimeError(
-                        f"Supabase authoritative create not confirmed for {table_id}"
+                        "Supabase authoritative create not confirmed"
                     )
                 logger.info(
                     "supabase SoR create miss; skipping Airtable archive POST %s",
