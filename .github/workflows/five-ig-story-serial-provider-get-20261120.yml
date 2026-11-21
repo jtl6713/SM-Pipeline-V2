@@ -34,12 +34,9 @@ jobs:
         run: |
           set -euo pipefail
           cat > /tmp/ig5-readonly.py <<'PY'
-          """Single-account, single-container Graph GET with strict Supabase preflight."""
-          import json
-          import os
-          from datetime import datetime, timezone
-          # Ops sets PORT="" for child shells; the installed runner expects int(PORT).
-          # This is the diagnostic Python subprocess only, never a service mutation.
+          """Exact one-container read-only GET; fail closed."""
+          import os,json,requests
+          from datetime import datetime,timezone
           os.environ["PORT"]="3350"
           from config import load_settings
           from airtable.client import AirtableClient
@@ -47,81 +44,50 @@ jobs:
           from item4.settings import PipelineSettings
           from ap1_ig.graph import load_instagram_graph_settings
           from publish.destinations import resolve_publish_theme
-          import requests
-          
-          record_id = "__RECORD__"
-          output_number = __NUMBER__
-          expected_theme = "__THEME__"
-          container_id = "__CONTAINER__"
-          
-          def output(**data):
-              print("IG5_RESULT="+json.dumps({"output_id":output_number,"container_id":container_id,"read_only":True,**data},sort_keys=True),flush=True)
-          
-          stage="settings_load"
+          n=__NUMBER__;rid="__RECORD__";cid="__CONTAINER__";theme="__THEME__"
+          def out(**data):
+           print("IG5_RESULT="+json.dumps(dict(output_id=n,container_id=cid,read_only=True,**data)),flush=True)
+          stage="settings"
           try:
-              settings=load_settings()
-              if settings.get("studio_write_source")!="supabase" or settings.get("studio_runner_output_read_source")!="supabase" or not settings.get("supabase_url"):
-                  output(status="blocked",reason="supabase_authority_unavailable")
-                  raise SystemExit(0)
-              stage="canonical_output_read"
-              client=AirtableClient(settings)
-              row=client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
-              f=row.get("fields",{})
-              if row.get("id")!=record_id or str(f.get("Output_ID"))!=str(output_number) or str(f.get("IG_Story_Container_ID") or "")!=container_id:
-                  output(status="blocked",reason="exact_output_identity_mismatch")
-                  raise SystemExit(0)
-              if (f.get("Do_Not_Publish") or f.get("Test_Run_ID") or f.get("Review_Status")!="Approved" or f.get("Output_Status")!="Approved for Publishing"
-                  or f.get("Platform")!="Instagram" or f.get("Platform_Output_Type")!="Instagram Story"
-                  or f.get("Publish_Status")!="Ready to Publish" or f.get("Render_Status")!="Rendered"
-                  or str(f.get("IG_Story_Status") or "")!="Failed"
-                  or f.get("Published_At") or f.get("Platform_Post_URL") or f.get("IG_Story_Post_ID") or f.get("Platform_Post_ID") or f.get("Platform_Media_ID")):
-                  output(status="blocked",reason="publication_state_changed_or_held")
-                  raise SystemExit(0)
-              if "(#4) Application request limit reached" not in str(f.get("IG_Story_Error_Message") or ""):
-                  output(status="blocked",reason="unexpected_old_failure")
-                  raise SystemExit(0)
-              retry=f.get("Publish_Next_Retry_At")
-              if retry:
-                  try:
-                      retry_at=datetime.fromisoformat(str(retry).replace("Z","+00:00"))
-                      if retry_at.tzinfo is None: retry_at=retry_at.replace(tzinfo=timezone.utc)
-                  except Exception:
-                      output(status="blocked",reason="invalid_retry_clock")
-                      raise SystemExit(0)
-                  if datetime.now(timezone.utc)<retry_at:
-                      output(status="blocked",reason="cooldown_active")
-                      raise SystemExit(0)
-              stage="account_theme_verification"
-              if resolve_publish_theme(output=row,client=client)!=expected_theme:
-                  output(status="blocked",reason="unexpected_profile_theme")
-                  raise SystemExit(0)
-              stage="profile_graph_credentials"
-              provider=load_instagram_graph_settings(PipelineSettings(client),row,client=client)
-              token=provider["token"]
-              version=provider["version"]
-              if not token or not provider["ig_user_id"] or not version.startswith("v"):
-                  output(status="blocked",reason="profile_graph_credentials_missing")
-                  raise SystemExit(0)
-              # Exactly one authenticated GET; no media_publish, create_story, PATCH, POST or Airtable egress.
-              url="https://graph.facebook.com/"+version+"/"+container_id
-              stage="meta_graph_get"
-              response=requests.get(url,params={"fields":"status_code,status"},headers={"Authorization":"Bearer "+token},timeout=25,allow_redirects=False)
-              try: body=response.json()
-              except ValueError: body={}
-              if not isinstance(body,dict): body={}
-              error=body.get("error") if isinstance(body.get("error"),dict) else {}
-              state=str(body.get("status_code") or "").upper().strip()
-              code=error.get("code")
-              code=code if isinstance(code,int) and not isinstance(code,bool) else None
-              if state not in {"FINISHED","IN_PROGRESS","PUBLISHED","ERROR","EXPIRED"}:
-                  state="UNKNOWN"
-              output(status="checked",provider_http=response.status_code,container_status=state,
-                  provider_error_code=code,provider_error_transient=error.get("is_transient") is True,
-                  account_scope_verified_by_config=True,provider_action="GET_only")
-          except SystemExit:
-              raise
-          except Exception as error:
-              output(status="blocked",reason="provider_read_or_supabase_preflight_failed",failure_stage=stage,failure_class=type(error).__name__)
+           s=load_settings()
+           if not (s.get("studio_write_source")=="supabase" and s.get("studio_runner_output_read_source")=="supabase" and s.get("studio_runner_content_read_source")=="supabase" and s.get("supabase_url") and s.get("supabase_service_role_key")):
+            out(status="blocked",reason="supabase_authority");raise SystemExit
+           stage="record"
+           c=AirtableClient(s);r=c.get_record(PLATFORM_OUTPUTS_TABLE,rid);f=r.get("fields") or {}
+           if r.get("id")!=rid or str(f.get("Output_ID"))!=str(n) or str(f.get("IG_Story_Container_ID") or "")!=cid:
+            out(status="blocked",reason="wrong_identity");raise SystemExit
+           if (f.get("Platform")!="Instagram" or f.get("Platform_Output_Type")!="Instagram Story" or f.get("Review_Status")!="Approved" or
+               f.get("Output_Status")!="Approved for Publishing" or f.get("Publish_Status")!="Ready to Publish" or
+               f.get("Render_Status")!="Rendered" or f.get("IG_Story_Status")!="Failed" or
+               f.get("Do_Not_Publish") or f.get("Test_Run_ID") or f.get("Published_At") or
+               f.get("Platform_Post_URL") or f.get("IG_Story_Post_ID") or f.get("Platform_Post_ID") or f.get("Platform_Media_ID")):
+            out(status="blocked",reason="state_not_safe_for_probe");raise SystemExit
+           if "(#4) Application request limit reached" not in str(f.get("IG_Story_Error_Message") or ""):
+            out(status="blocked",reason="old_error_not_transient_limit");raise SystemExit
+           retry=f.get("Publish_Next_Retry_At")
+           if retry:
+            when=datetime.fromisoformat(str(retry).replace("Z","+00:00"))
+            if when.tzinfo is None:when=when.replace(tzinfo=timezone.utc)
+            if when>datetime.now(timezone.utc):
+             out(status="blocked",reason="cooldown");raise SystemExit
+           stage="profile"
+           if resolve_publish_theme(output=r,client=c)!=theme:
+            out(status="blocked",reason="account_scope");raise SystemExit
+           p=load_instagram_graph_settings(PipelineSettings(c),r,client=c)
+           if not (p.get("token") and p.get("ig_user_id") and p.get("version","").startswith("v")):
+            out(status="blocked",reason="missing_provider_credentials");raise SystemExit
+           stage="graph_get"
+           resp=requests.get("https://graph.facebook.com/"+p["version"]+"/"+cid,params={"fields":"status_code,status"},headers={"Authorization":"Bearer "+p["token"]},timeout=24,allow_redirects=False)
+           try:b=resp.json()
+           except ValueError:b={}
+           if not isinstance(b,dict):b={}
+           err=b.get("error") if isinstance(b.get("error"),dict) else {}
+           state=str(b.get("status_code") or "").upper()
+           if state not in {"FINISHED","IN_PROGRESS","PUBLISHED","ERROR","EXPIRED"}:state="UNKNOWN"
+           ec=err.get("code")
+           out(status="checked",provider_http=resp.status_code,container_status=state,provider_error_code=ec if type(ec) is int else None,provider_error_transient=err.get("is_transient") is True,provider_action="GET_only")
+          except SystemExit:pass
+          except Exception as e:out(status="blocked",reason="diagnostic_exception",failure_stage=stage,failure_class=type(e).__name__)
           PY
           cat > /tmp/ig5-readonly.ps1 <<'PS'
           $ErrorActionPreference = "Stop"
