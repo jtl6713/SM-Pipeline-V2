@@ -28,7 +28,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           code=Path('repair/scripts/p1-2340-miami-ig-reel-public-readonly.ps1').read_text()
-          assert "P1_MIAMI_IG_REEL_PUBLIC_AUDIT=" in code and "NYC_META_GRAPH_API_ACCESS_TOKEN" in code
+          assert "P1_MIAMI_IG_REEL_PUBLIC_AUDIT=" in code and "MIAMI_META_GRAPH_API_ACCESS_TOKEN" in code
           assert "Invoke-RestMethod" in code and "-Method Get" in code
           assert "media_product_type" in code
           for forbidden in ["Invoke-RestMethod -Method Post", "Invoke-WebRequest -Method Post",
