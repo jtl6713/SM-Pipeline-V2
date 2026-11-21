@@ -57,7 +57,6 @@ POWERSHELL_GUARDS = {
         1,
     )
 }
-}
 
 
 def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
