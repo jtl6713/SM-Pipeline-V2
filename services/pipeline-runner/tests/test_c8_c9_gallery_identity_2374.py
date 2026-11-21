@@ -22,7 +22,7 @@ def slide(n, *, record_id=None, output_id=None):
     }
     if output_id:
         fields["Platform Output"] = [output_id]
-    return {"id": record_id or f"rec{n:014d}", "fields": fields}
+    return {"id": record_id or f"rec{int(n):014d}", "fields": fields}
 
 
 def test_gallery_gate_rejects_ambiguous_and_incomplete_sets():
