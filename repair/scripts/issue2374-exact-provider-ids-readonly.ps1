@@ -104,7 +104,8 @@ function Owner([string]$city,[string]$kind){
 }
 $findings=@()
 # IG: require BOTH fresh exact media ID GET and an owner-account /stories
-# listing match. Graph errors/expiry/incomplete pages NEVER prove non-publication.
+# listing match (which itself establishes native STORY format). Graph errors,
+# expiry and incomplete pages NEVER prove non-publication.
 foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
   $items=@($rows|Where-Object{$storyNums -contains [int]$_.output_number -and [string]$market[[string]$_.content_profile_id] -eq $city})
   if($items.Count -eq 0){continue}
@@ -114,7 +115,7 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
     continue
   }
   $all=@();$pages=0;$complete=$false;$edgeState='owner_stories_get_unavailable'
-  $next='https://graph.facebook.com/'+$owner.version+'/'+$owner.id+'/stories?fields=id,timestamp,media_type,media_product_type&limit=100'
+  $next='https://graph.facebook.com/'+$owner.version+'/'+$owner.id+'/stories?fields=id,timestamp,media_type&limit=100'
   while($next -and $pages -lt 4){
     $r=G $next $owner.token
     if(-not $r.ok -or $null -eq $r.data.data){break}
@@ -130,16 +131,14 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
     if(-not $complete){$result.state='owner_stories_scan_incomplete_no_negative_proof'}
     elseif($match.Count -ne 1){$result.state='no_exact_owner_story_match_no_negative_proof'}
     else{
-      $exact=G ('https://graph.facebook.com/'+$owner.version+'/'+$id+'?fields=id,timestamp,media_type,media_product_type') $owner.token
+      $exact=G ('https://graph.facebook.com/'+$owner.version+'/'+$id+'?fields=id,timestamp,media_type') $owner.token
       if(-not $exact.ok -or [string]$exact.data.id -ne $id){$result.state='exact_story_get_unavailable'}
       else{
         $saved=AsTime $o.published_at
         $provider=AsTime $exact.data.timestamp
         $edgeTime=AsTime $match[0].timestamp
-        $product=[string]$exact.data.media_product_type
         if(-not $provider -or -not $edgeTime -or -not $saved){$result.state='story_timestamp_unavailable'}
         elseif([Math]::Abs(($provider-$saved).TotalMinutes) -gt 20 -or [Math]::Abs(($edgeTime-$provider).TotalMinutes) -gt 1){$result.state='story_timestamp_mismatch'}
-        elseif($product -and $product -ne 'STORY'){$result.state='remote_media_product_not_story'}
         else{$result.state='exact_owner_story_verified_without_public_permalink';$result.provider_timestamp=$provider.ToString('o')}
       }
     }
