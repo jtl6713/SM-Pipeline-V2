@@ -29,7 +29,7 @@ $values[$name]=[string]$p.Setting_Value
 $token=[string]$values['META_LONG_LIVED_USER_ACCESS_TOKEN']
 $ver=[string]$values['FACEBOOK_GRAPH_API_VERSION']
 if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
-$report=@{read_only=$true;provider_operations='GET only';output_writes=0;provider_writes=0;source_rows=$items.Count;user_state='unverified';pages=@();accounts_http=0;accounts_code=0;accounts_complete=$false}
+$report=@{read_only=$true;provider_operations='GET only';output_writes=0;provider_writes=0;source_rows=$items.Count;user_state='unverified';pages=@();accounts_http=0;accounts_code=0;accounts_complete=$false;permissions_http=0;permissions_code=0;scopes=@{}}
 function G($path){
 try {
 $d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$token);Accept='application/json'} -TimeoutSec 35
@@ -45,6 +45,14 @@ if($token){
 $m=G '/me?fields=id'
 if($m.ok -eq $true){
 $report.user_state='valid_user_identity'
+$permissions=G '/me/permissions'
+$report.permissions_http=$permissions.status;$report.permissions_code=$permissions.code
+if($permissions.ok -eq $true -and $null -ne $permissions.body.data){
+foreach($required in @('pages_manage_posts','pages_show_list','pages_read_engagement')){
+$granted=@($permissions.body.data|Where-Object{$_.permission -eq $required -and $_.status -eq 'granted'})
+$report.scopes[$required]=($granted.Count -gt 0)
+}
+}
 $a=G '/me/accounts?fields=id,tasks&limit=100'
 $report.accounts_http=$a.status;$report.accounts_code=$a.code
 if($a.ok -eq $true -and $null -ne $a.body.data){
