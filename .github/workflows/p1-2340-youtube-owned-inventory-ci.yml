@@ -1,0 +1,28 @@
+name: P1 2340 YouTube owner-scoped upload inventory CI
+on:
+  pull_request:
+    paths:
+      - 'services/youtube-uploader/youtube-upload-service.js'
+      - 'services/youtube-uploader/owned-channel-inventory.test.cjs'
+      - '.github/workflows/p1-2340-youtube-owned-inventory-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/youtube-uploader/youtube-upload-service.js'
+      - 'services/youtube-uploader/owned-channel-inventory.test.cjs'
+      - '.github/workflows/p1-2340-youtube-owned-inventory-ci.yml'
+permissions:
+  contents: read
+jobs:
+  owned-inventory-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and exact-owner no-publish receipt tests
+        run: |
+          node --check services/youtube-uploader/youtube-upload-service.js
+          node --test services/youtube-uploader/owned-channel-inventory.test.cjs services/youtube-uploader/upload-dedup.test.cjs
