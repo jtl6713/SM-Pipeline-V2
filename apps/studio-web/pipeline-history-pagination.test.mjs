@@ -38,3 +38,15 @@ test("Supabase history is profile scoped, excludes test runs and uses stable ser
   assert.match(body, /next_offset:/);
   assert.doesNotMatch(body, /scheduled_post_date/);
 });
+
+test("Production approval comes from request Submitted_At, never Factory approval", () => {
+  const start = reads.indexOf("export async function listSupabasePipelineHistoryPage(");
+  const end = reads.indexOf("export async function listSupabasePipelineOutputs(", start);
+  const body = reads.slice(start, end);
+  assert.match(body, /production_requests\(publish_status\)/);
+  assert.match(body, /publish_status\?\.Submitted_At/);
+  assert.doesNotMatch(body, /Review_Decision_At/);
+  assert.match(api, /production_approved_at: f\(record, "Production_Approved_At"\)/);
+  assert.match(ui, /Production approved/);
+  assert.match(ui, /newestApproved/);
+});
