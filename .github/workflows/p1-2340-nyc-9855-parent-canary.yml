@@ -35,7 +35,7 @@ jobs:
           for forbidden in ["Invoke-RestMethod -Method Patch", "Invoke-WebRequest -Method Patch",
                             "Write-Output $token", "Write-Host $token"]:
               assert forbidden not in code, "Mutating or sensitive output operation prohibited"
-          print("meta_2340_static_scope=GET_ONLY")
+          print("p1_2340_exact_original_child_status_get_and_one_parent_create_only")
           PY
       - name: Authenticate approved Ops service without echoing credentials
         shell: bash
@@ -67,7 +67,7 @@ jobs:
             -H "Authorization: Bearer $P1_2340_OPS_TOKEN" -H 'Content-Type: application/json' \
             --data-binary @/tmp/p1-2340-ig-ap3c-request.json || true)
           if [[ "$code" != 200 && "$code" != 202 ]]; then
-            echo "Ops did not accept read-only diagnostic ($code)"; exit 2
+            echo "Ops did not accept bounded AP3C canary ($code)"; exit 2
           fi
           job=$(jq -er '.job.id // .jobId' /tmp/p1-2340-ig-ap3c-ops-start.json)
           for n in $(seq 1 140); do
@@ -81,7 +81,7 @@ jobs:
               jq -c '{output,owner_verified,preflight,children,fence_created,provider_create_calls,stage_status,stage_message,created_parent_id}' /tmp/p1-2340-ig-ap3c-report.json
               exit 0
             elif [[ "$status" == failed ]]; then
-              echo 'Read-only Ops audit failed; no provider actions authorized'
+              echo 'Bounded AP3C Ops canary failed; no retry authorized'
               # Sanitize error text; never print tokens, URLs, bearer headers, or
               # the submitted PowerShell script. Retain only diagnostic tails.
               jq -r '.job.log // ""' /tmp/p1-2340-ig-ap3c-ops-status.json | tail -n 14 \
