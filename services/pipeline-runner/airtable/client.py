@@ -7,7 +7,7 @@ logger = logging.getLogger("pipeline-runner.airtable")
 
 
 class AirtableClient:
-    """Minimal Airtable REST client for stage workers."""
+    """Compatibility interface for Supabase-only pipeline stage CRUD."""
 
     def __init__(self, settings: dict | None = None) -> None:
         settings = settings or load_settings()
@@ -92,16 +92,13 @@ class AirtableClient:
             f"Supabase record lookup unsupported or unavailable for {table_id}/{record_id}; no Airtable fallback"
         )
 
-    def _patch_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
-        raise RuntimeError(f"Supabase update mapping required for {table_id}; no Airtable fallback")
-
     def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
         from settings_store import commit_setting
 
         try:
             committed_setting = commit_setting(self._settings, table_id, record_id, fields)
         except Exception as error:
-            logger.warning("supabase settings commit failed for %s; Airtable remains required: %s", record_id, error)
+            logger.warning("supabase settings commit failed for %s; no Airtable fallback permitted: %s", record_id, error)
             committed_setting = False
         if committed_setting:
             logger.info(
@@ -123,7 +120,7 @@ class AirtableClient:
             committed = self._commit_phase6(table_id, [pending])
             if not committed:
                 logger.warning(
-                    "supabase phase6 update commit failed for %s %s; Airtable remains required",
+                    "supabase phase6 update commit failed for %s %s; no Airtable fallback permitted",
                     table_id,
                     record_id,
                 )
@@ -139,7 +136,7 @@ class AirtableClient:
             committed = self._commit_side_table(table_id, [pending])
             if not committed:
                 logger.warning(
-                    "supabase side-table update commit failed for %s %s; Airtable remains required",
+                    "supabase side-table update commit failed for %s %s; no Airtable fallback permitted",
                     table_id,
                     record_id,
                 )
@@ -154,9 +151,6 @@ class AirtableClient:
             raise RuntimeError(
                 f"Supabase update uncommitted for {table_id}/{record_id}; no Airtable fallback"
             )
-        record = self._patch_record(table_id, record_id, fields, typecast=typecast)
-        self._mirror(table_id, [record])
-        return record
 
     def list_records(
         self,
@@ -250,7 +244,6 @@ class AirtableClient:
             release_phase6_minted_ids,
         )
 
-        url = f"{self._api_root}/{self._base_id}/{table_id}"
         created: list[dict[str, Any]] = []
         legacy = self._legacy_export(table_id)
         phase6 = self._phase6_export(table_id) and not legacy
@@ -278,7 +271,7 @@ class AirtableClient:
                     )
                 except Exception as error:
                     logger.warning(
-                        "supabase create commit failed for %s; Airtable remains required: %s",
+                        "supabase create commit failed for %s; no Airtable fallback permitted: %s",
                         table_id,
                         error,
                     )
@@ -303,7 +296,6 @@ class AirtableClient:
         """
         import requests
 
-        url = f"{self._api_root}/{self._base_id}/{table_id}"
         updated: list[dict[str, Any]] = []
         legacy = self._legacy_export(table_id)
         for start in range(0, len(records), 10):
@@ -335,7 +327,7 @@ class AirtableClient:
                 ])
                 if not phase6_committed:
                     logger.warning(
-                        "supabase phase6 batch update commit failed for %s; Airtable remains required",
+                        "supabase phase6 batch update commit failed for %s; no Airtable fallback permitted",
                         table_id,
                     )
                 else:
@@ -355,7 +347,7 @@ class AirtableClient:
                 ])
                 if not side_committed:
                     logger.warning(
-                        "supabase side-table batch update commit failed for %s; Airtable remains required",
+                        "supabase side-table batch update commit failed for %s; no Airtable fallback permitted",
                         table_id,
                     )
                 else:
@@ -391,8 +383,6 @@ class AirtableClient:
         key = str(fields.get(merge_field) or "").strip()
         if not key:
             raise ValueError(f"{merge_field} must be set for atomic upsert")
-        if self._archive_closed():
-            raise RuntimeError(
-                f"Atomic Supabase upsert not implemented for {table_id}/{merge_field}; no Airtable fallback"
-            )
-        raise RuntimeError("Supabase atomic upsert required; no Airtable fallback")
+        raise RuntimeError(
+            f"Atomic Supabase upsert not implemented for {table_id}/{merge_field}; no Airtable fallback"
+        )
