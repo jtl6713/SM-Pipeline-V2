@@ -43,7 +43,7 @@ try {
     $ids+= $id
   }
   if(@($ids|Select-Object -Unique).Count -ne 8){throw 'duplicate_photo_receipts'}
-  # ConvertFrom-Json can emit one nested array rather than eight scalar
+  # Previous general JSON array parsing could emit an unexpected envelope
   # pipeline elements; keep the JSON array shape explicit using System.Text.Json.
   $report.stage='compare-saved-photo-identities'
   $report.stage='read-parent-ids-json-string'
