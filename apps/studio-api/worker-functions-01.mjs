@@ -2,6 +2,7 @@ import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upse
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
+import { heldRetryPendingDisposition } from "./held-retry-pending-disposition.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -2312,6 +2313,13 @@ export function normalizedOutputState(record) {
   if (youtubeManualActionRequired(fields)) {
     return "Manual Action Required";
   }
+
+  // Historical held Retry Pending is a recovery decision, never proof of a safe retry.
+  // This only changes read-only display; canonical stage and provider holds remain.
+  // Standalone extracted-function harnesses do not bind module imports.
+  const pendingDisposition = typeof heldRetryPendingDisposition === "function"
+    ? heldRetryPendingDisposition(record) : null;
+  if (pendingDisposition) return pendingDisposition.label;
 
   // A verified TTD0 9:16 asset mismatch cannot be fixed by retrying the
   // TikTok publisher. This label makes the required upstream media repair
