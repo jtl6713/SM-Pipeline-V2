@@ -163,7 +163,12 @@ export async function recoverOriginalStoryVideo({
       (job.state === "recovering" && safeAge(job.recovery_started_at) >= RECOVERY_READ_LEASE_MS) ||
       (job.state === "recovery_needs_review" && !job.recovery_upload_started_at)) {
     const next = { ...job, state:"recovering", recovery_stage:"search",
-      recovery_started_at:isoNow(), recovery_profile_name:profileName };
+      recovery_started_at:isoNow(), recovery_profile_name:profileName,
+      // Pre-recovery job R2 upload time is the last accepting-state CAS write
+      // for older jobs that predate accepting_started_at.
+      recovery_original_accepting_recorded_at:
+        job.accepting_started_at || job.recovery_original_accepting_recorded_at ||
+        found.uploaded_at || null };
     etag = await writeJob(next, etag); job = next;
   }
   const drive = await checkDrive({
