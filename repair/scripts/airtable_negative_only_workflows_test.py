@@ -235,6 +235,38 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
         self.write(name, good + "Invoke-WebRequest https://__AIRT_HOST__/v0\n")
         self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
 
+    def test_future_multiline_python_forbidden_list_needs_real_assertion(self):
+        name = "new-provider-getonly-python-audit.yml"
+        guard = (
+            "for token in ('-Method Post','__AIRT_HOST__',\n"
+            "              'requests.post','/media_publish'):\n"
+            "    assert token not in script, 'unsafe source mutation'\n"
+        )
+        self.write(name, guard)
+        self.assertEqual(unexpected_references(
+            self.root, (AIRT_HOST, "AIRTABLE_PAT")), [])
+        self.write(name, guard + "curl https://__AIRT_HOST__/v0/base\n")
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        self.write(name, guard.replace("assert token not in script", "pass # assert disabled"))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        self.write(name, guard.replace("assert token not in script", "assert token in script"))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
+    def test_python_negative_list_rejects_dynamic_expression_and_http_message(self):
+        name = "new-provider-getonly-python-audit.yml"
+        guard = (
+            "for token in ('-Method Post','__AIRT_HOST__',requests.post):\n"
+            "    assert token not in script, 'unsafe'\n"
+        )
+        self.write(name, guard)
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        guard = (
+            "for token in ('-Method Post','__AIRT_HOST__'):\n"
+            "    assert token not in script, requests.post()\n"
+        )
+        self.write(name, guard)
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://__AIRT_HOST__/v0/foo\n")
         self.assertGreaterEqual(len(unexpected_references(self.root, (AIRT_HOST,))), 1)

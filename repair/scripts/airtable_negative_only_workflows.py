@@ -6,6 +6,7 @@ retired PAT or endpoint. This never permits a real provider HTTP operation.
 from __future__ import annotations
 
 from pathlib import Path
+import ast
 import re
 
 # Split the retired host token so source inventory never contains a direct API endpoint.
@@ -139,6 +140,83 @@ EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS = {
     ),
 }
 
+
+
+
+def _literal_python_negative_guard_lines(lines: list[str]) -> set[int]:
+    """Identify source-only forbidden-token loops without path allowlisting.
+
+    Require a literal tuple/list of strings AND an immediately following
+    simple negative assertion. Do not execute or trust Python/YAML snippets.
+    Each permitted token line must belong to that verified literal header.
+    """
+    safe: set[int] = set()
+    for start, source_line in enumerate(lines):
+        if not re.match(r"^for [A-Za-z_][A-Za-z0-9_]* in [\[(]", source_line.strip()):
+            continue
+        segments: list[str] = []
+        for end in range(start, min(start + 7, len(lines) - 1)):
+            segments.append(lines[end].strip())
+            header = " ".join(segments)
+            if len(header) > 1600:
+                break
+            if not header.endswith(":"):
+                continue
+            found = re.fullmatch(
+                r"for (?P<variable>[A-Za-z_][A-Za-z0-9_]*) in (?P<values>.+):",
+                header,
+            )
+            if not found:
+                break
+            try:
+                values = ast.literal_eval(found.group("values"))
+                parsed = ast.parse(lines[end + 1].strip())
+            except (SyntaxError, ValueError, TypeError):
+                break
+            if (not isinstance(values, (tuple, list))
+                or not values or any(type(v) is not str for v in values)
+                or not any(AIRT_HOST in v or "AIRTABLE_PAT" in v
+                           or "AIRTABLE_TOKEN" in v for v in values)
+                or not any("-Method Post" in v or "requests.post" in v
+                           or "/media_publish" in v for v in values)
+                or len(parsed.body) != 1 or not isinstance(parsed.body[0], ast.Assert)):
+                break
+            assertion = parsed.body[0]
+            expression = assertion.test
+            if (not isinstance(expression, ast.Compare)
+                or not isinstance(expression.left, ast.Name)
+                or expression.left.id != found.group("variable")
+                or len(expression.ops) != 1
+                or not isinstance(expression.ops[0], ast.NotIn)
+                or len(expression.comparators) != 1
+                or not isinstance(expression.comparators[0], ast.Name)
+                or expression.comparators[0].id not in {"s", "script", "source", "code", "w"}):
+                break
+            # A failing assertion must not evaluate an HTTP call as its message.
+            message = assertion.msg
+            if message is not None:
+                if isinstance(message, ast.Constant):
+                    if not isinstance(message.value, str):
+                        break
+                elif isinstance(message, ast.JoinedStr):
+                    if any(
+                        not (isinstance(part, ast.Constant)
+                             and isinstance(part.value, str))
+                        and not (isinstance(part, ast.FormattedValue)
+                                 and isinstance(part.value, ast.Name)
+                                 and part.value.id == found.group("variable"))
+                        for part in message.values
+                    ):
+                        break
+                else:
+                    break
+            safe.update(
+                i for i in range(start, end + 1)
+                if AIRT_HOST in lines[i] or "AIRTABLE_PAT" in lines[i]
+                or "AIRTABLE_TOKEN" in lines[i]
+            )
+            break
+    return safe
 
 
 def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
@@ -276,6 +354,11 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
                      or "'AIRTABLE_PAT'" in candidate
                      or "'AIRTABLE_TOKEN'" in candidate)):
                 safe.add((rel, i))
+        # Future GET-only Python audit workflows are equally safe when their
+        # forbidden host is only a static literal and is immediately rejected.
+        # This prevents repeated, redundant PR conflicts on new audit fixtures.
+        for i in _literal_python_negative_guard_lines(lines):
+            safe.add((rel, i))
     return safe
 
 
