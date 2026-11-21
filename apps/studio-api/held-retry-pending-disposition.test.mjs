@@ -28,7 +28,7 @@ test("FB prior credential failure is not marked as an authorized retry",()=>{
   assert.equal(normalizedOutputState({fields}),"Needs Verification");
 });
 test("future-scheduled FB throttle requires evidence, preserves slot and raw stage",()=>{
-  const fields={Platform:"Facebook",Output_Status:"Approved for Publishing",
+  const fields={Platform:"Facebook",Review_Status:"Approved",Output_Status:"Approved for Publishing",
     Publish_Status:"Ready to Schedule",FB_Publish_Status:"Retry Pending",
     Publish_Error_Stage:"FBS3_RATE_LIMIT",Publish_Error_Message:"Graph rate limit 368",
     Scheduled_Post_Date:"2027-01-05T18:00:00Z",
@@ -52,4 +52,29 @@ test("returned creative still reports Changes Requested regardless of stale raw 
     Publish_Status:"Not Ready",IG_Carousel_Status:"Retry Pending",Do_Not_Publish:true};
   assert.equal(heldRetryPendingDisposition({fields}).label,"Changes Requested");
   assert.equal(normalizedOutputState({fields}),"Changes Requested");
+});
+
+test("historical FB provider attempt still requires verification when old throttle error cleared",()=>{
+  const fields={Platform:"Facebook",Review_Status:"Approved",Output_Status:"Approved for Publishing",
+    Publish_Status:"Ready to Schedule",FB_Publish_Status:"Retry Pending",
+    Scheduled_Post_Date:"2027-01-08T19:30:00Z",Last_Publish_Attempt_At:"2026-10-27T15:30:00Z",
+    Studio_Publish_Dispatch_Count:0,Auto_Publish_Enabled:true,
+    Publish_Retry_Eligible:true,Do_Not_Publish:false};
+  const result=heldRetryPendingDisposition({fields},{nowMs:Date.parse("2026-11-21T14:30:00Z")});
+  assert.equal(result?.label,"Needs Verification");
+  assert.equal(result.retry_authorized,false);
+  assert.match(result.reason,/historical provider dispatch or attempt/);
+  // In ordinary rendered Pipeline, the identical persisted fields cannot
+  // falsely advertise a safe automated retry.
+  assert.equal(normalizedOutputState({fields}),"Needs Verification");
+  assert.equal(fields.FB_Publish_Status,"Retry Pending");
+});
+test("clean and genuinely unattempted future FB booking is Scheduled",()=>{
+  const fields={Platform:"Facebook",Review_Status:"Approved",Output_Status:"Approved for Publishing",
+    Publish_Status:"Ready to Schedule",FB_Publish_Status:"Retry Pending",
+    Scheduled_Post_Date:"2027-01-08T19:30:00Z",
+    Studio_Publish_Dispatch_Count:0,Auto_Publish_Enabled:true,
+    Publish_Retry_Eligible:true,Do_Not_Publish:false};
+  assert.equal(heldRetryPendingDisposition({fields},{nowMs:Date.parse("2026-11-21T14:30:00Z")}),null);
+  assert.equal(normalizedOutputState({fields}),"Scheduled");
 });
