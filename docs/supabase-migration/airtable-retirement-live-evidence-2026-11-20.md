@@ -120,3 +120,36 @@ inferred zeroes.
 
 **No production deployment, binding mutation, publishing, database mutation or
 provider-token revocation performed by this verification.**
+
+
+## 2026-11-21 follow-up: live Cloudflare audit and QA ledger blocker
+
+The trusted existing GitHub action was re-run safely in read-only mode:
+https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/41577516380
+(attempt 2, 2026-11-21 06:13 UTC).
+
+The active Cloudflare Worker deployment and version queries succeeded.
+The historical binding-contract validator then failed before persisting
+its report because 14 now-valid bindings were absent from its old allowlist
+(including several STUDIO_*_READ_SOURCE and STUDIO_WRITE_SOURCE selectors
+and ElevenLabs rollout flags). It reported no missing old core/reservation
+bindings. All 14 observed names/types are allowed in the updated retirement
+branch contract. No secret value was captured by the assistant.
+
+PR #2364 now changes that read-only audit to capture a sanitized candidate
+production Supabase project reference and binding names/types *before*
+enforcing policy. It also saves the discovery report even on failure.
+This trusted live audit code is not yet on main and therefore has not
+certified the active Cloudflare SUPABASE_URL == the production project.
+
+Additional release blocker: QA Test Center on the retirement PR still
+uses Airtable-authoritative runs and events and the generic Airtable
+compatibility gateway; the Supabase project has no corresponding QA
+tables in public schema. Deploying the retirement code as is could
+break QA history and release governance. A new pre-deploy check blocks
+the Worker before any production mutation until QA is Supabase-native
+and independently migrated/backfilled. See
+docs/supabase-migration/qa-ledger-cutover-plan.md.
+
+The cutover release is NOT authorized. No production deployment, SQL
+migration, publishing action, or Airtable credential revocation was done.

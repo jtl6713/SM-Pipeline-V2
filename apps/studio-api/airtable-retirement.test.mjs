@@ -167,3 +167,25 @@ test("production audit can be statically checked in PR without exposing live sec
   assert.ok(workflow.includes("UNVERIFIED_DISCOVERY_ONLY"));
   assert.ok(workflow.includes("production_supabase_identity_audit_test.py"));
 });
+
+
+test("production release blocks Airtable-dependent QA before deployment", () => {
+  const workflow=source(".github/workflows/deploy-cloudflare-worker-production.yml");
+  const gate=workflow.indexOf("python repair/scripts/qa_retirement_preflight.py");
+  const mutation=workflow.indexOf("Capture production rollback point and exact binding contract");
+  assert.ok(gate!==-1 && mutation!==-1 && gate<mutation,
+    "QA source gate must execute before production mutation");
+  assert.ok(workflow.includes("STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
+  assert.ok(workflow.includes('.writeAuthority=="Supabase"'));
+  assert.ok(!workflow.includes('.writeAuthority=="Airtable"'));
+});
+
+test("Cloudflare audit saves sanitized binding evidence before allowlist enforcement", () => {
+  const audit=source(".github/workflows/cloudflare-production-bindings-audit.yml");
+  const save=audit.indexOf("bindings-audit-discovery.json");
+  const policy=audit.indexOf("contract=assert_live_contract(got, 'active production Worker')");
+  assert.ok(save!==-1 && policy>save);
+  assert.ok(audit.includes("from production_supabase_identity_audit import inspect_studio_bindings"));
+  assert.ok(audit.includes("if: always()"));
+  assert.ok(audit.includes('"credential_values_collected":False'));
+});

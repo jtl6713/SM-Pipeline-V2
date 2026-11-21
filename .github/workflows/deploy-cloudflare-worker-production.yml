@@ -56,6 +56,7 @@ jobs:
       TARGET_WORKER: chicagoshining-studio-api
       # Require an independently confirmed Supabase production project.
       STUDIO_PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
+      STUDIO_QA_SUPABASE_LEDGER_VERIFIED: ${{ vars.STUDIO_QA_SUPABASE_LEDGER_VERIFIED }}
       VERIFY_BRIDGE: chicagoshining-studio-deploy-verify
       WRANGLER_VERSION: 4.123.0
       ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
@@ -67,6 +68,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Fail closed if QA history still depends on Airtable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/qa_retirement_preflight.py
+          echo 'qa_supabase_ledger_predeploy_gate=PASS'
 
       - name: Verify Post Insights Supabase published-post and refresh regression
         shell: bash
@@ -755,7 +763,7 @@ jobs:
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
 
-      - name: Verify live QA catalog and bounded Airtable history through protected service binding
+      - name: Verify live QA catalog and bounded Supabase history through protected service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -766,7 +774,7 @@ jobs:
           # after upload are often Cloudflare 1042 served as 404, which rolled
           # Worker 0.10.782 back even after the session probe had recovered.
           curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-catalog" -o /tmp/qa-live-catalog.json
-          jq -e '.ok==true and .writeAuthority=="Airtable" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
+          jq -e '.ok==true and .writeAuthority=="Supabase" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
           curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
           jq -e '.ok==true and (.runs|type)=="array" and (.limited_to==1)' /tmp/qa-live-runs.json >/dev/null
           # A workers.dev 1042/1104 is served as 404/500 and is not an auth result.

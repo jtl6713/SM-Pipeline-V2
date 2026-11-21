@@ -9,6 +9,9 @@ on:
       - 'deploy/bootstrap-studio-insights-tables.py'
       - 'repair/scripts/production_supabase_identity_audit*.py'
       - 'repair/scripts/airtable_retirement_evidence_gate*.py'
+      - 'repair/scripts/qa_retirement_preflight*.py'
+      - '.github/workflows/cloudflare-production-bindings-audit.yml'
+      - '.github/workflows/deploy-cloudflare-worker-production.yml'
       - 'docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql'
       - '.github/workflows/verify-supabase-production-readonly.yml'
       - '.github/workflows/supabase-migration-gate-readonly.yml'
@@ -129,6 +132,7 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'studio_api_binding_contract_test.py' -v
           python -m unittest discover -s repair/scripts -p 'production_supabase_identity_audit_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_retirement_evidence_gate_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_retirement_preflight_test.py' -v
           # The evidence template is intentionally BLOCKED until real production
           # project and full six-source hourly attestations are supplied.
           if python repair/scripts/airtable_retirement_evidence_gate.py --manifest docs/supabase-migration/airtable-retirement-release-evidence.template.json; then
