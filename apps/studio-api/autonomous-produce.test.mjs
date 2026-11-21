@@ -915,6 +915,8 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /autonomousRefillSlot/);
   assert.match(worker, /pickAutonomousRefillProfile/);
   assert.match(worker, /async function ensureAutonomousSelectedMusic/);
+  assert.match(worker, /async function selectValidAutonomousMusicAssetId/);
+  assert.match(worker, /No verified available music asset is configured for autonomous production/);
   assert.match(worker, /pickCatalogFallbackMusicRecord/);
   assert.match(worker, /Selected_Music_Asset/);
   assert.doesNotMatch(
@@ -928,7 +930,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
     worker.indexOf("async function stampPhotoReadyIdeaForAutonomousProduce"),
     worker.indexOf("async function adoptNextReadyDailyIdea"),
   );
-  assert.match(stampMusicBlock, /pickAutonomousMusicAssetId/);
+  assert.match(stampMusicBlock, /selectValidAutonomousMusicAssetId/);
   assert.match(stampMusicBlock, /Selected_Music_Asset/);
   const adoptMusicBlock = worker.slice(
     worker.indexOf("async function adoptNextReadyDailyIdea"),
