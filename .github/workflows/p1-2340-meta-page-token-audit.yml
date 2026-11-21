@@ -75,8 +75,8 @@ jobs:
             status=$(jq -r '.job.status // empty' /tmp/p1-2340-ops-status.json)
             if [[ "$status" == ok ]]; then
               jq -r '.job.log // ""' /tmp/p1-2340-ops-status.json | grep '^P1_META_AUDIT=' | tail -1 | sed 's/^P1_META_AUDIT=//' > /tmp/p1-2340-meta-token-audit.json
-              jq -e '.read_only == true and .output_writes == 0 and .provider_writes == 0 and (.profiles|length)==4' /tmp/p1-2340-meta-token-audit.json >/dev/null
-              jq -c '{read_only,provider_operations,user_token_audit,profiles,existing_facebook_5885,output_writes,provider_writes}' /tmp/p1-2340-meta-token-audit.json
+              jq -e '.read_only == true and .output_writes == 0 and .provider_writes == 0 and (.pages|type)=="array"' /tmp/p1-2340-meta-token-audit.json >/dev/null
+              jq -c '{read_only,provider_operations,user_state,accounts_http,accounts_code,accounts_complete,pages,output_writes,provider_writes}' /tmp/p1-2340-meta-token-audit.json
               exit 0
             elif [[ "$status" == failed ]]; then
               echo 'Read-only Ops audit failed; no provider actions authorized'
