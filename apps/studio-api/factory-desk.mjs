@@ -319,6 +319,12 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
       : (row.studio_state || ""),
     protected_media_rework: row.protected_media_rework === true,
     recovery_source_inventory_verified: row.recovery_source_inventory_verified === true,
+    // Display-only independently verified source JPEGs; not C9 approved slides.
+    recovery_original_image_previews: row.protected_media_rework === true
+      && Array.isArray(row.recovery_original_image_previews)
+        ? row.recovery_original_image_previews.slice(0, 10) : [],
+    recovery_source_count_mismatch: row.protected_media_rework === true
+      && row.recovery_source_count_mismatch === true,
     recovery_stage: row.protected_media_rework === true ? (row.recovery_stage || null) : null,
     recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
     // The existing client checks DNP and review_package_ready before showing
