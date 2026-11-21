@@ -671,20 +671,29 @@ jobs:
           jq -e '
             .ok==true and .read_source=="supabase"
             and (.lanes.manual|type)=="array"
-            and ([.lanes.manual[]|select(.protected_media_rework==true)]|length)==82
+            # Never weaken the 82 original protected holds. The two newly
+            # proven empty-media failures can enter only as an all-or-none
+            # exact additional 2-card group after separate human repair hold.
+            and ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_Preflight_Repair_20261120")]|length)==82
+            and (([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|.output_id]|sort)==[]
+              or ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|.output_id]|sort)==[10793,10802])
+            and ([.lanes.manual[]|select(.protected_media_rework==true)]|length)==
+              (82 + ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")]|length))
             and ([.lanes.manual[]|select(.protected_media_rework==true
               and .do_not_publish==true
               and .output_status=="Changes Requested"
+              and .review_status=="Changes Requested"
               and .review_package_ready==false
               and .can_approve==false
               and .can_retry==false
-              and .can_publish==false)]|length)==82
+              and .can_publish==false)]|length)==
+              (82 + ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")]|length))
             and ([.lanes.needs_eyes[]?|select(.protected_media_rework==true)]|length)==0
             and ([.lanes.auto_high[]?|select(.protected_media_rework==true)]|length)==0
             and ([.lanes.auto_low[]?|select(.protected_media_rework==true)]|length)==0
           ' /tmp/issue2374-factory-desk.json >/dev/null
           jq -c '{factory_read_source:.read_source,held_manual_repair:([.lanes.manual[]|select(.protected_media_rework==true)]|length),needs_eyes_held:([.lanes.needs_eyes[]?|select(.protected_media_rework==true)]|length)}' /tmp/issue2374-factory-desk.json
-          echo 'factory_82_held_visible_without_approval=PASS'
+          echo 'factory_original_82_and_exact_new_media_holds_visible_without_approval=PASS'
 
       - name: Delete functional verification bridge
         if: always()
