@@ -41,6 +41,7 @@ import {
   listSupabaseProductionRequestsByIds,
   listSupabaseRequestsWithProductionJob,
   readSupabasePipelineSetting,
+  listSupabasePipelineSettingsByNames,
   syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -9982,8 +9983,22 @@ export async function syncMiamiTikTokPipelineSecret(request, env) {
 
 export async function item4PipelineSetting(env, name) {
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    const row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
-    if (row?.id) return String(f(row, "Setting_Value") || "").trim();
+    // No Airtable fallback under Supabase write authority. One bounded
+    // alternative read protects Frames from a transient empty lookup; if both
+    // fail, surface a safe, actionable 503 rather than an unexplained 500.
+    let row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
+    if (!String(f(row || {}, "Setting_Value") || "").trim()) {
+      const rows = await listSupabasePipelineSettingsByNames(env, [name], { limit: 5 }).catch(() => null);
+      row = Array.isArray(rows)
+        ? rows.find(candidate => String(f(candidate, "Setting_Name") || "") === name) || null
+        : null;
+    }
+    const value = String(f(row || {}, "Setting_Value") || "").trim();
+    if (!value) {
+      throw new HttpError(503, "Production frame destination setting " + String(name) +
+        " could not be verified in Supabase. No new frame jobs were started.");
+    }
+    return value;
   }
   const rows = await listRecords(env, "Pipeline Settings", {
     limit: 5,
@@ -9998,7 +10013,7 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");
-  if (!driveFolderId) throw new HttpError(500, "STUDIO_VARIANT_DRIVE_FOLDER_ID is not configured");
+  if (!driveFolderId) throw new HttpError(503, "STUDIO_VARIANT_DRIVE_FOLDER_ID is not configured; no frame jobs were started.");
 
   const existingRows = await item4VariantQueueRows(env, recordId);
   const byTransferId = new Map(

@@ -5924,6 +5924,28 @@ async function readProductionRequestPublishStatus(env, airtableId) {
   return isPlainObject(bag) ? bag : {};
 }
 
+/**
+ * A generic Production settings save must not silently erase an approved
+ * storyboard's exact script, scene order and media authority marker.
+ * Only an explicit replacement carrying its own validated directive changes it.
+ */
+export function preserveApprovedStoryboardProductionNotes(previous, incoming) {
+  const marker = "[story-first-production.1] ";
+  const before = String(previous || "");
+  const after = String(incoming ?? "");
+  const directives = before.split(/\r?\n/).filter(line => line.startsWith(marker));
+  if (!directives.length) return after;
+  if (directives.length !== 1) throw new Error("Stored storyboard production directives conflict");
+  let directive;
+  try { directive = JSON.parse(directives[0].slice(marker.length)); }
+  catch { throw new Error("Stored storyboard production directive is invalid"); }
+  if (directive?.schema !== "story-first-production.1" || !Array.isArray(directive.scenes) ||
+      !directive.scenes.length || directive.scenes.some(scene => !/^rec[A-Za-z0-9]{14}$/.test(String(scene?.asset_id || ""))))
+    throw new Error("Stored storyboard production selection is invalid");
+  if (after.includes(marker)) return after;
+  return [after.trimEnd(), directives[0]].filter(Boolean).join("\n");
+}
+
 export async function syncAirtableProductionRequestRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
@@ -5931,6 +5953,21 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
   const bagPatch = drafted.publish_status_patch || null;
   delete drafted.publish_status_patch;
   const row = { ...drafted };
+  if (options.create !== true && Object.hasOwn(row, "production_notes")) {
+    // Phase6 Supabase is authoritative. Read the current directive before
+    // accepting a replacement from a generic settings form. Fail closed if
+    // the current row cannot be verified, rather than silently drop scenes.
+    const previous = await supabaseRest(
+      env,
+      `production_requests?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=production_notes&limit=1`,
+    );
+    if (!Array.isArray(previous)) throw new Error("Cannot verify original storyboard notes");
+    if (previous.length) {
+      row.production_notes = preserveApprovedStoryboardProductionNotes(
+        previous[0].production_notes, row.production_notes,
+      );
+    }
+  }
   if (options.create === true) {
     if (row.production_request_id == null) row.production_request_id = record.id;
     if (row.request_status == null) row.request_status = "Draft";

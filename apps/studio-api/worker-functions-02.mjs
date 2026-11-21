@@ -1,5 +1,6 @@
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
+import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
@@ -2177,6 +2178,22 @@ export async function item4ReconcileVariants(env, recordId, record = null, optio
 }
 /*__STUDIO_WORKER_END:item4ReconcileVariants__*/
 
+async function item4FramePrepareStage(name, operation) {
+  try { return await operation(); }
+  catch (error) {
+    if (error?.status && Number(error.status) < 500) throw error;
+    // No asset names, auth tokens, Drive URLs or user notes in this log.
+    console.error("studio_frame_prepare_failed", {
+      stage: name,
+      code: Number(error?.status || 500),
+      reason: String(error?.message || "unavailable").slice(0, 180),
+    });
+    throw new HttpError(503,
+      "Frames Prepare could not complete " + name +
+      ". The original assets and approved storyboard are preserved; no automatic generation or publish was started.");
+  }
+}
+
 export async function runItem4VariantPrepareCore(env, recordId, authorization, options = {}) {
   const {
     cropsPayload = {},
@@ -2204,15 +2221,41 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
     assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   }
 
-  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  let plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   if (f(record, "Studio_Output_Plan_Status") !== "Ready" || !plan?.items?.length) {
     throw new HttpError(409, "Build a complete platform output plan before preparing platform media");
+  }
+
+  const integrity = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (integrity.kind === "invalid")
+    throw new HttpError(409, integrity.reason + "; no frame jobs were started.");
+  if (integrity.kind === "repair") {
+    // The approved storyboard, not a 1-photo UI default, owns the exact
+    // source order. Re-read before saving so a concurrent operator edit wins.
+    const latest = await item4FramePrepareStage("concurrent storyboard verification",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    const latestAssets = item4AssetManifest(latest)
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    if (JSON.stringify(latestAssets) !== JSON.stringify(item4AssetManifest(record)
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))) ||
+        JSON.stringify(item4ParseJson(f(latest, "Studio_Output_Plan_JSON"), null)) !== JSON.stringify(plan) ||
+        String(f(latest, "Production_Notes") || "") !== String(f(record, "Production_Notes") || "")) {
+      throw new HttpError(409, "Storyboard or source media changed while preparing frames. Refresh Production; no frames started.");
+    }
+    record = await item4FramePrepareStage("approved storyboard plan reconciliation",
+      () => item4UpdateRequestState(env, recordId, {
+        Studio_Output_Plan_JSON: JSON.stringify(integrity.plan),
+      }));
+    plan = integrity.plan;
   }
 
   const ratios = item4RequiredRatios(plan);
   if (!ratios.length) throw new HttpError(409, "The platform output plan does not contain any supported image ratios");
 
-  let masterAuthority = await item4ReconcileMasterAuthority(env, recordId, record);
+  let masterAuthority = await item4FramePrepareStage("master verification",
+    () => item4ReconcileMasterAuthority(env, recordId, record));
   record = masterAuthority.record;
   let authoritativeAssets = masterAuthority.assets.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
@@ -2250,26 +2293,32 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
 
   authoritativeAssets = item4MergeAssetCrops(authoritativeAssets, cropsPayload);
 
-  const outputRows = await outputRowsForProductionRequest(env, recordId);
-  const preparingRecord = await item4UpdateRequestState(env, recordId, {
-    Studio_Variant_Status: "Preparing",
-    Studio_Variant_Error: null,
-    Studio_Item4_State: "Plan Ready",
-  });
+  const outputRows = await item4FramePrepareStage("platform output lookup",
+    () => outputRowsForProductionRequest(env, recordId));
+  if (!outputRows.length)
+    throw new HttpError(409, "No enabled platform destinations were found. Rebuild the platform plan before Prepare.");
+  const preparingRecord = await item4FramePrepareStage("frame preparation checkpoint",
+    () => item4UpdateRequestState(env, recordId, {
+      Studio_Variant_Status: "Preparing",
+      Studio_Variant_Error: null,
+      Studio_Item4_State: "Plan Ready",
+    }));
 
-  const expected = await item4UpsertVariantQueue(
-    env,
-    recordId,
-    authoritativeAssets,
-    ratios,
-    outputRows,
-    plan,
-    { forceRetry }
-  );
+  const expected = await item4FramePrepareStage("frame queue creation",
+    () => item4UpsertVariantQueue(
+      env,
+      recordId,
+      authoritativeAssets,
+      ratios,
+      outputRows,
+      plan,
+      { forceRetry }
+    ));
   // Under write SoR, queue creates can soft-echo without persisting. Fail closed
   // so Prepare never returns 202/None and the UI does not say "did not finish."
   if (expected.length) {
-    const persisted = await item4VariantQueueRows(env, recordId);
+    const persisted = await item4FramePrepareStage("frame queue readback",
+      () => item4VariantQueueRows(env, recordId));
     const expectedIds = new Set(expected.map((row) => String(row?.transfer_id || "").trim()).filter(Boolean));
     const scoped = (Array.isArray(persisted) ? persisted : []).filter((row) =>
       expectedIds.has(String(f(row, "Transfer_ID") || "").trim())
@@ -2281,7 +2330,8 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
       );
     }
   }
-  let reconciled = await item4ReconcileVariants(env, recordId, preparingRecord);
+  let reconciled = await item4FramePrepareStage("frame manifest reconciliation",
+    () => item4ReconcileVariants(env, recordId, preparingRecord));
 
   // Prefer a short sync pulse, then finish in waitUntil/cron so Prepare returns
   // while crops continue instead of holding the HTTP request for the full budget.
