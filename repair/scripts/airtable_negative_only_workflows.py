@@ -112,6 +112,11 @@ EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS = {
         "for forbidden in ('SUPABASE_SERVICE_ROLE_KEY','__AIRT_HOST__',",
         "assert forbidden not in script", 3, 1,
     ),
+    ".github/workflows/issue2374-ten-new-media-original-preview.yml": (
+        "assert required in script, required",
+        "for forbidden in ('SUPABASE_SERVICE_ROLE_KEY','__AIRT_HOST__',",
+        "assert forbidden not in script", 3, 1,
+    ),
     ".github/workflows/issue2374-supabase-worker-release-contract.yml": (
         "forbidden=[",
         "'/api/admin/qa/', '/qa-catalog', '/qa-runs', '__AIRT_HOST__',",
