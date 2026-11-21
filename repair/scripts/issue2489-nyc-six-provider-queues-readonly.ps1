@@ -109,7 +109,7 @@ try {
     if($identity.ok -and [string]$identity.data.id -eq $ig){
       $list=Scan ('https://graph.facebook.com/'+$vers+'/'+$ig+'/media?fields=id,caption,media_type,timestamp,permalink&limit=100') $it 3
       $matches=@($list.rows|Where-Object {([string]$_.caption) -match '(?i)Past and present collide in NYC|New York City: Then and Now'})
-      $r.instagram=@{account_verified=$true;published_media_pages=$list.pages;published_media_scan_complete=$list.ok;matching_published_count=$matches.Count;exact_caption_matches=@($matches|Select-Object -First 12 | ForEach-Object { @{id=[string]$_.id;posted_at=$_.timestamp;media_type=$_.media_type} });reason=$list.reason;unpublished_queue_exposed_by_api=$false}
+      $r.instagram=@{account_verified=$true;published_media_pages=$list.pages;published_media_scan_complete=$list.ok;matching_published_count=$matches.Count;exact_caption_matches=@($matches|Select-Object -First 12|ForEach-Object {@{id=[string]$_.id;posted_at=$_.timestamp;media_type=$_.media_type}});reason=$list.reason;unpublished_queue_exposed_by_api=$false}
     }else{$r.instagram=@{account_verified=$false;reason='ig_identity_unavailable';unpublished_queue_exposed_by_api=$false}}
   }else{$r.instagram=@{account_verified=$false;reason='ig_scope_unavailable';unpublished_queue_exposed_by_api=$false}}
   try{
@@ -121,18 +121,7 @@ try {
   if(-not $serviceSecret){$serviceSecret=[string]$v['YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']}
   if(-not $serviceSecret){$serviceSecret=E 'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET'}
   $base=([string]$v['NYC_YOUTUBE_UPLOAD_SERVICE_URL']).TrimEnd('/')
-  if($channel -match '^UC[A-Za-z0-9_-]{22}
-  $r.graph_gets=$script:getCount
-  # Meta's Instagram Graph and TikTok account status APIs cannot prove absence
-  # of drafts/scheduled content. Never assert no duplicate solely on this audit.
-  $r.remote_queue_exhaustively_verified=$false
-  $r.safe_to_release_automatically=$false
-}catch{
-  $r.error_category=([string]$_.Exception.Message -replace '[^a-zA-Z0-9_-]','_').Substring(0,[Math]::Min(90,([string]$_.Exception.Message).Length))
-}finally{
-  Write-Output ('NYC2489_PROVIDER_QUEUE_AUDIT='+($r|ConvertTo-Json -Depth 10 -Compress))
-}
- -and $serviceSecret.Length -ge 16 -and $base -eq 'https://youtube-upload-nyc.chicagoshining.com'){
+  if($channel -match '^UC[A-Za-z0-9_-]{22}$' -and $serviceSecret.Length -ge 16 -and $base -eq 'https://youtube-upload-nyc.chicagoshining.com'){
     try{
       $service=$base+'/youtube/channel/uploads?expected_channel_id='+$channel
       $inv=Invoke-RestMethod $service -Headers @{'x-sm-pipeline-key'=$serviceSecret;Accept='application/json'} -Method Get -TimeoutSec 100
