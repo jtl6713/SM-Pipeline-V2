@@ -3,6 +3,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from version_gate import expected_runner_version, verified_runner_public_version
 
 OPS_BASE = "https://ops.chicagoshining.com"
 EXPECTED_COMMIT = os.environ.get("GITHUB_SHA", "").strip()
@@ -37,7 +38,7 @@ if not EXPECTED_COMMIT or len(EXPECTED_COMMIT) != 40:
     raise RuntimeError("Missing GitHub deployment commit")
 
 services = [
-    ("pipeline-runner", "https://pipeline.chicagoshining.com", "2026-11-16-youtube-durable-dedup"),
+    ("pipeline-runner", "https://pipeline.chicagoshining.com", expected_runner_version()),
     ("youtube-uploader", "https://youtube-upload.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
     ("youtube-uploader-la", "https://youtube-upload-la.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
     ("youtube-uploader-nyc", "https://youtube-upload-nyc.chicagoshining.com", "2026-11-16-engagement-durable-upload-dedup"),
@@ -75,9 +76,9 @@ for service, url, version in services:
         "PASS public health: " + url,
         "Commit:  " + EXPECTED_COMMIT,
     ]
-    if service == "pipeline-runner":
-        markers.append("PASS public health version=" + version)
     missing = [m for m in markers if m not in log]
+    if service == "pipeline-runner" and not verified_runner_public_version(log, version):
+        missing.append("verified current runner public health version")
     if missing:
         raise RuntimeError("Ops health/commit proof missing for " + service + ": " + repr(missing))
     # GitHub-hosted runners cannot reliably reach these Cloudflare routes.
