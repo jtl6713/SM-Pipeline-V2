@@ -87,6 +87,7 @@ function setup({persistedCount = 6, sourceMismatch = false, dropReadback = false
     HttpError, f, ITEM4_DRAIN_POST_BUDGET_MS: 8000,
     studioPhase6WriteSource: () => "supabase",
     PRODUCTION_REQUEST_TABLE: "Production Requests",
+    PRODUCTION_REQUEST_OUTPUT_TABLE: "Production Request Outputs",
     airtableFetch: async (_env, _table, _id, options = {}) => {
       if (options.method === "PATCH") {
         stats.parentPatches++;
