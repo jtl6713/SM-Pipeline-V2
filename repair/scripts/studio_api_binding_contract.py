@@ -20,7 +20,8 @@ CORE_BINDINGS = {
     "AIRTABLE_MEDIA_TABLE_ID": "plain_text",
     "AIRTABLE_MUSIC_VIEW_ID": "plain_text",
     "AIRTABLE_OUTPUT_TABLE_ID": "plain_text",
-    "AIRTABLE_PAT": "secret_text",
+    "SUPABASE_URL": "plain_text",
+    "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
     "ALLOWED_ORIGINS": "plain_text",
     "I3_DECISION_WEBHOOK_URL": "plain_text",
     "STUDIO_MEDIA": "r2_bucket",
@@ -32,6 +33,9 @@ RESERVATION_BINDINGS = {
 }
 
 OPTIONAL_BINDINGS = {
+    # Historical secret binding may remain on currently deployed versions until
+    # the provider PAT is revoked after zero-egress certification. Not required.
+    "AIRTABLE_PAT": "secret_text",
     # Separate, non-authoritative Home counter namespace (not schedule authority).
     "STUDIO_PROFILE_SUMMARIES": "durable_object_namespace",
     "STUDIO_HOME_PROFILE_SUMMARY_READS": "plain_text",
@@ -194,12 +198,10 @@ OPTIONAL_BINDINGS = {
     # value during ordinary Worker deploys. STUDIO_WRITE_SOURCE does not
     # cover these tables. Default remains Airtable (flag unset).
     "STUDIO_PHASE6_WRITE_SOURCE": "secret_text",
-    "SUPABASE_URL": "plain_text",
-    "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
 }
 
-CONTRACT_ID = "studio-api-10-core-elevenlabs-optional"
-REQUIRED_SECRETS = ("AIRTABLE_PAT",)
+CONTRACT_ID = "studio-api-supabase-core-no-airtable-credential"
+REQUIRED_SECRETS = ("SUPABASE_SERVICE_ROLE_KEY",)
 AUTHORITATIVE_SERVICES = (
     {"name": "chicagoshining-studio-api", "kind": "worker", "role": "Studio API / repair controller"},
     {"name": "chicagoshining-studio-web", "kind": "pages", "role": "Studio UI"},
