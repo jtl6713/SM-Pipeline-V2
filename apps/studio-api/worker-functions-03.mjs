@@ -11,6 +11,7 @@ import {
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
 import { productionOutputLinksFromJoinedRecords } from "./production-output-identity.mjs";
 import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
+import { recoverOriginalStoryVideo } from "./story-first-video-recovery-route.mjs";
 import { storyVideoReferenceManifest, verifyStudioReferenceAsset, uploadStoryVideoReferences, deleteStudioElevenReferenceAssets } from "./story-first-ai-video-references.mjs";
 import { reconcileUnbilledChicagoVideoAttempt } from "./story-first-ai-video-unbilled-reconciliation.mjs";
 import {
@@ -14632,7 +14633,7 @@ export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
  * are transferred by the existing Studio Runner into Drive + Media Assets.
  * Creating a storyboard or generating a preview never makes a Production Request. */
 export async function storyFirstSceneMediaRoute(request, env, url, authorization) {
-  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled))$/.exec(url.pathname);
+  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|recover|reconcile-unbilled))$/.exec(url.pathname);
   if (!path) throw new HttpError(404, "Story scene was not found");
   const [, ideaId, sceneNumber, action] = path;
   const idea = await loadAuthorizedIdea(env, ideaId, authorization);
@@ -14686,14 +14687,79 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       run_id: job?.run_id || null,
       last_checked_at: job?.last_checked_at || null,
       error: job?.error || null,
-      preview_url: job?.state === "awaiting_review" ? "/api/story-first/ideas/" +
-        ideaId + "/scenes/" + sceneNumber + "/video/preview" : null,
+      preview_url: ["awaiting_review", "accepting", "recovering", "recovery_upload_started",
+        "recovery_polling", "recovery_registering", "recovery_needs_review"].includes(job?.state)
+        ? "/api/story-first/ideas/" + ideaId + "/scenes/" + sceneNumber + "/video/preview" : null,
+      recoverable: ["accepting", "recovering", "recovery_upload_started", "recovery_polling",
+        "recovery_registering", "recovery_needs_review"].includes(job?.state),
       asset_id: job?.asset_id || null,
       model_id: job?.settings?.model_id || null, resolution: job?.settings?.resolution || null,
       generate_audio: job?.settings?.generate_audio === true,
       message: job?.state === "submission_uncertain" ?
         "Provider submission outcome uncertain. Do not retry; an administrator must reconcile charges." : null,
     });
+    if (videoAction === "recover") {
+      if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+      const body = await request.json().catch(() => ({}));
+      if (String(body.content_profile_id || "") !== profileId) throw new HttpError(403, "Video profile mismatch");
+      if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase")
+        throw new HttpError(503, "Original-video recovery requires verified Supabase media authority; no Airtable fallback.");
+      const lookupCatalog = transferId => supabaseRest(
+        env, "media_assets?metadata->>studio_transfer_id=eq." + encodeURIComponent(transferId) +
+          "&select=airtable_record_id,media_class,google_drive_file_id,active,do_not_use,metadata&limit=3",
+      );
+      const createMedia = fields => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+        method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }),
+      });
+      const saveSelectedScene = async (assetId, approvedOverride, originalJob) => {
+        const latestIdea = await loadAuthorizedIdea(env, ideaId, authorization);
+        assertIdeaUnpromoted(latestIdea, "Original video recovery");
+        assertIdeaNotApproved(latestIdea, "Original video recovery");
+        const latestStory = parseStoryFirstNotes(f(latestIdea, "Production_Config_Notes"));
+        const latestScene = latestStory?.scenes?.[index];
+        if (!latestScene || latestStory.profile_id !== profileId ||
+            String(latestScene.visual || "") !== String(originalJob.scene_visual || "") ||
+            (latestScene.assigned_asset_id && latestScene.assigned_asset_id !== assetId) ||
+            latestScene.generated_master_id) {
+          throw new HttpError(409, "Storyboard changed during video recovery; original asset preserved for review.");
+        }
+        if (!(latestScene.selected_approved && latestScene.assigned_asset_id === assetId)) {
+          latestScene.assigned_asset_id = assetId;
+          latestScene.selected_approved = true;
+          latestScene.selected_origin = "ai";
+          latestScene.decision = "ai";
+          latestScene.media_override = latestScene.media === "still" && approvedOverride === true;
+          latestScene.state = "media_approved";
+          const notes = upsertStoryFirstNotes(
+            f(latestIdea, "Production_Config_Notes"), latestStory, profileId,
+          );
+          await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+            method: "PATCH", body: JSON.stringify({ fields: {
+              Production_Config_Notes: notes,
+              Suggested_Visuals: storyFirstShotChecklist(latestStory),
+            } }),
+          });
+        }
+        const verifyIdea = await loadAuthorizedIdea(env, ideaId, authorization);
+        const verified = parseStoryFirstNotes(f(verifyIdea, "Production_Config_Notes"))?.scenes?.[index];
+        if (!verified?.selected_approved || verified.assigned_asset_id !== assetId)
+          throw new HttpError(503, "Original video asset registered, but scene selection was not verified. Recovery is resumable.");
+      };
+      const result = await recoverOriginalStoryVideo({
+        env, ideaId, sceneNumber: Number(sceneNumber), profileId,
+        profileName: String(f(profile, "Profile_Name") || ""),
+        title: String(f(idea, "Candidate_Title") || "Script a Short"), scene,
+        expectedRunId: String(body.expected_run_id || ""),
+        audioMixAcknowledged: body.audio_mix_acknowledged === true,
+        mediaOverride: body.media_override === true, jobKey, mediaKey,
+        readJob, writeJob, lookupCatalog, createMedia, saveSelectedScene,
+        googleAccessToken: () => item4GoogleAccessToken(env),
+        watermarkRequired: studioProfileRequiresChicagoWatermark(profile),
+        rightsVerified: String(env.STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED || "").toLowerCase() === "true",
+        HttpError,
+      });
+      return respond(request, env, result);
+    }
     if (videoAction === "reconcile-unbilled") {
       if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
       requirePermission(authorization, "tenant_admin");
@@ -14872,7 +14938,9 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
     if (videoAction === "preview") {
       if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
       const { job } = await readJob();
-      if (job?.state !== "awaiting_review") throw new HttpError(404, "No AI video is awaiting review");
+      if (!["awaiting_review", "accepting", "recovering", "recovery_upload_started",
+        "recovery_polling", "recovery_registering", "recovery_needs_review"].includes(job?.state))
+        throw new HttpError(404, "No owned original AI video is available for review");
       const object = await env.STUDIO_MEDIA.get(mediaKey);
       if (!object) throw new HttpError(410, "AI video preview is missing");
       return new Response(request.method === "HEAD" ? null : object.body, {
