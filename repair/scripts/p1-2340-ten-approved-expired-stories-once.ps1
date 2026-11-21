@@ -58,8 +58,10 @@ foreach($x in $t){
    $o.platform -ne 'Instagram' -or $o.platform_output_type -ne 'Instagram Story' -or $o.review_status -ne 'Approved' -or $o.output_status -ne 'Approved for Publishing' -or $o.publish_status -ne 'Failed' -or $o.publish_method -ne 'Automated' -or
    $o.do_not_publish -ne $true -or $o.auto_publish_enabled -ne $false -or $o.publish_retry_eligible -ne $false -or $o.published_at -or $o.platform_post_url -or
    [string]$e.IG_Story_Status -ne 'Failed' -or [string]$e.IG_Story_Container_ID -ne $x.old -or [string]$e.IG_Story_Post_ID -or [string]$e.Backlog_20261120_IG_Story_Provider_Status -ne 'EXPIRED'){throw 'approved_original_row_not_exact'}
-  $fence=[string]$e.Studio_Overdue_Failed_IG_Story_Fence_20261120
-  if($fence -notmatch '"previous_do_not_publish": false' -or $fence -notmatch '"previous_auto_publish_enabled": true'){throw 'safety_hold_origin_not_verified'}
+  $fence=$e.Studio_Overdue_Failed_IG_Story_Fence_20261120
+  if($null -eq $fence -or $fence.previous_do_not_publish -ne $false -or
+     $fence.previous_auto_publish_enabled -ne $true -or
+     [string]$fence.provider_container_preserved -ne $x.old){throw 'safety_hold_origin_not_verified'}
   if($asset -notmatch ('^https://media\.chicagoshining\.com/studio/previews/'+$x.rid+'/[^?]+\.mp4$')){throw 'approved_video_media_url_not_exact'}
   $head=Invoke-WebRequest $asset -Method Head -UseBasicParsing -TimeoutSec 30
   if([int]$head.StatusCode -ne 200 -or [string]$head.Headers.'Content-Type' -notmatch '(video/|application/octet-stream)'){throw 'approved_media_unavailable'}
