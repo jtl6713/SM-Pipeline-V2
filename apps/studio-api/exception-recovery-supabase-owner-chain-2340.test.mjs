@@ -35,6 +35,10 @@ test("authenticated and generic provider GETs cannot fall back to legacy Pipelin
  const provider=part(service,"async function exceptionRecoveryReadAuthenticatedProvider(", "async function appendPublicationRecoveryAudit(");
  assert.match(provider, /requireSupabase:true/g);
  assert.doesNotMatch(provider,/listRecords\(env,"Pipeline Settings"/);
+ assert.match(provider,/readSupabasePipelineSetting\(env,/);
+ assert.match(provider,/"YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",\{activeOnly:true\}/);
+ assert.match(provider,/YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:transportKey/);
+ assert.doesNotMatch(provider,/airtableFetch/);
  const generic=part(service,"async function exceptionRecoveryReadProvider(", "async function exceptionRecoveryReadVerifiedOutput(");
  assert.match(generic,/const strict = Boolean\(verifiedProfile\)/);
  assert.match(generic,/requireSupabase:strict/);

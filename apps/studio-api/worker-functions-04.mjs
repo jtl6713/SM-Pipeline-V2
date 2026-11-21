@@ -10804,10 +10804,17 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   // The deployment may keep the uploader authentication key in the existing
   // global Pipeline Setting rather than a Worker binding. This key is only
   // transport authentication: destination URL and channel remain scoped.
-  // Do not retrieve uploader credentials from legacy Airtable Pipeline Settings.
-  // Supabase-scoped settings or an existing Worker secret are the only inputs.
-  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET &&
-     !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET)
+  // The uploader's shared transport key is global, not a city destination.
+  // Resolve it directly from the canonical Supabase Pipeline Settings row if
+  // the scoped bulk resolver omitted it. Do not query legacy Airtable.
+  let transportKey=String(settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET ||
+    env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "").trim();
+  if(!transportKey) {
+    const globalSetting=await readSupabasePipelineSetting(env,
+      "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",{activeOnly:true}).catch(()=>null);
+    transportKey=String(f(globalSetting,"Setting_Value")||"").trim();
+  }
+  if(!transportKey)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,
       evidence:"profile_service_auth_missing"};
   const channel=verifiedRecoveryChannelId(source.profile,settings);
@@ -10817,8 +10824,7 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   // expected channel stay profile-scoped; this service key authenticates the
   // configured uploader and never substitutes another profile's channel.
   return verifyAuthenticatedYouTubeReceipt(source.row,{settings:{
-    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:
-      settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||"",
+    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:transportKey,
   },expectedChannelId:channel.channel_id});
 }
 
