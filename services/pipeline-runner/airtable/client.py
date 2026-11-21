@@ -44,10 +44,11 @@ class AirtableClient:
             )
         return getattr(requests, method.lower())(url, **kwargs)
 
-    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
+    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
         from supabase_pipeline import mirror_airtable_records
 
-        mirror_airtable_records(self._settings, table_id, records, partial=partial)
+        result = mirror_airtable_records(self._settings, table_id, records, partial=partial)
+        return result if isinstance(result, dict) else {"ok": False, "count": 0}
 
     def _legacy_export(self, table_id: str) -> bool:
         from supabase_pipeline import legacy_export_enabled
@@ -156,9 +157,16 @@ class AirtableClient:
             )
             return {"id": record_id, "fields": fields}
         if self._legacy_export(table_id):
-            self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            outcome = self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            if outcome.get("ok") is not True or outcome.get("count") != 1:
+                # Supabase is the canonical write source. A transport error,
+                # missing row, or partial write cannot return a fake success.
+                # A retry must reconcile any uncertain prior commit first.
+                raise RuntimeError(
+                    f"Supabase authoritative update not confirmed for {table_id} {record_id}"
+                )
             logger.info(
-                "Airtable archive kept the Supabase commit and did not export %s %s",
+                "Supabase authoritative update committed without Airtable export %s %s",
                 table_id,
                 record_id,
             )
@@ -167,10 +175,8 @@ class AirtableClient:
             pending = {"id": record_id, "fields": fields}
             committed = self._commit_phase6(table_id, [pending])
             if not committed:
-                logger.warning(
-                    "supabase phase6 update commit failed for %s %s; Airtable remains required",
-                    table_id,
-                    record_id,
+                raise RuntimeError(
+                    f"Supabase Phase6 authoritative update not confirmed for {table_id} {record_id}"
                 )
             else:
                 logger.info(
@@ -183,10 +189,8 @@ class AirtableClient:
             pending = {"id": record_id, "fields": fields}
             committed = self._commit_side_table(table_id, [pending])
             if not committed:
-                logger.warning(
-                    "supabase side-table update commit failed for %s %s; Airtable remains required",
-                    table_id,
-                    record_id,
+                raise RuntimeError(
+                    f"Supabase side-table authoritative update not confirmed for {table_id} {record_id}"
                 )
             else:
                 logger.info(
@@ -351,6 +355,13 @@ class AirtableClient:
                 created.extend(minted)
                 continue
             if self._archive_closed():
+                if legacy or phase6 or side:
+                    # A failed commit may have written a subset of records.
+                    # Never manufacture rec IDs or claim a successful create;
+                    # the caller must reconcile exact canonical identities.
+                    raise RuntimeError(
+                        f"Supabase authoritative create not confirmed for {table_id}"
+                    )
                 logger.info(
                     "supabase SoR create miss; skipping Airtable archive POST %s",
                     table_id,
