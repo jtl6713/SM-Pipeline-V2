@@ -39,3 +39,25 @@ test("quantity control has a compact responsive layout beside the top action", (
   assert.match(css, /#page-ideas \.heading-actions \.idea-generate-top-count/);
   assert.match(css, /@media\(max-width:760px\)[^\n]*\.idea-generate-top-count/);
 });
+
+const clarity = readFileSync(new URL("./assets/studio-clarity-0599.css", import.meta.url), "utf8");
+
+test("Ideas heading groups quantity and compact Generate button after four normal actions", () => {
+  const start = html.indexOf('<div class="heading-actions">', html.indexOf('<section id="page-ideas"'));
+  const end = html.indexOf("</div>", start);
+  const heading = html.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(heading, /id="newIdeaButton"[\s\S]*class="idea-generate-top-action"/);
+  assert.match(heading, /class="idea-generate-top-action"[\s\S]*id="ideaGenerateCount"[\s\S]*id="generateIdeasButton"/);
+  assert.equal((html.match(/id="ideaGenerateCount"/g) || []).length, 1);
+  assert.equal((html.match(/id="generateIdeasButton"/g) || []).length, 1);
+});
+
+test("Ideas action grid remains two columns on phones and Generate button is compact", () => {
+  assert.match(clarity, /#page-ideas \.page-heading \.heading-actions\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
+  assert.match(clarity, /@media\(max-width:760px\)\{[\s\S]*#page-ideas \.page-heading \.heading-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
+  assert.match(clarity, /#page-ideas \.heading-actions>\.idea-generate-top-action\{grid-column:1\/-1/);
+  assert.match(clarity, /#page-ideas \.heading-actions \.idea-generate-top-action #generateIdeasButton\{[^}]*width:auto!important/);
+  assert.doesNotMatch(clarity, /#page-ideas \.heading-actions button:nth-child\(5\)/);
+  assert.doesNotMatch(clarity, /#page-ideas \.page-heading \.heading-actions\{grid-template-columns:1fr/);
+});
