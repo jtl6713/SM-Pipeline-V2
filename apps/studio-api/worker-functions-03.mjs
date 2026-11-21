@@ -52,6 +52,7 @@ import {
   supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
   listSupabasePipelineHistoryPage,
+  listSupabasePipelineContentPage,
   listSupabasePipelineTitleSearch,
   pipelineTitleSearchTokens,
   listSupabaseManualActionOutputs,
@@ -2596,6 +2597,28 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
   // A normal newest-250 snapshot cannot answer older Failed/Past Due/No Date
   // clicks, and an Airtable prefilter alone can include the wrong state.
   const focusedMode = String(url.searchParams.get("mode") || "");
+  // #2536: content-ID pagination; each selected content retains every output.
+  if (focusedMode === "content_page") {
+    if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
+      throw new HttpError(503, "Supabase Pipeline content paging unavailable");
+    const offsetRaw = String(url.searchParams.get("offset") || "0");
+    if (!/^\\d{1,9}$/.test(offsetRaw)) throw new HttpError(400, "Invalid Pipeline offset");
+    const packed = await listSupabasePipelineContentPage(env, {
+      profileAirtableId: profile.id, offset: Number(offsetRaw), limit: 10,
+      createdFrom: url.searchParams.get("created_from") || "",
+      createdTo: url.searchParams.get("created_to") || "",
+    });
+    const records = stripDeletedDuplicateOutputRecords(packed.records.map(record => mapOutput(
+      record, null, null,
+      packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    )));
+    return respond(request, env, {
+      ok: true, records, count: records.length, content_ids: packed.content_ids,
+      has_more: packed.has_more, next_offset: packed.next_offset,
+      read_source: "supabase", scope: "all_content",
+      profile: mapStudioContentProfile(profile),
+    });
+  }
   // #2531: authoritative, all-week, paginated history; never fall back to
   // Airtable or return a truncated list as though it were complete.
   if (focusedMode === "history") {
