@@ -1,0 +1,131 @@
+name: One-shot TikTok 10685 read-only status
+
+on:
+  push:
+    branches: [ops/tiktok-10685-readonly-20261120]
+    paths: ['.github/workflows/tiktok-10685-status-readonly-20261120.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check-tiktok:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Find existing authenticated Ops credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for token in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$token" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $token" "https://ops.chicagoshining.com/api/catalog" || true)
+            if [[ "$http" == "200" ]] && jq -e '.ok == true' /tmp/catalog.json >/dev/null; then
+              echo "::add-mask::$token"
+              echo "OPS_TOKEN=$token" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "No usable Ops credential"
+          exit 1
+      - name: Query current TikTok status and creator without any delivery or database write
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/tiktok-10685.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_supabase_authority_not_verified" }
+          $runtime=Join-Path (Get-Location) "Services\pipeline-runner\service"
+          if (-not (Test-Path (Join-Path $runtime ".env")) -or -not (Test-Path (Join-Path $runtime "config.py"))) { throw "runner_local_runtime_not_found" }
+          $diagnostic=@'
+          import os,sys,json
+          sys.path.insert(0,os.getcwd())
+          try:
+              from airtable.client import AirtableClient
+              from airtable.constants import PLATFORM_OUTPUTS_TABLE
+              from config import load_settings
+              from item4.settings import PipelineSettings
+              from publish.destinations import resolve_publish_theme
+              from render.fields import field_str
+              from supabase_pipeline import studio_write_source,supabase_configured
+              from ttd.client import TikTokDraftClient,load_tiktok_settings,draft_status_from,fail_reason_from,public_post_ids_from
+              import requests
+              settings=load_settings()
+              if studio_write_source(settings)!="supabase" or not supabase_configured(settings) or settings.get("studio_runner_output_read_source")!="supabase":
+                  raise RuntimeError("supabase_only_guard")
+              client=AirtableClient()
+              output=client.get_record(PLATFORM_OUTPUTS_TABLE,"rec4E9TMeiRXb4M6B")
+              if field_str(output,"Output_ID")!="10685" or field_str(output,"Platform")!="TikTok":
+                  raise RuntimeError("output_identity_guard")
+              pub=field_str(output,"TikTok_Draft_Publish_ID")
+              if pub!="p_inbox_url~v2.7710418465512851486":
+                  raise RuntimeError("publish_id_changed")
+              if field_str(output,"Published_At") or field_str(output,"Platform_Post_URL"):
+                  raise RuntimeError("output_already_published")
+              if resolve_publish_theme(output=output,client=client)!="miami":
+                  raise RuntimeError("profile_guard")
+              psettings=PipelineSettings(client)
+              worker=load_tiktok_settings(psettings,output,client=client)
+              if not worker["url"].startswith("https://") or "miami" not in worker["url"].lower():
+                  raise RuntimeError("miami_worker_guard")
+              http,body=TikTokDraftClient(base_url=worker["url"],secret=worker["secret"]).draft_status(pub)
+              info=(body.get("tiktok_response") or {}).get("error") or {}
+              try:
+                  response=requests.post(worker["url"]+"/tiktok/creator-info",json={},headers={"X-Pipeline-Secret":worker["secret"],"Content-Type":"application/json"},timeout=40)
+                  connected=str((response.json() or {}).get("creator_username") or "").lstrip("@").casefold()
+                  creator_http=response.status_code
+              except Exception:
+                  connected=""
+                  creator_http=0
+              expected=str(psettings.get("MIAMI_TIKTOK_HANDLE") or "").lstrip("@").casefold()
+              print("TIKTOK_10685_RESULT="+json.dumps({
+                "output":10685,"profile":"Miami","publish_id":pub,"http":http,
+                "status":draft_status_from(body),"draft_delivered":body.get("draft_delivered"),
+                "user_completed_post":body.get("user_completed_post"),
+                "failure_reason":fail_reason_from(body),
+                "public_post_ids_count":len(public_post_ids_from(body)),
+                "tiktok_error_code":info.get("code"),"tiktok_log_id":info.get("log_id"),
+                "creator_http":creator_http,"connected_creator":connected,"expected_creator":expected,
+                "creator_match":(connected==expected) if connected and expected else None
+                },separators=(",",":")))
+              if http!=200: raise RuntimeError("tiktok_status_non_200")
+          except Exception as exc:
+              print("TIKTOK_10685_DIAGNOSTIC_FAILED="+type(exc).__name__+":"+str(exc)[:100])
+              sys.exit(3)
+          '@
+          $script=Join-Path $env:TEMP "tiktok10685-status-check.py"
+          Set-Content -LiteralPath $script -Value $diagnostic -Encoding UTF8
+          Push-Location $runtime
+          try {
+            & python $script
+            if ($LASTEXITCODE -ne 0) { throw "tiktok_10685_python_diagnostic_failed" }
+          } finally { Pop-Location; Remove-Item -LiteralPath $script -ErrorAction SilentlyContinue }
+          PS
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          Path('/tmp/tiktok-10685.json').write_text(json.dumps({"command":Path('/tmp/tiktok-10685.ps1').read_text(),"confirm":True}))
+          PY
+          http=$(curl -sS --max-time 30 -o /tmp/ops-job.json -w '%{http_code}' -X POST "https://ops.chicagoshining.com/api/shell" -H "Authorization: Bearer $OPS_TOKEN" -H "Content-Type: application/json" --data-binary @/tmp/tiktok-10685.json || true)
+          if [[ "$http" != "200" && "$http" != "202" ]]; then echo "Ops refused diagnostic HTTP=$http"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-job.json)
+          for i in $(seq 1 75); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-job-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-job-status.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-job-status.json | grep '^TIKTOK_10685_' || true
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-job-status.json | grep -E 'TIKTOK_10685_|runner_local_runtime_not_found|runner_supabase_authority_not_verified|tiktok_10685_python_diagnostic_failed' | tail -15 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops diagnostic timed out"
+          exit 4
