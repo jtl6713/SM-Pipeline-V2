@@ -10,7 +10,7 @@ test("active Worker and Durable Object contain no Airtable HTTP endpoint", () =>
     "apps/studio-api/profile-summary-do.mjs",
     "services/pipeline-runner/airtable/client.py",
   ]) {
-    assert.doesNotMatch(source(path), /https?:\\/\\/api\\.airtable\\.com\\//, path);
+    assert.equal(source(path).includes("https://api.airtable.com/"), false, path);
   }
 });
 
@@ -20,18 +20,18 @@ test("Worker raises on missing Supabase CRUD instead of fabricating results", ()
     worker.indexOf("async function airtableFetch("),
     worker.indexOf("  // Queue the summary change BEFORE optional Supabase mirror calls"),
   );
-  assert.match(gateway, /supabase_only_crud_uncommitted/);
-  assert.match(gateway, /throw new HttpError\\(\\s*503,/);
-  assert.doesNotMatch(gateway, /await airtableRequestSlot\\(/);
-  assert.doesNotMatch(gateway, /body = \\{ records: \\[\\] \\}/);
-  assert.doesNotMatch(gateway, /deleted:\\s*true/);
+  assert.ok(gateway.includes("supabase_only_crud_uncommitted"));
+  assert.ok(gateway.includes("throw new HttpError("));
+  assert.ok(!gateway.includes("await airtableRequestSlot("));
+  assert.ok(!gateway.includes("body = { records: [] }"));
+  assert.ok(!gateway.includes("deleted: true"));
 });
 
 test("Worker Supabase deletes verify one returned row", () => {
   const adapter = source("apps/studio-api/supabase-pipeline-reads.mjs");
-  assert.match(adapter, /delete_not_confirmed/);
-  assert.match(adapter, /deleted\\.length !== 1/);
-  assert.match(adapter, /Prefer: "return=representation"/);
+  assert.ok(adapter.includes("delete_not_confirmed"));
+  assert.ok(adapter.includes("deleted.length !== 1"));
+  assert.ok(adapter.includes('Prefer: "return=representation"'));
 });
 
 test("retired standalone scripts cannot request the Airtable API", () => {
@@ -42,7 +42,7 @@ test("retired standalone scripts cannot request the Airtable API", () => {
     "deploy/bootstrap-studio-insights-tables.py",
     "scripts/diagnose-post-insights-profiles.py",
   ]) {
-    assert.doesNotMatch(source(path), /api\\.airtable\\.com/);
-    assert.match(source(path), /Retired: Supabase-native replacement required/);
+    assert.ok(!source(path).includes("api.airtable.com"), path);
+    assert.ok(source(path).includes("Retired: Supabase-native replacement required"), path);
   }
 });
