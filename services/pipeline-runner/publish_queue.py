@@ -33,6 +33,13 @@ def _checked(value: Any) -> bool:
         return True
     return str(value).strip().lower() in {"true", "1", "yes"}
 
+def _retry_explicitly_prohibited(fields: dict) -> bool:
+    """Only an actual false stored retry flag prohibits action. Missing/null is
+    not a positive retry approval but leaves fresh initial publication eligible
+    under its separate approval/stage preflight."""
+    value = fields.get("Publish_Retry_Eligible") if "Publish_Retry_Eligible" in fields else fields.get("publish_retry_eligible")
+    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
+
 
 def _when(value: Any) -> datetime | None:
     if value is None or value == "":
@@ -66,6 +73,7 @@ def youtube_action_due_now(fields: dict, now: datetime) -> int:
         and not _checked(fields.get("Do_Not_Publish") if "Do_Not_Publish" in fields else fields.get("do_not_publish"))
         and _text(fields.get("Publish_Status") or fields.get("publish_status")) != "Published"
         and stage not in {"Complete", "Terminal Error"}
+        and not _retry_explicitly_prohibited(fields)
         and _due_clock(_when(fields.get("Publish_Next_Retry_At") or fields.get("publish_next_retry_at")), now)
     )
 
@@ -100,7 +108,7 @@ def fb_resolved_publish_mode(fields: dict) -> str:
 
 def fb_action_due_now(fields: dict, now: datetime) -> int:
     mode = _text(fields.get("FB_Resolved_Publish_Mode") or fields.get("fb_resolved_publish_mode")) or fb_resolved_publish_mode(fields)
-    retry_eligible = _checked(fields.get("Publish_Retry_Eligible") if "Publish_Retry_Eligible" in fields else fields.get("publish_retry_eligible"))
+    retry_prohibited = _retry_explicitly_prohibited(fields)
     retry_at = _when(fields.get("Publish_Next_Retry_At") or fields.get("publish_next_retry_at"))
     return int(
         _text(fields.get("Platform") or fields.get("platform")) == "Facebook"
@@ -112,7 +120,8 @@ def fb_action_due_now(fields: dict, now: datetime) -> int:
         and not _checked(fields.get("Do_Not_Publish") if "Do_Not_Publish" in fields else fields.get("do_not_publish"))
         and _text(fields.get("Publish_Status") or fields.get("publish_status")) != "Published"
         and _text(fields.get("FB_Publish_Status") or fields.get("fb_publish_status")) != "Published"
-        and (not retry_eligible or retry_at is None or _due_clock(retry_at, now))
+        and not retry_prohibited
+        and _due_clock(retry_at, now)
     )
 
 
