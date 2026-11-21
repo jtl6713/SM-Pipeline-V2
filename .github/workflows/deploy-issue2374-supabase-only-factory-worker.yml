@@ -23,6 +23,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       VERIFY_BRIDGE: chicagoshining-studio-issue2374-verify
+      STUDIO_PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
+      STUDIO_QA_SUPABASE_LEDGER_VERIFIED: ${{ vars.STUDIO_QA_SUPABASE_LEDGER_VERIFIED }}
       WRANGLER_VERSION: 4.123.0
       ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
       ACTIVATE_SCHEDULE_CONFIRMATION: ${{ inputs.activate_schedule_confirmation || '' }}
@@ -130,7 +132,7 @@ jobs:
           curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/version-before.json
           jq -e '.success==true' /tmp/version-before.json >/dev/null
           python - <<'PY'
-          import json, sys
+          import json, os, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('repair/scripts')))
           from studio_api_binding_contract import assert_live_contract, assert_global_factory_binding_tuple
@@ -162,9 +164,15 @@ jobs:
           prior_stage=assert_global_factory_binding_tuple(plain_vars,'Predeploy Worker',allow_absent=True)
           print('predeploy_global_factory_stage='+prior_stage)
           Path('/tmp/active-plain-vars.json').write_text(json.dumps(plain_vars))
-          prod_base=next((b.get('text') for b in bindings if b.get('name')=='AIRTABLE_BASE_ID'),None)
-          if prod_base != 'appe33zkZn35yirTL':
-              raise SystemExit('Factory canary predeploy refused: production Airtable base identity mismatch')
+          # This deploy path must honor the same independently protected
+          # Supabase project and QA cutover gate as the canonical release.
+          approved_ref=os.environ.get('STUDIO_PRODUCTION_SUPABASE_PROJECT_REF','').strip()
+          if approved_ref != 'vkwvscgisqsbuwagdvtb':
+              raise SystemExit('Factory deploy denied: protected production project identity missing')
+          if plain_vars.get('SUPABASE_URL','').rstrip('/') != ('https://'+approved_ref+'.supabase.co'):
+              raise SystemExit('Factory deploy denied: active Supabase URL is not approved production')
+          if os.environ.get('STUDIO_QA_SUPABASE_LEDGER_VERIFIED','').strip().lower() != 'true':
+              raise SystemExit('Factory deploy denied: approved QA history cutover gate missing')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
@@ -292,7 +300,7 @@ jobs:
             'observability':{'enabled':True,'head_sampling_rate':1},
             'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
-            'secrets':{'required':['AIRTABLE_PAT']}
+            'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}
           }
           # Independent SQLite namespace. No schedule reservation data is shared.
           cfg['durable_objects']={'bindings':[{
