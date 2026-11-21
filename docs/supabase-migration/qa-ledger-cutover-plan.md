@@ -1,6 +1,8 @@
 # QA Test Center ledger: required before Airtable retirement
 
-**Status: production cutover blocker.** No production data was mutated by this plan.
+**Status: additive QA schema applied in the only live production project;
+historical import and Worker release remain blocked.** The schema migration
+added QA-only objects without modifying existing Studio content tables.
 
 ## Existing history to preserve
 
@@ -201,3 +203,66 @@ is healthy or because Supabase advertises backup support.
 
 This note is planning only. It does not claim that a backup was listed,
 that rollback was proven, or that a live migration was performed.
+
+
+## Applied production QA schema checkpoint — 2026-11-21 08:44 UTC
+
+Supabase Management API migration `20261121084412_studio_qa_ledger_append_only_production_20261121`
+was successfully applied to the existing live project
+`vkwvscgisqsbuwagdvtb` using the exact reviewed additive DDL from
+`docs/supabase-migration/phase7/011_qa_ledger_review_only.sql`
+(with only its surrounding BEGIN/COMMIT delimiters omitted in the migration
+request; the migration tool owns the transaction).
+
+Direct production `pg_catalog` acceptance via
+`docs/supabase-migration/phase7/012_qa_ledger_verify_readonly.sql`
+returned **QA TABLE READY = TRUE on both tables**, including:
+
+- RLS enabled; no `anon` or `authenticated` direct reads/writes.
+- `service_role` limited to SELECT and INSERT (no UPDATE/DELETE).
+- Unique native run/execution identities, unique idempotency keys and unique
+  Airtable legacy source correlation IDs.
+- Run/event foreign-key relationship and enabled append-only mutation triggers.
+- Legacy source-field integrity and payload-hash constraints.
+
+Immediately after applying the DDL, production record counts were
+**0 QA runs and 0 QA events**. That is the expected *new schema baseline*,
+**not proof of source-to-target migration parity**. The current Airtable
+source still holds **one historical synthetic run and one RunFinalized event**;
+both source pages were complete, and no live import was executed.
+
+The user supplied an authoritative production Supabase backup-page screenshot
+listing seven PHYSICAL scheduled snapshots for November 14–20, 2026, most
+recent at **2026-11-20 11:45:21 UTC**. Backup availability is verified, but
+no restore has been attempted or proved. Restoring this snapshot over the
+actively writing production database could lose newer Studio records;
+**never click Restore as part of QA migration**.
+
+### Precisely what remains before any Worker cutover
+
+1. Freeze and independently review the one-run/one-event legacy export
+   privately. The latest read-only source fingerprints, calculated from
+   exact canonical source fields, are:
+   - run source field SHA-256: `6cc5d913050f6782f54603d499a639263d3e313d34c4ee2bdbb350c61878ac6c`
+   - event source field SHA-256: `8d18933877a1f2dbcbc11b7b70990731019f0cb1d41cb4337a73e3a6688ab97c`
+   - single-run inventory SHA-256: `b6e44759c390619100d517846f5f5709099dedd2847886df1cd30ee02960d723`
+   - single-event inventory SHA-256: `261ba128547f64c769d9ed9e69b34c3fa8758e42fa99991966fe1f927aa294cd`
+   Recheck these against the final private frozen export immediately before
+   importing; these digests alone are not approval or full data validation.
+2. Independently approve the zero-destructive-change backfill (historical
+   source data only) and recovery procedure. Use the operator-only importer;
+   do not bypass its private manifest gate with invented reviewer approval
+   or an untracked direct SQL insert.
+3. Read back both canonical Supabase rows and reconcile **all legacy JSON
+   fields, IDs, UTC timestamps, hashes, counts and event-to-run references**.
+   The imported historical run is a synthetic storage smoke, not a real
+   Pass; its status must remain `Synthetic Storage Verification`.
+4. Independently run production-only, non-publishing QA HTTP tests. Only
+   then may the protected QA ledger verification variable be approved.
+   Do not infer release permission from either empty or existing tables.
+5. Cut over the Worker only under the existing protected rollback mechanism,
+   preserve QA history, and separately certify a six-hour Airtable zero-egress
+   window before revoking its credentials.
+
+No production Worker, publishing, scheduling, or existing data table was
+changed by the 08:44 schema-only migration.
