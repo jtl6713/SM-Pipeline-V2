@@ -1,0 +1,208 @@
+name: Five serialized old IG Story container reads (GET only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/five-ig-story-serial-provider-get-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: five-ig-story-serial-read-20261120
+  cancel-in-progress: false
+jobs:
+  read_only:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {output_number: 1256, record_id: reclzIZkun5Mj4WFT, container_id: '18115347590139610', theme: miami}
+          - {output_number: 2627, record_id: rec84IjfUIcvTHDKc, container_id: '18132638605783117', theme: nyc}
+          - {output_number: 5047, record_id: rec7IerfkxmU6Kmxb, container_id: '18132659572783117', theme: nyc}
+          - {output_number: 5244, record_id: rec9FFAi9EAZ1gZ7w, container_id: '18115349108139610', theme: miami}
+          - {output_number: 5394, record_id: rec5HzmR2ENCivIzK, container_id: '18115349219139610', theme: miami}
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: GET exact owned saved Story container on matched account, one at a time
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/ig5-readonly.py <<'PY'
+          """Single-account, single-container Graph GET with strict Supabase preflight."""
+          import json
+          import os
+          from datetime import datetime, timezone
+          # Ops sets PORT="" for child shells; the installed runner expects int(PORT).
+          # This is the diagnostic Python subprocess only, never a service mutation.
+          os.environ["PORT"]="3350"
+          from config import load_settings
+          from airtable.client import AirtableClient
+          from airtable.constants import PLATFORM_OUTPUTS_TABLE
+          from item4.settings import PipelineSettings
+          from ap1_ig.graph import load_instagram_graph_settings
+          from publish.destinations import resolve_publish_theme
+          import requests
+          
+          record_id = "__RECORD__"
+          output_number = __NUMBER__
+          expected_theme = "__THEME__"
+          container_id = "__CONTAINER__"
+          
+          def output(**data):
+              print("IG5_RESULT="+json.dumps({"output_id":output_number,"container_id":container_id,"read_only":True,**data},sort_keys=True),flush=True)
+          
+          stage="settings_load"
+          try:
+              settings=load_settings()
+              if settings.get("studio_write_source")!="supabase" or settings.get("studio_runner_output_read_source")!="supabase" or not settings.get("supabase_url"):
+                  output(status="blocked",reason="supabase_authority_unavailable")
+                  raise SystemExit(0)
+              stage="canonical_output_read"
+              client=AirtableClient(settings)
+              row=client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
+              f=row.get("fields",{})
+              if row.get("id")!=record_id or str(f.get("Output_ID"))!=str(output_number) or str(f.get("IG_Story_Container_ID") or "")!=container_id:
+                  output(status="blocked",reason="exact_output_identity_mismatch")
+                  raise SystemExit(0)
+              if (f.get("Do_Not_Publish") or f.get("Test_Run_ID") or f.get("Review_Status")!="Approved" or f.get("Output_Status")!="Approved for Publishing"
+                  or f.get("Platform")!="Instagram" or f.get("Platform_Output_Type")!="Instagram Story"
+                  or f.get("Publish_Status")!="Ready to Publish" or f.get("Render_Status")!="Rendered"
+                  or str(f.get("IG_Story_Status") or "")!="Failed"
+                  or f.get("Published_At") or f.get("Platform_Post_URL") or f.get("IG_Story_Post_ID") or f.get("Platform_Post_ID") or f.get("Platform_Media_ID")):
+                  output(status="blocked",reason="publication_state_changed_or_held")
+                  raise SystemExit(0)
+              if "(#4) Application request limit reached" not in str(f.get("IG_Story_Error_Message") or ""):
+                  output(status="blocked",reason="unexpected_old_failure")
+                  raise SystemExit(0)
+              retry=f.get("Publish_Next_Retry_At")
+              if retry:
+                  try:
+                      retry_at=datetime.fromisoformat(str(retry).replace("Z","+00:00"))
+                      if retry_at.tzinfo is None: retry_at=retry_at.replace(tzinfo=timezone.utc)
+                  except Exception:
+                      output(status="blocked",reason="invalid_retry_clock")
+                      raise SystemExit(0)
+                  if datetime.now(timezone.utc)<retry_at:
+                      output(status="blocked",reason="cooldown_active")
+                      raise SystemExit(0)
+              stage="account_theme_verification"
+              if resolve_publish_theme(output=row,client=client)!=expected_theme:
+                  output(status="blocked",reason="unexpected_profile_theme")
+                  raise SystemExit(0)
+              stage="profile_graph_credentials"
+              provider=load_instagram_graph_settings(PipelineSettings(client),row,client=client)
+              token=provider["token"]
+              version=provider["version"]
+              if not token or not provider["ig_user_id"] or not version.startswith("v"):
+                  output(status="blocked",reason="profile_graph_credentials_missing")
+                  raise SystemExit(0)
+              # Exactly one authenticated GET; no media_publish, create_story, PATCH, POST or Airtable egress.
+              url="https://graph.facebook.com/"+version+"/"+container_id
+              stage="meta_graph_get"
+              response=requests.get(url,params={"fields":"status_code,status"},headers={"Authorization":"Bearer "+token},timeout=25,allow_redirects=False)
+              try: body=response.json()
+              except ValueError: body={}
+              if not isinstance(body,dict): body={}
+              error=body.get("error") if isinstance(body.get("error"),dict) else {}
+              state=str(body.get("status_code") or "").upper().strip()
+              code=error.get("code")
+              code=code if isinstance(code,int) and not isinstance(code,bool) else None
+              if state not in {"FINISHED","IN_PROGRESS","PUBLISHED","ERROR","EXPIRED"}:
+                  state="UNKNOWN"
+              output(status="checked",provider_http=response.status_code,container_status=state,
+                  provider_error_code=code,provider_error_transient=error.get("is_transient") is True,
+                  account_scope_verified_by_config=True,provider_action="GET_only")
+          except SystemExit:
+              raise
+          except Exception as error:
+              output(status="blocked",reason="provider_read_or_supabase_preflight_failed",failure_stage=stage,failure_class=type(error).__name__)
+          PY
+          cat > /tmp/ig5-readonly.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $health = Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.version -ne "2026-11-20-ig-story-graph-limit-cooldown-v1" -or
+              $health.studio_write_source -ne "supabase" -or
+              $health.studio_runner_output_read_source -ne "supabase" -or
+              $health.studio_runner_content_read_source -ne "supabase" -or
+              $health.airtable_activity.any_read -ne $false -or $health.airtable_activity.any_write -ne $false) {
+            throw "IG5 preflight failed: trusted Supabase runner not healthy"
+          }
+          $root = Join-Path (Get-Location) "Services\pipeline-runner\service"
+          if (-not (Test-Path $root)) { throw "IG5 runner source unavailable" }
+          if (-not (Test-Path (Join-Path $root "config.py"))) { throw "IG5 runner config.py unavailable" }
+          Write-Output "IG5_STAGE=runner_root_verified"
+          $env:PYTHONPATH = $root
+          $python = Get-Command python -ErrorAction SilentlyContinue
+          if (-not $python) { throw "IG5 Python unavailable" }
+          $probePath = Join-Path $env:TEMP ("ig5-readonly-"+[Guid]::NewGuid().ToString("N")+".py")
+          $probe = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__PYBASE64__"))
+          [IO.File]::WriteAllText($probePath,$probe)
+          try {
+            Push-Location $root
+            # Explicitly add the real runner source directory to sys.path even
+            # when the temporary script lives elsewhere on the Windows host.
+            Write-Output "IG5_STAGE=python_invoked"
+            & $python.Source -c 'import os,sys,runpy;sys.path.insert(0,os.getcwd());runpy.run_path(sys.argv[1])' $probePath
+            Write-Output ("IG5_STAGE=python_exit_code_"+$LASTEXITCODE)
+            if ($LASTEXITCODE -ne 0) { throw "IG5 read-only Python diagnostic failed" }
+          } finally {
+            Pop-Location
+            Remove-Item $probePath -Force -ErrorAction SilentlyContinue
+          }
+          PS
+          sed -i -e 's/__NUMBER__/${{ matrix.output_number }}/g' -e 's/__RECORD__/${{ matrix.record_id }}/g' -e 's/__CONTAINER__/${{ matrix.container_id }}/g' -e 's/__THEME__/${{ matrix.theme }}/g' /tmp/ig5-readonly.py
+          python3 -m py_compile /tmp/ig5-readonly.py
+          python3 - <<'PY'
+          import base64,json
+          from pathlib import Path
+          payload=base64.b64encode(Path("/tmp/ig5-readonly.py").read_bytes()).decode()
+          script=Path("/tmp/ig5-readonly.ps1").read_text().replace("__PYBASE64__",payload)
+          Path("/tmp/ig5-request.json").write_text(json.dumps({"command":script,"confirm":True}))
+          print("one_exact_provider_get_scope_built=true")
+          PY
+          BASE="https://ops.chicagoshining.com"
+          selected=""
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            http=$(curl -sS --max-time 20 -o /tmp/ig5-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$http" == "200" ]] && jq -e '.ok==true' /tmp/ig5-catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          http=$(curl -sS --max-time 25 -o /tmp/ig5-submit.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H "Content-Type: application/json" --data-binary @/tmp/ig5-request.json || true)
+          if [[ "$http" != "200" && "$http" != "202" ]]; then echo "ig5_submit_http=$http"; exit 3; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ig5-submit.json)
+          test -n "$job"
+          echo "ig5_shell_job_accepted=true"
+          for i in $(seq 1 40); do
+            code=$(curl -sS --max-time 20 -o /tmp/ig5-job.json -w '%{http_code}' -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" || true)
+            if [[ "$code" == "200" ]]; then
+              state=$(jq -r '.job.status // empty' /tmp/ig5-job.json)
+              if [[ "$state" == "ok" ]]; then
+                jq -r '.job.log // ""' /tmp/ig5-job.json | grep '^IG5_RESULT=' | tail -1 | sed 's/^IG5_RESULT=//' > /tmp/ig5-result.json
+                jq -e --argjson id '${{ matrix.output_number }}' --arg cid '${{ matrix.container_id }}' '.output_id==$id and .container_id==$cid and .read_only==true and (.status=="checked" or .status=="blocked")' /tmp/ig5-result.json >/dev/null
+                jq -c '{output_id,container_id,status,reason,failure_stage,failure_class,provider_http,container_status,provider_error_code,provider_error_transient,provider_action}' /tmp/ig5-result.json
+                exit 0
+              fi
+              if [[ "$state" == "failed" ]]; then
+                echo "ig5_shell_probe_failed_no_provider_verification"
+                # Print only specific known safe exception categories; never raw Ops output.
+                jq -r '.job.log // ""' /tmp/ig5-job.json | grep -E 'IG5_STAGE=|IG5_RESULT=|IG5 |IG5_|ModuleNotFoundError|SyntaxError|NameError|ImportError|FileNotFoundError|Traceback|ParserError|CommandNotFoundException' | tail -20 || true
+                exit 4
+              fi
+            fi
+            sleep 3
+          done
+          echo "ig5_shell_probe_status_unavailable"
+          exit 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ig-story-${{ matrix.output_number }}-readonly-result
+          path: /tmp/ig5-result.json
+          retention-days: 14
