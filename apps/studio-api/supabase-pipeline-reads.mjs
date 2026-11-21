@@ -2036,6 +2036,23 @@ export async function listSupabaseManualActionOutputs(env, { profileAirtableId, 
  * The cursor is a numeric offset; the caller must walk until has_more=false.
  */
 /** #2536: paginate content IDs first, then hydrate every output in those groups. */
+export function pipelineLocalMidnightUtc(day, zone) {
+    const target = Date.parse(day + "T00:00:00Z");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    let utc = target;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(utc))
+        .filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
+      const observed = Date.UTC(parts.year, parts.month - 1, parts.day,
+        parts.hour, parts.minute, parts.second);
+      utc += target - observed;
+    }
+    return new Date(utc).toISOString();
+}
+
 export async function listSupabasePipelineContentPage(env, {
   profileAirtableId, offset = 0, limit = 10, createdFrom = "", createdTo = "",
 } = {}) {
@@ -2059,22 +2076,7 @@ export async function listSupabasePipelineContentPage(env, {
     : /chicago/.test(market) ? "America/Chicago"
     : /miami|new york|nyc/.test(market) ? "America/New_York" : null;
   if (!zone) throw new Error("Pipeline profile timezone unavailable");
-  const localMidnightUtc = (day) => {
-    const target = Date.parse(day + "T00:00:00Z");
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-    });
-    let utc = target;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const parts = Object.fromEntries(formatter.formatToParts(new Date(utc))
-        .filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
-      const observed = Date.UTC(parts.year, parts.month - 1, parts.day,
-        parts.hour, parts.minute, parts.second);
-      utc += target - observed;
-    }
-    return new Date(utc).toISOString();
-  };
+  const localMidnightUtc = (day) => pipelineLocalMidnightUtc(day, zone);
   let filter = `content_profile_id=eq.${profileId}`;
   if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(localMidnightUtc(createdFrom))}`;
   if (createdTo) {
