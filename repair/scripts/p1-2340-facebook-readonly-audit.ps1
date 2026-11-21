@@ -13,7 +13,7 @@ function EnvValue([string]$key) {
   if (-not $line) { throw 'required_runner_setting_missing' }
   return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
 }
-$dburl=EnvValue 'SUPABASE_URL'
+$dburl=(EnvValue 'SUPABASE_URL').TrimEnd('/')
 $dbkey=EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
 if ($dburl -notmatch '^https://[a-z0-9-]+\.supabase\.co$' -or -not $dbkey) { throw 'unsafe_supabase_source' }
 $headers=@{apikey=$dbkey;Authorization=('Bearer '+$dbkey)}
