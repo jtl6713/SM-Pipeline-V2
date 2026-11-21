@@ -6728,6 +6728,7 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:loadFactoryIdeaCandidates__*/
 /*__STUDIO_WORKER_EXTRACT:writeOpsQueueControls__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadRenderQueueCandidates__*/
+/*__STUDIO_WORKER_EXTRACT:studioRenderAudioPreflight__*/
 /*__STUDIO_WORKER_EXTRACT:studioAdmitRenderQueue__*/
 /*__STUDIO_WORKER_EXTRACT:item4PulseR4Python__*/
 /*__STUDIO_WORKER_EXTRACT:item4PulseR5Python__*/
