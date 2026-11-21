@@ -135,12 +135,12 @@ def load_profile_creative_guidance(client: Any, *records: dict[str, Any] | None)
 def creative_prompt_suffix(guidance: dict[str, Any] | None, *, mode: str) -> str:
     """Instructions supplement, but cannot remove platform/factual safety rules."""
     data = parse_creative_guidance(guidance)
-    if mode not in ("thumbnail", "narration"):
-        raise ValueError("mode must be thumbnail or narration")
-    specific = "thumbnail_instructions" if mode == "thumbnail" else "narration_instructions"
+    if mode not in ("thumbnail", "narration", "ideas"):
+        raise ValueError("mode must be thumbnail, narration, or ideas")
+    specific = "thumbnail_instructions" if mode == "thumbnail" else "narration_instructions" if mode == "narration" else None
     owner = data["owner_global_direction"]
     shared = data["shared_direction"]
-    unique = data[specific]
+    unique = data[specific] if specific else ""
     if not owner and not shared and not unique:
         return ""
     blocks = [
