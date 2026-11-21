@@ -8,14 +8,14 @@ test("Pipeline content controls and release build are integrated natively", () =
   assert.ok(!html.includes("pipeline-content-pagination-2536.js"));
   // Release identity is deliberately not pinned to this feature's first
   // version: a newer Studio deployment must retain these Pipeline controls.
-  const version = html.match(/id="uiBuildLabel">UI build (\\d+\\.\\d+\\.\\d+)/)?.[1];
+  const version = html.match(/id="uiBuildLabel">UI build (\d+\.\d+\.\d+)/)?.[1];
   assert.ok(version, "Studio UI release label exists");
   const minimum = [0, 6, 1031];
   const actual = version.split(".").map(Number);
   assert.ok(actual[0] > minimum[0] || (actual[0] === minimum[0] && (
     actual[1] > minimum[1] || (actual[1] === minimum[1] && actual[2] >= minimum[2])
   )), "Pipeline pagination survives current or newer Studio releases");
-  const cacheKeys = [...html.matchAll(/\\?v=([0-9]+\\.[0-9]+\\.[0-9]+-[A-Za-z0-9_-]+)/g)].map((m) => m[1]);
+  const cacheKeys = [...html.matchAll(/\?v=([0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9_-]+)/g)].map((m) => m[1]);
   assert.equal(new Set(cacheKeys).size, 1, "Studio asset cache keys agree");
   assert.ok(ui.includes('BUILD_ID = "item4-' + cacheKeys[0] + '"'));
 });
