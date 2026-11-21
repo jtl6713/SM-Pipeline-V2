@@ -203,7 +203,7 @@ test("Runner attestation requires Supabase write authority at fixed health origi
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://unknown.example.com"},healthy),"unverified");
   assert.equal(calls,0);
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},healthy),
-    "2026-11-05-video-watermark-scale-v2");
+    "unverified");
   assert.equal(calls,1);
   const supabaseWrite=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
     version:"v1",studio_write_source:"supabase"}),{status:200});
