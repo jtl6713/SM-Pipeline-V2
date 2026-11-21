@@ -102,3 +102,47 @@ def test_ap1c_missing_staged_asset_uses_no_graph_and_parks_retry(monkeypatch):
     assert updates[-1]["Publish_Retry_Eligible"] is False
     assert updates[-1]["Publish_Next_Retry_At"] is None
     assert "QA-IG-AP1C-UNSTAGED-ASSET" in updates[-1]["IG_Carousel_Error_Message"]
+
+
+def test_duplicate_order_blocks_graph_even_if_slide_count_matches(monkeypatch):
+    output = {
+        "id": "recABCDEFGHIJKLMN",
+        "fields": {
+            "Platform": "Instagram",
+            "Platform_Output_Type": "Instagram Carousel",
+            "Output_ID": 8502,
+            "IG_Carousel_Status": "Assets Ready",
+            "IG_Carousel_Child_Count": 2,
+            "Image_Count": 2,
+            "Publish_Method": "Automated",
+            "Auto_Publish_Enabled": True,
+            "Do_Not_Publish": False,
+        },
+    }
+    records = [
+        slide(1, ig_url="https://media.chicagoshining.com/ig/a.jpg", ig_status="Ready"),
+        slide(1, ig_url="https://media.chicagoshining.com/ig/b.jpg", ig_status="Ready"),
+    ]
+    records[1]["id"] = "rec00000000000002"
+    updates = []
+
+    class FakeClient:
+        def get_record(self, _table, _id):
+            return output
+
+        def update_record(self, _table, _id, fields, typecast=False):
+            updates.append(dict(fields))
+            return {"id": _id, "fields": fields}
+
+    monkeypatch.setattr(ap1c, "AirtableClient", lambda: FakeClient())
+    monkeypatch.setattr(ap1c, "list_final_slides", lambda *_a, **_k: records)
+    monkeypatch.setattr(ap1c, "PipelineSettings", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("duplicate order must not contact provider")
+    ))
+    response = ap1c.process_request(output_record_id=output["id"])
+    assert response["reason"] == "duplicate_slide_sets"
+    assert response["new_children"] == 0
+    assert response["retry_authorized"] is False
+    assert updates[-1]["Publish_Retry_Eligible"] is False
+    assert updates[-1]["IG_Carousel_Status"] == "Retry Pending"
+    assert "QA-IG-AP1C-DUPLICATE-SLIDE-SETS" in updates[-1]["IG_Carousel_Error_Message"]
