@@ -8,6 +8,7 @@ import {
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
   factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
+  factoryBatchReconcileSupabaseApprovalReceipts,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -640,4 +641,125 @@ test("failed bookkeeping stays active when authoritative approval cannot be conf
     verifySatisfied:async()=>false,
   }),/not verified/);
   assert.equal(factoryBatchNeedsAttention(item),true);
+});
+
+
+test("Supabase original-request receipts repair aged global R2 pending progress without reapproval", async () => {
+  const bucket = new FakeR2();
+  const group = "a0490b3a-52f8-499d-91b8-9771db2ef11a";
+  const child = "fgc_receipt_test_global_20261120";
+  const outputs = records.slice(0, 3);
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: child, groupRequestId: group, records: outputs,
+  });
+  const canonical = new Map(outputs.map((item, index) => [item.id, {
+    profileId,
+    row: {
+      airtable_record_id: item.id, output_number: item.output_id,
+      review_status: "Approved", output_status: "Approved for Publishing",
+      error_messages: { SM_Factory_Supabase_Approval_Receipt: {
+        authority: "supabase", request_id: index === 2 ? "another-request" : group,
+        profile_record_id: profileId, output_record_id: item.id,
+        output_number: item.output_id, approved_at: "2026-11-21T04:11:15.137Z",
+      } },
+    },
+  }]));
+  let reads = 0;
+  const loadRecords = async ids => {
+    reads++;
+    return new Map(ids.map(id => [id, canonical.get(id)]));
+  };
+  const nowMs = Date.now() + 120000;
+  const result = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: child, loadRecords, nowMs, minAgeMs: 0,
+  });
+  assert.equal(reads, 1);
+  assert.deepEqual(result.items.map(item => item.status), ["approved", "approved", "pending"]);
+  assert.equal(factoryBatchCounts(result).approved_count, 2);
+  assert.equal(factoryBatchCounts(result).pending_count, 1);
+  assert.equal(result.status, "running");
+  assert.equal(result.items[0].timeline.at(-1).reason, "exact_supabase_original_request_receipt");
+
+  // A second pass must not reapprove, count duplicate success, or accept a
+  // receipt issued to another request. Clearing that mismatch is authoritative.
+  const again = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: child, loadRecords, nowMs: nowMs + 30000, minAgeMs: 0,
+  });
+  assert.equal(factoryBatchCounts(again).approved_count, 2);
+  canonical.get(outputs[2].id).row.error_messages.SM_Factory_Supabase_Approval_Receipt.request_id = group;
+  const done = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: child, loadRecords, nowMs: nowMs + 60000, minAgeMs: 0,
+  });
+  assert.equal(done.status, "completed");
+  assert.equal(factoryBatchCounts(done).approved_count, 3);
+  assert.equal(factoryBatchNeedsAttention(done), false);
+});
+
+test("Supabase receipt repair fails closed on wrong output, profile, current status, or missing reader", async () => {
+  const bucket = new FakeR2();
+  const group = "factory_original_request_test";
+  const child = "fgc_receipt_protection_test_20261120";
+  const item = records[0];
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: child, groupRequestId: group, records: [item],
+  });
+  const sample = {
+    profileId, row: {
+      airtable_record_id: item.id, output_number: item.output_id,
+      review_status: "Approved", output_status: "Approved for Publishing",
+      error_messages: { SM_Factory_Supabase_Approval_Receipt: {
+        authority: "supabase", request_id: group, profile_record_id: profileId,
+        output_record_id: item.id, output_number: item.output_id,
+        approved_at: "2026-11-21T04:11:15.137Z",
+      } },
+    },
+  };
+  const nowMs = Date.now() + 120000;
+  for (const change of [
+    { profileId: "recOtherProfile" },
+    { row: { ...sample.row, output_number: 999 } },
+    { row: { ...sample.row, review_status: "Changes Requested" } },
+    { row: { ...sample.row, error_messages: {} } },
+  ]) {
+    const proof = { ...sample, ...change };
+    const job = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+      profileId, requestId: child, nowMs, minAgeMs: 0,
+      loadRecords: async () => new Map([[item.id, proof]]),
+    });
+    assert.equal(job.items[0].status, "pending");
+  }
+  await assert.rejects(
+    factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+      profileId, requestId: child, nowMs, minAgeMs: 0,
+    }), /reader required/);
+  const unchanged = await factoryBatchRead(bucket, profileId, child);
+  assert.equal(unchanged.items[0].status, "pending");
+});
+
+test("Supabase receipt repair ignores fresh R2 jobs and never changes terminal failed approvals", async () => {
+  const bucket = new FakeR2();
+  const group = "factory_original_request_test";
+  const child = "fgc_receipt_aged_test_20261120";
+  const item = records[0];
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: child, groupRequestId: group, records: [item],
+  });
+  let read = 0;
+  const younger = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: child, nowMs: Date.now(), minAgeMs: 600000,
+    loadRecords: async () => { read++; return new Map(); },
+  });
+  assert.equal(read, 0);
+  assert.equal(younger.items[0].status, "pending");
+  await factoryBatchDrain(bucket, {
+    profileId, requestId: child, approve: async () => {
+      throw Error("permanent denial");
+    },
+  });
+  const failed = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: child, nowMs: Date.now() + 120000, minAgeMs: 0,
+    loadRecords: async () => { read++; return new Map(); },
+  });
+  assert.equal(read, 0);
+  assert.equal(failed.items[0].status, "failed");
 });
