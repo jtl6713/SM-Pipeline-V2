@@ -476,15 +476,16 @@ def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(mon
 
     monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", fake_request)
-    # Supabase commit fails; write SoR still must not fall through to Airtable.
-    record = AirtableClient(settings=_settings(
-        studio_write_source="supabase",
-        studio_phase6_write_source="supabase",
-    )).update_record(
-        MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
-    )
-    assert record == {"id": "recMedia9", "fields": {"Studio_Favorite": True}}
-    # fake_patch raises if Airtable were contacted.
+    # Supabase commit fails; authoritative updates MUST raise (never fake success)
+    # and the frozen Airtable archive must not receive a fallback PATCH.
+    with pytest.raises(RuntimeError, match="Supabase Phase6 authoritative update not confirmed"):
+        AirtableClient(settings=_settings(
+            studio_write_source="supabase",
+            studio_phase6_write_source="supabase",
+        )).update_record(
+            MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
+        )
+    assert not any(method == "PATCH" and "api.airtable.com" in url for method, url, _ in seen)
 
 
 def test_runner_media_delete_does_not_mirror(monkeypatch):
