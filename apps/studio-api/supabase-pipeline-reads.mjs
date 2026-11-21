@@ -5933,7 +5933,7 @@ export function preserveApprovedStoryboardProductionNotes(previous, incoming) {
   const marker = "[story-first-production.1] ";
   const before = String(previous || "");
   const after = String(incoming ?? "");
-  const directives = before.split(/\\r?\\n/).filter(line => line.startsWith(marker));
+  const directives = before.split(/\r?\n/).filter(line => line.startsWith(marker));
   if (!directives.length) return after;
   if (directives.length !== 1) throw new Error("Stored storyboard production directives conflict");
   let directive;
@@ -5943,7 +5943,7 @@ export function preserveApprovedStoryboardProductionNotes(previous, incoming) {
       !directive.scenes.length || directive.scenes.some(scene => !/^rec[A-Za-z0-9]{14}$/.test(String(scene?.asset_id || ""))))
     throw new Error("Stored storyboard production selection is invalid");
   if (after.includes(marker)) return after;
-  return [after.trimEnd(), directives[0]].filter(Boolean).join("\\n");
+  return [after.trimEnd(), directives[0]].filter(Boolean).join("\n");
 }
 
 export async function syncAirtableProductionRequestRowToSupabase(env, record, options = {}) {
