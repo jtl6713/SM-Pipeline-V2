@@ -2045,7 +2045,7 @@ export async function listSupabasePipelineContentPage(env, {
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
   const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
   for (const date of [createdFrom, createdTo]) {
-    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z")))) {
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date + "T00:00:00Z")) || new Date(date + "T00:00:00Z").toISOString().slice(0, 10) !== date)) {
       throw new Error("Invalid creation date");
     }
   }
