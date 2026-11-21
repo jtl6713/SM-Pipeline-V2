@@ -197,6 +197,90 @@ async function linkedChannelId(token) {
   };
 }
 
+// Account-scoped diagnostic only. No upload, privacy, or publish mutations.
+// A bounded/incomplete scan is NEVER evidence that a video was not uploaded.
+async function ownedChannelUploadInventory(expectedChannelId, maxPages = 10) {
+  if (!/^UC[A-Za-z0-9_-]{22}$/.test(String(expectedChannelId || ""))) {
+    throw new Error("expected_channel_id_required");
+  }
+  const token = await accessToken();
+  const getJson = async (url) => {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("youtube_read_failed_" + response.status);
+    return response.json();
+  };
+  const channelUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
+  channelUrl.searchParams.set("part", "id,contentDetails");
+  channelUrl.searchParams.set("mine", "true");
+  const channelData = await getJson(channelUrl);
+  const channels = channelData.items || [];
+  if (channels.length !== 1 || channels[0].id !== expectedChannelId) {
+    throw new Error("youtube_owned_channel_mismatch");
+  }
+  const uploads = channels[0].contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) throw new Error("youtube_upload_playlist_missing");
+
+  const ids = [];
+  const seenIds = new Set();
+  const seenTokens = new Set();
+  let next = "";
+  let pages = 0;
+  do {
+    if (pages >= maxPages) break;
+    if (seenTokens.has(next)) throw new Error("youtube_upload_pagination_cycle");
+    seenTokens.add(next);
+    const playlistUrl = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+    playlistUrl.searchParams.set("part", "contentDetails");
+    playlistUrl.searchParams.set("playlistId", uploads);
+    playlistUrl.searchParams.set("maxResults", "50");
+    if (next) playlistUrl.searchParams.set("pageToken", next);
+    const page = await getJson(playlistUrl);
+    for (const item of page.items || []) {
+      const id = String(item?.contentDetails?.videoId || "");
+      if (id && !seenIds.has(id)) { seenIds.add(id); ids.push(id); }
+    }
+    pages++;
+    next = String(page.nextPageToken || "");
+  } while (next);
+
+  const videos = [];
+  let missingVideoDetails = 0;
+  for (let start = 0; start < ids.length; start += 50) {
+    const batch = ids.slice(start, start + 50);
+    const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+    videosUrl.searchParams.set("part", "id,snippet,status,contentDetails");
+    videosUrl.searchParams.set("id", batch.join(","));
+    videosUrl.searchParams.set("maxResults", "50");
+    const response = await getJson(videosUrl);
+    const returned = new Map((response.items || []).map((video) => [video.id, video]));
+    missingVideoDetails += batch.filter((id) => !returned.has(id)).length;
+    for (const id of batch) {
+      const video = returned.get(id);
+      if (!video) continue;
+      if (video.snippet?.channelId !== expectedChannelId) {
+        throw new Error("youtube_video_channel_mismatch");
+      }
+      videos.push({
+        id, title: String(video.snippet?.title || "").slice(0, 200),
+        description_excerpt: String(video.snippet?.description || "").slice(0, 300),
+        published_at: video.snippet?.publishedAt || null,
+        privacy_status: video.status?.privacyStatus || null,
+        duration: video.contentDetails?.duration || null,
+      });
+    }
+  }
+  return {
+    read_only: true, provider_media_writes: 0, output_writes: 0,
+    channel_id: expectedChannelId, playlist_pages_scanned: pages,
+    video_ids_seen: ids.length, missing_video_details: missingVideoDetails,
+    complete: !next && missingVideoDetails === 0,
+    partial_page_limit: Boolean(next), videos,
+  };
+}
+
 async function analyticsReadStatus(token) {
   const end = new Date();
   const start = new Date(end.getTime() - 7 * 86400000);
@@ -859,6 +943,15 @@ async function handler(req, res) {
     if (!authorized(req)) return json(res, 401, { error: "Unauthorized" });
     if (req.method === "GET" && url.pathname === "/youtube/oauth/status") {
       return json(res, 200, await oauthStatus());
+    }
+    if (req.method === "GET" && url.pathname === "/youtube/channel/uploads") {
+      // Prevent public private-video inventory if the uploader is misconfigured.
+      if (!cfg.secret) return json(res, 503, { error: "uploader_shared_secret_required" });
+      const channelId = String(url.searchParams.get("expected_channel_id") || "");
+      if (!/^UC[A-Za-z0-9_-]{22}$/.test(channelId)) {
+        return json(res, 400, { error: "expected_channel_id_required" });
+      }
+      return json(res, 200, await ownedChannelUploadInventory(channelId));
     }
     if (req.method === "POST" && url.pathname === "/youtube/analytics") {
       const payload = await readJson(req);
