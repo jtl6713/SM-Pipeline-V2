@@ -113,6 +113,44 @@ test("after shaping, only the same exact DNP/Changes Requested record is retaine
   assert.match(summary.next_step, /Factory approval/);
 });
 
+test("six original-image candidate galleries remain repair-only, never Final Approved", () => {
+  const standard = shaped();
+  const source = {
+    ...standard,
+    fields: {
+      ...standard.fields,
+      Studio_Recovery_Source_Gallery_Verified_20261121: null,
+      Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121: {
+        verified_4x5_image_count: 4,
+        original_factory_approved_slide_identity_proven: false,
+      },
+    },
+  };
+  const ready = protectedMediaReworkSummary(source);
+  assert.equal(ready.media_rework, true);
+  assert.equal(ready.source_inventory_verified, true);
+  assert.equal(ready.can_approve, false);
+  assert.equal(ready.can_publish, false);
+  assert.match(ready.next_step, /no Final Approved slide records/);
+  const missing = {
+    ...standard,
+    fields: {
+      ...standard.fields,
+      Studio_Recovery_Source_Gallery_Verified_20261121: null,
+      Studio_Recovery_IG_Original_Preview_Gallery_Needs_Rebuild_20261121: {
+        verified_original_index0_width: 1080,
+        verified_original_index0_height: 1920,
+        verified_complete_gallery: false,
+      },
+    },
+  };
+  const rebuild = protectedMediaReworkSummary(missing);
+  assert.equal(rebuild.source_inventory_verified, false);
+  assert.match(rebuild.next_step, /wrong aspect/);
+  assert.equal(rebuild.can_approve, false);
+  assert.equal(rebuild.can_retry, false);
+});
+
 test("protected media goes to Factory Manual, never Approve/Needs Eyes or publish", () => {
   const row = {
     id: RECORD, kind: "output", title: "Original creative gallery",
