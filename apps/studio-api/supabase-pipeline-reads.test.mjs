@@ -1037,7 +1037,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
   assert.match(worker, /phase6_backfill_tables: \["media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /phase5_runner_projection_backfill: true/);
-  assert.match(worker, /Airtable legacy export failed; keeping Supabase commit/);
+  assert.match(worker, /supabase_only_crud_uncommitted/);
   assert.match(worker, /syncAirtableMediaAssetRowToSupabase/);
   assert.match(worker, /syncAirtableTransferQueueRowToSupabase/);
   const syncModule = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
@@ -1047,7 +1047,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(syncModule, /media_assets: media/);
   assert.match(syncModule, /studio_media_transfer_queue: queue/);
   assert.match(syncModule, /runner_record_projections: runnerMarkers/);
-  assert.match(worker, /supabase airtable write-through failed/);
+  assert.match(worker, /Supabase .* unavailable for/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
   assert.match(worker, /listSupabaseOverviewPack/);
@@ -3031,7 +3031,7 @@ test("Output and Content creates parse fields and mint a rec id", () => {
 
 
   assert.match(worker, /0\.10\.995-produce-job-persist/);
-  assert.match(worker, /Airtable phase6 legacy export create failed; keeping Supabase commit/);
+  assert.match(worker, /supabase_only_crud_uncommitted/);
   assert.match(worker, /supabase phase6 create commit failed; Airtable remains required/);
   assert.match(worker, /releaseMintedAirtableIds/);
 });
@@ -4009,9 +4009,9 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /studioAirtableOutputOrContentTable/);
   assert.match(worker, /Platform Outputs/);
   assert.match(worker, /Content Items/);
-  assert.match(worker, /supabase SoR record miss; skipping Airtable archive GET/);
-  assert.match(worker, /supabase SoR list miss; skipping Airtable archive GET/);
-  assert.match(worker, /supabase SoR mutation miss; skipping Airtable archive WRITE/);
+  assert.match(worker, /supabase_only_crud_uncommitted/);
+  assert.match(worker, /no record was /);
+  assert.doesNotMatch(worker, /await fetch\(endpoint,/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
   assert.match(worker, /phase6TableKind\(env, tableId\)/);
 
