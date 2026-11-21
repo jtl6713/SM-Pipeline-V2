@@ -1,0 +1,113 @@
+name: NYC Carousel #10065 AP2C original child status only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/nyc-carousel-10065-ap2c-existing-children-20261120.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nyc-carousel-10065-ap2c-verify-only
+  cancel-in-progress: false
+
+jobs:
+  original-children-poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Check exact 4 saved children and run native AP2C only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/ap2c10065.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="recX2sdcURmfzfqzf";$target=10065
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 18
+          if($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.studio_runner_content_read_source -ne "supabase" -or $health.airtable_activity.any_read -ne $false -or $health.airtable_activity.any_write -ne $false){throw "ap2c10065_supabase_health_gate"}
+          $envpath=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if(-not(Test-Path $envpath)){throw "ap2c10065_env_missing"}
+          function Setting([string]$key){
+           $line=@(Get-Content $envpath|Where-Object{$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")})|Select-Object -Last 1
+           if(-not $line){throw "ap2c10065_missing_setting"}
+           return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=Setting "PIPELINE_RUNNER_SHARED_SECRET";$dburl=Setting "SUPABASE_URL";$dbkey=Setting "SUPABASE_SERVICE_ROLE_KEY"
+          $h=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $base=$dburl.TrimEnd("/")+"/rest/v1"
+          $u=$base+"/platform_outputs?airtable_record_id=eq."+$record+"&select=output_number,airtable_record_id,content_item_id,content_profile_id,platform,platform_output_type,review_status,output_status,publish_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,ig_carousel_status,publish_next_retry_at,error_messages"
+          function Preflight {
+           $p=@(Invoke-RestMethod -Uri $u -Headers $h -TimeoutSec 25)
+           if($p.Count -ne 1){throw "ap2c10065_output_not_unique"}
+           $x=$p[0]
+           if($x.output_number -ne 10065 -or $x.content_item_id -ne "5fbb0bdc-6d23-47f4-9585-5dbf96d20302" -or $x.platform -ne "Instagram" -or $x.platform_output_type -ne "Instagram Carousel" -or $x.review_status -ne "Approved" -or $x.output_status -ne "Approved for Publishing" -or $x.publish_status -ne "Ready to Publish" -or $x.publish_method -ne "Automated" -or $x.auto_publish_enabled -ne $true -or $x.do_not_publish -ne $false -or $x.test_run_id -or $x.published_at -or $x.platform_post_url -or $x.ig_carousel_status -ne "Children Processing" -or $x.publish_next_retry_at -or $x.error_messages.IG_Carousel_Parent_Container_ID -or $x.error_messages.IG_Carousel_Published_Media_ID -or $x.error_messages.Platform_Post_ID -or $x.error_messages.Publish_Locked_By -or $x.error_messages.IG_Carousel_Error_Stage -or $x.error_messages.Replace_Transaction_ID){throw "ap2c10065_parent_gate"}
+           $expected=@{
+            "recUOCngn9ernMnFd"="18134520607783117";
+            "recu8S8p77oPS2OlX"="18134520628783117";
+            "recMop0mSP7LLdhx2"="18134520661783117";
+            "recJAc6qfdLzztvHt"="18134520697783117"
+           }
+           $query=$base+"/carousel_slides?airtable_record_id=in.("+($expected.Keys -join ",")+")&select=airtable_record_id,ig_child_container_id,deleted_from_carousel,fields"
+           $slides=@(Invoke-RestMethod -Uri $query -Headers $h -TimeoutSec 25)
+           if($slides.Count -ne 4){throw "ap2c10065_four_children_required"}
+           $orders=@()
+           foreach($s in $slides){
+            if(-not $expected.ContainsKey([string]$s.airtable_record_id) -or [string]$s.ig_child_container_id -ne $expected[[string]$s.airtable_record_id] -or $s.deleted_from_carousel -eq $true -or [string]$s.fields.IG_Child_Container_Status -ne "IN_PROGRESS" -or [string]$s.fields.IG_Public_Asset_Status -ne "Ready" -or 10065 -notin @($s.fields.PO_Output_ID)){throw "ap2c10065_child_identity_or_state_gate"}
+            $orders+= [int]$s.fields.'Current Order'
+           }
+           if((($orders|Sort-Object) -join ",") -ne "1,2,3,4"){throw "ap2c10065_child_order_gate"}
+           return $x
+          }
+          $x=Preflight
+          $h2=@{"X-Pipeline-Secret"=$secret}
+          function Poll([bool]$dry) {
+           $body=@{output_record_id=$record;extra=@{dry_run=$dry}}|ConvertTo-Json -Depth 4 -Compress
+           return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/ap2c" -Method POST -Headers $h2 -ContentType "application/json" -Body $body -TimeoutSec 185
+          }
+          $dry=Poll $true
+          if($dry.status -ne "ok" -or $dry.details.run.dry_run -ne $true -or $dry.details.run.eligibility_reason){throw "ap2c10065_dry_run_refused"}
+          Write-Output "ap2c10065_dry=PASS"
+          $x=Preflight
+          $real=Poll $false
+          Write-Output ("ap2c10065_native_status="+[string]$real.status)
+          Write-Output ("ap2c10065_native_reason="+[string]$real.details.run.reason)
+          $after=@(Invoke-RestMethod -Uri $u -Headers $h -TimeoutSec 25)
+          if($after.Count -ne 1 -or $after[0].published_at -or $after[0].platform_post_url -or $after[0].error_messages.IG_Carousel_Parent_Container_ID){throw "ap2c10065_unexpected_remote_publication"}
+          Write-Output ("ap2c10065_carousel_state="+[string]$after[0].ig_carousel_status)
+          Write-Output "ap2c10065_no_publication=PASS"
+          if($after[0].ig_carousel_status -eq "Children Ready"){Write-Output "ap2c10065_children_ready=PASS"}
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path("/tmp/ap2c10065-body.json").write_text(json.dumps({"command":pathlib.Path("/tmp/ap2c10065.ps1").read_text(),"confirm":True}))
+          PY
+          token=''
+          for t in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$t" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ap2c10065-auth.json -w '%{http_code}' -H "Authorization: Bearer $t" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ap2c10065-auth.json >/dev/null; then token="$t"; break; fi
+          done
+          test -n "$token"
+          code=$(curl -sS --max-time 25 -o /tmp/ap2c10065-job.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @/tmp/ap2c10065-body.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "ap2c10065_accepted=false_http_$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ap2c10065-job.json)
+          for n in $(seq 1 70); do
+            curl -sS --max-time 25 -H "Authorization: Bearer $token" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ap2c10065-status.json
+            state=$(jq -r '.job.status // empty' /tmp/ap2c10065-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ap2c10065-status.json | grep '^ap2c10065_' || true
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo "ap2c10065_runner_job_failed"
+              jq -r '.job.log // ""' /tmp/ap2c10065-status.json | grep -E '^ap2c10065_|Exception|Error|Traceback|Cannot bind|InvalidOperation' | tail -16 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "ap2c10065_job_timed_out"; exit 4
