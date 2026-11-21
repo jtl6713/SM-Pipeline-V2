@@ -27,8 +27,8 @@ test("global comes before profile before generation-type before item; empty laye
     "owner-global", "profile-every-generation", "generation-type", "item-specific",
   ]);
   const full = effectiveGenerationPrompt(options);
-  assert.ok(full.indexOf("owner") < full.indexOf("profile"));
-  assert.ok(full.indexOf("profile") < full.indexOf("thumbnail"));
-  assert.ok(full.indexOf("thumbnail") < full.indexOf("clock"));
+  assert.ok(full.indexOf("\\nowner\\n") < full.indexOf("\\nprofile\\n"));
+  assert.ok(full.indexOf("\\nprofile\\n") < full.indexOf("\\nthumbnail\\n"));
+  assert.ok(full.indexOf("\\nthumbnail\\n") < full.indexOf("\\nclock"));
   assert.equal(effectiveGenerationPrompt({ownerGlobal: "", profileWide: "profile"}), "[Selected profile / every generation]\nprofile");
 });
