@@ -24530,7 +24530,30 @@ function timedScriptAssetLabel(asset, index) {
       // Start the heavy history read and small live check concurrently; paint
       // the newest outputs without waiting on Airtable's open-pack scan.
       const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
-      const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 8000, retries: 1 }));
+      const fullPromise = settled((async () => {
+        // All-week Pipeline inventory. Fetch every verified Supabase page; never
+        // silently substitute the former newest-250 snapshot for full history.
+        const records = [];
+        let offset = 0;
+        const seen = new Set();
+        for (;;) {
+          const page = await api(`/api/outputs?mode=history&offset=${offset}`, { timeoutMs: 20000, retries: 1 });
+          if (page?.read_source !== "supabase" || !Array.isArray(page?.records))
+            throw new Error("Pipeline history page was not verified from Supabase");
+          for (const record of page.records) {
+            const id = String(record?.id || "");
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            records.push(record);
+          }
+          if (!page.has_more) break;
+          const next = Number(page.next_offset);
+          if (!Number.isSafeInteger(next) || next <= offset)
+            throw new Error("Pipeline history pagination stalled");
+          offset = next;
+        }
+        return { records, stale: false, complete: true };
+      })());
       const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
       const latestSettled = await latestPromise;
       if (profileAtRequest !== selectedProfileId) return;
@@ -24553,7 +24576,7 @@ function timedScriptAssetLabel(asset, index) {
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
       if (!Array.isArray(outputsResult?.records)) throw new Error("Pipeline API returned no verified output list");
-      const records = mergePipelineFreshOutputs(outputsSettled.ok ? outputsResult.records : pipelineOutputs, latestRows);
+      const records = outputsSettled.ok ? outputsResult.records : mergePipelineFreshOutputs(pipelineOutputs, latestRows);
       if (outputsResult.refreshing && !records.length) throw new Error("Pipeline is still loading");
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
