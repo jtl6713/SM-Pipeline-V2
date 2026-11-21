@@ -1,89 +1,14 @@
-name: Read Item 2 Stage Contracts
-
+# Retired 2026-11-20: legacy GitHub Action issued direct Airtable API HTTP requests.
+# Historical implementation is available in Git history; this entrypoint no longer runs.
+# Supabase-only replacements must use verified database access and release gates.
+name: Retired - read-item2-stage-contracts
 on:
-  push:
-    branches: [main]
-    paths: ['deploy/read-item2-stage-contracts.txt']
-
-permissions: {contents: read}
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  audit:
+  retired:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
     steps:
-      - uses: actions/checkout@v6
-      - name: Resolve Make config and read live blueprints
-        shell: bash
-        run: |
-          set -euo pipefail; umask 077
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
-          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
-          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
-          PAT=$(cat /tmp/pat.txt)
-          python - <<'PY' >/tmp/q
-          import urllib.parse
-          print(urllib.parse.urlencode([('filterByFormula',"AND({Active}=1,OR({Setting_Name}='MAKE_API_BASE_URL',{Setting_Name}='MAKE_API_TOKEN'))"),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
-          PY
-          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
-          python - <<'PY'
-          import json
-          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
-          open('/tmp/t','w').write(v['MAKE_API_TOKEN'].strip());open('/tmp/b','w').write(v['MAKE_API_BASE_URL'].strip().rstrip('/'))
-          PY
-          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
-          : >/tmp/contracts.ndjson
-          for sid in 5514334 5533802 5536624 5582071 5586579 5587853 5587860 5582074 5589218 5589819 5589822 5589932 5592384 5576753 5576757 5580354 5602193 5715530 5715500 5531974 5568863 5569035 5578180 5894885 5546623 5893683 5569896 5764543; do
-            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
-            sleep .4
-            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
-            SID=$sid python - <<'PY' >>/tmp/contracts.ndjson
-          import json,os,urllib.parse
-          sid=int(os.environ['SID']); sd=json.load(open('/tmp/sc')); bd=json.load(open('/tmp/bp'))
-          sc=sd.get('scenario') or sd.get('response') or sd
-          bp=bd.get('blueprint') or (bd.get('response') or {}).get('blueprint') or bd
-          if isinstance(bp,str): bp=json.loads(bp)
-          mods=[]
-          def safe_url(v):
-            s=str(v or '')
-            if not s: return s
-            try:
-              u=urllib.parse.urlsplit(s)
-              return (u.path or '/') + (('?' + u.query) if u.query else '')
-            except Exception: return '<url-redacted>'
-          def walk(flow,path='root'):
-            for idx,n in enumerate(flow or []):
-              nodepath=f'{path}/{idx}:{n.get("id")}'
-              mod=str(n.get('module') or ''); meta=n.get('metadata') or {}; name=str((meta.get('designer') or {}).get('name') or meta.get('name') or '')
-              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
-              blob=json.dumps({'module':mod,'name':name,'mapper':mapper,'parameters':params,'filter':filt},default=str)
-              interesting=('airtable:' in mod.lower() or 'gateway:' in mod.lower() or 'webhook' in mod.lower() or 'http:' in mod.lower() or n.get('id') in [1,2,3,4,5,10])
-              if interesting:
-                safe={}
-                for k,v in {**params,**mapper}.items():
-                  kl=str(k).lower()
-                  if any(x in kl for x in ['authorization','token','secret','api_key','apikey']): safe[k]='<redacted>'
-                  elif 'url' in kl: safe[k]=safe_url(v)
-                  elif kl in ['id','body','method','jsonstringbodycontent','bodycontent','requestbody','data'] or 'body' in kl or any(x in kl for x in ['record','formula','max','limit','table','view','hook','status']): safe[k]=v
-                mods.append({'path':nodepath,'id':n.get('id'),'module':mod,'name':name,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob,'has_do_not_publish':'Do_Not_Publish' in blob,'has_output_record_id':'output_record_id' in blob,'has_record_id':'record_id' in blob})
-              for ridx,r in enumerate(n.get('routes') or []): walk(r.get('flow') or [],f'{nodepath}/route{ridx}')
-          walk(bp.get('flow') or [])
-          text=json.dumps(bp,default=str)
-          print(json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'terms':{'Test_Run_ID':'Test_Run_ID' in text,'Do_Not_Publish':'Do_Not_Publish' in text,'output_record_id':'output_record_id' in text,'record_id':'record_id' in text},'modules':mods},separators=(',',':')))
-          PY
-            sleep .4
-          done
-          cat /tmp/contracts.ndjson
-      - name: Destroy credentials
-        if: always()
-        shell: bash
-        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/sc /tmp/bp
-      - name: Save evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: item2-stage-contracts-${{ github.run_id }}
-          path: /tmp/contracts.ndjson
-          if-no-files-found: ignore
-          retention-days: 30
+      - run: echo "Airtable access retired; Supabase-only replacement required"
