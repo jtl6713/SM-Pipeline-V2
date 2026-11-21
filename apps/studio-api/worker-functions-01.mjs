@@ -2487,7 +2487,7 @@ export function contentLifecycleFromOutputs(outputRecords = []) {
     else if (states.some((state) => state === "Scheduled")) studioStage = "Scheduled";
     else if (states.some((state) => state === "Draft Delivered")) studioStage = "Draft Delivered";
     else studioStage = "Complete";
-  } else if (states.some((state) => ["Failed", "Manual Action Required", "Retry Pending"].includes(state))) {
+  } else if (states.some((state) => ["Failed", "Manual Action Required", "Retry Pending", "Auto Publish Disabled", "Needs Verification", "Needs Asset Repair", "Review Held"].includes(state))) {
     studioStage = "Needs Attention";
   } else if (states.some((state) => state === "Ready for Review")) {
     studioStage = "Review";
@@ -2765,6 +2765,10 @@ export function outputProgressPercent(record, state, job = null) {
     "Platform Processing": 88,
     "Draft Delivered": 92,
     "Manual Action Required": 85,
+    "Auto Publish Disabled": 85,
+    "Needs Verification": 85,
+    "Needs Asset Repair": 65,
+    "Review Held": 65,
     "Retry Pending": 60,
     Failed: 0,
     Skipped: 100,
