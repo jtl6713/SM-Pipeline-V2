@@ -67,7 +67,7 @@ export function evaluateAssertion(testId,observation) {
   if(definition.kind==="mirror-parity") {
     if(!Array.isArray(observation.comparisons)||!observation.comparisons.length||observation.comparisons.length>definition.maxObservations) return {status:"Blocked",reason:"Missing or out-of-budget comparisons",evidence:observation};
     if(observation.comparisons.some(x=>!isObject(x)||typeof x.matches!=="boolean")) return {status:"Blocked",reason:"Incomplete comparison evidence",evidence:observation};
-    return {status:observation.comparisons.every(x=>x.matches)?"Pass":"Fail",reason:"Airtable canonical to Supabase mirror field parity",evidence:observation};
+    return {status:observation.comparisons.every(x=>x.matches)?"Pass":"Fail",reason:"Canonical Supabase API field parity",evidence:observation};
   }
   if(definition.kind==="mae-dry-run") {
     if(observation.dryRun!==true||observation.mutationCount!==0||typeof observation.ruleViolations!=="number") return {status:"Blocked",reason:"Dry run and zero-mutation proof required",evidence:observation};
