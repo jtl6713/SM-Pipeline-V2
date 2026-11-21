@@ -37,7 +37,7 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
                    PYTHON + "          curl https://__AIRT_HOST__/v0/base/table\n")
         issues = unexpected_references(self.root, (AIRT_HOST,))
         self.assertGreaterEqual(len(issues), 1)
-        self.assertIn(":4", issues[0])
+        self.assertTrue(any(issue.endswith(":4") for issue in issues), issues)
 
     def test_python_removed_assertion_is_not_an_exemption(self):
         self.write("issue2374-exact-provider-ids-audit.yml", PYTHON.replace(
