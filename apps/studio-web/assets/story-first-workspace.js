@@ -609,7 +609,9 @@
       const time = current.videoLastChecked[index];
       progress.appendChild(node("span","story-first-video-progress-note",
         (time ? "Last checked " + new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) + ". " : "") +
-        "Checking this existing job automatically about every 15 seconds. No repeat generation or charge."));
+        (["pending", "generating"].includes(job.state)
+          ? "Checking this existing job automatically about every 15 seconds. No repeat generation or charge."
+          : "Acceptance registration is not automatically retried. Refresh Video Status; if it remains here, an administrator must reconcile the original clip. Do not regenerate.")));
     } else if (job.state === "awaiting_review") {
       progress.appendChild(node("span","story-first-video-progress-note",
         "Generation finished. Play the preview and Accept or Decline; nothing publishes automatically."));
@@ -942,6 +944,13 @@
       await checkSceneVideo(index, true);
       report(action === "accept" ? "AI video accepted and saved to this scene and Asset Manager." :
         "AI video declined. Another generation requires a new explicit quote and approval.");
+    } catch (error) {
+      // A Drive/Asset Manager failure can leave the durable R2 job in 'accepting'.
+      // Never keep showing the previous 'awaiting_review' Accept button after a 409.
+      // This is a read-only status request, never another paid ElevenLabs call.
+      try { await checkSceneVideo(index, true); }
+      catch (statusError) { console.warn("Could not refresh original video job after accept failure", statusError); }
+      throw error;
     } finally { current.busy = false; }
   }
   function keyTerms(value) {
@@ -1257,7 +1266,9 @@
     scenes.forEach((shot,index)=>{
       const card=sceneDisclosure(index);
       const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
-        ["pending","generating"].includes(current.videoJobs[index]?.state) ? videoJobLabel(current.videoJobs[index]) :
+        ["pending","generating","accepting","registered","submission_uncertain"].includes(current.videoJobs[index]?.state)
+          ? videoJobLabel(current.videoJobs[index]) :
+        current.videoJobs[index]?.state === "accepted" ? "Acceptance Needs Reconciliation" :
         current.videoJobs[index]?.state==="awaiting_review" ? "Awaiting Video Review" :
         current.pendingUpload[index]?"Uploading Media":
         shot.generated_master_id?"Awaiting Image Review":
@@ -1411,6 +1422,13 @@
           }
           // Render progress NEXT TO the scene's status control, not in the
           // distant page-level notice. It follows every read-only poll state.
+          if (videoJob.state === "accepting") {
+            actions.appendChild(node("p", "form-message",
+              "The original generated video is preserved, but its Drive/Asset Manager registration may be incomplete. Refresh Video Status. If this persists, an administrator must reconcile this job before retrying acceptance. Do not generate a second video."));
+          } else if (videoJob.state === "accepted") {
+            actions.appendChild(node("p", "form-message",
+              "The video job says accepted, but the scene has not confirmed its selection. Refresh the saved storyboard and reconcile the existing asset; do not regenerate."));
+          }
           appendVideoJobProgress(index, videoJob, actions);
           button("Refresh Video Status", "secondary-button", () =>
             checkSceneVideo(index).catch(e => report(e.message, true)), actions);
