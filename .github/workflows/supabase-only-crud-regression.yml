@@ -16,6 +16,8 @@ on:
       - 'repair/scripts/qa_production_backup_inventory*.py'
       - 'repair/scripts/qa_ledger_sql_review_test.py'
       - 'docs/supabase-migration/phase7/011_qa_ledger_review_only.sql'
+      - 'docs/supabase-migration/phase7/012_qa_ledger_verify_readonly.sql'
+      - 'repair/scripts/qa_ledger_schema_acceptance_test.py'
       - '.github/workflows/cloudflare-production-bindings-audit.yml'
       - '.github/workflows/deploy-cloudflare-worker-production.yml'
       - 'docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql'
@@ -148,6 +150,7 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_apply_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_production_backup_inventory_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_sql_review_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_schema_acceptance_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_negative_only_workflows_test.py' -v
           # The evidence template is intentionally BLOCKED until real production
           # project and full six-source hourly attestations are supplied.
