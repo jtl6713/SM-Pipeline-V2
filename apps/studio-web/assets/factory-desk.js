@@ -55,6 +55,7 @@
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
     lastBatchFetchMs: 0,
+    lastBatchFullFetchMs: 0,
     retryBatchNotice: null,
     lastBatchSuccessMs: 0,
     batchActivityError: "",
@@ -1508,6 +1509,26 @@
     finally { factoryPolicyRequest = null; }
   }
 
+  function factoryBatchMergeExactActivity(previous, refreshed) {
+    const byId = new Map(refreshed.map(row => [row.request_id, row]));
+    const batches = (previous?.batches || []).map(row => byId.get(row.request_id) || row);
+    const sum = field => batches.reduce((total, row) => total + Math.max(0, Number(row[field]) || 0), 0);
+    const totals = {
+      ...previous.totals,
+      batches: batches.length,
+      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status) ||
+        Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length,
+      completed: batches.filter(row => row.status === "completed" && !row.failed_count).length,
+      failed_batches: batches.filter(row => Number(row.failed_count || 0) > 0).length,
+      approved: sum("approved_count"), pending: sum("pending_count"), failed: sum("failed_count"),
+      findings: batches.reduce((total, row) => total + (row.quality_signals || []).length, 0),
+    };
+    return {
+      ...previous, ...(batches[0] || {}), batches, totals,
+      quality_signals: batches.flatMap(row => row.quality_signals || []),
+    };
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
@@ -1522,11 +1543,41 @@
     state.batchActivityLoading = true;
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
-      // Activity is time-sensitive: fail promptly rather than locking out several
-      // scheduled polls behind the default 35-second Factory request timeout.
-      const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
-        cache: "no-store", timeoutMs: 12000,
-      });
+      // Frequent full-history scans can exceed the 12-second poll budget.
+      // Once discovered, re-read at most four exact global groups from R2
+      // every 3 seconds; run the complete active discovery at least every 18s.
+      // No POST, approval, scheduling, publishing, or claim mutation occurs.
+      const fastGroups = state.batch?.filter_profile_id === (factoryProfileId() || null)
+        ? (state.batch?.batches || []).filter(row => row.group && row.request_id &&
+            (Number(row.pending_count || 0) > 0 || ["queued","running","enqueuing"].includes(row.status)))
+          .slice(0, 4)
+        : [];
+      const useExact = fastGroups.length > 0 && state.lastBatchFullFetchMs &&
+        now - state.lastBatchFullFetchMs < 18000 && !force;
+      let fetched;
+      if (useExact) {
+        const updates = await Promise.all(fastGroups.map(async row => {
+          const params = new URLSearchParams({
+            scope: "all", request_id: row.request_id, fresh: String(now),
+          });
+          const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, {
+            cache: "no-store", timeoutMs: 12000,
+          });
+          if (value?.ok !== true || value.batches?.length !== 1 ||
+              value.batches[0]?.request_id !== row.request_id) {
+            throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
+          }
+          return value.batches[0];
+        }));
+        fetched = factoryBatchMergeExactActivity(state.batch, updates);
+      } else {
+        fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
+          cache: "no-store", timeoutMs: 12000,
+        });
+        if (fetched?.ok !== false && Array.isArray(fetched?.batches)) {
+          state.lastBatchFullFetchMs = Date.now();
+        }
+      }
       if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
         throw new Error("Approval activity response was incomplete");
       }
