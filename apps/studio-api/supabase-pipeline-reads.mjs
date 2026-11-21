@@ -5783,6 +5783,19 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
     const profileAirtableId = firstLink(fields.Content_Profile);
     const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
     const row = mapAirtableContentToSupabase(record, profileUuid || null, { fullRecord: false });
+    // I4 Content Items carry an original Production_Request link. Its typed FK
+    // is required for Factory and subsequent route/readback joins. The prior
+    // create wrote only extras.Production_Request, silently orphaning parent
+    // discovery despite successful output fanout (Museum Mile 2026-11-21).
+    if (Object.prototype.hasOwnProperty.call(fields, "Production_Request")) {
+      const ownerRecordId = firstLink(fields.Production_Request);
+      row.production_request_id = ownerRecordId
+        ? await resolveSupabaseLinkedId(env, "production_requests", ownerRecordId)
+        : null;
+      if (ownerRecordId && !row.production_request_id) {
+        throw new Error("Supabase Content Item Production_Request owner cannot be resolved");
+      }
+    }
     await upsertChunk(env, "content_items", [row]);
     await mergeCreativeMasterExtras(env, [record]).catch((error) => {
       console.warn("creative master copy failed", error);
@@ -5808,6 +5821,15 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
       : null;
     if (requestedProfile && !patch.content_profile_id) {
       throw new Error("Supabase Content Item profile cannot be resolved");
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, "Production_Request")) {
+    const ownerRecordId = firstLink(fields.Production_Request);
+    patch.production_request_id = ownerRecordId
+      ? await resolveSupabaseLinkedId(env, "production_requests", ownerRecordId)
+      : null;
+    if (ownerRecordId && !patch.production_request_id) {
+      throw new Error("Supabase Content Item Production_Request owner cannot be resolved");
     }
   }
   const hasBagPatch = Object.keys(fields).some(key =>

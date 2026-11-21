@@ -1,4 +1,4 @@
-import { selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
+import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
@@ -11216,25 +11216,41 @@ export async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, wi
 export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtMs = Date.now()) {
   if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
     return { skipped: "authority_unavailable" };
-  const target = selectExactNycHandoffSlot(scheduledAtMs);
-  if (!target) return { skipped: "outside_incident_window" };
+  // All other 17 original NYC requests have verified fanout. Focus the
+  // incident-only cron on the TWO still Submitted with zero Platform Outputs.
+  // The existing 19-request registry is the only trusted identity source.
+  const scheduled = selectExactNycHandoffSlot(scheduledAtMs);
+  if (!scheduled) return { skipped: "outside_incident_window" };
+  const lastTwo = ["recF11iJFCPcRbGsk", "recNHXsBTfgfuagts"];
+  const nextId = lastTwo[Math.floor(Number(scheduledAtMs) / 60000) % lastTwo.length];
+  const target = NYC_20261121_EXACT_HANDOFF.find(item => item.request === nextId);
+  if (!target) return { skipped: "unrecognized_incident_request" };
   const firstAttemptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
-  const receiptKey = `studio/recovery/nyc-20261121/sparse-patch-v2/${target.request}.json`;
-  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v2_already_attempted" };
-  // Prior terminal receipts remain immutable. Only the exact confirmed
-  // sparse Content PATCH failure is eligible for ONE repair-version retry.
-  // NOT_FOUND and ambiguous partial output cases remain held for diagnosis.
+  const priorVersionKey = `studio/recovery/nyc-20261121/sparse-patch-v2/${target.request}.json`;
+  const receiptKey = `studio/recovery/nyc-20261121/final-two-v3/${target.request}.json`;
+  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v3_already_attempted" };
+  // Preserve all prior receipts. If an earlier receipt claimed verified
+  // outputs, a subsequent zero-output count would be a destructive anomaly,
+  // not permission to regenerate; hold for investigation.
+  let earlierStatus = null, earlierError = null, v2Status = null;
   const originalObject = await env.STUDIO_MEDIA.get(firstAttemptKey);
   if (originalObject) {
     let previous;
     try { previous = JSON.parse(await originalObject.text()); }
     catch { return { request: target.request, skipped: "unreadable_first_receipt" }; }
-    if (previous?.status !== "failed_no_auto_retry") {
-      return { request: target.request, skipped: "previous_outcome_not_retryable" };
-    }
-    if (String(previous?.error || "") !== "Studio content PATCH was not saved to Supabase; no status advanced.") {
-      return { request: target.request, skipped: "previous_failure_not_content_sparse_patch" };
-    }
+    earlierStatus = String(previous?.status || "").slice(0, 80);
+    earlierError = String(previous?.error || "").slice(0, 240);
+    if (/^verified_fanout/.test(earlierStatus))
+      return { request: target.request, skipped: "prior_verified_fanout_needs_investigation" };
+  }
+  const v2Object = await env.STUDIO_MEDIA.get(priorVersionKey);
+  if (v2Object) {
+    let previous;
+    try { previous = JSON.parse(await v2Object.text()); }
+    catch { return { request: target.request, skipped: "unreadable_v2_receipt" }; }
+    v2Status = String(previous?.status || "").slice(0, 80);
+    if (/^verified_fanout/.test(v2Status))
+      return { request: target.request, skipped: "prior_v2_verified_fanout_needs_investigation" };
   }
 
   // Each ID is from one of the two original NYC batches. An unrelated
@@ -11266,9 +11282,10 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
       existing_count: existingOutputs.length };
   }
   const started = new Date().toISOString();
-  const receipt = { schema: "studio.nyc-20261121-sparse-content-recovery-v2.1", request: target.request,
+  const receipt = { schema: "studio.nyc-20261121-final-two-v3.1", request: target.request,
     idea: target.idea, content: target.content, expected: target.expected, started_at: started,
-    publish_actions: 0, schedule_actions: 0, status: "attempted" };
+    previous_receipt_status: earlierStatus, previous_receipt_error: earlierError,
+    v2_receipt_status: v2Status, publish_actions: 0, schedule_actions: 0, status: "attempted" };
   // R2 durable receipt precedes side effects. A failure here means NO mutation.
   await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
     httpMetadata: { contentType: "application/json" },

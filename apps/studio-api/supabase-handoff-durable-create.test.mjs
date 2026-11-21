@@ -100,3 +100,51 @@ test("promoted PR writes original Content Item typed FK and fails if identity is
   assert.match(block,/resolveSupabaseLinkedId\(env, "content_items", originalId\)/);
   assert.match(block,/promoted Content Item is missing in authoritative Supabase/);
 });
+
+test("Museum Mile normal I4 create persists typed Content Item -> Production Request owner", async()=>{
+ const originalFetch=globalThis.fetch;
+ const calls=[];
+ const profileUuid="63c2e81b-0cd1-423d-a033-11366e69bdee";
+ const requestUuid="baf09caf-f1cc-4771-a6ac-c1794e871645";
+ globalThis.fetch=async(url,init={})=>{
+  const parsed=new URL(url);
+  const method=String(init.method||"GET").toUpperCase();
+  calls.push({path:parsed.pathname,method,body:init.body?JSON.parse(init.body):null});
+  const data=parsed.pathname.endsWith("/content_profiles")?[{id:profileUuid}]:
+   parsed.pathname.endsWith("/production_requests")?[{id:requestUuid}]:[];
+  return new Response(JSON.stringify(data),{status:method==="POST"?201:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  const result=await studioSupabaseCommitOutputContentFirst(supabase, CONTENT_ITEMS_TABLE_ID,[{
+   id:"recJS9V7be7OpQ9zD",
+   fields:{Content_Title:"Museum Mile In One Day",Content_Status:"Idea Approved",
+    Production_Request:["recbx2NNJZTvoZr8u"],Content_Profile:["recgtK8Z7eNADNtVy"]},
+  }],{create:true});
+  assert.equal(result.ok,true);
+  const inserted=calls.filter(c=>c.path.endsWith("/content_items")&&c.method==="POST");
+  assert.equal(inserted.length,1,"one original Content Item insert");
+  assert.equal(inserted[0].body[0].airtable_record_id,"recJS9V7be7OpQ9zD");
+  assert.equal(inserted[0].body[0].production_request_id,requestUuid);
+  assert.equal(inserted[0].body[0].content_profile_id,profileUuid);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("I4 Content create refuses a linked Production Request that does not exist",async()=>{
+ const originalFetch=globalThis.fetch;
+ const calls=[];
+ globalThis.fetch=async(url,init={})=>{
+  const method=String(init.method||"GET").toUpperCase();
+  calls.push(method);
+  return new Response("[]",{status:method==="POST"?201:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  await assert.rejects(
+   studioSupabaseCommitOutputContentFirst(supabase,CONTENT_ITEMS_TABLE_ID,[{
+    id:"recJS9V7be7OpQ9zD",fields:{Content_Title:"Museum Mile In One Day",
+     Production_Request:["recbx2NNJZTvoZr8u"]},
+   }],{create:true}),
+   /Production_Request owner cannot be resolved/
+  );
+  assert.ok(!calls.includes("POST"),"unresolved owner never receives orphan INSERT");
+ }finally{globalThis.fetch=originalFetch;}
+});
