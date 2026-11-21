@@ -834,8 +834,8 @@ jobs:
 
       - name: Verify bounded Rendering Review workspace through service binding
         id: rendering_review_http
-        # Dormant pilot only: no Supabase review-session SoR exists yet.
-        # Keep a real failure signal without rolling back core Studio publishing.
+        # Dormant pilot: no Supabase review-session authority exists yet.
+        # Report genuine failure without rolling back core Studio publishing.
         continue-on-error: true
         shell: bash
         run: |
@@ -861,7 +861,7 @@ jobs:
         run: |
           echo "rendering_review_http_acceptance=${{ steps.rendering_review_http.outcome }}"
           if [[ "${{ steps.rendering_review_http.outcome }}" != "success" ]]; then
-            echo '::warning::Dormant Rendering Review pilot read-only migration incomplete (#2564); no fabricated empty list or release PASS. Core Worker and publishing acceptance remain enforced.'
+            echo '::warning::Rendering Review pilot read-only migration incomplete (#2564); no fabricated empty list or PASS. Core Worker, publishing and Factory acceptance remain enforced.'
           fi
 
       - name: Verify authenticated Script a Short revision route is deployed (no-write negative probe)
