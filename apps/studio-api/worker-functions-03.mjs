@@ -2608,10 +2608,13 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
       offset: Number(offsetRaw),
       limit: 150,
     });
-    const records = stripDeletedDuplicateOutputRecords(packed.records.map((record) => mapOutput(
-      record, null, null,
-      packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
-    )));
+    const records = stripDeletedDuplicateOutputRecords(packed.records.map((record) => ({
+      ...mapOutput(
+        record, null, null,
+        packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+      ),
+      production_approved_at: f(record, "Production_Approved_At") || null,
+    })));
     return respond(request, env, {
       ok: true, records, count: records.length,
       has_more: packed.has_more, next_offset: packed.next_offset,
