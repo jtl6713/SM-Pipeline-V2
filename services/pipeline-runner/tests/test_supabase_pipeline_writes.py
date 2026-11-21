@@ -3,6 +3,7 @@
 import json
 
 import requests
+import pytest
 
 from airtable.client import AirtableClient
 from airtable.constants import (
@@ -661,3 +662,36 @@ def test_partial_ttd1_output_mirror_merges_publish_id_into_bag(monkeypatch):
     assert body["error_messages"]["_runner_record_projection"] == "v1"
     assert "TikTok_Draft_Publish_ID" not in body  # bag only, not a typed column
     assert "Publish_Error_Message" not in body["error_messages"]
+
+
+def test_canonical_output_update_does_not_fake_success_when_supabase_fails(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase temporarily unavailable")))
+    client = AirtableClient(settings=_settings(studio_write_source="supabase"))
+    with pytest.raises(RuntimeError, match="Supabase authoritative update not confirmed"):
+        client.update_record(PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Failed"})
+
+
+def test_carousel_side_table_failed_supabase_commit_is_not_reported_as_written(monkeypatch):
+    from airtable.constants import CAROUSEL_SLIDES_TABLE
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase slides unavailable")))
+    client = AirtableClient(settings=_settings(studio_write_source="supabase"))
+    with pytest.raises(RuntimeError, match="Supabase side-table authoritative update not confirmed"):
+        client.update_record(CAROUSEL_SLIDES_TABLE, "recSlide1", {"Current Order": 2})
+
+
+def test_authoritative_create_failure_never_returns_fabricated_record_id(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    client = AirtableClient(settings=_settings(studio_write_source="supabase"))
+    with pytest.raises(RuntimeError, match="Supabase authoritative create not confirmed"):
+        client.create_records(PLATFORM_OUTPUTS_TABLE, [{"Output_ID": 123, "Platform": "TikTok"}])
+
+
+def test_phase6_authoritative_update_failure_does_not_fake_success(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    client = AirtableClient(settings=_settings(studio_write_source="supabase", studio_phase6_write_source="supabase"))
+    with pytest.raises(RuntimeError, match="Supabase Phase6 authoritative update not confirmed"):
+        client.update_record(PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"})
