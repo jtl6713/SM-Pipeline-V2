@@ -9988,8 +9988,9 @@ export async function syncMiamiTikTokPipelineSecret(request, env) {
 /*__STUDIO_WORKER_END:syncMiamiTikTokPipelineSecret__*/
 
 export async function item4PipelineSetting(env, name) {
-  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    // No Airtable fallback under Supabase write authority. One bounded
+  if ((studioWriteSource(env) === "supabase" || studioPhase6WriteSource(env) === "supabase")
+      && studioSupabaseConfigured(env)) {
+    // No Airtable fallback when either Studio or Phase6 authority is Supabase. One bounded
     // alternative read protects Frames from a transient empty lookup; if both
     // fail, surface a safe, actionable 503 rather than an unexplained 500.
     let row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
