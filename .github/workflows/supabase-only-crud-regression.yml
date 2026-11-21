@@ -25,7 +25,8 @@ jobs:
       - name: Reject executable GitHub Actions with Airtable API endpoints
         shell: bash
         run: |
-          if git grep -n -F 'api.airtable.com' -- '.github/workflows/*.yml' '.github/workflows/*.yaml'; then
+          host="api." && host+="airtable.com"
+          if git grep -n -F "$host" -- '.github/workflows/*.yml' '.github/workflows/*.yaml'; then
             echo 'FAIL: direct Airtable HTTP endpoint found in a GitHub Actions workflow'
             exit 1
           fi
@@ -33,7 +34,8 @@ jobs:
       - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
         shell: bash
         run: |
-          if git grep -n -F 'https://api.airtable.com' -- \
+          host="https://api." && host+="airtable.com"
+          if git grep -n -F "$host" -- \
             'scripts/*.py' 'repair/scripts/*.py' 'repair/scripts/*.sh' \
             'repair/tools/*.py' 'repair/_tmp_make/*.py' 'repair/archive/workflows/*.yml' \
             'services/pipeline-runner/scripts/*.py' 'deploy/local-services/*.ps1' \
