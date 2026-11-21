@@ -537,6 +537,9 @@
   }
 
   function canDelete(card, { candidate = false } = {}) {
+    // Recovery Source approved media is intentionally preserved. A generic
+    // Delete button in Repair must not destroy the only source of the package.
+    if (card?.protected_media_rework === true) return false;
     if (candidate) return false;
     if (card?.kind === "idea") return true;
     if (card?.kind === "output") return true;
@@ -2094,9 +2097,13 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.review_package_ready === false
-      ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
-      : (card.studio_state || (alert ? "Needs repair" : "—"));
+    const stateLabel = card.protected_media_rework === true
+      ? (card.recovery_source_inventory_verified === true
+        ? "Source verified · Needs creative review"
+        : "Media repair · Source unresolved")
+      : (card.review_package_ready === false
+        ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
+        : (card.studio_state || (alert ? "Needs repair" : "—")));
     const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
@@ -2108,6 +2115,9 @@
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${card.protected_media_rework === true
+          ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
+          : ""}
       </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
