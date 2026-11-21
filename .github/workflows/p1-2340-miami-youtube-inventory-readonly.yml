@@ -1,0 +1,117 @@
+name: P1 2340 Miami YouTube owner-scoped inventory GET audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-miami-youtube-inventory-readonly.yml'
+      - 'repair/scripts/p1-2340-miami-youtube-owned-inventory-readonly.ps1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-miami-youtube-inventory-readonly.yml'
+      - 'repair/scripts/p1-2340-miami-youtube-owned-inventory-readonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-miami-youtube-owned-history-readonly
+  cancel-in-progress: false
+jobs:
+  parser-and-static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Miami script syntax and GET-only scope
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-miami-youtube-owned-inventory-readonly.ps1'
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $source=Get-Content -Raw $file
+          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_la'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
+            if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}
+          }
+          Write-Output 'MIAMI_GET_ONLY_STATIC_GATE_PASS'
+  miami-owned-video-history:
+    if: github.event_name != 'pull_request'
+    needs: parser-and-static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PowerShell syntax and reject provider writes
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-miami-youtube-owned-inventory-readonly.ps1'
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $source=Get-Content -Raw $file
+          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_la'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
+            if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}
+          }
+          Write-Output 'MIAMI_GET_ONLY_STATIC_GATE_PASS'
+      - name: Authenticate existing approved Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/miami-ops.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true' /tmp/miami-ops.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "MIAMI_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Ops credentials unavailable: no provider activity'; exit 1
+      - name: Execute one read-only local Miami YouTube inventory via Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib
+          code=pathlib.Path('repair/scripts/p1-2340-miami-youtube-owned-inventory-readonly.ps1').read_text()
+          pathlib.Path('/tmp/miami-readonly-request.json').write_text(json.dumps({'command':code,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/miami-ops-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $MIAMI_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/miami-readonly-request.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            echo "Ops rejected read-only audit ($code); no retries"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/miami-ops-start.json)
+          for n in $(seq 1 120); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $MIAMI_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/miami-ops-job.json
+            status=$(jq -r '.job.status // empty' /tmp/miami-ops-job.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/miami-ops-job.json | grep '^P1_MIAMI_YT_INVENTORY=' | tail -1 | sed 's/^P1_MIAMI_YT_INVENTORY=//' > /tmp/miami-video-inventory.json
+              jq -e '.read_only == true and .provider_writes == 0 and .output_writes == 0 and .airtable_reads == 0 and .channel == "Miami" and .prior_video_id == "WMszupIwRgg" and .prior_receipt_verified == true and (.expected_channel_id | test("^UC[A-Za-z0-9_-]{22}$")) and .original_output_record_id == "rec1ooEl74TXu3Iu8"' /tmp/miami-video-inventory.json >/dev/null
+              if ! jq -e '(.reason == "title_candidates_require_exact_original_receipt_reconciliation" or .reason == "no_exact_title_match_found_but_absence_not_proven" or .reason == "incomplete_inventory_cannot_infer_absence") and (.pages_scanned|tonumber) >= 1' /tmp/miami-video-inventory.json >/dev/null; then
+                echo 'Authenticated owned Miami inventory could not be completed or started; audit BLOCKED, never claim verified absence'
+                exit 3
+              fi
+              jq -c '{channel,output_number,expected_title,reason,complete,pages_scanned,videos_seen,missing_video_details,matched,read_only,provider_writes,output_writes,airtable_reads}' /tmp/miami-video-inventory.json
+              exit 0
+            elif [[ "$status" == "failed" ]]; then
+              echo 'Protected read-only job failed: inspect sanitized artifact; do not reattempt blindly'
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Inventory job unfinished; no provider mutation'; exit 4
+      - name: Save scoped, sanitized 30-day evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-miami-youtube-owned-readonly
+          path: /tmp/miami-video-inventory.json
+          retention-days: 30
+          if-no-files-found: warn
