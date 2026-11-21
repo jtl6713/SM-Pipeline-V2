@@ -1,0 +1,32 @@
+name: Issue 2374 Overdue Provider Evidence CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/overdue-provider-evidence.mjs'
+      - 'apps/studio-api/overdue-provider-evidence.test.mjs'
+      - 'apps/studio-api/exception-recovery-counts.mjs'
+      - 'apps/studio-api/exception-recovery-counts.test.mjs'
+      - '.github/workflows/issue2374-overdue-evidence-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-api/overdue-provider-evidence.mjs'
+      - 'apps/studio-api/overdue-provider-evidence.test.mjs'
+      - 'apps/studio-api/exception-recovery-counts.mjs'
+      - 'apps/studio-api/exception-recovery-counts.test.mjs'
+      - '.github/workflows/issue2374-overdue-evidence-ci.yml'
+permissions:
+  contents: read
+jobs:
+  safe-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: node --check apps/studio-api/overdue-provider-evidence.mjs && node --check apps/studio-api/exception-recovery-counts.mjs
+      - name: Provider evidence and canonical census regression
+        run: node --test apps/studio-api/overdue-provider-evidence.test.mjs apps/studio-api/exception-recovery-counts.test.mjs
