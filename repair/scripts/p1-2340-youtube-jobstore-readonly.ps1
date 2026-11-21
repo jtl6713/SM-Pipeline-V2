@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $report=@{read_only=$true;output_writes=0;provider_writes=0;kind='original_youtube_uploader_jobs';source_available=$false;matching=@();scanned=0;scans=@()}
-$health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -TimeoutSec 20
+$health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -Method Get -TimeoutSec 20
 if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase'){throw 'supabase_runner_not_authoritative'}
 $root=(Get-Location).Path
 $service=Join-Path $root 'Services\youtube-uploader\service'
