@@ -61,3 +61,8 @@ test("Ideas action grid remains two columns on phones and Generate button is com
   assert.doesNotMatch(clarity, /#page-ideas \.heading-actions button:nth-child\(5\)/);
   assert.doesNotMatch(clarity, /#page-ideas \.page-heading \.heading-actions\{grid-template-columns:1fr/);
 });
+
+test("two-column Ideas buttons stretch to row height even when text wraps", () => {
+  assert.match(clarity, /#page-ideas \.page-heading \.heading-actions\{[^}]*align-items:stretch!important/);
+  assert.match(clarity, /#page-ideas \.heading-actions>button\{[^}]*align-self:stretch!important/);
+});
