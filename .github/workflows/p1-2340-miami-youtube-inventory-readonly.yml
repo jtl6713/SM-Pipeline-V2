@@ -30,7 +30,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $source=Get-Content -Raw $file
-          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_la'}
+          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_miami'}
           foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
             if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}
           }
@@ -55,7 +55,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $source=Get-Content -Raw $file
-          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_la'}
+          if($source -notmatch 'P1_MIAMI_YT_INVENTORY=' -or $source -notmatch 'WMszupIwRgg'){throw 'scope_not_exact_miami'}
           foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
             if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}
           }
