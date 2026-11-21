@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
+  protectedMediaReworkOriginalPreviewGallery,
   protectedMediaReworkSummary,
 } from "./factory-protected-media-rework.mjs";
 import {
@@ -202,4 +203,80 @@ test("Factory source always uses independent exact Supabase rework query and no 
   assert.match(client, /Original media needs reconstruction/);
   assert.match(client, /never send a video request or a stale Airtable GET/);
 
+});
+
+test("exact six original held gallery previews are display-only and bound to their own output", () => {
+  const urls = [0,1,2,3].map(i =>
+    `https://media.chicagoshining.com/studio/previews/lettered/${RECORD}/${i}.jpg`);
+  const source = {
+    source_class: "original_output_preview_folder",
+    verification_type: "read_only_cdn_http_decoded_image_header",
+    expected_image_count: 4,
+    verified_4x5_image_count: 4,
+    candidate_original_image_urls: urls,
+    original_slide_records_present: false,
+    original_factory_approved_slide_identity_proven: false,
+    fresh_factory_creative_review_required: true,
+    ap0c_instagram_public_asset_staging_done: false,
+    owner_original_provider_publication_proven: false,
+    new_publish_retry_authorized: false,
+    parent_count_mismatch_requires_manual_review: true,
+  };
+  const row = shaped({fields: {
+    ...shaped().fields,
+    Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121: source,
+  }});
+  const gallery = protectedMediaReworkOriginalPreviewGallery(row);
+  assert.deepEqual(gallery, {urls, count_mismatch: true});
+  const summary = protectedMediaReworkSummary(row);
+  assert.deepEqual(summary.original_image_previews, urls);
+  assert.equal(summary.source_count_mismatch, true);
+  assert.equal(summary.can_approve, false);
+  assert.equal(summary.can_retry, false);
+  assert.equal(summary.can_publish, false);
+
+  // No inferred sibling Facebook gallery, no deleted slide, no unverified
+  // image, no 9:16 or other count unless independent image evidence matches.
+  const badVariants = [
+    {candidate_original_image_urls: [...urls.slice(0,3)]},
+    {candidate_original_image_urls: [...urls.slice(0,3), urls[2]]},
+    {candidate_original_image_urls: [urls[1],...urls.slice(1)]},
+    {candidate_original_image_urls: [...urls.slice(0,3), urls[3].replace(RECORD,"recBBBBBBBBBBBBBB")]},
+    {verified_4x5_image_count: 3},
+    {expected_image_count: 8},
+    {ap0c_instagram_public_asset_staging_done: true},
+    {original_factory_approved_slide_identity_proven: true},
+    {fresh_factory_creative_review_required: false},
+    {owner_original_provider_publication_proven: true},
+    {new_publish_retry_authorized: true},
+    {original_slide_records_present: true},
+  ];
+  for (const overrides of badVariants) {
+    const bad = {...row,fields:{...row.fields,
+      Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121: {...source,...overrides},
+    }};
+    assert.equal(protectedMediaReworkOriginalPreviewGallery(bad),null,JSON.stringify(overrides));
+    assert.deepEqual(protectedMediaReworkSummary(bad)?.original_image_previews,[]);
+  }
+  assert.equal(protectedMediaReworkOriginalPreviewGallery({...row,fields:{...row.fields,Do_Not_Publish:false}}),null);
+  const card = factoryCardFromRow({kind:"output",id:RECORD,output_status:"Changes Requested",
+    review_status:"Changes Requested",publish_status:"Not Ready",do_not_publish:true,auto_publish_enabled:false,
+    protected_media_rework:true,recovery_original_image_previews:urls,recovery_source_count_mismatch:true});
+  assert.deepEqual(card.recovery_original_image_previews,urls);
+  assert.equal(card.recovery_source_count_mismatch,true);
+  assert.equal(card.can_approve,false);
+  assert.equal(card.can_retry,false);
+  assert.equal(card.can_publish,false);
+});
+
+test("Factory client renders only output-scoped, read-only source carousel with no legacy backend lookup", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const worker = readFileSync(path.join(dir,"worker-functions-04.mjs"),"utf8");
+  const client = readFileSync(path.join(dir,"../studio-web/assets/factory-desk.js"),"utf8");
+  assert.match(worker,/recovery_original_image_previews: mediaRework\\?\\.original_image_previews/);
+  assert.match(client,/function showFactoryRecoverySourceGallery/);
+  assert.match(client,/if \(showFactoryRecoverySourceGallery\(card, image, dialog\)\)/);
+  assert.match(client,/Verified original preview image/);
+  assert.match(client,/fresh approval and staging still required/);
+  assert.match(client,/clearFactoryRecoveryGalleryControls\(\)/);
 });
