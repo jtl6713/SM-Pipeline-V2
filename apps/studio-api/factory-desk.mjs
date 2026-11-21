@@ -318,6 +318,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
         : "Creative package repair · Source review needed")
       : (row.studio_state || ""),
     protected_media_rework: row.protected_media_rework === true,
+    recovery_hold_marker: row.protected_media_rework === true ? (row.recovery_hold_marker || null) : null,
     recovery_source_inventory_verified: row.recovery_source_inventory_verified === true,
     // Display-only independently verified source JPEGs; not C9 approved slides.
     recovery_original_image_previews: row.protected_media_rework === true

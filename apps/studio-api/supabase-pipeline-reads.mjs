@@ -4203,7 +4203,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Changes Requested. Without this, protected recovery media vanishes from
   // Factory even when its source images have been restored.
   let mediaReworkScanWarning = null;
-  const [outputRows, reviewReadyRows, heldReworkRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  const [outputRows, reviewReadyRows, originalHeldReworkRows, newHeldReworkRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
@@ -4232,6 +4232,18 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
       console.warn("Supabase Factory protected rework scan failed", String(error?.message || error));
       return [];
     }),
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.true&review_status=eq.Changes%20Requested`
+        + `&output_status=eq.Changes%20Requested`
+        + `&error_messages->>Studio_Overdue_UnsafeGallery_Hold_20261121=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast`,
+      { pageSize: 100, maxRows: 200 },
+    ).catch((error) => {
+      mediaReworkScanWarning = "New protected media repair source unavailable; do not treat missing cards as resolved";
+      console.warn("Supabase Factory new protected media scan failed", String(error?.message || error));
+      return [];
+    }),
     supabaseRest(
       env,
       `production_requests?request_status=neq.Cancelled&select=${REQUEST_SELECT}`
@@ -4250,6 +4262,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Merge by authoritative output identity, retaining the independent
   // review-ready scan even when its records predate the newest-output sample.
   const outputById = new Map();
+  const heldReworkRows = [...(originalHeldReworkRows || []), ...(newHeldReworkRows || [])];
   const protectedReworkRows = (heldReworkRows || []).filter(protectedMediaReworkSourceRow);
   // Only canonical, still-held, unpublished records with an explicit exact
   // source marker qualify. Never show test, scheduled or published candidates.

@@ -695,3 +695,48 @@ def test_archive_closed_blocks_network_egress_and_uncommitted_success(monkeypatc
     with pytest.raises(RuntimeError, match="Supabase"):
         client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True})
 
+
+def test_issue2464_ttd0_reads_four_ready_9x16_slides_without_airtable(monkeypatch):
+    """Regression: live 9941/10015 had four ready originals but zero TTD0 rows."""
+    from airtable.constants import CAROUSEL_SLIDES_TABLE
+    from ttd.assets import list_ready_slides, slide_formula
+    seen_urls = []
+
+    def forbid_airtable(*_args, **_kwargs):
+        raise AssertionError("Airtable archive egress forbidden under Supabase SoR")
+
+    def fake_supabase(method, url, *, headers, json, timeout):
+        assert method == "GET"
+        assert "carousel_slides" in url
+        assert "Asset_9x16_Public_Status" in url
+        assert "Asset_9x16_Public_URL" in url
+        seen_urls.append(url)
+        return Response([
+            {
+                "airtable_record_id": f"recTTD0Verified{i:02d}",
+                "current_order": i,
+                "deleted_from_carousel": False,
+                "fields": {
+                    "PO_Output_ID": [9941],
+                    "Slide Number": i,
+                    "Current Order": i,
+                    "Asset_9x16_Public_Status": "Ready",
+                    "Asset_9x16_Public_URL":
+                        f"https://media.chicagoshining.com/studio/previews/lettered/recdjiDsU4dTBmFea/{i-1}.jpg",
+                    "Review Status": "Final Approved",
+                    "Shared_Asset_Approved": True,
+                    "Platform Output": ["recdjiDsU4dTBmFea"],
+                },
+            }
+            for i in (1, 2, 3, 4)
+        ])
+
+    monkeypatch.setattr(requests, "get", forbid_airtable)
+    monkeypatch.setattr(requests, "request", fake_supabase)
+    client = _client(studio_write_source="supabase")
+    assert "Asset_9x16_Public_Status" in slide_formula("9941")
+    assert len(list_ready_slides(client, "9941")) == 4
+    assert len(seen_urls) == 1
+    assert client.list_records(
+        CAROUSEL_SLIDES_TABLE, formula=slide_formula("9941"), max_records=10
+    )[0]["fields"]["Asset_9x16_Public_Status"] == "Ready"
