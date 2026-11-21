@@ -34,6 +34,10 @@ PYTHON_GUARDS = {
         "'/media_publish','__AIRT_HOST__'):",
         "assert bad not in source",
     ),
+    ".github/workflows/issue2374-ig-gallery-http-audit.yml": (
+        "'/media_publish','__AIRT_HOST__'):",
+        "assert bad not in source",
+    ),
     ".github/workflows/issue2374-ig-carousels-owner-auth-audit.yml": (
         '"__AIRT_HOST__", "Write-Host $key", "Write-Output $key"]:',
         "assert bad not in s,",
@@ -44,6 +48,8 @@ PYTHON_GUARDS = {
 PYTHON_MULTILINE_PREVIOUS = {
     ".github/workflows/issue2374-fb-gallery-http-audit.yml":
         "for bad in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','-Method Post',",
+    ".github/workflows/issue2374-ig-gallery-http-audit.yml":
+        "for bad in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','-Method Post',
     ".github/workflows/issue2374-ig-carousels-owner-auth-audit.yml":
         '"Invoke-Sqlcmd", "/media_publish", "AIRTABLE_PAT",',
 }
