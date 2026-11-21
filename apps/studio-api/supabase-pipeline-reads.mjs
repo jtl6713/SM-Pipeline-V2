@@ -2035,6 +2035,55 @@ export async function listSupabaseManualActionOutputs(env, { profileAirtableId, 
  * pages. Never apply the calendar's schedule-week filter to this inventory.
  * The cursor is a numeric offset; the caller must walk until has_more=false.
  */
+/** #2536: paginate content IDs first, then hydrate every output in those groups. */
+export async function listSupabasePipelineContentPage(env, {
+  profileAirtableId, offset = 0, limit = 10, createdFrom = "", createdTo = "",
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Pipeline unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Pipeline profile missing");
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
+  for (const date of [createdFrom, createdTo]) {
+    if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z")))) {
+      throw new Error("Invalid creation date");
+    }
+  }
+  if (createdFrom && createdTo && createdFrom > createdTo) throw new Error("Creation date range is reversed");
+  let filter = `content_profile_id=eq.${profileId}`;
+  if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(createdFrom + "T00:00:00Z")}`;
+  if (createdTo) {
+    const exclusive = new Date(Date.parse(createdTo + "T00:00:00Z") + 86400000).toISOString();
+    filter += `&created_at=lt.${encodeURIComponent(exclusive)}`;
+  }
+  const contents = await supabaseRest(env,
+    `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at`
+    + `&order=content_number.desc.nullslast,id.desc&limit=${size + 1}&offset=${skip}`);
+  const page = (contents || []).slice(0, size);
+  const contentByAirtableId = new Map(page.filter(c => c.airtable_record_id).map(c => [
+    c.airtable_record_id, { id: c.airtable_record_id, createdTime: c.created_at,
+      fields: { Content_ID: c.content_number, Content_Title: c.content_title } },
+  ]));
+  const uuids = page.map(c => c.id);
+  let outputs = [];
+  if (uuids.length) {
+    // Query every output of the selected content IDs, not a fixed output count per page.
+    // Fail closed on unusually large groups rather than silently truncate them.
+    const rows = await supabaseRest(env,
+      `platform_outputs?content_item_id=in.(${uuids.join(",")})&test_run_id=is.null`
+      + `&select=${OUTPUT_SELECT}&order=content_number.desc.nullslast,output_number.desc.nullslast,id.desc&limit=2001`);
+    if (rows.length > 2000) throw new Error("Pipeline content page exceeds output safety bound");
+    outputs = rows.map(flattenOutputRow).map(airtableShapedOutputFromSupabase);
+  }
+  return {
+    records: outputs, contentByAirtableId,
+    content_ids: page.map(c => c.content_number),
+    has_more: (contents || []).length > size,
+    next_offset: (contents || []).length > size ? skip + page.length : null,
+    read_source: "supabase",
+  };
+}
+
 export async function listSupabasePipelineHistoryPage(env, {
   profileAirtableId, offset = 0, limit = 150,
 } = {}) {
