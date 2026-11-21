@@ -38,6 +38,7 @@ jobs:
           }
           if(([regex]::Matches($s,'@\{n=\d+;rid=')).Count -ne 10){throw 'expected_exact_ten_selected_stories'}
           if(([regex]::Matches($s,'/media_publish')).Count -ne 1 -or ([regex]::Matches($s,"'/media'")).Count -ne 1){throw 'one_meta_create_and_publish_operation_per_target'}
+          if($s -match '(?im)^\s*\$pid\s*=' -or $s -notmatch '\$publishEventRecordId='){throw 'reserved_PowerShell_PID_variable_must_not_be_assigned'}
           if(([regex]::Matches($s,'/rest/v1/quality_agent_recovery_events')).Count -ne 3){throw 'one_original_create_event_GET_and_two_unique_fenced_writes_required'}
           if($s -match "@\{n=5628;" -or $s -notmatch 'skipped_copyright_sensitive=5628'){throw 'prior_vizcaya_copyright_sensitive_hold_must_remain'}
           foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','Write-Output $token','Write-Host $token')){
