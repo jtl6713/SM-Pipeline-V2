@@ -61,6 +61,107 @@ $profiles=@(
   @{label='Miami';prefix='MIAMI_';failed_output=6256},
   @{label='NYC';prefix='NYC_';failed_output=0}
 )
+# Test the already-stored long-lived USER token through read-only /me/accounts
+# to identify Page assignments without requesting or exporting access_token.
+$userToken=[string]$settings['META_LONG_LIVED_USER_ACCESS_TOKEN']
+$userAudit=@{token_present=([bool]$userToken);token_state='unverified';
+  accounts_http=0;accounts_code=0;list_complete=$false;assigned_page_count=0}
+$userPageTasks=@{}
+if($userToken) {
+  $globalVersion=[string]$settings['FACEBOOK_GRAPH_API_VERSION']
+  if(-not $globalVersion){$globalVersion='v26.0'}
+  $userMe=GraphGet '/me?fields=id' $userToken $globalVersion
+  if($userMe.ok -eq $true) {
+    $userAudit.token_state='valid_user_identity'
+    $userAccounts=GraphGet '/me/accounts?fields=id,tasks&limit=100' $userToken $globalVersion
+    $userAudit.accounts_http=$userAccounts.http
+    $userAudit.accounts_code=$userAccounts.code
+    if($userAccounts.ok -eq $true -and $null -ne $userAccounts.data.data) {
+      $userAudit.list_complete=(-not $userAccounts.data.paging.next)
+      foreach($account in @($userAccounts.data.data)) {
+        $id=[string]$account.id
+        if($id -match '^\d{6,35}
+  $prefix=$profile.prefix
+  $pageId=[string]$settings[($prefix+'FACEBOOK_PAGE_ID')]
+  $token=[string]$settings[($prefix+'FACEBOOK_PAGE_ACCESS_TOKEN')]
+  $version=[string]$settings[($prefix+'FACEBOOK_GRAPH_API_VERSION')]
+  if (-not $version) { $version=[string]$settings['FACEBOOK_GRAPH_API_VERSION'] }
+  if (-not $version) { $version='v26.0' }
+  $report=@{profile=$profile.label;failed_output=$profile.failed_output;checked_at=(Get-Date).ToUniversalTime().ToString('o');
+    token_present=([bool]$token);page_id_present=([bool]$pageId);
+    page_identity_verified=$false;token_state='unverified';read_feed_verified=$false;
+    page_create_content_task=$null;pages_manage_posts_permission=$null;
+    user_page_assigned=$null;user_can_create_content=$null;
+    feed_http=0;feed_code=0;feed_subcode=0;
+    tasks_http=0;tasks_code=0;permissions_http=0;permissions_code=0;
+    provider_http=0;provider_code=0;provider_subcode=0;
+    no_provider_writes=$true;no_output_writes=$true;duplicate_absence_proven=$false}
+  if (-not $token -or $pageId -notmatch '^\d{6,35}$') { $report.token_state='missing_or_invalid_configuration';$reports+= $report;continue }
+  $me=GraphGet '/me?fields=id,name' $token $version
+  $report.provider_http=$me.http; $report.provider_code=$me.code; $report.provider_subcode=$me.subcode
+  if ($me.ok -ne $true) {
+    $report.token_state=if($me.code -eq 190){'expired_or_invalid'}elseif($me.code -eq 200){'permission_denied'}else{'provider_rejected'}
+    $reports+=$report;continue
+  }
+  if ([string]$me.data.id -ne $pageId) {
+    $report.token_state='different_page_owner';$reports+=$report;continue
+  }
+  $report.page_identity_verified=$true
+  $report.token_state='valid_page_identity'
+  if ($userAudit.list_complete -eq $true) {
+    $report.user_page_assigned=$userPageTasks.ContainsKey($pageId)
+    if($report.user_page_assigned) {
+      $report.user_can_create_content=(@($userPageTasks[$pageId]) -contains 'CREATE_CONTENT')
+    }
+  }
+  # Read permissions cannot prove publish permission; an unsupported edge stays unknown.
+  $tasks=GraphGet ('/'+$pageId+'?fields=id,tasks') $token $version
+  $report.tasks_http=$tasks.http;$report.tasks_code=$tasks.code
+  if ($tasks.ok -eq $true -and $null -ne $tasks.data.tasks) {
+    $report.page_create_content_task=(@($tasks.data.tasks) -contains 'CREATE_CONTENT')
+  }
+  $perms=GraphGet '/me/permissions' $token $version
+  $report.permissions_http=$perms.http;$report.permissions_code=$perms.code
+  if ($perms.ok -eq $true -and $null -ne $perms.data.data) {
+    $granted=@($perms.data.data | Where-Object { $_.permission -eq 'pages_manage_posts' -and $_.status -eq 'granted' })
+    $report.pages_manage_posts_permission=($granted.Count -gt 0)
+  }
+  $feed=GraphGet ('/'+$pageId+'/feed?fields=id&limit=1') $token $version
+  $report.feed_http=$feed.http;$report.feed_code=$feed.code;$report.feed_subcode=$feed.subcode
+  $report.read_feed_verified=($feed.ok -eq $true -and $null -ne $feed.data.data)
+  $reports+=$report
+}
+# Existing LA #5885 has an exact stored remote video ID. Inspect it without
+# using a token from another Page; permalink alone is not ownership proof.
+$reel=@{output_id=5885;read_only=$true;verified_public=$false;page_identity_verified=$false;exact_id_verified=$false;http=0;code=0}
+$la=@($reports | Where-Object {$_.profile -eq 'LA'}) | Select-Object -First 1
+if ($la.page_identity_verified -eq $true) {
+  $token=[string]$settings['LA_FACEBOOK_PAGE_ACCESS_TOKEN']
+  $ver=[string]$settings['FACEBOOK_GRAPH_API_VERSION']; if (-not $ver) {$ver='v26.0'}
+  $v=GraphGet '/1841282600545084?fields=id,permalink_url,is_published' $token $ver
+  $reel.http=$v.http;$reel.code=$v.code
+  $reel.page_identity_verified=$true
+  $reel.exact_id_verified=($v.ok -eq $true -and [string]$v.data.id -eq '1841282600545084')
+  $reel.verified_public=($reel.exact_id_verified -and $v.data.is_published -eq $true -and
+    [string]$v.data.permalink_url -match '^https://(?:www\.)?facebook\.com/')
+}
+$result=@{task='P1-2340-meta-page-token-diagnostic';read_only=$true;provider_operations='GET only';
+  report_time=(Get-Date).ToUniversalTime().ToString('o');supabase_setting_rows=$source.Count;user_token_audit=$userAudit;profiles=$reports;
+  existing_facebook_5885=$reel; output_writes=0;provider_writes=0;
+  finding='GET access is not a proof of publish permission or duplicate absence'}
+Write-Output ('P1_META_AUDIT='+($result | ConvertTo-Json -Depth 8 -Compress))
+) {
+          $userPageTasks[$id]=@($account.tasks)
+        }
+      }
+      $userAudit.assigned_page_count=$userPageTasks.Count
+    }
+  } else {
+    $userAudit.token_state=if($userMe.code -eq 190){'expired_or_invalid'}else{'provider_rejected'}
+    $userAudit.accounts_http=$userMe.http
+    $userAudit.accounts_code=$userMe.code
+  }
+}
 $reports=@()
 foreach($profile in $profiles) {
   $prefix=$profile.prefix
