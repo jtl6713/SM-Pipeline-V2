@@ -46,11 +46,15 @@ try {
   # ConvertFrom-Json can emit one nested array rather than eight scalar
   # pipeline elements; keep the JSON array shape explicit using System.Text.Json.
   $report.stage='compare-saved-photo-identities'
+  $report.stage='read-parent-ids-json-string'
   $saved=[string]$o.error_messages.FB_Photo_IDs_JSON
   if(-not $saved){throw 'parent_photo_receipts_differ'}
+  $report.stage='parse-parent-json-document'
   $doc=[System.Text.Json.JsonDocument]::Parse($saved)
   try {
+    $report.stage='validate-json-root-kind'
     if($doc.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array){throw 'parent_photo_receipts_differ'}
+    $report.stage='enumerate-json-photo-ids'
     $savedIds=@()
     foreach($item in $doc.RootElement.EnumerateArray()){
       if($item.ValueKind -ne [System.Text.Json.JsonValueKind]::String){throw 'parent_photo_receipts_differ'}
@@ -59,10 +63,13 @@ try {
   }finally{
     $doc.Dispose()
   }
+  $report.stage='compare-parent-photo-count'
   if($savedIds.Count -ne 8){throw 'parent_photo_receipts_differ'}
+  $report.stage='compare-all-ordered-photo-ids'
   for($i=0;$i -lt 8;$i++){
     if([string]$savedIds[$i] -cne [string]$ids[$i]){throw 'parent_photo_receipts_differ'}
   }
+  $report.stage='parent-and-slides-match'
   $report.all_photo_ids_retained=$true
   $report.stage='read-owner-config'
   $rows=Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 25
@@ -110,6 +117,7 @@ try {
 }catch{
   $reason=[string]$_.Exception.Message
   $whitelist=@('not_supabase_authoritative','runner_env_unavailable','runner_config_unavailable','production_project_mismatch','source_output_unavailable','output_state_changed','profile_mismatch','ordered_slide_count_mismatch','photo_slide_not_approved_or_incomplete','duplicate_photo_receipts','parent_photo_receipts_differ','duplicate_active_provider_setting','page_identity_unavailable','page_identity_get_mismatch')
+  $report.exception_type=[string]$_.Exception.GetType().Name
   $report.reason=if($whitelist -contains $reason){$reason}else{'provider_or_runtime_get_unavailable'}
 }
 Write-Output ('P1_FB9777_RECEIPTS='+($report|ConvertTo-Json -Depth 6 -Compress))
