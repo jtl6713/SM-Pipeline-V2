@@ -1,7 +1,12 @@
--- REVIEW-ONLY: Proposed append-only Supabase QA Test Center ledger.
--- THIS MIGRATION HAS NOT BEEN APPLIED TO PRODUCTION.
--- Apply ONLY after an approved, independently counted source export,
--- backup/rollback evidence, migration review and explicit release approval.
+-- APPLIED SCHEMA: Append-only Supabase QA Test Center ledger.
+-- Existing live production project: vkwvscgisqsbuwagdvtb
+-- Applied 2026-11-21 08:44 UTC as tracked Supabase migration
+-- 20261121084412_studio_qa_ledger_append_only_production_20261121.
+-- This file is now a historical DDL specification; do NOT run it again.
+-- Schema creation was ADDITIVE and inserted NO QA history. History backfill,
+-- Worker cutover, publishing, and Airtable revocation remain separately gated.
+-- The operator-verified Supabase backup listing establishes backup availability,
+-- NOT a successful restore test or permission for destructive operations.
 -- Airtable source: QA Test Runs tblYwzehVtmyUMzj5,
 -- QA Executions tblsg5E1cq8nb240c.
 -- Historical values (including non-Open status and legacy non-SHA hashes)
