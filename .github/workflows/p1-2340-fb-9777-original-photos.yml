@@ -44,6 +44,7 @@ jobs:
           if($tokensMatch.Count -ne 8 -or [string]$tokensMatch[0].Groups[1].Value -cne '122129565183476558' -or [string]$tokensMatch[7].Groups[1].Value -cne '122129330427476558'){throw 'numeric_parent_array_capture_regression'}
           if($code -notmatch "stage='meta-page-owner-get'" -or $code -notmatch "stage='compare-saved-photo-identities'"){throw 'safe_failure_stage_instrumentation_missing'}
           if($code -notmatch "stage='compare-all-ordered-photo-ids'" -or $code -notmatch "exception_type="){throw 'safe_diagnostics_missing'}
+          foreach($required in @('meta-original-page-post-get','distinct_page_story_ids','page_story_id','multiple_original_page_stories_detected_do_not_create_duplicate_parent')){if(-not $code.Contains($required)){throw ('existing_story_duplicate_protection_missing: '+$required)}}
           Write-Output 'P1_FB9777_GET_ONLY_STATIC_PASS'
   owned-photos-get:
     if: github.event_name == 'push'
@@ -96,7 +97,7 @@ jobs:
             if [[ "$state" == ok ]]; then
               jq -r '.job.log // ""' /tmp/fb9777-job.json | grep '^P1_FB9777_RECEIPTS=' | tail -1 | sed 's/^P1_FB9777_RECEIPTS=//' > /tmp/fb9777-evidence.json
               jq -e '.read_only==true and .output_number==9777 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .expected==8' /tmp/fb9777-evidence.json >/dev/null
-              jq -c '{output_number,profile,expected,verified_owned,all_photo_ids_retained,page_owned,stage,reason,exception_type,observations,provider_writes,output_writes,airtable_reads}' /tmp/fb9777-evidence.json
+              jq -c '{output_number,profile,expected,verified_owned,all_photo_ids_retained,page_owned,stage,reason,exception_type,distinct_page_story_ids,owned_story_refs,page_stories,observations,provider_writes,output_writes,airtable_reads}' /tmp/fb9777-evidence.json
               if jq -e '.reason=="not_started" or .reason=="provider_or_runtime_get_unavailable"' /tmp/fb9777-evidence.json >/dev/null; then
                 echo 'Original photo receipt GET was blocked; no publication authorized';exit 3
               fi

@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $report=[ordered]@{
   output_number=9777;profile='Miami';read_only=$true;provider_writes=0;output_writes=0;airtable_reads=0;
-  expected=8;verified_owned=0;all_photo_ids_retained=$false;page_owned=$false;observations=@();reason='not_started';stage='preflight'
+  expected=8;verified_owned=0;all_photo_ids_retained=$false;page_owned=$false;observations=@();page_stories=@();distinct_page_story_ids=0;owned_story_refs=0;reason='not_started';stage='preflight'
 }
 try {
   $report.stage='authority-health'
@@ -100,21 +100,50 @@ try {
       $same=[string]$photo.id -eq $id
       $from=[string]$photo.from.id
       $ownedPhoto=$same -and $from -eq $page
+      $pageStoryId=[string]$photo.page_story_id
       if($ownedPhoto){$report.verified_owned++}
       $report.observations+=@{
         id=$id;get_ok=$same;page_owned=$ownedPhoto;
-        possible_existing_story=([string]$photo.page_story_id -ne '');
+        possible_existing_story=($pageStoryId -ne '');page_story_id=$pageStoryId;
         created_time=[string]$photo.created_time
       }
     } catch{
       $report.observations+=@{id=$id;get_ok=$false;page_owned=$false;possible_existing_story=$null}
     }
   }
+  # Original photo Page story references may already point to published
+  # Facebook posts. Never create a new parent photo set without this audit.
+  $report.stage='compare-original-page-story-ids'
+  $storyIds=@($report.observations | Where-Object { $_.page_owned -eq $true -and [string]$_.page_story_id -ne '' } | ForEach-Object { [string]$_.page_story_id } | Sort-Object -Unique)
+  $report.distinct_page_story_ids=$storyIds.Count
+  if($storyIds.Count -gt 8){throw 'too_many_original_page_story_refs'}
+  $report.stage='meta-original-page-post-get'
+  foreach($sid in $storyIds){
+    if($sid -notmatch '^\d{6,30}(_\d{6,30})?$'){
+      $report.page_stories+=@{page_story_id=$sid;get_ok=$false;page_owned=$false;reason='unexpected_story_id_format'}
+      continue
+    }
+    try{
+      $post=G $sid 'id,from,permalink_url,created_time'
+      $sameStory=[string]$post.id -eq $sid
+      $fromPage=[string]$post.from.id
+      $samePage=$sameStory -and $fromPage -eq $page
+      $perma=[string]$post.permalink_url
+      if($perma -and $perma -notmatch '^https://(www\.|m\.)?facebook\.com/'){
+        $samePage=$false
+        $perma=''
+      }
+      if($samePage){$report.owned_story_refs++}
+      $report.page_stories+=@{page_story_id=$sid;get_ok=$sameStory;page_owned=$samePage;permalink=$perma;created_time=[string]$post.created_time}
+    }catch{
+      $report.page_stories+=@{page_story_id=$sid;get_ok=$false;page_owned=$false}
+    }
+  }
   $report.stage='completed'
-  $report.reason=if($report.verified_owned -eq 8 -and @($report.observations|Where-Object{$_.possible_existing_story -eq $true}).Count -eq 0){'all_eight_original_photo_receipts_owned_no_saved_story_but_public_post_not_proven_absent'}else{'original_photo_ids_incomplete_or_ambiguous_no_publish'}
+  $report.reason=if($report.verified_owned -ne 8){'original_photo_ids_incomplete_or_ambiguous_no_publish'}elseif($report.distinct_page_story_ids -eq 0){'eight_owned_photos_without_story_refs_parent_post_not_proven'}elseif($report.distinct_page_story_ids -eq 1 -and $report.owned_story_refs -eq 1){'one_page_owned_existing_story_candidate_parent_attachments_unverified'}elseif($report.distinct_page_story_ids -gt 1){'multiple_original_page_stories_detected_do_not_create_duplicate_parent'}else{'original_page_story_association_ambiguous_no_publish'}
 }catch{
   $reason=[string]$_.Exception.Message
-  $whitelist=@('not_supabase_authoritative','runner_env_unavailable','runner_config_unavailable','production_project_mismatch','source_output_unavailable','output_state_changed','profile_mismatch','ordered_slide_count_mismatch','photo_slide_not_approved_or_incomplete','duplicate_photo_receipts','parent_photo_receipts_differ','duplicate_active_provider_setting','page_identity_unavailable','page_identity_get_mismatch')
+  $whitelist=@('not_supabase_authoritative','runner_env_unavailable','runner_config_unavailable','production_project_mismatch','source_output_unavailable','output_state_changed','profile_mismatch','ordered_slide_count_mismatch','photo_slide_not_approved_or_incomplete','duplicate_photo_receipts','parent_photo_receipts_differ','duplicate_active_provider_setting','page_identity_unavailable','page_identity_get_mismatch','too_many_original_page_story_refs')
   $report.exception_type=[string]$_.Exception.GetType().Name
   $report.reason=if($whitelist -contains $reason){$reason}else{'provider_or_runtime_get_unavailable'}
 }
