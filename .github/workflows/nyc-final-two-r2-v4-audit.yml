@@ -1,0 +1,159 @@
+name: NYC final 2 v4 licensed-music R2 receipt audit read-only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/nyc-final-two-r2-v4-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: nyc-handoff-20261121-temp-r2-licensed-v4-read
+  cancel-in-progress: false
+jobs:
+  receipt-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TEMP_WORKER: nyc-handoff-r2-readonly-${{ github.run_id }}
+    steps:
+      - name: Verify existing production STUDIO_MEDIA R2 binding (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/settings" \
+            -o /tmp/nyc-production-worker-bindings.json
+          jq -e '.success==true' /tmp/nyc-production-worker-bindings.json >/dev/null
+          jq -er '[.result.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | .bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/nyc-production-worker-bindings.json > /tmp/nyc-existing-r2-bucket
+          echo 'exact_production_r2_binding_verified=true'
+
+      - name: Prepare ephemeral single-route read-only R2 auditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib,secrets
+          ids = ["recF11iJFCPcRbGsk","recNHXsBTfgfuagts"]
+          assert len(ids)==2 and len(set(ids))==2
+          route='/'+secrets.token_urlsafe(48)
+          pathlib.Path('/tmp/nyc-r2-route').write_text(route)
+          source = """
+          const EXPECTED_ROUTE=__ROUTE__;
+          const ORIGINAL_REQUESTS=__IDS__;
+          export default {
+            async fetch(request,env){
+              const url=new URL(request.url);
+              if (url.pathname !== EXPECTED_ROUTE || request.method !== 'GET')
+                return new Response('Not found',{status:404});
+              const result=[];
+              for(const id of ORIGINAL_REQUESTS) {
+                const versions=['exact','sparse-patch-v2','final-two-v3','licensed-music-v4'];
+                for(const version of versions){
+                  const key='studio/recovery/nyc-20261121/'+version+'/'+id+'.json';
+                  let status={request:id,version,receipt:'missing'};
+                  try {
+                    const object=await env.STUDIO_MEDIA.get(key);
+                    if(object){
+                      const parsed=JSON.parse(await object.text());
+                      status={request:id,version,receipt:'found',status:parsed.status||null,
+                        expected:parsed.expected||null,routed:parsed.routed||null,
+                        blocked:parsed.blocked||null,promoted:parsed.promoted===true,
+                        owner_readback_verified:parsed.owner_readback_verified===true,
+                        resume_accepted:parsed.resume_accepted===true,
+                        resume_reason:String(parsed.resume_reason||'').slice(0,160),
+                        error:String(parsed.error||'').slice(0,240),
+                        previous_receipt_error:String(parsed.previous_receipt_error||'').slice(0,200),
+                        started_at:parsed.started_at||null,finished_at:parsed.finished_at||null};
+                    }
+                  }catch(error){
+                    status={request:id,version,receipt:'read_error',error_type:String(error?.name||'Error').slice(0,60)};
+                  }
+                  result.push(status);
+                }
+              }
+              return Response.json({ok:true,read_only:true,checked:result.length,results:result},{
+                headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+            }
+          };
+          """.replace('__ROUTE__',json.dumps(route)).replace('__IDS__',json.dumps(ids))
+          pathlib.Path('/tmp/nyc-r2-bridge.mjs').write_text(source)
+          bucket=pathlib.Path('/tmp/nyc-existing-r2-bucket').read_text().strip()
+          assert bucket
+          metadata={"main_module":"worker.mjs","compatibility_date":"2026-08-02",
+            "bindings":[{"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":bucket}]}
+          pathlib.Path('/tmp/nyc-r2-metadata.json').write_text(json.dumps(metadata))
+          PY
+          node --check /tmp/nyc-r2-bridge.mjs
+          echo 'temporary_readonly_auditor_prepared=true'
+
+      - name: Create isolated temporary R2 binding bridge (never modify production Worker)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS --max-time 60 -o /tmp/nyc-temp-created.json -w '%{http_code}' \
+            -X PUT "$API/workers/scripts/$TEMP_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/nyc-r2-metadata.json;type=application/json' \
+            -F 'worker.mjs=@/tmp/nyc-r2-bridge.mjs;type=application/javascript+module;filename=worker.mjs')
+          test "$code" -ge 200 && test "$code" -lt 300
+          jq -e '.success==true' /tmp/nyc-temp-created.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API/workers/scripts/$TEMP_WORKER/subdomain" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/nyc-temp-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/nyc-temp-enabled.json >/dev/null
+          curl -fsS --max-time 25 "$API/workers/subdomain" -H "$AUTH" -o /tmp/nyc-account-subdomain.json
+          jq -er '.result.subdomain' /tmp/nyc-account-subdomain.json > /tmp/nyc-account-subdomain
+          echo 'temporary_bridge_created=true'
+
+      - name: Read sanitized statuses of v1/v2/v3 for two exact incident requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROUTE="$(cat /tmp/nyc-r2-route)"
+          SUB="$(cat /tmp/nyc-account-subdomain)"
+          URL="https://$TEMP_WORKER.$SUB.workers.dev$ROUTE"
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 35 -o /tmp/nyc-exact-status.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .read_only==true and .checked==8 and (.results|length)==8' /tmp/nyc-exact-status.json >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "temporary_r2_audit_failed_http_$code"
+              exit 1
+            fi
+            sleep 3
+          done
+          jq -c '.results[]|{request,version,receipt,status,expected,routed,blocked,promoted,owner_readback_verified,resume_accepted,resume_reason,error,previous_receipt_error,error_type,started_at,finished_at}' \
+             /tmp/nyc-exact-status.json | tee /tmp/nyc-exact-status-sanitized.jsonl
+          echo 'all_8_final_two_versioned_r2_receipts_audited=true'
+
+      - name: Remove temporary bridge even on failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" && -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${TEMP_WORKER:-}" ]]; then
+            curl -sS --max-time 25 -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TEMP_WORKER" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/nyc-temp-deleted.json || true
+            if [[ -s /tmp/nyc-temp-deleted.json ]]; then
+              jq -e '.success==true' /tmp/nyc-temp-deleted.json >/dev/null || true
+            fi
+          fi
+          echo 'temporary_bridge_delete_attempted=true'
+
+      - name: Save sanitized receipt audit only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyc-handoff-20261121-licensed-music-v4-r2-receipts
+          path: /tmp/nyc-exact-status-sanitized.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
