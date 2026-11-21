@@ -133,6 +133,8 @@ import {
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
+  readSupabaseShapedContentItem,
+  readSupabaseContentProfile,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
@@ -10741,15 +10743,19 @@ async function exceptionRecoveryReadProvider(env, row) {
  * Every read of an output for the autonomous status-only reconciler uses this.
  */
 async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId);
+  // P1 #2340: this owner chain is required before any profile-scoped provider
+  // GET. Airtable is no longer an authority; missing Supabase data fails closed.
+  if(studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+    throw new Error("supabase_recovery_owner_chain_required");
+  const row=await readSupabaseShapedOutput(env,recordId);
   if(!row?.id||row.id!==recordId)throw new Error("authoritative_recovery_output_unavailable");
   const contentId=contentIdForRecoveryOutput(row);
   if(!contentId)throw new Error("recovery_content_link_missing_or_ambiguous");
-  const content=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId);
+  const content=await readSupabaseShapedContentItem(env,contentId);
   const links=content?.fields?.Content_Profile;
   if(!Array.isArray(links)||links.length!==1||!RECOVERY_RECORD_ID.test(String(links[0]||"")))
     throw new Error("recovery_profile_link_missing_or_ambiguous");
-  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,links[0]);
+  const profile=await readSupabaseContentProfile(env,links[0]);
   const chain=verifyRecoveryProfileChain(row,content,profile);
   if(!chain.ok)throw new Error(chain.reason||"authoritative_profile_link_unverified");
   return {row:withVerifiedRecoveryProfile(row,chain),profile,profile_id:chain.profile_id};
@@ -10871,11 +10877,12 @@ export async function getStudioPublicationRecoveryHistory(request,env) {
 /** Provider GET only. No persisted publication change from this endpoint. */
 export async function getStudioExceptionRecoveryReceipt(request, env) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  const source=await exceptionRecoveryReadVerifiedOutput(env,id);
+  const row=source.row;
   if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
   const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
     ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
-    :await exceptionRecoveryReadProvider(env,row);
+    :await exceptionRecoveryReadProvider(env,row,source.profile);
   let verification=null;
   if(new URL(request.url).searchParams.get("authenticated")==="1") {
     const after=(await exceptionRecoveryReadVerifiedOutput(env,id)).row;
