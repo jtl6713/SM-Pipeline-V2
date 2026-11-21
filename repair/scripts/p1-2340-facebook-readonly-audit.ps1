@@ -21,7 +21,7 @@ foreach($item in $items){
 $p=$item.payload
 if($null -eq $p -or [string]$p.source -ne 'pipeline' -or [string]$p.Active -ne 'True'){continue}
 $name=[string]$p.Setting_Name
-if($name -and $name -match '^(META_LONG_LIVED_USER_ACCESS_TOKEN|FACEBOOK_GRAPH_API_VERSION|FACEBOOK_PAGE_ID|LA_FACEBOOK_PAGE_ID|MIAMI_FACEBOOK_PAGE_ID|NYC_FACEBOOK_PAGE_ID)$'){
+if($name -and $name -match '^(META_LONG_LIVED_USER_ACCESS_TOKEN|FACEBOOK_GRAPH_API_VERSION|FACEBOOK_PAGE_ID|LA_FACEBOOK_PAGE_ID|MIAMI_FACEBOOK_PAGE_ID|NYC_FACEBOOK_PAGE_ID|FACEBOOK_PAGE_ACCESS_TOKEN|LA_FACEBOOK_PAGE_ACCESS_TOKEN|MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN|NYC_FACEBOOK_PAGE_ACCESS_TOKEN)$'){
 if($values.ContainsKey($name)){throw 'duplicate_active_setting'}
 $values[$name]=[string]$p.Setting_Value
 }
@@ -33,6 +33,19 @@ $report=@{read_only=$true;provider_operations='GET only';output_writes=0;provide
 function G($path){
 try {
 $d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$token);Accept='application/json'} -TimeoutSec 35
+return @{ok=$true;status=200;body=$d;code=0}
+}catch{
+$status=0;$code=0
+try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+try{$e=$_.ErrorDetails.Message|ConvertFrom-Json;$code=[int]$e.error.code}catch{}
+return @{ok=$false;status=$status;code=$code;body=$null}
+}
+}
+# Page-history GET uses the already-stored, Page-identity-tested Page token.
+# The user token is for /me/accounts and /me/permissions only.
+function PG($path,$pageToken){
+try {
+$d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$pageToken);Accept='application/json'} -TimeoutSec 35
 return @{ok=$true;status=200;body=$d;code=0}
 }catch{
 $status=0;$code=0
@@ -74,11 +87,11 @@ $report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.
 $report.history_status='not_authorized';$report.history_probes=@()
 if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -eq $true -and $report.scopes['pages_read_engagement'] -eq $true){
  $targets=@(
-  @{n=4907;market='Chicago';page='FACEBOOK_PAGE_ID'},
-  @{n=5355;market='Los Angeles';page='LA_FACEBOOK_PAGE_ID'},
-  @{n=6256;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
-  @{n=6076;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
-  @{n=5915;market='New York City';page='NYC_FACEBOOK_PAGE_ID'}
+  @{n=4907;market='Chicago';page='FACEBOOK_PAGE_ID';token_key='FACEBOOK_PAGE_ACCESS_TOKEN'},
+  @{n=5355;market='Los Angeles';page='LA_FACEBOOK_PAGE_ID';token_key='LA_FACEBOOK_PAGE_ACCESS_TOKEN'},
+  @{n=6256;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID';token_key='MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN'},
+  @{n=6076;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID';token_key='MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN'},
+  @{n=5915;market='New York City';page='NYC_FACEBOOK_PAGE_ID';token_key='NYC_FACEBOOK_PAGE_ACCESS_TOKEN'}
  )
  $nums='(4907,5355,6256,6076,5915)'
  $outputs=@(Invoke-RestMethod ($url+'/rest/v1/platform_outputs?select=output_number,platform,content_profile_id,output_title,output_caption&output_number=in.'+$nums+'&limit=10') -Headers $headers -Method Get -TimeoutSec 30)
@@ -95,6 +108,10 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   if($p.Count -ne 1 -or [string]$p[0].market_name -ne [string]$t.market){throw 'history_target_owner_mismatch'}
   $pageId=[string]$values[[string]$t.page]
   if($pageId.Length -lt 6 -or $pageId.Length -gt 30 -or $pageId -match '[^0-9]'){throw 'history_page_id_unavailable'}
+  $pageToken=[string]$values[[string]$t.token_key]
+  if(-not $pageToken){throw 'history_page_token_unavailable'}
+  $identity=PG ('/'+$pageId+'?fields=id') $pageToken
+  if($identity.ok -ne $true -or [string]$identity.body.id -ne $pageId){throw 'history_page_token_identity_mismatch'}
   $needles=@()
   foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
    $v=Norm $value;if($v.Length -ge 35){$needles+= $v.Substring(0,[Math]::Min(75,$v.Length))}
@@ -106,7 +123,7 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
    for($pg=0;$pg -lt 2;$pg++){
     $path='/'+$pageId+'/'+$edge+'?fields='+$fields+'&limit=100'
     if($after){$path+='&after='+[uri]::EscapeDataString($after)}
-    $r=G $path
+    $r=PG $path $pageToken
     $probe.http_status=$r.status;$probe.error_code=$r.code
     if($r.ok -ne $true -or $null -eq $r.body.data){break}
     $probe.pages_scanned++
