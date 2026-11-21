@@ -1,0 +1,114 @@
+name: P1 2340 NYC 10065 one-shot public media_publish canary
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-nyc-10065-ap4c-canary.yml'
+      - 'repair/scripts/p1-2340-nyc-10065-ap4c-once.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-nyc-10065-ap4c-canary
+  cancel-in-progress: false
+jobs:
+  exact-nyc-parent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse approved PowerShell exact-canary script without executing
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/p1-2340-nyc-10065-ap4c-once.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Output 'P1_2340_AP4C_PARSER_OK'
+      - name: Reject provider writes and unsafe variable token logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          code=Path('repair/scripts/p1-2340-nyc-10065-ap4c-once.ps1').read_text()
+          assert "P1_IG_AP4C_CANARY=" in code and "recX2sdcURmfzfqzf" in code
+          assert "Invoke-RestMethod" in code and " -Method Get" in code
+          assert "stages/ap4c" in code and "quality_agent_recovery_events" in code
+          assert code.count(" -Method Post ") == 3
+          for forbidden in ["Invoke-RestMethod -Method Patch", "Invoke-WebRequest -Method Patch",
+                            "Write-Output $token", "Write-Host $token"]:
+              assert forbidden not in code, "Mutating or sensitive output operation prohibited"
+          print("p1_2340_exact_public_duplicate_preflight_durable_fence_and_one_media_publish_only")
+          PY
+      - name: Authenticate approved Ops service without echoing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-2340-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-2340-ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_2340_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable'; exit 1
+      - name: Guarded exact AP4C one-time publication after complete account-owned duplicate GET
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/p1-2340-ig-ap4c-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/p1-2340-nyc-10065-ap4c-once.ps1').read_text(),
+            'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/p1-2340-ig-ap4c-ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $P1_2340_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/p1-2340-ig-ap4c-request.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then
+            echo "Ops did not accept bounded AP4C canary ($code)"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-2340-ig-ap4c-ops-start.json)
+          for n in $(seq 1 140); do
+            curl -fsS --max-time 30 \
+              -H "Authorization: Bearer $P1_2340_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-2340-ig-ap4c-ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-2340-ig-ap4c-ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-2340-ig-ap4c-ops-status.json | grep '^P1_IG_AP4C_CANARY=' | tail -1 | sed 's/^P1_IG_AP4C_CANARY=//' > /tmp/p1-2340-ig-ap4c-report.json
+              jq -e '.output == 10065 and .fence_created == true and .preflight == "verified_no_recent_duplicate" and .public_publish_stage_calls == 1' /tmp/p1-2340-ig-ap4c-report.json >/dev/null
+              jq -c '{output,preflight,fence_created,public_publish_stage_calls,finalize_stage_calls,stage_status,stage_media_id,persisted_media_id,persisted_ig_stage,persisted_publish_status,final_url,finalize_stage_status,finalize_published}' /tmp/p1-2340-ig-ap4c-report.json
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              echo 'Bounded AP4C Ops canary failed; no retry authorized'
+              # Sanitize error text; never print tokens, URLs, bearer headers, or
+              # the submitted PowerShell script. Retain only diagnostic tails.
+              jq -r '.job.log // ""' /tmp/p1-2340-ig-ap4c-ops-status.json | tail -n 14 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|FACEBOOK_PAGE_ACCESS_TOKEN|META_GRAPH_API_ACCESS_TOKEN' \
+                | tail -n 10 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Bounded one-shot AP4C audit did not complete'; exit 4
+      - name: Preserve bounded exact public stage outcome as 30-day evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-nyc-10065-ap4c-canary
+          path: /tmp/p1-2340-ig-ap4c-report.json
+          retention-days: 30
+          if-no-files-found: warn
