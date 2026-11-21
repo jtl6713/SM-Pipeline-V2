@@ -130,6 +130,14 @@ def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
             return "tiktok_draft_before_inbox_lead_window"
         return None
     if is_retry_for(record, STAGE_TTD0):
+        # The stage has already proved its approved 9:16 image set incomplete.
+        # No further TTD0 invocation can prepare missing images; only a
+        # verified upstream asset repair may explicitly rearm Ready for Assets.
+        if (
+            error_stage_starts(record, "TTD0_ASSETS")
+            and record.get("fields", {}).get("Publish_Retry_Eligible") is False
+        ):
+            return "tiktok_asset_repair_required"
         if _retry_attempt_ceiling_reached(record):
             return "tiktok_draft_retry_limit_reached"
         if _retry_not_due(record):

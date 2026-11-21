@@ -153,7 +153,12 @@ def process_request(
                 record_id,
                 {
                     **unlock_fields(),
-                    "Output_Notes": append_note(output, f"TTD0 asset verification mismatch at {stamp_minutes()}."),
+                    "Output_Notes": append_note(
+                        output,
+                        f"TTD0 asset repair required at {stamp_minutes()}: "
+                        "approved ordered 9:16 slide readiness does not match Image_Count. "
+                        "Paused automatic TTD0 attempts until verified variants are repaired and explicitly rearmed.",
+                    ),
                     "Publish_Status": PUBLISH_STATUS_FAILED,
                     "Publish_Error_Stage": "TTD0_ASSETS",
                     "TikTok_Draft_Status": STATUS_RETRY,
@@ -163,12 +168,22 @@ def process_request(
                         "Confirm every linked TikTok slide has Asset_9x16_Public_Status = Ready "
                         "and a nonblank Asset_9x16_Public_URL."
                     ),
-                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                    "Publish_Retry_Eligible": True,
+                    # TTD0 only consumes completed 9:16 slide assets; another
+                    # dispatch cannot manufacture the absent/duplicate sources.
+                    # An explicit verified asset-repair rearm must change the
+                    # stage back to Ready for Assets, without resetting attempts.
+                    "Publish_Next_Retry_At": None,
+                    "Publish_Retry_Eligible": False,
                     "TikTok_Draft_Assets_JSON": "",
                 },
             )
-            return {"processed": True, "retry": True, "reason": "asset_mismatch", **result}
+            return {
+                "processed": True,
+                "retry": False,
+                "needs_asset_repair": True,
+                "reason": "asset_repair_required",
+                **result,
+            }
 
         # Stage cover for TikTok only. Preserve the approved slides and Image_Count.
         try:
