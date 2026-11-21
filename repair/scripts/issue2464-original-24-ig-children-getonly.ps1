@@ -28,8 +28,10 @@ $expected=@{
 $numbers='8128,8138,8357,8417'
 $select='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,review_status,output_status,publish_status,ig_carousel_status,do_not_publish,auto_publish_enabled,publish_retry_eligible,published_at,platform_post_url,error_messages'
 $outputs=@(SourceGet ('/rest/v1/platform_outputs?select='+$select+'&output_number=in.('+$numbers+')&limit=6'))
+if($outputs.Count -eq 1 -and $outputs[0] -is [array]){$outputs=@($outputs[0])}
 if($outputs.Count -ne 4 -or @($outputs|Select-Object -ExpandProperty output_number -Unique).Count -ne 4){throw 'four_original_outputs_not_found'}
 $profiles=@(SourceGet '/rest/v1/content_profiles?select=id,market_name&limit=25')
+if($profiles.Count -eq 1 -and $profiles[0] -is [array]){$profiles=@($profiles[0])}
 $markets=@{};foreach($p in $profiles){$markets[[string]$p.id]=[string]$p.market_name}
 $allSlides=@();$source=@();$sourceIds=@{}
 foreach($o in $outputs){
@@ -51,6 +53,7 @@ foreach($o in $outputs){
 }
 $join=@($sourceIds.Keys|Sort-Object) -join ','
 $slides=@(SourceGet ('/rest/v1/carousel_slides?select=airtable_record_id,current_order,deleted_from_carousel,ig_child_container_id,fields&airtable_record_id=in.('+$join+')&limit=30'))
+if($slides.Count -eq 1 -and $slides[0] -is [array]){$slides=@($slides[0])}
 if($slides.Count -ne 24 -or @($slides|Select-Object -ExpandProperty airtable_record_id -Unique).Count -ne 24){throw 'missing_or_duplicate_original_slides'}
 $children=@();$seen=@{}
 foreach($s in $slides){
@@ -74,6 +77,7 @@ foreach($num in @(8128,8138,8357,8417)){
 }
 if($children.Count -ne 24){throw 'original_24_count_mismatch'}
 $settings=@(SourceGet '/rest/v1/engagement_settings?select=payload&limit=500')
+if($settings.Count -eq 1 -and $settings[0] -is [array]){$settings=@($settings[0])}
 if($settings.Count -ge 500){throw 'settings_pagination_incomplete'}
 $config=@{}
 foreach($item in $settings){
