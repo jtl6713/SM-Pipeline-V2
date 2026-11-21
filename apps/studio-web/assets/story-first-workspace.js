@@ -581,7 +581,7 @@
       pending: "Queued at ElevenLabs", generating: "Generating video",
       awaiting_review: "Video ready for review", registered: "Video registered; finalize scene",
       accepted: "Video accepted", declined: "Video declined",
-      failed: "Generation failed", accepting: "Asset registration in progress",
+      failed: "Generation failed", accepting: "Registration not confirmed — needs recovery",
       submission_uncertain: "Submission uncertain — administrator review required",
     };
     return labels[job?.state || "none"] || "Video status: " + String(job?.state || "unknown");
@@ -594,12 +594,12 @@
       submitting: "Submitted · verifying the provider request",
       pending: "Queued at ElevenLabs · awaiting generation",
       generating: "Generating video at ElevenLabs",
-      accepting: "Registering reviewed video privately",
+      accepting: "Registration has not completed — preserve original video",
       awaiting_review: "Complete · your video is ready to review",
       registered: "Registered · finalize your media selection",
     }[job?.state];
     if (!stage) return;
-    const active = ["submitting", "pending", "generating", "accepting"].includes(job.state);
+    const active = ["submitting", "pending", "generating"].includes(job.state);
     const progress = node("div","story-first-video-progress" + (active ? " is-active" : " is-complete"));
     progress.setAttribute("role","status");
     progress.setAttribute("aria-live","polite");
@@ -612,6 +612,9 @@
         (["pending", "generating"].includes(job.state)
           ? "Checking this existing job automatically about every 15 seconds. No repeat generation or charge."
           : "Acceptance registration is not automatically retried. Refresh Video Status; if it remains here, an administrator must reconcile the original clip. Do not regenerate.")));
+    } else if (job.state === "accepting") {
+      progress.appendChild(node("span","story-first-video-progress-note",
+        "This is not an active generation or automatic registration poll. Refresh reads the stored status only; preserve this video for administrator recovery without another ElevenLabs charge."));
     } else if (job.state === "awaiting_review") {
       progress.appendChild(node("span","story-first-video-progress-note",
         "Generation finished. Play the preview and Accept or Decline; nothing publishes automatically."));
