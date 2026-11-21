@@ -1251,6 +1251,26 @@ export async function studioLoadRenderQueueCandidates(env, { limit = 80, fields 
 }
 /*__STUDIO_WORKER_END:studioLoadRenderQueueCandidates__*/
 
+export function studioRenderAudioPreflight(row) {
+  const mode = (name) => String(f(row, name) || "").trim().toLowerCase();
+  const voice = mode("Studio_Effective_Voiceover_Mode") === "yes";
+  const music = mode("Studio_Effective_Background_Music_Mode") === "yes";
+  if (voice) {
+    if (!String(f(row, "Voiceover_URL") || "").trim()) return "voiceover_missing";
+    const seconds = Number(f(row, "Voiceover_Duration_Seconds")
+      || f(row, "Studio_Effective_Voiceover_Duration_Seconds") || 0);
+    const frames = Number(f(row, "Render_Total_Frames") || 0);
+    if (!(seconds > 0) || !(frames > 0) || frames / 30 < seconds + 0.1)
+      return "voiceover_exceeds_video";
+  }
+  if (music && !String(
+    f(row, "Music_URL") || f(row, "Preferred_Music_URL") || f(row, "Selected_Music_URL") || ""
+  ).trim()) return "background_music_missing";
+  if (music && !(Number(f(row, "Music_Volume")) > 0)) return "background_music_muted";
+  return null;
+}
+/*__STUDIO_WORKER_END:studioRenderAudioPreflight__*/
+
 export async function studioAdmitRenderQueue(env, options = {}) {
   const controls = options.controls || await readOpsQueueControls(env);
   const candidates = await studioLoadRenderQueueCandidates(env, {
@@ -1373,6 +1393,12 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       Boolean(String(f(latest, "Final_File_URL") || "").trim())
     ) {
       skipped.push({ id: head.id, reason: "no_longer_eligible" });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
+    const missingAudio = studioRenderAudioPreflight(latest);
+    if (missingAudio) {
+      skipped.push({ id: head.id, reason: missingAudio });
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
       continue;
     }
@@ -5390,14 +5416,18 @@ export function arrayOrEmpty(value) {
 }
 /*__STUDIO_WORKER_END:arrayOrEmpty__*/
 
-export function resolvedOutputTriState(outputRow, overrideField, requestRecord, requestField, profileDefault) {
+export function resolvedOutputTriState(outputRow, overrideField, requestRecord, requestField, profileDefault, parentIntent = null) {
   const override = String(f(outputRow, overrideField) || "Inherit").trim() || "Inherit";
-
   if (override === "Yes" || override === "No") return override;
   if (override === "Use Profile Default") return profileDefault ? "Yes" : "No";
 
-  const master = String(f(requestRecord, requestField) || "Use Profile Default").trim() || "Use Profile Default";
+  const master = String(f(requestRecord, requestField) || "").trim();
   if (master === "Yes" || master === "No") return master;
+  if (master === "Use Profile Default") return profileDefault ? "Yes" : "No";
+  // Phase6 older request snapshots omitted Voiceover_Mode. Do not turn a
+  // parent's explicit Yes into No merely because that JSONB field is missing.
+  const contentIntent = String(parentIntent ?? "").trim();
+  if (contentIntent === "Yes" || contentIntent === "No") return contentIntent;
   return profileDefault ? "Yes" : "No";
 }
 /*__STUDIO_WORKER_END:resolvedOutputTriState__*/
@@ -5634,24 +5664,33 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
     "AI decides"
   );
 
+  const companionStory = String(f(outputRow, "Output_Type") || "").trim() === "Story";
+  const hasVoiceOverride = ["Yes", "No", "Use Profile Default"].includes(
+    String(f(outputRow, "Voiceover_Mode_Override") || "").trim()
+  );
+  const hasMusicOverride = ["Yes", "No", "Use Profile Default"].includes(
+    String(f(outputRow, "Background_Music_Mode_Override") || "").trim()
+  );
   const effective = {
     platform: String(f(outputRow, "Platform") || "").trim(),
     output_type: String(f(outputRow, "Output_Type") || "").trim(),
     route,
 
-    voiceover_mode: resolvedOutputTriState(
+    voiceover_mode: companionStory && !hasVoiceOverride ? "No" : resolvedOutputTriState(
       outputRow,
       "Voiceover_Mode_Override",
       requestRecord,
       "Voiceover_Mode",
-      profileDefaults.include_voiceover
+      profileDefaults.include_voiceover,
+      f(parentContentItem, "Include_Voiceover")
     ),
-    background_music_mode: resolvedOutputTriState(
+    background_music_mode: companionStory && !hasMusicOverride ? "Yes" : resolvedOutputTriState(
       outputRow,
       "Background_Music_Mode_Override",
       requestRecord,
       "Background_Music_Mode",
-      profileDefaults.include_background_music
+      profileDefaults.include_background_music,
+      f(parentContentItem, "Include_Background_Music")
     ),
     thumbnail_mode: studioIsFinishedPassthrough(requestRecord)
       ? "Yes"
@@ -5772,6 +5811,20 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
     scheduled_at: f(outputRow, "Scheduled_At") || null,
   };
 
+  // Exact original narration wins over an earlier 30s request plan. Keep all
+  // six approved scenes, never cut off the end of spoken audio.
+  if (effective.voiceover_mode === "Yes" && !companionStory) {
+    const parentSeconds = Number(f(parentContentItem, "Voiceover_Duration_Seconds") || 0);
+    const validParent = Number.isFinite(parentSeconds) && parentSeconds > 0 ? parentSeconds : 0;
+    effective.voiceover_duration_seconds = Math.max(
+      Number(effective.voiceover_duration_seconds) || 0, validParent
+    );
+    if (effective.voiceover_duration_seconds > 0) {
+      const tail = Math.max(0, Number(effective.voiceover_tail_seconds) || 0);
+      const speechCoverage = Math.ceil((effective.voiceover_duration_seconds + tail + 0.4) * 30) / 30;
+      effective.video_duration_seconds = Math.max(effective.video_duration_seconds, speechCoverage);
+    }
+  }
   effective.music = await resolveStudioRenderMusic(env, outputRow, requestRecord, effective);
   const ezOrigin = String(f(requestRecord, "Production_Notes") || "").includes("origin=ez-button");
   if (ezOrigin) {
@@ -5783,6 +5836,15 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
   }
   if (studioIsFinishedPassthrough(requestRecord)) effective.thumbnail_mode = "Yes";
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
+  // Requesting music must never silently fall back to a silent render.
+  if (effective.background_music_mode === "Yes" && !String(effective.music?.url || "").trim()) {
+    effective.issues.push("Background music requested but no approved catalog URL is available.");
+  }
+  if (effective.voiceover_mode === "Yes"
+      && String(f(parentContentItem, "Voiceover_Status") || "").trim() === "Generated"
+      && !String(f(parentContentItem, "Voiceover_URL") || "").trim()) {
+    effective.issues.push("Voiceover marked Generated without a retrievable URL.");
+  }
   return effective;
 }
 /*__STUDIO_WORKER_END:buildOutputWorkItemEffective__*/
@@ -7432,21 +7494,18 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Requested_Carousel_Slide_Count_Max: effective.carousel_slide_count_mode === "Target range" ? effective.carousel_slide_count_max : null,
     Studio_Effective_Carousel_Image_Mode: effective.carousel_image_mode,
     Preferred_Music_Media_Asset_ID: effective.music?.record_id || null,
-    Preferred_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Selected_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Selected_Music_Media_Asset_ID: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.record_id || null),
-    Music_Volume: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? 0
-      : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
+    // Companion Stories intentionally have no narration but MUST retain music.
+    // Only finished-video passthrough forbids a new soundtrack overlay.
+    Preferred_Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Selected_Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Selected_Music_Media_Asset_ID: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.record_id || null),
+    Music_Volume: studioIsFinishedPassthrough(requestRecord)
+      ? 0 : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
     Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
