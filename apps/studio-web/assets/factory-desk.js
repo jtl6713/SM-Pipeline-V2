@@ -606,6 +606,27 @@
       || (/^rec[A-Za-z0-9]+$/.test(String(card.id || "")) ? `/api/outputs/${card.id}/preview` : "");
     const imageOnly = looksLikeImageOnly(card);
 
+    // A recovery-marked, publishing-held gallery is NOT a video preview.
+    // The generic /api/outputs/:id/preview route still resolves legacy
+    // provider/Drive data. For protected repair use the exact trusted public
+    // first image only, and never send a video request or a stale Airtable GET.
+    if (card.protected_media_rework === true) {
+      const safeSource = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_\/-]+\.(jpg|jpeg|png|webp)$/i.test(thumb);
+      dialog.classList.remove("is-video");
+      dialog.classList.add("is-image");
+      if (safeSource) {
+        image.src = thumb;
+        image.hidden = false;
+        setStatus(`Original held source image · ${cardLabel(card)} · not a complete approved gallery`);
+      } else {
+        empty.hidden = false;
+        empty.textContent = "Original media needs reconstruction. No verified source preview exists yet.";
+        setStatus(`No verified recovery preview for ${cardLabel(card)}`, true);
+      }
+      backdrop.hidden = false;
+      return;
+    }
+
     if (imageOnly && thumb) {
       dialog.classList.remove("is-video");
       dialog.classList.add("is-image");
