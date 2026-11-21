@@ -68,12 +68,24 @@ try {
  $embed=Invoke-RestMethod -Uri $embedUrl -Method Get -TimeoutSec 45
  $returned=[string]$embed.embed_product_id
  $author=([string]$embed.author_unique_id).TrimStart('@').ToLowerInvariant()
- if(-not $author){
-   $authorUrl=[string]$embed.author_url
-   if($authorUrl -match '^https://www[.]tiktok[.]com/@([A-Za-z0-9._]{2,40})/?$'){$author=$Matches[1].ToLowerInvariant()}
+ $authorFromUrl=''
+ $rawAuthorUrl=[string]$embed.author_url
+ # TikTok oEmbed author links can have query parameters. Validate exact HTTPS
+ # official host and canonical /@handle path to avoid accepting other users.
+ if($rawAuthorUrl){
+   $authorUri=$null
+   if([Uri]::TryCreate($rawAuthorUrl,[UriKind]::Absolute,[ref]$authorUri) -and
+      $authorUri.Scheme -eq 'https' -and $authorUri.Host -eq 'www.tiktok.com' -and
+      $authorUri.AbsolutePath -match '^/@([A-Za-z0-9._]{2,40})/?$'){
+     $authorFromUrl=$Matches[1].ToLowerInvariant()
+   }
  }
+ if(-not $author){$author=$authorFromUrl}
  $r.oembed_public_post_id=$returned
- $r.oembed_owner_verified=($author -eq $expected)
+ $r.oembed_owner_verified=($author -eq $expected -and
+    (-not $authorFromUrl -or $authorFromUrl -eq $expected))
+ $r.oembed_author_handle=if($author -match '^[a-z0-9._]{2,40}$'){$author}else{'unavailable'}
+ $r.oembed_author_url_handle=if($authorFromUrl -match '^[a-z0-9._]{2,40}$'){$authorFromUrl}else{'unavailable'}
  $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
  $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
  $r.stage='completed'
