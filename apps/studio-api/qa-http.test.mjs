@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,qaDeploymentBlockers,QA_WORKER_BUILD,QA_UI_BUILD,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
-function harness(){
+function harness(overrides={}){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
   const leases=new Map();
   const bucket={
@@ -49,7 +49,7 @@ function harness(){
       method,headers:{"Content-Type":"application/json"},
       ...(body?{body:JSON.stringify(body)}:{})
     });
-    return handleQaApi({request,url:new URL(request.url),env:{STUDIO_MEDIA:bucket},
+    return handleQaApi({request,url:new URL(request.url),env:{STUDIO_MEDIA:bucket,...overrides},
       authorization:{user:{record_id:actor}},qaLedger,clock:now,
       respond:(_request,_env,obj,status=200)=>new Response(JSON.stringify(obj),{status}),
       fetchHealth:fetchHealth || (async()=>new Response(JSON.stringify({version:"0.10.764"}),{status:200}))});
@@ -61,6 +61,13 @@ test("catalog exposes 88 versioned cases and read-only safe-check allowlist",asy
   assert.equal(r.status,200);assert.equal(j.tests.length,88);
   assert.deepEqual(j.safeAutomations,["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
   assert.equal(j.writeAuthority,"Supabase");
+});
+test("single live Worker refuses staging or development execution flags",async()=>{
+  for(const name of ["staging","development"]){
+    const h=harness({STUDIO_QA_EXECUTION_ENV:name});
+    await assert.rejects(()=>h.call("GET","catalog"),/Only production QA execution is configured/);
+    assert.equal(h.rows.get(QA_RUNS_TABLE).length,0);
+  }
 });
 test("QA environment selection cannot silently send staging tests to production",async()=>{
   const h=harness();
