@@ -2043,23 +2043,14 @@ export async function listSupabasePipelineHistoryPage(env, {
   if (!profileId) throw new Error("Supabase Pipeline profile missing");
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
   const size = Math.max(1, Math.min(200, Math.floor(Number(limit) || 150)));
-  // The Production Approve action writes Submitted_At on the linked
-  // production_requests publish_status bag. This is NOT Factory Review_Decision_At.
-  const historySelect = OUTPUT_SELECT.replace(
-    "content_items(airtable_record_id,content_number,content_title)",
-    "content_items(airtable_record_id,content_number,content_title,production_requests(publish_status))",
-  );
+  // Database-maintained approval stamp is indexed and sorted before LIMIT/OFFSET.
+  // Null stamps (historical requests lacking proof) are placed last.
+  const historySelect = OUTPUT_SELECT + ",production_approved_at";
   const rows = await supabaseRest(env,
     `platform_outputs?content_profile_id=eq.${profileId}&test_run_id=is.null`
-    + `&select=${historySelect}&order=created_at.desc.nullslast,output_number.desc.nullslast,id.desc`
+    + `&select=${historySelect}&order=production_approved_at.desc.nullslast,created_at.desc.nullslast,output_number.desc.nullslast,id.desc`
     + `&limit=${size + 1}&offset=${skip}`);
-  const page = (rows || []).slice(0, size).map((row) => {
-    const flat = flattenOutputRow(row);
-    const submitted = row.content_items?.production_requests?.publish_status?.Submitted_At;
-    const stamp = typeof submitted === "string" && Number.isFinite(Date.parse(submitted))
-      ? submitted : null;
-    return { ...flat, production_approved_at: stamp };
-  });
+  const page = (rows || []).slice(0, size).map(flattenOutputRow);
   const contentByAirtableId = new Map();
   for (const row of page) {
     if (row.content_item_airtable_id) contentByAirtableId.set(row.content_item_airtable_id, {
