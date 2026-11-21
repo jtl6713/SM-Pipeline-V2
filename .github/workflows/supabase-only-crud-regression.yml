@@ -138,6 +138,7 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'airtable_retirement_evidence_gate_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_retirement_preflight_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_preflight_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_plan_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_negative_only_workflows_test.py' -v
           # The evidence template is intentionally BLOCKED until real production
           # project and full six-source hourly attestations are supplied.
