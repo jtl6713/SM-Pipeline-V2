@@ -711,6 +711,88 @@ export async function factoryBatchMarkExceptionRouted(bucket, {
   });
 }
 
+/**
+ * Repair R2 progress only after an exact, still-current Supabase approval receipt
+ * from THIS Factory request has been read back. This never calls the approval
+ * writer, MAE, or any publisher. The receipt is verified against immutable
+ * record number, profile, and parent/child request identity before CAS.
+ *
+ * Intentionally limited to aged global-group pending/processing rows. Terminal
+ * failures have a separate audited recovery path and are never rewritten here.
+ */
+export async function factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+  profileId, requestId, loadRecords, nowMs = Date.now(), minAgeMs = 60000,
+} = {}) {
+  assertBucket(bucket);
+  if (typeof loadRecords !== "function") throw Error("Canonical Supabase receipt reader required");
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  if (!snapshot?.group_request_id || !["queued", "running"].includes(snapshot.status)) return snapshot;
+  const createdMs = Date.parse(snapshot.created_at || "");
+  if (!Number.isFinite(createdMs) || nowMs - createdMs < minAgeMs) return snapshot;
+  if (new Set(snapshot.items.map(row => row.id)).size !== snapshot.items.length) {
+    throw Error("Duplicate Factory ledger identities; receipt reconciliation denied");
+  }
+  const candidates = snapshot.items.filter(row =>
+    row.status === "pending" || row.status === "processing");
+  if (!candidates.length) return snapshot;
+  // The source reader must make an authoritative exact-ID read, not use the
+  // eventually-consistent Factory Desk or the browser's saved selection.
+  const records = await loadRecords(candidates.map(row => row.id));
+  if (!(records instanceof Map)) throw Error("Canonical Supabase receipt read unavailable");
+  const verified = new Map();
+  for (const item of candidates) {
+    const entry = records.get(item.id);
+    const row = entry?.row;
+    const receipt = row?.error_messages?.SM_Factory_Supabase_Approval_Receipt;
+    if (entry?.profileId !== profileId || row?.airtable_record_id !== item.id ||
+        Number(row?.output_number) !== Number(item.output_id) ||
+        row?.review_status !== "Approved" ||
+        !["Approved for Publishing", "Scheduled", "Published"].includes(String(row?.output_status || "")) ||
+        receipt?.authority !== "supabase" ||
+        receipt?.request_id !== snapshot.group_request_id ||
+        receipt?.profile_record_id !== profileId ||
+        receipt?.output_record_id !== item.id ||
+        Number(receipt?.output_number) !== Number(item.output_id) ||
+        !Number.isFinite(Date.parse(String(receipt?.approved_at || "")))) continue;
+    // Don't change an R2 row while the same active drain is still completing.
+    const lastProcessing = [...(item.timeline || [])].reverse().find(event => event.state === "processing");
+    if (item.status === "processing" && lastProcessing &&
+        nowMs - Date.parse(lastProcessing.at || "") < minAgeMs) continue;
+    verified.set(item.id, { output_id: Number(item.output_id), approved_at: receipt.approved_at });
+  }
+  if (!verified.size) return snapshot;
+  const at = new Date(nowMs).toISOString();
+  return cas(bucket, factoryBatchKey(profileId, requestId), current => {
+    if (current?.group_request_id !== snapshot.group_request_id ||
+        new Set((current.items || []).map(row => row.id)).size !== (current.items || []).length) {
+      throw Error("Factory ledger identity changed; no receipt reconciliation");
+    }
+    let changed = 0;
+    const items = current.items.map(item => {
+      const proof = verified.get(item.id);
+      if (!proof || Number(item.output_id) !== proof.output_id ||
+          !["pending", "processing"].includes(item.status)) return item;
+      changed++;
+      return {
+        ...item, status: "approved", error: null, next_attempt_ms: 0,
+        approval_verified_at: at,
+        timeline: [...(item.timeline || []), {
+          state: "approved", at, attempt: item.total_attempts || 0,
+          reason: "exact_supabase_original_request_receipt",
+          canonical_approved_at: proof.approved_at,
+        }].slice(-180),
+      };
+    });
+    if (!changed) return null;
+    const counts = factoryBatchCounts({ ...current, items });
+    return {
+      ...current, items, updated_at: at,
+      status: counts.pending_count ? "running"
+        : counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed",
+    };
+  });
+}
+
 export async function factoryBatchReconcile(bucket, profileId, requestId) {
   assertBucket(bucket);
   const key = factoryBatchKey(profileId, requestId);
