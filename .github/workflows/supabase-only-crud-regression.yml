@@ -22,6 +22,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reject executable GitHub Actions with Airtable API endpoints
+        shell: bash
+        run: |
+          if git grep -n -F 'api.airtable.com' -- '.github/workflows/*.yml' '.github/workflows/*.yaml'; then
+            echo 'FAIL: direct Airtable HTTP endpoint found in a GitHub Actions workflow'
+            exit 1
+          fi
+          echo 'PASS: no direct Airtable API endpoints in GitHub Actions workflows'
       - name: Syntax-check modified Worker modules and run no-egress guard
         run: |
           node --check apps/studio-api/worker.js
