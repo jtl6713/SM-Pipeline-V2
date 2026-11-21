@@ -103,7 +103,7 @@ foreach($file in @($paths|Select-Object -Unique)){
 # Owner-bound source-of-truth YouTube uploads inventory; video listing GET
 # validates uploaded channel through the uploader itself. This endpoint uses
 # the existing OAuth configuration; it does not upload or modify videos.
-$ytOwner=@{};$ttOwner=@()
+$ytOwner=@{};$ttOwner=@{}
 foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
   $pr=$prefix[$city]
   $base=[string]$vals[$pr+'YOUTUBE_UPLOAD_SERVICE_URL']
