@@ -55,11 +55,16 @@ def final_gallery_identity_reason(
     ids: list[str] = []
     for slide in slides:
         number = field(slide, "Slide Number")
-        try:
-            n = int(number)
-        except (TypeError, ValueError):
+        if isinstance(number, bool):
             return "invalid_final_slide_number"
-        if n < 1 or str(number).strip() != str(n):
+        try:
+            numeric = float(number)
+            if not numeric.is_integer():
+                return "invalid_final_slide_number"
+            n = int(numeric)
+        except (TypeError, ValueError, OverflowError):
+            return "invalid_final_slide_number"
+        if n < 1:
             return "invalid_final_slide_number"
         numbers.append(n)
         if slide.get("id"):
