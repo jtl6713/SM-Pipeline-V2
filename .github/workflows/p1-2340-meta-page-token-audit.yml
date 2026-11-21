@@ -28,7 +28,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           code=Path('repair/scripts/p1-2340-facebook-readonly-audit.ps1').read_text()
-          assert "GraphGet(" in code and "P1_META_AUDIT=" in code
+          assert "function G(" in code and "P1_META_AUDIT=" in code
+          assert "Invoke-RestMethod" in code and "-Method Get" in code
+          assert "/me/accounts?fields=id,tasks&limit=100" in code
           for forbidden in ["Invoke-RestMethod -Method Post", "Invoke-WebRequest -Method Post",
                             "Invoke-RestMethod -Method Patch", "Invoke-WebRequest -Method Patch",
                             "Write-Output $token", "Write-Host $token"]:
