@@ -907,3 +907,5 @@ zero Airtable egress and zero Approve/Retry/Publish authorization.
 Only then deploy Studio original-image gallery Prev/Next view.
 
 Deploy #2531 Pipeline all-week history pagination and production-approved sorting UI 0.6.1029 from merged PR #2534; 22/22 CI checks green.
+
+Deploy #2546 Studio Ideas UI 0.6.1030: single AI Idea Generation card with Quantity, Quality, Generate Ideas, and countdown to next hourly Chicago-time idea pull above Current Ideas. Verify production custom domain and cache keys. 2026-11-21.
