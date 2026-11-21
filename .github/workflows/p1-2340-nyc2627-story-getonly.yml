@@ -37,7 +37,7 @@ jobs:
           if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_automatic_PROFILE_variable_must_not_be_assigned'}
           if($s -notmatch 'stage='){throw 'sanitized_failure_stage_required'}
           if($s.Contains('$script:report.provider_gets++')){throw 'script_scope_request_counter_breaks_invoke_scriptblock'}
-          if(([regex]::Matches($s,'\$report\.provider_gets=\[int\]\$report\.provider_gets\+1')).Count -ne 3){throw 'three_bounded_account_and_container_gets_required'}
+          if(([regex]::Matches($s,'\$report\.provider_gets=\[int\]\$report\.provider_gets\+1')).Count -ne 4){throw 'four_bounded_owner_container_and_content_gets_required'}
           foreach($proof in @('candidate_id_or_permalink_drift','original_approved_video_asset_changed','normalized_mean_absolute_error','provider_and_approved_frames_not_similar_enough','content_verified=$true','ffmpeg_not_available_to_compare_media')){if(-not $s.Contains($proof)){throw ('content_identity_gate_missing: '+$proof)}}
           Write-Output 'P1_2340_2627_STRICT_READONLY_STATIC_PASS'
   audited-original-status:
