@@ -89,6 +89,38 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
             len(unexpected_references(self.root, ("api.airtable.com",))), 1
         )
 
+    def test_new_nyc_tiktok_provider_status_forbidden_token_is_nonexecuting(self):
+        name = "p1-2340-nyc4785-tiktok-status.yml"
+        source = (
+            "foreach($bad in @('/tiktok/draft/photo/init','/tiktok/draft/video/init',"
+            "'/tiktok/publish-private','/media_publish','-Method Patch','-Method Put',"
+            "'-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){\n"
+            "if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}\n"
+        )
+        self.write(name, source)
+        self.assertEqual(unexpected_references(self.root, ("api.airtable.com",)), [])
+        self.write(name, source + "curl 'https://api.airtable.com/v0/secret'\n")
+        self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
+
+    def test_new_approved_stories_guards_are_exact_not_whole_file_allowlists(self):
+        for name, guard in (
+            ("p1-2340-story-3522-fresh-approved-once.yml",
+             "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete',"
+             "'-Method Put','Write-Output $token','Write-Host $token')){\n"
+             "if($src.Contains($bad)){throw 'unsafe_operation_or_secret_output'}\n"),
+            ("p1-2340-ten-approved-stories.yml",
+             "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete',"
+             "'Write-Output $token','Write-Host $token')){\n"
+             "if($s.Contains($bad)){throw 'unsafe_operation'}\n"),
+        ):
+            with self.subTest(name=name):
+                self.write(name, guard)
+                self.assertEqual(unexpected_references(self.root, ("api.airtable.com","AIRTABLE_PAT")), [])
+                self.write(name, guard + "curl https://api.airtable.com/v0/base\n")
+                self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
+                self.write(name, guard.replace("throw 'unsafe_operation", "Write-Host 'unsafe_operation"))
+                self.assertEqual(len(unexpected_references(self.root, ("AIRTABLE_PAT",))), 1)
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://api.airtable.com/v0/foo\n")
         self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
