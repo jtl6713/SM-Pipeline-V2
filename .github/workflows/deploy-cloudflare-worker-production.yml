@@ -64,6 +64,15 @@ jobs:
       ENABLE_PROFILE_SUMMARY_SHADOW: ${{ inputs.enable_profile_summary_shadow || 'false' }}
       PROFILE_SUMMARY_SHADOW_CONFIRMATION: ${{ inputs.profile_summary_shadow_confirmation || '' }}
     steps:
+      - name: Owner-global generation guidance API regression #2532
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --test apps/studio-api/owner-generation-guidance.test.mjs apps/studio-api/owner-generation-supabase.test.mjs
+
       - name: Checkout
         uses: actions/checkout@v6
 
