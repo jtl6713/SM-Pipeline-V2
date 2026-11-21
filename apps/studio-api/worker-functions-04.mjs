@@ -11734,7 +11734,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       const packedOutputs = pack.outputs || [];
       const packedRequests = pack.requests || [];
       // Empty pack usually means Phase 4 sync has not warmed requests/outputs yet.
-      if (packedOutputs.length || packedRequests.length) {
+      if (packedOutputs.length || packedRequests.length || (pack.reviewOutputs || []).length) {
+        // A healthy Supabase-only Factory may have nothing except protected
+        // source-rework outputs. Never silently fall back to Airtable for them.
         profiles = pack.profiles || [];
         outputs = packedOutputs;
         requests = packedRequests;
