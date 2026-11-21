@@ -153,7 +153,7 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             if (array.fullmatch(candidate)
                 and i + 1 < len(lines)
                 and fail_guard.fullmatch(lines[i + 1].strip())
-                and ("'__AIRT_HOST__'" in candidate
+                and (_expand_guard("'__AIRT_HOST__'") in candidate
                      or _expand_guard("'https://__AIRT_HOST__'") in candidate
                      or "'AIRTABLE_PAT'" in candidate
                      or "'AIRTABLE_TOKEN'" in candidate)):
