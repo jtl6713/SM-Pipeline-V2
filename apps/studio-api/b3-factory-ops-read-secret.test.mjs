@@ -1,23 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
-test("B3 read flag install is main-only, secret_text, and does not retarget Home or writes", () => {
-  const workflow = readFileSync(new URL(
-    "../../.github/workflows/put-studio-api-b3-factory-ops-read.yml",
-    import.meta.url,
-  ), "utf8");
-  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /0\.10\.782-supabase-b3-factory-ops-reads/);
-  assert.match(workflow, /\/content\/v2/);
-  assert.doesNotMatch(workflow, /target \+ "\/content"/);
-  assert.match(workflow, /STUDIO_CONTENT_READ_SOURCE/);
-  assert.match(workflow, /"name": "STUDIO_FACTORY_OPS_READ_SOURCE"/);
-  assert.match(workflow, /"text": "supabase"/);
-  assert.match(workflow, /"type": "secret_text"/);
-  assert.match(workflow, /Pre-existing Worker binding changed during B3 flag install/);
-  assert.doesNotMatch(workflow, /STUDIO_READ_SOURCE/);
-  assert.doesNotMatch(workflow, /STUDIO_WRITE_SOURCE/);
-  assert.doesNotMatch(workflow, /STUDIO_HOME_PROFILE_SUMMARY_READS/);
-  assert.doesNotMatch(workflow, /print\(secret|print\(result|print\(script/);
+test("studioFactoryOpsReadSource uses Supabase and the obsolete Airtable-era installer remains retired", () => {
+  const workflow = new URL("../../.github/workflows/put-studio-api-b3-factory-ops-read.yml", import.meta.url);
+  assert.equal(existsSync(workflow), false);
+  const source = readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export function studioFactoryOpsReadSource(env)");
+  assert.ok(start >= 0, "missing studioFactoryOpsReadSource");
+  const fn = source.slice(start, source.indexOf("}", start) + 1);
+  assert.match(fn, /studioOnlySupabaseSource\(env\)/);
 });
