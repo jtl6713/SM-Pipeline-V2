@@ -35,6 +35,12 @@ test("Factory active approvals show actual stages, output identity, elapsed and 
   assert.match(factory, /factoryLiveItemHtml\(item\)/);
   assert.match(factory, /factoryLiveSummaryHtml\(items\.filter/);
   assert.match(factory, /hasPendingWork \? 3000 : 15000/);
+  assert.match(factory, /function factoryBatchMergeExactActivity\(/);
+  assert.match(factory, /request_id: row\.request_id/);
+  assert.match(factory, /lastBatchFullFetchMs/);
+  assert.match(factory, /< 18000 && !force/);
+  assert.match(factory, /\.slice\(0, 4\)/);
+  assert.match(factory, /Exact Factory progress is unavailable; retaining prior snapshot/);
   assert.match(factory, /!Number\(totals\.active\) && !Number\(totals\.pending\)/);
   assert.match(html, /factory-live-approval-progress\.css/);
   assert.match(html, /live=five-stages-20261120/);
