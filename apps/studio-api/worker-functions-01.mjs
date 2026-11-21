@@ -4664,10 +4664,16 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
     includeInactive,
     limit: 500,
   }).catch(() => null);
-  // Under STUDIO_WRITE_SOURCE=supabase Airtable PRO lists are empty. Use densified
-  // rows for plan/prepare even when Platform_Output is not yet a typed column.
-  // Fanout still reuses Platform Outputs by PRO record id before POST (#1907).
-  if (Array.isArray(fromSupabase) && fromSupabase.length > 0 && studioWriteSource(env) === "supabase") {
+  // Phase 6 Production Request Outputs belong to Supabase whenever the Phase 6
+  // write authority is Supabase. Do not gate these reads on STUDIO_WRITE_SOURCE,
+  // an independent Output/Content flag. Otherwise a valid six-output Supabase
+  // result falls into legacy Airtable listRecordsPage scans and Frames Prepare
+  // can fail before its first durable frame checkpoint.
+  if (studioPhase6WriteSource(env) === "supabase") {
+    if (!Array.isArray(fromSupabase)) {
+      throw new HttpError(503,
+        "Production output lookup is unavailable in Supabase. No frames were started.");
+    }
     const filtered = includeInactive
       ? fromSupabase
       : fromSupabase.filter((row) => Boolean(f(row, "Active") || f(row, "Enabled")));
