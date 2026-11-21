@@ -94,6 +94,10 @@ jobs:
             if [[ "$status" == "ok" ]]; then
               jq -r '.job.log // ""' /tmp/la-ops-job.json | grep '^P1_LA_YT_INVENTORY=' | tail -1 | sed 's/^P1_LA_YT_INVENTORY=//' > /tmp/la-video-inventory.json
               jq -e '.read_only == true and .provider_writes == 0 and .output_writes == 0 and .airtable_reads == 0 and .expected_channel_id == "UCVt3nBxRfPuuxxduuxmz9sw" and .original_output_record_id == "rec75nNjbFn830TjM"' /tmp/la-video-inventory.json >/dev/null
+              if ! jq -e '(.reason == "title_candidates_require_exact_original_receipt_reconciliation" or .reason == "no_exact_title_match_found_but_absence_not_proven" or .reason == "incomplete_inventory_cannot_infer_absence") and (.pages_scanned|tonumber) >= 1' /tmp/la-video-inventory.json >/dev/null; then
+                echo 'Authenticated owned LA inventory could not be completed or started; audit BLOCKED, never claim verified absence'
+                exit 3
+              fi
               jq -c '{channel,output_number,expected_title,reason,complete,pages_scanned,videos_seen,missing_video_details,matched,read_only,provider_writes,output_writes,airtable_reads}' /tmp/la-video-inventory.json
               exit 0
             elif [[ "$status" == "failed" ]]; then
