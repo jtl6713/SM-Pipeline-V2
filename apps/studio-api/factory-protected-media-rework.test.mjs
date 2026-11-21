@@ -273,7 +273,7 @@ test("Factory client renders only output-scoped, read-only source carousel with 
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const worker = readFileSync(path.join(dir,"worker-functions-04.mjs"),"utf8");
   const client = readFileSync(path.join(dir,"../studio-web/assets/factory-desk.js"),"utf8");
-  assert.match(worker,/recovery_original_image_previews: mediaRework\\?\\.original_image_previews/);
+  assert.ok(worker.includes("recovery_original_image_previews: mediaRework?.original_image_previews"));
   assert.match(client,/function showFactoryRecoverySourceGallery/);
   assert.match(client,/if \(showFactoryRecoverySourceGallery\(card, image, dialog\)\)/);
   assert.match(client,/Verified original preview image/);
