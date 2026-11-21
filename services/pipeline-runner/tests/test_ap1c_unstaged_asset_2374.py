@@ -146,3 +146,64 @@ def test_duplicate_order_blocks_graph_even_if_slide_count_matches(monkeypatch):
     assert updates[-1]["Publish_Retry_Eligible"] is False
     assert updates[-1]["IG_Carousel_Status"] == "Retry Pending"
     assert "QA-IG-AP1C-DUPLICATE-SLIDE-SETS" in updates[-1]["IG_Carousel_Error_Message"]
+
+
+def test_graph_401_stops_further_creates_and_requires_owner_reauthentication(monkeypatch):
+    output = {
+        "id": "recABCDEFGHIJKLMN",
+        "fields": {
+            "Platform": "Instagram",
+            "Platform_Output_Type": "Instagram Carousel",
+            "Output_ID": 9893,
+            "IG_Carousel_Status": "Assets Ready",
+            "IG_Carousel_Child_Count": 2,
+            "Image_Count": 2,
+            "Publish_Method": "Automated",
+            "Auto_Publish_Enabled": True,
+            "Do_Not_Publish": False,
+            "Publish_Retry_Eligible": True,
+        },
+    }
+    images = [
+        slide(1, ig_url="https://media.chicagoshining.com/ig/1.jpg", ig_status="Ready"),
+        slide(2, ig_url="https://media.chicagoshining.com/ig/2.jpg", ig_status="Ready"),
+    ]
+    parent_updates = []
+    child_updates = []
+
+    class FakeClient:
+        def get_record(self, _table, _id):
+            assert _id == output["id"]
+            return output
+
+        def update_record(self, table, _id, fields, typecast=False):
+            if _id == output["id"]:
+                parent_updates.append(dict(fields))
+            else:
+                child_updates.append(dict(fields))
+            return {"id": _id, "fields": fields}
+
+    class FakeGraph:
+        calls = 0
+
+        def create_child(self, _url):
+            self.calls += 1
+            return 401, {"error": {"message": "OAuth token expired"}}
+
+    graph = FakeGraph()
+    monkeypatch.setattr(ap1c, "AirtableClient", lambda: FakeClient())
+    monkeypatch.setattr(ap1c, "list_final_slides", lambda *_a, **_k: images)
+    monkeypatch.setattr(ap1c, "PipelineSettings", lambda *_a, **_k: object())
+    monkeypatch.setattr(ap1c, "load_instagram_settings", lambda *_a, **_k: {})
+    monkeypatch.setattr(ap1c, "InstagramCarouselClient", lambda **_k: graph)
+
+    result = ap1c.process_request(output_record_id=output["id"])
+    assert result["reason"] == "provider_oauth_reauthorization_required"
+    assert result["needs_children"] is False
+    assert result["retry_authorized"] is False
+    assert graph.calls == 1, "must stop after the first unauthorized response"
+    assert parent_updates[-1]["IG_Carousel_Status"] == "Retry Pending"
+    assert parent_updates[-1]["Publish_Retry_Eligible"] is False
+    assert parent_updates[-1]["Publish_Next_Retry_At"] is None
+    assert "QA-IG-AP1C-OAUTH-REAUTH-REQUIRED" in parent_updates[-1]["IG_Carousel_Error_Message"]
+    assert len(child_updates) == 2
