@@ -79,6 +79,7 @@ function mockSupabase(t, seed, { timeZone = "America/Chicago" } = {}) {
         assert.equal(u.searchParams.get("updated_at"), "eq." + row.updated_at);
         assert.match(String(init.headers.Prefer), /return=representation/);
         const body = JSON.parse(init.body);
+        assert.equal(body.publish_method, "Automated");
         assert.equal(body.auto_publish_enabled, true);
         assert.ok(Date.parse(body.scheduled_post_date) > Date.now(), "must reserve a future time");
         assert.equal(body.studio_scheduled_at, body.scheduled_post_date);
@@ -260,4 +261,15 @@ test("Factory approval writes future profile-local MAE date in the SAME Supabase
     "no intermediate Approved/no-date update may exist");
   assert.ok(mock.calls.some(call => call.path.endsWith("/platform_outputs")
     && call.query.includes("scheduled_post_date=gt.")), "must read actual Supabase occupancy");
+});
+
+
+test("explicit manual method cannot be silently converted to automatic publication", async t => {
+  const row = output(IDS[0], 8946);
+  row.publish_method = "Manual";
+  const mock = mockSupabase(t, [row]);
+  await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "manual-method-held", verifyImages: async readiness => readiness,
+  }), /explicitly configured for manual publishing/);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });
