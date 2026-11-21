@@ -36,9 +36,7 @@
   }
   function refresh() {
     update();
-    document.querySelector('[data-page="outputs"]')?.click();
-    document.querySelector('[data-page="outputs"]')?.closest("body")
-      ?.querySelector('[data-refresh="outputs"]')?.click();
+    document.querySelector('[data-refresh="outputs"]')?.click();
   }
   function mount() {
     const bar = document.querySelector(".pipeline-command-bar");
