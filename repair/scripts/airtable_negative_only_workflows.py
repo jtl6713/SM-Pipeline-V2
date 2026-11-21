@@ -30,6 +30,14 @@ PYTHON_GUARDS = {
         '"Write-Output $key","AIRTABLE_PAT","__AIRT_HOST__"]:',
         "assert bad not in s,",
     ),
+    ".github/workflows/issue2374-fb-gallery-http-audit.yml": (
+        "'/media_publish','__AIRT_HOST__'):",
+        "assert bad not in source",
+    ),
+    ".github/workflows/issue2374-ig-carousels-owner-auth-audit.yml": (
+        '"__AIRT_HOST__", "Write-Host $key", "Write-Output $key"]:',
+        "assert bad not in s,",
+    ),
 }
 POWERSHELL_GUARDS = {
     ".github/workflows/p1-2340-la-youtube-inventory-readonly.yml": (
@@ -63,6 +71,13 @@ POWERSHELL_GUARDS = {
         1,
     )
 }
+OTHER_EXACT_POWERSHELL_GUARDS = {
+    ".github/workflows/p1-2340-nyc2627-story-getonly.yml": (
+        "foreach($forbidden in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','__AIRT_HOST__','/media_publish','/media?','airtable.com/v0/')){",
+        "if($s.Contains($forbidden)){throw ('write_or_unscoped_provider_call_forbidden: '+$forbidden)}",
+    ),
+
+}
 
 
 def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
@@ -87,7 +102,7 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
         i = matches[0]
         context = "\n".join(lines[max(0, i - 8):i])
         if (lines[i].strip().endswith(tail)
-            and "for bad in [" in context
+            and ("for bad in [" in context or "for bad in (" in context)
             and i + 1 < len(lines)
             and lines[i + 1].strip().startswith(post_assertion)):
             safe.add((filename, i))
@@ -114,6 +129,17 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             for i in matches
         ):
             safe.update((filename, i) for i in matches)
+    for filename, (text, guard) in OTHER_EXACT_POWERSHELL_GUARDS.items():
+        file = root / filename
+        if not file.exists():
+            continue
+        lines = file.read_text(encoding="utf-8").splitlines()
+        matches = [i for i, line in enumerate(lines)
+                   if AIRT_HOST in line or "AIRTABLE_PAT" in line]
+        if (len(matches) == 1 and lines[matches[0]].strip() == _expand_guard(text)
+            and matches[0] + 1 < len(lines)
+            and lines[matches[0] + 1].strip() == _expand_guard(guard)):
+            safe.add((filename, matches[0]))
     # The merged, GET-only production identity audit reports presence of a
     # legacy credential binding by *name*; this is not an egress credential use.
     # Permit exactly one fixed expression, not the entire workflow.
@@ -134,7 +160,7 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
     # next statement rejects that token using a literal Contains()+throw.
     # This is a narrowly parsed statement, NOT a whole-file or path exemption.
     # Previously pinned files still require their exact original guard counts.
-    pinned = set(PYTHON_GUARDS) | set(POWERSHELL_GUARDS) | {identity_audit}
+    pinned = set(PYTHON_GUARDS) | set(POWERSHELL_GUARDS) | set(OTHER_EXACT_POWERSHELL_GUARDS) | {identity_audit}
     array = re.compile(r"^foreach\(\$bad in @\('(?:[^'\r\n]*)'(?:,'(?:[^'\r\n]*)')*\)\)\{$")
     fail_guard = re.compile(
         r"^if\(\$(?:src|s|source|code)\.Contains\(\$bad\)\)"
