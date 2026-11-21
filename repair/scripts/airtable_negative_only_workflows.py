@@ -29,10 +29,17 @@ POWERSHELL_GUARDS = {
     ".github/workflows/p1-2340-la-youtube-inventory-readonly.yml": (
         ",'AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){",
         "if($source.Contains($bad)){throw 'unsafe_la_inventory_script'}",
+        2,
     ),
     ".github/workflows/p1-2340-miami-youtube-inventory-readonly.yml": (
         ",'AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){",
         "if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}",
+        2,
+    ),
+    ".github/workflows/p1-2340-fb-9777-original-photos.yml": (
+        ",'-X POST','AIRTABLE_PAT','api.airtable.com','Write-Output $key','Write-Host $token')){",
+        "if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}",
+        1,
     ),
 }
 
@@ -63,7 +70,7 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             and lines[i + 1].strip().startswith(post_assertion)):
             safe.add((filename, i))
 
-    for filename, (tail, post_assertion) in POWERSHELL_GUARDS.items():
+    for filename, (tail, post_assertion, expected_count) in POWERSHELL_GUARDS.items():
         file = root / filename
         if not file.exists():
             continue
@@ -72,8 +79,9 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             i for i, line in enumerate(lines)
             if "api.airtable.com" in line or "AIRTABLE_PAT" in line
         ]
-        # These contain TWO independent guards: initial parser and live step.
-        if len(matches) != 2:
+        # Require every forbidden reference to be in an exact negative guard,
+        # preserving the intentionally repeated parser/live checks when present.
+        if len(matches) != expected_count:
             continue
         if all(
             lines[i].strip().startswith("foreach($bad in @(")
