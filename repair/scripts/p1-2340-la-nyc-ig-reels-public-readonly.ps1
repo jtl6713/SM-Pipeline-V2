@@ -48,7 +48,7 @@ foreach($scope in @('LA','NYC')){
  foreach($t in @($targets|Where-Object{$_.scope -eq $scope})){
   $o=@($records|Where-Object{[int]$_.output_number -eq $t.n})[0]
   $caption=([string]$o.output_caption).Trim();$hashtags=([string]$o.output_hashtags).Trim()
-  $full=N (if($hashtags){$caption+[Environment]::NewLine+[Environment]::NewLine+$hashtags}else{$caption})
+  $full=if($hashtags){$caption+[Environment]::NewLine+[Environment]::NewLine+$hashtags}else{$caption};$full=N $full
   if($full.Length -lt 60){throw 'caption_not_unique'}
   $prefix=$full.Substring(0,[Math]::Min(95,$full.Length))
   $hits=@($media|Where-Object{$_.caption -and ((N ([string]$_.caption)) -eq $full -or (N ([string]$_.caption)).StartsWith($prefix))}|ForEach-Object{@{media_id=[string]$_.id;permalink=[string]$_.permalink;timestamp=[string]$_.timestamp;media_type=[string]$_.media_type;product_type=[string]$_.media_product_type}})
