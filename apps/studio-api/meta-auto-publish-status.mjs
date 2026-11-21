@@ -39,6 +39,6 @@ export function metaAutoPublishDisabledState(fields = {}) {
 
   // An explicit hold is not a user publishing task.
   if (trueFlag(fields.Do_Not_Publish)) return "Review Held";
-  if (hasAttempt(fields)) return "Verification Required";
+  if (hasAttempt(fields)) return "Needs Verification";
   return "Auto Publish Disabled";
 }
