@@ -300,7 +300,9 @@ test("new proven same-day gallery holds require the same full rework safety gate
   });
   const out = shaped({
     id: "recr4kD97CT3X2JLX",
-    fields: {...shaped().fields, Output_ID: 10802, [oldMarker]: undefined, [newMarker]: evidence},
+    fields: {...shaped().fields, Output_ID: 10802,
+      Studio_Recovery_Source_Gallery_Verified_20261121: null,
+      [oldMarker]: undefined, [newMarker]: evidence},
   });
   assert.equal(protectedMediaReworkSourceRow(source), true);
   assert.equal(protectedMediaReworkShapedRecord(out), true);
