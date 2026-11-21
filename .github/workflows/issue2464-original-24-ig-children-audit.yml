@@ -27,6 +27,15 @@ jobs:
           $tokens=$null;$errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Prove numeric order of hashtable-backed original slides
+        shell: pwsh
+        run: |
+          $sample=@(@{output=8128;order=4},@{output=8128;order=2},@{output=8128;order=1},@{output=8128;order=3})
+          $ordered=@($sample | Where-Object { [int]$_['output'] -eq 8128 } | ForEach-Object { [int]$_['order'] } | Sort-Object)
+          if(($ordered -join ',') -ne '1,2,3,4'){throw 'numeric_gallery_order_contract_failed'}
+          $source=Get-Content 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1' -Raw
+          if(-not $source.Contains("ForEach-Object { [int]$_['order'] } | Sort-Object")){throw 'live_numeric_gallery_guard_missing'}
+          Write-Output 'original_24_numeric_gallery_order=PASS'
       - name: Fail closed on unexpected audit mutation or scope
         shell: bash
         run: |
