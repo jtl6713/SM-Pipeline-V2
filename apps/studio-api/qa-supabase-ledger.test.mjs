@@ -84,6 +84,43 @@ test("inserts a new run once with server-side identity readback and only POST",a
   assert.equal(writes[0].legacy_record_id,undefined);
 });
 
+test("rejects mismatched persisted run identity, deployment or actor after POST",async()=>{
+  const base={
+    "Run ID":"qa-11111111-1111-4111-8111-111111111111",
+    "Catalog Revision":"test-revision","Environment":"development",
+    "Deployment JSON":'{"worker":"x","ui":"y","runner":"z"}',
+    "Created By":"recTEST","Created At UTC":"2026-11-06T05:50:33.000Z",
+    "Status":"Open","Idempotency Key":"run:key-new","Payload Hash":"a".repeat(64)
+  };
+  for (const altered of [
+    {created_by:"different-actor"},
+    {deployment:{worker:"different",ui:"y",runner:"z"}},
+    {catalog_revision:"incorrect-revision"},
+    {run_id:"qa-99999999-9999-4999-8999-999999999999"},
+    {created_at_utc:"2026-11-07T05:50:33.000Z"}
+  ]) {
+    const ledger=createSupabaseQaLedger(ENV,async()=>json([{
+      ...sampleRun("new"),...altered
+    }],201));
+    await assert.rejects(()=>ledger.add(QA_RUNS_TABLE,base),
+      e=>e.status===503&&/readback field mismatch/.test(String(e)));
+  }
+});
+
+test("JSONB key reordering does not falsely reject committed QA evidence",async()=>{
+  const ledger=createSupabaseQaLedger(ENV,async()=>json([{
+    ...sampleEvent,payload_json:{notes:"Synthetic test",decision:"Incomplete"}
+  }],201));
+  const saved=await ledger.add(QA_EVENTS_TABLE,{
+    "Execution ID":sampleEvent.execution_id,"Run ID":sampleEvent.run_id,
+    "Test ID":sampleEvent.test_id,"Event Kind":sampleEvent.event_kind,
+    "Actor ID":sampleEvent.actor_id,"Recorded At UTC":sampleEvent.recorded_at_utc,
+    "Payload JSON":JSON.stringify(sampleEvent.payload_json),
+    "Idempotency Key":sampleEvent.idempotency_key,"Payload Hash":sampleEvent.payload_hash
+  });
+  assert.equal(saved.id,sampleEvent.record_id);
+});
+
 test("reads event JSON unchanged and fails closed on missing canonical rows",async()=>{
   const ledger=createSupabaseQaLedger(ENV,async()=>json([sampleEvent]));
   const page=await ledger.listPage(QA_EVENTS_TABLE,"Run ID",sampleEvent.run_id,10);
