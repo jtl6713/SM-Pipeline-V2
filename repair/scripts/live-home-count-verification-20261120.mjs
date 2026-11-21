@@ -1,3 +1,4 @@
+// 2026-11-20 evening publication recovery: exact latest four-profile snapshot verification; no Studio writes.
 import crypto from "node:crypto";
 const apiToken=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,run=process.env.GITHUB_RUN_ID;
 if(!apiToken||!account||!/^\d+$/.test(run||""))throw new Error("cloudflare_credentials_or_run_missing");
