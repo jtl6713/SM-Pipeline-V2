@@ -54,7 +54,10 @@ jobs:
             "recJAc6qfdLzztvHt"="18134520697783117"
            }
            $query=$base+"/carousel_slides?airtable_record_id=in.("+($expected.Keys -join ",")+")&select=airtable_record_id,ig_child_container_id,deleted_from_carousel,fields"
-           $slides=@(Invoke-RestMethod -Uri $query -Headers $h -TimeoutSec 25)
+           $slideResponse=Invoke-RestMethod -Uri $query -Headers $h -TimeoutSec 25
+           $slides=@($slideResponse | ForEach-Object { $_ })
+           if($slides.Count -eq 1 -and $slides[0] -is [array]) { $slides=@($slides[0]) }
+           Write-Output ("ap2c10065_supabase_child_count="+$slides.Count)
            if($slides.Count -ne 4){throw "ap2c10065_four_children_required"}
            $orders=@()
            foreach($s in $slides){
