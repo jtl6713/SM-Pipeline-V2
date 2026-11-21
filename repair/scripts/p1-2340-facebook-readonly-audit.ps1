@@ -20,7 +20,12 @@ $headers=@{apikey=$dbkey;Authorization=('Bearer '+$dbkey)}
 # Fetch settings into process memory. Values never appear in logs/artifacts.
 $settingsUrl=$dburl.TrimEnd('/')+'/rest/v1/engagement_settings?select=payload&limit=500'
 $source=@(Invoke-RestMethod -Uri $settingsUrl -Headers $headers -Method Get -TimeoutSec 30)
-if ($source.Count -lt 100 -or $source.Count -ge 500) { throw 'settings_inventory_incomplete' }
+# Some Windows PowerShell editions wrap a JSON response array as one nested
+# object. Normalize before enforcing count, without ever logging secret rows.
+if ($source.Count -eq 1 -and $source[0] -is [array]) { $source=@($source[0]) }
+if ($source.Count -lt 1 -or $source.Count -ge 500) {
+  throw ('settings_inventory_unavailable_or_truncated_count_'+$source.Count)
+}
 $settings=@{}
 foreach($record in $source) {
   $p=$record.payload
@@ -111,7 +116,7 @@ if ($la.page_identity_verified -eq $true) {
     [string]$v.data.permalink_url -match '^https://(?:www\.)?facebook\.com/')
 }
 $result=@{task='P1-2340-meta-page-token-diagnostic';read_only=$true;provider_operations='GET only';
-  report_time=(Get-Date).ToUniversalTime().ToString('o');profiles=$reports;
+  report_time=(Get-Date).ToUniversalTime().ToString('o');supabase_setting_rows=$source.Count;profiles=$reports;
   existing_facebook_5885=$reel; output_writes=0;provider_writes=0;
   finding='GET access is not a proof of publish permission or duplicate absence'}
 Write-Output ('P1_META_AUDIT='+($result | ConvertTo-Json -Depth 8 -Compress))
