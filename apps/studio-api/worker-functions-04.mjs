@@ -121,6 +121,7 @@ import {
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
   listSupabaseOverviewPack,
+  listSupabaseIdeasForProfile,
   listSupabaseFactoryDeskPack,
   listSupabaseContentProfiles,
   listSupabaseOpsPublishOutputs,
@@ -6014,11 +6015,46 @@ export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorizati
 }
 /*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewIdeasRefresh__*/
 
+const studioHomeIdeaLiveCountCache = { expiry:0, key:'', counts:null, pending:null };
+async function studioHomeVerifiedIdeasRows(env, records) {
+  if (studioHomeReadSource(env) !== 'supabase' || !studioSupabaseConfigured(env)) return records;
+  const ids = records.map(row => String(row.id || '')).filter(Boolean);
+  if (ids.length !== 4 || new Set(ids).size !== 4) return records;
+  const key = ids.slice().sort().join(':');
+  if (key !== studioHomeIdeaLiveCountCache.key) {
+    studioHomeIdeaLiveCountCache.key = key;
+    studioHomeIdeaLiveCountCache.expiry = 0;
+    studioHomeIdeaLiveCountCache.counts = null;
+    studioHomeIdeaLiveCountCache.pending = null;
+  }
+  if (Date.now() >= studioHomeIdeaLiveCountCache.expiry) {
+    if (!studioHomeIdeaLiveCountCache.pending) {
+      studioHomeIdeaLiveCountCache.pending = Promise.all(ids.map(async id => {
+        const list = await listSupabaseIdeasForProfile(env, id, 100, {unpromotedOnly:true});
+        return [id, list.length];
+      })).then(pairs => {
+        studioHomeIdeaLiveCountCache.counts = new Map(pairs);
+        studioHomeIdeaLiveCountCache.expiry = Date.now() + 30000;
+      }).finally(() => { studioHomeIdeaLiveCountCache.pending = null; });
+    }
+    await studioHomeIdeaLiveCountCache.pending;
+  }
+  const counts = studioHomeIdeaLiveCountCache.counts;
+  return records.map(row => {
+    const count = counts.get(String(row.id || ''));
+    return Number.isSafeInteger(count) ? {
+      ...row, ideas:count, ideas_source:'supabase-live-unpromoted',
+      metrics:{...(row.metrics || {}), ideas_not_in_production:count},
+    } : row;
+  });
+}
 export async function profilesOverview(request, env, authorization, ctx) {
   if (env?.STUDIO_HOME_PROFILE_SUMMARY_READS === "true") {
     try {
       const summary = await readStudioProfileSummary(env);
       if (validVerifiedStudioSummary(summary, summary.records.map((row) => row.id))) {
+        const verifiedIdeasRows = await studioHomeVerifiedIdeasRows(env, summary.records)
+          .catch(error => { console.warn('Home Ideas count reconciliation failed', String(error?.message || error)); return summary.records; });
         return respond(request, env, {
           ok: true, cached: true, stale: false, snapshot: true,
           summary_version: summary.version,
@@ -6027,7 +6063,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
           snapshot_at: Math.max(Number(summary.last_authoritative_event_at || 0), Number(summary.last_reconciled_at || 0)),
           snapshot_generation: "summary-" + summary.version,
           read_source: summary.source,
-          records: summary.records,
+          records: verifiedIdeasRows,
         });
       }
     } catch (error) {
