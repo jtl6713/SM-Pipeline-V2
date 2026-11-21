@@ -40,11 +40,11 @@ export function validateCreativeGuidancePatch(patch, previous = {}) {
   return result;
 }
 
-// Resolve existing Airtable guidance before showing a blank new Settings record.
+// Resolve inherited profile guidance before showing a blank new Settings record.
 // The underlying Brand, Persona and core AI Prompts may be shared between
 // Content Profiles; editing here saves a profile-scoped override, not a shared
 // source mutation.
-export function resolveCreativeGuidance({ saved = {}, profile = {}, brand = {}, persona = {} } = {}) {
+export function resolveCreativeGuidance({ saved = {}, profile = {}, brand = {}, persona = {}, savedRowExists = false } = {}) {
   const overrides = normalizeCreativeGuidance(saved);
   const options = {
     shared_direction: [
@@ -68,7 +68,8 @@ export function resolveCreativeGuidance({ saved = {}, profile = {}, brand = {}, 
   const creative = {};
   const sources = {};
   for (const key of CREATIVE_FIELDS) {
-    if (overrides[key]) {
+    // A saved blank is an explicit clear, not a request to re-inherit a stale default.
+    if (overrides[key] || savedRowExists) {
       creative[key] = overrides[key];
       sources[key] = { label: "Saved profile-specific Creative Guidance", inherited: false };
     } else {
