@@ -116,8 +116,9 @@ foreach($x in $t){
   $row.status_get_errors=$readErrors
   if(-not $ready){throw 'new_container_not_finished'}
   $pe='P1-2340:'+$x.n+':approved-expired-story-replacement-publish-v1'
-  $pid='recP12340PUB'+$x.n+'A'
-  $ev=@(@{airtable_record_id=$pid;event_key=$pe;outcome='approved_fresh_story_publish_reserved';output_record_id=$x.rid;output_number=$x.n;fields=@{Event_Key=$pe;Output_ID=$x.n;Outcome='approved_fresh_story_publish_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
+  # PowerShell's built-in $PID is read-only (case insensitive); never assign it.
+  $publishEventRecordId='recP12340PUB'+$x.n+'A'
+  $ev=@(@{airtable_record_id=$publishEventRecordId;event_key=$pe;outcome='approved_fresh_story_publish_reserved';output_record_id=$x.rid;output_number=$x.n;fields=@{Event_Key=$pe;Output_ID=$x.n;Outcome='approved_fresh_story_publish_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
   $pubFence=Invoke-RestMethod ($su+'/rest/v1/quality_agent_recovery_events') -Headers ($h+@{Prefer='return=representation'}) -Method Post -ContentType 'application/json' -Body $ev -TimeoutSec 25
   if(@($pubFence).Count -ne 1){throw 'unique_publish_fence_not_durable'}
   $row.state='publish_ambiguous_no_replay';$row.publish_calls=1;$report.provider_publish_calls++
