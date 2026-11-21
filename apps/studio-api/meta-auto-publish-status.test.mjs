@@ -42,7 +42,7 @@ test("actual failure, publication, nonapproved and non-Meta rows retain their se
 });
 test("production normalizedOutputState invokes Meta classifier before generic false-auto manual branch", () => {
   const worker = fs.readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
-  const at = worker.indexOf("const metaDisabledState = metaAutoPublishDisabledState(fields)");
+  const at = worker.indexOf("const metaDisabledState = typeof metaAutoPublishDisabledState");
   const legacy = worker.indexOf("if (fields.Auto_Publish_Enabled === false", at);
   assert.ok(at > 0 && legacy > at, "Meta-specific state must precede original manual handoff");
   assert.match(worker, /import \{ metaAutoPublishDisabledState \} from "\.\/meta-auto-publish-status\.mjs";/);
