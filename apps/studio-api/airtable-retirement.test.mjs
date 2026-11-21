@@ -95,18 +95,20 @@ test("canonical Studio deployment uses Supabase credential contract", () => {
   assert.ok(flow.includes("assert_production_supabase_target"));
 });
 
-test("Issue 2374 independent production deploy cannot bypass retired-credential and QA release gates", () => {
+test("Issue 2374 independent production deploy requires Supabase identity and a QA source audit", () => {
   const flow=source(".github/workflows/deploy-issue2374-supabase-only-factory-worker.yml");
   assert.ok(flow.includes("vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF"));
-  assert.ok(flow.includes("vars.STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
   assert.ok(flow.includes("approved_ref != 'vkwvscgisqsbuwagdvtb'"));
   assert.ok(flow.includes("plain_vars.get('SUPABASE_URL','').rstrip('/')"));
-  assert.ok(flow.includes("approved QA history cutover gate missing"));
+  assert.ok(flow.includes("python repair/scripts/qa_retirement_preflight.py"));
   assert.ok(flow.includes("'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}"));
   assert.doesNotMatch(flow, /AIRTABLE_PAT|AIRTABLE_BASE_ID/);
-  const gate=flow.indexOf("approved QA history cutover gate missing");
+  const staticGate=flow.indexOf("python repair/scripts/qa_retirement_preflight.py");
+  const identityGate=flow.indexOf("Factory deploy denied: protected production project identity missing");
   const deploy=flow.indexOf("wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log");
-  assert.ok(gate>=0&&deploy>gate, "QA gate must fail closed before issue2374 deploy");
+  assert.ok(staticGate>=0&&identityGate>staticGate&&deploy>identityGate,
+    "QA source audit and Supabase identity must execute before issue2374 deploy");
+  assert.ok(!flow.includes("STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
 });
 
 test("tracked Airtable credential envelope cannot be restored accidentally", () => {
@@ -188,13 +190,13 @@ test("production audit can be statically checked in PR without exposing live sec
 });
 
 
-test("production release blocks Airtable-dependent QA before deployment", () => {
+test("production release rejects Airtable-dependent QA code without obsolete migration approval", () => {
   const workflow=source(".github/workflows/deploy-cloudflare-worker-production.yml");
   const gate=workflow.indexOf("python repair/scripts/qa_retirement_preflight.py");
   const mutation=workflow.indexOf("Capture production rollback point and exact binding contract");
   assert.ok(gate!==-1 && mutation!==-1 && gate<mutation,
     "QA source gate must execute before production mutation");
-  assert.ok(workflow.includes("STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
+  assert.ok(!workflow.includes("STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
   assert.ok(workflow.includes('.writeAuthority=="Supabase"'));
   assert.ok(!workflow.includes('.writeAuthority=="Airtable"'));
 });

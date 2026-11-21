@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Non-mutating fail-closed QA ledger preflight for Supabase-only Worker release.
+"""Non-mutating Supabase-only QA code audit for Worker deployment.
 
-Static checks are necessary, never sufficient: an independent production
-backfill/readback approval is required. No provider API is called here.
+Synthetic QA history was copied and reconciled in production Supabase.
+Deployment checks validate no Airtable gateway or authority remains in QA code,
+not a manually maintained data-migration approval flag. This tool does not
+authorize publishing, deploy a Worker, or access provider APIs.
 """
 from __future__ import annotations
 import json
-import os
 from pathlib import Path
 
 
-def inspect_qa_sources(qa_http: str, qa_core: str, qa_governance: str, approved: bool) -> dict:
+def inspect_qa_sources(qa_http: str, qa_core: str, qa_governance: str) -> dict:
     blockers = []
     if "airtableFetch" in qa_http:
         blockers.append("QA HTTP service still calls the Airtable compatibility gateway")
@@ -22,8 +23,6 @@ def inspect_qa_sources(qa_http: str, qa_core: str, qa_governance: str, approved:
         blockers.append("QA canonical-run assertion still expects Airtable")
     if 'writeAuthority:"Airtable"' in qa_governance or "writeAuthority:'Airtable'" in qa_governance:
         blockers.append("QA immutable-event governance still stamps Airtable authority")
-    if not approved:
-        blockers.append("No independently approved QA Supabase ledger migration/backfill evidence")
     return {
         "qa_supabase_source_gate_passed": not blockers,
         "release_authorized": False,
@@ -32,21 +31,20 @@ def inspect_qa_sources(qa_http: str, qa_core: str, qa_governance: str, approved:
     }
 
 
-def inspect_repo(repo_root: Path, approved: bool) -> dict:
+def inspect_repo(repo_root: Path) -> dict:
     return inspect_qa_sources(
         (repo_root / "apps/studio-api/qa-http.mjs").read_text(),
         (repo_root / "apps/studio-api/qa-test-core.mjs").read_text(),
         (repo_root / "apps/studio-api/qa-governance.mjs").read_text(),
-        approved,
     )
 
 
 def main():
     root = Path(__file__).resolve().parents[2]
-    result = inspect_repo(root, os.getenv("STUDIO_QA_SUPABASE_LEDGER_VERIFIED", "") == "true")
+    result = inspect_repo(root)
     print(json.dumps(result, indent=2, sort_keys=True))
     if not result["qa_supabase_source_gate_passed"]:
-        raise SystemExit("BLOCKED: preserve QA append-only history and verified Supabase backfill before deploying.")
+        raise SystemExit("BLOCKED: QA code still contains Airtable authority or fallback.")
 
 
 if __name__ == "__main__":

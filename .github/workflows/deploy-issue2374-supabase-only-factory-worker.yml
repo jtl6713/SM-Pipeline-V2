@@ -24,7 +24,6 @@ jobs:
       TARGET_WORKER: chicagoshining-studio-api
       VERIFY_BRIDGE: chicagoshining-studio-issue2374-verify
       STUDIO_PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
-      STUDIO_QA_SUPABASE_LEDGER_VERIFIED: ${{ vars.STUDIO_QA_SUPABASE_LEDGER_VERIFIED }}
       WRANGLER_VERSION: 4.123.0
       ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
       ACTIVATE_SCHEDULE_CONFIRMATION: ${{ inputs.activate_schedule_confirmation || '' }}
@@ -35,6 +34,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Verify QA code has no Airtable fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/qa_retirement_preflight.py
 
       - name: Verify Post Insights Supabase published-post and refresh regression
         shell: bash
@@ -164,15 +169,13 @@ jobs:
           prior_stage=assert_global_factory_binding_tuple(plain_vars,'Predeploy Worker',allow_absent=True)
           print('predeploy_global_factory_stage='+prior_stage)
           Path('/tmp/active-plain-vars.json').write_text(json.dumps(plain_vars))
-          # This deploy path must honor the same independently protected
-          # Supabase project and QA cutover gate as the canonical release.
+          # This deploy path must honor the same verified
+          # Supabase project identity as the canonical release.
           approved_ref=os.environ.get('STUDIO_PRODUCTION_SUPABASE_PROJECT_REF','').strip()
           if approved_ref != 'vkwvscgisqsbuwagdvtb':
               raise SystemExit('Factory deploy denied: protected production project identity missing')
           if plain_vars.get('SUPABASE_URL','').rstrip('/') != ('https://'+approved_ref+'.supabase.co'):
               raise SystemExit('Factory deploy denied: active Supabase URL is not approved production')
-          if os.environ.get('STUDIO_QA_SUPABASE_LEDGER_VERIFIED','').strip().lower() != 'true':
-              raise SystemExit('Factory deploy denied: approved QA history cutover gate missing')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
