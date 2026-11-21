@@ -50,9 +50,9 @@ jobs:
           export default {
             async fetch(request, env) {
               const url = new URL(request.url);
-              if (request.method !== "GET" || url.pathname !== "/report") return new Response("Not found", { status:404 });
+              if (request.method !== "GET" || !["/report", "/exact"].includes(url.pathname)) return new Response("Not found", { status:404 });
               if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) return new Response("Unauthorized", {status:401});
-              const internal = new Request("https://studio.chicagoshining.com/api/factory/approval-batches?scope=all&view=active", {
+              const internal = new Request(url.pathname === "/exact" ? "https://studio.chicagoshining.com/api/factory/approval-batches?scope=all&request_id=a350556c-2b1b-4dbe-8c4f-3994b2a91523" : "https://studio.chicagoshining.com/api/factory/approval-batches?scope=all&view=active", {
                 headers: {
                   "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
                   "Origin":"https://studio.chicagoshining.com",
@@ -95,3 +95,22 @@ jobs:
             if [[ "$ROUND" == "1" ]]; then sleep 75; fi
           done
           jq -n --slurpfile a /tmp/factory-live-1.json --slurpfile b /tmp/factory-live-2.json '{before:$a[0].totals,after:$b[0].totals,pending_delta:(($b[0].totals.pending // 0)-($a[0].totals.pending // 0)),approved_delta:(($b[0].totals.approved // 0)-($a[0].totals.approved // 0))}'
+          # Exact-ID readback, including when the repaired group has left Active.
+          # Never infer success from a group disappearing from a bounded scan.
+          EXACT_URL="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev/exact"
+          curl -fsS --max-time 65 -H "Authorization: Bearer $TOKEN" "$EXACT_URL" -o /tmp/factory-exact-nyc.json
+          echo "FACTORY_EXACT_NYC_5_PROGRESS"
+          jq -c '{ok,scope,batches:[.batches[]? | {request_id,status,total,approved_count,pending_count,failed_count,items:[.items[]? | {id,output_id,status,phase}],children:[.children[]? | {profile_id,status,total,approved_count,pending_count,failed_count}]}]}' /tmp/factory-exact-nyc.json
+          jq -e --arg rid "a350556c-2b1b-4dbe-8c4f-3994b2a91523" '
+            .ok == true and (.batches | length) == 1 and
+            .batches[0].request_id == $rid and
+            .batches[0].total == 5 and
+            .batches[0].approved_count == 5 and
+            .batches[0].pending_count == 0 and
+            .batches[0].failed_count == 0 and
+            ([.batches[0].items[]? | select(.status == "approved")] | length) == 5
+          ' /tmp/factory-exact-nyc.json >/dev/null || {
+            echo "::error::Original NYC Factory approval R2 ledger not verified 5/5 by exact request ID"
+            exit 1
+          }
+          echo "FACTORY_EXACT_NYC_5=PASS"
