@@ -74,6 +74,7 @@ import {
   factoryBatchCronSelectJobs, factoryBatchFailureRouted, factoryBatchFailure,
   factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
   factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
+  factoryBatchReconcileSupabaseApprovalReceipts,
   factoryBatchLock, factoryBatchUnlock,
 } from "./factory-approval-queue.mjs";
 import {
@@ -19430,6 +19431,30 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // The same child may appear in both indexes; dispatch it only once.
   const distinct = [...new Map(candidates.map(row =>
     [row.profileId + "/" + row.requestId, row])).values()];
+  // Supabase can commit the exact approval before an interrupted waitUntil
+  // acknowledges the child R2 ledger. Repair those aged bookkeeping rows
+  // from their SAME original request receipts, with no second approval call.
+  // Limit reads to eight recent group children per cron tick; a missing or
+  // ambiguous Supabase read fails closed for that child without starving cron.
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const receiptCandidates = distinct.filter(row =>
+      row.job?.group_request_id && ["queued", "running"].includes(row.job.status) &&
+      (row.job.items || []).some(item => ["pending", "processing"].includes(item.status)))
+      .sort((a, b) => Date.parse(b.job.created_at || "") - Date.parse(a.job.created_at || ""))
+      .slice(0, 8);
+    for (const candidate of receiptCandidates) {
+      try {
+        const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(env.STUDIO_MEDIA, {
+          profileId: candidate.profileId, requestId: candidate.requestId,
+          loadRecords: ids => factorySupabaseApprovalRows(env, ids),
+        });
+        if (repaired) candidate.job = repaired;
+      } catch (error) {
+        console.warn("Factory Supabase receipt reconciliation skipped",
+          candidate.requestId, String(error?.message || error).slice(0, 140));
+      }
+    }
+  }
   const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
   for (const candidate of selected) {
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
