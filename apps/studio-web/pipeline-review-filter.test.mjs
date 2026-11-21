@@ -15,7 +15,9 @@ test("Pipeline always loads the full outputs list (not lean mode=review)", () =>
     app.indexOf("async function refreshPipelineOutputs"),
     app.indexOf("async function loadOutputs")
   );
-  assert.match(refresh, /api\("\/api\/outputs\?limit=250"/);
+  assert.match(refresh, /mode=history&offset=/);
+  assert.match(refresh, /if \(!page\.has_more\) break/);
+  assert.doesNotMatch(refresh, /\/api\/outputs\?limit=250/);
   assert.doesNotMatch(refresh, /api\([^)]*mode=review/);
   assert.doesNotMatch(refresh, /pipelineViewFilter === "approval"/);
 });
