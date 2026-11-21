@@ -23,7 +23,7 @@ $token=[string]$v['NYC_META_GRAPH_API_ACCESS_TOKEN'];$acct=[string]$v['NYC_INSTA
 if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
 if(-not $token -or $acct -notmatch '^\d{6,30}$'){throw 'meta_auth_unverified'}
 $gh=@{Authorization=('Bearer '+$token)}
-function G($uri){if(-not $uri.StartsWith('https://graph.facebook.com/')){throw 'graph_host_error'};return Invoke-RestMethod $uri -Headers $gh -Method Get -TimeoutSec 40}
+function G($uri){if(-not $uri.StartsWith('https://graph.facebook.com/')){throw 'graph_host_error'};for($i=0;$i -lt 3;$i++){try{return Invoke-RestMethod $uri -Headers $gh -Method Get -TimeoutSec 40}catch{if($i -ge 2){throw 'meta_get_unavailable_before_publish'};Start-Sleep -Seconds (2+$i)}}}
 $accountResult=G ('https://graph.facebook.com/'+$ver+'/'+$acct+'?fields=id')
 $parentResult=G ('https://graph.facebook.com/'+$ver+'/'+$parent+'?fields=id,status_code')
 if([string]$accountResult.id -ne $acct -or [string]$parentResult.id -ne $parent -or [string]$parentResult.status_code -ne 'FINISHED'){throw 'graph_owner_or_parent_not_finished'}
