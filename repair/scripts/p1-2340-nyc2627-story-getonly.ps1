@@ -44,19 +44,21 @@ try {
   if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
   $gh=@{Authorization=('Bearer '+$token)}
   function GraphGet($route){
-    $script:report.provider_gets++
     return Invoke-RestMethod ('https://graph.facebook.com/'+$ver+'/'+$route) -Method Get -Headers $gh -TimeoutSec 40
   }
   $report.stage='graph-owner-get'
+  $report.provider_gets=[int]$report.provider_gets+1
   $owner=GraphGet ($acct+'?fields=id')
   if([string]$owner.id -ne $acct){throw 'owner_id_not_verified'}
   $report.account_owned=$true
   $report.stage='graph-original-container-get'
+  $report.provider_gets=[int]$report.provider_gets+1
   $oldGet=GraphGet ($old+'?fields=id,status_code')
   if([string]$oldGet.id -ne $old){throw 'old_container_owner_check_failed'}
   $report.old_container_status=[string]$oldGet.status_code
   if($report.old_container_status -ne 'EXPIRED'){throw 'old_container_not_expired'}
   $report.stage='graph-replacement-container-get'
+  $report.provider_gets=[int]$report.provider_gets+1
   $newGet=GraphGet ($new+'?fields=id,status_code')
   if([string]$newGet.id -ne $new){throw 'new_container_owner_check_failed'}
   $report.replacement_container_status=[string]$newGet.status_code

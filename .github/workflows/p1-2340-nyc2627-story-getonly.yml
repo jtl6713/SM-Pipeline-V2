@@ -36,6 +36,8 @@ jobs:
           }
           if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_automatic_PROFILE_variable_must_not_be_assigned'}
           if($s -notmatch 'stage='){throw 'sanitized_failure_stage_required'}
+          if($s.Contains('$script:report.provider_gets++')){throw 'script_scope_request_counter_breaks_invoke_scriptblock'}
+          if(([regex]::Matches($s,'\$report\.provider_gets=\[int\]\$report\.provider_gets\+1')).Count -ne 3){throw 'three_bounded_account_and_container_gets_required'}
           Write-Output 'P1_2340_2627_STRICT_READONLY_STATIC_PASS'
   audited-original-status:
     if: github.event_name == 'push'
