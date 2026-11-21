@@ -959,7 +959,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(revisionCatch, /releaseAutonomousRevisionLock/);
   assert.doesNotMatch(revisionCatch, /status: "skipped"/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
-  assert.match(worker, /30m photo-ready SLA drain/);
+  assert.match(worker, /IDEA HARVEST SLA/);
   assert.match(worker, /skip_stuck_waiting_for_next_draft/);
   assert.match(worker, /parkAutonomousResumeDraft/);
   assert.match(worker, /autonomousWaitingIsStale/);
@@ -968,7 +968,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /deferProduce/);
   assert.match(worker, /sla_skip_stuck_waiting/);
   assert.match(worker, /shouldClearAutonomousResumeDeferred/);
-  assert.match(worker, /resume_only: true/);
+  assert.match(worker, /resume_only: !atHour/);
   assert.match(worker, /resume_only_idle/);
   // Light ticks must adopt photo-ready ideas (not heavy-only).
   assert.doesNotMatch(
