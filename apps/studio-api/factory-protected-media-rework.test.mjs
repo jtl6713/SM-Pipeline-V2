@@ -337,3 +337,25 @@ test("new held cases are scanned independently with no Airtable fallback and no 
   assert.equal(card.can_retry,false);
   assert.equal(card.can_publish,false);
 });
+
+test("protected Factory cards distinguish original 82 from newly fenced gallery repairs", () => {
+  const oldMarker = "Studio_Overdue_Preflight_Repair_20261120";
+  const newMarker = "Studio_Overdue_UnsafeGallery_Hold_20261121";
+  assert.equal(protectedMediaReworkSummary(shaped()).marker, oldMarker);
+  const fresh = shaped({fields:{
+    ...shaped().fields,
+    [oldMarker]:null,
+    [newMarker]:{reason:"missing original slide package"},
+  }});
+  assert.equal(protectedMediaReworkSummary(fresh).marker,newMarker);
+  const card = factoryCardFromRow({
+    kind:"output",id:RECORD,protected_media_rework:true,
+    recovery_hold_marker:newMarker,output_status:"Changes Requested",
+    review_status:"Changes Requested",publish_status:"Not Ready",
+    do_not_publish:true,auto_publish_enabled:false,review_package_ready:false,
+  });
+  assert.equal(card.recovery_hold_marker,newMarker);
+  assert.equal(card.can_publish,false);
+  assert.equal(card.can_retry,false);
+  assert.equal(card.can_approve,false);
+});
