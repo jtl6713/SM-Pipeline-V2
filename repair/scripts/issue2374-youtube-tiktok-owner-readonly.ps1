@@ -194,12 +194,14 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
   $o=$ytOwner[$city];$t=$ttOwner[$city]
   $ownerSummary+=@{profile=$city;youtube_owner_state=$o.state;youtube_owner_inventory_complete=$o.complete;youtube_ids_seen=$o.ids;youtube_pages_scanned=$o.pages;tiktok_oauth_state=$t.state;tiktok_scopes_granted=$t.scopes_granted}
 }
+$jobstoreRows=0
+foreach($source in $jobSources){if($source.available -eq $true -and $null -ne $source.rows){$jobstoreRows += [int]$source.rows}}
 $report=@{
   version='issue2374_youtube_tiktok_owner_history_v1';scan_at=$utc;source='production_supabase'
   read_only=$true;provider_media_writes=0;output_writes=0;publish_calls=0;airtable_operations=0
   nonpublication_proved=$false;retry_authorized=$false;targets=$targets.Count
   youtube_targets=13;tiktok_targets=8;http_get_calls=$script:httpGets
-  jobstores_seen=$jobSources.Count;jobstore_rows=@($jobSources|Measure-Object -Property rows -Sum).Sum
+  jobstores_seen=$jobSources.Count;jobstore_rows=$jobstoreRows
   provider_owner_coverage=$ownerSummary;counts=$counts;all_output_dispositions=$results
 }
 Write-Output ('ISSUE2374_YT_TT_OWNER_AUDIT='+($report|ConvertTo-Json -Compress -Depth 9))
