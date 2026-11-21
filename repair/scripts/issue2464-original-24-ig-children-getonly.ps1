@@ -33,7 +33,7 @@ $profiles=@(SourceGet '/rest/v1/content_profiles?select=id,market_name&limit=25'
 $markets=@{};foreach($p in $profiles){$markets[[string]$p.id]=[string]$p.market_name}
 $allSlides=@();$source=@();$sourceIds=@{}
 foreach($o in $outputs){
- $num=[int]$o.output_number;$spec=$expected[$num]
+ $num=[int]$o.output_number;$spec=$expected[[string]$num]
  if($null -eq $spec -or $o.airtable_record_id -ne $spec.record -or [string]$markets[[string]$o.content_profile_id] -ne $spec.profile -or
  $o.platform -ne 'Instagram' -or $o.platform_output_type -ne 'Instagram Carousel' -or $o.review_status -ne 'Approved' -or
  $o.output_status -ne 'Approved for Publishing' -or $o.publish_status -ne 'Ready to Publish' -or $o.ig_carousel_status -ne 'Retry Pending' -or
@@ -56,7 +56,7 @@ $children=@();$seen=@{}
 foreach($s in $slides){
  $originalId=[string]$s.airtable_record_id;$num=[int]$sourceIds[$originalId]
  if(-not $sourceIds.ContainsKey($originalId)){throw 'unrecognized_slide'}
- $spec=$expected[$num]
+ $spec=$expected[[string]$num]
  $order=[int]$s.current_order
  $child=[string]$s.ig_child_container_id
  $url=[string]$s.fields.'Asset_4x5_Public_URL'
@@ -69,7 +69,7 @@ foreach($s in $slides){
 }
 foreach($num in @(8128,8138,8357,8417)){
  $ordered=@($children|Where-Object{$_.output -eq $num}|Sort-Object order)
- if($ordered.Count -ne $expected[$num].count){throw 'original_gallery_size_changed'}
+ if($ordered.Count -ne $expected[[string]$num].count){throw 'original_gallery_size_changed'}
  for($i=0;$i -lt $ordered.Count;$i++){if($ordered[$i].order -ne ($i+1)){throw 'original_gallery_order_changed'}}
 }
 if($children.Count -ne 24){throw 'original_24_count_mismatch'}
@@ -113,7 +113,7 @@ foreach($name in @('Miami','New York City')){
 }
 $results=@()
 foreach($child in @($children|Sort-Object output,order)){
- $prefix=$expected[$child.output].prefix
+ $prefix=$expected[[string]$child.output].prefix
  $token=[string]$config[$prefix+'META_GRAPH_API_ACCESS_TOKEN']
  if($ownerOk[$child.profile]){
   $response=GraphRead $child.container_id $token 'id,status_code'
