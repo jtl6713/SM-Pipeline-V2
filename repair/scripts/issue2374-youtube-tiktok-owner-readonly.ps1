@@ -171,6 +171,105 @@ foreach($o in $targets) {
     $remote=@($owner.videos|Where-Object{[string]$_.id -eq $savedId -and $savedId} )
     $title=Norm ([string]$o.output_title)
     $titleHits=@($owner.videos|Where-Object{$title.Length -ge 24 -and (Norm ([string]$_.title)) -eq $title})
+    # Exact owner-bound YouTube GETs for the only three matching-title
+    # candidates and held saved video ID. A title match, even with a plausible
+    # dispatch time and matching caption, never authenticates the original
+    # video ASSET; no output can be marked published by this diagnostic.
+    $exactIds=@()
+    if($n -eq 4869){$exactIds=@('cHKqYIVxQNw','fUNK_Wc4vkM')}
+    elseif($n -eq 1771){$exactIds=@('6SGaMlwGsiI')}
+    elseif($n -eq 5201 -and $savedId -eq 'Ls65TemEHSo'){$exactIds=@('Ls65TemEHSo')}
+    $exactResults=@()
+    foreach($candidateId in $exactIds){
+      $listed=@($owner.videos|Where-Object{[string]$_.id -eq $candidateId})
+      if(-not $owner.ok -or ($n -ne 5201 -and $listed.Count -ne 1)){
+        $exactResults+=@{id=$candidateId;state='owner_inventory_missing_or_candidate_changed';verified_public=$false;asset_match_verified=$false}
+        continue
+      }
+      $exactBase=([string]$vals[$prefix[$city]+'YOUTUBE_UPLOAD_SERVICE_URL']).TrimEnd('/')
+      $exactSecret=[string]$vals[$prefix[$city]+'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']
+      if(-not $exactSecret){$exactSecret=[string]$vals['YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']}
+      $expectedChannel=[string]$vals[$prefix[$city]+'YOUTUBE_CHANNEL_ID']
+      if(-not $exactBase -or -not $exactSecret -or $expectedChannel -notmatch '^UC[A-Za-z0-9_-]{22}    $state=if(-not $owner.ok){'youtube_owner_inventory_unavailable_no_negative_proof'}elseif($savedId -and $remote.Count -eq 1){'saved_video_id_found_in_owner_uploads'}elseif($jobIds.Count -gt 0){'original_jobstore_video_id_needs_exact_get'}elseif($titleHits.Count -gt 0){'same_owner_title_candidate_needs_asset_and_time_review'}else{'no_exact_youtube_proof_no_negative_delivery_claim'}
+    $result.owner_inventory_state=$owner.state
+    $result.owner_inventory_complete=$owner.complete
+    $result.owner_video_ids_scanned=$owner.ids
+    $result.original_jobstore_scanned=($jobSources.Count -gt 0)
+    $result.matching_original_job_count=$matchedJobs.Count
+    $result.matching_job_video_ids=$jobIds
+    $result.saved_video_id_present=([bool]$savedId)
+    $result.saved_video_in_owner_uploads=($remote.Count -eq 1)
+    $result.saved_video_id=if($savedId){$savedId}else{$null}
+    $result.same_owner_title_candidates=@($titleHits|ForEach-Object{@{id=[string]$_.id;privacy=[string]$_.privacy_status;published_at=[string]$_.published_at}})
+    if($remote.Count -eq 1){$result.remote_privacy=[string]$remote[0].privacy_status;$result.remote_published_at=[string]$remote[0].published_at}
+  }
+  $result.state=$state
+  $results+=$result
+}
+$counts=@{}
+foreach($row in $results){if(-not $counts.ContainsKey($row.state)){$counts[$row.state]=0};$counts[$row.state]++}
+$ownerSummary=@()
+foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
+  $o=$ytOwner[$city];$t=$ttOwner[$city]
+  $ownerSummary+=@{profile=$city;youtube_owner_state=$o.state;youtube_owner_inventory_complete=$o.complete;youtube_ids_seen=$o.ids;youtube_pages_scanned=$o.pages;tiktok_oauth_state=$t.state;tiktok_scopes_granted=$t.scopes_granted}
+}
+$jobstoreRows=0
+foreach($source in $jobSources){if($source.available -eq $true -and $null -ne $source.rows){$jobstoreRows += [int]$source.rows}}
+$report=@{
+  version='issue2374_youtube_tiktok_owner_exact_v2';scan_at=$utc;source='production_supabase'
+  read_only=$true;provider_media_writes=0;output_writes=0;publish_calls=0;airtable_operations=0
+  nonpublication_proved=$false;retry_authorized=$false;targets=$targets.Count
+  youtube_targets=13;tiktok_targets=8;http_get_calls=$script:httpGets
+  jobstores_seen=$jobSources.Count;jobstore_rows=$jobstoreRows
+  provider_owner_coverage=$ownerSummary;counts=$counts;all_output_dispositions=$results
+}
+Write-Output ('ISSUE2374_YT_TT_OWNER_AUDIT='+($report|ConvertTo-Json -Compress -Depth 9))
+){
+        $exactResults+=@{id=$candidateId;state='exact_get_configuration_unavailable';verified_public=$false;asset_match_verified=$false}
+        continue
+      }
+      $get=SafeGet ($exactBase+'/youtube/videos/'+$candidateId) @{'X-SM-Pipeline-Key'=$exactSecret;Accept='application/json'}
+      $items=@($get.data.items|Where-Object{$null -ne $_ -and [string]$_.id -eq $candidateId})
+      if(-not $get.ok -or $items.Count -ne 1){
+        $exactResults+=@{id=$candidateId;state='exact_get_not_confirmed_no_negative_proof';http=$get.http;verified_public=$false;asset_match_verified=$false}
+        continue
+      }
+      $video=$items[0]
+      if([string]$video.snippet.channelId -ne $expectedChannel){
+        $exactResults+=@{id=$candidateId;state='exact_get_wrong_owner';http=$get.http;verified_public=$false;asset_match_verified=$false}
+        continue
+      }
+      $desc=Norm ([string]$video.snippet.description)
+      $caption=Norm ([string]$o.output_caption)
+      $lead=if($caption.Length -ge 72){$caption.Substring(0,72)}else{''}
+      $dispatchIso=[string]$f.Studio_Publish_Dispatch_At
+      $referenceIso=if($dispatchIso){$dispatchIso}else{[string]$o.scheduled_post_date}
+      $delta=$null
+      try{
+        $candidateUtc=[DateTimeOffset]::Parse([string]$video.snippet.publishedAt)
+        $referenceUtc=[DateTimeOffset]::Parse($referenceIso)
+        $delta=[math]::Round(($candidateUtc-$referenceUtc).TotalSeconds)
+      }catch{}
+      $titleExact=((Norm ([string]$video.snippet.title)) -eq $title)
+      $descExact=($caption.Length -ge 72 -and $desc -eq $caption)
+      $descLead=([bool]$lead -and $desc.Contains($lead))
+      $privacy=[string]$video.status.privacyStatus
+      $exactResults+=@{
+        id=$candidateId;state='exact_owner_metadata_requires_asset_proof'
+        http=$get.http;provider_owner_verified=$true
+        public_visibility_reported=($privacy -eq 'public')
+        remote_privacy=$privacy;remote_upload_status=[string]$video.status.uploadStatus
+        provider_published_at=[string]$video.snippet.publishedAt
+        reference_time_kind=if($dispatchIso){'dispatch'}else{'scheduled'}
+        seconds_after_reference=$delta
+        exact_title_match=$titleExact
+        exact_normalized_caption_match=$descExact
+        caption_lead_72_match=$descLead
+        same_owner_title_collision=($titleHits.Count -gt 1)
+        verified_public=$false;asset_match_verified=$false;retry_authorized=$false
+      }
+    }
+    $result.exact_video_checks=$exactResults
     $state=if(-not $owner.ok){'youtube_owner_inventory_unavailable_no_negative_proof'}elseif($savedId -and $remote.Count -eq 1){'saved_video_id_found_in_owner_uploads'}elseif($jobIds.Count -gt 0){'original_jobstore_video_id_needs_exact_get'}elseif($titleHits.Count -gt 0){'same_owner_title_candidate_needs_asset_and_time_review'}else{'no_exact_youtube_proof_no_negative_delivery_claim'}
     $result.owner_inventory_state=$owner.state
     $result.owner_inventory_complete=$owner.complete
