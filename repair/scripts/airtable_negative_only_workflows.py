@@ -236,7 +236,9 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
     # next statement rejects that token using a literal Contains()+throw.
     # This is a narrowly parsed statement, NOT a whole-file or path exemption.
     # Previously pinned files still require their exact original guard counts.
-    pinned = set(PYTHON_GUARDS) | set(POWERSHELL_GUARDS) | set(OTHER_EXACT_POWERSHELL_GUARDS) | {identity_audit}
+    pinned = (set(PYTHON_GUARDS) | set(POWERSHELL_GUARDS) |
+              set(OTHER_EXACT_POWERSHELL_GUARDS) |
+              set(EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS) | {identity_audit})
     array = re.compile(r"^foreach\(\$bad in @\('(?:[^'\r\n]*)'(?:,'(?:[^'\r\n]*)')*\)\)\{$")
     fail_guard = re.compile(
         r"^if\(\$(?:src|s|source|code)\.Contains\(\$bad\)\)"
