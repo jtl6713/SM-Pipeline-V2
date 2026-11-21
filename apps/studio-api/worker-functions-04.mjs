@@ -5495,7 +5495,11 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   const profileList = Array.isArray(profiles) ? profiles : [];
   const profileIds = profileList.map((profile) => profile?.id).filter(Boolean);
   const ideaCounts = overviewIdeaCountMap();
-  const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
+  // During every Supabase-backed Home refresh, recount Ideas against current
+  // promotion links. Cached per-profile counters can outlive a promotion and
+  // advertise phantom Miami/LA ideas even when the Ideas page is empty.
+  const missingIdeaCounts = forceIdeas || studioHomeReadSource(env) === "supabase"
+    || profileIds.some((id) => !ideaCounts.has(String(id)));
 
   // Home opens Supabase only when its own flag is set. preferSupabase marks a
   // manual refresh, but it must not open a database connection on its own.
