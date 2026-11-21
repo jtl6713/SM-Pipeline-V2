@@ -18,7 +18,7 @@ Reference: the November 16 SM Pipeline V2 Airtable CRUD and Egress Audit provide
 - The audit includes another **87 workflows with direct Airtable endpoint literals** beyond the three disabled here. They must be reviewed as historical, one-off, or active deployments and retired/reimplemented without breaking Cloudflare deployments.
 - Several direct maintenance/repair scripts, staging-only diagnostic modules, and archived source references remain. Distinguish executable active paths from historical evidence, and eliminate or isolate executable ones.
 - Existing production env/secret values, Windows runner .env, Cloudflare secrets and GitHub encrypted PAT envelopes have not been read or modified. A repo code change alone cannot guarantee external services or scheduled jobs have stopped.
-- Verify all read-source selectors. Some Worker flags still default to Airtable, which now fails closed at the gateway rather than secretly querying Airtable; migrate each to Supabase with functional regression tests.
+- All 10 Worker read/write source selectors now select Supabase (or `unavailable` when credentials are missing), ignoring stale Airtable rollback flags. Run full functional regression tests because unsupported query/view mappings will now fail visibly.
 - Validate Supabase schema and atomic-upsert constraints in the **production** database before enabling blocked mutation paths. Only the connected development project schema was inspected.
 - Review legacy tests that assume Airtable REST responses and adjust them to Supabase-only behavior. Run the targeted new tests and full suite.
 
