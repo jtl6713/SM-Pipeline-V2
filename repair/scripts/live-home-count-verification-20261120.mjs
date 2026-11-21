@@ -1,3 +1,4 @@
+// 2026-11-20 18:25 Chicago: recount after five provider-confirmed expired Instagram Story status repairs.
 // 2026-11-20 evening publication recovery: exact latest four-profile snapshot verification; no Studio writes.
 import crypto from "node:crypto";
 const apiToken=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,run=process.env.GITHUB_RUN_ID;
