@@ -8,7 +8,7 @@ $r=[ordered]@{
  source_manual_completed=$false;original_draft_changed=$false
  source_public_post_id='';oembed_public_post_id='';oembed_owner_verified=$false
  provider_public_receipt_verified=$false;exact_approved_media_match_verified=$false
- provider_gets=0;display_api_query_calls=0;owned_video_owned=$false;owned_video_id='';provider_writes=0;output_writes=0;airtable_operations=0
+ provider_gets=0;display_api_query_calls=0;owned_video_owned=$false;owned_video_id='';oauth_required_scopes_granted=$false;owned_video_http_status=0;provider_writes=0;output_writes=0;airtable_operations=0
  reason='not_started';stage='preflight'
 }
 try {
@@ -63,6 +63,7 @@ try {
  $actual=([string]$ident.creator_username).TrimStart('@').ToLowerInvariant()
  if($ident.ok -ne $true -or $ident.authorized -ne $true -or $actual -ne $expected){throw 'creator_oauth_owner_not_verified'}
  $r.owner_verified=$true
+ $r.oauth_required_scopes_granted=($ident.required_scopes_granted -eq $true)
  $r.stage='public-saved-url-oembed-get'
  $embedUrl='https://www.tiktok.com/oembed?url='+[uri]::EscapeDataString($link)
  $r.provider_gets++
@@ -105,8 +106,19 @@ try {
  $r.reason=if($r.provider_public_receipt_verified){'original_manual_public_post_id_exact_tiktok_owned_account_verified_media_fingerprint_unverified'}else{'owned_video_identity_not_verified_no_retry'}
  $r.stage='completed'
 }catch{
- $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')
+ $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified','public_link_video_id_mismatch','owned_video_secret_missing','owned_video_provider_unavailable','exact_owned_public_video_not_returned')
  $message=[string]$_.Exception.Message
  $r.reason=if($known -contains $message){$message}else{'public_provider_get_unavailable_no_retry'}
+ if($r.stage -eq 'exact-owned-video-analytics-query'){
+   $http=0
+   try{$http=[int]$_.Exception.Response.StatusCode}catch{}
+   $r.owned_video_http_status=$http
+   if($http -eq 401){$r.reason='owned_video_worker_authorization_denied_no_retry'}
+   elseif($http -eq 403){$r.reason='tiktok_video_list_scope_or_access_denied_no_retry'}
+   elseif($http -eq 404){$r.reason='owned_video_query_route_missing_no_retry'}
+   elseif($http -eq 429){$r.reason='owned_video_provider_rate_limited_no_retry'}
+   elseif($http -ge 500){$r.reason='owned_video_provider_server_error_no_retry'}
+   elseif($http -eq 400){$r.reason='owned_video_query_bad_request_no_retry'}
+ }
 }
 Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
