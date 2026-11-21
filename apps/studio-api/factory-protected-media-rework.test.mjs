@@ -216,6 +216,10 @@ test("protected media goes to Factory Manual, never Approve/Needs Eyes or publis
     do_not_publish: true, auto_publish_enabled: false,
     protected_media_rework: true,
     recovery_source_inventory_verified: true,
+    recovery_gallery_images: [
+      "https://media.chicagoshining.com/studio/previews/lettered/recAAAAAAAAAAAAAA/0.jpg",
+      "https://media.chicagoshining.com/studio/previews/lettered/recAAAAAAAAAAAAAA/1.jpg",
+    ],
     recovery_stage: MARKER.stage,
     recovery_next_step: "Verify preview and request new Factory approval",
     review_package_ready: false, platform: "Facebook",
@@ -231,6 +235,8 @@ test("protected media goes to Factory Manual, never Approve/Needs Eyes or publis
   assert.equal(card.can_publish, false);
   assert.equal(card.protected_media_rework, true);
   assert.equal(card.recovery_source_inventory_verified, true);
+  assert.equal(card.recovery_gallery_images.length, 2);
+  assert.deepEqual(factoryCardFromRow({ ...row, protected_media_rework: false }).recovery_gallery_images, []);
   assert.match(card.studio_state, /Media sources verified/);
   const lanes = partitionFactoryLanes([row]);
   assert.deepEqual(lanes.lanes.needs_eyes, []);
