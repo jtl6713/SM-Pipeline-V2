@@ -1020,6 +1020,7 @@ export function airtableShapedMusicFromSupabase(row) {
       File_Size_Bytes: bytes,
       File_Size_MB: sizeMb,
       Rights_Status: meta.rights_status || null,
+      Duration_Seconds: meta.duration_seconds != null ? Number(meta.duration_seconds) : null,
       Asset_Description: meta.asset_description || null,
       Studio_Transfer_ID: meta.studio_transfer_id || null,
       Added_At: meta.added_at || row.created_at || null,
