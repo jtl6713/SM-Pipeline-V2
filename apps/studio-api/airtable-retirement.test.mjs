@@ -46,3 +46,26 @@ test("retired standalone scripts cannot request the Airtable API", () => {
     assert.ok(source(path).includes("Retired: Supabase-native replacement required"), path);
   }
 });
+
+test("all Studio storage selectors ignore stale Airtable fallback flags", () => {
+  const adapter = source("apps/studio-api/supabase-pipeline-reads.mjs");
+  assert.ok(adapter.includes('return studioSupabaseConfigured(env) ? "supabase" : "unavailable";'));
+  for (const name of [
+    "studioReadSource",
+    "studioPipelineReadSource",
+    "studioContentReadSource",
+    "studioFactoryOpsReadSource",
+    "studioHomeReadSource",
+    "studioMusicReadSource",
+    "studioAssetsReadSource",
+    "studioAuthReadSource",
+    "studioWriteSource",
+    "studioPhase6WriteSource",
+  ]) {
+    const at = adapter.indexOf("export function " + name + "(env)");
+    assert.ok(at !== -1, name);
+    const body = adapter.slice(at, adapter.indexOf("}", at) + 1);
+    assert.ok(body.includes("studioOnlySupabaseSource(env)"), name);
+    assert.ok(!body.includes('return "airtable"'), name);
+  }
+});
