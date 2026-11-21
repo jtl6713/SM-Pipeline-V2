@@ -6,8 +6,8 @@ const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 test("Pipeline content controls and release build are integrated natively", () => {
   assert.ok(html.includes('id="pipelineContentControls"'));
   assert.ok(!html.includes("pipeline-content-pagination-2536.js"));
-  assert.ok(html.includes("v=0.6.1030-content-pages"));
-  assert.ok(ui.includes('BUILD_ID = "item4-0.6.1030-content-pages"'));
+  assert.ok(html.includes("v=0.6.1031-pipeline-content-pages"));
+  assert.ok(ui.includes('BUILD_ID = "item4-0.6.1031-pipeline-content-pages"'));
 });
 test("created-date, group size, and Next/Previous are wired to one paged endpoint", () => {
   for(const id of ["pipelineContentFrom","pipelineContentTo","pipelineContentSize","pipelineContentPrev","pipelineContentNext"])

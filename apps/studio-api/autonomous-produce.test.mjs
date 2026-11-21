@@ -915,6 +915,8 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /autonomousRefillSlot/);
   assert.match(worker, /pickAutonomousRefillProfile/);
   assert.match(worker, /async function ensureAutonomousSelectedMusic/);
+  assert.match(worker, /async function selectValidAutonomousMusicAssetId/);
+  assert.match(worker, /No verified available music asset is configured for autonomous production/);
   assert.match(worker, /pickCatalogFallbackMusicRecord/);
   assert.match(worker, /Selected_Music_Asset/);
   assert.doesNotMatch(
@@ -928,7 +930,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
     worker.indexOf("async function stampPhotoReadyIdeaForAutonomousProduce"),
     worker.indexOf("async function adoptNextReadyDailyIdea"),
   );
-  assert.match(stampMusicBlock, /pickAutonomousMusicAssetId/);
+  assert.match(stampMusicBlock, /selectValidAutonomousMusicAssetId/);
   assert.match(stampMusicBlock, /Selected_Music_Asset/);
   const adoptMusicBlock = worker.slice(
     worker.indexOf("async function adoptNextReadyDailyIdea"),
@@ -959,7 +961,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(revisionCatch, /releaseAutonomousRevisionLock/);
   assert.doesNotMatch(revisionCatch, /status: "skipped"/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
-  assert.match(worker, /30m photo-ready SLA drain/);
+  assert.match(worker, /IDEA HARVEST SLA/);
   assert.match(worker, /skip_stuck_waiting_for_next_draft/);
   assert.match(worker, /parkAutonomousResumeDraft/);
   assert.match(worker, /autonomousWaitingIsStale/);
@@ -968,7 +970,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /deferProduce/);
   assert.match(worker, /sla_skip_stuck_waiting/);
   assert.match(worker, /shouldClearAutonomousResumeDeferred/);
-  assert.match(worker, /resume_only: true/);
+  assert.match(worker, /resume_only: !atHour/);
   assert.match(worker, /resume_only_idle/);
   // Light ticks must adopt photo-ready ideas (not heavy-only).
   assert.doesNotMatch(

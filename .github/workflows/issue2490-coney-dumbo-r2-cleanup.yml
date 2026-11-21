@@ -1,0 +1,126 @@
+name: Issue 2490 Coney DUMBO exact R2 cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue2490-coney-dumbo-exact-r2-cleanup
+  cancel-in-progress: false
+
+jobs:
+  exact-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TEMP_WORKER: issue2490-r2-cleanup-${{ github.run_id }}
+    steps:
+      - name: Resolve the existing production media bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "$AUTH" \
+            "$API/workers/scripts/chicagoshining-studio-api/settings" \
+            -o /tmp/production-worker-bindings.json
+          jq -er '[.result.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | .bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/production-worker-bindings.json > /tmp/bucket
+
+      - name: Prepare exact-prefix cleanup bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib,secrets
+          prefixes = [
+            "studio/previews/item4/recNHXsBTfgfuagts/",
+            "studio/previews/item4/recF11iJFCPcRbGsk/",
+            "studio/previews/recAARHCCzh7IK9l0/",
+            "studio/previews/rec5rZkNsLHYUgWiA/",
+            "studio/previews/recL4Da4hDT4cG4zM/",
+            "studio/previews/recv6bOK7RENiHFBp/",
+            "studio/previews/lettered/recykQuLBcEqIvMJP/",
+            "studio/previews/lettered/recGAL2SKMPuVUGMV/",
+            "studio/previews/thumbnails/recejuTtsQB10tO6I/",
+            "studio/previews/thumbnails/recxYxvXnQHO9MYZX/",
+          ]
+          route = '/' + secrets.token_urlsafe(48)
+          pathlib.Path('/tmp/route').write_text(route)
+          source = r'''
+          const ROUTE=__ROUTE__;
+          const PREFIXES=__PREFIXES__;
+          export default { async fetch(request,env) {
+            const url=new URL(request.url);
+            if(request.method!=="POST" || url.pathname!==ROUTE) return new Response("Not found",{status:404});
+            const deleted=[];
+            for(const prefix of PREFIXES){
+              let cursor=undefined;
+              do {
+                const page=await env.STUDIO_MEDIA.list({prefix,limit:1000,cursor});
+                const keys=(page.objects||[]).map(object=>object.key);
+                if(keys.some(key=>!key.startsWith(prefix))) return Response.json({ok:false,error:"prefix_escape"},{status:409});
+                for(let i=0;i<keys.length;i+=100) await env.STUDIO_MEDIA.delete(keys.slice(i,i+100));
+                deleted.push(...keys);
+                cursor=page.truncated?page.cursor:undefined;
+              } while(cursor);
+            }
+            const remaining=[];
+            for(const prefix of PREFIXES){
+              const page=await env.STUDIO_MEDIA.list({prefix,limit:1});
+              if((page.objects||[]).length) remaining.push(prefix);
+            }
+            return Response.json({ok:remaining.length===0,prefixes:PREFIXES.length,deleted_count:deleted.length,remaining});
+          }};
+          '''.replace('__ROUTE__',json.dumps(route)).replace('__PREFIXES__',json.dumps(prefixes))
+          pathlib.Path('/tmp/worker.mjs').write_text(source)
+          metadata={"main_module":"worker.mjs","compatibility_date":"2026-08-02","bindings":[
+            {"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":pathlib.Path('/tmp/bucket').read_text().strip()}]}
+          pathlib.Path('/tmp/metadata.json').write_text(json.dumps(metadata))
+          PY
+          node --check /tmp/worker.mjs
+
+      - name: Delete only exact generated preview prefixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 60 -X PUT "$API/workers/scripts/$TEMP_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/metadata.json;type=application/json' \
+            -F 'worker.mjs=@/tmp/worker.mjs;type=application/javascript+module;filename=worker.mjs' \
+            -o /tmp/created.json
+          jq -e '.success==true' /tmp/created.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API/workers/scripts/$TEMP_WORKER/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/enabled.json >/dev/null
+          curl -fsS --max-time 25 "$API/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          ROUTE=$(cat /tmp/route)
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 60 -X POST -o /tmp/result.json -w '%{http_code}' \
+              "https://$TEMP_WORKER.$SUB.workers.dev$ROUTE" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .prefixes==10 and (.remaining|length)==0' /tmp/result.json >/dev/null 2>&1; then
+              break
+            fi
+            [[ "$attempt" == "12" ]] && { cat /tmp/result.json; exit 1; }
+            sleep 3
+          done
+          jq -c '{ok,prefixes,deleted_count,remaining}' /tmp/result.json
+
+      - name: Remove temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 25 -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TEMP_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deleted.json || true
+          test ! -s /tmp/deleted.json || jq -e '.success==true' /tmp/deleted.json >/dev/null

@@ -108,6 +108,11 @@ _SLIDE_SAFE_FIELDS = frozenset({
     "Shared_Asset_Revision",
     "Asset_4x5_Public_Status",
     "Asset_4x5_Public_URL",
+    # TTD0 reads 9:16 photo slides through this exact ready/status formula.
+    # Without these two keys, closed-Airtable mode treats the filter as
+    # untranslated and silently returns zero rows despite 4 ready 9:16 slides.
+    "Asset_9x16_Public_Status",
+    "Asset_9x16_Public_URL",
     # AP0C/AP1C/AP2C query these after each native Instagram carousel stage.
     # An untranslatable predicate silently returned zero rows once Airtable
     # egress was disabled, even when all Supabase slides were Ready.

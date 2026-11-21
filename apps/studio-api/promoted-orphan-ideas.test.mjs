@@ -72,9 +72,10 @@ test("Worker wires daily promoted orphan heal before autonomous harvest", () => 
   assert.match(fn, /export async function studioHealPromotedOrphanIdeas/);
   assert.match(fn, /classifyPromotedOrphanIdea/);
   const harvest = worker.slice(
-    worker.indexOf("if (cadence.heavy && Number(cadence.minute) === 0)"),
-    worker.indexOf("autonomous top-of-hour harvest failed"),
+    worker.indexOf("// IDEA HARVEST SLA"),
+    worker.indexOf("Independent Idea pull failed"),
   );
+  assert.match(harvest, /const atHour = cadence.heavy && Number\(cadence.minute\) === 0/);
   assert.match(harvest, /studioHealPromotedOrphanIdeas/);
   assert.match(harvest, /runStudioAutonomousProduce/);
   const healIdx = harvest.indexOf("studioHealPromotedOrphanIdeas");

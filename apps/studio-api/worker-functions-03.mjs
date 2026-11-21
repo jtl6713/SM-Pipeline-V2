@@ -14457,6 +14457,13 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
+  // A future schedule reservation / scheduled-hold is NOT a provider dispatch.
+  // Counting it as an attempt permanently excludes the output from the
+  // Supabase due-time first-publish lane (issue #2340). Preserve the actual
+  // scheduled_post_date as the durable reservation; stamp only real attempts.
+  if (/^(?:held until\b|(?:(?:reconcile|overdue-rescue):\s*)?skipped:\s*scheduled-hold\b)/i.test(String(note || "").trim())) {
+    return;
+  }
   const attemptStamp = publishDispatchAttemptStampFields({
     note,
     priorCount: f(record, "Studio_Publish_Dispatch_Count"),
@@ -14489,7 +14496,8 @@ export async function studioStampPublishDispatch(env, record, note) {
 export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
   if (!studioPublishCanDispatchNow(record)) {
     const heldUntil = studioPublishHeldUntilIso(record);
-    await studioStampPublishDispatch(env, record, `held until ${heldUntil || "scheduled time"}`);
+    // Future reservations must not acquire a publish-attempt counter here.
+    // The due-time cron owns the first actual dispatch and its durable fence.
     return { ok: true, skipped: "scheduled-hold", held_until: heldUntil, record };
   }
   const plan = studioPublishDispatchTarget(record);

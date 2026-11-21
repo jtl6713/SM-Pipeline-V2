@@ -89,6 +89,49 @@ test("wait-range applies only to real-photo image ideas", () => {
   }), false);
 });
 
+test("distinctive NYC places cannot match on island, bridge, park, or borough alone", () => {
+  const coney = buildIdeaLibraryKeys({
+    primaryLocation: "Coney Island Boardwalk",
+    title: "Coney Island Snack Run",
+    summary: "Three bites on the boardwalk",
+  });
+  const wrongIsland = rankIdeaLibraryFields({
+    location: "Long Island City, Queens, New York City",
+    name: "Long Island City 5",
+    haystack: "Long Island City 5 urban park skyline",
+    placeKeys: coney.placeKeys,
+    subjectKeys: coney.subjectKeys,
+    strongIdeaTokens: ideaLibraryTokens("Coney Island Snack Run"),
+    ideaTokens: ideaLibraryTokens("Coney Island Snack Run"),
+  });
+  assert.equal(wrongIsland, null);
+  const rightConey = rankIdeaLibraryFields({
+    location: "Coney Island, Brooklyn, New York",
+    name: "Coney Island 12 Nathan's sign",
+    haystack: "Coney Island 12 Nathan's sign boardwalk snack",
+    placeKeys: coney.placeKeys,
+    subjectKeys: coney.subjectKeys,
+    strongIdeaTokens: ideaLibraryTokens("Coney Island Snack Run"),
+    ideaTokens: ideaLibraryTokens("Coney Island Snack Run"),
+  });
+  assert.equal(rightConey?.confidence, "high");
+
+  const dumbo = buildIdeaLibraryKeys({
+    primaryLocation: "DUMBO, Brooklyn",
+    title: "DUMBO Rainy-Day Plan",
+  });
+  const genericBrooklyn = rankIdeaLibraryFields({
+    location: "Brooklyn Bridge Park",
+    name: "Brooklyn Bridge Park 10",
+    haystack: "Brooklyn Bridge Park waterfront",
+    placeKeys: dumbo.placeKeys,
+    subjectKeys: dumbo.subjectKeys,
+    strongIdeaTokens: ideaLibraryTokens("DUMBO Rainy-Day Plan"),
+    ideaTokens: ideaLibraryTokens("DUMBO Rainy-Day Plan"),
+  });
+  assert.equal(genericBrooklyn, null);
+});
+
 test("min 3 max 10 takes all 7 high-confidence matches, newest first", () => {
   const matches = [
     { id: "recOld", confidence: "high", intake_date: "2026-08-01", score: 90 },

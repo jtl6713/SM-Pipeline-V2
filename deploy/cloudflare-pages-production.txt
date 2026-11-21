@@ -908,4 +908,4 @@ Only then deploy Studio original-image gallery Prev/Next view.
 
 Deploy #2531 Pipeline all-week history pagination and production-approved sorting UI 0.6.1029 from merged PR #2534; 22/22 CI checks green.
 
-Deploy #2536 Pipeline Content ID UI 0.6.1030-content-pages from PR #2537: native 10/20/25/50 content groups, creation-date bounds and Prev/Next; preserve all publishing guards, verify UI release after deployment.
+Deploy #2536 Pipeline Content ID UI 0.6.1031-pipeline-content-pages from PR #2537: native 10/20/25/50 content groups, creation-date bounds and Prev/Next; preserve all publishing guards, verify UI release after deployment.
