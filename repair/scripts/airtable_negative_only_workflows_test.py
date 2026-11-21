@@ -152,6 +152,49 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
         ))
         self.assertGreaterEqual(len(unexpected_references(self.root, (AIRT_HOST,))), 1)
 
+    def test_new_multiline_python_get_only_guards(self):
+        cases = (
+            ("issue2374-fb-gallery-http-audit.yml",
+             "for bad in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','-Method Post',\n"
+             "  '/media_publish','__AIRT_HOST__'):\n"
+             "assert bad not in source\n"),
+            ("issue2374-ig-carousels-owner-auth-audit.yml",
+             "for bad in ['-Method Post','AIRTABLE_PAT',\n"
+             "  '__AIRT_HOST__', \"Write-Host $key\", \"Write-Output $key\"]:\n"
+             "assert bad not in s, 'unsafe provider write or secret exposure'\n"),
+        )
+        for name, guard in cases:
+            with self.subTest(name=name):
+                for old in (self.root / ".github/workflows").glob("*.yml"):
+                    old.unlink()
+                self.write(name, guard)
+                self.assertEqual(unexpected_references(
+                    self.root, (AIRT_HOST, "AIRTABLE_PAT")), [])
+                self.write(name, guard + "curl https://__AIRT_HOST__/v0/base\n")
+                self.assertTrue(any(
+                    issue.endswith(":4") for issue in
+                    unexpected_references(self.root, (AIRT_HOST,))
+                ))
+
+    def test_nyc_story_forbidden_variable_is_not_an_airtable_call(self):
+        name = "p1-2340-nyc2627-story-getonly.yml"
+        guard = (
+            "foreach($forbidden in @('-Method Post','-Method Patch','-Method Delete',"
+            "'Invoke-Sqlcmd','__AIRT_HOST__','/media_publish','/media?',"
+            "'airtable.com/v0/')){\n"
+            "if($s.Contains($forbidden)){throw "
+            "('write_or_unscoped_provider_call_forbidden: '+$forbidden)}\n"
+        )
+        self.write(name, guard)
+        self.assertEqual(unexpected_references(self.root, (AIRT_HOST,)), [])
+        self.write(name, guard + "Invoke-WebRequest https://__AIRT_HOST__/v0\n")
+        self.assertTrue(any(
+            issue.endswith(":3") for issue in
+            unexpected_references(self.root, (AIRT_HOST,))
+        ))
+        self.write(name, guard.replace("throw ", "Write-Host "))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://__AIRT_HOST__/v0/foo\n")
         self.assertGreaterEqual(len(unexpected_references(self.root, (AIRT_HOST,))), 1)
