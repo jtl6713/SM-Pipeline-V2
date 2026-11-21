@@ -101,3 +101,5 @@ jobs:
           path: /tmp/p1-2340-meta-token-audit.json
           retention-days: 30
           if-no-files-found: warn
+
+# 2026-11-21 #2464: re-run existing GET-only owned Facebook Page credentials/permissions and positive-history diagnostics for guarded #4907/#5355/#6256 and original #5915/#6076. No provider writes, no source status changes, and no Airtable egress.
