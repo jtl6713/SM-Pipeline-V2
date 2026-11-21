@@ -42,6 +42,7 @@ jobs:
             if($items.Count -ne 2 -or $items[0] -cne '122129565183476558' -or $items[1] -cne '122129565231476558'){throw 'photo_id_json_regression'}
           }finally{$sample.Dispose()}
           if($code -notmatch "stage='meta-page-owner-get'" -or $code -notmatch "stage='compare-saved-photo-identities'"){throw 'safe_failure_stage_instrumentation_missing'}
+          if($code -notmatch "stage='compare-all-ordered-photo-ids'" -or $code -notmatch "exception_type="){throw 'safe_diagnostics_missing'}
           Write-Output 'P1_FB9777_GET_ONLY_STATIC_PASS'
   owned-photos-get:
     if: github.event_name == 'push'
@@ -94,7 +95,7 @@ jobs:
             if [[ "$state" == ok ]]; then
               jq -r '.job.log // ""' /tmp/fb9777-job.json | grep '^P1_FB9777_RECEIPTS=' | tail -1 | sed 's/^P1_FB9777_RECEIPTS=//' > /tmp/fb9777-evidence.json
               jq -e '.read_only==true and .output_number==9777 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .expected==8' /tmp/fb9777-evidence.json >/dev/null
-              jq -c '{output_number,profile,expected,verified_owned,all_photo_ids_retained,page_owned,stage,reason,observations,provider_writes,output_writes,airtable_reads}' /tmp/fb9777-evidence.json
+              jq -c '{output_number,profile,expected,verified_owned,all_photo_ids_retained,page_owned,stage,reason,exception_type,observations,provider_writes,output_writes,airtable_reads}' /tmp/fb9777-evidence.json
               if jq -e '.reason=="not_started" or .reason=="provider_or_runtime_get_unavailable"' /tmp/fb9777-evidence.json >/dev/null; then
                 echo 'Original photo receipt GET was blocked; no publication authorized';exit 3
               fi
