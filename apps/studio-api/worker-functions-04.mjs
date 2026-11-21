@@ -11704,6 +11704,11 @@ export function mapOpsQueueProfileName(profileMap, linked) {
 /*__STUDIO_WORKER_END:mapOpsQueueProfileName__*/
 
 export async function getStudioOperationsQueue(request, env, authorization) {
+  // Production writes have already migrated. Never turn a missing or stale
+  // Factory/Operations read-source flag into an Airtable record lookup.
+  if (studioWriteSource(env) === "supabase" && studioFactoryOpsReadSource(env) !== "supabase") {
+    throw new HttpError(503, "Factory Supabase read authority not configured. No Airtable fallback.");
+  }
   const controls = await readOpsQueueControls(env);
   const fetchErrors = [];
   const settleList = async (label, promise) => {
