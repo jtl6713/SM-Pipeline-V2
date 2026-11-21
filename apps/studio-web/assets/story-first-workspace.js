@@ -652,6 +652,14 @@
           report("Scene " + (index + 1) + " video status unavailable: " + error.message, true);
         });
       }, 15000);
+    } else if (["recovery_polling", "recovery_registering"].includes(result.state)
+      && current.videoRecoveryConsent?.[videoSceneIdentity(index)]?.run_id === result.run_id) {
+      // The operator approved this exact original run. Keep checking its one
+      // durable runner job while this page remains open; never retry its POST.
+      current.videoTimers[index] = setTimeout(() => {
+        recoverExistingSceneVideo(index, true).catch(error =>
+          report("Scene " + (index + 1) + " existing-video recovery: " + error.message, true));
+      }, 15000);
     } else if (!auto) {
       report("Scene " + (index + 1) + ": " + videoJobLabel(result));
     }
@@ -967,21 +975,33 @@
       throw error;
     } finally { current.busy = false; }
   }
-  async function recoverExistingSceneVideo(index) {
+  async function recoverExistingSceneVideo(index, auto = false) {
     if (current.busy || current.videoRequestBusy) return;
     const video = current.videoJobs[index], scene = current.story?.scenes?.[index];
     if (!video?.run_id || !video.recoverable || !scene)
       throw new Error("Refresh Video Status to locate the original paid clip first.");
     const profile = assertProfile();
-    let mediaOverride = false;
-    if (scene.media === "still") {
-      mediaOverride = confirm("This scene requests a STILL. Recover the previously accepted VIDEO clip instead?");
-      if (!mediaOverride) return;
-    } else if (!confirm("Recover and select the EXISTING paid ElevenLabs clip? Studio checks R2, Drive and Asset Manager before any transfer. No second ElevenLabs generation or charge.")) return;
-    let audioAcknowledged = false;
-    if (video.generate_audio) {
-      audioAcknowledged = confirm("This clip contains generated audio. Confirm you will review its soundtrack against narration and music.");
-      if (!audioAcknowledged) return;
+    const identity = videoSceneIdentity(index);
+    current.videoRecoveryConsent ||= {};
+    const prior = current.videoRecoveryConsent[identity];
+    let mediaOverride = prior?.run_id === video.run_id && prior.media_override === true;
+    let audioAcknowledged = prior?.run_id === video.run_id && prior.audio_acknowledged === true;
+    if (auto) {
+      // Never auto-submit an upload unless a human accepted this exact run in
+      // the current session. The server also enforces its durable no-retry CAS.
+      if (prior?.run_id !== video.run_id) return;
+    } else {
+      if (scene.media === "still") {
+        mediaOverride = confirm("This scene requests a STILL. Recover the previously accepted VIDEO clip instead?");
+        if (!mediaOverride) return;
+      } else if (!confirm("Recover and select the EXISTING paid ElevenLabs clip? Studio checks R2, Drive and Asset Manager before any transfer. No second ElevenLabs generation or charge.")) return;
+      if (video.generate_audio) {
+        audioAcknowledged = confirm("This clip contains generated audio. Confirm you will review its soundtrack against narration and music.");
+        if (!audioAcknowledged) return;
+      }
+      current.videoRecoveryConsent[identity] = {
+        run_id:video.run_id, media_override:mediaOverride, audio_acknowledged:audioAcknowledged,
+      };
     }
     const originalIdea = current.record.id;
     current.busy = true;
@@ -1000,6 +1020,7 @@
       if (result.paid_generation_submitted !== false)
         throw new Error("Recovery did not confirm the no-generation guarantee. Refresh status.");
       if (result.state === "accepted") {
+        delete current.videoRecoveryConsent?.[identity];
         await reloadIdea();
         await checkSceneVideo(index, true);
         report("Scene " + (index + 1) + ": Original video recovered and selected in Asset Manager. No new ElevenLabs charge.");
