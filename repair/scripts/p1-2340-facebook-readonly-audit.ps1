@@ -93,8 +93,8 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   if($o.Count -ne 1 -or [string]$o[0].platform -ne 'Facebook'){throw 'history_target_identity_mismatch'}
   $p=@($profiles|Where-Object{[string]$_.id -eq [string]$o[0].content_profile_id})
   if($p.Count -ne 1 -or [string]$p[0].market_name -ne [string]$t.market){throw 'history_target_owner_mismatch'}
-  $pid=[string]$values[[string]$t.page]
-  if($pid.Length -lt 6 -or $pid.Length -gt 30 -or $pid -match '[^0-9]'){throw 'history_page_id_unavailable'}
+  $pageId=[string]$values[[string]$t.page]
+  if($pageId.Length -lt 6 -or $pageId.Length -gt 30 -or $pageId -match '[^0-9]'){throw 'history_page_id_unavailable'}
   $needles=@()
   foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
    $v=Norm $value;if($v.Length -ge 35){$needles+= $v.Substring(0,[Math]::Min(75,$v.Length))}
@@ -104,7 +104,7 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
    $probe=@{output_number=[int]$t.n;market=$t.market;edge=$edge;pages_scanned=0;rows_scanned=0;complete=$false;http_status=0;error_code=0;candidates=@();conclusion='inconclusive'}
    $after=''
    for($pg=0;$pg -lt 2;$pg++){
-    $path='/'+$pid+'/'+$edge+'?fields='+$fields+'&limit=100'
+    $path='/'+$pageId+'/'+$edge+'?fields='+$fields+'&limit=100'
     if($after){$path+='&after='+[uri]::EscapeDataString($after)}
     $r=G $path
     $probe.http_status=$r.status;$probe.error_code=$r.code
