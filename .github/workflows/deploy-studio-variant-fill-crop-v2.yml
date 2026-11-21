@@ -398,7 +398,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in /tmp/variant-token.txt /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc; do
+          for file in /tmp/variant-token.txt /tmp/variant-base-url.txt /tmp/variant-supabase-settings.json; do
             if [[ -e "$file" ]]; then shred -u "$file" 2>/dev/null || rm -f "$file"; fi
           done
 
