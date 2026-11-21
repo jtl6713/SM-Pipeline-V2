@@ -23,7 +23,7 @@ const FACTORY_APPROVAL_SELECT = [
   "id", "airtable_record_id", "output_number",
   "content_item_id", "content_item_airtable_id", "content_profile_id",
   "platform", "format", "studio_output_type", "platform_output_type",
-  "output_title", "output_status", "review_status", "publish_status", "render_status",
+  "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
@@ -162,6 +162,9 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
   if (!entry.profileUuid || !UUID.test(entry.profileUuid)) {
     throw Error("Cannot approve: source profile identity unavailable for scheduling");
   }
+  if (row.publish_method && row.publish_method !== "Automated") {
+    throw Error("Cannot approve: output is explicitly configured for manual publishing");
+  }
   if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(String(row.platform || ""))) {
     throw Error("Cannot approve: no supported automated publisher for this platform");
   }
@@ -239,6 +242,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     output_status: "Approved for Publishing",
     review_status: "Approved",
     publish_status: "Ready to Schedule",
+    publish_method: "Automated",
     auto_publish_enabled: true,
     scheduled_post_date: scheduled.iso,
     studio_scheduled_at: scheduled.iso,
@@ -281,6 +285,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     || check.row.output_status !== "Approved for Publishing"
     || check.row.review_status !== "Approved"
     || check.row.publish_status !== "Ready to Schedule"
+    || check.row.publish_method !== "Automated"
     || check.row.auto_publish_enabled !== true
     || Date.parse(String(check.row.scheduled_post_date || "")) !== Date.parse(scheduled.iso)
     || Date.parse(String(check.row.studio_scheduled_at || "")) !== Date.parse(scheduled.iso)
