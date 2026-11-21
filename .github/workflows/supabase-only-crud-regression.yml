@@ -88,6 +88,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify production Supabase project binding contract and retirement tests
+        run: |
+          python -m py_compile repair/scripts/studio_api_binding_contract.py
+          python -m unittest discover -s repair/scripts -p 'studio_api_binding_contract_test.py' -v
       - name: Run focused Python CRUD regression tests
         env:
           PYTHONPATH: services/pipeline-runner
