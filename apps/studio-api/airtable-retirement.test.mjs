@@ -137,3 +137,33 @@ test("ElevenLabs maintenance is Supabase-first and never requires Airtable PAT",
   assert.ok(preflight.includes('payload.get("studio_write_source") == "supabase"'));
   assert.ok(!preflight.includes('in ("airtable", "supabase")'));
 });
+
+
+test("legacy migration probe cannot approve Airtable as the primary read source", () => {
+  const workflow = source(".github/workflows/supabase-migration-gate-readonly.yml");
+  assert.ok(workflow.includes("AIRTABLE_RETIREMENT_PRIMARY_READ_GATE="));
+  assert.ok(workflow.includes("studio_primary_read_source=supabase"));
+  assert.ok(workflow.includes('sync.get("read_source") == "supabase"'));
+  assert.ok(!workflow.includes('"studio_read_source=airtable"'));
+});
+
+test("production media preflight is SELECT-only and retains duplicate and ACL checks", () => {
+  const sql = source("docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql");
+  const statements = sql.replace(/^--.*$/gm, "");
+  assert.doesNotMatch(statements, /\b(?:create|alter|drop|insert|update|delete|truncate|grant|revoke)\b/i);
+  for (const key of ["duplicate_native_groups", "duplicate_drive_groups",
+    "anon_can_execute_media_rpc", "service_role_can_execute_media_rpc",
+    "media_rpc_security_invoker", "scoped_native_unique_index_exists"]) {
+    assert.ok(sql.includes(key), key);
+  }
+});
+
+test("production audit can be statically checked in PR without exposing live secrets", () => {
+  const workflow = source(".github/workflows/verify-supabase-production-readonly.yml");
+  assert.ok(workflow.includes("github.event_name == 'pull_request'"));
+  assert.ok(workflow.includes("github.event_name == 'workflow_dispatch'"));
+  assert.ok(workflow.includes("refs/heads/main"));
+  assert.ok(workflow.includes("STUDIO_AUDIT_MODE"));
+  assert.ok(workflow.includes("UNVERIFIED_DISCOVERY_ONLY"));
+  assert.ok(workflow.includes("production_supabase_identity_audit_test.py"));
+});

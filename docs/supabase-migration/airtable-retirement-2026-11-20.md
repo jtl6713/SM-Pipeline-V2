@@ -103,3 +103,94 @@ The CI guard must scan for executable credential-envelope references before clai
 - Preserved the dedicated ElevenLabs TTS/video key installer and read-only video-price preflight; their dependency checks now require the Studio Worker Supabase URL and service-role secret instead of Airtable PAT. Video preflight only accepts a runner whose write authority is Supabase.
 - The PAT inventory CI now fails unless the only remaining workflow references are the read-only `i1-durable-runner-audit.yml` (Windows presence check) and `verify-supabase-production-readonly.yml` (Cloudflare credential-presence audit). These audits are retained to support eventual live credential removal; neither grants Airtable runtime access.
 - None of these branch changes removes already provisioned production secrets. Before removing PAT bindings, obtain direct production audit evidence, complete the production database migration and non-publishing canary, verify the monitored quiet window and retain rollback protection.
+
+
+### Five-stage production cutover preparation (continuation, 2026-11-20)
+
+**Evidence-based release position:** implementation and baseline CI were green at
+commit 45e09a1, but production remains unverified and this PR is draft. The
+newest commit requires its own full CI validation. No runtime, publishing,
+production SQL, GitHub secret or Airtable PAT was changed by this continuation.
+
+**Stage 1 — identify the real production Supabase project.**
+- Only connected Supabase projects visible from this session are
+  sm-pipeline-v2-dev (vkwvscgisqsbuwagdvtb) and Chicago Shining Task Organizer
+  (yxhfaksetrxdezoodibq). Neither is independently certified as Studio
+  production. Do not infer it from the project name or treat the dev database
+  as production.
+- A protected read-only Cloudflare audit can discover a candidate project
+  reference from the active chicagoshining-studio-api Worker SUPABASE_URL binding
+  without reading any secret values. The candidate is *not* an approval.
+- Independently confirm project ownership in the appropriate Supabase
+  organization, record the approved 20-character project reference, and match
+  it to both the live Worker and GitHub's configured SUPABASE_URL before
+  setting STUDIO_PRODUCTION_SUPABASE_PROJECT_REF.
+- The PR runs only secret-free audit-parser tests. The workflow_dispatch live
+  audit is intentionally restricted to trusted main. GitHub cannot run a
+  workflow_dispatch workflow absent from the default branch; do **not**
+  merge this PR merely to make that workflow available. Use a separate
+  trusted, independently reviewed audit path or verified operator evidence
+  for the premerge production check.
+
+**Stage 2 — production inventory and migration gate.**
+- Use docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql
+  for aggregate media identity, indexes, exact function signature, security
+  invoker/search_path and server-only RPC grants. This SQL file is SELECT-only.
+- Collect a sanitized production result and database backup/restore evidence.
+  Missing RPC/indexes may be acceptable *before* migration but are release
+  blockers *after* migration; duplicate ngv2_ or Drive IDs require
+  reconciliation without deleting production rows.
+- Apply docs/supabase-migration/phase7/010_media_atomic_upsert.sql only to the
+  independently approved production database, following backup and change
+  approval. Verify expected indexes, function permissions, and persisted
+  readback. The connected dev database already passed the equivalent
+  aggregate read-only checks, but that does not validate production.
+- Run a tightly scoped rollback-safe, non-publishing media claim canary
+  only after production migration verification; preserve existing outputs.
+
+**Stage 3 — read-only credentials and non-publishing behavior.**
+- Inspect active Cloudflare versions and binding types, Windows runner
+  configuration, GitHub Actions and Make/external-provider automation.
+  Never print service_role, PAT or other credential values into logs.
+- Verify Ideas, media assets, Factory, approvals, scheduling, and recovery
+  readback/transition parity using synthetic or explicitly authorized records
+  with all publishing actions fenced. Maintain rollback/duplicate safeguards.
+- The dedicated verify-supabase-production-readonly.yml supports discovery
+  and strict verification modes after trusted registration on main; its
+  pull_request job uses NO production secrets. Do not run the live audit from
+  unreviewed PR code.
+
+**Stage 4 — six-hour independently observed Airtable quiet window.**
+- Do not start the quiet clock until all relevant sources have durable,
+  independent attempt counters/coverage: studio_worker, pipeline_runner,
+  standalone_scripts, github_actions, make_scenarios, external_integrations.
+- Require every **completed UTC hour** to have a collector heartbeat, a
+  real evidence artifact, and exactly zero Airtable attempts. Missing or
+  unmonitored hours/sources are not zero and must block certification.
+- Populate the release evidence template with actual reviewed references,
+  then run repair/scripts/airtable_retirement_evidence_gate.py. It validates
+  shape and coverage; it intentionally NEVER grants deployment authorization.
+  Its checked-in template must fail because evidence is unavailable.
+- The historical Supabase Migration Gate previously marked the primary
+  studio_read_source=airtable as PASS (observed in scheduled production
+  run 44865672423, November 21 UTC). The branch now adds an explicit
+  AIRTABLE_RETIREMENT_PRIMARY_READ_GATE which requires both Worker health
+  and /sync to report supabase; historical Workstream A PASS is not release
+  acceptance. This is an identified live transition blocker.
+
+**Stage 5 — protected release and provider retirement.**
+- A human reviewer must independently validate every evidence artifact,
+  verify all current-head CI checks, confirm rollback and the exact approved
+  production project, and approve a non-publishing production canary.
+- Only then merge and run the canonical Studio/variant/TikTok release paths
+  under their separate manual approvals, verify health/readback and preserve
+  schedule/publishing safeguards. Do not use an old Airtable-config restorer.
+- After live operation shows full monitored zero-egress coverage, remove PAT
+  bindings from Cloudflare, Windows runner, GitHub Actions and third parties;
+  revoke the provider PAT and recheck zero egress/health. No credentials were
+  revoked merely because files/workflows were deleted from this PR.
+
+**Current five-stage disposition:** 1 candidate/ownership blocked by unavailable
+production connection; 2 dev preflight verified, production pending; 3
+read-only and canary procedures prepared, live evidence pending; 4 coverage
+gate prepared, quiet window NOT certified; 5 release NOT authorized.
