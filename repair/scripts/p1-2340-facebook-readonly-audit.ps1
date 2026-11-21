@@ -30,22 +30,10 @@ $token=[string]$values['META_LONG_LIVED_USER_ACCESS_TOKEN']
 $ver=[string]$values['FACEBOOK_GRAPH_API_VERSION']
 if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
 $report=@{read_only=$true;provider_operations='GET only';output_writes=0;provider_writes=0;source_rows=$items.Count;user_state='unverified';pages=@();accounts_http=0;accounts_code=0;accounts_complete=$false;permissions_http=0;permissions_code=0;scopes=@{}}
-function G($path){
+function G($path,$accessToken){
+if(-not $accessToken){$accessToken=$token}
 try {
-$d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$token);Accept='application/json'} -TimeoutSec 35
-return @{ok=$true;status=200;body=$d;code=0}
-}catch{
-$status=0;$code=0
-try{$status=[int]$_.Exception.Response.StatusCode}catch{}
-try{$e=$_.ErrorDetails.Message|ConvertFrom-Json;$code=[int]$e.error.code}catch{}
-return @{ok=$false;status=$status;code=$code;body=$null}
-}
-}
-# Page-history GET uses the already-stored, Page-identity-tested Page token.
-# The user token is for /me/accounts and /me/permissions only.
-function PG($path,$pageToken){
-try {
-$d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$pageToken);Accept='application/json'} -TimeoutSec 35
+$d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$accessToken);Accept='application/json'} -TimeoutSec 35
 return @{ok=$true;status=200;body=$d;code=0}
 }catch{
 $status=0;$code=0
@@ -80,10 +68,7 @@ $report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.
 }else{$report.user_state=if($m.code -eq 190){'expired_or_invalid'}else{'rejected'};$report.accounts_http=$m.status;$report.accounts_code=$m.code}
 }else{$report.user_state='missing'}
 
-# P1 #2340 positive-match-only inventory. GET /{page}/video_reels is NOT a
-# readable Graph edge; probe supported Page feed/published_posts only.
-# These edges may omit Reels, so absence is always inconclusive. A zero-match
-# or partial list NEVER proves non-delivery or permits a publish retry.
+# GET-only positive matches. No negative Reel delivery proof.
 $report.history_status='not_authorized';$report.history_probes=@()
 if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -eq $true -and $report.scopes['pages_read_engagement'] -eq $true){
  $targets=@(
@@ -110,7 +95,7 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   if($pageId.Length -lt 6 -or $pageId.Length -gt 30 -or $pageId -match '[^0-9]'){throw 'history_page_id_unavailable'}
   $pageToken=[string]$values[[string]$t.token_key]
   if(-not $pageToken){throw 'history_page_token_unavailable'}
-  $identity=PG ('/'+$pageId+'?fields=id') $pageToken
+  $identity=G ('/'+$pageId+'?fields=id') $pageToken
   if($identity.ok -ne $true -or [string]$identity.body.id -ne $pageId){throw 'history_page_token_identity_mismatch'}
   $needles=@()
   foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
@@ -118,12 +103,12 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   }
   foreach($edge in @('feed','published_posts')){
    $fields='id,message,created_time'
-   $probe=@{output_number=[int]$t.n;market=$t.market;edge=$edge;pages_scanned=0;rows_scanned=0;complete=$false;http_status=0;error_code=0;candidates=@();conclusion='inconclusive'}
+   $probe=@{output_number=[int]$t.n;market=$t.market;edge=$edge;pages_scanned=0;rows_scanned=0;complete=$false;http_status=0;error_code=0;candidates=@()}
    $after=''
    for($pg=0;$pg -lt 2;$pg++){
     $path='/'+$pageId+'/'+$edge+'?fields='+$fields+'&limit=100'
     if($after){$path+='&after='+[uri]::EscapeDataString($after)}
-    $r=PG $path $pageToken
+    $r=G $path $pageToken
     $probe.http_status=$r.status;$probe.error_code=$r.code
     if($r.ok -ne $true -or $null -eq $r.body.data){break}
     $probe.pages_scanned++
