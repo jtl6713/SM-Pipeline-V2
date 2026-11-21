@@ -4,6 +4,7 @@
 const rec = value => /^rec[A-Za-z0-9]{14}$/.test(String(value || ""));
 const run = value => /^[0-9a-f-]{30,45}$/i.test(String(value || ""));
 export const RECOVERY_MIN_ORIGINAL_AGE_MS = 30 * 60 * 1000;
+export const RECOVERY_MIN_REGISTRATION_AGE_MS = 15 * 60 * 1000;
 export const RECOVERY_READ_LEASE_MS = 90 * 1000;
 
 export function videoRecoveryIdentity(job, { ideaId, sceneNumber, profileId }) {
@@ -22,8 +23,11 @@ export function videoRecoveryFileName(job, title, sceneNumber) {
 
 export function videoRecoveryEligibleForNewDriveIngest(job, now=Date.now()) {
   const approved = Date.parse(String(job?.approved_at || ""));
-  return job?.state === "recovering" && job.recovery_stage === "search" && Number.isFinite(approved)
-    && now - approved >= RECOVERY_MIN_ORIGINAL_AGE_MS
+  const started = Date.parse(String(job?.accepting_started_at ||
+    job?.recovery_original_accepting_recorded_at || ""));
+  return job?.state === "recovering" && job.recovery_stage === "search"
+    && Number.isFinite(approved) && now - approved >= RECOVERY_MIN_ORIGINAL_AGE_MS
+    && Number.isFinite(started) && now - started >= RECOVERY_MIN_REGISTRATION_AGE_MS
     && !job.runner_job_id && !job.recovery_upload_started_at;
 }
 
