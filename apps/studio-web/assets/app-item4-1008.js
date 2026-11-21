@@ -2626,7 +2626,9 @@
   function setIdeaGeneratorOpen(open, { reset = false } = {}) {
     const panel = $("ideaGeneratePanel");
     if (!panel) return;
-    panel.hidden = !open;
+    // The AI generation card now lives permanently in the Ideas action area.
+    // Opening/closing other intake flows must never hide its controls.
+    panel.hidden = false;
     if (open) setIdeaFormOpen(false);
     if (reset) {
       stopIdeaGenerationPoll();
@@ -2644,6 +2646,26 @@
       setIdeaGenerateMessage();
     }
   }
+
+  // Chicago/Central scheduled top-of-hour harvest. Compute from UTC hour boundaries
+  // (Chicago always differs from UTC by an integral number of hours) and format
+  // with the IANA zone so DST changes do not shift the displayed local hour.
+  function updateIdeasNextPullCountdown() {
+    const node = $("ideasNextPullCountdown");
+    if (!node) return;
+    const nowMs = Date.now();
+    const nextMs = (Math.floor(nowMs / 3600000) + 1) * 3600000;
+    const nextTime = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true,
+    }).format(new Date(nextMs));
+    const seconds = Math.max(0, Math.ceil((nextMs - nowMs) / 1000));
+    const minutesRemaining = Math.floor(seconds / 60);
+    const secondsRemaining = seconds % 60;
+    node.textContent = `Next Idea Pull will be at ${nextTime} CT (in ${minutesRemaining}m ${String(secondsRemaining).padStart(2, "0")}s)`;
+    node.title = "Scheduled hourly idea harvest; actual processing may be delayed by an operational fault or hold.";
+  }
+  updateIdeasNextPullCountdown();
+  window.setInterval(updateIdeasNextPullCountdown, 1000);
 
   async function pollIdeaGenerationBatch() {
     if (!activeIdeaGenerationBatchId) return;
@@ -3144,8 +3166,6 @@
       }
     }
   });
-  $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
-  $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
   $("ideaGenerateMore")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: true }));
   $("ideaGenerateView")?.addEventListener("click", async () => {
     await loadIdeas();
@@ -23020,17 +23040,17 @@ function timedScriptAssetLabel(asset, index) {
     }
     for (const group of groups) group.records = sortedPipelineRecords(group.records);
     // The Pipeline is an inventory of content, not a seven-day calendar.
-    // Order packages by creation time, newest first, regardless of publish date.
-    // Legacy rows without a timestamp retain the numeric output-id fallback.
-    const newestCreated = (group) => Math.max(0, ...group.records.map((record) => {
-      const raw = record.created_at || record.created || record.content_created_at || "";
+    // Order packages by actual Production Approve submission time, newest first.
+    // Legacy rows missing approval evidence sort after dated approvals.
+    const newestApproved = (group) => Math.max(0, ...group.records.map((record) => {
+      const raw = record.production_approved_at || "";
       const ms = Date.parse(String(raw));
       return Number.isFinite(ms) ? ms : 0;
     }));
     groups.sort((a, b) => {
-      const aCreated = newestCreated(a);
-      const bCreated = newestCreated(b);
-      if (aCreated && bCreated && aCreated !== bCreated) return bCreated - aCreated;
+      const aApproved = newestApproved(a);
+      const bApproved = newestApproved(b);
+      if (aApproved !== bApproved) return bApproved - aApproved;
       return Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber));
     });
     return groups;
@@ -23116,8 +23136,10 @@ function timedScriptAssetLabel(asset, index) {
     const profileName = pipelineWorkingProfileName();
     const createdIso = String(content?.created_at || content?.created || first?.created_at || "").trim();
     const createdLabel = createdIso ? formatStudioDateTime(createdIso) : "";
+    const approvedIso = group.records.map((record) => record.production_approved_at).filter(Boolean).sort().at(-1) || "";
+    const approvalLabel = approvedIso ? `Production approved ${formatStudioDateTime(approvedIso)}` : "Production approval date unavailable";
     const groupMeta = [
-      createdLabel,
+      approvalLabel,
       `${group.records.length} output${group.records.length === 1 ? "" : "s"}`,
       destination ? `${destination.done}/${destination.total} rendered` : "",
     ].filter(Boolean);
@@ -24530,7 +24552,30 @@ function timedScriptAssetLabel(asset, index) {
       // Start the heavy history read and small live check concurrently; paint
       // the newest outputs without waiting on Airtable's open-pack scan.
       const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
-      const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 8000, retries: 1 }));
+      const fullPromise = settled((async () => {
+        // All-week Pipeline inventory. Fetch every verified Supabase page; never
+        // silently substitute the former newest-250 snapshot for full history.
+        const records = [];
+        let offset = 0;
+        const seen = new Set();
+        for (;;) {
+          const page = await api(`/api/outputs?mode=history&offset=${offset}`, { timeoutMs: 20000, retries: 1 });
+          if (page?.read_source !== "supabase" || !Array.isArray(page?.records))
+            throw new Error("Pipeline history page was not verified from Supabase");
+          for (const record of page.records) {
+            const id = String(record?.id || "");
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            records.push(record);
+          }
+          if (!page.has_more) break;
+          const next = Number(page.next_offset);
+          if (!Number.isSafeInteger(next) || next <= offset)
+            throw new Error("Pipeline history pagination stalled");
+          offset = next;
+        }
+        return { records, stale: false, complete: true };
+      })());
       const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
       const latestSettled = await latestPromise;
       if (profileAtRequest !== selectedProfileId) return;
@@ -24553,7 +24598,7 @@ function timedScriptAssetLabel(asset, index) {
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
       if (!Array.isArray(outputsResult?.records)) throw new Error("Pipeline API returned no verified output list");
-      const records = mergePipelineFreshOutputs(outputsSettled.ok ? outputsResult.records : pipelineOutputs, latestRows);
+      const records = outputsSettled.ok ? outputsResult.records : mergePipelineFreshOutputs(pipelineOutputs, latestRows);
       if (outputsResult.refreshing && !records.length) throw new Error("Pipeline is still loading");
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));

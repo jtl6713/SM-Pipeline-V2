@@ -51,6 +51,7 @@ import {
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
+  listSupabasePipelineHistoryPage,
   listSupabasePipelineTitleSearch,
   pipelineTitleSearchTokens,
   listSupabaseManualActionOutputs,
@@ -2595,6 +2596,33 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
   // A normal newest-250 snapshot cannot answer older Failed/Past Due/No Date
   // clicks, and an Airtable prefilter alone can include the wrong state.
   const focusedMode = String(url.searchParams.get("mode") || "");
+  // #2531: authoritative, all-week, paginated history; never fall back to
+  // Airtable or return a truncated list as though it were complete.
+  if (focusedMode === "history") {
+    if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
+      throw new HttpError(503, "Supabase Pipeline history unavailable");
+    const offsetRaw = String(url.searchParams.get("offset") || "0");
+    if (!/^\d{1,9}$/.test(offsetRaw)) throw new HttpError(400, "Invalid Pipeline offset");
+    const packed = await listSupabasePipelineHistoryPage(env, {
+      profileAirtableId: profile.id,
+      offset: Number(offsetRaw),
+      limit: 150,
+    });
+    const records = stripDeletedDuplicateOutputRecords(packed.records.map((record) => ({
+      ...mapOutput(
+        record, null, null,
+        packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+      ),
+      production_approved_at: f(record, "Production_Approved_At") || null,
+    })));
+    return respond(request, env, {
+      ok: true, records, count: records.length,
+      has_more: packed.has_more, next_offset: packed.next_offset,
+      read_source: "supabase", scope: "all_weeks",
+      profile: mapStudioContentProfile(profile),
+    });
+  }
+
   if (["approved_exceptions", "approved_past_due", "approved_missing_date", "failed", "manual", "attention"].includes(focusedMode)) {
     const manualFocused = focusedMode === "manual" || focusedMode === "attention";
     const observedAt = Date.now();
@@ -14403,6 +14431,13 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
+  // A future schedule reservation / scheduled-hold is NOT a provider dispatch.
+  // Counting it as an attempt permanently excludes the output from the
+  // Supabase due-time first-publish lane (issue #2340). Preserve the actual
+  // scheduled_post_date as the durable reservation; stamp only real attempts.
+  if (/^(?:held until\b|(?:(?:reconcile|overdue-rescue):\s*)?skipped:\s*scheduled-hold\b)/i.test(String(note || "").trim())) {
+    return;
+  }
   const attemptStamp = publishDispatchAttemptStampFields({
     note,
     priorCount: f(record, "Studio_Publish_Dispatch_Count"),
@@ -14435,7 +14470,8 @@ export async function studioStampPublishDispatch(env, record, note) {
 export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
   if (!studioPublishCanDispatchNow(record)) {
     const heldUntil = studioPublishHeldUntilIso(record);
-    await studioStampPublishDispatch(env, record, `held until ${heldUntil || "scheduled time"}`);
+    // Future reservations must not acquire a publish-attempt counter here.
+    // The due-time cron owns the first actual dispatch and its durable fence.
     return { ok: true, skipped: "scheduled-hold", held_until: heldUntil, record };
   }
   const plan = studioPublishDispatchTarget(record);

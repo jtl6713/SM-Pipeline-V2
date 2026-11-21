@@ -217,7 +217,18 @@
  <section id="page-ideas" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. <strong>Create VO timeline</strong> accepts the idea: writes the spoken script, attaches named library stills, and opens Production ready for Approve. Use unused photos scans unpublished 5–10 still sets through to Ready for Review.</p></div>
- <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="ideasCreateTimelineButton">Create VO timeline</button><button class="primary-button" id="newIdeaButton">+ New idea</button><div class="idea-generate-top-action"><label class="idea-generate-top-count" for="ideaGenerateCount"><span>Ideas</span><input id="ideaGenerateCount" type="number" min="1" max="10" step="1" value="5" inputmode="numeric" required></label><button type="button" class="secondary-button" id="generateIdeasButton">Generate AI ideas</button></div></div>
+ <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="ideasCreateTimelineButton">Create VO timeline</button><button class="primary-button" id="newIdeaButton">+ New idea</button><section class="idea-generate-top-action idea-generate-panel" id="ideaGeneratePanel" aria-labelledby="ideaGenerateHeading">
+ <h2 id="ideaGenerateHeading">AI Idea Generation</h2>
+ <form id="ideaGenerateForm" class="idea-generate-form">
+  <div class="idea-generate-fields">
+   <label class="form-field idea-generate-top-count" for="ideaGenerateCount"><span>Quantity</span><input id="ideaGenerateCount" type="number" min="1" max="10" step="1" value="5" inputmode="numeric" required></label>
+   <label class="form-field"><span>Quality</span><select id="ideaGenerateQuality"><option selected>Highest Quality</option><option>Balanced</option><option>Quantity</option></select></label>
+  </div>
+  <div class="idea-generate-actions"><button type="submit" class="primary-button" id="ideaGenerateSubmit">Generate Ideas</button></div>
+  <div class="form-message" id="ideaGenerateMessage" aria-live="polite"></div>
+  <div class="idea-generate-complete" id="ideaGenerateComplete" hidden><button type="button" class="primary-button" id="ideaGenerateView">View Ideas</button><button type="button" class="secondary-button" id="ideaGenerateMore">Generate More</button></div>
+ </form>
+ </section></div>
  </div>
  <div class="form-message ideas-autonomous-message" id="ideasAutonomousMessage" aria-live="polite"></div>
  <section class="panel" id="scriptedShortPanel">
@@ -271,16 +282,7 @@
    <p class="subtle">Generated AI images and video clips are reviewed inline before being registered in the Drive-backed Asset Manager. Unverified suggestions and rejected imagery do not count as completed scenes. Production requires a separate explicit action and all normal approval controls remain.</p>
   </div>
  </section>
- <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
- <form id="ideaGenerateForm" class="idea-generate-form">
- <div class="idea-generate-fields">
- <label class="form-field"><span>Quality</span><select id="ideaGenerateQuality"><option selected>Highest Quality</option><option>Balanced</option><option>Quantity</option></select></label>
- </div>
- <div class="idea-generate-actions"><button type="submit" class="primary-button" id="ideaGenerateSubmit">Generate Ideas</button><button type="button" class="secondary-button" id="ideaGenerateCancel">Cancel</button></div>
- <div class="form-message" id="ideaGenerateMessage" aria-live="polite"></div>
- <div class="idea-generate-complete" id="ideaGenerateComplete" hidden><button type="button" class="primary-button" id="ideaGenerateView">View Ideas</button><button type="button" class="secondary-button" id="ideaGenerateMore">Generate More</button></div>
- </form>
- </section>
+ 
  <section class="panel idea-create-panel" id="ideaCreatePanel" hidden>
  <div class="panel-heading"><div><h2>Start with an idea</h2><p>Pick an idea that’s already in the queue, or write a new one. This does not start publishing.</p></div></div>
  <form id="ideaCreateForm" class="idea-form">
@@ -305,7 +307,7 @@
  <div class="form-actions"><button type="button" class="secondary-button" id="cancelIdeaButton">Cancel</button><button type="submit" class="primary-button" id="createIdeaButton">Continue with selected idea</button></div>
  </form>
  </section>
- <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
+ <section class="panel"><p id="ideasNextPullCountdown" class="idea-next-pull" role="status" aria-live="off">Next Idea Pull will be at — CT</p><div id="ideasList" class="table-wrap"></div></section>
  </section>
 
  <section id="page-content" class="page production-page">
@@ -2090,8 +2092,7 @@
  </section>
  </div>
  <div class="ops-tab-panel ops-global-settings" id="operationsGlobalPanel" data-ops-tab-panel="global" role="tabpanel" aria-labelledby="operationsTabGlobal" hidden>
- <div class="panel-heading"><div><h2>Global Admin</h2><p>System-wide settings that apply to all profiles. Scheduling follows each profile’s local time zone.</p></div></div>
- <section class="ops-creative-panel" id="operationsOwnerPromptPanel" aria-labelledby="operationsOwnerPromptHeading">
+ <div class="panel-heading"><div><h2>Global Admin</h2><p>System-wide settings that apply to all profiles. Scheduling follows each profile’s local time zone.</p></div></div> <section class="ops-creative-panel" id="operationsOwnerPromptPanel" aria-labelledby="operationsOwnerPromptHeading">
   <div class="ops-creative-heading"><h3 id="operationsOwnerPromptHeading">Global AI Generation Prompt — All Owned Profiles</h3></div>
   <p class="subtle">These instructions apply to future AI generations for all content profiles in your Studio organization, including newly created profiles. Profile-specific instructions are added afterward. Existing approved and scheduled content is not modified.</p>
   <form id="operationsOwnerPromptForm">
@@ -2103,6 +2104,7 @@
    </div>
   </form>
  </section>
+
  <section class="ops-schedule-settings" aria-labelledby="operationsScheduleSettingsHeading" style="margin:1rem 0 1.5rem;padding:1rem 0;border-top:1px solid rgba(0,0,0,.08);border-bottom:1px solid rgba(0,0,0,.08)">
  <h3 id="operationsScheduleSettingsHeading" style="margin:0 0 .35rem">Global scheduling</h3>
  <p class="subtle" style="margin:0 0 .75rem">Scheduling Horizon controls how many future calendar days the MAE-first / balanced-overflow engine considers. Changing it does not rewrite existing schedules.</p>

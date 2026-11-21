@@ -1409,7 +1409,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1011-independent-insights-cron",
+          version: "0.10.1012-idea-reset-guards",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4577,6 +4577,35 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // IDEA HARVEST SLA: do not put the hourly pull or photo-ready FIFO resume
+    // behind Factory recovery, platform publishing, or Airtable cooldown checks.
+    // Every five-minute tick owns one independent waitUntil; the autonomous
+    // service retains its existing per-hour claim and in-flight guards.
+    ctx.waitUntil((async () => {
+      const atHour = cadence.heavy && Number(cadence.minute) === 0;
+      if (atHour) {
+        try {
+          await studioHealPromotedOrphanIdeas(env, { limit: 100 });
+        } catch (error) {
+          console.warn("promoted orphan idea heal failed", String(error?.message || error));
+        }
+      }
+      const outcome = await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+        scheduled: true,
+        cron: event?.cron || "",
+        cronMinute: cadence.minute,
+        resume_only: !atHour,
+      });
+      console.info("Independent Idea pull", JSON.stringify({
+        slot: outcome?.slot || null,
+        skipped: outcome?.skipped || null,
+        status: outcome?.status || null,
+        at_hour: atHour,
+      }));
+    })().catch((error) => {
+      console.warn("Independent Idea pull failed", String(error?.message || error));
+    }));
+
     // Render admission must not wait for the multi-minute Factory and publish
     // maintenance chain. One bounded, independent admission on the five-minute
     // cron; never approvals, scheduling, or public publishing.
@@ -4917,26 +4946,6 @@ export default {
         return;
       }
 
-      // Create the hour's ideas before publish heals. Those heals were still
-      // running at :12, so the harvest saw a non-zero minute and created nothing.
-      if (cadence.heavy && Number(cadence.minute) === 0) {
-        // Clear Promoted orphans before harvest so the open-ideas cap stays honest.
-        try {
-          await studioHealPromotedOrphanIdeas(env, { limit: 100 });
-        } catch (error) {
-          console.warn("promoted orphan idea heal failed", error);
-        }
-        try {
-          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-            scheduled: true,
-            cron: event?.cron || "",
-            cronMinute: cadence.minute,
-          });
-        } catch (error) {
-          console.warn("autonomous top-of-hour harvest failed", error);
-        }
-      }
-
       // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
       // Stamp MAE onto approved rows that Factory left blank BEFORE reconcile.
       // A blank Scheduled_Post_Date matches the due-publish formula and goes out now.
@@ -5084,19 +5093,6 @@ export default {
         await studioHealAutonomousRevisionLock(env);
       } catch (error) {
         console.warn("autonomous revision lock heal failed", error);
-      }
-      // Light tick: 30m photo-ready SLA drain. New ideas wait for the top of
-      // the hour, so this resume does not run on the same tick as that harvest.
-      if (!cadence.heavy) {
-        try {
-          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-            scheduled: true,
-            cron: event?.cron || "",
-            resume_only: true,
-          });
-        } catch (error) {
-          console.warn("autonomous FIFO resume (light) failed", error);
-        }
       }
       try {
         await resumeAzFinishedVideoRequests(env, ctx);
@@ -5304,18 +5300,6 @@ export default {
         await item4HealIncompletePreparingVariants(env);
       } catch (error) {
         console.warn("item4 preparing variant-gap heal failed", error);
-      }
-      // :00 already harvested above. :30 resumes drafts already opened.
-      if (Number(cadence.minute) !== 0) {
-        try {
-          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-            scheduled: true,
-            cron: event?.cron || "",
-            cronMinute: cadence.minute,
-          });
-        } catch (error) {
-          console.warn("autonomous produce cadence failed", error);
-        }
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -8853,6 +8837,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:waitAutonomousVariantsReady__*/
 /*__STUDIO_WORKER_EXTRACT:finishAutonomousProductionRequest__*/
 /*__STUDIO_WORKER_EXTRACT:ideaMatchedMediaIds__*/
+/*__STUDIO_WORKER_EXTRACT:selectValidAutonomousMusicAssetId__*/
 /**
  * Stamp a random Autonomous_Music_Pool track when Selected_Music_Asset is blank.
  * Photo-ready daily ideas used to skip this and every Remotion job fell through to

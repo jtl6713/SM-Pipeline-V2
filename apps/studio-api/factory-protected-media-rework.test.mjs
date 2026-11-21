@@ -280,3 +280,106 @@ test("Factory client renders only output-scoped, read-only source carousel with 
   assert.match(client,/fresh approval and staging still required/);
   assert.match(client,/clearFactoryRecoveryGalleryControls\(\)/);
 });
+
+test("new proven same-day gallery holds require the same full rework safety gates", () => {
+  const evidence = {
+    issue: 2374, output_number: 10802,
+    reason: "fb0_assets_zero_of_four_ready_prior_failed_attempt_no_original_slide_package",
+    source_slide_count: 0,
+    provider_calls_performed: 0, no_provider_retry_authorized: true,
+    reconstruction_and_fresh_approval_required: true,
+    original_approval_and_errors_preserved: true,
+    historical_schedule_preserved: true,
+  };
+  const oldMarker = "Studio_Overdue_Preflight_Repair_20261120";
+  const newMarker = "Studio_Overdue_UnsafeGallery_Hold_20261121";
+  const source = typed({
+    airtable_record_id: "recr4kD97CT3X2JLX",
+    output_number: 10802,
+    error_messages: { [newMarker]: evidence },
+  });
+  const out = shaped({
+    id: "recr4kD97CT3X2JLX",
+    fields: {...shaped().fields, Output_ID: 10802,
+      Studio_Recovery_Source_Gallery_Verified_20261121: null,
+      [oldMarker]: undefined, [newMarker]: evidence},
+  });
+  assert.equal(protectedMediaReworkSourceRow(source), true);
+  assert.equal(protectedMediaReworkShapedRecord(out), true);
+  assert.equal(protectedMediaReworkSummary(out).can_approve, false);
+  assert.equal(protectedMediaReworkSummary(out).can_publish, false);
+  assert.equal(protectedMediaReworkSummary(out).can_retry, false);
+  assert.match(protectedMediaReworkSummary(out).next_step,/original missing media\/slide package/);
+  for (const mismatch of [
+    {do_not_publish:false},{auto_publish_enabled:true},{publish_retry_eligible:true},
+    {output_status:"Approved for Publishing"},{review_status:"Approved"},
+    {publish_status:"Failed"},{scheduled_post_date:"2026-11-21T19:30:00Z"},
+    {published_at:"2026-11-21T19:31:00Z"},
+  ]) {
+    assert.equal(protectedMediaReworkSourceRow({...source,...mismatch}),false,JSON.stringify(mismatch));
+  }
+  for (const mismatch of [
+    {Do_Not_Publish:false},{Auto_Publish_Enabled:true},{Publish_Retry_Eligible:true},
+    {Output_Status:"Approved for Publishing"},{Review_Status:"Approved"},
+    {Publish_Status:"Failed"},{Scheduled_Post_Date:"2026-11-21T19:30:00Z"},
+  ]) {
+    assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,...mismatch}}),false,JSON.stringify(mismatch));
+  }
+  assert.equal(protectedMediaReworkSourceRow({...source,output_number:9999}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,airtable_record_id:RECORD}),false);
+  assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,Output_ID:9999}}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:{...evidence,source_slide_count:4}}}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:{...evidence,provider_calls_performed:1}}}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:"forged"}}),false);
+  assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,[newMarker]:"forged"}}),false);
+});
+
+test("new held cases are scanned independently with no Airtable fallback and no manual approval", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const read = readFileSync(path.join(dir,"supabase-pipeline-reads.mjs"),"utf8");
+  assert.match(read,/error_messages->>Studio_Overdue_UnsafeGallery_Hold_20261121=not\.is\.null/);
+  assert.match(read,/const heldReworkRows = \[\.\.\.\(originalHeldReworkRows \|\| \[\]\), \.\.\.\(newHeldReworkRows \|\| \[\]\)\]/);
+  const row = {
+    id: RECORD,kind:"output",title:"FB0 original source needs rebuilding",
+    output_status:"Changes Requested",review_status:"Changes Requested",publish_status:"Not Ready",
+    do_not_publish:true,auto_publish_enabled:false,protected_media_rework:true,review_package_ready:false,
+  };
+  const card = factoryCardFromRow(row);
+  assert.equal(card.lane,"manual");
+  assert.equal(card.can_approve,false);
+  assert.equal(card.can_retry,false);
+  assert.equal(card.can_publish,false);
+});
+
+test("protected Factory cards distinguish original 82 from newly fenced gallery repairs", () => {
+  const oldMarker = "Studio_Overdue_Preflight_Repair_20261120";
+  const newMarker = "Studio_Overdue_UnsafeGallery_Hold_20261121";
+  assert.equal(protectedMediaReworkSummary(shaped()).marker, oldMarker);
+  const fresh = shaped({
+    id:"recYnHtxkSljy762z",
+    fields:{
+      ...shaped().fields,
+      Output_ID:10793,
+      [oldMarker]:null,
+      [newMarker]:{
+        output_number:10793,reason:"missing original slide package",
+        source_slide_count:0,no_provider_retry_authorized:true,
+        reconstruction_and_fresh_approval_required:true,
+        original_approval_and_errors_preserved:true,
+        historical_schedule_preserved:true,
+        provider_calls_performed:0,
+      },
+    },
+  });
+  assert.equal(protectedMediaReworkSummary(fresh).marker,newMarker);
+  const card = factoryCardFromRow({
+    kind:"output",id:RECORD,protected_media_rework:true,
+    recovery_hold_marker:newMarker,output_status:"Changes Requested",
+    review_status:"Changes Requested",publish_status:"Not Ready",
+    do_not_publish:true,auto_publish_enabled:false,review_package_ready:false,
+  });
+  assert.equal(card.recovery_hold_marker,newMarker);
+  assert.equal(card.can_publish,false);
+  assert.equal(card.can_retry,false);
+  assert.equal(card.can_approve,false);
+});

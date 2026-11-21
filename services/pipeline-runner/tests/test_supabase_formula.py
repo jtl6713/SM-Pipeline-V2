@@ -337,3 +337,20 @@ def test_content_not_checkbox_uses_extras_bag():
     )
     assert "airtable_record_id.eq.recContentABCDEF1" in got
     assert "extras->>Do_Not_Produce" in got
+
+
+def test_issue2464_ttd0_original_9x16_ready_formula_is_translatable():
+    """Issue #2464: 9941 and 10015 are not empty galleries in Supabase."""
+    from ttd.assets import slide_formula
+
+    for output_id in ("9941", "10015"):
+        formula = slide_formula(output_id)
+        translated = formula_to_postgrest_filter(CAROUSEL_SLIDES_TABLE, formula)
+        assert translated is not None, (output_id, formula)
+        assert f"PO_Output_ID.like.*{output_id}*" in translated
+        assert "fields->>Asset_9x16_Public_Status.eq.Ready" in translated
+        assert "fields->>Asset_9x16_Public_URL.not.is.null" in translated
+        assert "fields->>Asset_9x16_Public_URL.neq." in translated
+        url = attach_formula_filter("carousel_slides?select=*", translated)
+        assert "Asset_9x16_Public_Status" in url
+        assert "Asset_9x16_Public_URL" in url

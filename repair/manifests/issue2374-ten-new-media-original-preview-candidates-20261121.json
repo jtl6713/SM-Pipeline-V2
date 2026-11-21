@@ -1,0 +1,104 @@
+{
+  "schema_version": "issue2374_ten_unsafe_gallery_original_preview_candidates_v1",
+  "created_utc": "2026-11-21",
+  "source": "production_supabase",
+  "output_count": 10,
+  "original_expected_images": 60,
+  "read_only": true,
+  "do_not_publish": true,
+  "fresh_factory_approval_required": true,
+  "publish_calls_authorized": false,
+  "notes": "Ten exact source outputs were held after incomplete or no linked original C9 galleries. A later concurrent writer recreated four C9 rows for Facebook 10802 without fresh human review; candidate URL paths are NOT proof of approved slide identity, FB/IG platform staging or publication. Check contiguous 4:5 originals from the output-specific Studio preview folder via bounded GET only. Never auto-clear holds or create platform objects from this inventory.",
+  "outputs": [
+    {
+      "output_number": 10546,
+      "content_number": 2180,
+      "content_title": "Lakefront Trail Explained",
+      "market_name": "Chicago",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recgS5wXiWnlhgVm0/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10564,
+      "content_number": 2187,
+      "content_title": "Museum Mile Rainy Picks",
+      "market_name": "New York City",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/rec37Q0BeKga1ydGC/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10598,
+      "content_number": 2188,
+      "content_title": "Ride the Roosevelt Island Tram",
+      "market_name": "New York City",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/rec1fQzlWCRm53MQ4/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10759,
+      "content_number": 2205,
+      "content_title": "Koreatown Noodle Crawl",
+      "market_name": "Los Angeles",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/reczJBifoU2F95yEM/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10766,
+      "content_number": 2208,
+      "content_title": "No-Car LA Facts",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recNu1iOFpzuzIHEu/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10792,
+      "content_number": 2173,
+      "content_title": "Hollywood Sign Shuttle Tip",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recbqPtRfK3EZagWm/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10793,
+      "content_number": 2173,
+      "content_title": "Hollywood Sign Shuttle Tip",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recYnHtxkSljy762z/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10800,
+      "content_number": 2168,
+      "content_title": "Union Station Details",
+      "market_name": "Los Angeles",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recEbgk1H0rNqEr8h/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10802,
+      "content_number": 2161,
+      "content_title": "Little Tokyo Afternoon Plan",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recr4kD97CT3X2JLX/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10818,
+      "content_number": 2168,
+      "content_title": "Union Station Details",
+      "market_name": "Los Angeles",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recWgwW0HYmgq4EZG/0.jpg",
+      "held_verified": true
+    }
+  ]
+}

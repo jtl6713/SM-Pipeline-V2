@@ -22,7 +22,7 @@ jobs:
       - run: python -m py_compile scripts/post-insights-public-health.py
 
   probe:
-    if: github.event_name != 'pull_request'
+    # Credential-free probes are safe on pull requests; surface failures before merge.
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
