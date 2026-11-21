@@ -898,3 +898,10 @@ Deploy Studio UI 0.6.1010-revision-drafts: show explicitly returned Draft revisi
 2026-11-21 UI 0.6.1026-ideas-grid-row-align: Protected Pages deploy after PR; fix mobile two-column row top alignment by stretching Ideas grid items instead of centering buttons with different wrapped text heights. Real Chromium phone viewport layout gate required before deployment. Prior 0.6.1025 deployment was blocked by browser check and never reached production; no publish/schedule/approval changes.
 
 2026-11-21 issue #2374 Factory Manual/Repair Pages UI 0.6.1027 (source PR #2473 merged): SECOND STAGE ONLY after successful protected Supabase-only Studio API Worker deployment through issue2374-scoped release #2487, exact 82 held repair cards verified in production, and zero observed Airtable egress. This Pages release must verify 0.6.1027-ideas-grid-row-align UI label and item4 BUILD_ID, all matching asset cache URLs, Factory original-JPEG preview only (no legacy Airtable GET), proper Manual/Repair lane, no Approve/Delete/Publish/Retry on DNP-held creative. Keep 82 creative holds; do not schedule, publish, regenerate or reapprove. Fail on domain/asset mismatch and preserve previous Pages version through standard rollback gate.
+
+Issue #2374 second stage Pages 0.6.1028 (source PR #2520):
+DO NOT MERGE before the new Supabase-only Worker marker PR #2522
+passes protected CI, deploys successfully and independently verifies all
+82 original DNP held Manual/Repair packages, no provider/API writes,
+zero Airtable egress and zero Approve/Retry/Publish authorization.
+Only then deploy Studio original-image gallery Prev/Next view.
