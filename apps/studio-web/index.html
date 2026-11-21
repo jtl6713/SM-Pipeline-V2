@@ -2064,10 +2064,10 @@
 
  <section class="ops-creative-panel" id="operationsCreativePanel" aria-labelledby="operationsCreativeHeading">
  <div class="ops-creative-heading"><h3 id="operationsCreativeHeading">Creative Guidance</h3><strong id="operationsCreativeProfile">Selected profile</strong></div>
- <p class="subtle">The editable instructions below are populated from the selected profile’s existing Airtable records. Save a profile-specific version without changing shared Brand, Persona, or system-wide AI prompt templates. Changes affect future generation only.</p>
+ <p class="subtle">These profile-specific instructions are stored in Supabase and apply to future generation only. Owner-wide guidance from Global Admin is applied first, then instructions for this profile. Changes do not rewrite existing content.</p>
  <form id="operationsCreativeForm">
  <div class="ops-creative-fields">
- <label class="form-field"><span>Shared Creative Direction</span><textarea name="shared_direction" maxlength="4000" rows="7" placeholder="Brand personality, local perspective, target audience, recurring visual motifs and story themes"></textarea><small class="subtle">Used by both thumbnail composition and narration.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_shared_direction">Reading existing database guidance…</small></label>
+ <label class="form-field"><span>Every Generation — Shared Creative Direction</span><textarea name="shared_direction" maxlength="4000" rows="7" placeholder="Brand personality, local perspective, target audience, recurring visual motifs and story themes"></textarea><small class="subtle">Used by both thumbnail composition and narration.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_shared_direction">Reading existing database guidance…</small></label>
  <label class="form-field"><span>Thumbnail Instructions</span><textarea name="thumbnail_instructions" maxlength="4000" rows="7" placeholder="Photo realism, lighting, cover titles, typography, color palette, safe zones"></textarea><small class="subtle">Applies to newly designed thumbnails and covers.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_thumbnail_instructions">Reading existing database guidance…</small></label>
  <label class="form-field"><span>Narration Instructions</span><textarea name="narration_instructions" maxlength="4000" rows="7" placeholder="Voice and pace, style of opening hook, local facts, narrative arc, what to avoid"></textarea><small class="subtle">Applies when AI writes a spoken script; never overrides Force exact.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_narration_instructions">Reading existing database guidance…</small></label>
  </div>
@@ -2077,15 +2077,32 @@
  <span id="operationsCreativeStatus" class="subtle" role="status" aria-live="polite"></span>
  </div>
  </form>
+ <details id="operationsCreativeEffectivePromptDetails" class="ops-creative-reference-drawer">
+  <summary>Preview effective generation instructions (Global Admin + selected profile)</summary>
+  <p class="subtle">System safety rules are enforced separately. Generation-type and item-specific instructions are appended when relevant.</p>
+  <pre id="operationsCreativeEffectivePreview" class="ops-prompt-text">Load a profile to view the effective instructions.</pre>
+ </details>
  <details class="ops-creative-reference-drawer" id="operationsCreativeReferenceDrawer">
- <summary>View original database prompts and shared generation templates</summary>
- <p class="subtle">These are the current Airtable Brand, AI Persona, and P1/P2 system prompts, shown for reference. Shared templates affect multiple city profiles, so edits made above are saved only for the selected profile.</p>
+ <summary>Additional inherited generation sources</summary>
+ <p class="subtle">Only sources returned by the current Supabase-backed generation service are displayed. Editing profile instructions never changes platform safety rules.</p>
  <div id="operationsCreativeReferences" class="ops-creative-reference-list"></div>
  </details>
  </section>
  </div>
  <div class="ops-tab-panel ops-global-settings" id="operationsGlobalPanel" data-ops-tab-panel="global" role="tabpanel" aria-labelledby="operationsTabGlobal" hidden>
  <div class="panel-heading"><div><h2>Global Admin</h2><p>System-wide settings that apply to all profiles. Scheduling follows each profile’s local time zone.</p></div></div>
+ <section class="ops-creative-panel" id="operationsOwnerPromptPanel" aria-labelledby="operationsOwnerPromptHeading">
+  <div class="ops-creative-heading"><h3 id="operationsOwnerPromptHeading">Global AI Generation Prompt — All Owned Profiles</h3></div>
+  <p class="subtle">These instructions apply to future AI generations for all content profiles in your Studio organization, including newly created profiles. Profile-specific instructions are added afterward. Existing approved and scheduled content is not modified.</p>
+  <form id="operationsOwnerPromptForm">
+   <label class="form-field"><span>Owner-wide generation instructions</span><textarea id="operationsOwnerPrompt" maxlength="4000" rows="8" placeholder="Common creative standards for all your city profiles"></textarea></label>
+   <div class="ops-creative-actions">
+    <button type="submit" class="primary-button" id="operationsOwnerPromptSave" disabled>Save global prompt</button>
+    <button type="button" class="secondary-button" id="operationsOwnerPromptReload">Reload saved prompt</button>
+    <span id="operationsOwnerPromptStatus" class="subtle" role="status" aria-live="polite"></span>
+   </div>
+  </form>
+ </section>
  <section class="ops-schedule-settings" aria-labelledby="operationsScheduleSettingsHeading" style="margin:1rem 0 1.5rem;padding:1rem 0;border-top:1px solid rgba(0,0,0,.08);border-bottom:1px solid rgba(0,0,0,.08)">
  <h3 id="operationsScheduleSettingsHeading" style="margin:0 0 .35rem">Global scheduling</h3>
  <p class="subtle" style="margin:0 0 .75rem">Scheduling Horizon controls how many future calendar days the MAE-first / balanced-overflow engine considers. Changing it does not rewrite existing schedules.</p>
