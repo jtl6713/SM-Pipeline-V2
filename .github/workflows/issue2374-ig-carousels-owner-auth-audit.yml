@@ -33,7 +33,12 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
           s=Path('repair/scripts/issue2374-ig-carousels-owner-auth-readonly.ps1').read_text()
+          # PowerShell's automatic $Matches variable becomes an integer-key
+          # dictionary after -match; ConvertTo-Json then fails at the end.
+          assert re.search(r'\\$matches\\b', s, flags=re.IGNORECASE) is None
+          assert '$candidateResults=@()' in s
           assert "ISSUE2374_IG_OWNER_AUTH_AUDIT=" in s
           assert "output_writes=0" in s and "provider_writes=0" in s
           assert "publish_calls=0" in s and "airtable_operations=0" in s
