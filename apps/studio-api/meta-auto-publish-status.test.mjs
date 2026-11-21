@@ -19,10 +19,10 @@ test("approved, scheduled but unarmed Meta output is not a manual handoff", () =
   assert.equal(classify({ Publish_Retry_Eligible: false }), "Auto Publish Disabled");
 });
 test("prior Meta side effects require verification rather than another blind create", () => {
-  assert.equal(classify({ Studio_Publish_Dispatch_Count: 1 }), "Verification Required");
-  assert.equal(classify({ Publish_Attempt_Count: 1 }), "Verification Required");
-  assert.equal(classify({ FB_Photo_IDs_JSON: '["123"]', Platform: "Facebook" }), "Verification Required");
-  assert.equal(classify({ IG_Carousel_Parent_Container_ID: "existing" }), "Verification Required");
+  assert.equal(classify({ Studio_Publish_Dispatch_Count: 1 }), "Needs Verification");
+  assert.equal(classify({ Publish_Attempt_Count: 1 }), "Needs Verification");
+  assert.equal(classify({ FB_Photo_IDs_JSON: '["123"]', Platform: "Facebook" }), "Needs Verification");
+  assert.equal(classify({ IG_Carousel_Parent_Container_ID: "existing" }), "Needs Verification");
 });
 test("explicit hold does not claim an operator must perform a platform action", () => {
   assert.equal(classify({ Do_Not_Publish: true }), "Review Held");
