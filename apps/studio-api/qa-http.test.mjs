@@ -193,7 +193,7 @@ test("Supabase canonical QA run assertion only passes on observed canonical row"
 });
 
 
-test("Runner attestation allows only the fixed health origin and known write sources",async()=>{
+test("Runner attestation requires Supabase write authority at fixed health origin",async()=>{
   let calls=0;
   const healthy=async()=>{
     calls++;
