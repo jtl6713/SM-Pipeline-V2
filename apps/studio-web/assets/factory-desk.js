@@ -2116,7 +2116,7 @@
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
         ${card.protected_media_rework === true
-          ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
+          ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Rebuild/stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
           : ""}
       </span>
       ${cell(card.profile_name)}
