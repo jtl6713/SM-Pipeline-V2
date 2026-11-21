@@ -1020,6 +1020,7 @@ export function airtableShapedMusicFromSupabase(row) {
       File_Size_Bytes: bytes,
       File_Size_MB: sizeMb,
       Rights_Status: meta.rights_status || null,
+      Duration_Seconds: meta.duration_seconds != null ? Number(meta.duration_seconds) : null,
       Asset_Description: meta.asset_description || null,
       Studio_Transfer_ID: meta.studio_transfer_id || null,
       Added_At: meta.added_at || row.created_at || null,
@@ -1680,6 +1681,15 @@ export function airtableShapedProductionRequestFromSupabase(row) {
         ? bag.Studio_Master_Media_Assets
         : [],
       Background_Music_Mode: bag.Background_Music_Mode || null,
+      Voiceover_Mode: bag.Voiceover_Mode || null,
+      Script_Mode: bag.Script_Mode || null,
+      Requested_Script: bag.Requested_Script || null,
+      Video_Duration_Seconds: bag.Video_Duration_Seconds ?? null,
+      Voiceover_Duration_Seconds: bag.Voiceover_Duration_Seconds ?? null,
+      Music_Start_Seconds: bag.Music_Start_Seconds ?? null,
+      Voiceover_Tail_Seconds: bag.Voiceover_Tail_Seconds ?? null,
+      Video_Clip_Count_Mode: bag.Video_Clip_Count_Mode || null,
+      Video_Clip_Count_Exact: bag.Video_Clip_Count_Exact ?? null,
       Active: bag.Active !== false,
       Master_Content_Type: bag.Master_Content_Type || null,
       Target_Platforms: Array.isArray(bag.Target_Platforms) ? bag.Target_Platforms : [],
@@ -2368,6 +2378,13 @@ export async function listSupabaseCarouselSlidesByIds(env, ids) {
   return rows.map(airtableShapedCarouselSlide);
 }
 
+export const PRO_AUDIO_OVERRIDE_FIELDS = Object.freeze([
+  "Voiceover_Mode_Override", "Background_Music_Mode_Override",
+  "Video_Duration_Seconds_Override", "Voiceover_Duration_Seconds",
+  "Music_Start_Seconds", "Voiceover_Tail_Seconds_Override",
+  "Selected_Music_Asset_Override",
+]);
+
 export function mapPlanScheduleRow(record, { partial = false } = {}) {
   const fields = record?.fields || {};
   if (!record?.id) return null;
@@ -2382,6 +2399,13 @@ export function mapPlanScheduleRow(record, { partial = false } = {}) {
   }
   if (present("Enabled")) row.enabled = checkboxOn(fields.Enabled);
   if (present("Notes")) row.notes = String(fields.Notes || "").trim() || null;
+  // Overrides have no typed columns. Preserve them in the PRO JSONB
+  // effective_resolution rather than silently losing explicit Yes/No choices.
+  const overrides = {};
+  for (const name of PRO_AUDIO_OVERRIDE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(fields, name)) overrides[name] = fields[name] ?? null;
+  }
+  if (Object.keys(overrides).length) row.effective_resolution = overrides;
   if (present("Brand")) {
     const brands = recordLinkIds(fields.Brand);
     row.brand_airtable_id = brands[0] || null;
@@ -2419,6 +2443,7 @@ const PRO_OUTPUT_SELECT = [
   "aspect_ratio",
   "enabled",
   "notes",
+  "effective_resolution",
   "scheduled_at",
   "created_at",
   "platform_output_id",
@@ -2464,6 +2489,9 @@ export function airtableShapedProOutputFromSupabase(row) {
       Scheduled_At: row.scheduled_at || "",
       Production_Request: requests,
       Brand: brands,
+      ...Object.fromEntries(PRO_AUDIO_OVERRIDE_FIELDS
+        .filter((name) => Object.prototype.hasOwnProperty.call(row.effective_resolution || {}, name))
+        .map((name) => [name, row.effective_resolution[name]])),
     },
   };
 }
@@ -2690,6 +2718,18 @@ export async function syncPlanScheduleRowsToSupabase(env, records, options = {})
   const linkedRows = attachPlanScheduleRequestForeignKeys(rows, requestIdMap, {
     strict: studioPhase6WriteSource(env) === "supabase",
   });
+  // Do not replace existing JSONB overrides with a sparse PATCH. A failed
+  // existing-row read must stop the write instead of erasing explicit No.
+  for (const row of linkedRows) {
+    if (!row.effective_resolution) continue;
+    const prior = await supabaseRest(env,
+      `production_request_outputs?airtable_record_id=eq.${encodeURIComponent(row.airtable_record_id)}&select=effective_resolution&limit=1`);
+    if (!Array.isArray(prior)) throw new Error("PRO audio override readback unavailable");
+    row.effective_resolution = {
+      ...(isPlainObject(prior[0]?.effective_resolution) ? prior[0].effective_resolution : {}),
+      ...row.effective_resolution,
+    };
+  }
   const size = options.partial === true ? 1 : 40;
   for (let index = 0; index < linkedRows.length; index += size) {
     await upsertChunk(env, "production_request_outputs", linkedRows.slice(index, index + size));
@@ -4786,6 +4826,15 @@ export function mapAirtableProductionRequestToSupabase(record, profileUuid = nul
         ? fields.Studio_Master_Media_Assets
         : [],
       Background_Music_Mode: fields.Background_Music_Mode || null,
+      Voiceover_Mode: fields.Voiceover_Mode || null,
+      Script_Mode: fields.Script_Mode || null,
+      Requested_Script: fields.Requested_Script || null,
+      Video_Duration_Seconds: fields.Video_Duration_Seconds ?? null,
+      Voiceover_Duration_Seconds: fields.Voiceover_Duration_Seconds ?? null,
+      Music_Start_Seconds: fields.Music_Start_Seconds ?? null,
+      Voiceover_Tail_Seconds: fields.Voiceover_Tail_Seconds ?? null,
+      Video_Clip_Count_Mode: fields.Video_Clip_Count_Mode || null,
+      Video_Clip_Count_Exact: fields.Video_Clip_Count_Exact ?? null,
       Active: fields.Active !== false && fields.Active !== 0,
       Master_Content_Type: fields.Master_Content_Type || null,
       Target_Platforms: Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [],
@@ -5928,7 +5977,13 @@ function productionRequestPublishStatusPatch(fields) {
   if ("Target_Platforms" in fields) {
     bag.Target_Platforms = Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [];
   }
-  if ("Background_Music_Mode" in fields) bag.Background_Music_Mode = fields.Background_Music_Mode || null;
+  for (const key of [
+    "Background_Music_Mode", "Voiceover_Mode", "Script_Mode", "Requested_Script",
+    "Video_Duration_Seconds", "Voiceover_Duration_Seconds", "Music_Start_Seconds",
+    "Voiceover_Tail_Seconds", "Video_Clip_Count_Mode", "Video_Clip_Count_Exact",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) bag[key] = fields[key] ?? null;
+  }
   if ("Selected_Music_Asset" in fields) {
     bag.Selected_Music_Asset = Array.isArray(fields.Selected_Music_Asset) ? fields.Selected_Music_Asset : [];
   }
