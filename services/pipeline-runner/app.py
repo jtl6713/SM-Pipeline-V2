@@ -701,11 +701,11 @@ def lookup_original_story_video_in_drive():
         return denied, status
 
     filename = str(request.args.get("filename") or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,90}-Scene-[1-9][0-9]{0,2}-[0-9a-f]{8}\\.mp4", filename):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,90}-Scene-[1-9][0-9]{0,2}-[0-9a-f]{8}\.mp4", filename):
         return jsonify(ok=False, error="invalid_original_video_filename"), 422
     # The filename comes from Studio's original immutable paid-generation run.
     # No client-provided Drive query, folder, or token can be supplied.
-    escaped = filename.replace("\\\\", "\\\\\\\\").replace("'", "\\\\'")
+    escaped = filename  # Validated safe ASCII; no quotes or backslashes.
     query = f"name = '{escaped}' and trashed = false"
     try:
         files = GoogleDriveClient().list_files(
