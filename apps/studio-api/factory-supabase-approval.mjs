@@ -104,7 +104,8 @@ export async function factorySupabaseApprovalRows(env, ids) {
       record.fields.Selected_Assets_JSON = typeof row.selected_assets === "string"
         ? row.selected_assets : JSON.stringify(row.selected_assets);
     }
-    result.set(id, { row, record, profileId, profileTimeZone: profileZones.get(direct || linked) });
+    result.set(id, { row, record, profileId, profileUuid: direct || linked,
+      profileTimeZone: profileZones.get(direct || linked) });
   }
   return result;
 }
@@ -158,6 +159,9 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
  */
 async function factorySupabaseNextApprovedSlot(env, entry) {
   const row = entry.row;
+  if (!entry.profileUuid || !UUID.test(entry.profileUuid)) {
+    throw Error("Cannot approve: source profile identity unavailable for scheduling");
+  }
   if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(String(row.platform || ""))) {
     throw Error("Cannot approve: no supported automated publisher for this platform");
   }
@@ -168,7 +172,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
   const pageSize = 500;
   let complete = false;
   for (let offset = 0; offset < 3000; offset += pageSize) {
-    const query = "platform_outputs?content_profile_id=eq." + encodeURIComponent(row.content_profile_id)
+    const query = "platform_outputs?content_profile_id=eq." + encodeURIComponent(entry.profileUuid)
       + "&platform=eq." + encodeURIComponent(row.platform)
       + "&scheduled_post_date=gt." + encodeURIComponent(now.toISOString())
       + "&scheduled_post_date=lt." + encodeURIComponent(until.toISOString())
@@ -288,6 +292,6 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   return {
     id, platform: check.row.platform, format: check.row.studio_output_type || check.row.format,
     scheduled_ms: Date.parse(scheduled.iso),
-    message: "Approved in Supabase and scheduled for " + scheduled.iso + " (" + scheduled.timeZone + ").",
+    message: "Approved in Supabase; Ready to Schedule at " + scheduled.iso + " (" + scheduled.timeZone + ").",
   };
 }
