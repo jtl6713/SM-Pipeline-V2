@@ -4013,7 +4013,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /no record was /);
   assert.doesNotMatch(worker, /await fetch\(endpoint,/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
-  assert.match(worker, /phase6TableKind\(env, tableId\)/);
+  assert.match(worker, /studioAirtableEgressTableKind\(env, tableId\)/);
 
 
   assert.match(worker, /0\.10\.995-produce-job-persist/);
