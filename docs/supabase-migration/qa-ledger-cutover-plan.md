@@ -42,3 +42,55 @@ backfill/export steps and the controlled production cutover are complete.
 
 Never bypass this gate by returning an empty history, disabling QA, changing
 a flag without migration, or forging Pass results.
+
+## November 21 implementation checkpoint — source inventory and draft code
+
+A connected, **read-only** Airtable table inventory established the exact legacy
+sources in base `appe33zkZn35yirTL`:
+- QA Test Runs `tblYwzehVtmyUMzj5`: 1 row, no additional cursor.
+- QA Executions `tblsg5E1cq8nb240c`: 1 row, no additional cursor.
+- The event references the one run and is a historical `RunFinalized` event.
+  The run has `development` environment and an old synthetic verification
+  status. **Legacy payload-hash tokens are 33 characters, not SHA-256 hashes**.
+  These must be preserved verbatim and separately wrapped by a SHA-256 source
+  fields checksum; do not silently rewrite legacy status or hashes.
+
+The connected production Supabase information-schema inspection showed no QA
+ledger tables in `public`, `qa` or `studio_qa` at inspection time.
+
+The following changes are **staged only** in draft PR #2364:
+- `docs/supabase-migration/phase7/011_qa_ledger_review_only.sql`
+  proposes RLS-enabled, service-role-only, append-only run/event tables with
+  legacy record/source payload correlation. It has not been executed.
+- `apps/studio-api/qa-supabase-ledger.mjs` implements a bounded read/insert
+  adapter against these two tables; `qa-http.mjs` no longer calls the legacy
+  Airtable gateway for QA data.
+- `qa-test-core.mjs`, `qa-governance.mjs`, the versioned QA catalog and
+  QA unit tests now require the canonical Supabase source.
+- `repair/scripts/qa_ledger_backfill_preflight.py` accepts private source
+  exports and independent Supabase readbacks, verifies exact counts and
+  legacy row-field SHA-256 checksums, and always returns
+  `release_authorized:false`. It reads no provider secrets and performs
+  no writes. Its tests cover mismatched history and incomplete evidence.
+
+**Remaining, in order:**
+1. Obtain durable, independently signed private source exports and exact
+   original field-level hashes; reconfirm no new Airtable QA rows were added.
+2. Review the SQL, production backup and rollback proof. Apply the table
+   schema only under a separately approved migration procedure.
+3. Implement and execute the approved idempotent backfill from the preserved
+   private export. Do not commit export data or credentials to Git.
+4. Obtain complete service-role-only Supabase readback with original
+   `legacy_source_fields` and `legacy_row_sha256`; require the reconciliation
+   utility to pass with independently checked source counts.
+5. Run real QA HTTP history/replay/finalization, cross-run catalog revision,
+   authorization, immutability, concurrency and non-publishing tests.
+6. Have an independent reviewer attest results and the release rollback plan.
+   Only then authorize the protected
+   `STUDIO_QA_SUPABASE_LEDGER_VERIFIED=true` setting. Do not infer approval
+   from passing unit tests or the source preflight alone.
+
+No production SQL, backfill, deployment, publishing or credential mutation is
+authorized by this document or the current branch. The six-hour system-wide
+Airtable quiet-window evidence must come **after** any approved source export
+and the controlled cutover.
