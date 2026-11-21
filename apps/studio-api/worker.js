@@ -941,6 +941,7 @@ import {
   getStudioOperationsProfiles,
   patchStudioOperationsProfile,
   studioProfileCreativeGuidance,
+  studioOwnerGlobalGenerationGuidance,
   studioHealAutonomousRevisionLock,
   studioHealPromotedOrphanIdeas,
   studioReadyProductionCronResume,
@@ -1062,6 +1063,7 @@ export default {
       const isReadyProductionDiagnosticRoute = url.pathname === "/api/admin/ready-production-diagnostic";
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsCreativeRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
+      const isOperationsGlobalCreativeRoute = url.pathname === "/api/operations/owner-global-creative";
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
@@ -3470,6 +3472,13 @@ export default {
           return await mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isOperationsGlobalCreativeRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "PATCH") assertWriteRequest(request, env);
+        if (!["GET", "PATCH"].includes(request.method)) throw new HttpError(405, "Method not allowed");
+        return studioOwnerGlobalGenerationGuidance(request, env, authorization);
       }
 
       if (isOperationsCreativeRoute) {
@@ -8823,6 +8832,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:getStudioOperationsProfiles__*/
 /*__STUDIO_WORKER_EXTRACT:patchStudioOperationsProfile__*/
 /*__STUDIO_WORKER_EXTRACT:studioProfileCreativeGuidance__*/
+/*__STUDIO_WORKER_EXTRACT:studioOwnerGlobalGenerationGuidance__*/
 /*__STUDIO_WORKER_EXTRACT:studioInternalJsonRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioSaveAutonomousLastRun__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousLastRun__*/
