@@ -1,4 +1,4 @@
-name: NYC Carousel #10065 AP2C original child status only
+name: 'NYC Carousel #10065 AP2C original child status only'
 
 on:
   push:
