@@ -94,8 +94,7 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   $p=@($profiles|Where-Object{[string]$_.id -eq [string]$o[0].content_profile_id})
   if($p.Count -ne 1 -or [string]$p[0].market_name -ne [string]$t.market){throw 'history_target_owner_mismatch'}
   $pid=[string]$values[[string]$t.page]
-  if($pid -notmatch '^\d{6,30}
-){throw 'history_page_id_unavailable'}
+  if($pid.Length -lt 6 -or $pid.Length -gt 30 -or $pid -match '[^0-9]'){throw 'history_page_id_unavailable'}
   $needles=@()
   foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
    $v=Norm $value;if($v.Length -ge 35){$needles+= $v.Substring(0,[Math]::Min(75,$v.Length))}
