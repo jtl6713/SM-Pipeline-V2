@@ -24,7 +24,7 @@ function SourceGet([string]$path) {
 }
 $targets = @(9868,9882,9893,9895,9905,10631)
 $numbers = ($targets | ForEach-Object { [string]$_ }) -join ','
-$select = 'output_number,content_profile_id,platform,platform_output_type,review_status,output_status,publish_status,ig_carousel_status,do_not_publish,published_at,platform_post_url,error_messages'
+$select = 'output_number,content_profile_id,platform,platform_output_type,review_status,output_status,publish_status,ig_carousel_status,do_not_publish,published_at,platform_post_url,output_caption,error_messages'
 $rows = @(SourceGet ('/rest/v1/platform_outputs?select=' + $select + '&output_number=in.(' + $numbers + ')&limit=8'))
 if ($rows.Count -eq 1 -and $rows[0] -is [array]) { $rows = @($rows[0]) }
 if ($rows.Count -ne 6 -or @($rows | Select-Object -ExpandProperty output_number -Unique).Count -ne 6) { throw 'exact_six_cohort_unavailable' }
@@ -68,7 +68,7 @@ function OwnerGet([string]$url, [string]$token) {
     try { $u = [uri]$url } catch { throw 'provider_url_invalid' }
     if ($u.Scheme -ne 'https' -or $u.Host -ne 'graph.facebook.com' -or -not $token) { throw 'provider_get_disallowed' }
     $script:providerGets++
-    if ($script:providerGets -gt 4) { throw 'provider_get_budget_exceeded' }
+    if ($script:providerGets -gt 14) { throw 'provider_get_budget_exceeded' }
     try {
         $data = Invoke-RestMethod -Uri $url -Headers @{Authorization=('Bearer ' + $token);Accept='application/json'} -Method Get -TimeoutSec 35
         return @{ok=$true;status=200;data=$data}
@@ -106,8 +106,81 @@ foreach ($spec in @(
     }
     $ownerChecks += $r
 }
+
+# Scan up to five native owner media pages per verified account.
+# A caption match is ONLY a candidate; no remote post or source status changes.
+function NormalizeCaption([string]$text) {
+    if (-not $text) { return '' }
+    return [regex]::Replace($text.ToLowerInvariant(),'\s+',' ').Trim()
+}
+$inventory=@()
+$ownedMedia=@{}
+foreach ($spec in @(@{city='New York City';prefix='NYC_'},@{city='Miami';prefix='MIAMI_'})) {
+    $city=[string]$spec.city
+    $ownedMedia[$city]=@()
+    $owner=@($ownerChecks|Where-Object{$_.profile -eq $city})[0]
+    $state=[ordered]@{profile=$city;pages=0;objects=0;status='not_started'}
+    if (-not $owner.media_read_authorized) {
+        $state.status='owner_media_read_unavailable_no_negative_proof'
+        $inventory+=$state
+        continue
+    }
+    $id=[string]$config[$spec.prefix+'INSTAGRAM_BUSINESS_ACCOUNT_ID']
+    $token=[string]$config[$spec.prefix+'META_GRAPH_API_ACCESS_TOKEN']
+    $next='https://graph.facebook.com/'+$version+'/'+$id+'/media?fields=id,caption,permalink,timestamp,media_type,media_product_type&limit=100'
+    $pages=0;$status='complete'
+    while ($next -and $pages -lt 5) {
+        $g=OwnerGet $next $token
+        if (-not $g.ok -or $null -eq $g.data.data) {$status='media_history_incomplete_no_negative_proof';break}
+        $ownedMedia[$city]+=@($g.data.data)
+        $pages++
+        $next=[string]$g.data.paging.next
+    }
+    if ($next -and $status -eq 'complete') {$status='pagination_capped_no_negative_proof'}
+    $state.pages=$pages
+    $state.objects=@($ownedMedia[$city]).Count
+    $state.status=$status
+    $inventory+=$state
+}
+$matches=@()
+foreach ($source in $rows) {
+    $number=[int]$source.output_number
+    $city=[string]$market[[string]$source.content_profile_id]
+    $body=NormalizeCaption ([string]$source.output_caption)
+    $needle=if ($body.Length -ge 85) {$body.Substring(0,[Math]::Min(120,$body.Length))} else {''}
+    $hits=@();$seen=@{}
+    if ($needle) {
+        foreach ($item in @($ownedMedia[$city])) {
+            $id=[string]$item.id
+            $type=[string]$item.media_type
+            $permalink=[string]$item.permalink
+            $cap=NormalizeCaption ([string]$item.caption)
+            if ($id -match '^\d{6,30}$' -and $type -eq 'CAROUSEL_ALBUM' -and
+                $permalink -match '^https://(www\.)?instagram\.com/p/' -and
+                $cap.StartsWith($needle) -and -not $seen.ContainsKey($id)) {
+                $seen[$id]=$true
+                $hits+=@{id=$id;published_at=[string]$item.timestamp;public_permalink=$permalink}
+            }
+        }
+    }
+    $status=if ($hits.Count -gt 1) {'multiple_public_carousel_caption_candidates_require_asset_proof'}
+        elseif ($hits.Count -eq 1) {'single_public_carousel_caption_candidate_requires_asset_proof'}
+        elseif (-not $needle) {'caption_too_short_no_negative_proof'}
+        else {'no_matching_carousel_in_bounded_history_no_negative_proof'}
+    $matches+=@{output=$number;profile=$city;status=$status;candidate_count=$hits.Count;candidates=$hits;original_asset_proven=$false;retry_authorized=$false}
+}
+$counts=@{}
+foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+    $key=$m.profile+'|'+[string]$m.candidates[0].id
+    if(-not $counts.ContainsKey($key)){$counts[$key]=0}
+    $counts[$key]++
+}
+foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+    $key=$m.profile+'|'+[string]$m.candidates[0].id
+    if($counts[$key] -gt 1){$m.status='shared_provider_candidate_requires_manual_review'}
+}
 $report = @{
-    version='issue2374_ig_carousel_oauth_v1'
+    version='issue2374_ig_carousel_owner_history_v2'
     source='production_supabase'
     read_only=$true
     output_writes=0
@@ -119,5 +192,8 @@ $report = @{
     provider_get_calls=$script:providerGets
     targets=$outputs
     owner_scopes=$ownerChecks
+    bounded_media_inventory=$inventory
+    matched_output_candidates=$matches
+    candidate_count=@($matches|Where-Object{$_.candidate_count -gt 0}).Count
 }
 Write-Output ('ISSUE2374_IG_OWNER_AUTH_AUDIT=' + ($report | ConvertTo-Json -Compress -Depth 6))
