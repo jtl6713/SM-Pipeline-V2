@@ -25,3 +25,9 @@ test("authorized route exposes content page and date bounds", () => {
  assert.ok(worker.includes('url.searchParams.get("created_from")'));
  assert.ok(worker.includes('url.searchParams.get("created_to")'));
 });
+
+test("per-page setting defaults to ten and cannot split output groups", () => {
+ assert.ok(worker.includes('url.searchParams.get("per_page") || 10'));
+ assert.ok(reads.includes('Math.min(50, Math.floor(Number(limit) || 10))'));
+ assert.ok(reads.includes('content_item_id=in.('));
+});
