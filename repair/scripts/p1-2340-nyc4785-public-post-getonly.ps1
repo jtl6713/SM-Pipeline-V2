@@ -55,7 +55,7 @@ try {
  }
  $expected=([string]$cfg.NYC_TIKTOK_HANDLE).TrimStart('@').ToLowerInvariant()
  $base=[string]$cfg.NYC_TIKTOK_WORKER_BASE_URL
- if($base -ne 'https://auth-nyc.chicagoshining.com' -or $expected -ne 'newyorkshining'){throw 'configured_tiktok_owner_mismatch'}
+ if($base -ne 'https://auth-nyc.chicagoshining.com' -or $expected -ne 'nyshining8'){throw 'configured_tiktok_owner_mismatch'}
  $r.stage='owned-tiktok-creator-get'
  $r.provider_gets++
  $ident=Invoke-RestMethod ($base+'/tiktok/status') -Method Get -TimeoutSec 35
