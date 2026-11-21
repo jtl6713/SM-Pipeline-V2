@@ -216,10 +216,8 @@ export function studioSupabaseConfigured(env) {
 }
 
 export function studioReadSource(env) {
-  // Global/default reads stay on Airtable. Home, Content, and Factory/Ops
-  // each use their own flag and must not follow STUDIO_READ_SOURCE.
-  void env;
-  return "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -229,13 +227,8 @@ export function studioReadSource(env) {
  * when the narrower flag is unset. Roll back with STUDIO_PIPELINE_READ_SOURCE=airtable.
  */
 export function studioPipelineReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  const pipeline = String(env?.STUDIO_PIPELINE_READ_SOURCE || "").trim().toLowerCase();
-  if (pipeline === "airtable") return "airtable";
-  if (pipeline === "supabase") return "supabase";
-  return String(env?.STUDIO_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -245,10 +238,8 @@ export function studioPipelineReadSource(env) {
  * Opt-in: STUDIO_CONTENT_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioContentReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_CONTENT_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -258,10 +249,8 @@ export function studioContentReadSource(env) {
  * Opt-in: STUDIO_FACTORY_OPS_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioFactoryOpsReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_FACTORY_OPS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -271,10 +260,8 @@ export function studioFactoryOpsReadSource(env) {
  * is set. Opt-in: STUDIO_HOME_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioHomeReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_HOME_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -284,10 +271,8 @@ export function studioHomeReadSource(env) {
  * Opt-in: STUDIO_MUSIC_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioMusicReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_MUSIC_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -298,10 +283,8 @@ export function studioMusicReadSource(env) {
  * Requires library densify in media_assets.metadata (profile/classification/search).
  */
 export function studioAssetsReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_ASSETS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -312,10 +295,8 @@ export function studioAssetsReadSource(env) {
  * Mirror tables must be populated (half-hour auth mirror + extras densify) before enable.
  */
 export function studioAuthReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_AUTH_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 /**
@@ -327,16 +308,12 @@ export function studioAuthReadSource(env) {
  * not part of this flag. Record deletion is not started.
  */
 export function studioWriteSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 export function studioPhase5WritesMode(env) {
-  return studioWriteSource(env) === "supabase"
-    ? "supabase_sor_airtable_archived"
-    : "airtable_sor_write_through";
+  return studioWriteSource(env) === "supabase" ? "supabase_sor" : "supabase_unavailable";
 }
 
 export function studioLegacyExportEnabled(env, tableId) {
@@ -359,16 +336,12 @@ export function studioLegacyExportEnabled(env, tableId) {
  * STUDIO_WRITE_SOURCE=supabase. Record deletion is not started.
  */
 export function studioPhase6WriteSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_PHASE6_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  // Airtable is retired: environment rollback flags cannot reactivate it.
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
 export function studioPhase6WritesMode(env) {
-  return studioPhase6WriteSource(env) === "supabase"
-    ? "supabase_sor_airtable_archived"
-    : "airtable_sor_write_through";
+  return studioPhase6WriteSource(env) === "supabase" ? "supabase_sor" : "supabase_unavailable";
 }
 
 export const MEDIA_ASSETS_TABLE_ID = "tblSITCujCsJTNcDe";
