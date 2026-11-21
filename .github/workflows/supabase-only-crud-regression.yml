@@ -35,30 +35,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Two issue2374 read-only audit workflows mention the hostname only
-          # as a forbidden token in their static-safety negative checks.
-          # Verify that single exact occurrence rather than exempting a file.
+          # Only exact forbidden-token assertions in audited read-only workflows
+          # are permitted; any other endpoint occurrence fails closed.
           python - <<'PY'
+          import sys
           from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from airtable_negative_only_workflows import unexpected_references
           host="api."+"airtable.com"
-          allowed={
-              ".github/workflows/issue2374-all-profiles-provider-batch-audit.yml",
-              ".github/workflows/issue2374-exact-provider-ids-audit.yml",
-          }
-          bad=[]
-          for f in sorted(Path(".github/workflows").glob("*.y*ml")):
-              lines=f.read_text().splitlines()
-              matches=[(i,line.strip()) for i,line in enumerate(lines) if host in line]
-              for index,line in matches:
-                  context="\n".join(lines[max(0,index-7):index])
-                  exact=(str(f) in allowed and len(matches)==1
-                      and line.endswith('"'+host+'"]:')
-                      and "for bad in [" in context)
-                  if not exact:
-                      bad.append(f"{f}:{index+1}")
+          bad=unexpected_references(Path.cwd(), (host,))
           if bad:
               raise SystemExit("Direct Airtable endpoint in executable workflow: "+",".join(bad))
-          print("PASS: no executable Airtable endpoints; two static negative checks validated")
+          print("PASS: only structurally validated forbidden-token assertions mention Airtable host")
           PY
       - name: Reject tracked encrypted Airtable credential envelope and restoration jobs
         shell: bash
@@ -84,33 +72,18 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from airtable_negative_only_workflows import unexpected_references
           pat="AIR"+"TABLE_PAT"
           token="AIR"+"TABLE_TOKEN"
-          host="api."+"airtable.com"
-          presence={
+          allow_presence={
               ".github/workflows/i1-durable-runner-audit.yml",
               ".github/workflows/verify-supabase-production-readonly.yml",
           }
-          negative={
-              ".github/workflows/issue2374-all-profiles-provider-batch-audit.yml",
-              ".github/workflows/issue2374-exact-provider-ids-audit.yml",
-          }
-          flagged=[]
-          for f in sorted(Path(".github/workflows").glob("*.y*ml")):
-              lines=f.read_text().splitlines()
-              hits=[(i,line.strip()) for i,line in enumerate(lines)
-                    if pat in line or token in line]
-              if not hits:
-                  continue
-              name=str(f)
-              if name in presence:
-                  continue
-              if name in negative and len(hits)==1:
-                  i,line=hits[0]
-                  preceding="\n".join(lines[max(0,i-7):i])
-                  if line.endswith('"'+pat+'","'+host+'"]:') and "for bad in [" in preceding:
-                      continue
-              flagged.append(name)
+          flagged=[location for location in unexpected_references(Path.cwd(), (pat,token))
+                   if location.rsplit(":",1)[0] not in allow_presence]
           if flagged:
               raise SystemExit("Unsafe credential reference in executable workflow: "+", ".join(flagged))
           print("PASS: only approved presence audits and validated negative-only checks mention retired PAT")
@@ -165,6 +138,7 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'airtable_retirement_evidence_gate_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_retirement_preflight_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_preflight_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'airtable_negative_only_workflows_test.py' -v
           # The evidence template is intentionally BLOCKED until real production
           # project and full six-source hourly attestations are supplied.
           if python repair/scripts/airtable_retirement_evidence_gate.py --manifest docs/supabase-migration/airtable-retirement-release-evidence.template.json; then
