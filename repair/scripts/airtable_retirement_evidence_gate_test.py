@@ -13,6 +13,11 @@ class RetirementEvidenceGateTest(unittest.TestCase):
         self.manifest = {
             "schema_version": 1,
             "production_project_ref": "p" * 20,
+            "runtime_source_modes": {
+                "studio_primary_read_source": "supabase",
+                "studio_sync_read_source": "supabase",
+                "pipeline_runner_write_source": "supabase",
+            },
             "proofs": {k: {"verified": True, "artifact_ref": f"reviewed-{k}-artifact"}
                        for k in PROOFS},
             "quiet_window": {
@@ -38,6 +43,14 @@ class RetirementEvidenceGateTest(unittest.TestCase):
             item = copy.deepcopy(self.manifest)
             item["production_project_ref"] = ref
             self.assertFalse(self.check(item)["evidence_layout_complete"])
+
+    def test_legacy_live_airtable_primary_read_blocks_release(self):
+        item = copy.deepcopy(self.manifest)
+        item["runtime_source_modes"]["studio_primary_read_source"] = "airtable"
+        self.assertFalse(self.check(item)["evidence_layout_complete"])
+        item["runtime_source_modes"]["studio_primary_read_source"] = "supabase"
+        item["runtime_source_modes"]["studio_sync_read_source"] = "airtable"
+        self.assertFalse(self.check(item)["evidence_layout_complete"])
 
     def test_missing_required_source_or_one_hour_fails_closed(self):
         for source in SOURCES:

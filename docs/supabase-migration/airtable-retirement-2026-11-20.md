@@ -194,3 +194,8 @@ production SQL, GitHub secret or Airtable PAT was changed by this continuation.
 production connection; 2 dev preflight verified, production pending; 3
 read-only and canary procedures prepared, live evidence pending; 4 coverage
 gate prepared, quiet window NOT certified; 5 release NOT authorized.
+
+- The evidence gate additionally requires independently observed production runtime
+  modes for Worker primary read, Worker sync read, and runner writes to equal
+  `supabase`. An old `airtable` value is a hard blocker even if collection
+  windows show zero attempts. These fields remain null in the template.

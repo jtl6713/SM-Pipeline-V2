@@ -49,6 +49,13 @@ def evidence_shape(manifest, *, now=None):
     if not isinstance(ref, str) or not re.fullmatch(r"[a-z0-9]{20}", ref) or ref in NONPRODUCTION_REFS:
         problems.append("production Supabase project reference is absent, invalid, or known non-production")
 
+    modes = manifest.get("runtime_source_modes")
+    modes = modes if isinstance(modes, dict) else {}
+    for name in ("studio_primary_read_source", "studio_sync_read_source",
+                 "pipeline_runner_write_source"):
+        if modes.get(name) != "supabase":
+            problems.append(f"production runtime source not Supabase: {name}")
+
     proofs = manifest.get("proofs")
     if not isinstance(proofs, dict):
         proofs = {}

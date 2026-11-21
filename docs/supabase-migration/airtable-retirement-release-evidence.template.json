@@ -42,5 +42,10 @@
       "make_scenarios": [],
       "external_integrations": []
     }
+  },
+  "runtime_source_modes": {
+    "studio_primary_read_source": null,
+    "studio_sync_read_source": null,
+    "pipeline_runner_write_source": null
   }
 }
