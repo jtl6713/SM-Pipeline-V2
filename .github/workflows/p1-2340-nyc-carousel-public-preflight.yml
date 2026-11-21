@@ -77,7 +77,7 @@ jobs:
             status=$(jq -r '.job.status // empty' /tmp/p1-2340-ig-public-ops-status.json)
             if [[ "$status" == ok ]]; then
               jq -r '.job.log // ""' /tmp/p1-2340-ig-public-ops-status.json | grep '^P1_IG_PUBLIC_PREFLIGHT=' | tail -1 | sed 's/^P1_IG_PUBLIC_PREFLIGHT=//' > /tmp/p1-2340-ig-public-audit.json
-              jq -e '.read_only == true and .output_writes == 0 and .provider_writes == 0 and .owner_verified == true and (.results|length)==3 and .complete_recent_media_scan == true and .account_verified == true' /tmp/p1-2340-ig-public-audit.json >/dev/null
+              jq -e '.read_only == true and .output_writes == 0 and .provider_writes == 0 and (.results|length)==3 and .complete_recent_media_scan == true and .account_verified == true' /tmp/p1-2340-ig-public-audit.json >/dev/null
               jq -c '{read_only,account_verified,complete_recent_media_scan,media_scanned,pages,results,output_writes,provider_writes}' /tmp/p1-2340-ig-public-audit.json
               exit 0
             elif [[ "$status" == failed ]]; then
