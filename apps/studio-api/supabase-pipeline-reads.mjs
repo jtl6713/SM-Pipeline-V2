@@ -1908,7 +1908,7 @@ export function supabaseFocusedExceptionFilter(mode, nowIso) {
       + "publish_status.eq.Failed,error_messages->>Studio_State.eq.Failed)";
   }
   const clock = String(nowIso || "");
-  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(clock)
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/.test(clock)
     || !Number.isFinite(Date.parse(clock))) throw new Error("Invalid Home snapshot clock");
   const due = encodeDeskFilterValue(clock);
   const approved = base + "&review_status=eq.Approved&do_not_publish=eq.false";
