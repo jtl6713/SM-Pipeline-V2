@@ -860,6 +860,7 @@ test("NYC five-output original Supabase receipts repair an R2 0/5 batch, with no
   assert.equal(repaired.status, "completed");
   assert.deepEqual(factoryBatchCounts(repaired), {
     total: 5, approved_count: 5, skipped_count: 0, failed_count: 0, pending_count: 0,
+    done_count: 5,
   });
   assert.equal(reads, 1);
   assert.ok(repaired.items.every(item =>
