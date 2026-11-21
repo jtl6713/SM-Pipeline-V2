@@ -68,7 +68,8 @@ $report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.
 }else{$report.user_state='missing'}
 
 # P1 #2340 positive-match-only inventory. GET /{page}/video_reels is NOT a
-# readable Graph edge; probe published Page videos/posts instead. A zero-match
+# readable Graph edge; probe supported Page feed/published_posts only.
+# These edges may omit Reels, so absence is always inconclusive. A zero-match
 # or partial list NEVER proves non-delivery or permits a publish retry.
 $report.history_status='not_authorized';$report.history_probes=@()
 if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -eq $true -and $report.scopes['pages_read_engagement'] -eq $true){
@@ -99,8 +100,8 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
    $v=Norm $value;if($v.Length -ge 35){$needles+= $v.Substring(0,[Math]::Min(75,$v.Length))}
   }
-  foreach($edge in @('videos','posts')){
-   $fields=if($edge -eq 'videos'){'id,title,description,created_time,permalink_url'}else{'id,message,created_time,permalink_url'}
+  foreach($edge in @('feed','published_posts')){
+   $fields='id,message,created_time'
    $probe=@{output_number=[int]$t.n;market=$t.market;edge=$edge;pages_scanned=0;rows_scanned=0;complete=$false;http_status=0;error_code=0;candidates=@();conclusion='inconclusive'}
    $after=''
    for($pg=0;$pg -lt 2;$pg++){
