@@ -2047,7 +2047,7 @@ export async function listSupabasePipelineHistoryPage(env, {
     `platform_outputs?content_profile_id=eq.${profileId}&test_run_id=is.null`
     + `&select=${OUTPUT_SELECT}&order=created_at.desc.nullslast,output_number.desc.nullslast,id.desc`
     + `&limit=${size + 1}&offset=${skip}`);
-  const page = (rows || []).slice(0, size);
+  const page = (rows || []).slice(0, size).map(flattenOutputRow);
   const contentByAirtableId = new Map();
   for (const row of page) {
     if (row.content_item_airtable_id) contentByAirtableId.set(row.content_item_airtable_id, {
