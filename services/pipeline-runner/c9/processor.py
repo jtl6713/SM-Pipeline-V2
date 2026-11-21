@@ -9,7 +9,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from c9.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from carousel.constants import C9_READY_OUTPUT_VIEW
 from carousel.formulas import exact_record_formula
-from carousel.mapping import c8_include_slide
+from carousel.mapping import c8_include_slide, final_gallery_identity_reason
 from carousel.parent import load_linked_slides, load_parent
 from render.fields import field, field_str, first_linked_id
 
@@ -63,6 +63,18 @@ def process_request(
     preview["final_slide_ids"] = [slide["id"] for slide in slides]
     if not slides:
         return {"processed": False, "reason": "no_final_linked_slides", **preview}
+    output_type = field_str(output, "Platform_Output_Type")
+    is_instagram_carousel = output_type == "Instagram Carousel"
+    reason = final_gallery_identity_reason(
+        slides,
+        min_slides=2 if is_instagram_carousel else 1,
+        max_slides=10 if is_instagram_carousel else None,
+    )
+    if reason:
+        # C9 can only advance a single uniquely ordered, final-approved set.
+        # A wrong Ready label can otherwise cause AP1C to publish an arbitrary
+        # alternate creative slide. Do not change the current output at all.
+        return {"processed": False, "reason": reason, "graph_creates": 0, **preview}
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
