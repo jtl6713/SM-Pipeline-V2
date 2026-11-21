@@ -2616,6 +2616,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     )));
     return respond(request, env, {
       ok: true, records, count: records.length, content_ids: packed.content_ids,
+      content_groups: packed.content_groups,
       has_more: packed.has_more, next_offset: packed.next_offset,
       read_source: "supabase", scope: "all_content",
       profile: mapStudioContentProfile(profile),
