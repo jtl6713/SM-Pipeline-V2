@@ -4,7 +4,7 @@
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async function(input, init) {
     const raw = typeof input === "string" ? input : input?.url;
-    if (!raw || !/\\/api\\/outputs\\?/.test(raw)) return nativeFetch(input, init);
+    if (!raw || !String(raw).includes("/api/outputs?")) return nativeFetch(input, init);
     const url = new URL(raw, location.href);
     if (url.searchParams.get("mode") !== "history") return nativeFetch(input, init);
     url.searchParams.set("mode", "content_page");
