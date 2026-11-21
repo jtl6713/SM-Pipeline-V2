@@ -23020,17 +23020,17 @@ function timedScriptAssetLabel(asset, index) {
     }
     for (const group of groups) group.records = sortedPipelineRecords(group.records);
     // The Pipeline is an inventory of content, not a seven-day calendar.
-    // Order packages by creation time, newest first, regardless of publish date.
-    // Legacy rows without a timestamp retain the numeric output-id fallback.
-    const newestCreated = (group) => Math.max(0, ...group.records.map((record) => {
-      const raw = record.created_at || record.created || record.content_created_at || "";
+    // Order packages by actual Production Approve submission time, newest first.
+    // Legacy rows missing approval evidence sort after dated approvals.
+    const newestApproved = (group) => Math.max(0, ...group.records.map((record) => {
+      const raw = record.production_approved_at || "";
       const ms = Date.parse(String(raw));
       return Number.isFinite(ms) ? ms : 0;
     }));
     groups.sort((a, b) => {
-      const aCreated = newestCreated(a);
-      const bCreated = newestCreated(b);
-      if (aCreated && bCreated && aCreated !== bCreated) return bCreated - aCreated;
+      const aApproved = newestApproved(a);
+      const bApproved = newestApproved(b);
+      if (aApproved !== bApproved) return bApproved - aApproved;
       return Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber));
     });
     return groups;
@@ -23116,8 +23116,10 @@ function timedScriptAssetLabel(asset, index) {
     const profileName = pipelineWorkingProfileName();
     const createdIso = String(content?.created_at || content?.created || first?.created_at || "").trim();
     const createdLabel = createdIso ? formatStudioDateTime(createdIso) : "";
+    const approvedIso = group.records.map((record) => record.production_approved_at).filter(Boolean).sort().at(-1) || "";
+    const approvalLabel = approvedIso ? `Production approved ${formatStudioDateTime(approvedIso)}` : "Production approval date unavailable";
     const groupMeta = [
-      createdLabel,
+      approvalLabel,
       `${group.records.length} output${group.records.length === 1 ? "" : "s"}`,
       destination ? `${destination.done}/${destination.total} rendered` : "",
     ].filter(Boolean);
