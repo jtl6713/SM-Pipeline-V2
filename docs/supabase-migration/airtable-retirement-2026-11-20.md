@@ -1,0 +1,33 @@
+# Airtable retirement — implementation and release gate (2026-11-20)
+
+## Scope and evidence
+Reference: the November 16 SM Pipeline V2 Airtable CRUD and Egress Audit provided by the owner. Its counts are *static reference candidates*, not observed network requests: 1,664 Worker/runner wrapper invocations, 179 direct API URL literals, and 90 GitHub Actions workflows with direct URL literals. A zero-traffic monitor in the app alone does not cover independent GitHub Actions, maintenance scripts, or external Make scenarios.
+
+## This PR (first safety boundary)
+- Worker `airtableFetch`: no outbound Airtable branch. A Supabase read or write that is unsupported/uncommitted fails visibly (503), not `records: []`, a fake created ID, or a deleted:true echo.
+- Profile Summary Durable Object: no direct Airtable reread; dirty events stay pending on failed Supabase reads.
+- Runner `AirtableClient`: compatibility entrypoint requires Supabase, cannot make Airtable HTTP requests, and does not fabricate reads/mutations. Supported DELETE operations require exactly one returned Supabase row.
+- Worker side-table DELETE: checks exactly one Supabase row was deleted, and isolates Pipeline Settings from Engagement Settings.
+- Pipeline Settings mutations: require returned Supabase representation rather than trusting an unverified 204/zero-row PATCH.
+- Python runner reads/writes default to Supabase.
+- Retired the legacy media-intake cleanup, closeout backfill, YouTube uploader OAuth diagnostic GitHub workflows and five standalone scripts with direct Airtable egress.
+
+**Deliberate block:** runner `upsert_record` now fails closed. A2B Drive-ID and native gallery Studio_Transfer_ID operations need a transactional Supabase upsert strategy and verified uniqueness constraints to avoid duplicates. Do not tell operators these stages work until proved.
+
+## Not complete; do not merge/deploy
+- The audit includes another **87 workflows with direct Airtable endpoint literals** beyond the three disabled here. They must be reviewed as historical, one-off, or active deployments and retired/reimplemented without breaking Cloudflare deployments.
+- Several direct maintenance/repair scripts, staging-only diagnostic modules, and archived source references remain. Distinguish executable active paths from historical evidence, and eliminate or isolate executable ones.
+- Existing production env/secret values, Windows runner .env, Cloudflare secrets and GitHub encrypted PAT envelopes have not been read or modified. A repo code change alone cannot guarantee external services or scheduled jobs have stopped.
+- Verify all read-source selectors. Some Worker flags still default to Airtable, which now fails closed at the gateway rather than secretly querying Airtable; migrate each to Supabase with functional regression tests.
+- Validate Supabase schema and atomic-upsert constraints in the **production** database before enabling blocked mutation paths. Only the connected development project schema was inspected.
+- Review legacy tests that assume Airtable REST responses and adjust them to Supabase-only behavior. Run the targeted new tests and full suite.
+
+## Release acceptance
+1. Static source guard: no executable production Worker, runner, script, workflow or external job can issue Airtable GET/POST/PATCH/PUT/DELETE.
+2. Runtime egress monitoring: zero attempted Airtable calls across Worker, runner, scheduled jobs, GitHub Actions and known external integrations during the full quiet window. Any unmonitored integration means this gate is not certified.
+3. Supabase mutation correctness: every create/update/delete/upsert returns only after a confirmed persisted transaction, with exact affected rows or verified idempotent conflict handling. Missing/unsupported reads raise explicit errors; do not invent empty lists.
+4. End-to-end tests: asset library/upload and deletion, Ideas, Factory approvals, Content, scheduling, publishing/retries, recovery ledgers, Home counters, settings and QA. Preserve existing workflows; no unattended production publishing in test runs.
+5. Confirm deployment configuration and source flags on the live Worker and runner, then deploy and validate a small non-publishing canary.
+6. After verified replacement, revoke the **Airtable personal access token(s)** at the provider, remove GitHub/encrypted envelopes, Cloudflare and runner bindings, audit old GitHub workflow permissions, and verify Make/external automations cannot use Airtable.
+
+No live production calls, schema updates, deployment, or provider credential revocation were performed by this PR.
