@@ -90,7 +90,7 @@
   async function ensureIdeasCache() {
     if (ideasCache.length) return ideasCache;
     try {
-      const { records = [] } = await api("/api/ideas?limit=100");
+      const { records = [] } = await api("/api/ideas?limit=100&unpromoted=1");
       if (records.length) ideasCache = records;
     } catch (_error) {
       /* Drafts can still render with the production request ID. */
@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1009-prepare-error-visibility";
+  const BUILD_ID = "item4-0.6.1020-prepare-error-visibility";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12346,8 +12346,8 @@ function timedScriptAssetLabel(asset, index) {
 
   function item4IsRetryablePrepareFailure(error, status) {
     const variantStatus = String(status?.variant_status || "");
-    // Never interpret a failed POST as a running job when Supabase still says
-    // None. Preserve the true API error instead of starting a poll that hides it.
+    // A rejected POST is not proof that a frame job has started.
+    // Only a persisted Preparing state permits background polling.
     if (String(error?.bodyStatus || "") === "Error" || variantStatus === "Error") return false;
     return variantStatus === "Preparing";
   }
@@ -16996,22 +16996,40 @@ function timedScriptAssetLabel(asset, index) {
       // Output selection Save and plan generation are separate operations.
       // Refresh persisted workspace first; do not reject a saved plan using stale browser state.
       const approvalRecordId = String(activeProductionRequest.id);
+      const requestedKeys = productionOutputSelectionKeys();
       try {
         await loadItem4Workspace(activeProductionRequest);
         if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
-        if (item4Workspace?.plan_status !== "Ready") {
-          // Saving selected outputs does not itself build the master platform plan.
-          // Approval is an explicit operator action, so complete the missing plan now.
-          await buildItem4Plan();
+        // A saved operator selection is not the same as a persisted plan. Keep
+        // unsaved changes visible, but never silently rebuild over them.
+        if (item4OutputSelectionDirty) {
+          setRequestMessage("Save output selections before Approve. Your current choices are preserved.", "error-text");
+          return;
+        }
+        let planConfirmed = String(item4Workspace?.plan_status || "") === "Ready"
+          && item4SavedPlanMatchesCurrentSelection(item4Workspace?.plan, requestedKeys);
+        if (!planConfirmed) {
+          // The heavy /item4 reconcile path can return stale Needs Plan while
+          // Supabase already has a Ready plan. Verify its exact saved outputs
+          // before making any further plan writes or showing a false blocker.
+          planConfirmed = await item4AdoptReadyPlanFromReadback(approvalRecordId, requestedKeys);
+        }
+        if (!planConfirmed) {
+          // Only a genuinely unconfirmed plan enters the existing build path.
+          // The click is operator-initiated; this does not approve or publish.
+          await buildItem4Plan({ throwOnError: true });
           if (String(activeProductionRequest?.id || "") !== approvalRecordId) return;
-          await loadItem4Workspace(activeProductionRequest);
+          // A second full /item4 load can overwrite a good plan with a stale
+          // snapshot. Read the authoritative /plan endpoint instead.
+          planConfirmed = await item4AdoptReadyPlanFromReadback(
+            approvalRecordId, productionOutputSelectionKeys());
+        }
+        if (!planConfirmed) {
+          setRequestMessage("The saved platform plan could not be verified against your selected output formats. No approval was submitted. Review the output selections and retry.", "error-text");
+          return;
         }
       } catch (error) {
         setRequestMessage("Could not verify or prepare the platform plan: " + (error.message || error), "error-text");
-        return;
-      }
-      if (item4Workspace?.plan_status !== "Ready") {
-        setRequestMessage("Platform plan is not ready. Use Recommend formats to prepare it, then try Approve. Current status: " + String(item4Workspace?.plan_status || "Unknown"), "error-text");
         return;
       }
     }
@@ -17137,7 +17155,10 @@ function timedScriptAssetLabel(asset, index) {
     const status = String(record.status || "").trim().toLowerCase();
     // The API exposes revision_open explicitly; it strips the internal marker
     // from production_notes. Promoted revisions may also have Active=false.
-    if (status === "promoted" && record.revision_open === true) return true;
+    // A Factory send-back moves the existing promoted request to Draft but
+    // deliberately retains its promoted-content link. Show only explicitly
+    // marked revisions; normal promoted or completed rows stay in Pipeline.
+    if (record.revision_open === true && ["promoted", "draft", "ready"].includes(status)) return true;
     if (record.active === false) return false;
     if (status !== "draft" && status !== "ready") return false;
     if (String(record.submitted_at || "").trim()) return false;
@@ -17171,7 +17192,7 @@ function timedScriptAssetLabel(asset, index) {
           <div class="production-draft-meta">${badge(r.status)}${timing ? `<span class="subtle">${escapeHtml(timing)}</span>` : ""}</div>
           <h3>${value(ideaName)}</h3>
           <p>${platforms !== "—" ? platforms : "Platforms not chosen yet"}</p>
-          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">${String(r.status || "").toLowerCase() === "promoted" ? "Revise" : "Continue"}</button>
+          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">${r.revision_open === true || String(r.status || "").toLowerCase() === "promoted" ? "Revise" : "Continue"}</button>
         </article>`;
       }).join("")}</div>`;
 
@@ -17698,7 +17719,7 @@ function timedScriptAssetLabel(asset, index) {
       // The ordinary list route is intentionally stale-while-revalidate.
       // Intake is an administrative lifecycle screen: never classify a
       // previously promoted idea from an old R2 snapshot.
-      const result = await api("/api/ideas?limit=100&fresh=1", { timeoutMs: 20000, retries: 1 });
+      const result = await api("/api/ideas?limit=100&unpromoted=1&fresh=1", { timeoutMs: 20000, retries: 1 });
       if (result?.live !== true || !Array.isArray(result?.records)) {
         throw new Error("Could not verify live idea statuses. Reopen Ideas to retry; no stale list was shown.");
       }
@@ -20487,12 +20508,26 @@ function timedScriptAssetLabel(asset, index) {
     activeCreativeOutputId = recordId;
     $("creativeEditorPanel").hidden = false;
     window.scrollTo(0, 0);
+    activeCreativeOutput = null;
+    creativeSlides = [];
     $("creativeEditorTitle").textContent = "Loading creative review…";
+    $("creativeEditorSubtitle").textContent = "Loading saved creative values…";
+    $("creativeSaveState").textContent = "Loading";
+    $("creativeSaveState").classList.remove("saved");
+    ["creativeRenderPreview", "creativeRenderPreviewStill", "creativeRenderPreviewDrive"].forEach((id) => {
+      const media = $(id);
+      if (media) media.hidden = true;
+    });
+    $("creativeRenderPreviewEmpty").hidden = false;
+    $("creativeOutputMeta").replaceChildren();
+    $("creativeMetaComplete").hidden = true;
+    $("creativeTiktokComplete").hidden = true;
+    $("creativeYoutubeComplete").hidden = true;
     $("creativeSlidesList").innerHTML = '<div class="empty">Loading creative directives…</div>';
     phase6Message("Loading saved creative values…");
     setCreativeBusy(true);
     try {
-      const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
+      const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`, { timeoutMs: 25000, retries: 1 });
       if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
       populateCreativeEditor(data);
       const still = creativeSimpleVideoKind(data?.output) === "still";
@@ -20508,8 +20543,28 @@ function timedScriptAssetLabel(asset, index) {
       }
     } catch (e) {
       if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
-      phase6Message(e.message, "error-text");
+      activeCreativeOutput = null;
+      creativeSlides = [];
+      $("creativeEditorTitle").textContent = "Creative review unavailable";
+      $("creativeEditorSubtitle").textContent = "The saved creative data could not be loaded. No changes were made.";
+      $("creativeSafetyBadge").textContent = "Load failed";
+      $("creativeSafetyBadge").className = "badge tone-danger";
+      $("creativeSafetyBanner").textContent = "Creative review did not load. Retry below or close this editor. Publishing is not available from this incomplete view.";
+      $("creativeOutputMeta").replaceChildren();
+      $("creativeMetaComplete").hidden = true;
+      $("creativeTiktokComplete").hidden = true;
+      $("creativeYoutubeComplete").hidden = true;
+      $("creativeSlidesList").innerHTML = '<div class="empty">Creative data failed to load. <button type="button" class="secondary-button" id="retryCreativeEditorLoad">Retry loading</button></div>';
+      $("retryCreativeEditorLoad").addEventListener("click", () => openCreativeEditor(recordId));
+      $("creativeRenderPreviewEmpty").textContent = "Preview unavailable until creative details load.";
+      phase6Message(`Creative review load failed: ${String(e?.message || e || "Request failed")}`, "error-text");
       setCreativeBusy(false);
+      $("creativeSaveState").textContent = "Load failed";
+      $("creativeSaveState").classList.remove("saved");
+      ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "creativePublishNow", "creativeSaveSchedule", "creativeScheduleCalendar", "creativeUnlockTitles"].forEach((id) => {
+        const button = $(id);
+        if (button) button.disabled = true;
+      });
     }
   }
 

@@ -147,10 +147,28 @@
     return ids;
   }
 
+  // A publication hold blocks *publishing approval*, not a separate human
+  // creative review. Keep held rendered outputs with eligible review decisions
+  // in Needs Eyes. They remain non-selectable for batch publishing approval.
+  function factoryHasHumanReviewAction(card) {
+    return canReviewActions(card) || canReviewHeldOutput(card) || canRejectHeldOutput(card);
+  }
+
   function factoryVisibleNeedsEyes(cards) {
     const submitted = factorySubmittedApprovalIds();
     return (cards || []).filter(card =>
-      card?.kind !== "output" || !submitted.has(String(card?.id || "")));
+      card?.kind === "output" && !submitted.has(String(card?.id || "")) &&
+      factoryHasHumanReviewAction(card));
+  }
+
+  // Only genuinely unreviewable items move to Needs Attention. Moving safe
+  // creative-only decisions there caused the Museum Mile Day Plan outputs
+  // 10827–10832 to disappear from the main Factory review queue.
+  function factoryReviewAttentionCards(cards) {
+    const submitted = factorySubmittedApprovalIds();
+    return (cards || []).filter(card => card?.kind === "output" &&
+      !submitted.has(String(card?.id || "")) && !factoryHasHumanReviewAction(card))
+      .map(card => ({ ...card, _factoryAttention: true }));
   }
 
   const FACTORY_WAITING_SELECTION_KEY = "studio.factory.waiting-selection.v1";
@@ -1799,13 +1817,14 @@
     }
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
     if (card?.review_hold_active === true) return "Publishing approval is held for media QA. You can accept V2 creatively or request another revision.";
+    if (card?.safety_hold_active === true) return "Safety hold: an unapproved publisher attempted to proceed. Preview is available; approval and release remain disabled.";
     if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
     const render = String(card?.render_status || "").trim().toLowerCase();
     if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
     if (/ready for render|waiting in render queue|^rendering$/.test(render)) return "Render is still queued or running; wait for completion.";
     const output = String(card?.output_status || "").trim().toLowerCase();
     if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) {
-      return `Airtable Output Status is ${card.output_status}; not yet approved for review.`;
+      return `Output status is ${card.output_status}; not yet eligible for review.`;
     }
     if (!canReviewActions(card)) return "Not yet review-ready according to the authoritative output/review status.";
     if (state.batchApprovalsEnabled === false) return "Batch approvals are disabled by the server; individual approval is available.";
@@ -1822,6 +1841,48 @@
     return "This profile or output type is outside the current batch rollout; use individual Approve.";
   }
 
+  function canReviewHeldOutput(card) {
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    const publish = String(card?.publish_status || "").trim().toLowerCase();
+    return card?.kind === "output"
+      && card.do_not_publish === true
+      && !card.held_review_decision
+      && card.review_hold_active !== true
+      && card.review_package_ready !== false
+      && output === "ready for review"
+      && ["", "review sent", "pending review", "pending"].includes(review)
+      && ["rendered", "native photo route"].includes(render)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
+      && card.auto_publish_enabled !== true
+      && !card.scheduled_post_date && !card.studio_scheduled_at
+      && !card.youtube_scheduled_publish_at && !card.published_at
+      && !card.platform_post_url;
+  }
+
+  function canRejectHeldOutput(card) {
+    // Rejection is allowed even when a caption/thumbnail is incomplete, so
+    // the operator can request the necessary fixes without releasing a hold.
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    const publish = String(card?.publish_status || "").trim().toLowerCase();
+    return card?.kind === "output" && card.do_not_publish === true
+      && !card.held_review_decision
+      && card.review_hold_active !== true
+      && output === "ready for review"
+      && ["", "review sent", "pending review", "pending"].includes(review)
+      && ["rendered", "native photo route"].includes(render)
+      && (["", "not ready"].includes(publish) ||
+          (card.safety_hold_active === true && ["ready to publish", "publishing", "uploading"].includes(publish)))
+      && card.auto_publish_enabled !== true
+      && !card.scheduled_post_date && !card.studio_scheduled_at
+      && !card.youtube_scheduled_publish_at && !card.published_at
+      && !card.platform_post_url;
+  }
+
   function canReleaseForApproval(card) {
     const output = String(card?.output_status || "").trim().toLowerCase();
     const review = String(card?.review_status || "").trim().toLowerCase();
@@ -1830,6 +1891,7 @@
     return card?.kind === "output"
       && card.do_not_publish === true
       && card.review_hold_active !== true
+      && card.safety_hold_active !== true
       && card.review_package_ready !== false
       && output === "ready for review"
       && ["", "review sent", "pending review"].includes(review)
@@ -1850,13 +1912,16 @@
     }
     const reviewAllowed = canReviewActions(card, { pile, candidate });
     const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
-    const batchReason = needsEyesOutput ? factoryBatchSelectionReason(card) : "";
+    const attentionOutput = card._factoryAttention === true && card.kind === "output";
+    const reviewActionOutput = needsEyesOutput || attentionOutput;
+    const batchReason = reviewActionOutput ? factoryBatchSelectionReason(card) : "";
     const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
-    if (card.kind === "output" && (reviewAllowed || needsEyesOutput)) {
-      // A stale review badge/held revision must never present a live Approve
-      // action merely because the server grouped the row under Needs Eyes.
-      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
-      if(needsEyesOutput && card.review_hold_active===true && card.do_not_publish===true) {
+    if (card.kind === "output" && (reviewAllowed || reviewActionOutput)) {
+      // Remediation outputs do not offer a disabled or unsafe approval action.
+      if (reviewAllowed || needsEyesOutput) {
+        actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
+      }
+      if(reviewActionOutput && card.review_hold_active===true && card.do_not_publish===true) {
         // This is a separate protected handoff of an already-approved revision,
         // not a publishing approval. The server enforces the exact V2/session hold.
         actions.push(`<button type="button" class="secondary-button factory-held-handoff-action" data-factory-handoff-held="${esc(card.id)}" title="Verify approved V2 and release only its original owned review hold. Does not approve, schedule or publish.">Complete V2 Factory handoff</button>`);
@@ -1868,10 +1933,22 @@
           actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
       }
-      if (needsEyesOutput && canReleaseForApproval(card)) {
+      if (reviewActionOutput && card.held_review_decision && card.do_not_publish === true) {
+        actions.push(`<span class="factory-batch-unavailable" role="status">Creative ${esc(card.held_review_decision)} · publishing safety hold retained</span>`);
+      }
+      if (reviewActionOutput && canReviewHeldOutput(card)) {
+        actions.push(`<button type="button" class="primary-button" data-factory-held-review="approve:${esc(card.id)}" title="Approve creative review only; publishing stays blocked.">Approve review (publish held)</button>`);
+      }
+      if (reviewActionOutput && canRejectHeldOutput(card)) {
+        actions.push(`<button type="button" class="secondary-button" data-factory-held-review="reject:${esc(card.id)}" title="Reject or request changes while preserving the publishing hold.">Reject / Request Changes</button>`);
+      }
+      if (reviewActionOutput && canReleaseForApproval(card)) {
         actions.push(`<button type="button" class="secondary-button" data-factory-release-approval="${esc(card.id)}" title="Operator-controlled release only. Does not approve, schedule, or publish.">Release for Approval</button>`);
       }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
+    }
+    if (attentionOutput) {
+      actions.push(`<button type="button" class="primary-button" data-factory-make-ready="${esc(card.id)}" title="Open the exact output in Pipeline to correct its blocking condition. Does not bypass holds or approve publishing.">Fix / Make Ready</button>`);
     }
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
@@ -1907,7 +1984,7 @@
         ${needsEyesOutput
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
-        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Approval unavailable:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
       </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
@@ -2033,27 +2110,49 @@
     const ready = readyContentCards(group);
     const pending = pendingSiblingOutputsForGroup(group);
     const heldRevisions = (group.cards || []).filter(card => card.review_hold_active === true);
+    // A completed Safety-Held render is visible in Needs eyes but cannot
+    // be selected/approved. Count the actual reviewable video previews
+    // separately from operator-approvable outputs (LA Content 2212: six
+    // rendered, zero eligible). Never equate "0 ready" with a failed render.
+    const safetyHeld = (group.cards || []).filter(card =>
+      card?.kind === "output" && card.safety_hold_active === true && card.do_not_publish === true);
+    const heldRendered = safetyHeld.filter(card =>
+      ["rendered", "native photo route"].includes(String(card.render_status || "").trim().toLowerCase()) && canPreview(card));
     const pendingLabel = heldRevisions.length ? "Review-held V2 — preview only" : pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
     const bits = [];
     if (contentId) bits.push(`Content ${contentId}`);
-    bits.push(`${ready.length} ready`);
+    if (safetyHeld.length) {
+      if (first.profile_name) bits.push(String(first.profile_name));
+      const creativeReviewReady = (group.cards || []).filter(card =>
+        canReviewHeldOutput(card) || canRejectHeldOutput(card)).length;
+      bits.push(`${heldRendered.length} rendered for preview`);
+      if (creativeReviewReady) bits.push(`${creativeReviewReady} ready for creative review`);
+      bits.push(`${ready.length} publishing-approvable`);
+      bits.push("Publishing safety hold");
+    } else {
+      const heldForReview = (group.cards || []).filter(canRejectHeldOutput);
+      if (ready.length) bits.push(`${ready.length} ready`);
+      if (heldForReview.length) bits.push(`${heldForReview.length} ready for your review · publishing held`);
+      if (!ready.length && !heldForReview.length) bits.push("0 approvable · inspect hold or render status");
+    }
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
+    // Each Platform Output is independently approvable. A held or unfinished
+    // sibling must not disable selection of review-ready outputs in this content.
+    // The approval endpoint still revalidates every submitted output.
     const approveAll = ready.length > 1
-      ? (pending.length || heldRevisions.length
-        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="${heldRevisions.length ? "Review-held V2 is not yet eligible for publishing" : "Wait until sibling Stories finish rendering, then Approve all together"}">${esc(`Approve all (${ready.length}) — ${heldRevisions.length ? "review held" : "wait for Stories"}`)}</button>`
-        : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
+      ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve eligible (${ready.length})</button>`
       : "";
     const batchReady = ready.filter(canSelectBatchOutput);
     const contentSelected = batchReady.length > 0 && batchReady.every((card) => state.selectedOutputs.has(card.id));
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
-      Select eligible outputs</label>`;
+        ${contentSelected ? "checked" : ""} ${!batchReady.length ? "disabled" : ""}>
+      ${safetyHeld.length && !batchReady.length ? "Preview only — approval held" : "Select eligible outputs"}</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
@@ -2931,6 +3030,17 @@
         }
       });
     });
+    root.querySelectorAll("[data-factory-make-ready]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const card = byId.get(button.getAttribute("data-factory-make-ready"));
+        if (!card) { setStatus("Output is no longer in the review snapshot. Refresh Factory.", true); return; }
+        button.disabled = true;
+        try {
+          setStatus("Opening the exact output for remediation. Resolve the shown issue, then refresh Factory; no approval or publication occurs automatically.");
+          await openStudioTarget(card);
+        } finally { button.disabled = false; }
+      });
+    });
     root.querySelectorAll("[data-factory-preview]").forEach((button) => {
       button.addEventListener("click", () => {
         const card = byId.get(button.getAttribute("data-factory-preview"));
@@ -3140,6 +3250,38 @@
         }
       });
     });
+    root.querySelectorAll("[data-factory-held-review]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const [decision, id] = String(button.getAttribute("data-factory-held-review") || "").split(":");
+        const card = byId.get(id);
+        if (!card || !(decision === "reject" ? canRejectHeldOutput(card) : canReviewHeldOutput(card))) {
+          setStatus("Held output status changed. Refresh Factory before deciding.", true);
+          return;
+        }
+        let note = "";
+        if (decision === "reject") {
+          const answer = window.prompt("Why are you rejecting this output? Describe the changes needed:");
+          if (answer == null || !answer.trim()) return;
+          note = answer.trim();
+        } else if (!window.confirm(`Approve the creative review of "${cardLabel(card)}"?\\n\\nThe publishing hold remains active. Nothing will be scheduled or posted.`)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          await mutateDesk({ action: decision === "approve" ? "approve_held_review" : "reject_held_review",
+            id: card.id, kind: "output", note });
+          setStatus(decision === "approve"
+            ? "Creative review approved. Publishing remains blocked."
+            : "Changes requested. Publishing remains blocked.");
+        } catch (error) {
+          const message = String(error?.message || error);
+          setStatus("Held review was not committed: " + message, true);
+          window.alert("Held review failed:\\n" + message);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
     root.querySelectorAll("[data-factory-release-approval]").forEach((button) => {
       button.addEventListener("click", async () => {
         const card = byId.get(button.getAttribute("data-factory-release-approval"));
@@ -3282,6 +3424,12 @@
     // Display exactly the still-selectable review queue, excluding every
     // submitted output while durable Activity owns its progress and failures.
     const visibleNeedsEyes = factoryVisibleNeedsEyes(desk.lanes?.needs_eyes);
+    const attentionCards = factoryReviewAttentionCards(desk.lanes?.needs_eyes);
+    const manualCards = [...(desk.lanes?.manual || [])];
+    const inManual = new Set(manualCards.map(card => String(card.id || "")));
+    for (const card of attentionCards) {
+      if (!inManual.has(String(card.id || ""))) manualCards.push(card);
+    }
     const filtered = (cards) => (cards || []).filter(card =>
       searching || factoryMatchesProfile(card));
     const visibleDesk = desk;
@@ -3292,9 +3440,10 @@
       needs_eyes: filtered(visibleNeedsEyes).length,
       needs_assets_pile: filtered(desk.lanes?.needs_assets).length,
       needs_assets_max: desk.summary?.needs_assets_max || 3,
-      manual: filtered(desk.lanes?.manual).length,
+      manual: filtered(manualCards).length,
     } : { ...desk.summary,
       needs_eyes: filtered(visibleNeedsEyes).length,
+      manual: filtered(manualCards).length,
     };
     renderSummary(summary);
     const visibleNote = $("factoryProfileScopeNote");
@@ -3303,7 +3452,7 @@
     renderLane("factoryLaneAutoHigh", filtered(desk.lanes?.auto_high), "Nothing in active produce/render right now.", { lane: "auto_high" });
     renderLane("factoryLaneNeedsEyes", filtered(visibleNeedsEyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
     renderLane("factoryLaneNeedsAssets", filtered(desk.lanes?.needs_assets), "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
-    renderLane("factoryLaneManual", filtered(desk.lanes?.manual), "No stuck or failed work in view.", { lane: "manual" });
+    renderLane("factoryLaneManual", filtered(manualCards), "No outputs need remediation.", { lane: "manual" });
     renderLane(
       "factoryNeedsAssetsCandidates",
       filtered(desk.needs_assets_candidates),
@@ -3377,21 +3526,8 @@
     }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
-    if (cards.some(card => card.review_hold_active === true)) {
-      setStatus("This content has a protected V2 review hold. Preview it first; Factory cannot approve this group.", true);
-      return;
-    }
     if (ready.length < 2) {
       setStatus("This content does not have multiple outputs waiting for approval.", true);
-      return;
-    }
-    const pending = pendingSiblingOutputsForGroup({ cards });
-    if (pending.length) {
-      const pendingLabel = pendingSiblingMeta(pending);
-      setStatus(`Approve all is waiting — ${pendingLabel}. Approve when the whole content is Ready for Review so Stories do not come back alone.`, true);
-      window.alert(
-        `Approve all is held until sibling outputs finish.\n\n${pendingLabel}.\n\nStories usually land in Needs eyes a few minutes after Reels/Shorts. Wait, then Approve all together.`,
-      );
       return;
     }
     const title = ready[0].title || "this content";

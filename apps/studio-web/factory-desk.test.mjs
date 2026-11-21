@@ -33,8 +33,8 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(html, /data-factory-band-toggle/);
   assert.match(html, /id="factoryCountAutoHigh"/);
   assert.match(html, /id="factoryCountNeedsEyes"/);
-  assert.match(html, /Same queue as Studio overview Awaiting Approval/);
-  assert.match(html, /Incomplete packages sit in Repair/);
+  assert.match(html, /Only genuinely reviewable outputs/);
+  assert.match(html, /non-ready items are in Needs Attention/);
   assert.doesNotMatch(html, /Studio overview Awaiting Approval can read higher/);
   assert.match(html, /id="factoryCountNeedsAssets"/);
   assert.match(html, /id="factoryCountManual"/);
@@ -53,10 +53,10 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(factory, /pin_needs_assets/);
   assert.match(factory, /data-factory-approve/);
   assert.match(factory, /data-factory-approve-content/);
-  assert.match(factory, /Approve all \(\$\{ready\.length\}\)/);
+  assert.match(factory, /Approve eligible \(\$\{ready\.length\}\)/);
   assert.match(factory, /pendingSiblingOutputsForGroup/);
   assert.match(factory, /still rendering/);
-  assert.match(factory, /wait for Stories/);
+  assert.match(factory, /Approve eligible/);
   assert.match(factory, /approval did not stick|not ready yet/);
   assert.match(factory, /output_status/);
   assert.match(factory, /\/api\/outputs\/approve-all/);

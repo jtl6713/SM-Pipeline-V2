@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
       - 'deploy/i1-durable-runner-release.txt'
+      - 'services/pipeline-runner/ap0/eligibility.py'
+      - 'services/pipeline-runner/ap0/public_mp4.py'
+      - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
+      - 'services/pipeline-runner/publish_queue.py'
+      - 'services/pipeline-runner/tests/test_publish_queue.py'
 
 permissions:
   contents: read
@@ -52,10 +57,12 @@ jobs:
             services/pipeline-runner/tests/test_fbs3_eligibility.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_supabase_runner_reads.py \
+            services/pipeline-runner/tests/test_supabase_youtube_title_fallback.py \
             services/pipeline-runner/tests/test_supabase_formula.py \
             services/pipeline-runner/tests/test_visual_watermark.py \
             services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py \
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
+            services/pipeline-runner/tests/test_ap1_igs_graph_rate_limit.py \
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
             services/pipeline-runner/tests/test_ttd_email_text.py \
             services/pipeline-runner/tests/test_ttd3_atomic_email_claim.py \
@@ -65,6 +72,9 @@ jobs:
             services/pipeline-runner/tests/test_ttd2_delivery_recovery.py \
             services/pipeline-runner/tests/test_ttd4_manual_hold_completion.py \
             services/pipeline-runner/tests/test_public_cover.py \
+            services/pipeline-runner/tests/test_ap0_eligibility.py \
+            services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py \
+            services/pipeline-runner/tests/test_publish_queue.py \
             services/pipeline-runner/tests/test_rendering_review_publication.py \
             services/pipeline-runner/tests/test_rendering_review_producer.py \
             services/pipeline-runner/tests/test_rendering_review_producer_http.py \
@@ -86,6 +96,24 @@ jobs:
             services/pipeline-runner/tests/test_native_gallery_readiness_http.py \
             services/pipeline-runner/tests/test_native_gallery_auto_execute.py \
             services/pipeline-runner/tests/test_native_gallery_execute_http.py
+
+      - name: Fail closed unless runner is Supabase-only and Airtable archive is idle
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 25 -o /tmp/pre-deploy-runner-health.json -w '%{http_code}' \
+            'https://pipeline.chicagoshining.com/health' || true)
+          test "$code" = "200"
+          jq -e '.ok==true
+            and .studio_write_source=="supabase"
+            and .studio_phase6_write_source=="supabase"
+            and .studio_runner_output_read_source=="supabase"
+            and .studio_runner_content_read_source=="supabase"
+            and .supabase_pipeline_writes==true
+            and .airtable_activity.ok==true
+            and .airtable_activity.any_read==false
+            and .airtable_activity.any_write==false' /tmp/pre-deploy-runner-health.json >/dev/null
+          echo "runner_supabase_authority_and_airtable_archive_idle=PASS"
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -164,7 +192,7 @@ jobs:
           test -n "$EXPECTED"
           for i in $(seq 1 24); do
             code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
-            if [[ "$code" == "200" ]] && jq -e --arg expected "$EXPECTED" '.ok==true and .version==$expected' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$code" == "200" ]] && jq -e --arg expected "$EXPECTED" '.ok==true and .version==$expected and .studio_write_source=="supabase" and .studio_phase6_write_source=="supabase" and .studio_runner_output_read_source=="supabase" and .studio_runner_content_read_source=="supabase" and .supabase_pipeline_writes==true' /tmp/health.json >/dev/null 2>&1; then
               cat /tmp/health.json
               echo "Verified deployed runner version: $EXPECTED"
               exit 0

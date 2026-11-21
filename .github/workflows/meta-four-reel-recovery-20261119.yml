@@ -1,0 +1,448 @@
+name: Controlled Meta publishing recovery - 4 exact rendered Reels
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-four-reel-recovery-20261119.yml'
+permissions:
+  contents: read
+concurrency:
+  group: meta-four-reel-recovery-20261119
+  cancel-in-progress: false
+jobs:
+  fb-la:
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with existing approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops credential unavailable"; exit 1
+      - name: Execute one exact, reviewed, rendered FB Reel through native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/meta-ig-5867.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="recHuXqnrnjAC5W9T"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_not_supabase_authoritative" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$key) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "missing_required_env" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvValue "PIPELINE_RUNNER_SHARED_SECRET"
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw "missing_runner_auth" }
+          $h=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $url=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$record+"&select=airtable_record_id,output_number,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,error_messages"
+          $rows=@(Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25)
+          if ($rows.Count -ne 1) { throw "exact_output_ambiguous" }
+          $o=$rows[0]
+          if ($o.output_number -ne 5867 -or $o.platform -ne "Facebook" -or $o.platform_output_type -ne "Facebook Reel" -or
+              $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Ready to Publish" -or
+              $o.render_status -ne "Rendered" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.publish_asset_url -or
+              $o.error_messages.Platform_Post_ID -or $o.error_messages.FB_Slideshow_Meta_Video_ID -or $o.error_messages.Publish_Locked_By -or
+              $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID) {
+              throw "exact_fb_5867_safety_gate_failed"
+          }
+          $head=Invoke-WebRequest -Uri $o.publish_asset_url -Method Head -UseBasicParsing -TimeoutSec 40
+          if ([int]$head.StatusCode -ne 200 -or $head.Headers["Content-Type"] -notmatch "video/mp4") { throw "fb_public_mp4_unavailable" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function RunStage([bool]$dry) {
+              $body=@{output_record_id=$record;extra=@{dry_run=$dry}} | ConvertTo-Json -Depth 5 -Compress
+              return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/fbs3" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 240
+          }
+          $preview=RunStage $true
+          if ($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) { throw "fb_dry_run_refused" }
+          Write-Output "fb_5867_dry_run=PASS"
+          $result=RunStage $false
+          Write-Output ("fb_5867_stage_status="+[string]$result.status)
+          Write-Output ("fb_5867_reason="+[string]$result.details.run.reason)
+          $video=[string]$result.details.run.video_id
+          if ($video) { Write-Output ("fb_5867_video_id="+$video) }
+          if ($result.status -ne "ok" -or -not $video) { throw "fb_5867_fbs3_not_queued" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          $body=@{output_record_id=$record;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
+          for ($try=0; $try -lt 3; $try++) {
+              Start-Sleep -Seconds 18
+              $poll=Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/fbs4" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 160
+              Write-Output ("fb_5867_poll_status="+[string]$poll.status)
+              if ($poll.details.run.permalink) {
+                  Write-Output ("fb_5867_permalink="+[string]$poll.details.run.permalink)
+                  break
+              }
+              if (-not $poll.details.run.still_processing) {
+                  Write-Output ("fb_5867_poll_reason="+[string]$poll.details.run.reason)
+                  break
+              }
+          }
+          PS
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/meta-ig-5867.json').write_text(json.dumps({
+             "command":pathlib.Path('/tmp/meta-ig-5867.ps1').read_text(),
+             "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+             -X POST 'https://ops.chicagoshining.com/api/shell' \
+             -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+             --data-binary @/tmp/meta-ig-5867.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected exact canary: http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^fb_5867_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -25
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops exact canary not confirmed"; exit 4
+
+  ig-miami:
+    needs: fb-la
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with existing approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops credential unavailable"; exit 1
+      - name: Execute one exact, reviewed, rendered IG Reel through native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/meta-ig-6019.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="recAfE52sgYjKrSjY"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_not_supabase_authoritative" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$key) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "missing_required_env" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvValue "PIPELINE_RUNNER_SHARED_SECRET"
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw "missing_runner_auth" }
+          $h=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $url=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$record+"&select=airtable_record_id,output_number,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,error_messages"
+          $rows=@(Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25)
+          if ($rows.Count -ne 1) { throw "exact_output_ambiguous" }
+          $o=$rows[0]
+          if ($o.output_number -ne 6019 -or $o.platform -ne "Instagram" -or $o.platform_output_type -ne "Instagram Reel" -or
+              $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Ready to Publish" -or
+              $o.render_status -ne "Rendered" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.publish_asset_url -or
+              $o.error_messages.Platform_Post_ID -or $o.error_messages.Platform_Media_ID -or $o.error_messages.Publish_Locked_By -or
+              $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID) {
+              throw "exact_ig_6019_safety_gate_failed"
+          }
+          $head=Invoke-WebRequest -Uri $o.publish_asset_url -Method Head -UseBasicParsing -TimeoutSec 40
+          if ([int]$head.StatusCode -ne 200 -or $head.Headers["Content-Type"] -notmatch "video/mp4") { throw "ig_public_mp4_unavailable" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function RunStage([bool]$dry) {
+              $body=@{output_record_id=$record;extra=@{dry_run=$dry}} | ConvertTo-Json -Depth 5 -Compress
+              return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/ap1_ig" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 240
+          }
+          $preview=RunStage $true
+          if ($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) { throw "ig_dry_run_refused" }
+          Write-Output "ig_6019_dry_run=PASS"
+          $result=RunStage $false
+          Write-Output ("ig_6019_stage_status="+[string]$result.status)
+          Write-Output ("ig_6019_reason="+[string]$result.details.run.reason)
+          if ($result.details.run.media_id) { Write-Output ("ig_6019_media_id="+[string]$result.details.run.media_id) }
+          if ($result.details.run.creation_id) { Write-Output ("ig_6019_creation_id="+[string]$result.details.run.creation_id) }
+          if ($result.details.run.permalink) { Write-Output ("ig_6019_permalink="+[string]$result.details.run.permalink) }
+          if ($result.status -eq "error") { throw "ig_runner_stage_error" }
+          if ($result.status -eq "skipped" -and $result.details.run.reason -ne "container_in_progress") { throw "ig_runner_stage_skipped" }
+          PS
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/meta-ig-6019.json').write_text(json.dumps({
+             "command":pathlib.Path('/tmp/meta-ig-6019.ps1').read_text(),
+             "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+             -X POST 'https://ops.chicagoshining.com/api/shell' \
+             -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+             --data-binary @/tmp/meta-ig-6019.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected exact canary: http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^ig_6019_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -25
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops exact canary not confirmed"; exit 4
+
+  fb-ny:
+    needs: ig-miami
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with existing approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops credential unavailable"; exit 1
+      - name: Execute one exact, reviewed, rendered FB Reel through native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/meta-ig-5936.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="recLOrfrlkBAzOzZn"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_not_supabase_authoritative" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$key) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "missing_required_env" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvValue "PIPELINE_RUNNER_SHARED_SECRET"
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw "missing_runner_auth" }
+          $h=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $url=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$record+"&select=airtable_record_id,output_number,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,error_messages"
+          $rows=@(Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25)
+          if ($rows.Count -ne 1) { throw "exact_output_ambiguous" }
+          $o=$rows[0]
+          if ($o.output_number -ne 5936 -or $o.platform -ne "Facebook" -or $o.platform_output_type -ne "Facebook Reel" -or
+              $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Ready to Publish" -or
+              $o.render_status -ne "Rendered" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.publish_asset_url -or
+              $o.error_messages.Platform_Post_ID -or $o.error_messages.FB_Slideshow_Meta_Video_ID -or $o.error_messages.Publish_Locked_By -or
+              $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID) {
+              throw "exact_fb_5936_safety_gate_failed"
+          }
+          $head=Invoke-WebRequest -Uri $o.publish_asset_url -Method Head -UseBasicParsing -TimeoutSec 40
+          if ([int]$head.StatusCode -ne 200 -or $head.Headers["Content-Type"] -notmatch "video/mp4") { throw "fb_public_mp4_unavailable" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function RunStage([bool]$dry) {
+              $body=@{output_record_id=$record;extra=@{dry_run=$dry}} | ConvertTo-Json -Depth 5 -Compress
+              return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/fbs3" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 240
+          }
+          $preview=RunStage $true
+          if ($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) { throw "fb_dry_run_refused" }
+          Write-Output "fb_5936_dry_run=PASS"
+          $result=RunStage $false
+          Write-Output ("fb_5936_stage_status="+[string]$result.status)
+          Write-Output ("fb_5936_reason="+[string]$result.details.run.reason)
+          $video=[string]$result.details.run.video_id
+          if ($video) { Write-Output ("fb_5936_video_id="+$video) }
+          if ($result.status -ne "ok" -or -not $video) { throw "fb_5936_fbs3_not_queued" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          $body=@{output_record_id=$record;extra=@{dry_run=$false}} | ConvertTo-Json -Depth 5 -Compress
+          for ($try=0; $try -lt 3; $try++) {
+              Start-Sleep -Seconds 18
+              $poll=Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/fbs4" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 160
+              Write-Output ("fb_5936_poll_status="+[string]$poll.status)
+              if ($poll.details.run.permalink) {
+                  Write-Output ("fb_5936_permalink="+[string]$poll.details.run.permalink)
+                  break
+              }
+              if (-not $poll.details.run.still_processing) {
+                  Write-Output ("fb_5936_poll_reason="+[string]$poll.details.run.reason)
+                  break
+              }
+          }
+          PS
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/meta-ig-5936.json').write_text(json.dumps({
+             "command":pathlib.Path('/tmp/meta-ig-5936.ps1').read_text(),
+             "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+             -X POST 'https://ops.chicagoshining.com/api/shell' \
+             -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+             --data-binary @/tmp/meta-ig-5936.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected exact canary: http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^fb_5936_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -25
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops exact canary not confirmed"; exit 4
+
+  ig-ny:
+    needs: fb-ny
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with existing approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops credential unavailable"; exit 1
+      - name: Execute one exact, reviewed, rendered IG Reel through native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/meta-ig-6053.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="recl5soc3ipX0c2BI"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_not_supabase_authoritative" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$key) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "missing_required_env" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvValue "PIPELINE_RUNNER_SHARED_SECRET"
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw "missing_runner_auth" }
+          $h=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $url=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$record+"&select=airtable_record_id,output_number,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,error_messages"
+          $rows=@(Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25)
+          if ($rows.Count -ne 1) { throw "exact_output_ambiguous" }
+          $o=$rows[0]
+          if ($o.output_number -ne 6053 -or $o.platform -ne "Instagram" -or $o.platform_output_type -ne "Instagram Reel" -or
+              $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Ready to Publish" -or
+              $o.render_status -ne "Rendered" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.publish_asset_url -or
+              $o.error_messages.Platform_Post_ID -or $o.error_messages.Platform_Media_ID -or $o.error_messages.Publish_Locked_By -or
+              $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID) {
+              throw "exact_ig_6053_safety_gate_failed"
+          }
+          $head=Invoke-WebRequest -Uri $o.publish_asset_url -Method Head -UseBasicParsing -TimeoutSec 40
+          if ([int]$head.StatusCode -ne 200 -or $head.Headers["Content-Type"] -notmatch "video/mp4") { throw "ig_public_mp4_unavailable" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function RunStage([bool]$dry) {
+              $body=@{output_record_id=$record;extra=@{dry_run=$dry}} | ConvertTo-Json -Depth 5 -Compress
+              return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/ap1_ig" -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 240
+          }
+          $preview=RunStage $true
+          if ($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) { throw "ig_dry_run_refused" }
+          Write-Output "ig_6053_dry_run=PASS"
+          $result=RunStage $false
+          Write-Output ("ig_6053_stage_status="+[string]$result.status)
+          Write-Output ("ig_6053_reason="+[string]$result.details.run.reason)
+          if ($result.details.run.media_id) { Write-Output ("ig_6053_media_id="+[string]$result.details.run.media_id) }
+          if ($result.details.run.creation_id) { Write-Output ("ig_6053_creation_id="+[string]$result.details.run.creation_id) }
+          if ($result.details.run.permalink) { Write-Output ("ig_6053_permalink="+[string]$result.details.run.permalink) }
+          if ($result.status -eq "error") { throw "ig_runner_stage_error" }
+          if ($result.status -eq "skipped" -and $result.details.run.reason -ne "container_in_progress") { throw "ig_runner_stage_skipped" }
+          PS
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/meta-ig-6053.json').write_text(json.dumps({
+             "command":pathlib.Path('/tmp/meta-ig-6053.ps1').read_text(),
+             "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+             -X POST 'https://ops.chicagoshining.com/api/shell' \
+             -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+             --data-binary @/tmp/meta-ig-6053.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected exact canary: http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^ig_6053_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -25
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops exact canary not confirmed"; exit 4

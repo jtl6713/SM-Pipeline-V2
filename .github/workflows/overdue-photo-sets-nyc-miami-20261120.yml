@@ -1,0 +1,155 @@
+name: Exact approved Facebook photo-set recovery - NYC and Miami
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/overdue-photo-sets-nyc-miami-20261120.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: overdue-photo-sets-nyc-miami-20261120
+  cancel-in-progress: false
+
+jobs:
+  exact-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate with existing approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >>"$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Approved Ops credential unavailable"; exit 1
+      - name: Publish two previously approved photo sets with exact FB0-FB3 stages and receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/overdue-photo-batch.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or
+              $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) {
+              throw "runner_supabase_authority_not_verified"
+          }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          function EnvValue([string]$k) {
+             $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($k)+"\s*=")}) | Select-Object -Last 1
+             if (-not $line) { throw "runner_secret_missing" }
+             return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvValue "PIPELINE_RUNNER_SHARED_SECRET"
+          $dburl=EnvValue "SUPABASE_URL"
+          $dbkey=EnvValue "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $dburl -or -not $dbkey) { throw "auth_configuration_missing" }
+          $dbHead=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $stageHead=@{"X-Pipeline-Secret"=$secret}
+          function RunStage([string]$stage,[string]$record,[bool]$dry) {
+             $body=@{output_record_id=$record;extra=@{dry_run=$dry}} | ConvertTo-Json -Compress -Depth 5
+             return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/$stage" -Headers $stageHead -Method POST -ContentType "application/json" -Body $body -TimeoutSec 330
+          }
+          $targets=@(
+            @{number=9894;record="rec9zt364vdj26Job"},
+            @{number=10651;record="recZvSMC0DUiSAc7X"}
+          )
+          foreach ($target in $targets) {
+             $record=[string]$target.record
+             $number=[int]$target.number
+             $url=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$record+"&select=output_number,airtable_record_id,content_profile_id,platform,platform_output_type,review_status,output_status,render_status,publish_status,publish_method,fb_publish_status,image_count,image_output_selected,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_next_retry_at,output_caption,final_file_url,error_messages"
+             function ReadExact {
+                $rows=@(Invoke-RestMethod -Uri $url -Headers $dbHead -TimeoutSec 35)
+                if ($rows.Count -ne 1) { throw "exact_output_missing_or_ambiguous" }
+                return $rows[0]
+             }
+             $o=ReadExact
+             if ($o.output_number -ne $number -or $o.platform -ne "Facebook" -or $o.platform_output_type -ne "Facebook Photo Set" -or
+                 $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.render_status -ne "Native Photo Route" -or
+                 $o.publish_status -ne "Ready to Publish" -or $o.publish_method -ne "Automated" -or
+                 $o.fb_publish_status -ne "Ready for Assets" -or $o.image_count -ne 4 -or $o.image_output_selected -ne $true -or
+                 $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+                 $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.output_caption -or -not $o.content_profile_id -or
+                 $o.error_messages.Platform_Post_ID -or $o.error_messages.Platform_Media_ID -or
+                 $o.error_messages.Publish_Locked_By -or $o.error_messages.Publish_Locked_At -or $o.error_messages.Publish_Started_At -or
+                 $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID -or
+                 $o.error_messages.Backlog_20261120_Recovery_State -ne "fb0_exact_canary" -or
+                 -not ([string]$o.publish_next_retry_at).StartsWith("2099-01-01")) {
+                 throw "photo_exact_approved_preflight_denied"
+             }
+             $otherUrl=$dburl.TrimEnd("/")+"/rest/v1/platform_outputs?content_profile_id=eq."+$o.content_profile_id+"&platform_output_type=eq.Facebook%20Photo%20Set&published_at=not.is.null&select=output_number,output_caption,final_file_url&limit=1000"
+             $published=@(Invoke-RestMethod -Uri $otherUrl -Headers $dbHead -TimeoutSec 35)
+             foreach($sibling in $published) {
+                 if($sibling.output_caption -eq $o.output_caption -or ($o.final_file_url -and $sibling.final_file_url -eq $o.final_file_url)) {
+                    throw "same_format_facebook_photo_already_published"
+                 }
+             }
+             foreach($stage in @("fb0","fb1","fb2","fb3")) {
+                 $preview=RunStage $stage $record $true
+                 if($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) {
+                    Write-Output ("photo_recovery_"+$number+"_dry_run_stage="+$stage+";reason="+[string]$preview.details.run.eligibility_reason)
+                    throw "native_facebook_photo_stage_refused"
+                 }
+                 $result=RunStage $stage $record $false
+                 Write-Output ("photo_recovery_"+$number+"_stage="+$stage+";status="+[string]$result.status+";reason="+[string]$result.details.run.reason)
+                 if($result.status -ne "ok" -or $result.details.run.processed -ne $true -or
+                    $result.details.run.retry -eq $true -or $result.details.run.terminal -eq $true) {
+                    throw "native_facebook_photo_stage_failed"
+                 }
+                 $fresh=ReadExact
+                 if($stage -eq "fb0" -and $fresh.fb_publish_status -ne "Ready for Photo Media") { throw "fb0_receipt_incomplete" }
+                 if($stage -eq "fb1" -and $fresh.fb_publish_status -ne "Photo Media Ready") { throw "fb1_receipt_incomplete" }
+                 if($stage -eq "fb2" -and ($fresh.fb_publish_status -ne "Published Pending Finalize" -or
+                     -not $fresh.error_messages.Platform_Post_ID)) { throw "fb2_post_id_incomplete" }
+             }
+             $final=ReadExact
+             if($final.publish_status -ne "Published" -or $final.output_status -ne "Published" -or
+                -not $final.published_at -or -not $final.platform_post_url -or -not $final.error_messages.Platform_Post_ID) {
+                throw "native_photo_publication_receipt_missing"
+             }
+             Write-Output ("photo_recovery_"+$number+"_provider_id="+[string]$final.error_messages.Platform_Post_ID)
+             Write-Output ("photo_recovery_"+$number+"_permalink="+[string]$final.platform_post_url)
+             Write-Output ("photo_recovery_"+$number+"_confirmed=PASS")
+          }
+          PS
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/overdue-photo-batch.json').write_text(json.dumps({
+             "command":pathlib.Path('/tmp/overdue-photo-batch.ps1').read_text(),
+             "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+             -X POST 'https://ops.chicagoshining.com/api/shell' \
+             -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+             --data-binary @/tmp/overdue-photo-batch.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected exact canary: http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 210); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+                "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^photo_recovery_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -25
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops exact canary not confirmed"; exit 4

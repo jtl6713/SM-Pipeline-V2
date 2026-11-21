@@ -1,0 +1,39 @@
+name: Audit LA TikTok connected account (read only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/la-tiktok-identity-10733-audit.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-la-account:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect public LA OAuth status without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://auth-la.chicagoshining.com/tiktok/status'
+          code=$(curl -sSL --retry 2 --max-time 25 -o /tmp/la-tiktok-status.json -w '%{http_code}' "$url")
+          test "$code" = '200' || { echo "LA status endpoint returned HTTP $code"; exit 1; }
+          jq -e '.ok == true' /tmp/la-tiktok-status.json >/dev/null
+          username=$(jq -r '.creator_username // ""' /tmp/la-tiktok-status.json | tr '[:upper:]' '[:lower:]' | sed 's/^@//')
+          auth=$(jq -r '.authorized // false' /tmp/la-tiktok-status.json)
+          scopes=$(jq -r '.required_scopes_granted // false' /tmp/la-tiktok-status.json)
+          worker=$(jq -r '.worker_version // "unknown"' /tmp/la-tiktok-status.json)
+          echo "expected_creator=@lashining1"
+          echo "configured_creator=@${username:-none}"
+          echo "authorized=$auth required_scopes_granted=$scopes worker_version=$worker"
+          if [[ "$username" == 'lashining1' && "$auth" == true && "$scopes" == true ]]; then
+            echo 'la_tiktok_connected_account_match=PASS'
+          else
+            echo 'la_tiktok_connected_account_match=FAIL'
+            exit 1
+          fi
+          rm -f /tmp/la-tiktok-status.json

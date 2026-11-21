@@ -17,6 +17,7 @@ import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
 import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-autonomous-schedule.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
+import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -91,6 +92,7 @@ import {
   factorySupabaseApprovalRows, factorySupabaseApprovalDisposition,
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
+import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
@@ -119,6 +121,7 @@ import {
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
   listSupabaseOverviewPack,
+  listSupabaseIdeasForProfile,
   listSupabaseFactoryDeskPack,
   listSupabaseContentProfiles,
   listSupabaseOpsPublishOutputs,
@@ -131,6 +134,8 @@ import {
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
+  readSupabaseShapedContentItem,
+  readSupabaseContentProfile,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
@@ -5491,7 +5496,11 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   const profileList = Array.isArray(profiles) ? profiles : [];
   const profileIds = profileList.map((profile) => profile?.id).filter(Boolean);
   const ideaCounts = overviewIdeaCountMap();
-  const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
+  // During every Supabase-backed Home refresh, recount Ideas against current
+  // promotion links. Cached per-profile counters can outlive a promotion and
+  // advertise phantom Miami/LA ideas even when the Ideas page is empty.
+  const missingIdeaCounts = forceIdeas || studioHomeReadSource(env) === "supabase"
+    || profileIds.some((id) => !ideaCounts.has(String(id)));
 
   // Home opens Supabase only when its own flag is set. preferSupabase marks a
   // manual refresh, but it must not open a database connection on its own.
@@ -6006,11 +6015,46 @@ export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorizati
 }
 /*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewIdeasRefresh__*/
 
+const studioHomeIdeaLiveCountCache = { expiry:0, key:'', counts:null, pending:null };
+async function studioHomeVerifiedIdeasRows(env, records) {
+  if (studioHomeReadSource(env) !== 'supabase' || !studioSupabaseConfigured(env)) return records;
+  const ids = records.map(row => String(row.id || '')).filter(Boolean);
+  if (ids.length !== 4 || new Set(ids).size !== 4) return records;
+  const key = ids.slice().sort().join(':');
+  if (key !== studioHomeIdeaLiveCountCache.key) {
+    studioHomeIdeaLiveCountCache.key = key;
+    studioHomeIdeaLiveCountCache.expiry = 0;
+    studioHomeIdeaLiveCountCache.counts = null;
+    studioHomeIdeaLiveCountCache.pending = null;
+  }
+  if (Date.now() >= studioHomeIdeaLiveCountCache.expiry) {
+    if (!studioHomeIdeaLiveCountCache.pending) {
+      studioHomeIdeaLiveCountCache.pending = Promise.all(ids.map(async id => {
+        const list = await listSupabaseIdeasForProfile(env, id, 100, {unpromotedOnly:true});
+        return [id, list.length];
+      })).then(pairs => {
+        studioHomeIdeaLiveCountCache.counts = new Map(pairs);
+        studioHomeIdeaLiveCountCache.expiry = Date.now() + 30000;
+      }).finally(() => { studioHomeIdeaLiveCountCache.pending = null; });
+    }
+    await studioHomeIdeaLiveCountCache.pending;
+  }
+  const counts = studioHomeIdeaLiveCountCache.counts;
+  return records.map(row => {
+    const count = counts.get(String(row.id || ''));
+    return Number.isSafeInteger(count) ? {
+      ...row, ideas:count, ideas_source:'supabase-live-unpromoted',
+      metrics:{...(row.metrics || {}), ideas_not_in_production:count},
+    } : row;
+  });
+}
 export async function profilesOverview(request, env, authorization, ctx) {
   if (env?.STUDIO_HOME_PROFILE_SUMMARY_READS === "true") {
     try {
       const summary = await readStudioProfileSummary(env);
       if (validVerifiedStudioSummary(summary, summary.records.map((row) => row.id))) {
+        const verifiedIdeasRows = await studioHomeVerifiedIdeasRows(env, summary.records)
+          .catch(error => { console.warn('Home Ideas count reconciliation failed', String(error?.message || error)); return summary.records; });
         return respond(request, env, {
           ok: true, cached: true, stale: false, snapshot: true,
           summary_version: summary.version,
@@ -6019,7 +6063,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
           snapshot_at: Math.max(Number(summary.last_authoritative_event_at || 0), Number(summary.last_reconciled_at || 0)),
           snapshot_generation: "summary-" + summary.version,
           read_source: summary.source,
-          records: summary.records,
+          records: verifiedIdeasRows,
         });
       }
     } catch (error) {
@@ -10544,6 +10588,62 @@ export async function gatherStudioDeskInventory(env) {
  * Read-only, shared Quality Agent snapshot. No new scan loop or publisher.
  * Authorization is enforced by the /api/admin/exception-recovery route.
  */
+/**
+ * Complete Supabase-only classification of the approved past-due backlog.
+ * No Airtable reads, no Graph/upload API calls and no output PATCH or release.
+ * Includes explicitly held and retry-disabled records so they never vanish.
+ */
+export async function getStudioApprovedPastDueTriage(request, env) {
+  if (!studioSupabaseConfigured(env)) throw new HttpError(503,"Supabase approved-past-due source is unavailable");
+  const url=new URL(request.url);
+  const scanAt=new Date().toISOString();
+  const pageSize=100;
+  const records=[];
+  let offset=0;
+  while (offset<2000) {
+    const page=await listSupabaseDeskHealPage(env,{
+      kind:"approved_past_due_all",limit:pageSize,offset,cutoffIso:scanAt
+    });
+    if (!Array.isArray(page?.records)) throw new HttpError(503,"Supabase overdue census incomplete");
+    records.push(...page.records);
+    if (!page.offset) break;
+    const next=Number(page.offset);
+    if (!Number.isInteger(next)||next<=offset||next>=2000)
+      throw new HttpError(503,"Supabase overdue census exceeded safe full-scan bound");
+    offset=next;
+  }
+  const ids=new Set();
+  const items=records.map(row=>{
+    if(!row?.id||ids.has(row.id)) throw new HttpError(503,"Supabase overdue census has missing or duplicate output identity");
+    ids.add(row.id);
+    return classifyApprovedPastDueOutput(row,{nowMs:Date.parse(scanAt)});
+  });
+  const counts=new Map();
+  for (const item of items) {
+    const current=counts.get(item.action_group)||{group:item.action_group,count:0,platforms:{}};
+    current.count++;
+    current.platforms[item.platform]=(current.platforms[item.platform]||0)+1;
+    counts.set(item.action_group,current);
+  }
+  const profileFilter=String(url.searchParams.get("profile_id")||"").trim();
+  const platformFilter=String(url.searchParams.get("platform")||"").trim().toLowerCase();
+  const groupFilter=String(url.searchParams.get("group")||"").trim();
+  const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")||500)||500));
+  const visible=items.filter(item=>
+    (!profileFilter||records.find(r=>r.id===item.record_id)?.fields?.Content_Profile?.includes(profileFilter))
+    &&(!platformFilter||item.platform.toLowerCase()===platformFilter)
+    &&(!groupFilter||item.action_group===groupFilter)
+  );
+  return respond(request,env,{
+    status:"ok",source_of_truth:"supabase",read_only:true,publish_actions_enabled:false,
+    scanned_at:scanAt,total:items.length,groups:[...counts.values()].sort((a,b)=>a.group.localeCompare(b.group)),
+    visible_count:visible.length,truncated:visible.length>limit,
+    items:visible.slice(0,limit),
+    safety_note:"No saved external ID is not evidence that a post never published. Categories never authorize a provider POST.",
+  });
+}
+/*__STUDIO_WORKER_END:getStudioApprovedPastDueTriage__*/
+
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
     const url = new URL(request.url);
@@ -10663,35 +10763,43 @@ function exceptionRecoveryRecordIdFromPath(pathname, suffix) {
   if (!RECOVERY_RECORD_ID.test(String(id || ""))) throw new HttpError(400, "Invalid output record ID");
   return id;
 }
-async function exceptionRecoveryReadProvider(env, row) {
+async function exceptionRecoveryReadProvider(env, row, verifiedProfile = null) {
   const platform = String(f(row, "Platform") || "");
   let names = [];
   if (platform === "Facebook" || platform === "Instagram")
     names = ["FACEBOOK_PAGE_ACCESS_TOKEN","FACEBOOK_GRAPH_API_VERSION"];
   else if (platform === "YouTube") names = ["YOUTUBE_API_KEY"];
-  const settings = names.length ? await studioActivePipelineSettings(env,names,row).catch(()=>({})) : {};
+  const strict = Boolean(verifiedProfile);
+  const settings = names.length
+    ? await studioActivePipelineSettings(env,names,verifiedProfile || row,
+      {requireSupabase:strict}).catch(()=>({})) : {};
   return verifyExistingProviderReceipt(row,{settings:{
     ...settings,
-    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
-    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN ||
+      (strict ? "" : env.FACEBOOK_PAGE_ACCESS_TOKEN),
+    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY ||
+      (strict ? "" : env.YOUTUBE_API_KEY),
   }});
 }
 /**
- * Resolve the authoritative Airtable identity chain, never the
- * Platform Output.Content_Profile lookup label:
- * Platform Output.Content_Item -> Content Item.Content_Profile -> Profile.
- * Every read of an output for the autonomous status-only reconciler uses this.
+ * Resolve the authoritative Supabase owner chain, never the legacy
+ * display-only Content_Profile lookup: Output -> Content Item -> Profile.
+ * Missing/mismatched identities fail closed before any provider GET.
  */
 async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId);
+  // P1 #2340: this owner chain is required before any profile-scoped provider
+  // GET. Airtable is no longer an authority; missing Supabase data fails closed.
+  if(studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+    throw new Error("supabase_recovery_owner_chain_required");
+  const row=await readSupabaseShapedOutput(env,recordId);
   if(!row?.id||row.id!==recordId)throw new Error("authoritative_recovery_output_unavailable");
   const contentId=contentIdForRecoveryOutput(row);
   if(!contentId)throw new Error("recovery_content_link_missing_or_ambiguous");
-  const content=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId);
+  const content=await readSupabaseShapedContentItem(env,contentId);
   const links=content?.fields?.Content_Profile;
   if(!Array.isArray(links)||links.length!==1||!RECOVERY_RECORD_ID.test(String(links[0]||"")))
     throw new Error("recovery_profile_link_missing_or_ambiguous");
-  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,links[0]);
+  const profile=await readSupabaseContentProfile(env,links[0]);
   const chain=verifyRecoveryProfileChain(row,content,profile);
   if(!chain.ok)throw new Error(chain.reason||"authoritative_profile_link_unverified");
   return {row:withVerifiedRecoveryProfile(row,chain),profile,profile_id:chain.profile_id};
@@ -10716,7 +10824,8 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
     let scoped;
     try {
       scoped=await studioActivePipelineSettings(env,
-        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile);
+        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile,
+        {requireSupabase:true});
     } catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_instagram_settings_unavailable"};}
     const direct=String(f(source.profile,"Instagram_Business_Account_ID")||"").trim();
     if(direct && direct!==String(scoped.INSTAGRAM_BUSINESS_ACCOUNT_ID||"").trim())
@@ -10729,18 +10838,25 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   let settings;
   try {
     settings=await studioActivePipelineSettings(env,
-      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
+      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile,
+      {requireSupabase:true});
   }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
   // The deployment may keep the uploader authentication key in the existing
   // global Pipeline Setting rather than a Worker binding. This key is only
   // transport authentication: destination URL and channel remain scoped.
-  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET && !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET) {
-    const keys=await listRecords(env,"Pipeline Settings",{limit:2,
-      filterFormula:'AND({Active}=1,{Setting_Name}="YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET")'});
-    if(keys.length!==1 || !String(f(keys[0],"Setting_Value")||"").trim())
-      return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_service_auth_missing"};
-    settings={...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:String(f(keys[0],"Setting_Value")).trim()};
+  // The uploader's shared transport key is global, not a city destination.
+  // Resolve it directly from the canonical Supabase Pipeline Settings row if
+  // the scoped bulk resolver omitted it. Do not query legacy Airtable.
+  let transportKey=String(settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET ||
+    env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "").trim();
+  if(!transportKey) {
+    const globalSetting=await readSupabasePipelineSetting(env,
+      "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",{activeOnly:true}).catch(()=>null);
+    transportKey=String(f(globalSetting,"Setting_Value")||"").trim();
   }
+  if(!transportKey)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,
+      evidence:"profile_service_auth_missing"};
   const channel=verifiedRecoveryChannelId(source.profile,settings);
   if(!channel.ok)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
@@ -10748,8 +10864,7 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   // expected channel stay profile-scoped; this service key authenticates the
   // configured uploader and never substitutes another profile's channel.
   return verifyAuthenticatedYouTubeReceipt(source.row,{settings:{
-    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:
-      settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||"",
+    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:transportKey,
   },expectedChannelId:channel.channel_id});
 }
 
@@ -10779,6 +10894,11 @@ async function appendPublicationRecoveryAudit(env,event) {
     throw new Error("audit_append_readback_failed");
 }
 export async function studioPublicationRecoveryCron(env) {
+  // Do not run a legacy Airtable discovery/PATCH reconciler after the
+  // canonical write source has moved to Supabase. Explicitly fail closed.
+  if (studioWriteSource(env) === "supabase")
+    return {ok:false,disabled:true,reason:"legacy_airtable_recovery_writer_disabled",
+      read_only:true};
   return runPublicationRecovery(env,{
     discover:async options=>{
       const page=await listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{...options,limit:100});
@@ -10813,11 +10933,12 @@ export async function getStudioPublicationRecoveryHistory(request,env) {
 /** Provider GET only. No persisted publication change from this endpoint. */
 export async function getStudioExceptionRecoveryReceipt(request, env) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  const source=await exceptionRecoveryReadVerifiedOutput(env,id);
+  const row=source.row;
   if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
   const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
     ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
-    :await exceptionRecoveryReadProvider(env,row);
+    :await exceptionRecoveryReadProvider(env,row,source.profile);
   let verification=null;
   if(new URL(request.url).searchParams.get("authenticated")==="1") {
     const after=(await exceptionRecoveryReadVerifiedOutput(env,id)).row;
@@ -10919,7 +11040,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
   const fresh=url.searchParams.get("fresh")==="1";
   // Normal page navigation never triggers the 8k-record, cursor-paginated
-  // Airtable census. Only the administrator's explicit Reconcile action does.
+  // Supabase census. Only the administrator's explicit Reconcile action does.
   if(!fresh){
     const cached=await readExceptionRecoveryCensusCache(env.STUDIO_MEDIA);
     if(!cached) return respond(request,env,{
@@ -10934,13 +11055,12 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     // comparison stays unavailable instead of claiming the wrong cache.
     const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
-    const all=await scanOutstandingFailedOutputs((options)=>(
-      (studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env))
-        ? listSupabaseOutputCensusPage(env, options)
-        : listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
-          ...options,fields:EXCEPTION_CENSUS_FIELDS,
-        })
-    ),{
+    // Supabase is the production source of truth. Never fall back to Airtable
+    // during the quiet migration window or on a missing Supabase credential.
+    if(studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+      throw new HttpError(503,"Authoritative Supabase census unavailable; Airtable fallback prohibited");
+    const all=await scanOutstandingFailedOutputs(
+      (options)=>listSupabaseOutputCensusPage(env,options),{
         filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
     // A source-canonical census must not launch a second expensive QA scan.
@@ -10952,6 +11072,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     const scanAtMs=Date.now();
     const counts=reconcileExceptionCensus(all,mapOutput,{
       atMs:scanAtMs,qaFailed:null,qaPastDue:null,
+      source:"supabase",
     });
     const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
@@ -10962,7 +11083,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
   const cached=await persistExceptionRecoveryCensusCache(env.STUDIO_MEDIA,data);
   return respond(request,env,{...data,census_cache_status:cached.status,
     census_cache_note:cached.status==="durable_verified"
-      ? "Next navigation can reuse this verified census without rescanning Airtable."
+      ? "Next navigation can reuse this verified census without rescanning Supabase."
       : "Census completed, but durable cache could not be verified; later navigation will show unavailable."});
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/
@@ -11836,7 +11957,17 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
       review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
+      safety_hold_active: Boolean(String(f(record, "Factory_Review_Handoff_Safety_Hold_At") || "").trim()),
+      held_review_decision: f(record, "SM_Factory_Held_Review_Receipt")?.decision || null,
       do_not_publish: f(record, "Do_Not_Publish") === true,
+      // Keep preview-only decisions in sync with the server's publication
+      // disarming preflight. Missing card fields previously looked "safe".
+      auto_publish_enabled: f(record, "Auto_Publish_Enabled") === true,
+      scheduled_post_date: f(record, "Scheduled_Post_Date") || null,
+      studio_scheduled_at: f(record, "Studio_Scheduled_At") || null,
+      youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At") || null,
+      published_at: f(record, "Published_At") || null,
+      platform_post_url: f(record, "Platform_Post_URL") || null,
       thumbnail_url: mapped.thumbnail_url || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
@@ -12993,7 +13124,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -13002,6 +13133,15 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "approve_held_review" || action === "reject_held_review") {
+      if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
+      requirePermission(authorization, "outputs_review");
+      try {
+        resultExtra = await factoryHeldReviewDecision(env, id, actor,
+          action === "approve_held_review" ? "approve" : "reject", note);
+      } catch (error) {
+        throw new HttpError(409, String(error?.message || error));
+      }
     } else if (action === "release_for_approval") {
       if (kind !== "output") throw new HttpError(400, "Formal review release is only for platform outputs");
       requirePermission(authorization, "outputs_review");
@@ -13042,7 +13182,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, approve_held_review, reject_held_review, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -13052,6 +13192,10 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
+  if (action === "approve_held_review" || action === "reject_held_review") {
+    return respond(request, env, { ok: true, page: "factory-desk", action,
+      result: resultExtra, message: resultExtra.message, refresh_required: true });
+  }
   if (action === "release_for_approval") {
     // Do not turn a committed canonical hold release into a 500 while reloading the Desk.
     return respond(request, env, { ok: true, page: "factory-desk", action,
@@ -17439,6 +17583,15 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
       TIKTOK_RESEND_ERRORS[reason] || reason,
     );
   }
+  // Fail before clearing an existing delivery receipt if the Supabase row
+  // cannot supply the identity TTD1 requires. The read projection inherits
+  // a TikTok title from its linked Content Item when the output title is blank.
+  const numericOutputId = Number(f(existing, "Output_ID"));
+  const outputTitle = String(f(existing, "Output_Title") || "").trim();
+  if (!Number.isSafeInteger(numericOutputId) || numericOutputId <= 0 || !outputTitle) {
+    throw new HttpError(409,
+      "TikTok output ID or title is missing in Supabase. Resend was not rearmed.");
+  }
   const scheduledPostDate = f(existing, "Scheduled_Post_Date");
   const fields = tiktokResendRearmFields({
     now: new Date().toISOString(),
@@ -17451,8 +17604,12 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
   });
   // Supabase SoR archive mode returns the PATCH bag only. Dispatch needs the
   // full output (Platform, caption, Final_File_URL) or TTD1 never starts.
-  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1])
-    .catch(() => existing);
+  // Never dispatch a stale pre-rearm record when the authoritative reread
+  // fails. Its previous publish_id can be from another delivery generation.
+  const rearmed = await studioReadOutputRecordForManualComplete(env, match[1]);
+  if (!rearmed?.id) {
+    throw new HttpError(503, "TikTok resend state could not be verified in Supabase.");
+  }
   const dueNow = fields.TikTok_Draft_Status === "Ready for Delivery";
   const dispatch = dueNow
     ? await studioDispatchApprovedPublishNow(env, rearmed)

@@ -1,0 +1,126 @@
+name: Exact-only AP0 public MP4 asset prep canary 3526
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backlog-asset-prep-3526-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ap0-asset-prep-3526-20261120
+  cancel-in-progress: false
+jobs:
+  exact-prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate existing production Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "No authenticated Ops credential"; exit 1
+      - name: Prepare precisely output 3526 MP4, NEVER invoke publish stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/asset-prep-3526.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $id="rec3FNyw6bAIYSAPK"
+          $expected="19Mmh_yCn7HSefGF7cNkn1XQpuMtGTZbi"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "supabase_runner_health_not_ready" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_envfile_missing" }
+          function EnvVal([string]$key) {
+            $line=@(Get-Content $envfile | Where-Object {$_ -match ("^\s*"+[regex]::Escape($key)+"\s*=")}) | Select-Object -Last 1
+            if (-not $line) { throw "required_runner_env_missing" }
+            return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $secret=EnvVal "PIPELINE_RUNNER_SHARED_SECRET"
+          $base=EnvVal "SUPABASE_URL"
+          $dbkey=EnvVal "SUPABASE_SERVICE_ROLE_KEY"
+          if (-not $secret -or -not $base -or -not $dbkey) { throw "runner_auth_missing" }
+          $dbHead=@{apikey=$dbkey;Authorization=("Bearer "+$dbkey)}
+          $uri=$base.TrimEnd("/")+"/rest/v1/platform_outputs?airtable_record_id=eq."+$id+"&select=output_number,airtable_record_id,platform,platform_output_type,review_status,output_status,render_status,publish_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,final_file_url,publish_next_retry_at,error_messages"
+          function ReadExact {
+            $rows=@(Invoke-RestMethod -Uri $uri -Headers $dbHead -TimeoutSec 30)
+            if ($rows.Count -ne 1) { throw "output_3526_missing_or_duplicate" }
+            return $rows[0]
+          }
+          $o=ReadExact
+          if ($o.output_number -ne 3526 -or $o.platform -ne "Facebook" -or $o.platform_output_type -ne "Facebook Reel" -or
+              $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.render_status -ne "Rendered" -or
+              $o.publish_status -ne "Ready to Publish" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or
+              $o.test_run_id -or $o.published_at -or $o.platform_post_url -or $o.publish_asset_url -or
+              $o.error_messages.Platform_Post_ID -or $o.error_messages.Platform_Media_ID -or $o.error_messages.FB_Slideshow_Meta_Video_ID -or
+              $o.error_messages.Publish_Locked_By -or $o.error_messages.Publish_Locked_At -or $o.error_messages.Publish_Started_At -or
+              $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Render_Review_Hold_ID -or $o.error_messages.Studio_Review_Hold_ID -or
+              $o.error_messages.Final_File_ID -ne $expected -or
+              $o.final_file_url -ne ("https://drive.google.com/file/d/"+$expected+"/view") -or
+              -not ([string]$o.publish_next_retry_at).StartsWith("2099-01-01") -or
+              $o.error_messages.Backlog_Prep_20261120_Mode -ne "asset_stage_only_no_publish") { throw "output_3526_preflight_denied" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function Stage([bool]$dry) {
+            $payload=@{output_record_id=$id;extra=@{dry_run=$dry}} | ConvertTo-Json -Depth 5 -Compress
+            return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/ap0" -Method Post -Headers $headers -Body $payload -ContentType "application/json" -TimeoutSec 390
+          }
+          $pre=Stage $true
+          if ($pre.status -ne "ok" -or $pre.details.run.dry_run -ne $true -or $pre.details.run.eligibility_reason) {
+            Write-Output ("asset_prep_3526_preview_status="+[string]$pre.status)
+            Write-Output ("asset_prep_3526_preview_reason="+[string]$pre.details.run.eligibility_reason)
+            throw "ap0_dry_run_not_eligible"
+          }
+          Write-Output "asset_prep_3526_dry_run=PASS"
+          $result=Stage $false
+          Write-Output ("asset_prep_3526_stage_status="+[string]$result.status)
+          if ($result.status -ne "ok" -or $result.details.run.processed -ne $true) { throw "ap0_asset_transfer_failed" }
+          $fresh=ReadExact
+          if ($fresh.published_at -or $fresh.platform_post_url -or $fresh.publish_status -ne "Ready to Publish" -or
+              -not ([string]$fresh.publish_next_retry_at).StartsWith("2099-01-01") -or
+              -not ([string]$fresh.publish_asset_url).StartsWith("https://media.chicagoshining.com/publish/")) { throw "asset_prep_3526_readback_failed" }
+          $head=Invoke-WebRequest -Uri $fresh.publish_asset_url -Method Head -UseBasicParsing -TimeoutSec 40
+          if ([int]$head.StatusCode -ne 200 -or $head.Headers["Content-Type"] -notmatch "video/mp4") { throw "asset_prep_3526_public_mp4_not_verified" }
+          Write-Output "asset_prep_3526_public_mp4=PASS"
+          Write-Output ("asset_prep_3526_url="+[string]$fresh.publish_asset_url)
+          Write-Output "asset_prep_3526_publish_hold=INTACT"
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/asset-prep-3526.json').write_text(json.dumps({
+            "command":pathlib.Path('/tmp/asset-prep-3526.ps1').read_text(),
+            "confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/asset-prep-3526.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "Ops rejected asset job http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-start.json)
+          for n in $(seq 1 120); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^asset_prep_3526_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | tail -28
+              exit 3
+            fi
+            sleep 5
+          done
+          echo "Asset job outcome not confirmed"; exit 4

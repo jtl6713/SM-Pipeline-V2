@@ -179,6 +179,8 @@ export function factoryApprovalHoldReleaseEligibility(record, readiness = evalua
   if (read(record, "Do_Not_Publish") !== true) return { eligible: false, reason: "Output has no publishing hold to release" };
   if (read(record, "Studio_Render_Review_Hold_Active") === true)
     return { eligible: false, reason: "Separate Rendering Review QA hold must be resolved through its original review session" };
+  if (string(read(record, "Factory_Review_Handoff_Safety_Hold_At")))
+    return { eligible: false, reason: "Unapproved publisher activity was detected. Safety hold requires separate verification before release" };
   if (output !== "ready for review" || !["", "review sent", "pending review"].includes(review))
     return { eligible: false, reason: "Output is not awaiting a fresh formal review decision" };
   if (["scheduled", "publishing", "published", "uploading", "platform processing", "draft delivered"].includes(publish)
@@ -229,11 +231,17 @@ export function factoryReviewVisibility(record, readiness, studioState, creative
   // but never gain an Approve action until their independent hold is resolved.
   const actionable = formalFactoryApprovalReady(record, readiness);
   const canReleaseHold = factoryApprovalHoldReleaseEligibility(record, readiness).eligible;
+  // A fully rendered but publication-held output must remain inspectable in Factory.
+  // Visibility is NOT permission to approve, schedule, publish, or lift a safety hold.
+  const heldReviewOnly = read(record, "Do_Not_Publish") === true
+    && lower(read(record, "Output_Status")) === "ready for review"
+    && ["", "review sent", "pending", "pending review"].includes(lower(read(record, "Review_Status")))
+    && readiness?.readiness === "READY" && creativeAvailable === true;
   return {
     visible: (studioState === "Ready for Review" && actionable)
-      || heldVisible || canReleaseHold,
+      || heldVisible || canReleaseHold || heldReviewOnly,
     incomplete: lower(read(record, "Output_Status")) === "ready for review"
       && readiness?.readiness !== "READY" && !heldVisible,
-    held_preview_only: heldVisible,
+    held_preview_only: heldVisible || (heldReviewOnly && !canReleaseHold),
   };
 }

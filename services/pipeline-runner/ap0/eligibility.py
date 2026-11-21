@@ -12,7 +12,7 @@ from ap0.constants import (
     R2_KEY_PREFIX,
 )
 from ap0.public_cover import cover_needs_public_stage
-from ap0.public_mp4 import is_public_publish_url, master_r2_key_from_record
+from ap0.public_mp4 import final_drive_file_id, is_public_publish_url, master_r2_key_from_record
 from asset.helpers import as_bool
 from render.fields import field, field_str
 
@@ -26,7 +26,7 @@ def output_id_token(record: dict[str, Any]) -> str:
 
 
 def final_file_id(record: dict[str, Any]) -> str:
-    return field_str(record, "Final_File_ID")
+    return final_drive_file_id(record)
 
 
 def source_token(record: dict[str, Any]) -> str:

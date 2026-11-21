@@ -912,6 +912,7 @@ import {
   studioIdeaGenerationStatus,
   chicagoNowParts,
   getStudioDeskInventory,
+  getStudioApprovedPastDueTriage,
   getStudioExceptionRecoveryCenter,
   getStudioExceptionRecoveryConversation,
   getStudioExceptionRecoveryPreflight,
@@ -1080,6 +1081,7 @@ export default {
       const isOpsMiamiTikTokSecretRoute = url.pathname === "/api/ops/tiktok/miami/pipeline-secret";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isQaRoute = url.pathname.startsWith("/api/admin/qa/");
+      const isAdminApprovedPastDueTriageRoute = url.pathname === "/api/admin/approved-past-due/triage";
       const isAdminExceptionRecoveryRoute = url.pathname === "/api/admin/exception-recovery";
       const isAdminExceptionConversationRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/conversation$/.test(url.pathname);
       const isAdminExceptionPreflightRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/preflight$/.test(url.pathname);
@@ -1404,7 +1406,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1007-factory-content-outputs",
+          version: "0.10.1011-independent-insights-cron",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -2880,6 +2882,12 @@ export default {
           return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isAdminApprovedPastDueTriageRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioApprovedPastDueTriage(request, env);
       }
 
       if (isAdminExceptionRecoveryRoute) {
@@ -4840,6 +4848,29 @@ export default {
         })))
         .catch((error) => console.warn("FBS4 existing-video cron failed", error)));
     }
+    // First-party insights read and write Supabase SoR and must not be blocked by
+    // Factory's lengthy five-minute recovery or its Airtable cooldown return.
+    // One bounded, independent analytics owner per heavy tick; read-only Meta
+    // and uploader fetches, Supabase snapshot stamps, no publishing/scheduling.
+    if (cadence.insights && studioWriteSource(env) === "supabase") {
+      ctx.waitUntil((async () => {
+        const sweep = await studioSweepPublishedInsights(env, { limit: 8 });
+        console.info("Independent Supabase insights sweep", JSON.stringify({
+          scanned: sweep.scanned, considered: sweep.considered,
+          updated: sweep.updated, failed: sweep.failed,
+          active_profiles: sweep.active_profiles,
+        }));
+        for (const profile of sweep.profiles || []) {
+          try {
+            await studioRecomputeInsightsLearned(env, { profile });
+          } catch (error) {
+            console.warn("independent insights learned-model recompute failed", profile, error);
+          }
+        }
+      })().catch((error) => console.warn(
+        "Independent Supabase insights sweep failed", String(error?.message || error)
+      )));
+    }
     ctx.waitUntil((async () => {
       // Fail-safe Factory recovery before the Airtable cooldown return so a busy
       // approve wave cannot strand accepted children until cooling fully clears.
@@ -5254,17 +5285,21 @@ export default {
         console.warn("production cadence cron failed", error);
       }
       if (cadence.insights) {
-        let firstPartyAnalyticsSweep = null;
-        try {
-          firstPartyAnalyticsSweep = await studioSweepPublishedInsights(env, { limit: 8 });
-        } catch (error) {
-          console.warn("insights sweep cron failed", error);
-        }
-        for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
+        // Legacy non-Supabase mode retains its prior inline sweep. Supabase SoR
+        // runs exactly once in the independent waitUntil above.
+        if (studioWriteSource(env) !== "supabase") {
+          let firstPartyAnalyticsSweep = null;
           try {
-            await studioRecomputeInsightsLearned(env, { profile });
+            firstPartyAnalyticsSweep = await studioSweepPublishedInsights(env, { limit: 8 });
           } catch (error) {
-            console.warn("insights learned-model recompute failed", profile, error);
+            console.warn("insights sweep cron failed", error);
+          }
+          for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
+            try {
+              await studioRecomputeInsightsLearned(env, { profile });
+            } catch (error) {
+              console.warn("insights learned-model recompute failed", profile, error);
+            }
           }
         }
         try {
@@ -8682,6 +8717,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:deskOutputsForRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioQualityAuditApprovedPastDue__*/
 /*__STUDIO_WORKER_EXTRACT:gatherStudioDeskInventory__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioApprovedPastDueTriage__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCenter__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryConversation__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryPreflight__*/

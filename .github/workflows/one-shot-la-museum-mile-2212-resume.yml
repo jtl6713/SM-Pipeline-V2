@@ -1,0 +1,86 @@
+name: Exact LA Museum Mile 2212 production resume (no publish)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/one-shot-la-museum-mile-2212-resume.yml']
+permissions:
+  contents: read
+concurrency:
+  group: exact-la-2212-produce
+  cancel-in-progress: false
+jobs:
+  resume:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate existing Operations control
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [ -n "$candidate" ] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "https://ops.chicagoshining.com/api/catalog" || true)
+            if [ "$code" = 200 ] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "OPS_RUN_TOKEN=$candidate" >> "$GITHUB_ENV"
+              echo "authorized_ops=PASS"
+              exit 0
+            fi
+          done
+          echo "authorized_ops=FAILED"
+          exit 1
+      - name: Resume exactly one existing Supabase-backed production job
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/one-la2212.ps1 <<'PS1'
+          $ErrorActionPreference = "Stop"
+          $record = "rectZptYzSfHtDsGt"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.service -ne "pipeline-runner" -or $health.studio_write_source -ne "supabase") { throw "runner_source_not_verified" }
+          $p = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $p)) { throw "runner_env_unavailable" }
+          $line = @(Get-Content $p | Where-Object { $_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*=' }) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_unavailable" }
+          $secret = ([string]$line -split "=",2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_auth_empty" }
+          $body = @{ production_request_record_id=$record; resume=$true } | ConvertTo-Json -Compress
+          $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-produce/resume" -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -Body $body -ContentType "application/json" -TimeoutSec 45
+          if ($reply.ok -ne $true -or $reply.production_request_record_id -ne $record -or $reply.accepted -ne $true) { throw "exact_resume_not_accepted" }
+          Write-Output ("exact_la2212_resume_accepted=true already_running=" + $reply.already_running + " step=" + $reply.job.step)
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/one-la2212-command.json').write_text(json.dumps({
+              'command':Path('/tmp/one-la2212.ps1').read_text(), 'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/la2212-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_RUN_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/one-la2212-command.json || true)
+          [ "$code" = 200 ] || [ "$code" = 202 ]
+          job=$(jq -er '.job.id // .jobId' /tmp/la2212-start.json)
+          for i in $(seq 1 80); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_RUN_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/la2212-result.json
+            status=$(jq -r '.job.status // empty' /tmp/la2212-result.json)
+            if [ "$status" = ok ]; then
+              jq -r '.job.log // ""' /tmp/la2212-result.json | grep 'exact_la2212_resume_accepted=true'
+              exit 0
+            fi
+            if [ "$status" = failed ]; then
+              echo "exact_la2212_resume=FAILED"
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "exact_la2212_resume=NOT_VERIFIED"
+          exit 1

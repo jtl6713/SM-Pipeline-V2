@@ -876,7 +876,14 @@ export function airtableShapedOutputFromSupabase(row) {
       Publish_Method: row.publish_method || null,
       Do_Not_Publish: Boolean(row.do_not_publish),
       Test_Run_ID: row.test_run_id || null,
-      Output_Title: row.output_title,
+      // An output-specific title wins; for blank TikTok titles, inherit the
+      // linked Content Item title from the same Supabase read. TTD1 requires
+      // a title and must not create a provider draft with a generic label.
+      Output_Title: row.output_title || (
+        String(row.platform || "").trim().toLowerCase() === "tiktok"
+          ? (row.content_title || row.content_items?.content_title || null)
+          : null
+      ),
       // Undefined (column not selected) must not wipe package evidence from the
       // error_messages bag — that zeroed Home Awaiting Approval after #2030.
       ...(row.output_caption !== undefined ? { Output_Caption: row.output_caption } : {}),
@@ -1885,6 +1892,61 @@ function flattenIdeaRow(row) {
   };
 }
 
+
+/**
+ * Exact Home Past Due / Failed Pipeline drill-down candidates, Supabase only.
+ * Server-side filtering reduces work; the shared Home classifier is the final
+ * authority. No provider writes, Airtable requests, or side-effect purges.
+ */
+export function supabaseFocusedExceptionFilter(mode, nowIso) {
+  const modes = ["approved_exceptions", "approved_past_due", "approved_missing_date", "failed"];
+  if (!modes.includes(mode)) throw new Error("Unknown Home exception mode");
+  const base = "test_run_id=is.null";
+  if (mode === "failed") {
+    // Failed can be derived from any of these four statuses in mapOutput.
+    return base + "&or=(output_status.eq.Failed,render_status.eq.Failed,"
+      + "publish_status.eq.Failed,error_messages->>Studio_State.eq.Failed)";
+  }
+  const clock = String(nowIso || "");
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/.test(clock)
+    || !Number.isFinite(Date.parse(clock))) throw new Error("Invalid Home snapshot clock");
+  const due = encodeDeskFilterValue(clock);
+  const approved = base + "&review_status=eq.Approved&do_not_publish=eq.false";
+  if (mode === "approved_past_due") return approved + "&scheduled_post_date=lte." + due;
+  if (mode === "approved_missing_date") return approved + "&scheduled_post_date=is.null";
+  return approved + "&or=(scheduled_post_date.is.null,scheduled_post_date.lte." + due + ")";
+}
+
+export async function listSupabaseFocusedExceptionOutputs(env, {
+  profileAirtableId, mode, nowIso = new Date().toISOString(),
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Home exception source unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Home exception profile missing");
+  const filter = supabaseFocusedExceptionFilter(mode, nowIso);
+  const pageSize = 100;
+  const maxCandidates = 5000;
+  const all = [];
+  const seen = new Set();
+  let complete = false;
+  for (let offset = 0; offset < maxCandidates; offset += pageSize) {
+    const page = await supabaseRest(env, "platform_outputs?content_profile_id=eq."
+      + encodeURIComponent(profileId) + "&" + filter
+      + "&select=" + OUTPUT_SELECT
+      + "&order=output_number.desc.nullslast,airtable_record_id.asc"
+      + "&limit=" + pageSize + "&offset=" + offset);
+    if (!Array.isArray(page)) throw new Error("Supabase Home exception page unavailable");
+    for (const row of page) {
+      if (!row?.airtable_record_id) throw new Error("Supabase Home exception record lacks stable identity");
+      if (seen.has(row.airtable_record_id)) throw new Error("Supabase Home exception scan duplicated identity");
+      seen.add(row.airtable_record_id);
+      all.push(airtableShapedOutputFromSupabase(flattenOutputRow(row)));
+    }
+    if (page.length < pageSize) { complete = true; break; }
+  }
+  if (!complete) throw new Error("Supabase Home exception scan hit full-census safety limit");
+  return stripDeletedDuplicateOutputRecords(all);
+}
 
 /**
  * Profile-scoped Manual Action candidates for Pipeline rescue + Home click-through.
@@ -2955,6 +3017,16 @@ function igOpenCarouselFilter() {
  */
 export function deskHealOutputFilter(kind, options = {}) {
   const quiet = "test_run_id=is.null&do_not_publish=eq.false";
+  if (kind === "approved_past_due_all") {
+    // Include both dated clocks and ALL unconfirmed statuses, even when
+    // Do_Not_Publish or retry-ineligible. These rows need visible decisions,
+    // not automatic dispatch. Provider actions are never driven by this query.
+    const clock = String(options.cutoffIso || new Date().toISOString());
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(clock)) throw new Error("Approved past-due scan needs a UTC clock");
+    const at = encodeDeskFilterValue(clock);
+    return `test_run_id=is.null&review_status=eq.Approved&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&publish_status=neq.Published&or=(scheduled_post_date.lt.${at},studio_scheduled_at.lt.${at})`;
+  }
   if (kind === "native_photo") {
     const statuses = ["Ready for Review", "Approved for Publishing", "Published"]
       .map(encodeDeskFilterValue)
@@ -3399,7 +3471,7 @@ export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset 
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${deskHealSelect(kind)}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
+    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${deskHealSelect(kind)}&order=output_number.desc.nullslast,airtable_record_id.asc&limit=${capped}&offset=${start}`,
   );
   const batch = Array.isArray(rows) ? rows : [];
   const records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
@@ -3485,6 +3557,18 @@ export async function readSupabaseShapedOutput(env, airtableId) {
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row?.airtable_record_id) return null;
   return shapeDeskHealRecord(row);
+}
+
+/**
+ * Exact Supabase Content Item read for P1 #2340 owner-chain verification.
+ * This returns a compatibility-shaped record; its profile link comes from
+ * the canonical content_profiles foreign key, never an Airtable lookup.
+ * An absent or broken relationship is NOT a negative provider receipt.
+ */
+export async function readSupabaseShapedContentItem(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !studioSupabaseConfigured(env)) return null;
+  return readContentRow(env, id);
 }
 
 /**
@@ -4025,11 +4109,30 @@ function matchesOpsQueueRenderFormula(fields = {}) {
   ].includes(render) || ["Ready for Render", "Rendering"].includes(output);
 }
 
-function matchesOpsQueueReviewFormula(fields = {}) {
+/**
+ * Supabase must mirror OPS_QUEUE_REVIEW_FORMULA (the legacy read's treatment
+ * of review-only held outputs). The dedicated read query includes held RFR,
+ * but filtering again here previously removed every one of those records.
+ *
+ * Visibility is inspection ONLY; Factory approval, scheduling, publisher
+ * routes and safety-hold release have their own independent authority checks.
+ */
+export function matchesOpsQueueReviewFormula(fields = {}) {
   if (String(fields.Test_Run_ID || "").trim()) return false;
-  if (fields.Do_Not_Publish) return false;
-  const output = String(fields.Output_Status || "");
-  const review = String(fields.Review_Status || "");
+  const output = String(fields.Output_Status || "").trim();
+  const review = String(fields.Review_Status || "").trim();
+  const publish = String(fields.Publish_Status || "").trim();
+  if (fields.Do_Not_Publish === true) {
+    // Held outputs must remain inspectable without reopening any completed,
+    // rejected, scheduled, or previously published work. In particular,
+    // Publishing may be the unsafe background status being investigated.
+    return output === "Ready for Review"
+      && ["", "Review Sent", "Pending Review"].includes(review)
+      && !["Scheduled", "Published", "Published Privately", "Draft Delivered"].includes(publish)
+      && !String(fields.Published_At || "").trim()
+      && !String(fields.Platform_Post_URL || "").trim()
+      && !String(fields.Platform_Post_ID || "").trim();
+  }
   if (output === "Ready for Review") return true;
   if (review !== "Review Sent") return false;
   return !["Approved", "Approved for Publishing", "Scheduled", "Published"].includes(output);
@@ -4070,8 +4173,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).catch(() => []),
     supabaseRestAll(
       env,
-      `platform_outputs?do_not_publish=eq.false`
-        + `&or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)`
+      `platform_outputs?or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)`
         + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
       { pageSize: 500, maxRows: 10000 },
     ).then((rows) => {
@@ -7392,7 +7494,10 @@ export async function listSupabaseRevisionOpenProductionRequests(env, { limit = 
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
   const rows = await supabaseRest(
     env,
-    `production_requests?request_status=eq.Promoted&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
+    // A sent-back Promoted request becomes Draft. Keep that revision visible
+    // even after the status transition; the explicit Factory marker, not an
+    // arbitrary Draft, is the authorization to show an existing promoted item.
+    `production_requests?request_status=in.(Promoted,Draft,Ready)&production_notes=like.*%5Bfactory-revision-open%5D*&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .map(airtableShapedProductionRequestFromSupabase)
@@ -7482,7 +7587,7 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
 }
 
 /** Ideas for one profile. Uses the indexed profile id and does not count the table. */
-export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit = 100) {
+export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit = 100, options = {}) {
   const id = String(profileAirtableId || "").trim();
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
   if (!/^rec[A-Za-z0-9]+$/.test(id)) return [];
@@ -7490,18 +7595,48 @@ export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit 
     throw ideaListReadError(error);
   });
   if (!uuid) return [];
-  const rows = await supabaseRest(
-    env,
-    `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`
-      + `&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at`
-      + `&order=created_at.desc&limit=${cap}`,
-    { headers: { Prefer: "return=representation" } },
-  ).catch((error) => {
-    throw ideaListReadError(error);
-  });
-  return (Array.isArray(rows) ? rows : [])
-    .filter((row) => row?.airtable_record_id)
-    .map(airtableShapedIdeaFromSupabase);
+  const unpromotedOnly = options.unpromotedOnly === true;
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at";
+  const profileFilter = `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`;
+  if (!unpromotedOnly) {
+    const rows = await supabaseRest(
+      env,
+      `${profileFilter}&select=${select}&order=created_at.desc&limit=${cap}`,
+      { headers: { Prefer: "return=representation" } },
+    ).catch((error) => { throw ideaListReadError(error); });
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => row?.airtable_record_id)
+      .map(airtableShapedIdeaFromSupabase);
+  }
+  // The Ideas screen shows NOT promoted. Filter status before LIMIT so 500+
+  // newer promoted records cannot displace its open intake records.
+  // Pagination is deliberately complete: a page of promoted-link-but-not-
+  // promoted-status ideas must not hide later valid ideas.
+  const eligible = [];
+  const seen = new Set();
+  const pageSize = 100;
+  for (let offset = 0; offset < 2000; offset += pageSize) {
+    const rows = await supabaseRest(
+      env,
+      `${profileFilter}&or=(status.is.null,status.neq.Promoted)&select=${select}&order=created_at.desc,airtable_record_id.asc&limit=${pageSize}&offset=${offset}`,
+      { headers: { Prefer: "return=representation" } },
+    ).catch((error) => { throw ideaListReadError(error); });
+    if (!Array.isArray(rows)) throw ideaListReadError("Incomplete unpromoted ideas scan");
+    for (const row of rows) {
+      if (!row?.airtable_record_id || seen.has(row.airtable_record_id)) {
+        throw ideaListReadError("Unpromoted ideas scan has missing or duplicate identity");
+      }
+      seen.add(row.airtable_record_id);
+      const record = airtableShapedIdeaFromSupabase(row);
+      const bag = record.fields || {};
+      if (String(bag.Candidate_Status || "") === "Promoted"
+          || Boolean(bag.Promoted_Content_Record_ID)
+          || (Array.isArray(bag["Content Items"]) && bag["Content Items"].length)) continue;
+      eligible.push(record);
+    }
+    if (rows.length < pageSize) return eligible;
+  }
+  throw ideaListReadError("Unpromoted idea census exceeded safe 2000-record limit");
 }
 
 function ideaListReadError(error) {
@@ -8204,7 +8339,16 @@ const CONTENT_SIDE_VIEW_FILTERS = {
 };
 CONTENT_SIDE_VIEW_FILTERS["C1 - Ready for Carousel Planning"] = CONTENT_SIDE_VIEW_FILTERS.viwT0B4SmJLL1qPlp;
 
+// PostgREST timestamp columns cannot be compared with an empty string.
+// A failed Published_At != "" filter made Post Insights return zero posts and
+// prevented the scheduled first-party analytics sweep from reaching due rows.
+const OUTPUT_SIDE_TIMESTAMP_COLUMNS = new Set([
+  "published_at", "scheduled_post_date", "studio_scheduled_at",
+  "youtube_scheduled_publish_at", "publish_next_retry_at",
+  "ig_carousel_next_retry_at",
+]);
 function outputSideBlankFilter(column) {
+  if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(column)) return `${column}.is.null`;
   return `or(${column}.is.null,${column}.eq.)`;
 }
 
@@ -8330,6 +8474,7 @@ function outputSideLeafFilter(cleaned) {
   }
   if (notBlank && OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notBlank[1]];
+    if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(col)) return `${col}.not.is.null`;
     return `and(${col}.not.is.null,${col}.neq.)`;
   }
   const empty = cleaned.match(/^\{([A-Za-z0-9_]+)\}=""$/);
@@ -8339,6 +8484,7 @@ function outputSideLeafFilter(cleaned) {
   const notEmpty = cleaned.match(/^\{([A-Za-z0-9_]+)\}!=""$/);
   if (notEmpty && OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]]) {
     const col = OUTPUT_SIDE_BLANK_FIELDS[notEmpty[1]];
+    if (OUTPUT_SIDE_TIMESTAMP_COLUMNS.has(col)) return `${col}.not.is.null`;
     // jsonb clip lists have no text mirror; presence is non-null.
     if (col === "render_clip_list" || col === "selected_assets") {
       return `${col}.not.is.null`;
@@ -8701,7 +8847,7 @@ function splitContentProfileScope(formula) {
   };
 }
 
-async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "") {
+async function readOutputContentListRows(env, kind, formula, limit, offset, viewName = "", options = {}) {
   const profileScope = splitContentProfileScope(formula);
   let profileFilter = null;
   let formulaForTranslate = formula;
@@ -8734,10 +8880,15 @@ async function readOutputContentListRows(env, kind, formula, limit, offset, view
     const andClause = andParts.length === 1
       ? andParts[0]
       : `and(${andParts.join(",")})`;
+    // Respect Post Insights' published-date ordering; a numeric Output_ID
+    // sort can starve newer posts and individual platforms during collection.
+    const outputOrder = options.sortField === "Published_At"
+      ? `published_at.${options.sortDirection === "asc" ? "asc" : "desc"}.nullslast,output_number.desc`
+      : "output_number.desc.nullslast";
     const rows = await supabaseRest(
       env,
       `platform_outputs?select=${OUTPUT_SELECT}`
-        + `&order=output_number.desc.nullslast&limit=${limit}&offset=${offset}`
+        + `&order=${outputOrder}&limit=${limit}&offset=${offset}`
         + `&and=(${andClause})`,
     );
     if (!Array.isArray(rows)) return null;
@@ -9078,7 +9229,11 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     if (kind === "content" && viewName && !CONTENT_SIDE_VIEW_FILTERS[viewName]) {
       return null;
     }
-    const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName);
+    const query = sideQuery(pathOrParams);
+    const records = await readOutputContentListRows(env, kind, formula, limit, offset, viewName, {
+      sortField: query.get("sort[0][field]") || "",
+      sortDirection: query.get("sort[0][direction]") || "desc",
+    });
     if (!records) return null;
     const body = { records };
     if (records.length === limit) body.offset = String(offset + records.length);

@@ -135,7 +135,10 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);
-  assert.doesNotMatch(beforeHeavy, /studioSweepPublishedInsights/);
+  // Supabase-only analytics may run independently before Factory/Airtable
+  // maintenance. This is read-only against providers and does not publish.
+  assert.match(beforeHeavy, /if \(cadence\.insights && studioWriteSource\(env\) === "supabase"\)/);
+  assert.match(beforeHeavy, /ctx\.waitUntil\(\(async \(\) => \{[\s\S]*studioSweepPublishedInsights\(env, \{ limit: 8 \}\)/);
   assert.doesNotMatch(beforeHeavy, /item4PulsePipelineStage/);
 });
 
@@ -148,12 +151,13 @@ test("scheduled gates insights and ingest to heavy cadence", () => {
   assert.match(scheduled, /item4PulsePipelineStage\(env, "a2"/);
 });
 
-test("insights backlog list is capped near the per-profile select size", () => {
+test("insights Supabase backlog scan stays bounded while allowing all platforms a slot", () => {
   const sweep = worker.slice(
     worker.indexOf("async function studioSweepPublishedInsights"),
     worker.indexOf("async function studioSweepSimilarAccountTimes")
   );
-  assert.match(sweep, /Math\.max\(perProfileLimit \* 4, 40\)/);
+  assert.match(sweep, /Math\.max\(perProfileLimit \* 12, 100\)/);
+  assert.match(sweep, /const byPlatform = new Map/);
   assert.doesNotMatch(sweep, /limit:\s*250/);
 });
 

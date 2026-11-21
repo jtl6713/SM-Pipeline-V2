@@ -82,6 +82,14 @@ def fb_resolved_publish_mode(fields: dict) -> str:
     explicit = _text(fields.get("FB_Image_Publish_Mode") or fields.get("fb_image_publish_mode"))
     if explicit in {"Single Photo", "Multi-Photo Collage", "Slideshow Reel"}:
         return explicit
+    # A final-approved multi-image Facebook Photo Set is a native /feed attached_media
+    # post unless its explicit image mode requests a slideshow. When the source
+    # image-mode field is empty, treating every >1 image as a Slideshow Reel
+    # silently diverts FB0 away from FB1/FB2 and strands the approved photo set.
+    platform_format = _text(fields.get("Platform_Output_Type") or fields.get("platform_output_type"))
+    studio_format = _text(fields.get("Studio_Output_Type") or fields.get("studio_output_type"))
+    if platform_format == "Facebook Photo Set" and studio_format == "Multi-Image Post":
+        return "Multi-Photo Collage"
     voice = _text(fields.get("Studio_Effective_Voiceover_Mode") or fields.get("studio_effective_voiceover_mode"))
     music = _text(fields.get("Studio_Effective_Background_Music_Mode") or fields.get("studio_effective_background_music_mode"))
     images = _number(fields.get("Image_Count") if "Image_Count" in fields else fields.get("image_count")) or 0

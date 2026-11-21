@@ -1,0 +1,35 @@
+name: Verify live Supabase Home past-due counters exact (GET only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/live-home-count-verification-20261120.yml'
+      - 'repair/scripts/live-home-count-verification-20261120.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: live-home-count-verification-20261120
+  cancel-in-progress: false
+jobs:
+  check-home:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact current 4-profile Home counts via Supabase-only Worker service binding
+        run: node repair/scripts/live-home-count-verification-20261120.mjs
+      - name: Preserve exact Home exception identities for P1 #2340
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-2340-exact-id-census
+          path: /tmp/home-2340-exact-inventory.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -73,7 +73,7 @@ test("Review hold, failed render and not-ready Airtable state show disabled sele
     [{review_hold_active:true}, /Publishing approval is held/],
     [{do_not_publish:true}, /Publishing hold/],
     [{render_status:"Failed"}, /Render status is Failed/],
-    [{output_status:"In Production"}, /Airtable Output Status is In Production/],
+    [{output_status:"In Production"}, /Output status is In Production/],
     [{render_status:"Waiting in Render Queue"}, /Render is still queued/],
   ];
   for (const [override, reason] of cases) {

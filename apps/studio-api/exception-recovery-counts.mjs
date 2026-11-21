@@ -1,14 +1,15 @@
 /**
  * Canonical exception counts, derived from the existing Home/Pipeline predicates
- * against one completely paginated Airtable production-output census.
+ * against one completely paginated authoritative production-output census.
  * An unavailable/incomplete scan must never become a zero count.
  */
 import {homeApprovedExceptionKind,homeIsUnpublishedFailure,homeOutputContribution} from "./profile-summary-classification.mjs";
 const bool=v=>v===true;
 const mappedProfile=row=>Array.isArray(row?.fields?.Content_Profile) ? String(row.fields.Content_Profile[0]||"") : "";
 const blank=()=>({outputs:0,approved_past_due:0,approved_missing_date:0,failed:0,manual_action_required:0,held_deferred:0});
-export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFailed=null,qaPastDue=null}={}) {
-  if(!Array.isArray(rawRows)||typeof mapOutput!=="function") throw new Error("Complete Airtable output census required");
+export const EXCEPTION_CENSUS_MAX_CASES = 1500;
+export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFailed=null,qaPastDue=null,source="unknown"}={}) {
+  if(!Array.isArray(rawRows)||typeof mapOutput!=="function") throw new Error("Complete authoritative output census required");
   const totals=blank(),byProfile=new Map(),seen=new Set();
   const homeFailed=new Set(),homeDue=new Set();
   const byPlatform={};
@@ -103,16 +104,16 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
       missing_ids_sample:missing.slice(0,30),extra_ids_sample:extra.slice(0,30)};
   };
   return {
-    status:"complete_census",source:"airtable",scan_completed_at:new Date(atMs).toISOString(),
+    status:"complete_census",source:["supabase","airtable"].includes(source)?source:"unknown",scan_completed_at:new Date(atMs).toISOString(),
     semantics:"home-pipeline-canonical-predicates",source_row_count:seen.size,
     totals,by_profile:Object.fromEntries(byProfile),by_platform:byPlatform,
     comparisons:{failed:compare(homeFailed,qaFailed),approved_past_due:compare(homeDue,qaPastDue)},
     exception_items:exceptionItems.sort((a,b)=>{
       const priority=x=>x.categories.includes("failed")?4:x.categories.includes("approved_past_due")?3:x.categories.includes("remote_identity_unverified")?2:1;
       return priority(b)-priority(a)||Number(b.output_id||0)-Number(a.output_id||0);
-    }).slice(0,500),
+    }).slice(0,EXCEPTION_CENSUS_MAX_CASES),
     exception_items_count:exceptionItems.length,
-    exception_items_truncated:exceptionItems.length>500,
+    exception_items_truncated:exceptionItems.length>EXCEPTION_CENSUS_MAX_CASES,
     unverified_remote_ids:unverifiedRemoteIds,
     overdue_recovery_lanes:overdueRecoveryLanes,
     snapshot_parity_with_home_widget:"not_proven_without_matching_generation",

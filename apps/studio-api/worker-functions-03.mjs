@@ -22,8 +22,9 @@ import {
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
-import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
+import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
@@ -52,6 +53,7 @@ import {
   listSupabasePipelineTitleSearch,
   pipelineTitleSearchTokens,
   listSupabaseManualActionOutputs,
+  listSupabaseFocusedExceptionOutputs,
   readSupabaseShapedOutput,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -2628,6 +2630,42 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
         complete: rows.length < 200,
         scanned_at: new Date(observedAt).toISOString(),
         mode: focusedMode,
+      });
+    }
+    // P1 #2340: Home Past Due and Failed must never fall back to Airtable.
+    // This candidate census is complete and uses the SAME Home classifier
+    // as the dashboard, not a broad scheduled-date SQL as a publish selector.
+    if (!manualFocused) {
+      if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
+        throw new HttpError(503, "Supabase Home exception drill-down unavailable");
+      const rows = await listSupabaseFocusedExceptionOutputs(env, {
+        profileAirtableId: profile.id,
+        mode: focusedMode,
+        nowIso: new Date(observedAt).toISOString(),
+      });
+      const mapped = rows.map((record) => {
+        const output = mapOutput(record, null, null, null);
+        return {
+          ...output,
+          home_exception_kind: homeApprovedExceptionKind(output, observedAt),
+          home_failed: homeIsUnpublishedFailure(output),
+        };
+      });
+      const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
+        focusedMode === "failed" ? row.home_failed
+          : focusedMode === "approved_exceptions" ? Boolean(row.home_exception_kind)
+          : row.home_exception_kind === focusedMode
+      ));
+      return respond(request, env, {
+        ok: true,
+        records: matched,
+        count: matched.length,
+        profile: mapStudioContentProfile(profile),
+        read_source: "supabase",
+        complete: true,
+        scanned_at: new Date(observedAt).toISOString(),
+        mode: focusedMode,
+        publish_actions_enabled: false,
       });
     }
     const profileFormula = contentProfileFilterFormula(profile);
@@ -7938,13 +7976,10 @@ export function mapPhase6CreativeOutput(record) {
 export async function studioReadOutputRecord(env, recordId) {
   const id = String(recordId || "").trim();
   if (!id) return null;
+  // Creative review is a read-only Supabase SoR route. A missing row or a
+  // failed Supabase read must never leak to the frozen Airtable archive.
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    try {
-      const shaped = await readSupabaseShapedOutput(env, id);
-      if (shaped?.id) return shaped;
-    } catch (error) {
-      console.warn("supabase output read failed; falling back to Airtable", id, error);
-    }
+    return readSupabaseShapedOutput(env, id);
   }
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
 }
@@ -7955,10 +7990,34 @@ export async function getOutputCreative(request, env, url, authorization) {
   const record = await studioReadOutputRecord(env, id);
   if (!record?.id) throw new HttpError(404, "Platform Output was not found");
   const output = mapPhase6CreativeOutput(record);
-  const narration = await phase6ResolveNarrationVoice(env, record);
+  const supabaseCreativeRead = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
+  // The former fallback loads Content Item, Production Request and profile
+  // from Airtable. It can time out and hides an already rendered review.
+  // Only use values on the Supabase-shaped output for this read-only view.
+  const narration = supabaseCreativeRead
+    ? phase6NarrationVoiceFallback(f(record, "Voice_ID"), f(record, "Voice_Name"))
+    : await phase6ResolveNarrationVoice(env, record);
+  // Voice-directory reads (Airtable catalog + live ElevenLabs API) are
+  // optional editing convenience, not prerequisites to view saved creative.
+  // In Supabase SoR, present the proven defaults plus any saved voice.
+  const knownVoices = [
+    { id: PHASE6_DEFAULT_VOICE_ID, name: "Kate", is_default: true, source: "legacy-fallback" },
+    { id: PHASE6_GEORGE_VOICE_ID, name: "George", is_default: false, source: "legacy-fallback" },
+  ];
+  if (narration.voice_id && !knownVoices.some(v => v.id === narration.voice_id)) {
+    knownVoices.unshift({ id: narration.voice_id, name: narration.voice_name || narration.voice_id, is_default: false, source: "saved-output" });
+  }
   const [slides, voiceCatalog] = await Promise.all([
     phase6SlidesForOutput(env, record, narration),
-    phase6VoiceCatalog(env),
+    supabaseCreativeRead
+      ? Promise.resolve({
+          voices: knownVoices,
+          live_connected: false,
+          live_configured: Boolean(env.ELEVENLABS_API_KEY),
+          live_error: "Voice directory not loaded on this read-only review. The dedicated voice list remains available.",
+          default_voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,
+        })
+      : phase6VoiceCatalog(env),
   ]);
   const handoff = phase6CreativeHandoffStatus(record, slides);
   const titleLock = phase6TitleLockView(record, slides);
@@ -12037,7 +12096,7 @@ export function studioProfileDestinationFieldValue(profile, settingName) {
 }
 /*__STUDIO_WORKER_END:studioProfileDestinationFieldValue__*/
 
-export async function studioActivePipelineSettings(env, names, contextRecord) {
+export async function studioActivePipelineSettings(env, names, contextRecord, options = {}) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
   const profile = await studioPipelineSettingsProfileRecord(env, contextRecord);
@@ -12059,6 +12118,11 @@ export async function studioActivePipelineSettings(env, names, contextRecord) {
     rows = await listSupabasePipelineSettingsByNames(env, uniqueFetch, {
       limit: Math.max(40, uniqueFetch.length + 10),
     }).catch(() => null);
+  }
+  if (options.requireSupabase === true &&
+      (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) ||
+       !Array.isArray(rows))) {
+    throw new Error("Supabase profile-scoped Pipeline Settings unavailable");
   }
   if (!Array.isArray(rows)) {
     rows = await listRecords(env, "Pipeline Settings", {
@@ -13056,7 +13120,8 @@ export async function studioPublishFacebookPageStory(env, record) {
       /(?:QA-FB-STORY-368|FB-STORY-GRAPH|remote.verification)/i.test(
         String(f(record, "Studio_Publish_Dispatch_Note") || "") + " " +
         String(f(record, "Publish_Error_Stage") || "")) &&
-      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))) {
+      !(noRemoteStory && isFacebookPublishRateLimitError(facebookStoryRateLimitText(record)))
+      && !facebookStoryDefiniteAuthRejection(record)) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
         Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",
@@ -14337,25 +14402,25 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
-  const count = Number(f(record, "Studio_Publish_Dispatch_Count") || 0) + 1;
+  const attemptStamp = publishDispatchAttemptStampFields({
+    note,
+    priorCount: f(record, "Studio_Publish_Dispatch_Count"),
+  });
   try {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
       method: "PATCH",
       body: JSON.stringify({
         fields: {
-          Studio_Publish_Dispatch_At: new Date().toISOString(),
-          Studio_Publish_Dispatch_Count: count,
+          ...attemptStamp,
           Studio_Publish_Dispatch_Note: String(note || "").slice(0, 900),
           // A rescue skip used to leave Publish_Status at Ready to Publish, so
           // the row stayed Past Due. Park the reason without calling it Failed.
-          ...(/skipped:/i.test(String(note || "")) && !/RATE_LIMIT|FACEBOOK_STORY_RATE_LIMIT_368/i.test(String(f(record, "Publish_Error_Stage") || ""))
-            ? {
-              Publish_Error_Stage: "RESCUE_SKIP",
-              Publish_Error_Message: String(note || "").slice(0, 900),
-              Publish_Retry_Eligible: true,
-              Publish_Next_Retry_At: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-            }
-            : {}),
+          ...overdueSkipReceiptFields({
+            note,
+            retryEligible: f(record, "Publish_Retry_Eligible"),
+            retryAt: f(record, "Publish_Next_Retry_At"),
+            errorStage: f(record, "Publish_Error_Stage"),
+          }),
         },
         typecast: true,
       }),

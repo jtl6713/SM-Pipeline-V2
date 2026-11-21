@@ -50,7 +50,7 @@ test("opening Ideas requires an authoritative live listing, never a stale snapsh
   const end = src.indexOf("function productionPageActive()", start);
   const body = src.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(body, /\/api\/ideas\?limit=100&fresh=1/);
+  assert.match(body, /\/api\/ideas\?limit=100&unpromoted=1&fresh=1/);
   assert.match(body, /result\?\.live !== true/);
   assert.doesNotMatch(body, /refreshing && !result\.records\.length/);
 });

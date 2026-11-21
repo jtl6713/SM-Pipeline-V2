@@ -7,6 +7,7 @@ media.chicagoshining.com host is chicagoshining-publish-assets, so those keys 40
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +15,26 @@ from urllib.parse import urlparse
 from ap0.constants import CONTENT_TYPE, PUBLIC_MEDIA_BASE
 from item4.constants import STUDIO_MASTER_PREFIX
 from render.fields import field_str
+
+
+_DRIVE_FINAL_PATH = re.compile(r"^/file/d/([A-Za-z0-9_-]{10,})(?:/|$)")
+
+
+def final_drive_file_id(record: dict[str, Any]) -> str:
+    """Use an explicit final Drive ID or derive one from Google's canonical file URL.
+
+    Supabase can contain a completed Final_File_URL while Final_File_ID remains
+    empty (e.g. an approved historical render). Never trust a non-Google host,
+    a relative URL, or another media service as a Drive ID source.
+    """
+    explicit = field_str(record, "Final_File_ID")
+    if explicit:
+        return explicit
+    parsed = urlparse(field_str(record, "Final_File_URL"))
+    if parsed.scheme != "https" or parsed.hostname != "drive.google.com":
+        return ""
+    match = _DRIVE_FINAL_PATH.match(parsed.path or "")
+    return match.group(1) if match else ""
 
 
 def _is_studio_master_key(r2_key: str) -> bool:
@@ -51,7 +72,7 @@ def master_r2_key_from_record(record: dict[str, Any]) -> str:
 def download_mp4_to_path(client, record: dict[str, Any], dest_path: str) -> str:
     from integrations.google_drive import GoogleDriveClient
 
-    drive_id = field_str(record, "Final_File_ID")
+    drive_id = final_drive_file_id(record)
     if drive_id:
         GoogleDriveClient().download_file_to_path(drive_id, dest_path)
         return dest_path
@@ -66,7 +87,7 @@ def download_mp4_bytes(client, record: dict[str, Any]) -> bytes:
     from item4.sources import download_via_media_bridge
     from integrations.google_drive import GoogleDriveClient
 
-    drive_id = field_str(record, "Final_File_ID")
+    drive_id = final_drive_file_id(record)
     if drive_id:
         content, _mime = GoogleDriveClient().download_file(drive_id)
         return content

@@ -136,3 +136,13 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-18: Deploy runner 2026-11-18-fb0-record-link-checkpoint-v2 after merged PRs #2192 and #2194. Facebook FB0/FB1/FB2 now locate Supabase carousel slides by exact immutable output record link, not blank or ambiguous numeric Output_ID, with strict postfilter and over-capacity sentinel. FB0 exact duplicate 2N slide repair validates final approved source Drive IDs and preserves canonical source media. FB1 Meta OAuth 190/459 checkpoint cannot retry automatically or re-create photo objects. CI required, no Airtable egress, do not bypass old Meta holds or silently publish. Issue #2182.
 
 2026-11-18: Deploy rebased Vibe #2193 recovery and 5xx read-only verification retry, with original master claim-clock guard and resumable Google Drive 308 safety. No publishing.
+
+2026-11-19: Deploy pipeline-runner 2026-11-19-ig-carousel-supabase-allowlist-v1 (PR #2244). Exact Supabase-native AP0C/1C/2C carousel readiness and child-container readback; verify regressions and /health via protected Ops workflow. No direct publish, retry override, or Meta permission change.
+
+2026-11-19: Deploy optional frame-filling composition guidance for generated thumbnails (PR #2250).
+
+2026-11-20: Deploy native runner 2026-11-20-ig-story-graph-limit-cooldown-v1 (merged PR #2299, commit 929af3dfb5fff58618c37e0e964fb805ecfab946). Correct Meta Graph (#4) request-limit errors from existing Instagram Story container GET: preserve container, cooldown one hour or longer, never treat as terminal failure or create a new Story on this error; require explicit FINISHED before media_publish. Verify Supabase-only reads/writes, six-hour Airtable archive idle, all regression tests and deployed /health. No historical status/retry reset or public publication in this deployment.
+
+2026-11-20: Deploy merged PR #2318 (dd5a5a117a992c6b75e4e267a3d8feafa9fc5e90): fix TTD1 missing_output_identity for blank TikTok output titles by deriving linked Content Item title from Supabase. Preserve numeric ID guard, existing draft receipts; no Airtable reads/writes or broad retries. Verify runner /health.
+
+2026-11-20 YT0 Supabase FK parent-title fallback v1: deploy merged read-only missing YouTube title projection for exact parent Content Item, preserve nonblank platform output titles. No automatic provider upload, no retry reset, no publication. Require runner Supabase source health, archive 6h zero reads/writes, protected regression suite, and exact version health readback.

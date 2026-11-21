@@ -310,7 +310,7 @@ def _list_select(table_id: str) -> str:
         blobs = ",".join(OUTPUT_JSON_COLUMNS.values())
         return (
             f"{base},error_messages,{blobs},"
-            "content_items(airtable_record_id),content_profiles(airtable_record_id)"
+            "content_items(airtable_record_id,content_title),content_profiles(airtable_record_id)"
         )
     if table_id == CONTENT_ITEMS_TABLE:
         return f"{base},extras,content_profiles(airtable_record_id)"
@@ -416,6 +416,23 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     fields.update(shaped["fields"])
     shaped = {"id": record_id, "fields": fields}
     if table_id == PLATFORM_OUTPUTS_TABLE:
+        # TikTok TTD1 and YouTube YT0 require an output title. Factory
+        # outputs may have a blank typed output_title even when the exact
+        # linked authoritative Content Item has its approved title. Derive
+        # the read-side title from the Supabase FK join only. Never override
+        # a nonblank output title, change the write authority, or infer from
+        # unrelated sibling outputs.
+        if (
+            str(shaped["fields"].get("Platform") or "").strip().casefold() in {"tiktok", "youtube"}
+            and not str(shaped["fields"].get("Output_Title") or "").strip()
+        ):
+            parent = row.get("content_items")
+            parent_title = (
+                str(parent.get("content_title") or "").strip()
+                if isinstance(parent, dict) else ""
+            )
+            if parent_title:
+                shaped["fields"]["Output_Title"] = parent_title
         for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
             if row.get(column) is not None:
                 shaped["fields"][airtable_key] = row.get(column)
@@ -542,7 +559,7 @@ def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str
     if not table:
         return None
     if table_id == PLATFORM_OUTPUTS_TABLE:
-        select = "*,content_items(airtable_record_id),content_profiles(airtable_record_id)"
+        select = "*,content_items(airtable_record_id,content_title),content_profiles(airtable_record_id)"
     elif table_id == CONTENT_ITEMS_TABLE:
         select = "*,content_profiles(airtable_record_id)"
     else:

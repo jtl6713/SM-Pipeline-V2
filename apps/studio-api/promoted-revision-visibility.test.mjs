@@ -22,7 +22,7 @@ test("reopened promoted revision is selectable without creating a new draft", ()
   const start = web.indexOf("function productionRequestIsOpenDraft(");
   const end = web.indexOf("async function loadProductionRequests(", start);
   const block = web.slice(start, end);
-  assert.match(block, /status === "promoted"/);
+  assert.match(block, /\["promoted", "draft", "ready"\]\.includes\(status\)/);
   assert.match(block, /record\.revision_open === true/);
   assert.match(block, /if \(record\.active === false\) return false/);
   assert.match(web, /\? "Revise" : "Continue"/);

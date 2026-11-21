@@ -229,7 +229,7 @@ test("Factory removes submitted outputs from the checkable Needs Eyes lane immed
 });
 
 test("Factory submitted-output projection covers click, durable queue, reload and Active Approvals", () => {
-  const names = ["factoryActivityRows", "factorySubmittedApprovalIds", "factoryVisibleNeedsEyes"];
+  const names = ["factoryActivityRows", "factorySubmittedApprovalIds", "factoryHasHumanReviewAction", "factoryVisibleNeedsEyes"];
   const sources = names.map(name => extractNamedFunction(js, name)).join("\n");
   const A = "recAAAA1111AAAA11", B = "recBBBB2222BBBB22";
   const C = "recCCCC3333CCCC33", D = "recDDDD4444DDDD44";
@@ -244,22 +244,24 @@ test("Factory submitted-output projection covers click, durable queue, reload an
   };
   const submitted = new Function(
     "state", "recentFactoryAccepted", "pendingFactoryApproval", "factoryRecoveryEntries",
+    "canReviewActions", "canReviewHeldOutput", "canRejectHeldOutput",
     sources + "\nreturn {factorySubmittedApprovalIds, factoryVisibleNeedsEyes};",
   )(state, () => ({[C]: Date.now()}), () => ({ids: [D]}),
-    () => [{ saved: { ids: [E] } }]);
+    () => [{ saved: { ids: [E] } }], () => true, () => false, () => false);
   assert.deepEqual([...submitted.factorySubmittedApprovalIds()].sort(), [A,B,C,D,E,F,G].sort());
   const cards = [A,B,C,D,E,F,G,H].map(id => ({id, kind: "output"}));
   cards.push({id: "request-1", kind: "request"});
   assert.deepEqual(submitted.factoryVisibleNeedsEyes(cards).map(card => card.id),
-    [H, "request-1"], "Only never-submitted outputs should remain selectable");
+    [H], "Only never-submitted, eligible outputs should remain selectable");
 
   const noBatch = new Function("state", "recentFactoryAccepted",
     "pendingFactoryApproval", "factoryRecoveryEntries",
+    "canReviewActions", "canReviewHeldOutput", "canRejectHeldOutput",
     sources + "\nreturn factoryVisibleNeedsEyes;",
   )({submissionIntentIds: new Set(), submittingOutputIds: null, batch: null},
-    () => ({}), () => null, () => []);
-  assert.deepEqual(noBatch(cards).map(card => card.id), cards.map(card => card.id),
-    "Explicit preflight refusal without a saved request must restore the review queue");
+    () => ({}), () => null, () => [], () => true, () => false, () => false);
+  assert.deepEqual(noBatch(cards).map(card => card.id), cards.filter(card => card.kind === "output").map(card => card.id),
+    "Explicit preflight refusal without a saved request restores only approvable outputs");
 });
 
 test("Global Factory selects Instagram Stories with backend-normalized metadata", () => {
