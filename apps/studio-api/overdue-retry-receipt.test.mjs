@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
+import fs from "node:fs";
+import { overdueSkipReceiptFields, publishDispatchAttemptStampFields, preDispatchScheduledHold } from "./overdue-retry-receipt.mjs";
 
 const nowMs = Date.parse("2026-11-20T07:00:00Z");
 
@@ -50,4 +51,34 @@ test("do not erase existing eight skipped counts when logging another skip", () 
   assert.equal(Object.keys(publishDispatchAttemptStampFields({
     note: "overdue-rescue: skipped: scheduled-hold", priorCount: 8,
   })).length, 0);
+});
+
+test("pre-due approval holds are not publication attempts", () => {
+  for (const note of [
+    "held until 2026-11-28T17:30:00.000Z",
+    "skipped: scheduled-hold",
+    "reconcile: skipped: scheduled-hold",
+    "overdue-rescue: held until 2026-11-28T17:30:00.000Z",
+  ]) {
+    assert.equal(preDispatchScheduledHold(note), true, note);
+    assert.deepEqual(publishDispatchAttemptStampFields({ note, priorCount: 2 }), {}, note);
+  }
+  for (const note of ["reconcile: target=AP3C | webhook=ok", "overdue-rescue: skipped: graph_failed", "dispatch failed: timeout"]) {
+    assert.equal(preDispatchScheduledHold(note), false, note);
+  }
+});
+
+test("scheduled approval exits without any provider or dispatch receipt writes", () => {
+  const worker = fs.readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const start = worker.indexOf("export async function studioDispatchApprovedPublishAndSchedule(");
+  const end = worker.indexOf("/*__STUDIO_WORKER_END:studioDispatchApprovedPublishAndSchedule__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const fn = worker.slice(start, end);
+  const hold = fn.slice(fn.indexOf("if (!studioPublishCanDispatchNow(record))"), fn.indexOf("const plan = studioPublishDispatchTarget(record)"));
+  assert.match(hold, /skipped: "scheduled-hold"/);
+  assert.doesNotMatch(hold, /studioStampPublishDispatch|studioDispatchApprovedPublishNow|airtableFetch|supabaseRest/);
+  const stamp = worker.slice(worker.indexOf("export async function studioStampPublishDispatch("),
+    worker.indexOf("/*__STUDIO_WORKER_END:studioStampPublishDispatch__*/"));
+  assert.match(stamp, /if \(preDispatchScheduledHold\(note\)\) return;/);
+  assert.ok(stamp.indexOf("if (preDispatchScheduledHold(note)) return;") < stamp.indexOf("airtableFetch("));
 });
