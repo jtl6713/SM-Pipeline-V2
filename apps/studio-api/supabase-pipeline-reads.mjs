@@ -3117,13 +3117,14 @@ export function deskHealOutputFilter(kind, options = {}) {
     const due = encodeDeskFilterValue(new Date(nowMs).toISOString());
     const tiktokLead = encodeDeskFilterValue(new Date(nowMs + 15 * 60000).toISOString());
     const neverDispatched = "or=(error_messages->>Studio_Publish_Dispatch_Count.is.null,error_messages->>Studio_Publish_Dispatch_Count.eq.0)";
-    const retryAllowed = "or=(publish_retry_eligible.is.null,publish_retry_eligible.eq.true)";
+    // A never-attempted approved row may have retry=false; the per-record
+    // preflight rejects any prior remote attempt or ID. Honor cooldowns.
     const retryDue = `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${due})`;
     const scheduled = `or=(scheduled_post_date.lte.${due},and(platform.eq.TikTok,scheduled_post_date.lte.${tiktokLead}))`;
     return `${quiet}&auto_publish_enabled=eq.true&review_status=eq.Approved&published_at=is.null`
       + `&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
-      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Publish")}`
-      + `&${neverDispatched}&${retryAllowed}&${retryDue}&${scheduled}`;
+      + `&publish_status=in.(${["Ready to Publish", "Ready to Schedule"].map(encodeDeskFilterValue).join(",")})`
+      + `&${neverDispatched}&${retryDue}&${scheduled}`;
   }
   if (kind === "overdue_scheduled") {
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();

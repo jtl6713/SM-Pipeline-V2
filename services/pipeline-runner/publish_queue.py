@@ -41,6 +41,35 @@ def _retry_explicitly_prohibited(fields: dict) -> bool:
     return value is False or (isinstance(value, str) and value.strip().lower() == "false")
 
 
+
+def _fresh_initial_without_provider_attempt(fields: dict) -> bool:
+    """An explicit no-retry flag is compatible with a first-ever approved
+    dispatch, but never with recovery after an uncertain provider operation."""
+    state = _text(fields.get("Publish_Status") or fields.get("publish_status"))
+    if state not in {"Ready to Publish", "Ready to Schedule"}:
+        return False
+    if not _checked(fields.get("Auto_Publish_Enabled") if "Auto_Publish_Enabled" in fields else fields.get("auto_publish_enabled")):
+        return False
+    if _checked(fields.get("Do_Not_Publish") if "Do_Not_Publish" in fields else fields.get("do_not_publish")):
+        return False
+    if (_number(fields.get("Publish_Attempt_Count") or fields.get("publish_attempt_count")) or 0) != 0:
+        return False
+    if (_number(fields.get("Studio_Publish_Dispatch_Count") or fields.get("studio_publish_dispatch_count")) or 0) != 0:
+        return False
+    for key in (
+        "Publish_Started_At", "Last_Publish_Attempt_At",
+        "Studio_Publish_Dispatch_At", "Platform_Post_ID", "Platform_Media_ID",
+        "YouTube_Video_ID", "YouTube_Upload_Job_ID", "FB_Slideshow_Meta_Video_ID",
+    ):
+        if _text(fields.get(key) or fields.get(key.lower())):
+            return False
+    if _text(fields.get("FB_Publish_Status") or fields.get("fb_publish_status")) not in {
+        "", "Ready for Assets", "Not Needed",
+    }:
+        return False
+    return True
+
+
 def _when(value: Any) -> datetime | None:
     if value is None or value == "":
         return None
@@ -73,7 +102,7 @@ def youtube_action_due_now(fields: dict, now: datetime) -> int:
         and not _checked(fields.get("Do_Not_Publish") if "Do_Not_Publish" in fields else fields.get("do_not_publish"))
         and _text(fields.get("Publish_Status") or fields.get("publish_status")) != "Published"
         and stage not in {"Complete", "Terminal Error"}
-        and not _retry_explicitly_prohibited(fields)
+        and (not _retry_explicitly_prohibited(fields) or _fresh_initial_without_provider_attempt(fields))
         and _due_clock(_when(fields.get("Publish_Next_Retry_At") or fields.get("publish_next_retry_at")), now)
     )
 
@@ -120,7 +149,7 @@ def fb_action_due_now(fields: dict, now: datetime) -> int:
         and not _checked(fields.get("Do_Not_Publish") if "Do_Not_Publish" in fields else fields.get("do_not_publish"))
         and _text(fields.get("Publish_Status") or fields.get("publish_status")) != "Published"
         and _text(fields.get("FB_Publish_Status") or fields.get("fb_publish_status")) != "Published"
-        and not retry_prohibited
+        and (not retry_prohibited or _fresh_initial_without_provider_attempt(fields))
         and _due_clock(retry_at, now)
     )
 

@@ -22,7 +22,7 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
   if (!checked(read("Auto_Publish_Enabled", "auto_publish_enabled"))) return block("auto_publish_disabled");
   if (str(read("Review_Status", "review_status")) !== "Approved" ||
       str(read("Output_Status", "output_status")) !== "Approved for Publishing") return block("not_final_approved");
-  if (str(read("Publish_Status", "publish_status")) !== "Ready to Publish") return block("not_ready_to_publish");
+  if (!["Ready to Publish", "Ready to Schedule"].includes(str(read("Publish_Status", "publish_status")))) return block("not_ready_for_initial_dispatch");
   if (present(read("Published_At", "published_at")) ||
       present(read("Platform_Post_URL", "platform_post_url")) ||
       present(read("Manual_Published_URL", "manual_published_url"))) return block("existing_publication_receipt");
@@ -43,9 +43,9 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
   ]) {
     if (present(read(name, name.toLowerCase()))) return block("prior_provider_or_dispatch_identity");
   }
-  if (read("Publish_Retry_Eligible", "publish_retry_eligible") === false ||
-      str(read("Publish_Retry_Eligible", "publish_retry_eligible")).toLowerCase() === "false")
-    return block("retry_explicitly_prohibited");
+  // Publish_Retry_Eligible=false forbids another attempt, not the first-ever
+  // publish of an approved output. The zero-attempt and remote-identity checks
+  // above already prove fresh admission; a future retry/cooldown remains held.
   const retryAt = time(read("Publish_Next_Retry_At", "publish_next_retry_at"));
   if (retryAt !== null && retryAt > nowMs) return block("retry_cooldown");
   const lockBy = read("Publish_Locked_By", "publish_locked_by");

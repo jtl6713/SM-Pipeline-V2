@@ -32,7 +32,9 @@ test("an ambiguous prior dispatch is verification work, never another upload", (
 });
 test("never override retry prohibition, cooldown or active lock", () => {
   let row = fresh(); row.fields.Publish_Retry_Eligible = false;
-  assert.equal(check(row).reason, "retry_explicitly_prohibited");
+  assert.equal(check(row).eligible, true, "no-retry flag must not block a never-attempted first post");
+  row.fields.Studio_Publish_Dispatch_Count = 1;
+  assert.equal(check(row).reason, "previous_attempt_requires_provider_reconciliation");
   row = fresh(); row.fields.Publish_Next_Retry_At = "2099-01-01T00:00:00Z";
   assert.equal(check(row).reason, "retry_cooldown");
   row = fresh(); row.fields.Publish_Locked_By = "publisher";
@@ -61,4 +63,12 @@ test("carousel children and TikTok drafts with existing stage work use continuat
   assert.equal(check(row).reason, "carousel_stage_requires_continuation");
   row = fresh(); row.fields.TikTok_Draft_Status = "Processing";
   assert.equal(check(row).reason, "tiktok_stage_requires_continuation");
+});
+
+test("due Ready to Schedule records share the same fenced first-publish admission", () => {
+  const row = fresh();
+  row.fields.Publish_Status = "Ready to Schedule";
+  assert.deepEqual(check(row), { eligible: true, reason: "fresh_approved_due_unattempted" });
+  row.fields.Studio_Publish_Dispatch_Count = 8;
+  assert.equal(check(row).reason, "previous_attempt_requires_provider_reconciliation");
 });
