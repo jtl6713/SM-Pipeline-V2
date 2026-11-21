@@ -15,6 +15,7 @@ from idea.chain import trigger_next
 from idea.constants import DEFAULT_CONTENT_PROFILE_ID
 from idea.mapping import parse_int
 from idea.prompt import build_i1_prompt
+from studio_produce.creative_guidance import load_profile_creative_guidance, creative_prompt_suffix
 from render.fields import field, field_str
 
 
@@ -186,6 +187,13 @@ def process_request(
     # Ask for bounded alternatives, but save at most the requested shortfall.
     pool_size = min(20, max(remaining + 4, (remaining * 3 + 1) // 2))
     prompt = build_i1_prompt(profile, remaining_slots=pool_size, quality=quality_mode)
+    # Apply owner/global and this profile's every-generation guidance to all
+    # I1 paths, including durable retries. The reader uses Supabase settings
+    # whenever Studio's Supabase authority is enabled; it never changes output.
+    creative = load_profile_creative_guidance(
+        client, {"fields": {"Content_Profile": [preview["profile_record_id"]]}},
+    )
+    prompt += creative_prompt_suffix(creative, mode="ideas")
     prompt += (
         "\n\nDURABLE I1 CANDIDATE POOL: The user requested only "
         f"{remaining} saved idea(s). Return {pool_size} distinct candidates "

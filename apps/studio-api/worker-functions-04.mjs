@@ -51,6 +51,8 @@ import {
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { reconcileCreativeMasterAtFactoryApproval } from "./creative-master-factory-guard.mjs";
 import { creativeSettingName, parseCreativeGuidance, resolveCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
+import { ownerGenerationSettingName, parseOwnerGenerationGuidance, validateOwnerGenerationPrompt, effectiveGenerationLayers, effectiveGenerationPrompt } from "./owner-generation-guidance.mjs";
+import { resolveOwnerOrganizationForProfile, loadOwnerGenerationForProfile } from "./owner-generation-supabase.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
@@ -8870,7 +8872,7 @@ pre{background:#102829;color:#dff8f5;padding:16px;border-radius:10px;white-space
 </head>
 <body><main>
 <h1>Studio Admin — Make Blueprint Deploy</h1>
-<p>Signed in as ${escapeHtml(displayName)}. This deployer reads Make API configuration from Supabase Pipeline Settings. No Airtable credentials are used or requested.</p>
+<p>Signed in as ${escapeHtml(displayName)}. This deployer uses the Studio API Worker's server-side Airtable credential and reads the Make API credential from Pipeline Settings. No local AIRTABLE_PAT is used or requested.</p>
 <div class="note"><strong>Safety:</strong> The current live blueprint is backed up to the Make Admin Queue before the Make PATCH is attempted. Scheduling/activation are not changed.</div>
 <label>Scenario ID</label><input id="scenario" type="number" value="5556716">
 <label>Expected current name</label><input id="expected" value="R4 - Start Remotion Render v2.4.1 - Remotion Props toString Fix">
@@ -8998,7 +9000,7 @@ export async function adminMakeDeploy(request, env, authorization) {
           Started_At: requestedAt,
           Requested_By: String(authorization?.email || "studio-admin"),
           Correlation_ID: correlationId,
-          Notes: "Server-side Studio Admin deployment. Uses Supabase Pipeline Settings and configured Make API credentials; no Airtable token. Live blueprint backed up before PATCH. Scheduling/activation unchanged.",
+          Notes: "Server-side Studio Admin deployment. Uses Cloudflare Worker AIRTABLE_PAT and Make API credentials stored in Pipeline Settings; no local AIRTABLE_PAT. Live blueprint backed up before PATCH. Scheduling/activation unchanged.",
         },
       }],
       typecast: true,
@@ -14483,78 +14485,106 @@ export async function patchStudioOperationsProfile(request, env, url, authorizat
 
 // Scoped creative instructions are saved as Pipeline Settings, so existing
 // Content Profile schemas/defaults and Supabase read gating remain unchanged.
-export async function studioProfileCreativeGuidance(request, env, url, authorization) {
-  const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]+)\/creative$/.exec(url.pathname);
-  if (!match) throw new HttpError(400, "Invalid profile creative-guidance path");
-  const profileId = match[1];
-  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
-  if (!profile?.id) throw new HttpError(404, "Content Profile was not found");
-  const name = creativeSettingName(profileId);
+export async function studioOwnerGlobalGenerationGuidance(request, env, authorization) {
+  if (!authorization?.authorized || !authorization?.permissions?.tenant_admin) {
+    throw new HttpError(403, "Tenant admin permission required");
+  }
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) {
+    throw new HttpError(503, "Supabase authoritative Pipeline Settings are required for generation guidance");
+  }
+  const name = ownerGenerationSettingName(authorization?.organization?.record_id);
   const stored = await studioSettingsByName(env, name);
+  const previous = parseOwnerGenerationGuidance(f(stored, "Setting_Value"));
+  if (request.method === "GET") {
+    return respond(request, env, { ok: true, ...previous, can_edit: true, scope: "organization", owner_id: authorization.organization.record_id });
+  }
+  if (request.method !== "PATCH") throw new HttpError(405, "Method not allowed");
+  let body;
+  try { body = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "A JSON object is required");
+  if (String(body.revision ?? "") !== previous.revision) throw new HttpError(409, "Global prompt changed in another session; reload before saving");
+  let prompt;
+  try { prompt = validateOwnerGenerationPrompt(body.prompt); }
+  catch (error) { throw new HttpError(400, error.message); }
+  const saved = {
+    prompt,
+    revision: crypto.randomUUID(),
+    updated_at: new Date().toISOString(),
+    updated_by: String(authorization?.user?.record_id || authorization?.email || "admin"),
+  };
+  await studioUpsertSetting(env, name, JSON.stringify(saved), "Organization-scoped owner-wide AI generation instructions");
+  const verified = parseOwnerGenerationGuidance(f(await studioSettingsByName(env, name), "Setting_Value"));
+  if (verified.revision !== saved.revision) throw new HttpError(502, "Global prompt save could not be verified in Supabase");
+  return respond(request, env, { ok: true, ...verified, can_edit: true, scope: "organization", owner_id: authorization.organization.record_id });
+}
+/*__STUDIO_WORKER_END:studioOwnerGlobalGenerationGuidance__*/
+
+// The editor never reads Airtable. Existing profile-specific overrides are stored
+// in Supabase Pipeline Settings; the owner-wide layer is scoped by organization.
+export async function studioProfileCreativeGuidance(request, env, url, authorization) {
+  const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]{14})\/creative$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid profile creative-guidance path");
+  if (!authorization?.authorized || !authorization?.permissions?.tenant_admin) throw new HttpError(403, "Tenant admin permission required");
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env)) {
+    throw new HttpError(503, "Supabase authoritative Pipeline Settings are required for generation guidance");
+  }
+  const profileId = match[1];
+  const profile = await readSupabaseContentProfile(env, profileId);
+  if (!profile?.id) throw new HttpError(404, "Content Profile was not found in Supabase");
+  const orgId = await resolveOwnerOrganizationForProfile(env, profileId);
+  const linkedBrand = firstLinkedRecordId(f(profile, "Brand"));
+  const allowedBrandIds = new Set([
+    authorization?.brand?.record_id,
+    ...(authorization?.allowed_brands || []).map((brand) => brand?.record_id),
+  ].filter(Boolean));
+  if (orgId !== authorization?.organization?.record_id
+      && !(orgId == null && linkedBrand && allowedBrandIds.has(linkedBrand))) {
+    throw new HttpError(403, "Content Profile is not owned by your Studio organization");
+  }
+  const name = creativeSettingName(profileId);
+  const globalName = ownerGenerationSettingName(authorization?.organization?.record_id);
+  const [stored, ownerStored] = await Promise.all([
+    studioSettingsByName(env, name), studioSettingsByName(env, globalName),
+  ]);
   const raw = String(f(stored, "Setting_Value") || "");
   let version = "0";
   try { version = String(JSON.parse(raw)?.revision || "0"); } catch { /* old/missing setting */ }
   const previous = parseCreativeGuidance(raw);
   if (request.method === "GET") {
-    // These records are linked from the selected profile. They may be shared
-    // with other profiles, so the editor displays their actual database text
-    // but saves changes to this profile's own Pipeline Settings override.
-    const brandId = firstLinkedRecordId(f(profile, "Brand"));
-    const personaId = firstLinkedRecordId(f(profile, "AI_Persona"));
-    const fetchOptional = async (tableId, id) => {
-      if (!id) return null;
-      try { return await airtableFetch(env, tableId, id); }
-      catch (error) {
-        console.warn("profile creative source unavailable", tableId, id, error?.message || error);
-        return null;
-      }
-    };
-    const [brand, persona, thumbnailTemplate, packageTemplate] = await Promise.all([
-      fetchOptional("tblUV8Cd7C2UCyuJ9", brandId),
-      fetchOptional("tblIfUHO11qzUgZ24", personaId),
-      fetchOptional("tbl3bGFEcfruzyUVT", "recNwBofjF7gw5CEu"),
-      fetchOptional("tbl3bGFEcfruzyUVT", "recZTvVhFf8CrcUcU"),
-    ]);
-    const from = (row, names) => Object.fromEntries(names.map((field) => [field, String(f(row, field) || "")]));
-    const resolved = resolveCreativeGuidance({
-      saved: previous,
-      profile: from(profile, ["Brand_Voice", "Profile_Override_Guidelines", "Content_Strategy_Overrides", "Thumbnail_Guideline_Overrides"]),
-      brand: from(brand, ["Brand_Name", "Brand_Voice", "Brand_Personality", "Visual_Style_Guidelines", "Thumbnail_Style_Guidelines"]),
-      persona: from(persona, ["Persona_Name", "Communication_Style", "Tone_Guidelines", "Pacing_Guidelines"]),
-    });
-    const templates = [
-      { row: thumbnailTemplate, type: "Thumbnail generation · P2", name: "P2_THUMBNAIL_PROMPT" },
-      { row: packageTemplate, type: "Content package / narration · P1", name: "P1_CONTENT_PACKAGE" },
-    ].filter((item) => item.row?.id)
-      .map((item) => ({
-        key: item.name,
-        label: item.type,
-        scope: "Shared across profiles",
-        system_prompt: String(f(item.row, "System Prompt") || ""),
-        user_prompt_template: String(f(item.row, "User Prompt Template") || ""),
-      }));
-    return respond(request, env, { ok: true, profile_id: profileId,
+    const resolved = resolveCreativeGuidance({ saved: previous, profile: profile.fields || {}, savedRowExists: Boolean(stored?.id) });
+    const globalPrompt = parseOwnerGenerationGuidance(f(ownerStored, "Setting_Value"));
+    const profileWide = resolved.creative.shared_direction;
+    return respond(request, env, {
+      ok: true,
+      profile_id: profileId,
       profile_name: String(f(profile, "Profile_Name") || ""),
       creative: resolved.creative, sources: resolved.sources,
-      references: resolved.references, templates,
-      revision: version, can_edit: Boolean(authorization?.permissions?.tenant_admin) });
+      references: [], templates: [],
+      owner_global: globalPrompt,
+      effective_prompt: effectiveGenerationPrompt({ ownerGlobal: globalPrompt.prompt, profileWide }),
+      effective_layers: effectiveGenerationLayers({ ownerGlobal: globalPrompt.prompt, profileWide }),
+      revision: version, can_edit: true,
+    });
   }
+  if (request.method !== "PATCH") throw new HttpError(405, "Method not allowed");
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new HttpError(400, "Request body must be a JSON object");
-  }
-  if (String(payload.revision ?? "") !== version) {
-    throw new HttpError(409, "Creative instructions changed in another session; reload before saving");
-  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new HttpError(400, "Request body must be a JSON object");
+  if (String(payload.revision ?? "") !== version) throw new HttpError(409, "Creative instructions changed in another session; reload before saving");
   let creative;
   try { creative = validateCreativeGuidancePatch(payload.creative, previous); }
   catch (error) { throw new HttpError(400, String(error.message || error)); }
   const nextRevision = crypto.randomUUID();
-  const storedValue = JSON.stringify({ ...creative, revision: nextRevision, updated_at: new Date().toISOString() });
-  await studioUpsertSetting(env, name, storedValue, `Profile-specific thumbnail + narration direction for ${profileId}`);
-  return respond(request, env, { ok: true, profile_id: profileId,
-    profile_name: String(f(profile, "Profile_Name") || ""), creative, revision: nextRevision, can_edit: true });
+  const storedValue = JSON.stringify({ ...creative, revision: nextRevision, updated_at: new Date().toISOString(), updated_by: authorization?.user?.record_id || null });
+  await studioUpsertSetting(env, name, storedValue, `Profile-specific generation direction for ${profileId}`);
+  const verified = await studioSettingsByName(env, name);
+  const verifyValue = String(f(verified, "Setting_Value") || "");
+  if (!verifyValue.includes(nextRevision)) throw new HttpError(502, "Profile prompt save could not be verified in Supabase");
+  return respond(request, env, {
+    ok: true, profile_id: profileId,
+    profile_name: String(f(profile, "Profile_Name") || ""),
+    creative, revision: nextRevision, can_edit: true,
+  });
 }
 /*__STUDIO_WORKER_END:studioProfileCreativeGuidance__*/
 
