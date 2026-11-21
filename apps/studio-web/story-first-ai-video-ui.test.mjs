@@ -177,3 +177,15 @@ test("quote progress uses the same visible animated track and supports reduced m
   assert.match(css, /story-first-video-progress\[hidden\]/);
   assert.doesNotMatch(css, /width:\s*100%.*estimated|percent-complete/i);
 });
+
+test("acceptance errors refresh the real R2 status without retrying paid generation", () => {
+  const action = ui.slice(ui.indexOf("async function decideSceneVideo(index, action)"),
+    ui.indexOf("function keyTerms(", ui.indexOf("async function decideSceneVideo(index, action)")));
+  assert.match(action, /catch \\(error\\) \\{[\\s\\S]*?await checkSceneVideo\\(index, true\\)/);
+  assert.doesNotMatch(action, /generateSceneVideo\\(|video\\/start|submitStoryVideo\\(/);
+  assert.match(server, /job\\.state === "accepting"/);
+  assert.match(server, /Original AI video preserved/);
+  assert.match(server, /job\\.state === "accepted"/);
+  assert.match(ui, /Acceptance Needs Reconciliation/);
+  assert.match(ui, /Do not generate a second video/);
+});
