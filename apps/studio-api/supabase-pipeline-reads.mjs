@@ -9504,10 +9504,16 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       return { ok: false, reason: "table" };
     }
     const table = kind === "idea" ? "idea_candidates" : kind === "slides" ? "carousel_slides" : "engagement_settings";
-    await supabaseRest(env, `${table}?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+    const source = kind === "pipeline_settings" ? "pipeline" : kind === "engagement_settings" ? "engagement" : "";
+    const filter = `airtable_record_id=eq.${encodeURIComponent(id)}`
+      + (source ? `&payload->>source=eq.${source}` : "");
+    const deleted = await supabaseRest(env, `${table}?${filter}&select=airtable_record_id`, {
       method: "DELETE",
-      headers: { Prefer: "return=minimal" },
+      headers: { Prefer: "return=representation" },
     });
+    if (!Array.isArray(deleted) || deleted.length !== 1 || deleted[0]?.airtable_record_id !== id) {
+      return { ok: false, reason: "delete_not_confirmed" };
+    }
     return { ok: true, records: [{ id, deleted: true }] };
   }
   return { ok: false, reason: "method" };
