@@ -61,6 +61,7 @@ CREATE TRIGGER studio_assign_idea_candidate_number
 -- anonymous/authenticated clients.
 GRANT USAGE ON SEQUENCE public.studio_idea_candidate_number_seq TO service_role;
 REVOKE ALL ON FUNCTION public.studio_assign_idea_candidate_number() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.studio_assign_idea_candidate_number() TO service_role;
 
 -- Process oldest unnumbered record first, using one assignment per row.
 DO $backfill$
