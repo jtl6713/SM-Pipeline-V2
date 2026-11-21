@@ -1407,7 +1407,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1011-independent-insights-cron",
+          version: "0.10.1012-idea-reset-guards",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -8644,6 +8644,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:waitAutonomousVariantsReady__*/
 /*__STUDIO_WORKER_EXTRACT:finishAutonomousProductionRequest__*/
 /*__STUDIO_WORKER_EXTRACT:ideaMatchedMediaIds__*/
+/*__STUDIO_WORKER_EXTRACT:selectValidAutonomousMusicAssetId__*/
 /**
  * Stamp a random Autonomous_Music_Pool track when Selected_Music_Asset is blank.
  * Photo-ready daily ideas used to skip this and every Remotion job fell through to

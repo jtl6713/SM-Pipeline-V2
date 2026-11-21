@@ -1919,6 +1919,47 @@ export async function listSupabaseManualActionOutputs(env, { profileAirtableId, 
   );
 }
 
+/**
+ * #2531: complete, profile-scoped Pipeline history via deterministic Supabase
+ * pages. Never apply the calendar's schedule-week filter to this inventory.
+ * The cursor is a numeric offset; the caller must walk until has_more=false.
+ */
+export async function listSupabasePipelineHistoryPage(env, {
+  profileAirtableId, offset = 0, limit = 150,
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Pipeline history unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Pipeline profile missing");
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const size = Math.max(1, Math.min(200, Math.floor(Number(limit) || 150)));
+  // Database-maintained approval stamp is indexed and sorted before LIMIT/OFFSET.
+  // Null stamps (historical requests lacking proof) are placed last.
+  const historySelect = OUTPUT_SELECT + ",production_approved_at";
+  const rows = await supabaseRest(env,
+    `platform_outputs?content_profile_id=eq.${profileId}&test_run_id=is.null`
+    + `&select=${historySelect}&order=production_approved_at.desc.nullslast,created_at.desc.nullslast,output_number.desc.nullslast,id.desc`
+    + `&limit=${size + 1}&offset=${skip}`);
+  const page = (rows || []).slice(0, size).map(flattenOutputRow);
+  const contentByAirtableId = new Map();
+  for (const row of page) {
+    if (row.content_item_airtable_id) contentByAirtableId.set(row.content_item_airtable_id, {
+      id: row.content_item_airtable_id,
+      fields: { Content_ID: row.content_number, Content_Title: row.content_title },
+    });
+  }
+  return {
+    records: page.map((row) => {
+      const shaped = airtableShapedOutputFromSupabase(row);
+      shaped.fields.Production_Approved_At = row.production_approved_at;
+      return shaped;
+    }),
+    contentByAirtableId,
+    has_more: (rows || []).length > size,
+    next_offset: (rows || []).length > size ? skip + page.length : null,
+    read_source: "supabase",
+  };
+}
+
 export async function listSupabasePipelineOutputs(env, { profileAirtableId, limit = 250, reviewOnly = false } = {}) {
   const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
   if (!profileId) return { records: [], contentByAirtableId: new Map(), profileMissing: true };
@@ -3361,6 +3402,7 @@ export async function listSupabaseDeskHealOutputs(env, {
   kind,
   limit = 30,
   sortDirection = "desc",
+  offset = 0,
   nowMs = undefined,
   requireAutoPublish = undefined,
   cutoffIso = "",
@@ -3374,8 +3416,10 @@ export async function listSupabaseDeskHealOutputs(env, {
   // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
   // TTD2 must fair-queue by Last_Checked (nulls first). output_number.desc
   // kept pulsing the same high-ID Processing rows and never reached 4121.
+  // Publisher fairness: process the oldest due slot first. Descending date
+  // allowed newer content to jump ahead and left older approved outputs stuck.
   const order = kind === "fresh_publish_ready"
-    ? `order=scheduled_post_date.desc.nullslast`
+    ? `order=scheduled_post_date.asc.nullslast,output_number.asc`
     : (kind === "ttd0_ready" || kind === "ttd1_ready")
     ? `order=scheduled_post_date.${direction}.nullslast`
     : kind === "overdue_scheduled"
@@ -3403,9 +3447,13 @@ export async function listSupabaseDeskHealOutputs(env, {
     }
     return matches.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
   }
+  // Only the first-publish selector opts into bounded pagination, so held or
+  // media-incomplete older candidates cannot monopolize every future cron tick.
+  const freshOffset = kind === "fresh_publish_ready"
+    ? `&offset=${Math.max(0, Math.min(480, Math.trunc(Number(offset) || 0)))}` : "";
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}`,
+    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}${freshOffset}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)

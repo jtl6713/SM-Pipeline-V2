@@ -41,8 +41,15 @@ export function heldRetryPendingDisposition(record,{nowMs=Date.now()}={}){
   const schedule=dueMs(fields.Scheduled_Post_Date??fields.Studio_Scheduled_At);
   const limit=fb&&/FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT|368|1390008|rate.?limit/i.test(stage+" "+err);
   const dispatched=Number(fields.Studio_Publish_Dispatch_Count??0)>0||!!value(fields,"Last_Publish_Attempt_At")||!!value(fields,"Studio_Publish_Dispatch_At");
-  if(limit&&schedule!==null&&Number.isFinite(nowMs)&&schedule>nowMs&&dispatched){
-    return {label:"Needs Verification",reason:"Future-scheduled Facebook Reel has a historical provider rate-limit operation",next_check:"Keep future MAE slot and reconcile original Page video receipt before cooldown rearm",retry_authorized:false,raw_retry_pending:true};
+  if(fb&&value(fields,"Review_Status")==="Approved"&&value(fields,"Output_Status")==="Approved for Publishing"&&
+    value(fields,"Publish_Status")==="Ready to Schedule"&&flag(fields.Auto_Publish_Enabled)&&
+    flag(fields.Publish_Retry_Eligible)&&!flag(fields.Do_Not_Publish)&&
+    schedule!==null&&Number.isFinite(nowMs)&&schedule>nowMs&&dispatched){
+    return {label:"Needs Verification",
+      reason:limit?"Future-scheduled Facebook Reel has historical Meta throttling and a prior provider attempt":
+        "Future-scheduled Facebook output has a historical provider dispatch or attempt without a confirmed original receipt",
+      next_check:"Keep the existing future MAE slot; reconcile prior Page video operation before any replay",
+      retry_authorized:false,raw_retry_pending:true};
   }
   return null; // genuine bounded retry, no invented permission or status
 }

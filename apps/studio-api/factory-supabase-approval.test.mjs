@@ -51,7 +51,7 @@ function output(id, number, state = "Ready for Review") {
     updated_at: ISO,
   };
 }
-function mockSupabase(t, seed) {
+function mockSupabase(t, seed, { timeZone = "America/Chicago" } = {}) {
   const rows = seed.map(row => structuredClone(row)), calls = [];
   const savedFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = savedFetch; });
@@ -60,6 +60,17 @@ function mockSupabase(t, seed) {
     assert.equal(u.origin, BASE, "zero Airtable or external publishing egress");
     calls.push({ method: init.method || "GET", path: u.pathname, query: u.search, body: init.body });
     if (u.pathname.endsWith("/platform_outputs")) {
+      if (u.searchParams.has("scheduled_post_date") && u.searchParams.has("content_profile_id")) {
+        const id = String(u.searchParams.get("content_profile_id")).replace(/^eq\./, "");
+        const platform = String(u.searchParams.get("platform")).replace(/^eq\./, "");
+        const lower = Date.parse(String(u.searchParams.getAll("scheduled_post_date")[0] || "").replace(/^gt\./, ""));
+        const upper = Date.parse(String(u.searchParams.getAll("scheduled_post_date")[1] || "").replace(/^lt\./, ""));
+        const matches = rows.filter(x => x.content_profile_id === id && x.platform === platform
+          && Date.parse(x.scheduled_post_date) > lower && Date.parse(x.scheduled_post_date) < upper);
+        const offset = Number(u.searchParams.get("offset") || 0);
+        const limit = Number(u.searchParams.get("limit") || 500);
+        return Response.json(matches.slice(offset, offset + limit));
+      }
       if ((init.method || "GET") === "PATCH") {
         const row = rows.find(x => x.id === u.searchParams.get("id").slice(3));
         assert.ok(row, "only exact output can be patched");
@@ -68,8 +79,11 @@ function mockSupabase(t, seed) {
         assert.equal(u.searchParams.get("updated_at"), "eq." + row.updated_at);
         assert.match(String(init.headers.Prefer), /return=representation/);
         const body = JSON.parse(init.body);
-        assert.equal(body.auto_publish_enabled, false);
-        assert.equal(body.scheduled_post_date, null);
+        assert.equal(body.publish_method, "Automated");
+        assert.equal(body.auto_publish_enabled, true);
+        assert.ok(Date.parse(body.scheduled_post_date) > Date.now(), "must reserve a future time");
+        assert.equal(body.studio_scheduled_at, body.scheduled_post_date);
+        assert.equal(body.error_messages.SM_Factory_Supabase_Approval_Receipt.scheduled, true);
         assert.equal(body.publish_status, "Ready to Schedule");
         Object.assign(row, body);
         return Response.json([row]);
@@ -81,7 +95,9 @@ function mockSupabase(t, seed) {
       return Response.json([{ id: CONTENT_UUID, airtable_record_id: CONTENT_ID, content_profile_id: PROFILE_UUID }]);
     }
     if (u.pathname.endsWith("/content_profiles")) {
-      return Response.json([{ id: PROFILE_UUID, airtable_record_id: PROFILE_ID }]);
+      return Response.json([{ id: PROFILE_UUID, airtable_record_id: PROFILE_ID,
+        market_name: timeZone === "America/Los_Angeles" ? "Los Angeles" : "Chicago",
+        platform_setup: { Timezone: timeZone } }]);
     }
     throw Error("Unexpected Supabase endpoint: " + u.pathname);
   };
@@ -117,8 +133,9 @@ test("mixed already-approved and Ready-for-Review selection accepts and does not
   assert.equal(mock.rows[1].output_status, "Approved for Publishing");
   assert.equal(mock.rows[1].review_status, "Approved");
   assert.equal(mock.rows[1].publish_status, "Ready to Schedule");
-  assert.equal(mock.rows[1].scheduled_post_date, null);
-  assert.equal(mock.rows[1].auto_publish_enabled, false);
+  assert.ok(Date.parse(mock.rows[1].scheduled_post_date) > Date.now());
+  assert.equal(mock.rows[1].studio_scheduled_at, mock.rows[1].scheduled_post_date);
+  assert.equal(mock.rows[1].auto_publish_enabled, true);
   assert.equal(mock.rows[1].error_messages.SM_Factory_Supabase_Approval_Receipt.request_id,
     "factory_test_mixed");
 });
@@ -212,5 +229,47 @@ test("Supabase Factory never reports Approving or Verifying when creative valida
     onStage: async phase => stages.push(phase),
   }), /public review media could not be verified/);
   assert.deepEqual(stages, ["validating"]);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});
+
+
+test("Factory cannot commit Approved without a publisher-capable platform", async t => {
+  const row = output(IDS[0], 8946);
+  row.platform = "X";
+  const mock = mockSupabase(t, [row]);
+  await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "unsupported-publisher", verifyImages: async readiness => readiness,
+  }), /no supported automated publisher/);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});
+
+test("Factory approval writes future profile-local MAE date in the SAME Supabase CAS", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)], { timeZone: "America/Los_Angeles" });
+  const approved = await factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "factory-atomic-profile-local", verifyImages: async readiness => readiness,
+  });
+  const row = mock.rows[0];
+  assert.ok(approved.scheduled_ms > Date.now());
+  assert.equal(approved.scheduled_ms, Date.parse(row.scheduled_post_date));
+  assert.equal(row.auto_publish_enabled, true);
+  assert.equal(row.publish_status, "Ready to Schedule");
+  assert.equal(row.error_messages.SM_Factory_Supabase_Approval_Receipt.scheduled_timezone,
+    "America/Los_Angeles");
+  assert.equal(row.error_messages.SM_Factory_Supabase_Approval_Receipt.scheduled_for,
+    row.scheduled_post_date);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 1,
+    "no intermediate Approved/no-date update may exist");
+  assert.ok(mock.calls.some(call => call.path.endsWith("/platform_outputs")
+    && call.query.includes("scheduled_post_date=gt.")), "must read actual Supabase occupancy");
+});
+
+
+test("explicit manual method cannot be silently converted to automatic publication", async t => {
+  const row = output(IDS[0], 8946);
+  row.publish_method = "Manual";
+  const mock = mockSupabase(t, [row]);
+  await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "manual-method-held", verifyImages: async readiness => readiness,
+  }), /explicitly configured for manual publishing/);
   assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });

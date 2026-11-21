@@ -12,3 +12,9 @@ on Factory Manual lane, zero approval/delete/publish/retry authorization.
 No output writes, no media creation, no provider publication, no automatic schedule.
 On source drift, mismatched marker counts, unauthorized session, or Airtable egress:
 fail closed, roll back the Worker, keep all 82 creative holds and issue #2374 OPEN.
+
+Second review-only release: Factory original-image gallery, source PR #2520.
+HOLD this marker until source #2520 merges after all protected checks.
+Validate exactly 82 protected Manual/Repair cards, zero review/publish gates,
+no Airtable egress, preserving Cloudflare bindings and automatic rollback.
+No image creation, C9 slide write, AP0C staging, provider post, or status reset.

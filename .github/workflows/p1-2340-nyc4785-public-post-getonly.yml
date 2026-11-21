@@ -28,7 +28,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $src=Get-Content -Raw $file
-          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','oembed_author_handle','oembed_author_url_handle','authorUri.Host','public-saved-url-oembed-get','exact-owned-video-analytics-query','NYC_TIKTOK_PIPELINE_SECRET','video_ids','tiktok-display-api','owned_video_owned','display_api_query_calls','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','oembed_author_handle','oembed_author_url_handle','authorUri.Host','public-saved-url-oembed-get','exact-owned-video-analytics-query','NYC_TIKTOK_PIPELINE_SECRET','video_ids','tiktok-display-api','owned_video_owned','display_api_query_calls','oauth_required_scopes_granted','owned_video_http_status','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
             if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
           }
           if(([regex]::Matches($src,'-Method Post')).Count -ne 1 -or -not $src.Contains('/tiktok/analytics/videos')){throw 'not_exactly_one_allowed_readonly_video_query'}
@@ -61,15 +61,26 @@ jobs:
             fi
           done
           echo 'Ops authentication unavailable; no TikTok action';exit 1
-      - name: Verify saved public post with TikTok Display API exact-owned video query
+      - name: Verify SHA-256 pinned owned TikTok public video read-only query
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,pathlib
-          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({
-            'command':pathlib.Path('repair/scripts/p1-2340-nyc4785-public-post-getonly.ps1').read_text(),
-            'confirm':True}))
+          import hashlib,json,os,pathlib
+          file=pathlib.Path('repair/scripts/p1-2340-nyc4785-public-post-getonly.ps1')
+          digest=hashlib.sha256(file.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(ch in '0123456789abcdef' for ch in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{file.as_posix()}'
+          command=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($hash -ne '{digest}'){{throw 'immutable_source_hash_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           admitted=false
           for attempt in $(seq 1 10); do
@@ -90,7 +101,7 @@ jobs:
             if [[ "$status" == ok ]]; then
               jq -r '.job.log // ""' /tmp/p1-4785-job.json | grep '^P1_NYC4785_PUBLIC_PROOF=' | tail -1 | sed 's/^P1_NYC4785_PUBLIC_PROOF=//' > /tmp/p1-4785-evidence.json
               jq -e '.output==4785 and .profile=="New York City" and .read_only==true and .provider_gets<=2 and .display_api_query_calls<=1 and .provider_writes==0 and .output_writes==0 and .airtable_operations==0 and .exact_approved_media_match_verified==false' /tmp/p1-4785-evidence.json >/dev/null
-              jq -c '{output,profile,source_manual_completed,original_draft_changed,source_public_post_id,oembed_public_post_id,oembed_author_handle,oembed_author_url_handle,owner_verified,oembed_owner_verified,display_api_query_calls,owned_video_owned,owned_video_id,provider_public_receipt_verified,exact_approved_media_match_verified,reason,provider_gets,provider_writes,output_writes}' /tmp/p1-4785-evidence.json
+              jq -c '{output,profile,source_manual_completed,original_draft_changed,source_public_post_id,oembed_public_post_id,oembed_author_handle,oembed_author_url_handle,owner_verified,oembed_owner_verified,display_api_query_calls,oauth_required_scopes_granted,owned_video_http_status,owned_video_owned,owned_video_id,provider_public_receipt_verified,exact_approved_media_match_verified,reason,provider_gets,provider_writes,output_writes}' /tmp/p1-4785-evidence.json
               if ! jq -e '.provider_public_receipt_verified==true' /tmp/p1-4785-evidence.json >/dev/null;then
                 echo 'Public post owner unverified; no retry authorized';exit 3
               fi

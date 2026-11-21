@@ -6,6 +6,7 @@ on:
       - 'apps/studio-api/approved-publish-flow.test.mjs'
       - 'apps/studio-api/approved-publish-flow-contract.test.mjs'
       - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-03.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/worker.js'
       - '.github/workflows/p1-2340-approved-publish-flow-ci.yml'
@@ -16,6 +17,7 @@ on:
       - 'apps/studio-api/approved-publish-flow.test.mjs'
       - 'apps/studio-api/approved-publish-flow-contract.test.mjs'
       - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-03.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/worker.js'
       - '.github/workflows/p1-2340-approved-publish-flow-ci.yml'
@@ -34,6 +36,7 @@ jobs:
         run: |
           node --check apps/studio-api/approved-publish-flow.mjs
           node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --check apps/studio-api/worker-functions-03.mjs
           node --check apps/studio-api/worker-functions-04.mjs
           node --check apps/studio-api/worker.js
       - name: Reject ambiguous replays, assert Supabase and durable at-most-once fencing

@@ -2390,12 +2390,33 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
   let rows = [];
   try {
     if (supabaseMode) {
-      const candidates = await listSupabaseDeskHealOutputs(env, {
-        kind: "fresh_publish_ready", limit: 80, nowMs,
-      });
-      rows = candidates
-        .filter(row => assessFreshSupabasePublish(row, { nowMs }).eligible)
-        .slice(0, limit);
+      // Bounded oldest-due-first scan. Older incomplete candidates must never
+      // starve newer complete outputs just because the first page is filtered.
+      // Provider retries, old dispatch counters and held outputs are excluded
+      // by the selector AND rechecked under the per-output lock below.
+      const pageSize = 80;
+      const blocked = {};
+      let inspected = 0;
+      for (let offset = 0; offset < 480 && rows.length < limit; offset += pageSize) {
+        const candidates = await listSupabaseDeskHealOutputs(env, {
+          kind: "fresh_publish_ready", limit: pageSize, offset, nowMs,
+        });
+        inspected += candidates.length;
+        for (const candidate of candidates) {
+          const admission = assessFreshSupabasePublish(candidate, { nowMs });
+          if (admission.eligible) rows.push(candidate);
+          else blocked[admission.reason] = (blocked[admission.reason] || 0) + 1;
+          if (rows.length >= limit) break;
+        }
+        if (candidates.length < pageSize) break;
+      }
+      // Do not quietly call a blocked queue "healthy". Never rewrite statuses
+      // or clear attempt markers just to suppress an overdue exception.
+      if (inspected > 0 && (rows.length === 0 || Object.keys(blocked).length)) {
+        console.warn("Supabase due-publish admission diagnostics", JSON.stringify({
+          inspected, admitted: rows.length, blocked,
+        }));
+      }
     } else {
       rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit,
@@ -12032,6 +12053,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       publish_status: mapped.publish_status,
       protected_media_rework: Boolean(mediaRework),
       recovery_source_inventory_verified: mediaRework?.source_inventory_verified || false,
+      recovery_original_image_previews: mediaRework?.original_image_previews || [],
+      recovery_source_count_mismatch: mediaRework?.source_count_mismatch === true,
       recovery_stage: mediaRework?.stage || null,
       recovery_next_step: mediaRework?.next_step || null,
       review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
@@ -15109,6 +15132,35 @@ export function ideaMatchedMediaIds(idea) {
 }
 /*__STUDIO_WORKER_END:ideaMatchedMediaIds__*/
 
+export async function selectValidAutonomousMusicAssetId(env, configuredIds, fallbackId) {
+  const ids = [...new Set([
+    ...(Array.isArray(configuredIds) ? configuredIds : []),
+    fallbackId,
+  ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  // Preserve variety without trusting a stale profile link. Every candidate
+  // is re-read from the authoritative media catalog before it can be stamped.
+  if (ids.length > 1) {
+    const offset = Math.floor(Math.random() * ids.length);
+    ids.push(...ids.splice(0, offset));
+  }
+  for (const id of ids) {
+    const asset = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id).catch(() => null);
+    if (!asset?.id) continue;
+    const mediaClass = String(f(asset, "Media_Class") || f(asset, "Asset Type") || "").toLowerCase();
+    const role = String(f(asset, "Asset_Role") || "").toLowerCase();
+    const status = String(f(asset, "Asset_Status") || "").trim();
+    const rights = String(f(asset, "Rights_Status") || "").trim();
+    if ((mediaClass.includes("audio") || role === "music")
+      && role === "music"
+      && status === "Available"
+      && ["Owned", "Licensed"].includes(rights)
+      && !Boolean(f(asset, "Do_Not_Use"))
+      && String(f(asset, "Google Drive File ID") || "").trim()) return id;
+  }
+  throw new HttpError(409, "No verified available music asset is configured for autonomous production");
+}
+/*__STUDIO_WORKER_END:selectValidAutonomousMusicAssetId__*/
+
 export async function ensureAutonomousSelectedMusic(env, requestRecord, profileRecord = null) {
   if (!requestRecord?.id) return requestRecord;
   if (linkedRecordIds(f(requestRecord, "Selected_Music_Asset")).length) return requestRecord;
@@ -15119,7 +15171,7 @@ export async function ensureAutonomousSelectedMusic(env, requestRecord, profileR
     profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
   }
   if (!profile?.id) return requestRecord;
-  const musicAssetId = pickAutonomousMusicAssetId(
+  const musicAssetId = await selectValidAutonomousMusicAssetId(env,
     mapOperationsProfile(profile).autonomous_music_asset_ids,
     AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   );
@@ -15147,7 +15199,7 @@ export async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, request
     fields.Production_Notes = stampAutonomousOrigin(f(requestRecord, "Production_Notes"));
   }
   if (!linkedRecordIds(f(requestRecord, "Selected_Music_Asset")).length) {
-    fields.Selected_Music_Asset = [pickAutonomousMusicAssetId(
+    fields.Selected_Music_Asset = [await selectValidAutonomousMusicAssetId(env,
       mapOperationsProfile(profile).autonomous_music_asset_ids,
       AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
     )];
