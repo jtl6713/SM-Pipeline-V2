@@ -10723,17 +10723,22 @@ function exceptionRecoveryRecordIdFromPath(pathname, suffix) {
   if (!RECOVERY_RECORD_ID.test(String(id || ""))) throw new HttpError(400, "Invalid output record ID");
   return id;
 }
-async function exceptionRecoveryReadProvider(env, row) {
+async function exceptionRecoveryReadProvider(env, row, verifiedProfile = null) {
   const platform = String(f(row, "Platform") || "");
   let names = [];
   if (platform === "Facebook" || platform === "Instagram")
     names = ["FACEBOOK_PAGE_ACCESS_TOKEN","FACEBOOK_GRAPH_API_VERSION"];
   else if (platform === "YouTube") names = ["YOUTUBE_API_KEY"];
-  const settings = names.length ? await studioActivePipelineSettings(env,names,row).catch(()=>({})) : {};
+  const strict = Boolean(verifiedProfile);
+  const settings = names.length
+    ? await studioActivePipelineSettings(env,names,verifiedProfile || row,
+      {requireSupabase:strict}).catch(()=>({})) : {};
   return verifyExistingProviderReceipt(row,{settings:{
     ...settings,
-    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
-    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN ||
+      (strict ? "" : env.FACEBOOK_PAGE_ACCESS_TOKEN),
+    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY ||
+      (strict ? "" : env.YOUTUBE_API_KEY),
   }});
 }
 /**
@@ -10780,7 +10785,8 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
     let scoped;
     try {
       scoped=await studioActivePipelineSettings(env,
-        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile);
+        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile,
+        {requireSupabase:true});
     } catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_instagram_settings_unavailable"};}
     const direct=String(f(source.profile,"Instagram_Business_Account_ID")||"").trim();
     if(direct && direct!==String(scoped.INSTAGRAM_BUSINESS_ACCOUNT_ID||"").trim())
@@ -10793,18 +10799,18 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   let settings;
   try {
     settings=await studioActivePipelineSettings(env,
-      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
+      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile,
+      {requireSupabase:true});
   }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
   // The deployment may keep the uploader authentication key in the existing
   // global Pipeline Setting rather than a Worker binding. This key is only
   // transport authentication: destination URL and channel remain scoped.
-  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET && !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET) {
-    const keys=await listRecords(env,"Pipeline Settings",{limit:2,
-      filterFormula:'AND({Active}=1,{Setting_Name}="YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET")'});
-    if(keys.length!==1 || !String(f(keys[0],"Setting_Value")||"").trim())
-      return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_service_auth_missing"};
-    settings={...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:String(f(keys[0],"Setting_Value")).trim()};
-  }
+  // Do not retrieve uploader credentials from legacy Airtable Pipeline Settings.
+  // Supabase-scoped settings or an existing Worker secret are the only inputs.
+  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET &&
+     !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,
+      evidence:"profile_service_auth_missing"};
   const channel=verifiedRecoveryChannelId(source.profile,settings);
   if(!channel.ok)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
