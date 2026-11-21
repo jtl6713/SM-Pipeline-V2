@@ -4578,7 +4578,7 @@ export default {
         try {
           await studioHealPromotedOrphanIdeas(env, { limit: 100 });
         } catch (error) {
-          console.warn("Independent Idea orphan repair failed", String(error?.message || error));
+          console.warn("promoted orphan idea heal failed", String(error?.message || error));
         }
       }
       const outcome = await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
