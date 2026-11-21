@@ -72,3 +72,25 @@ test("Worker recovery uses existing fanout, R2 precommit receipt, and no publish
  const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
  assert.match(worker,/studioNyc20261121HandoffCron\(env, ctx, Number\(event\?\.scheduledTime\)/);
 });
+
+test("last-two v3 recovery is exact, one-shot, and never repeats verified owner output",()=>{
+ const code=readFileSync(new URL("./worker-functions-02.mjs",import.meta.url),"utf8");
+ const start=code.indexOf("export async function studioNyc20261121HandoffCron(");
+ const end=code.indexOf("/*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/",start);
+ assert.ok(start>0 && end>start);
+ const body=code.slice(start,end);
+ assert.match(body,/const lastTwo = \["recF11iJFCPcRbGsk", "recNHXsBTfgfuagts"\]/);
+ assert.match(body,/NYC_20261121_EXACT_HANDOFF\.find/);
+ assert.match(body,/final-two-v3/);
+ assert.match(body,/v3_already_attempted/);
+ assert.match(body,/prior_verified_fanout_needs_investigation/);
+ assert.match(body,/prior_v2_verified_fanout_needs_investigation/);
+ assert.match(body,/exactNycHandoffPreflight/);
+ assert.match(body,/existing_platform_outputs_need_reconcile/);
+ assert.match(body,/failed_no_auto_retry/);
+ const checked=body.indexOf("if (existingOutputs.length)");
+ const receipt=body.indexOf("STUDIO_MEDIA.put(receiptKey");
+ const produce=body.indexOf("finalizeProductionRequestPromotion(env, target.request");
+ assert.ok(checked>0 && checked<receipt && receipt<produce, "zero PO readback then durable receipt then fanout");
+ assert.doesNotMatch(body,/publishPlatform|publishNow|schedulePlatform|autoApprove/i);
+});
