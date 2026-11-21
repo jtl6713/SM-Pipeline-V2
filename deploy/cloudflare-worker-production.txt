@@ -1433,3 +1433,5 @@ Deploy Studio API Facebook Story definite-auth-rejection recovery 2026-11-20 PR2
 2026-11-20: Deploy merged PR #2295 (0662d8bf8b911b5d96743f8144aa9558515372c7): count only confirmed dispatch attempts; pre-provider skipped/held receipts preserve historical counts without exhausting retry budget. No automatic reset or publish. Preserve all live Cloudflare bindings and verify Worker.
 
 2026-11-20: Deploy merged PR #2318 (dd5a5a117a992c6b75e4e267a3d8feafa9fc5e90): TikTok resend preflight identity validation and authoritative Supabase Content Item fallback before rearm; fail closed on unverifiable reread. Preserve existing TikTok draft receipts and all Cloudflare bindings. No automatic resends/public posts. Verify active deployed Worker source.
+
+2026-11-20 P1 #2340: Deploy merged #2341 (1d9fb7629d72e3f1da0c54a5fa9fe3f6fec32480). Restore exact Home Approved Past Due / Failed drill-down with complete Supabase-only census and canonical Home classification. Read-only, no provider writes, no status changes, no Airtable egress for these modes. Preserve Cloudflare bindings and publication holds. Verify deployed live read source.
