@@ -1,0 +1,40 @@
+name: P1 2340 Supabase Approved Publishing Flow CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/approved-publish-flow.mjs'
+      - 'apps/studio-api/approved-publish-flow.test.mjs'
+      - 'apps/studio-api/approved-publish-flow-contract.test.mjs'
+      - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/worker.js'
+      - '.github/workflows/p1-2340-approved-publish-flow-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-api/approved-publish-flow.mjs'
+      - 'apps/studio-api/approved-publish-flow.test.mjs'
+      - 'apps/studio-api/approved-publish-flow-contract.test.mjs'
+      - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/worker.js'
+      - '.github/workflows/p1-2340-approved-publish-flow-ci.yml'
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and source ownership checks
+        run: |
+          node --check apps/studio-api/approved-publish-flow.mjs
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/worker.js
+      - name: Reject ambiguous replays, assert Supabase and durable at-most-once fencing
+        run: node --test apps/studio-api/approved-publish-flow.test.mjs apps/studio-api/approved-publish-flow-contract.test.mjs apps/studio-api/approved-past-due-supabase-triage-contract.test.mjs
