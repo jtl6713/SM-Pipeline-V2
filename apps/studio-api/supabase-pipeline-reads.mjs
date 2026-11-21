@@ -2104,6 +2104,9 @@ export async function listSupabasePipelineContentPage(env, {
   return {
     records: outputs, contentByAirtableId,
     content_ids: page.map(c => c.content_number),
+    // Include content without generated outputs so a 10-ID page really shows 10 groups.
+    content_groups: page.map(c => ({ id: c.airtable_record_id || c.id,
+      content_id: c.content_number, title: c.content_title, created_at: c.created_at })),
     has_more: (contents || []).length > size,
     next_offset: (contents || []).length > size ? skip + page.length : null,
     read_source: "supabase",
