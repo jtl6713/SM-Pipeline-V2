@@ -760,6 +760,20 @@ export function packContentExtras(fields = {}) {
   return bag;
 }
 
+export function mergePresentContentBagFields(existing, fields = {}) {
+  // Sparse I3/I4 Content Item PATCHes contain only production directives:
+  // preserve original Idea, media provenance and runner projection metadata.
+  const bag = isPlainObject(existing) ? { ...existing } : {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!key || key.startsWith("_") || key === "__proto__"
+        || key === "prototype" || key === "constructor"
+        || TYPED_CONTENT_FIELD_KEYS.has(key)) continue;
+    if (value == null || value === "") delete bag[key];
+    else bag[key] = value;
+  }
+  return bag;
+}
+
 function jsonColumn(value) {
   if (value && typeof value === "object") return value;
   if (typeof value === "string") {
@@ -5776,23 +5790,9 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
     return { ok: true, mode: "create" };
   }
   const fields = record.fields || {};
-  const profileAirtableId = firstLink(fields.Content_Profile);
-  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-  const canUpsert = Boolean(profileUuid) && (
-    fields.Content_ID != null || fields.Content_Status != null || fields.Content_Title != null
-  );
-  if (canUpsert) {
-    let row = mapAirtableContentToSupabase(record, profileUuid, { fullRecord: options.fullRecord === true });
-    if (options.fullRecord !== true) {
-      [row] = await applyStoredProjection(env, "content_items", [row], "extras");
-    }
-    await upsertChunk(env, "content_items", [row]);
-    await mergeCreativeMasterExtras(env, [record]).catch((error) => {
-      console.warn("creative master copy failed", error);
-    });
-    return { ok: true, mode: "upsert" };
-  }
-
+  // Never upsert a sparse PATCH: mapAirtableContentToSupabase sets absent
+  // typed title/status/parent to null. Partial writes must preserve all
+  // unchanged columns and the original Idea/media JSON provenance.
   const patch = {};
   if ("Content_ID" in fields) patch.content_number = fields.Content_ID ?? null;
   if ("Content_Title" in fields) patch.content_title = fields.Content_Title || null;
@@ -5801,23 +5801,42 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
   if ("Voiceover_Status" in fields) patch.voiceover_status = selectName(fields.Voiceover_Status);
   if ("Thumbnail_URL" in fields) patch.thumbnail_url = fields.Thumbnail_URL || null;
   if ("Created_At" in fields || record.createdTime) patch.created_at = fields.Created_At || record.createdTime || null;
-  if ("Content_ID" in fields) {
-    const [kept] = await applyStoredProjection(env, "content_items", [{
-      airtable_record_id: record.id,
-      extras: packContentExtras(fields),
-    }], "extras");
-    if (kept?.extras) patch.extras = kept.extras;
+  if ("Content_Profile" in fields) {
+    const requestedProfile = firstLink(fields.Content_Profile);
+    patch.content_profile_id = requestedProfile
+      ? await resolveSupabaseProfileId(env, requestedProfile)
+      : null;
+    if (requestedProfile && !patch.content_profile_id) {
+      throw new Error("Supabase Content Item profile cannot be resolved");
+    }
   }
-  if (!Object.keys(patch).length) return { skipped: true, reason: "empty_patch" };
-  await supabaseRest(
+  const hasBagPatch = Object.keys(fields).some(key =>
+    key && !key.startsWith("_") && !TYPED_CONTENT_FIELD_KEYS.has(key));
+  if (!Object.keys(patch).length && !hasBagPatch) {
+    return { skipped: true, reason: "empty_patch" };
+  }
+  // Validate the original durable identity first, then apply only present
+  // fields. An HTTP 204 on zero matching rows is NOT a successful handoff.
+  const prior = await supabaseRest(env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=id,extras&limit=2`);
+  if (!Array.isArray(prior) || prior.length !== 1 || !prior[0]?.id) {
+    throw new Error("Supabase Content Item identity missing or ambiguous");
+  }
+  if (hasBagPatch) {
+    patch.extras = mergePresentContentBagFields(prior[0].extras, fields);
+  }
+  const committed = await supabaseRest(
     env,
-    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=id`,
     {
       method: "PATCH",
       body: patch,
-      headers: { Prefer: "return=minimal" },
+      headers: { Prefer: "return=representation" },
     },
   );
+  if (!Array.isArray(committed) || committed.length !== 1 || committed[0]?.id !== prior[0].id) {
+    throw new Error("Supabase Content Item sparse PATCH did not persist the original identity");
+  }
   await mergeCreativeMasterExtras(env, [record]).catch((error) => {
     console.warn("creative master copy failed", error);
   });
