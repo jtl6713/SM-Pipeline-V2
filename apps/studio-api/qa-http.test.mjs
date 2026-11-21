@@ -56,6 +56,23 @@ function harness(overrides={}){
   }
   return {call,rows};
 }
+test("static QA catalog stays available without ledger credentials, but history fails closed",async()=>{
+  const env={STUDIO_QA_EXECUTION_ENV:"production"};
+  const base="https://studio.chicagoshining.com/api/admin/qa/";
+  const respond=(_request,_env,payload,status=200)=>new Response(JSON.stringify(payload),{status});
+  const invoke=(route)=>{
+    const request=new Request(base+route,{method:"GET"});
+    return handleQaApi({request,url:new URL(request.url),env,
+      authorization:{user:{record_id:"recADMIN00000001"}},respond});
+  };
+  const response=await invoke("catalog");
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.writeAuthority,"Supabase");
+  assert.equal(body.tests.length,88);
+  await assert.rejects(()=>invoke("runs?limit=1"),e=>e.status===503&&/QA ledger service credential unavailable/.test(e.message));
+});
+
 test("catalog exposes 88 versioned cases and read-only safe-check allowlist",async()=>{
   const h=harness(),r=await h.call("GET","catalog");const j=await r.json();
   assert.equal(r.status,200);assert.equal(j.tests.length,88);
