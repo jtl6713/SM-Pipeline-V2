@@ -11,6 +11,9 @@ import {
 } from "./supabase-pipeline-reads.mjs";
 import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages } from "./review-package-readiness.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
+import {
+  maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
+} from "./mae-schedule.mjs";
 import { factoryBatchRolloutAcceptsOutput } from "./factory-batch-rollout.mjs";
 
 const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
@@ -69,11 +72,14 @@ export async function factorySupabaseApprovalRows(env, ids) {
     throw Error("Factory Supabase profile ownership unavailable");
   }
   const profiles = await supabaseRest(env,
-    "content_profiles?id=" + listFilter(profileUuids) + "&select=id,airtable_record_id&limit=21");
+    "content_profiles?id=" + listFilter(profileUuids) + "&select=id,airtable_record_id,market_name,platform_setup&limit=21");
   if (!Array.isArray(profiles) || profiles.length !== profileUuids.length) {
     throw Error("Factory Supabase profile ownership incomplete");
   }
   const profileMap = new Map(profiles.map(row => [row.id, row.airtable_record_id]));
+  const profileZones = new Map(profiles.map(row => [row.id, maeNormalizeTimeZone(
+    row.platform_setup?.Timezone || row.platform_setup?.timezone || maeTimeZoneFromTheme(row.market_name),
+  )]));
   const result = new Map();
   for (const id of unique) {
     const row = found.get(id);
@@ -98,7 +104,7 @@ export async function factorySupabaseApprovalRows(env, ids) {
       record.fields.Selected_Assets_JSON = typeof row.selected_assets === "string"
         ? row.selected_assets : JSON.stringify(row.selected_assets);
     }
-    result.set(id, { row, record, profileId });
+    result.set(id, { row, record, profileId, profileTimeZone: profileZones.get(direct || linked) });
   }
   return result;
 }
@@ -143,6 +149,52 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
   });
 }
 
+
+/**
+ * Factory approval must reserve an actual future MAE slot BEFORE it can commit
+ * Approved. Never emit Approved/Ready to Schedule with a null publish date.
+ * The Factory batch drain's per-profile R2 claim serializes Factory siblings.
+ * All occupancy is read from Supabase; failed/incomplete reads block approval.
+ */
+async function factorySupabaseNextApprovedSlot(env, entry) {
+  const row = entry.row;
+  if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(String(row.platform || ""))) {
+    throw Error("Cannot approve: no supported automated publisher for this platform");
+  }
+  const now = new Date();
+  const zone = maeNormalizeTimeZone(entry.profileTimeZone);
+  const until = new Date(now.getTime() + (MAE_SUGGEST_HORIZON_DAYS + 2) * 86400000);
+  const occupancy = [];
+  const pageSize = 500;
+  let complete = false;
+  for (let offset = 0; offset < 3000; offset += pageSize) {
+    const query = "platform_outputs?content_profile_id=eq." + encodeURIComponent(row.content_profile_id)
+      + "&platform=eq." + encodeURIComponent(row.platform)
+      + "&scheduled_post_date=gt." + encodeURIComponent(now.toISOString())
+      + "&scheduled_post_date=lt." + encodeURIComponent(until.toISOString())
+      + "&select=airtable_record_id,scheduled_post_date"
+      + "&order=scheduled_post_date.asc&limit=" + pageSize + "&offset=" + offset;
+    const existing = await supabaseRest(env, query);
+    if (!Array.isArray(existing)) throw Error("Cannot approve: Supabase schedule occupancy unavailable");
+    for (const other of existing) {
+      if (other.airtable_record_id === row.airtable_record_id) continue;
+      const at = Date.parse(String(other.scheduled_post_date || ""));
+      if (Number.isFinite(at)) occupancy.push(at);
+    }
+    if (existing.length < pageSize) { complete = true; break; }
+  }
+  if (!complete) throw Error("Cannot approve: future scheduling occupancy cannot be verified completely");
+  const slot = maeScheduleNextSlot({
+    timeZone: zone, now, occupiedMs: occupancy, platformOccupiedMs: occupancy,
+    horizonDays: MAE_SUGGEST_HORIZON_DAYS,
+  });
+  const at = Date.parse(String(slot.iso || ""));
+  if (!slot.ok || !Number.isFinite(at) || at <= now.getTime()) {
+    throw Error("Cannot approve: no verified future MAE publishing slot is available");
+  }
+  return { iso: new Date(at).toISOString(), timeZone: zone };
+}
+
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
   verifyImages = verifyReviewImages, onStage = async () => {},
@@ -164,6 +216,9 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (verified?.readiness !== "READY") {
     throw Error("Cannot approve: public review media could not be verified");
   }
+  // Slot must be proven BEFORE the single status+schedule CAS; otherwise the
+  // Factory historically committed Approved with no future plan and no auto.
+  const scheduled = await factorySupabaseNextApprovedSlot(env, entry);
   const stamp = new Date().toISOString();
   const row = entry.row;
   if (!row.updated_at || !UUID.test(row.id)) {
@@ -172,16 +227,18 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   const receipt = {
     request_id: requestId, output_record_id: id,
     output_number: row.output_number, profile_record_id: profileId,
-    approved_at: stamp, authority: "supabase", scheduled: false, published: false,
+    approved_at: stamp, authority: "supabase", scheduled: true,
+    scheduled_for: scheduled.iso, scheduled_timezone: scheduled.timeZone,
+    published: false,
   };
   const fields = {
     output_status: "Approved for Publishing",
     review_status: "Approved",
     publish_status: "Ready to Schedule",
-    auto_publish_enabled: false,
-    scheduled_post_date: null,
-    studio_scheduled_at: null,
-    youtube_scheduled_publish_at: null,
+    auto_publish_enabled: true,
+    scheduled_post_date: scheduled.iso,
+    studio_scheduled_at: scheduled.iso,
+    youtube_scheduled_publish_at: row.platform === "YouTube" ? scheduled.iso : null,
     updated_at: stamp,
     error_messages: {
       ...(row.error_messages && typeof row.error_messages === "object" && !Array.isArray(row.error_messages)
@@ -220,13 +277,17 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     || check.row.output_status !== "Approved for Publishing"
     || check.row.review_status !== "Approved"
     || check.row.publish_status !== "Ready to Schedule"
-    || check.row.auto_publish_enabled !== false
-    || check.row.scheduled_post_date || check.row.published_at
-    || check.row.error_messages?.SM_Factory_Supabase_Approval_Receipt?.request_id !== requestId) {
+    || check.row.auto_publish_enabled !== true
+    || Date.parse(String(check.row.scheduled_post_date || "")) !== Date.parse(scheduled.iso)
+    || Date.parse(String(check.row.studio_scheduled_at || "")) !== Date.parse(scheduled.iso)
+    || check.row.published_at
+    || check.row.error_messages?.SM_Factory_Supabase_Approval_Receipt?.request_id !== requestId
+    || check.row.error_messages?.SM_Factory_Supabase_Approval_Receipt?.scheduled !== true) {
     throw Error("Supabase approval exact readback could not be verified");
   }
   return {
     id, platform: check.row.platform, format: check.row.studio_output_type || check.row.format,
-    scheduled_ms: null, message: "Approved in Supabase; Ready to Schedule. No publishing started.",
+    scheduled_ms: Date.parse(scheduled.iso),
+    message: "Approved in Supabase and scheduled for " + scheduled.iso + " (" + scheduled.timeZone + ").",
   };
 }
