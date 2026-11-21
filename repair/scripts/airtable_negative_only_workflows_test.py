@@ -159,8 +159,9 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
              "  '/media_publish','__AIRT_HOST__'):\n"
              "assert bad not in source\n"),
             ("issue2374-ig-carousels-owner-auth-audit.yml",
-             "for bad in ['-Method Post','AIRTABLE_PAT',\n"
-             "  '__AIRT_HOST__', \"Write-Host $key\", \"Write-Output $key\"]:\n"
+             "for bad in [\"-Method Post\", \"-Method Patch\", \"-Method Put\", \"-Method Delete\",\n"
+             "\"Invoke-Sqlcmd\", \"/media_publish\", \"AIRTABLE_PAT\",\n"
+             "\"__AIRT_HOST__\", \"Write-Host $key\", \"Write-Output $key\"]:\n"
              "assert bad not in s, 'unsafe provider write or secret exposure'\n"),
         )
         for name, guard in cases:
@@ -171,8 +172,9 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
                 self.assertEqual(unexpected_references(
                     self.root, (AIRT_HOST, "AIRTABLE_PAT")), [])
                 self.write(name, guard + "curl https://__AIRT_HOST__/v0/base\n")
+                expected_line = guard.count("\n") + 1
                 self.assertTrue(any(
-                    issue.endswith(":4") for issue in
+                    issue.endswith(":" + str(expected_line)) for issue in
                     unexpected_references(self.root, (AIRT_HOST,))
                 ))
 
