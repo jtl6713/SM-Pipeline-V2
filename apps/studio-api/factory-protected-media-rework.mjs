@@ -47,6 +47,37 @@ export function protectedMediaReworkShapedRecord(record) {
     && isBlank(fields.Platform_Post_URL);
 }
 
+/**
+ * Six #2374 held original Instagram preview folders have individually verified
+ * 4:5 JPEG sequences. Expose image URLs to Factory for READ-ONLY human review,
+ * never as AP0C staging receipts, Final Approved slides or upload authority.
+ * Incomplete/incorrect-aspect galleries (including #10813) stay unavailable.
+ */
+export function protectedMediaReworkPreviewGallery(record) {
+  if (!protectedMediaReworkShapedRecord(record)) return [];
+  const proof = record.fields.Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121;
+  if (!isObject(proof)
+      || proof.source_class !== "original_output_preview_folder"
+      || proof.original_slide_records_present !== false
+      || proof.original_factory_approved_slide_identity_proven !== false
+      || proof.ap0c_instagram_public_asset_staging_done !== false
+      || proof.fresh_factory_creative_review_required !== true) return [];
+  const count = proof.expected_image_count;
+  if (!Number.isInteger(count) || count < 2 || count > 10
+      || proof.verified_4x5_image_count !== count) return [];
+  const urls = proof.candidate_original_image_urls;
+  if (!Array.isArray(urls) || urls.length !== count) return [];
+  const id = record.id;
+  const prefixes = [
+    `https://media.chicagoshining.com/studio/previews/lettered/${id}/`,
+    `https://media.chicagoshining.com/studio/previews/watermarked/${id}/`,
+  ];
+  // Every index must be exact, in order, from the same original output folder.
+  const selected = prefixes.find(prefix => urls.every((url, index) =>
+    typeof url === "string" && url === `${prefix}${index}.jpg`));
+  return selected ? [...urls] : [];
+}
+
 /** No sensitive provider fields or raw error_messages go into Factory cards. */
 export function protectedMediaReworkSummary(record) {
   if (!protectedMediaReworkShapedRecord(record)) return null;
@@ -63,9 +94,11 @@ export function protectedMediaReworkSummary(record) {
       || isObject(fields.Studio_Recovery_IG_Source_Gallery_Verified_20261121)
       || previewSequence
   );
+  const originalGalleryImages = protectedMediaReworkPreviewGallery(record);
   return {
     media_rework: true,
     source_inventory_verified: verifiedSource,
+    preview_gallery_urls: originalGalleryImages,
     stage: String(evidence.stage || "Creative package repair").slice(0, 100),
     next_step: previewSequence
       ? "Original public preview sequence verified, but no Final Approved slide records. Reconstruct the exact creative gallery and stage only after fresh Factory review."
