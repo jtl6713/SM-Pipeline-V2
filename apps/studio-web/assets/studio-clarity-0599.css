@@ -26,8 +26,8 @@ body{background:#f1f5fa!important;color:var(--studio-ink)}
 .topbar .topbar-profile select option{color:#102b50;background:#fff}
 #page-ideas .page-heading{display:block!important}
 /* Keep the top actions in two equal shrinkable columns, on desktop and phone. */
-#page-ideas .page-heading .heading-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;margin-top:20px;min-width:0;width:100%}
-#page-ideas .heading-actions>button{min-width:0;width:100%;min-height:46px!important;white-space:normal!important;text-align:left!important;justify-content:flex-start!important;border-radius:12px!important;padding:10px 12px!important;font-weight:750!important;font-size:.9rem!important;color:#102b50!important;background:#eaf3ff!important;border:1px solid #c5dbf4!important}
+#page-ideas .page-heading .heading-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;margin-top:20px;min-width:0;width:100%;align-items:stretch!important}
+#page-ideas .heading-actions>button{min-width:0;width:100%;align-self:stretch!important;min-height:46px!important;white-space:normal!important;text-align:left!important;justify-content:flex-start!important;border-radius:12px!important;padding:10px 12px!important;font-weight:750!important;font-size:.9rem!important;color:#102b50!important;background:#eaf3ff!important;border:1px solid #c5dbf4!important}
 #page-ideas .heading-actions>button:nth-child(2){background:#e8f7ef!important;border-color:#c4e9d5!important}
 #page-ideas .heading-actions>button:nth-child(3){background:#f0ebfc!important;border-color:#dcd0f5!important}
 #page-ideas .heading-actions>button:nth-child(4){background:#fff2e4!important;border-color:#f6dcc0!important}
