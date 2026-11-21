@@ -1,0 +1,85 @@
+# #2340: independent public owner verification of NYC #4785 manual TikTok post.
+# Only source, creator identity and public oEmbed GET; never re-init/re-publish.
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$r=[ordered]@{
+ output=4785;profile='New York City';read_only=$true;owner_verified=$false
+ source_manual_completed=$false;original_draft_changed=$false
+ source_public_post_id='';oembed_public_post_id='';oembed_owner_verified=$false
+ provider_public_receipt_verified=$false;exact_approved_media_match_verified=$false
+ provider_gets=0;provider_writes=0;output_writes=0;airtable_operations=0
+ reason='not_started';stage='preflight'
+}
+try {
+ $r.stage='supabase-authority-check'
+ $health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -Method Get -TimeoutSec 20
+ if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase'){throw 'source_not_supabase'}
+ $envfile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+ if(-not(Test-Path $envfile)){throw 'runner_config_unavailable'}
+ function E([string]$n){
+  $lines=@(Get-Content $envfile|Where-Object{$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')}|Select-Object -Last 1)
+  if($lines.Count -ne 1){throw 'runner_config_unavailable'}
+  return ([string]$lines[0] -split '=',2)[1].Trim().Trim('"',"'")
+ }
+ $url=(E 'SUPABASE_URL').TrimEnd('/');$key=E 'SUPABASE_SERVICE_ROLE_KEY'
+ if($url -ne 'https://vkwvscgisqsbuwagdvtb.supabase.co' -or -not $key){throw 'wrong_source_project'}
+ $h=@{apikey=$key;Authorization=('Bearer '+$key)}
+ $r.stage='read-exact-original-row'
+ $rows=Invoke-RestMethod ($url+'/rest/v1/platform_outputs?output_number=eq.4785&select=output_number,airtable_record_id,content_profile_id,platform,platform_output_type,publish_status,published_at,platform_post_url,error_messages&limit=2') -Headers $h -Method Get -TimeoutSec 30
+ if(@($rows).Count -ne 1){throw 'original_output_missing_or_duplicate'}
+ $o=$rows[0]
+ $postId=[string]$o.error_messages.Platform_Post_ID
+ $manual=[string]$o.error_messages.Manual_Completion_Status
+ $draftId=[string]$o.error_messages.TikTok_Draft_Publish_ID
+ $link=[string]$o.platform_post_url
+ if($o.airtable_record_id -ne 'recDpfbqDdQjCAgNo' -or $o.platform -ne 'TikTok' -or
+    $o.platform_output_type -ne 'TikTok Video' -or $o.publish_status -ne 'Published' -or
+    -not $o.published_at -or $manual -ne 'Completed' -or
+    $postId -ne '7710614609517923615' -or $link -ne 'https://www.tiktok.com/t/ZTPQG9mGw/'){throw 'source_manual_receipt_drift'}
+ $r.source_manual_completed=$true
+ $r.source_public_post_id=$postId
+ $r.original_draft_changed=($draftId -ne 'v_inbox_url~v2.7706207567982462989')
+ $p=Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o.content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 25
+ if(@($p).Count -ne 1 -or $p[0].market_name -ne 'New York City'){throw 'profile_mismatch'}
+ $r.stage='read-exact-creator-config'
+ $settings=Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 30
+ $cfg=@{}
+ foreach($item in $settings){
+  $x=$item.payload
+  if([string]$x.source -ne 'pipeline' -or [string]$x.Active -ne 'True'){continue}
+  $n=[string]$x.Setting_Name
+  if(@('NYC_TIKTOK_HANDLE','NYC_TIKTOK_WORKER_BASE_URL') -contains $n){
+    if($cfg.ContainsKey($n)){throw 'duplicate_active_credential_config'}
+    $cfg[$n]=[string]$x.Setting_Value
+  }
+ }
+ $expected=([string]$cfg.NYC_TIKTOK_HANDLE).TrimStart('@').ToLowerInvariant()
+ $base=[string]$cfg.NYC_TIKTOK_WORKER_BASE_URL
+ if($base -ne 'https://auth-nyc.chicagoshining.com' -or $expected -ne 'newyorkshining'){throw 'configured_tiktok_owner_mismatch'}
+ $r.stage='owned-tiktok-creator-get'
+ $r.provider_gets++
+ $ident=Invoke-RestMethod ($base+'/tiktok/status') -Method Get -TimeoutSec 35
+ $actual=([string]$ident.creator_username).TrimStart('@').ToLowerInvariant()
+ if($ident.ok -ne $true -or $ident.authorized -ne $true -or $actual -ne $expected){throw 'creator_oauth_owner_not_verified'}
+ $r.owner_verified=$true
+ $r.stage='public-saved-url-oembed-get'
+ $embedUrl='https://www.tiktok.com/oembed?url='+[uri]::EscapeDataString($link)
+ $r.provider_gets++
+ $embed=Invoke-RestMethod -Uri $embedUrl -Method Get -TimeoutSec 45
+ $returned=[string]$embed.embed_product_id
+ $author=([string]$embed.author_unique_id).TrimStart('@').ToLowerInvariant()
+ if(-not $author){
+   $authorUrl=[string]$embed.author_url
+   if($authorUrl -match '^https://www[.]tiktok[.]com/@([A-Za-z0-9._]{2,40})/?$'){$author=$Matches[1].ToLowerInvariant()}
+ }
+ $r.oembed_public_post_id=$returned
+ $r.oembed_owner_verified=($author -eq $expected)
+ $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
+ $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
+ $r.stage='completed'
+}catch{
+ $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')
+ $message=[string]$_.Exception.Message
+ $r.reason=if($known -contains $message){$message}else{'public_provider_get_unavailable_no_retry'}
+}
+Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
