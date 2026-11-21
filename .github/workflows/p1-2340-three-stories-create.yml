@@ -1,0 +1,106 @@
+name: P1 2340 Three Recovered Stories First Containers
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-three-stories-create.yml'
+      - 'repair/scripts/p1-2340-three-stories-create-once.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-three-story-create-batch-once
+  cancel-in-progress: false
+jobs:
+  original-story-first-create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact protected PowerShell script syntax
+        shell: pwsh
+        run: |
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/p1-2340-three-stories-create-once.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          Write-Output 'P1_2340_STORY_BATCH_PARSER_OK'
+      - name: Reject unbounded provider retries or secrets output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          code=Path('repair/scripts/p1-2340-three-stories-create-once.ps1').read_text()
+          assert "P1_IG_STORY_BATCH_CREATE=" in code
+          assert "stages/ap1_igs" in code and "quality_agent_recovery_events" in code
+          assert "Publish_Locked_By" in code and "updated_at=eq." in code
+          assert code.count(" -Method Post ")==2 and code.count(" -Method Patch ")==1
+          for forbidden in ['Invoke-WebRequest -Method Post','-Method Delete','Write-Output $token','Write-Host $token']:
+              assert forbidden not in code
+          print('p1_2340_exact_eight_per_record_immutable_fences')
+          PY
+      - name: Authenticate approved Ops without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-2340-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-2340-ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_2340_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable'; exit 1
+      - name: Run exact approved first Story container creation with per-record unique fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/p1-2340-story-create-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/p1-2340-three-stories-create-once.ps1').read_text(),
+            'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/p1-2340-story-create-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $P1_2340_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/p1-2340-story-create-request.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then
+            echo "Ops rejected bounded story-create request ($code), no replay"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-2340-story-create-start.json)
+          for n in $(seq 1 200); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_2340_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-2340-story-create-status.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-2340-story-create-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-2340-story-create-status.json | grep '^P1_IG_STORY_BATCH_CREATE=' | tail -1 | sed 's/^P1_IG_STORY_BATCH_CREATE=//' > /tmp/p1-2340-story-create-report.json
+              jq -e '.targets==3 and (.results|length)==3 and .public_media_publish_calls==0 and .stage_calls<=8 and .one_time_fences_required==true' /tmp/p1-2340-story-create-report.json >/dev/null
+              jq -c '{targets,created,stage_calls,public_media_publish_calls,results}' /tmp/p1-2340-story-create-report.json
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              echo 'Original bounded task failed; never replay a fenced provider attempt'
+              jq -r '.job.log // ""' /tmp/p1-2340-story-create-status.json | tail -n 12 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|ACCESS_TOKEN' | tail -n 8 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Bounded original batch still uncertain; do not replay'; exit 4
+      - name: Persist sanitized per-output results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-story-create-exact-eight
+          path: /tmp/p1-2340-story-create-report.json
+          retention-days: 30
+          if-no-files-found: warn
