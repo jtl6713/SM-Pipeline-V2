@@ -2338,7 +2338,8 @@ export function normalizedOutputState(record) {
   // Facebook/Instagram disabling of the publisher is an internal configuration
   // or provider-reconciliation issue, NOT proof that the owner must post manually.
   // Keep genuine manual methods and fallback paths in their original classification.
-  const metaDisabledState = metaAutoPublishDisabledState(fields);
+  const metaDisabledState = typeof metaAutoPublishDisabledState === "function"
+    ? metaAutoPublishDisabledState(fields) : null;
   if (metaDisabledState) return metaDisabledState;
 
   // Auto-publish was never turned on and nothing has been sent. That is a manual
