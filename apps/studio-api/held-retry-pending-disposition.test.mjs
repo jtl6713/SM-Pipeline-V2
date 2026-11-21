@@ -28,7 +28,7 @@ test("FB prior credential failure is not marked as an authorized retry",()=>{
   assert.equal(normalizedOutputState({fields}),"Needs Verification");
 });
 test("future-scheduled FB throttle requires evidence, preserves slot and raw stage",()=>{
-  const fields={Platform:"Facebook",Output_Status:"Approved for Publishing",
+  const fields={Platform:"Facebook",Review_Status:"Approved",Output_Status:"Approved for Publishing",
     Publish_Status:"Ready to Schedule",FB_Publish_Status:"Retry Pending",
     Publish_Error_Stage:"FBS3_RATE_LIMIT",Publish_Error_Message:"Graph rate limit 368",
     Scheduled_Post_Date:"2027-01-05T18:00:00Z",
