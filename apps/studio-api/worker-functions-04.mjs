@@ -19392,7 +19392,13 @@ export async function factoryBatchCronResume(env, ctx = null) {
   const candidates = [];
   if (factoryGlobalPolicy(env).enabled) {
     try {
-      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, { maxScan: 50 });
+      // Never advance the persistent parent cursor past groups we will not
+      // inspect. Reading 50 keys but processing only 12 permanently skipped
+      // some groups on every cursor cycle when the history was large.
+      const parentInspectionBudget = 12;
+      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, {
+        maxScan: parentInspectionBudget,
+      });
       let groupResumes = 0, inspectedGroups = 0;
       for (const groupId of groupIds) {
         try {
@@ -19401,7 +19407,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
             await factoryApprovalGroupResume(env.STUDIO_MEDIA, groupId);
             groupResumes++;
           }
-          if (!Array.isArray(parent?.children) || inspectedGroups >= 12) continue;
+          if (!Array.isArray(parent?.children) || inspectedGroups >= parentInspectionBudget) continue;
           inspectedGroups++;
           for (const child of parent.children.slice(0, 5)) {
             const profileId = String(child.profile_id || "");

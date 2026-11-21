@@ -285,3 +285,27 @@ test("active history scans hundreds of terminal groups with bounded parallel rea
   assert.equal(gets, 360);
   assert.equal(peak, 6, "history work overlaps but never starts unbounded storage calls");
 });
+
+test("Factory group cron cursor inspects every parent, with no silent 50-to-12 skip", async () => {
+  const bucket = new FakeR2();
+  const requests = Array.from({ length: 50 }, (_, i) =>
+    "factory_cron_parent_coverage_" + String(i).padStart(3, "0"));
+  for (const requestId of requests) {
+    bucket.objects.set(FACTORY_GROUP_PREFIX + "/" + requestId + ".json", {
+      etag: String(++bucket.version), data: {request_id:requestId, children:[]},
+    });
+  }
+  const found = [];
+  for (let tick = 0; tick < 5; tick++) {
+    const current = await factoryApprovalGroupCronScan(bucket, { maxScan: 12 });
+    assert.ok(current.length <= 12, "never advance cursor beyond inspection budget");
+    found.push(...current);
+  }
+  assert.equal(found.length, 50, "every one of 50 parents must be visited");
+  assert.deepEqual(new Set(found), new Set(requests), "no parent may be skipped");
+  const worker = (await import("node:fs")).readFileSync(
+    new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(worker, /const parentInspectionBudget = 12/);
+  assert.match(worker, /maxScan: parentInspectionBudget/);
+  assert.match(worker, /inspectedGroups >= parentInspectionBudget/);
+});
