@@ -190,41 +190,7 @@ foreach($o in $targets) {
       $exactSecret=[string]$vals[$prefix[$city]+'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']
       if(-not $exactSecret){$exactSecret=[string]$vals['YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']}
       $expectedChannel=[string]$vals[$prefix[$city]+'YOUTUBE_CHANNEL_ID']
-      if(-not $exactBase -or -not $exactSecret -or $expectedChannel -notmatch '^UC[A-Za-z0-9_-]{22}    $state=if(-not $owner.ok){'youtube_owner_inventory_unavailable_no_negative_proof'}elseif($savedId -and $remote.Count -eq 1){'saved_video_id_found_in_owner_uploads'}elseif($jobIds.Count -gt 0){'original_jobstore_video_id_needs_exact_get'}elseif($titleHits.Count -gt 0){'same_owner_title_candidate_needs_asset_and_time_review'}else{'no_exact_youtube_proof_no_negative_delivery_claim'}
-    $result.owner_inventory_state=$owner.state
-    $result.owner_inventory_complete=$owner.complete
-    $result.owner_video_ids_scanned=$owner.ids
-    $result.original_jobstore_scanned=($jobSources.Count -gt 0)
-    $result.matching_original_job_count=$matchedJobs.Count
-    $result.matching_job_video_ids=$jobIds
-    $result.saved_video_id_present=([bool]$savedId)
-    $result.saved_video_in_owner_uploads=($remote.Count -eq 1)
-    $result.saved_video_id=if($savedId){$savedId}else{$null}
-    $result.same_owner_title_candidates=@($titleHits|ForEach-Object{@{id=[string]$_.id;privacy=[string]$_.privacy_status;published_at=[string]$_.published_at}})
-    if($remote.Count -eq 1){$result.remote_privacy=[string]$remote[0].privacy_status;$result.remote_published_at=[string]$remote[0].published_at}
-  }
-  $result.state=$state
-  $results+=$result
-}
-$counts=@{}
-foreach($row in $results){if(-not $counts.ContainsKey($row.state)){$counts[$row.state]=0};$counts[$row.state]++}
-$ownerSummary=@()
-foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
-  $o=$ytOwner[$city];$t=$ttOwner[$city]
-  $ownerSummary+=@{profile=$city;youtube_owner_state=$o.state;youtube_owner_inventory_complete=$o.complete;youtube_ids_seen=$o.ids;youtube_pages_scanned=$o.pages;tiktok_oauth_state=$t.state;tiktok_scopes_granted=$t.scopes_granted}
-}
-$jobstoreRows=0
-foreach($source in $jobSources){if($source.available -eq $true -and $null -ne $source.rows){$jobstoreRows += [int]$source.rows}}
-$report=@{
-  version='issue2374_youtube_tiktok_owner_exact_v2';scan_at=$utc;source='production_supabase'
-  read_only=$true;provider_media_writes=0;output_writes=0;publish_calls=0;airtable_operations=0
-  nonpublication_proved=$false;retry_authorized=$false;targets=$targets.Count
-  youtube_targets=13;tiktok_targets=8;http_get_calls=$script:httpGets
-  jobstores_seen=$jobSources.Count;jobstore_rows=$jobstoreRows
-  provider_owner_coverage=$ownerSummary;counts=$counts;all_output_dispositions=$results
-}
-Write-Output ('ISSUE2374_YT_TT_OWNER_AUDIT='+($report|ConvertTo-Json -Compress -Depth 9))
-){
+      if(-not $exactBase -or -not $exactSecret -or $expectedChannel -notmatch '^UC[A-Za-z0-9_-]{22}$'){
         $exactResults+=@{id=$candidateId;state='exact_get_configuration_unavailable';verified_public=$false;asset_match_verified=$false}
         continue
       }
@@ -296,7 +262,7 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
 $jobstoreRows=0
 foreach($source in $jobSources){if($source.available -eq $true -and $null -ne $source.rows){$jobstoreRows += [int]$source.rows}}
 $report=@{
-  version='issue2374_youtube_tiktok_owner_history_v1';scan_at=$utc;source='production_supabase'
+  version='issue2374_youtube_tiktok_owner_exact_v2';scan_at=$utc;source='production_supabase'
   read_only=$true;provider_media_writes=0;output_writes=0;publish_calls=0;airtable_operations=0
   nonpublication_proved=$false;retry_authorized=$false;targets=$targets.Count
   youtube_targets=13;tiktok_targets=8;http_get_calls=$script:httpGets
