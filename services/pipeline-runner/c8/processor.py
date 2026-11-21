@@ -176,7 +176,7 @@ def process_request(
             continue
         # Do not let source iteration order decide the cover/thumbnail. The
         # validated final slide numbers are unique and contiguous.
-        slides.sort(key=lambda row: int(field(row, "Slide Number")))
+        slides.sort(key=lambda row: int(float(field(row, "Slide Number"))))
         existing = _find_existing(
             client,
             content_id=field(parent, "Content_ID"),
