@@ -430,7 +430,10 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
   const semanticPayload={...payload,executionId:undefined}; // stable across retries before generated ID
   const identity={runId,testId,actor};
   const result=await writeOnce(QA_EVENTS_TABLE,kind,key,identity,semanticPayload,()=>({
-    "Execution ID":payload.executionId||"qaex-"+crypto.randomUUID(),
+    // HumanApproval points to the observed execution in payload.executionId,
+    // but the approval is a *new immutable event* with its own unique ID.
+    "Execution ID":kind==="HumanApproval"||kind==="Waiver"||kind==="RunFinalized"
+      ?"qaex-"+crypto.randomUUID():payload.executionId,
     "Run ID":runId,"Test ID":testId,"Event Kind":kind,"Actor ID":actor,
     "Recorded At UTC":clock().toISOString(),"Payload JSON":JSON.stringify(payload)
   }));
