@@ -16,7 +16,7 @@ export function planQaAssertion(testId,scope) {
   if(testId==="QA-SB-001" && (!Array.isArray(scope.recordIds) || !scope.recordIds.length ||
       scope.recordIds.length>SAFE_ASSERTIONS[testId].maxObservations ||
       scope.recordIds.some(x=>typeof x!=="string" || !/^rec[A-Za-z0-9]{14}$/.test(x))))
-    throw Error("Exact Airtable record allowlist required");
+    throw Error("Exact canonical Supabase record allowlist required");
   if(testId==="QA-MAE-001" && scope.dryRun!==true) throw Error("MAE must be dry-run");
   return Object.freeze({testId,observer:OBSERVER_NAMES[testId],
     timeoutMs:SAFE_ASSERTIONS[testId].timeoutMs,

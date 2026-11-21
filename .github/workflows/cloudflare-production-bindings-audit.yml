@@ -55,6 +55,22 @@ jobs:
           r=raw.get('result') or {}
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(b.get('name') or ''):str(b.get('type') or '') for b in bindings}
+          # Persist only sanitized names/types and candidate project ref BEFORE
+          # the allowlist assertion. Drift must not discard audit evidence.
+          from production_supabase_identity_audit import inspect_studio_bindings
+          discovery=inspect_studio_bindings(bindings)
+          safe={
+              "worker":"chicagoshining-studio-api",
+              "active_version_id":r.get('id'),
+              "binding_names_types":sorted(
+                  [{"name":b.get('name'),"type":b.get('type')} for b in bindings],
+                  key=lambda b:str(b.get('name') or '')),
+              "project_discovery":discovery,
+              "credential_values_collected":False,
+              "read_only":True,
+          }
+          Path('/tmp/bindings-audit-discovery.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
+          print("active_worker_candidate_project_ref=" + str(discovery['candidate_project_ref'] or 'unavailable'))
           contract=assert_live_contract(got, 'active production Worker')
           plain={str(b['name']):str(b['text']) for b in bindings if b.get('type')=='plain_text' and 'text' in b}
           flags=sanitize_runtime_flags(plain)
@@ -94,7 +110,7 @@ jobs:
             echo '### Studio API production binding audit'
             echo "- Active version: $ACTIVE"
             echo "- Active binding count: $ACTIVE_COUNT"
-            echo "- Core 10-binding contract: $CORE_OK"
+            echo "- Supabase core binding contract: $CORE_OK"
             echo "- ELEVENLABS_API_KEY present: $ELEVEN (optional)"
             echo "- Durable Object namespaces: $DOS"
             echo "- Sanitized feature flags: $FLAGS"
@@ -103,8 +119,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save sanitized evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: studio-api-bindings-audit-${{ github.run_id }}
-          path: /tmp/bindings-audit-sanitized.json
+          path: |
+            /tmp/bindings-audit-discovery.json
+            /tmp/bindings-audit-sanitized.json
+          if-no-files-found: warn
           retention-days: 30

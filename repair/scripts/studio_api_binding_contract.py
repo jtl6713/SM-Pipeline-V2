@@ -1,26 +1,22 @@
 """Canonical Studio API Worker binding contract.
 
-Live production uses 10 legacy core bindings plus the atomic scheduling reservation
-feature-flag and Durable Object namespace after reservation bootstrap.
+Studio production core requires Supabase instead of Airtable. Historical Airtable
+IDs and PAT remain temporary optional bindings for cutover accounting.
+The atomic scheduling reservation namespace is independently protected.
 ELEVENLABS_API_KEY (TTS) and ELEVENLABS_VIDEO_API_KEY (paid video) are separate optional secret_text bindings.
 Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET,
 STAGE_BACKEND_SMV1, STAGE_BACKEND_R2, STAGE_BACKEND_R3, STAGE_BACKEND_R4,
 STAGE_BACKEND_R5, STAGE_BACKEND_RR1, STAGE_BACKEND_RR2, STAGE_BACKEND_R2B, STAGE_BACKEND_P1, STAGE_BACKEND_P2, STAGE_BACKEND_P3, STAGE_BACKEND_P4, STAGE_BACKEND_P5, STAGE_BACKEND_C2, STAGE_BACKEND_C3, STAGE_BACKEND_C3B, STAGE_BACKEND_SAI1, STAGE_BACKEND_C4, STAGE_BACKEND_C5, STAGE_BACKEND_C6, STAGE_BACKEND_C7, STAGE_BACKEND_C8, STAGE_BACKEND_C9, STAGE_BACKEND_I1, STAGE_BACKEND_I2, STAGE_BACKEND_I3, STAGE_BACKEND_I4, STAGE_BACKEND_A2, STAGE_BACKEND_A2B, STAGE_BACKEND_A3, STAGE_BACKEND_A4, STAGE_BACKEND_A1P, STAGE_BACKEND_A1S, STAGE_BACKEND_M1, STAGE_BACKEND_AP0, STAGE_BACKEND_AP1_IG, STAGE_BACKEND_AP1_IGS, STAGE_BACKEND_FBS1, STAGE_BACKEND_FBS3, STAGE_BACKEND_YT0, STAGE_BACKEND_TTD0, STAGE_BACKEND_FB0, STAGE_BACKEND_AP0C, STAGE_BACKEND_TTD_ORCH, STAGE_BACKEND_YT_ORCH, STAGE_BACKEND_FB_ORCH, STAGE_BACKEND_APCAR_ORCH, STAGE_BACKEND_IG_ORCH, STAGE_BACKEND_P0202) may already exist on the live Worker; treat them as optional.
-Supabase Phase 3 vars (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STUDIO_READ_SOURCE)
-are optional so Pipeline can feature-flag reads without blocking deploys.
+Supabase URL and service-role bindings are required. Older source flags may be
+preserved during cutover but do not authorize Airtable reads.
 """
 
 from __future__ import annotations
 
 
 CORE_BINDINGS = {
-    "AIRTABLE_BASE_ID": "plain_text",
-    "AIRTABLE_CONTENT_TABLE_ID": "plain_text",
-    "AIRTABLE_IDEA_TABLE_ID": "plain_text",
-    "AIRTABLE_MEDIA_TABLE_ID": "plain_text",
-    "AIRTABLE_MUSIC_VIEW_ID": "plain_text",
-    "AIRTABLE_OUTPUT_TABLE_ID": "plain_text",
-    "AIRTABLE_PAT": "secret_text",
+    "SUPABASE_URL": "plain_text",
+    "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
     "ALLOWED_ORIGINS": "plain_text",
     "I3_DECISION_WEBHOOK_URL": "plain_text",
     "STUDIO_MEDIA": "r2_bucket",
@@ -32,6 +28,16 @@ RESERVATION_BINDINGS = {
 }
 
 OPTIONAL_BINDINGS = {
+    # Legacy Airtable IDs are accepted during cutover, not required after removal.
+    "AIRTABLE_BASE_ID": "plain_text",
+    "AIRTABLE_CONTENT_TABLE_ID": "plain_text",
+    "AIRTABLE_IDEA_TABLE_ID": "plain_text",
+    "AIRTABLE_MEDIA_TABLE_ID": "plain_text",
+    "AIRTABLE_MUSIC_VIEW_ID": "plain_text",
+    "AIRTABLE_OUTPUT_TABLE_ID": "plain_text",
+    # Historical secret binding may remain on currently deployed versions until
+    # the provider PAT is revoked after zero-egress certification. Not required.
+    "AIRTABLE_PAT": "secret_text",
     # Separate, non-authoritative Home counter namespace (not schedule authority).
     "STUDIO_PROFILE_SUMMARIES": "durable_object_namespace",
     "STUDIO_HOME_PROFILE_SUMMARY_READS": "plain_text",
@@ -194,12 +200,10 @@ OPTIONAL_BINDINGS = {
     # value during ordinary Worker deploys. STUDIO_WRITE_SOURCE does not
     # cover these tables. Default remains Airtable (flag unset).
     "STUDIO_PHASE6_WRITE_SOURCE": "secret_text",
-    "SUPABASE_URL": "plain_text",
-    "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
 }
 
-CONTRACT_ID = "studio-api-10-core-elevenlabs-optional"
-REQUIRED_SECRETS = ("AIRTABLE_PAT",)
+CONTRACT_ID = "studio-api-supabase-core-no-airtable-credential"
+REQUIRED_SECRETS = ("SUPABASE_SERVICE_ROLE_KEY",)
 AUTHORITATIVE_SERVICES = (
     {"name": "chicagoshining-studio-api", "kind": "worker", "role": "Studio API / repair controller"},
     {"name": "chicagoshining-studio-web", "kind": "pages", "role": "Studio UI"},
@@ -209,6 +213,29 @@ AUTHORITATIVE_SERVICES = (
     {"name": "chicagoshining-studio-media-bridge", "kind": "worker", "role": "media preview bridge"},
 )
 
+
+
+def assert_production_supabase_target(url: str | None, approved_project_ref: str | None) -> str:
+    """Refuse production deployment unless its Supabase project is independently approved."""
+    import re
+    from urllib.parse import urlsplit
+
+    ref = str(approved_project_ref or "").strip()
+    if not re.fullmatch(r"[a-z0-9]{20}", ref):
+        raise SystemExit("Set STUDIO_PRODUCTION_SUPABASE_PROJECT_REF after verifying production ownership")
+    # sm-pipeline-v2-dev (vkwvscgisqsbuwagdvtb) is the LIVE Studio
+    # production database; its project name was not changed at cutover.
+    # Never infer the environment from the project name. Require explicit
+    # approved-ref + exact live Worker URL matching as before.
+    if ref == "yxhfaksetrxdezoodibq":
+        raise SystemExit("The separate Task Organizer project is not Studio production")
+    parsed = urlsplit(str(url or "").strip())
+    if (parsed.scheme != "https"
+            or parsed.netloc != f"{ref}.supabase.co"
+            or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment):
+        raise SystemExit("Live SUPABASE_URL does not match the approved production project")
+    return ref
 
 def binding_map(bindings):
     return {str(item.get("name") or ""): str(item.get("type") or "") for item in bindings or []}

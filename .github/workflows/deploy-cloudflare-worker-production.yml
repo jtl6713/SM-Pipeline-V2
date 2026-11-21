@@ -55,6 +55,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
+      # Require an independently confirmed Supabase production project.
+      STUDIO_PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
       VERIFY_BRIDGE: chicagoshining-studio-deploy-verify
       WRANGLER_VERSION: 4.123.0
       ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
@@ -66,6 +68,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Verify QA code is Supabase-only, independent of historical migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/qa_retirement_preflight.py
+          echo 'qa_supabase_ledger_predeploy_gate=PASS'
 
       - name: Verify Post Insights Supabase published-post and refresh regression
         shell: bash
@@ -194,7 +203,10 @@ jobs:
           import json, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('repair/scripts')))
-          from studio_api_binding_contract import assert_live_contract, assert_global_factory_binding_tuple
+          from studio_api_binding_contract import (
+              assert_live_contract, assert_global_factory_binding_tuple,
+              assert_production_supabase_target,
+          )
           r=json.loads(Path('/tmp/version-before.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
@@ -223,9 +235,11 @@ jobs:
           prior_stage=assert_global_factory_binding_tuple(plain_vars,'Predeploy Worker',allow_absent=True)
           print('predeploy_global_factory_stage='+prior_stage)
           Path('/tmp/active-plain-vars.json').write_text(json.dumps(plain_vars))
-          prod_base=next((b.get('text') for b in bindings if b.get('name')=='AIRTABLE_BASE_ID'),None)
-          if prod_base != 'appe33zkZn35yirTL':
-              raise SystemExit('Factory canary predeploy refused: production Airtable base identity mismatch')
+          assert_production_supabase_target(
+              plain_vars.get('SUPABASE_URL'),
+              __import__('os').environ.get('STUDIO_PRODUCTION_SUPABASE_PROJECT_REF'),
+          )
+          print('studio_production_supabase_identity=VERIFIED')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
@@ -353,7 +367,7 @@ jobs:
             'observability':{'enabled':True,'head_sampling_rate':1},
             'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
-            'secrets':{'required':['AIRTABLE_PAT']}
+            'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}
           }
           # Independent SQLite namespace. No schedule reservation data is shared.
           cfg['durable_objects']={'bindings':[{
@@ -401,7 +415,7 @@ jobs:
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log 2>&1 || { echo 'Wrangler deploy failed; full log withheld to avoid exposing preserved plaintext binding values'; exit 1; }
           echo "wrangler_deploy=PASS"
 
-      - name: Verify active source and live 10-core binding contract
+      - name: Verify active source and live Supabase binding contract
         shell: bash
         run: |
           set -euo pipefail
@@ -749,7 +763,7 @@ jobs:
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
 
-      - name: Verify live QA catalog and bounded Airtable history through protected service binding
+      - name: Verify live QA catalog and bounded Supabase history through protected service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -760,7 +774,7 @@ jobs:
           # after upload are often Cloudflare 1042 served as 404, which rolled
           # Worker 0.10.782 back even after the session probe had recovered.
           curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-catalog" -o /tmp/qa-live-catalog.json
-          jq -e '.ok==true and .writeAuthority=="Airtable" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
+          jq -e '.ok==true and .writeAuthority=="Supabase" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
           curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
           jq -e '.ok==true and (.runs|type)=="array" and (.limited_to==1)' /tmp/qa-live-runs.json >/dev/null
           # A workers.dev 1042/1104 is served as 404/500 and is not an auth result.

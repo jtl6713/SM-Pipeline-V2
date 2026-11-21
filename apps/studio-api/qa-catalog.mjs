@@ -2,7 +2,7 @@
 export const QA_CATALOG = Object.freeze({
   "schemaVersion": 1,
   "source": "QA Test Center comprehensive Studio regression plan expanded from 2026-10-31 baseline",
-  "catalogVersion": "2026-11-06.2",
+  "catalogVersion": "2026-11-21.1",
   "tests": [
     {
       "id": "QA-AUTH-001",
@@ -426,7 +426,7 @@ export const QA_CATALOG = Object.freeze({
     },
     {
       "id": "QA-AT-001",
-      "title": "Airtable canonical read",
+      "title": "Supabase canonical QA readback",
       "category": "AT",
       "severity": "Critical",
       "automation": "manual",
@@ -441,7 +441,7 @@ export const QA_CATALOG = Object.freeze({
         }
       ],
       "expectedResults": [
-        "Recorded evidence matches Airtable canonical fields; no record altered."
+        "Recorded evidence matches the authoritative Supabase QA run; no record altered."
       ],
       "prohibitedActions": [
         "public_publish",
@@ -452,7 +452,7 @@ export const QA_CATALOG = Object.freeze({
     },
     {
       "id": "QA-SB-001",
-      "title": "Supabase mirror parity",
+      "title": "Supabase canonical API parity",
       "category": "SB",
       "severity": "Critical",
       "automation": "manual",
@@ -463,15 +463,15 @@ export const QA_CATALOG = Object.freeze({
       "steps": [
         {
           "order": 1,
-          "instruction": "Select explicit Airtable record IDs"
+          "instruction": "Select explicit Supabase record IDs"
         },
         {
           "order": 2,
-          "instruction": "compare mirror records field-by-field and timestamps."
+          "instruction": "compare canonical API records against Supabase fields and timestamps."
         }
       ],
       "expectedResults": [
-        "Differences recorded as Fail or Blocked; mirror never overrides Airtable."
+        "Differences recorded as Fail or Blocked; API never overrides Supabase."
       ],
       "prohibitedActions": [
         "public_publish",
@@ -855,7 +855,7 @@ export const QA_CATALOG = Object.freeze({
       "steps": [
         {
           "order": 1,
-          "instruction": "Record the platform counts and refresh; compare against bounded canonical Airtable output statuses; inspect freshness timestamps"
+          "instruction": "Record the platform counts and refresh; compare against bounded canonical Supabase output statuses; inspect freshness timestamps"
         },
         {
           "order": 2,
@@ -1013,7 +1013,7 @@ export const QA_CATALOG = Object.freeze({
         }
       ],
       "expectedResults": [
-        "Required-field checks work and one intended Airtable idea is persisted"
+        "Required-field checks work and one intended Supabase idea is persisted"
       ],
       "prohibitedActions": [
         "public_publish",
@@ -1455,7 +1455,7 @@ export const QA_CATALOG = Object.freeze({
       "steps": [
         {
           "order": 1,
-          "instruction": "Compare status, progress timeline and actual rendered file against Airtable"
+          "instruction": "Compare status, progress timeline and actual rendered file against Supabase"
         },
         {
           "order": 2,
@@ -1569,7 +1569,7 @@ export const QA_CATALOG = Object.freeze({
       "severity": "Critical",
       "automation": "manual",
       "prerequisites": [
-        "Use Airtable canonical Ready for Review inventory",
+        "Use Supabase canonical Ready for Review inventory",
         "Authenticated QA administrator and explicitly approved test scope"
       ],
       "steps": [
@@ -2344,12 +2344,12 @@ export const QA_CATALOG = Object.freeze({
     },
     {
       "id": "QA-OPS-005",
-      "title": "Airtable rate limit and recovery",
+      "title": "Supabase rate limit and recovery",
       "category": "OPS",
       "severity": "High",
       "automation": "manual",
       "prerequisites": [
-        "Use staging/mock Airtable 429 responses",
+        "Use staging/mock Supabase 429 responses",
         "Authenticated QA administrator and explicitly approved test scope"
       ],
       "steps": [
@@ -2363,7 +2363,7 @@ export const QA_CATALOG = Object.freeze({
         }
       ],
       "expectedResults": [
-        "Worker fails fast and recovers without saturating Airtable"
+        "Worker fails fast and recovers without saturating Supabase"
       ],
       "prohibitedActions": [
         "public_publish",
@@ -2374,18 +2374,18 @@ export const QA_CATALOG = Object.freeze({
     },
     {
       "id": "QA-OPS-006",
-      "title": "Supabase mirror read-source controls",
+      "title": "Supabase canonical read-source fail-closed controls",
       "category": "OPS",
       "severity": "Critical",
       "automation": "manual",
       "prerequisites": [
-        "Keep Airtable canonical and Supabase nonauthoritative",
+        "Keep Supabase canonical; never fall back to Airtable",
         "Authenticated QA administrator and explicitly approved test scope"
       ],
       "steps": [
         {
           "order": 1,
-          "instruction": "Simulate mirror lag/pool exhaustion in isolated test; inspect read-source fallback"
+          "instruction": "Simulate Supabase latency or pool exhaustion in an isolated test; verify bounded errors and no Airtable fallback"
         },
         {
           "order": 2,
@@ -2393,7 +2393,7 @@ export const QA_CATALOG = Object.freeze({
         }
       ],
       "expectedResults": [
-        "No writes move to Supabase and circuit-breaker protects pool"
+        "Reads and writes never fall back to Airtable; bounded failures protect Supabase and preserve existing records"
       ],
       "prohibitedActions": [
         "public_publish",
@@ -2595,7 +2595,7 @@ export const QA_CATALOG = Object.freeze({
       "steps": [
         {
           "order": 1,
-          "instruction": "Submit result once; repeat concurrently using same ID; query canonical Airtable records"
+          "instruction": "Submit result once; repeat concurrently using same ID; query canonical Supabase records"
         },
         {
           "order": 2,

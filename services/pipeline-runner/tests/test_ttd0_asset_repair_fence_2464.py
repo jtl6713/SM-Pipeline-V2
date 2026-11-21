@@ -54,7 +54,7 @@ def test_ttd0_zero_ready_slides_parks_without_timed_retry(monkeypatch):
     started, parked = client.updates
     assert started["Publish_Attempt_Count"] == 5  # history preserved, never reset
     assert parked["Publish_Status"] == "Failed"
-    assert parked["TikTok_Draft_Status"] == "Retry Pending"
+    assert parked["TikTok_Draft_Status"] == "Needs Asset Repair"
     assert parked["Publish_Error_Stage"] == "TTD0_ASSETS"
     assert parked["Publish_Next_Retry_At"] is None
     assert parked["Publish_Retry_Eligible"] is False
@@ -81,3 +81,20 @@ def test_ttd0_existing_dnp_hold_prohibits_any_write(monkeypatch):
     result = ttd0.process_request(output_record_id=output["id"])
     assert result["processed"] is False
     assert result["reason"] == "auto_publish_disabled"
+
+
+def test_ttd0_needs_asset_repair_never_auto_retries():
+    from ttd.eligibility import ttd0_eligibility_reason
+
+    output = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform": "TikTok",
+        "Auto_Publish_Enabled": True,
+        "Do_Not_Publish": False,
+        "TikTok_Draft_Status": "Needs Asset Repair",
+        "Publish_Error_Stage": "TTD0_ASSETS",
+        "Publish_Retry_Eligible": False,
+    }}
+    assert ttd0_eligibility_reason(output) == "tiktok_asset_repair_required"
+    # A verified source-asset fix, not a timer, returns this exact job to TTD0.
+    output["fields"]["TikTok_Draft_Status"] = "Ready for Assets"
+    assert ttd0_eligibility_reason(output) is None

@@ -29,7 +29,9 @@ test("Airtable 429 records cooldown but does not sleep in-request", () => {
     worker.indexOf("async function airtableFetch"),
     worker.indexOf("const AIRTABLE_BATCH_LIMIT")
   );
-  assert.match(fetchFn, /Airtable rate limited; failing fast/);
+  // Retired Airtable transport cannot issue HTTP or receive 429 responses.
+  assert.match(fetchFn, /supabase_only_crud_uncommitted/);
+  assert.doesNotMatch(fetchFn, /await fetch\(endpoint/);
   assert.doesNotMatch(fetchFn, /await sleepMs\(cooldown\)/);
   assert.doesNotMatch(fetchFn, /backing off/);
   assert.doesNotMatch(fetchFn, /for \(let attempt = 1;/);

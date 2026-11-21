@@ -36,14 +36,26 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
             rowDisplay: getComputedStyle(table.querySelector('thead tr')).display,
             alignment: headers.every((h, i) => Math.abs(h.getBoundingClientRect().x - cells[i].getBoundingClientRect().x) < 1),
             sameRow: headers.every(h => Math.abs(h.getBoundingClientRect().y - headers[0].getBoundingClientRect().y) < 1),
-            calendarHeading: getComputedStyle(document.querySelector('.pipeline-schedule-overview-heading h2')).display,
+            calendarHidden: getComputedStyle(document.querySelector('#pipelineScheduleOverview')).display === 'none',
+            contentControls: ['#pipelineContentFrom', '#pipelineContentTo', '#pipelineContentSize', '#pipelineContentPrev', '#pipelineContentNext']
+              .map(selector => {
+                const element = document.querySelector(selector);
+                if (!element) throw new Error('Missing Pipeline pagination control: ' + selector);
+                const rect = element.getBoundingClientRect();
+                return { selector, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+              }),
+            defaultPageSize: document.querySelector('#pipelineContentSize').value,
             titleHeight: document.querySelector('.pipeline-page-heading h1').getBoundingClientRect().height,
           };
         });
         assert.equal(result.rowDisplay, 'table-row', `${name} ${width}: native heading row`);
         assert.ok(result.alignment && result.sameRow, `${name} ${width}: headings align with columns`);
         assert.ok(result.titleHeight > 0, `${name} ${width}: page title visible`);
-        if (width <= 760) assert.notEqual(result.calendarHeading, 'none', `${name} ${width}: calendar heading visible`);
+        assert.ok(result.calendarHidden, `${name} ${width}: legacy weekly calendar hidden`);
+        assert.equal(result.defaultPageSize, '10', `${name} ${width}: 10 content groups per page by default`);
+        assert.ok(result.contentControls.every(rect =>
+          rect.width > 0 && rect.height > 0 && rect.left >= -1 && rect.right <= width + 1),
+          `${name} ${width}: content pagination and local-date controls stay within viewport`);
         console.log(`PASS ${name} ${width}px: title, headings, column alignment`);
 
         await page.evaluate(() => {
@@ -52,41 +64,49 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
         });
         const ideasLayout = await page.evaluate(() => {
           const heading = document.querySelector('#page-ideas .heading-actions');
-          const actions = [...heading.querySelectorAll(':scope > button')];
-          const group = heading.querySelector('.idea-generate-top-action');
-          const count = heading.querySelector('#ideaGenerateCount');
-          const generate = heading.querySelector('#generateIdeasButton');
-          const box = el => {
-            const rect = el.getBoundingClientRect();
-            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width };
+          const selectors = {
+            group: '#ideaGeneratePanel',
+            count: '#ideaGenerateCount',
+            quality: '#ideaGenerateQuality',
+            generate: '#ideaGenerateSubmit',
+          };
+          // The current Ideas UI groups Quantity, Quality and Generate Ideas in a
+          // single panel. The old standalone #generateIdeasButton was removed.
+          const elements = Object.fromEntries(Object.entries(selectors)
+            .map(([key, selector]) => [key, document.querySelector(selector)]));
+          for (const [key, element] of Object.entries(elements)) {
+            if (!element) throw new Error('Missing current Ideas generator element: ' + key);
+          }
+          const box = element => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+              width: rect.width, height: rect.height };
           };
           return {
-            actions: actions.map(box),
-            group: box(group),
-            count: box(count),
-            generate: box(generate),
-            columns: getComputedStyle(heading).gridTemplateColumns.split(' ').filter(Boolean).length,
-            overflow: heading.scrollWidth > heading.clientWidth + 1,
+            title: document.querySelector('#ideaGenerateHeading')?.textContent.trim(),
+            actionCount: heading.querySelectorAll(':scope > button').length,
+            group: box(elements.group),
+            count: box(elements.count),
+            quality: box(elements.quality),
+            generate: box(elements.generate),
           };
         });
-        assert.equal(ideasLayout.actions.length, 4, name + ' ' + width + ': four normal Ideas actions');
-        assert.equal(ideasLayout.columns, 2, name + ' ' + width + ': two complete Ideas action columns');
-        assert.ok(Math.abs(ideasLayout.actions[0].top - ideasLayout.actions[1].top) < 2,
-          name + ' ' + width + ': Refresh and unused photos share the first row');
-        assert.ok(Math.abs(ideasLayout.actions[2].top - ideasLayout.actions[3].top) < 2,
-          name + ' ' + width + ': VO timeline and New idea share the second row');
-        assert.ok(Math.abs(ideasLayout.actions[0].width - ideasLayout.actions[1].width) < 2,
-          name + ' ' + width + ': both columns have equal width');
-        assert.ok(ideasLayout.actions.every(rect => rect.left >= 0 && rect.right <= width + 1),
-          name + ' ' + width + ': all action tiles fit viewport');
-        assert.ok(!ideasLayout.overflow, name + ' ' + width + ': no Ideas heading overflow');
-        assert.ok(ideasLayout.generate.width < 200, name + ' ' + width + ': compact Generate button');
-        assert.ok(ideasLayout.generate.left >= ideasLayout.count.right &&
-          ideasLayout.generate.left - ideasLayout.count.right < 18,
-          name + ' ' + width + ': Generate button immediately follows quantity');
-        assert.ok(ideasLayout.group.left >= 0 && ideasLayout.group.right <= width + 1,
-          name + ' ' + width + ': paired quantity and Generate fit viewport');
-        console.log('PASS ' + name + ' ' + width + 'px: two Ideas columns, compact Generate action, no overflow');
+        assert.equal(ideasLayout.title, 'AI Idea Generation',
+          name + ' ' + width + ': current generator panel heading');
+        assert.equal(ideasLayout.actionCount, 4,
+          name + ' ' + width + ': existing Ideas toolbar actions preserved');
+        assert.ok(ideasLayout.group.width > 0 && ideasLayout.group.left >= -1 &&
+          ideasLayout.group.right <= width + 1,
+          name + ' ' + width + ': Ideas generator panel fits viewport');
+        for (const field of ['count', 'quality', 'generate']) {
+          const rect = ideasLayout[field];
+          assert.ok(rect.width > 0 && rect.height > 0 &&
+            rect.left >= ideasLayout.group.left - 1 &&
+            rect.right <= ideasLayout.group.right + 1,
+            name + ' ' + width + ': ' + field + ' is visible inside generation panel');
+        }
+        console.log('PASS ' + name + ' ' + width +
+          'px: Ideas quantity, quality, and Generate button grouped and responsive');
         await page.close();
       }
     } finally { await browser.close(); }

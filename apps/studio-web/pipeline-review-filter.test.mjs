@@ -10,15 +10,11 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const overview = fs.readFileSync(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
 const worker = readStudioWorkerSource();
 
-test("Pipeline always loads the full outputs list (not lean mode=review)", () => {
-  const refresh = app.slice(
-    app.indexOf("async function refreshPipelineOutputs"),
-    app.indexOf("async function loadOutputs")
-  );
-  assert.match(refresh, /mode=history&offset=/);
-  assert.match(refresh, /if \(!page\.has_more\) break/);
-  assert.doesNotMatch(refresh, /\/api\/outputs\?limit=250/);
-  assert.doesNotMatch(refresh, /api\([^)]*mode=review/);
+test("Pipeline requests one Supabase content-ID page without newest-250 truncation", () => {
+  const refresh = app.slice(app.indexOf("async function refreshPipelineOutputs"),
+    app.indexOf("async function loadOutputs"));
+  assert.match(refresh, /pipelineContentPageApiPath\(\)/);
+  assert.doesNotMatch(refresh, /mode=history&offset=|\/api\/outputs\?limit=250|mode=review/);
   assert.doesNotMatch(refresh, /pipelineViewFilter === "approval"/);
 });
 

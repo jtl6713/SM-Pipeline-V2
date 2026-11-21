@@ -20,7 +20,8 @@ test("Pipeline /api/outputs list stays lean and non-blocking", async () => {
   assert.match(app, /BUILD_ID = "item4-0[.]6[.][0-9]+[-a-zA-Z0-9.]*"/);
   assert.match(app, /API_TRANSIENT_RETRY_MAX = 3/);
   assert.match(app, /api\("\/api\/health", \{ timeoutMs: 8000, retries: 1 \}/);
-  assert.match(app, /mode=history&offset=/);
+  assert.match(app, /mode: "content_page"/);
+  assert.match(app, /per_page: String\(pipelineContentPageSize\)/);
   assert.match(app, /timeoutMs: 20000, retries: 1/);
   assert.match(worker, /readMappedListSnapshot/);
   assert.match(worker, /studio\/state\/pipeline-list-/);

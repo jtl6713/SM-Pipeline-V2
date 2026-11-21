@@ -47,7 +47,8 @@ jobs:
           version = max(d["deployments"][0]["versions"], key=lambda v:v.get("percentage",0))["version_id"]
           info = fetch("/versions/" + version)
           bindings = {row["name"]:row for row in (info.get("resources") or {}).get("bindings") or []}
-          required = {"AIRTABLE_PAT":"secret_text", "STUDIO_MEDIA":"r2_bucket",
+          required = {"SUPABASE_URL":"plain_text", "SUPABASE_SERVICE_ROLE_KEY":"secret_text",
+                      "STUDIO_MEDIA":"r2_bucket",
                       "ELEVENLABS_API_KEY":"secret_text", "ELEVENLABS_VIDEO_API_KEY":"secret_text"}
           required_ok = all(bindings.get(name,{}).get("type")==typ for name,typ in required.items())
           names = ["STUDIO_ELEVENLABS_VIDEO_ENABLED",
@@ -98,7 +99,7 @@ jobs:
                           runner_jobs_available=(payload.get("ok") is True and payload.get("service")=="pipeline-runner" and
                             all(x in {job.get("path") for job in payload.get("jobs") or []} for x in
                               ("/jobs/studio-asset-library","/jobs/studio-asset-watermark")))
-                          runner_write_authority_verified=(payload.get("studio_write_source") in ("airtable", "supabase"))
+                          runner_write_authority_verified=(payload.get("studio_write_source") == "supabase")
                           health="http_"+str(status)
                   except urllib.error.HTTPError as e:
                       health="http_"+str(e.code)
@@ -112,7 +113,7 @@ jobs:
             "runner_url_present":bool(runner_present),
             "runner_health":health,
             "runner_asset_watermark_routes_present":runner_jobs_available,
-            "runner_airtable_write_authority_verified":runner_write_authority_verified,
+            "runner_supabase_write_authority_verified":runner_write_authority_verified,
             "settings":settings,
             "single_4s_720p_9x16_silent_price_verified_in_ui":2425,
             "paid_request_submitted":False,
@@ -124,7 +125,7 @@ jobs:
           if not required_ok:
               raise SystemExit("Required binding missing or changed")
           if health!="http_200" or not runner_jobs_available or not runner_write_authority_verified:
-              raise SystemExit("Runner health/asset and Airtable authority were not confirmed through secure probe")
+              raise SystemExit("Runner health/asset and Supabase authority were not confirmed through secure probe")
           PY
       - name: Upload sanitized read-only preflight evidence
         if: always()

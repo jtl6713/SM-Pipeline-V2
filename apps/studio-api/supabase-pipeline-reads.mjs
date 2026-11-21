@@ -220,128 +220,29 @@ export function studioSupabaseConfigured(env) {
   return Boolean(String(env?.SUPABASE_URL || "").trim() && String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim());
 }
 
-export function studioReadSource(env) {
-  // Global/default reads stay on Airtable. Home, Content, and Factory/Ops
-  // each use their own flag and must not follow STUDIO_READ_SOURCE.
-  void env;
-  return "airtable";
+/**
+ * Single-authority storage mode. Airtable source flags are ignored, including
+ * any stale deployment secrets. Missing Supabase credentials are unavailable,
+ * never a reason to request the archived Airtable database.
+ */
+function studioOnlySupabaseSource(env) {
+  return studioSupabaseConfigured(env) ? "supabase" : "unavailable";
 }
 
-/**
- * Workstream B1 — Phase 3 Pipeline + schedule-grid only.
- * Does not enable Content, Factory, Ops, or Home.
- * Opt-in: STUDIO_PIPELINE_READ_SOURCE=supabase, or legacy STUDIO_READ_SOURCE=supabase
- * when the narrower flag is unset. Roll back with STUDIO_PIPELINE_READ_SOURCE=airtable.
- */
-export function studioPipelineReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  const pipeline = String(env?.STUDIO_PIPELINE_READ_SOURCE || "").trim().toLowerCase();
-  if (pipeline === "airtable") return "airtable";
-  if (pipeline === "supabase") return "supabase";
-  return String(env?.STUDIO_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Workstream B2 — GET /api/content only.
- * Does not follow STUDIO_READ_SOURCE or the Pipeline flag, so a deploy does
- * not turn Content on by itself. Factory, Ops, and Home stay on their own gates.
- * Opt-in: STUDIO_CONTENT_READ_SOURCE=supabase. Roll back with airtable or unset.
- */
-export function studioContentReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_CONTENT_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Workstream B3 — GET /api/factory/desk and GET /api/operations/queue only.
- * Does not follow STUDIO_READ_SOURCE, the Pipeline flag, or the Content flag.
- * Home uses studioHomeReadSource and does not follow this flag.
- * Opt-in: STUDIO_FACTORY_OPS_READ_SOURCE=supabase. Roll back with airtable or unset.
- */
-export function studioFactoryOpsReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_FACTORY_OPS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Home — GET /api/profiles/overview only.
- * Does not follow STUDIO_READ_SOURCE, the Pipeline flag, the Content flag,
- * or the Factory/Ops flag. A deploy leaves Home on Airtable until this secret
- * is set. Opt-in: STUDIO_HOME_READ_SOURCE=supabase. Roll back with airtable or unset.
- */
-export function studioHomeReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_HOME_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Library music — GET /api/music only.
- * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, or Home.
- * A deploy leaves music on Airtable until this secret is set.
- * Opt-in: STUDIO_MUSIC_READ_SOURCE=supabase. Roll back with airtable or unset.
- */
-export function studioMusicReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_MUSIC_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Asset Manager — GET /api/library only (not published files).
- * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, Home, Music, or Auth.
- * A deploy leaves Asset Manager on Airtable until this secret is set.
- * Opt-in: STUDIO_ASSETS_READ_SOURCE=supabase. Roll back with airtable or unset.
- * Requires library densify in media_assets.metadata (profile/classification/search).
- */
-export function studioAssetsReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_ASSETS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Auth — resolveAuthorization only.
- * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, Home, or Music.
- * A deploy leaves auth on Airtable until this secret is set.
- * Opt-in: STUDIO_AUTH_READ_SOURCE=supabase. Roll back with airtable or unset.
- * Mirror tables must be populated (half-hour auth mirror + extras densify) before enable.
- */
-export function studioAuthReadSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_AUTH_READ_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
-
-/**
- * Phase 5 remainder write switch for Platform Outputs and Content Items.
- * Default remains Airtable-first write-through. When STUDIO_WRITE_SOURCE=supabase,
- * Output/Content updates and creates commit to Supabase first. Airtable is a
- * frozen archive: a successful Supabase commit is not exported. Callers keep
- * the minted rec id. Production Requests, media, and the transfer queue are
- * not part of this flag. Record deletion is not started.
- */
-export function studioWriteSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
-}
+export function studioReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioPipelineReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioContentReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioFactoryOpsReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioHomeReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioMusicReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioAssetsReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioAuthReadSource(env) { return studioOnlySupabaseSource(env); }
+export function studioWriteSource(env) { return studioOnlySupabaseSource(env); }
 
 export function studioPhase5WritesMode(env) {
   return studioWriteSource(env) === "supabase"
     ? "supabase_sor_airtable_archived"
-    : "airtable_sor_write_through";
+    : "supabase_unavailable";
 }
 
 export function studioLegacyExportEnabled(env, tableId) {
@@ -361,27 +262,15 @@ export function studioLegacyExportEnabled(env, tableId) {
   );
 }
 
-/**
- * Phase 6 switch for Production Requests, Media Assets, and the transfer
- * queue. Default stays Airtable-first. STUDIO_WRITE_SOURCE does not turn this
- * on. Updates and creates commit to Supabase first only when
- * STUDIO_PHASE6_WRITE_SOURCE=supabase. A create uses the minted Supabase id
- * when Airtable identity fields are absent. Held-reschedule note readback uses the Supabase
- * row when STUDIO_WRITE_SOURCE=supabase. A successful Supabase commit is not
- * exported to Airtable. The half-hour Airtable copy is stopped while
- * STUDIO_WRITE_SOURCE=supabase. Record deletion is not started.
- */
+/** Phase 6 uses the same Supabase-only authority as other Studio writes. */
 export function studioPhase6WriteSource(env) {
-  if (!studioSupabaseConfigured(env)) return "airtable";
-  return String(env?.STUDIO_PHASE6_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "airtable";
+  return studioOnlySupabaseSource(env);
 }
 
 export function studioPhase6WritesMode(env) {
   return studioPhase6WriteSource(env) === "supabase"
     ? "supabase_sor_airtable_archived"
-    : "airtable_sor_write_through";
+    : "supabase_unavailable";
 }
 
 export const MEDIA_ASSETS_TABLE_ID = "tblSITCujCsJTNcDe";
@@ -2035,6 +1924,85 @@ export async function listSupabaseManualActionOutputs(env, { profileAirtableId, 
  * pages. Never apply the calendar's schedule-week filter to this inventory.
  * The cursor is a numeric offset; the caller must walk until has_more=false.
  */
+export function pipelineLocalMidnightUtc(day, zone) {
+    const target = Date.parse(day + "T00:00:00Z");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    let utc = target;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(utc))
+        .filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
+      const observed = Date.UTC(parts.year, parts.month - 1, parts.day,
+        parts.hour, parts.minute, parts.second);
+      utc += target - observed;
+    }
+    return new Date(utc).toISOString();
+}
+
+export async function listSupabasePipelineContentPage(env, {
+  profileAirtableId, offset = 0, limit = 10, createdFrom = "", createdTo = "",
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Pipeline unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Pipeline profile missing");
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
+  for (const date of [createdFrom, createdTo]) {
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date + "T00:00:00Z")) || new Date(date + "T00:00:00Z").toISOString().slice(0, 10) !== date)) {
+      throw new Error("Invalid creation date");
+    }
+  }
+  if (createdFrom && createdTo && createdFrom > createdTo) throw new Error("Creation date range is reversed");
+  // Resolve the profile's market to its IANA zone; never treat local calendar
+  // days as UTC days (DST boundaries can have 23 or 25 hours).
+  const profileRows = await supabaseRest(env,
+    `content_profiles?id=eq.${profileId}&select=profile_name,market_name&limit=1`);
+  const market = String(profileRows?.[0]?.market_name || profileRows?.[0]?.profile_name || "").toLowerCase();
+  const zone = /los angeles|\bla\b/.test(market) ? "America/Los_Angeles"
+    : /chicago/.test(market) ? "America/Chicago"
+    : /miami|new york|nyc/.test(market) ? "America/New_York" : null;
+  if (!zone) throw new Error("Pipeline profile timezone unavailable");
+  const localMidnightUtc = (day) => pipelineLocalMidnightUtc(day, zone);
+  let filter = `content_profile_id=eq.${profileId}`;
+  if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(localMidnightUtc(createdFrom))}`;
+  if (createdTo) {
+    const nextDay = new Date(Date.parse(createdTo + "T00:00:00Z") + 86400000)
+      .toISOString().slice(0, 10);
+    filter += `&created_at=lt.${encodeURIComponent(localMidnightUtc(nextDay))}`;
+  }
+  const contents = await supabaseRest(env,
+    `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at`
+    + `&order=content_number.desc.nullslast,id.desc&limit=${size + 1}&offset=${skip}`);
+  const page = (contents || []).slice(0, size);
+  const contentByAirtableId = new Map(page.filter(c => c.airtable_record_id).map(c => [
+    c.airtable_record_id, { id: c.airtable_record_id, createdTime: c.created_at,
+      fields: { Content_ID: c.content_number, Content_Title: c.content_title } },
+  ]));
+  const uuids = page.map(c => c.id);
+  let outputs = [];
+  if (uuids.length) {
+    // Query every output of the selected content IDs, not a fixed output count per page.
+    // Fail closed on unusually large groups rather than silently truncate them.
+    const rows = await supabaseRest(env,
+      `platform_outputs?content_item_id=in.(${uuids.join(",")})&test_run_id=is.null`
+      + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast,id.desc&limit=2001`);
+    if (rows.length > 2000) throw new Error("Pipeline content page exceeds output safety bound");
+    outputs = rows.map(flattenOutputRow).map(airtableShapedOutputFromSupabase);
+  }
+  return {
+    records: outputs, contentByAirtableId,
+    content_ids: page.map(c => c.content_number),
+    // Include content without generated outputs so a 10-ID page really shows 10 groups.
+    content_groups: page.map(c => ({ id: c.airtable_record_id || c.id,
+      content_id: c.content_number, title: c.content_title, created_at: c.created_at })),
+    has_more: (contents || []).length > size,
+    next_offset: (contents || []).length > size ? skip + page.length : null,
+    read_source: "supabase",
+  };
+}
+
 export async function listSupabasePipelineHistoryPage(env, {
   profileAirtableId, offset = 0, limit = 150,
 } = {}) {
@@ -9864,10 +9832,16 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       return { ok: false, reason: "table" };
     }
     const table = kind === "idea" ? "idea_candidates" : kind === "slides" ? "carousel_slides" : "engagement_settings";
-    await supabaseRest(env, `${table}?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+    const source = kind === "pipeline_settings" ? "pipeline" : kind === "engagement_settings" ? "engagement" : "";
+    const filter = `airtable_record_id=eq.${encodeURIComponent(id)}`
+      + (source ? `&payload->>source=eq.${source}` : "");
+    const deleted = await supabaseRest(env, `${table}?${filter}&select=airtable_record_id`, {
       method: "DELETE",
-      headers: { Prefer: "return=minimal" },
+      headers: { Prefer: "return=representation" },
     });
+    if (!Array.isArray(deleted) || deleted.length !== 1 || deleted[0]?.airtable_record_id !== id) {
+      return { ok: false, reason: "delete_not_confirmed" };
+    }
     return { ok: true, records: [{ id, deleted: true }] };
   }
   return { ok: false, reason: "method" };

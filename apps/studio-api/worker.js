@@ -1671,7 +1671,8 @@ export default {
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
-          airtable_configured: Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID),
+          airtable_configured: false,
+          supabase_configured: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
           access_identity_present: Boolean(accessIdentity(request).email || accessIdentity(request).jwt_present),
           r2_configured: Boolean(env.STUDIO_MEDIA),
           music_preview_source: "google_drive",
@@ -2331,7 +2332,7 @@ export default {
       if (isQaRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "POST") assertWriteRequest(request, env);
-        return await handleQaApi({request,url,env,authorization,airtableFetch,respond});
+        return await handleQaApi({request,url,env,authorization,respond});
       }
 
       // An approved held revision can be reopened for creative redo without
@@ -5649,9 +5650,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     }
   }
   let sideRead = null;
-  let sideReadAttempted = false;
   if (method === "GET" && studioWriteSource(env) === "supabase") {
-    sideReadAttempted = true;
     sideRead = await studioSideTableRead(env, tableId, pathOrParams).catch((error) => {
       console.warn("supabase side-table read failed; Airtable remains required", error);
       return null;
@@ -5674,16 +5673,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     else if (phase6Create && phase6Minted.length) archiveRecords = phase6Minted;
     else if (sideArchive) archiveRecords = sideArchive;
   }
-  const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
-  const tableRef = encodeURIComponent(String(tableId));
-  const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
-  const airtableRequestStarted = Date.now();
-  const source = ["shadow_reconcile", "home_overview_refresh", "home_ideas_refresh", "autonomous_refill_scan"].includes(options.airtableEgressSource)
-    ? options.airtableEgressSource : "studio_worker_gateway";
-  const { airtableEgressSource, ...fetchOptions } = options;
-  let response;
   let body = {};
-  let airtableCommitted = false;
   if (sideRead) {
     body = sideRead;
   } else if (archiveRecords) {
@@ -5692,174 +5682,15 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     body = archiveRecords.length === 1 && !raw.includes('"records"')
       ? archiveRecords[0]
       : { records: archiveRecords };
-  } else if (
-    // Quiet-window closeout: under STUDIO_WRITE_SOURCE=supabase the Airtable
-    // archive is frozen. Side/SoR reads already ran above. Any remaining GET
-    // (review jobs, gallery, settings miss, Phase 6 miss, etc.) must not
-    // touch Airtable — record miss → 404, list/view → empty page.
-    // Phase 6 keep their own write-source gate when Output SoR is still airtable.
-    method === "GET"
-    && (
-      studioWriteSource(env) === "supabase"
-      || (
-        studioPhase6WriteSource(env) === "supabase"
-        && Boolean(phase6TableKind(env, tableId))
-      )
-    )
-  ) {
-    const tableKind = studioAirtableEgressTableKind(env, tableId);
-    if (studioAirtableRecordIdPath(pathOrParams)) {
-      console.info("supabase SoR record miss; skipping Airtable archive GET", {
-        table_kind: tableKind,
-        side_read_attempted: sideReadAttempted,
-      });
-      throw new HttpError(404, "NOT_FOUND");
-    }
-    console.info("supabase SoR list miss; skipping Airtable archive GET", {
-      table_kind: tableKind,
-      side_read_attempted: sideReadAttempted,
-    });
-    body = { records: [] };
-  } else if (
-    // Residual Worker PATCH (~5–10/hr at 6 AM CT) was review/gallery/other
-    // mutations that never set archiveRecords and fell through to Airtable.
-    // Under write SoR, skip the archive WRITE and return a local echo so
-    // callers soft-continue without egress.
-    method !== "GET"
-    && studioWriteSource(env) === "supabase"
-  ) {
-    const tableKind = studioAirtableEgressTableKind(env, tableId);
-    // Phase 6 request/media/queue must not soft-echo a missed Supabase commit.
-    // Echoing empty Platform Variant creates made Prepare flip Preparing → None.
-    if (phase6TableKind(env, tableId)) {
-      console.warn("supabase Phase 6 mutation miss; refusing soft echo", {
-        table_kind: tableKind,
-        method,
-      });
-      throw new HttpError(
-        503,
-        `Studio could not save ${tableKind || "Phase 6"} changes. Try again in a moment.`
-      );
-    }
-    // An unsaved Content Item or Platform Output must never be reported as a
-    // successful POST/PATCH. The prior echo had no durable record identity:
-    // I3 marked the Idea Promoted, but I4/Factory could never find its parent.
-    // Callers that already performed their own guarded Supabase commit opt
-    // out explicitly with skipSupabaseWriteThrough.
-    if (studioAirtableOutputOrContentTable(env, tableId)
-        && options?.skipSupabaseWriteThrough !== true) {
-      console.warn("supabase output/content mutation did not commit", { table_kind: tableKind, method });
-      throw new HttpError(
-        503,
-        `Studio ${tableKind || "content/output"} ${method} was not saved to Supabase; no status advanced.`,
-      );
-    }
-    console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
-      table_kind: tableKind,
-      method,
-    });
-    const raw = String(options?.body || "");
-    let parsed = {};
-    try { parsed = raw ? JSON.parse(raw) : {}; } catch { parsed = {}; }
-    if (Array.isArray(parsed?.records)) {
-      body = { records: parsed.records };
-    } else {
-      const recordId = studioAirtableRecordIdPath(pathOrParams);
-      if (recordId && parsed && typeof parsed === "object" && parsed.fields) {
-        body = {
-          id: recordId,
-          fields: parsed.fields,
-          createdTime: new Date().toISOString(),
-        };
-      } else if (recordId && method === "DELETE") {
-        body = { id: recordId, deleted: true };
-      } else {
-        body = parsed && typeof parsed === "object" ? parsed : {};
-      }
-    }
-    airtableCommitted = false;
   } else {
-  await airtableRequestSlot();
-  try {
-    response = await fetch(endpoint, {
-      ...fetchOptions,
-      headers: {
-        Authorization: `Bearer ${env.AIRTABLE_PAT}`,
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-    });
-  } finally {
-    // One event for each attempted outbound request, including network failures.
-    // No record ID, filter formula, Airtable token or full URL is logged.
-    const egressEvent = {
-      source,
-      // Keep this coarse and non-secret: enough to kill remaining Airtable burn.
-      table_kind: studioAirtableEgressTableKind(env, tableId),
-      method,
-      status: response?.status ?? 0,
-      duration_ms: Date.now() - airtableRequestStarted,
-      at: new Date().toISOString(),
-      request_count: 1,
-    };
-    console.log("studio_airtable_egress_v1", JSON.stringify(egressEvent));
-    await recordStudioAirtableEgress(env, {
-      source, method: egressEvent.method,
-      status: egressEvent.status, at_ms: airtableRequestStarted,
-      // Durable hourly buckets ignore unknown keys today; table_kind stays in logs.
-      table_kind: egressEvent.table_kind,
-    }).catch(error => console.warn("airtable egress durable accounting unavailable", String(error?.message || error)));
-
-  }
-  const responseText = await response.text();
-  try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }
-  if (response.status === 429) {
-    const cooldown = airtableRetryDelayMs(response, 1);
-    airtableNextRequestAt = Math.max(airtableNextRequestAt, Date.now() + cooldown);
-    console.warn("Airtable rate limited; failing fast", { attempt: 1, cooldownMs: cooldown });
-  }
-  airtableCommitted = response.ok;
-  if (!response.ok) {
-    // Soft-fail ordinary Output/Content legacy exports. MAE schedule/approve
-    // passes maeSupabaseVerify so the same keep-Supabase path applies under
-    // the reservation lock. Other skipSupabaseWriteThrough callers still
-    // need Airtable to succeed.
-    const maeSoft = options?.maeSupabaseVerify === true && outputSorCommitted;
-    if (legacyExport && mutationRecords.length && (options?.skipSupabaseWriteThrough !== true || maeSoft)) {
-      console.warn("Airtable legacy export failed; keeping Supabase commit", tableId, response.status);
-      const raw = String(options?.body || "");
-      body = mutationRecords.length === 1 && !raw.includes('"records"')
-        ? mutationRecords[0]
-        : { records: mutationRecords };
-      airtableCommitted = false;
-    } else if (phase6Records.length) {
-      console.warn("Airtable phase6 legacy export failed; keeping Supabase commit", tableId, response.status);
-      const raw = String(options?.body || "");
-      body = phase6Records.length === 1 && !raw.includes('"records"')
-        ? phase6Records[0]
-        : { records: phase6Records };
-      airtableCommitted = false;
-    } else if (createLegacy && mintedCreates.length) {
-      console.warn("Airtable legacy export create failed; keeping Supabase commit", tableId, response.status);
-      const raw = String(options?.body || "");
-      body = mintedCreates.length === 1 && !raw.includes('"records"')
-        ? mintedCreates[0]
-        : { records: mintedCreates };
-      airtableCommitted = false;
-    } else if (phase6Create && phase6Minted.length) {
-      console.warn("Airtable phase6 legacy export create failed; keeping Supabase commit", tableId, response.status);
-      const raw = String(options?.body || "");
-      body = phase6Minted.length === 1 && !raw.includes('"records"')
-        ? phase6Minted[0]
-        : { records: phase6Minted };
-      airtableCommitted = false;
-    } else {
-      const airtableType = body?.error?.type ? String(body.error.type) : "";
-      const airtableMessage = body?.error?.message ? String(body.error.message) : "";
-      const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
-      throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
-    }
-  }
+    // Airtable is retired. A Supabase miss must be visible to the caller:
+    // never return an empty list, fake record, or successful delete.
+    const tableKind = studioAirtableEgressTableKind(env, tableId);
+    console.error("supabase_only_crud_uncommitted", { table_kind: tableKind, method });
+    throw new HttpError(
+      503,
+      `Supabase ${method === "GET" ? "read" : "mutation"} unavailable for ${tableKind}; no record was ${method === "GET" ? "read" : "saved"}.`
+    );
   }
   // Queue the summary change BEFORE optional Supabase mirror calls so a
   // slow/broken mirror never prevents Home's near-real-time invalidation.
@@ -5869,36 +5700,6 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   if (method !== "GET") {
     await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
-    });
-  }
-  if (mintedCreates.length && airtableCommitted) {
-    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
-    try {
-      if (airtableRecords.length) {
-        await studioSupabaseCommitOutputContentFirst(env, tableId, airtableRecords, { create: true });
-      }
-      await releaseMintedAirtableIds(env, tableId, mintedCreates.map((row) => row.id));
-    } catch (error) {
-      console.warn("supabase minted create adoption failed", tableId, error);
-    }
-  }
-  if (phase6Minted.length && airtableCommitted) {
-    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
-    try {
-      if (airtableRecords.length) {
-        const identity = await adoptMintedPhase6MediaIds(env, tableId, phase6Minted, airtableRecords);
-        if (identity?.ok === false) throw new Error("phase6 media identity adoption failed: " + identity.reason);
-        const adopted = await studioSupabaseCommitPhase6First(env, tableId, airtableRecords, { create: true });
-        if (!adopted?.ok) throw new Error("phase6 create adoption missing identity");
-      }
-      await releaseMintedAirtableIds(env, tableId, phase6Minted.map((row) => row.id));
-    } catch (error) {
-      console.warn("supabase phase6 minted create adoption failed", tableId, error);
-    }
-  }
-  if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
-    await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
-      console.warn("supabase airtable write-through failed", tableId, error);
     });
   }
   return body;

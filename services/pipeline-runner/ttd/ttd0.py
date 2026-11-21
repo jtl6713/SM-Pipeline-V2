@@ -44,6 +44,7 @@ from ttd.constants import (
     STAGE_TTD0,
     STATUS_PREPARING,
     STATUS_READY_FOR_DELIVERY,
+    STATUS_NEEDS_ASSET_REPAIR,
     STATUS_RETRY,
     VIDEO_RETRY_MINUTES,
 )
@@ -161,7 +162,9 @@ def process_request(
                     ),
                     "Publish_Status": PUBLISH_STATUS_FAILED,
                     "Publish_Error_Stage": "TTD0_ASSETS",
-                    "TikTok_Draft_Status": STATUS_RETRY,
+                    # A missing authoritative 9:16 slide set is a lasting
+                    # upstream repair dependency, not a five-minute retry.
+                    "TikTok_Draft_Status": STATUS_NEEDS_ASSET_REPAIR,
                     "Publish_Error_Message": (
                         f"TTD0 aggregated {actual} ready 9:16 slide(s); expected "
                         f"{expected if expected is not None else 'an approved nonzero count'}. "
