@@ -90,6 +90,11 @@ test("TTD0 asset mismatch held for repair is not incorrectly shown as another ti
   };
   assert.equal(normalizedOutputState(held), "Needs Asset Repair");
   assert.equal(normalizedOutputState({
-    fields: { ...held.fields, Publish_Retry_Eligible: true },
+    fields: {
+      ...held.fields,
+      Publish_Retry_Eligible: true,
+      Auto_Publish_Enabled: true,
+      Do_Not_Publish: false,
+    },
   }), "Retry Pending");
 });
