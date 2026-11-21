@@ -2215,10 +2215,31 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
   }
 
   if (Object.keys(cropsPayload).length && assets.length) {
-    record = await item4UpdateRequestState(env, recordId, {
-      Studio_Master_Assets_JSON: JSON.stringify(assets),
-    });
-    assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    // The Supabase Phase6 PATCH succeeds but its Airtable-shaped response is
+    // intentionally sparse: only updated fields, not the saved output plan.
+    // Never treat a mutation echo as an authorized, complete Production Request.
+    const savedIdentity = assets.map((asset) => ({
+      id: String(asset?.id || ""),
+      media_asset_record_id: String(asset?.media_asset_record_id || ""),
+      google_drive_file_id: String(asset?.google_drive_file_id || ""),
+    }));
+    await item4FramePrepareStage("crop settings save",
+      () => item4UpdateRequestState(env, recordId, {
+        Studio_Master_Assets_JSON: JSON.stringify(assets),
+      }));
+    record = await item4FramePrepareStage("crop save full request reload",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    const reloadedAssets = item4AssetManifest(record)
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    if (reloadedAssets.length !== savedIdentity.length ||
+        reloadedAssets.some((asset, index) =>
+          String(asset?.id || "") !== savedIdentity[index].id ||
+          String(asset?.media_asset_record_id || "") !== savedIdentity[index].media_asset_record_id ||
+          String(asset?.google_drive_file_id || "") !== savedIdentity[index].google_drive_file_id)) {
+      throw new HttpError(409,
+        "Master source identities changed during crop save. Refresh Production; no frames were started.");
+    }
+    assets = reloadedAssets;
   }
 
   let plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
@@ -2244,11 +2265,22 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
         String(f(latest, "Production_Notes") || "") !== String(f(record, "Production_Notes") || "")) {
       throw new HttpError(409, "Storyboard or source media changed while preparing frames. Refresh Production; no frames started.");
     }
-    record = await item4FramePrepareStage("approved storyboard plan reconciliation",
+    await item4FramePrepareStage("approved storyboard plan reconciliation",
       () => item4UpdateRequestState(env, recordId, {
         Studio_Output_Plan_JSON: JSON.stringify(integrity.plan),
       }));
-    plan = integrity.plan;
+    // Read the actual saved row, not a partial PATCH echo. Fail closed if a
+    // concurrent write prevents the six-scene correction from persisting.
+    record = await item4FramePrepareStage("approved plan full request reload",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+    if (reconcileApprovedStoryFirstSourcePlan(
+      f(record, "Production_Notes"), item4AssetManifest(record)
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)), plan,
+    ).kind !== "ready") {
+      throw new HttpError(409,
+        "Approved storyboard plan could not be verified after saving. Refresh Production; no frames were started.");
+    }
   }
 
   const ratios = item4RequiredRatios(plan);
@@ -2297,12 +2329,20 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
     () => outputRowsForProductionRequest(env, recordId));
   if (!outputRows.length)
     throw new HttpError(409, "No enabled platform destinations were found. Rebuild the platform plan before Prepare.");
-  const preparingRecord = await item4FramePrepareStage("frame preparation checkpoint",
+  await item4FramePrepareStage("frame preparation checkpoint",
     () => item4UpdateRequestState(env, recordId, {
       Studio_Variant_Status: "Preparing",
       Studio_Variant_Error: null,
       Studio_Item4_State: "Plan Ready",
     }));
+  // Rehydrate before variant reconciliation, which needs the full masters
+  // and output plan and must never receive a sparse state-PATCH response.
+  const preparingRecord = await item4FramePrepareStage("frame checkpoint full request reload",
+    () => loadAuthorizedProductionRequest(env, recordId, authorization));
+  if (String(f(preparingRecord, "Studio_Variant_Status") || "").trim() !== "Preparing") {
+    throw new HttpError(503,
+      "Frames Prepare checkpoint was not saved. No new frames were confirmed.");
+  }
 
   const expected = await item4FramePrepareStage("frame queue creation",
     () => item4UpsertVariantQueue(
