@@ -32,7 +32,7 @@ def probe(url):
             content = response.read(12_000_001)
             if len(content) > 12_000_000 or len(content) < 128:
                 return {"http":response.status,"valid":False,"reason":"size_out_of_range"}
-            if not content.startswith(b"\\xff\\xd8\\xff"):
+            if not content.startswith(b"\xff\xd8\xff"):
                 return {"http":response.status,"valid":False,"reason":"not_jpeg_magic"}
             with Image.open(io.BytesIO(content)) as im:
                 im.verify()
