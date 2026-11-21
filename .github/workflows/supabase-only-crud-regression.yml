@@ -12,6 +12,7 @@ on:
       - 'repair/scripts/qa_retirement_preflight*.py'
       - 'repair/scripts/qa_ledger_backfill_preflight*.py'
       - 'repair/scripts/qa_ledger_live_readback*.py'
+      - 'repair/scripts/qa_ledger_backfill_apply*.py'
       - 'repair/scripts/qa_ledger_sql_review_test.py'
       - 'docs/supabase-migration/phase7/011_qa_ledger_review_only.sql'
       - '.github/workflows/cloudflare-production-bindings-audit.yml'
@@ -143,6 +144,7 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_preflight_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_plan_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_live_readback_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_apply_test.py' -v
           python -m unittest discover -s repair/scripts -p 'qa_ledger_sql_review_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_negative_only_workflows_test.py' -v
           # The evidence template is intentionally BLOCKED until real production
