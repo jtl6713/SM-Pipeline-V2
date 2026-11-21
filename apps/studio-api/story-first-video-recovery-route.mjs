@@ -175,11 +175,17 @@ export async function recoverOriginalStoryVideo({
     if (watermarkRequired && !job.recovery_runner_result) {
       error(HttpError, 409, "The existing Drive file needs verified brand-watermark evidence. No duplicate was created.");
     }
+    // A previous request could have already created the record and lost its
+    // response. The catalog lookup above handles that case. CAS owns the
+    // *registration attempt* itself to prevent two clicks minting two assets.
+    if (job.state === "recovery_registering" && job.recovery_register_claim_at &&
+        safeAge(job.recovery_register_claim_at) < RECOVERY_READ_LEASE_MS)
+      return { ok:true, state:"recovery_registering", paid_generation_submitted:false,
+        message:"The original registration is being verified. No duplicate was created." };
     const registration = { ...job, state:"recovery_registering", recovery_stage:"register",
-      recovery_drive_file_id: drive.file.id, recovery_started_at: isoNow() };
-    if (job.state !== "recovery_registering") {
-      etag = await writeJob(registration, etag); job = registration;
-    }
+      recovery_drive_file_id: drive.file.id, recovery_started_at: isoNow(),
+      recovery_register_claim_at: isoNow() };
+    etag = await writeJob(registration, etag); job = registration;
     // If an earlier create succeeded but the response was lost, recover it first.
     const latest = await checkCatalog({lookupCatalog,transferId,profileId,HttpError});
     let assetId = latest.kind === "found" ? latest.id : "";
