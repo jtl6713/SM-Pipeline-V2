@@ -61,9 +61,24 @@ jobs:
           } | sort -u > /tmp/legacy-pat-workflows.txt
           echo "legacy_pat_workflow_file_count=$(wc -l </tmp/legacy-pat-workflows.txt)"
           cat /tmp/legacy-pat-workflows.txt
-          # Two read-only auditors intentionally report existing credential presence
-          # until provider revocation. No other executable workflow may depend on PAT.
-          grep -Ev '^\\.github/workflows/(i1-durable-runner-audit|verify-supabase-production-readonly)\\.yml
+          # Only the read-only production and Windows-runner presence audits
+          # may mention the retired PAT until live revocation is verified.
+          : > /tmp/unapproved-pat-workflows.txt
+          while IFS= read -r workflow; do
+            case "$workflow" in
+              .github/workflows/i1-durable-runner-audit.yml|.github/workflows/verify-supabase-production-readonly.yml)
+                ;;
+              *)
+                printf '%s\n' "$workflow" >> /tmp/unapproved-pat-workflows.txt
+                ;;
+            esac
+          done < /tmp/legacy-pat-workflows.txt
+          if test -s /tmp/unapproved-pat-workflows.txt; then
+            echo 'FAIL: executable workflows still reference retired Airtable credentials'
+            cat /tmp/unapproved-pat-workflows.txt
+            exit 1
+          fi
+          echo 'PASS: Airtable credential mentions limited to read-only retirement audits'
       - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
         shell: bash
         run: |
