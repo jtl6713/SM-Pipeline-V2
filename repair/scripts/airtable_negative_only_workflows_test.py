@@ -58,6 +58,21 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
                        "Write-Output 'skip'"))
         self.assertEqual(len(unexpected_references(self.root, ("AIRTABLE_PAT",))), 2)
 
+    def test_new_fb_photo_audit_token_guard_only(self):
+        text = (
+            "foreach($bad in @('-Method Post','-Method Patch','-Method Put',"
+            "'-Method Delete','-X POST','AIRTABLE_PAT','api.airtable.com',"
+            "'Write-Output $key','Write-Host $token')){\n"
+            "if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}\n"
+        )
+        self.write("p1-2340-fb-9777-original-photos.yml", text)
+        self.assertEqual(
+            unexpected_references(self.root, ("AIRTABLE_PAT","api.airtable.com")),
+            []
+        )
+        self.write("p1-2340-fb-9777-original-photos.yml", text + "curl https://api.airtable.com/v0/\n")
+        self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://api.airtable.com/v0/foo\n")
         self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
