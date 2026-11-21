@@ -1,20 +1,22 @@
 name: Deploy Pipeline Runner via Ops Dashboard
 
 on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY-SUPABASE-RUNNER for intentional runner cutover'
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
-      - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
+      # Airtable transport retirement and config-only changes are staged.
+      # Do not auto-deploy the runner until a reviewed release marker is pushed.
       - 'deploy/i1-durable-runner-release.txt'
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
-      - 'services/pipeline-runner/fb/assets.py'
-      - 'services/pipeline-runner/fb/fb0.py'
-      - 'services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py'
-      - 'services/pipeline-runner/config.py'
       - 'services/pipeline-runner/app.py'
-      - 'services/pipeline-runner/config.py'
       - 'services/pipeline-runner/tests/test_studio_video_recovery_lookup.py'
       - 'services/pipeline-runner/publish_queue.py'
       - 'services/pipeline-runner/tests/test_publish_queue.py'
@@ -40,6 +42,14 @@ jobs:
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+      - name: Require explicit operator confirmation for manual cutover
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$CUTOVER_CONFIRMATION" = "DEPLOY-SUPABASE-RUNNER"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
