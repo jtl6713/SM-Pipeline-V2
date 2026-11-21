@@ -7,7 +7,7 @@ const source = (path) => readFileSync(new URL(`../../${path}`, import.meta.url),
 // This scans repository *source text*, not user-supplied URL origins.
 // Conservatively reject the retired hostname even when prefixed/suffixed by
 // another host string; do not mistake substring checks for URL validation.
-const retiredAirtableHost = /api\\.airtable\\.com/i;
+const retiredAirtableHost = /api\.airtable\.com/i;
 
 test("active Worker and Durable Object contain no Airtable HTTP endpoint", () => {
   for (const path of [
