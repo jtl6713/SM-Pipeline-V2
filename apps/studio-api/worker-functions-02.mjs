@@ -5500,13 +5500,19 @@ export function emptyStudioMusic() {
 /*__STUDIO_WORKER_END:emptyStudioMusic__*/
 
 export function studioMusicFromMediaRecord(record) {
-  if (!record?.id) return emptyStudioMusic();
+  if (!record?.id || Boolean(f(record, "Do_Not_Use"))) return emptyStudioMusic();
+  const rights = String(f(record, "Rights_Status") || "").trim();
+  // Catalog access and a stock filename alone do not grant publishing rights.
+  if (!["Licensed", "Owned", "Public Domain"].includes(rights)) return emptyStudioMusic();
   const fileId = googleDriveFileId(record);
+  const seconds = Number(f(record, "Duration_Seconds") || f(record, "Duration (seconds)") || 0);
   return {
     record_id: record.id,
     url: stringOrNull(f(record, "Google Drive URL")) || (fileId ? googleDriveDownloadUrl(fileId) : null),
     google_drive_file_id: fileId,
     name: stringOrNull(f(record, "Asset Name")),
+    rights_status: rights,
+    duration_seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : 0,
   };
 }
 /*__STUDIO_WORKER_END:studioMusicFromMediaRecord__*/
@@ -5536,9 +5542,12 @@ export function studioCatalogMusicScore(record) {
 }
 /*__STUDIO_WORKER_END:studioCatalogMusicScore__*/
 
-export function pickCatalogFallbackMusicRecord(records, { random = Math.random } = {}) {
+export function pickCatalogFallbackMusicRecord(records, { random = Math.random, minDurationSeconds = 0 } = {}) {
   const usable = (Array.isArray(records) ? records : [])
-    .filter((record) => Boolean(studioMusicFromMediaRecord(record).url));
+    .filter((record) => {
+      const music = studioMusicFromMediaRecord(record);
+      return Boolean(music.url) && music.duration_seconds >= minDurationSeconds;
+    });
   if (!usable.length) return null;
   const ranked = [...usable].sort((a, b) => studioCatalogMusicScore(b) - studioCatalogMusicScore(a));
   const topScore = studioCatalogMusicScore(ranked[0]);
@@ -5549,12 +5558,12 @@ export function pickCatalogFallbackMusicRecord(records, { random = Math.random }
 }
 /*__STUDIO_WORKER_END:pickCatalogFallbackMusicRecord__*/
 
-export async function catalogFallbackMusic(env) {
+export async function catalogFallbackMusic(env, { minDurationSeconds = 0 } = {}) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Asset_Role}='Music',NOT({Do_Not_Use}))",
   });
-  const picked = pickCatalogFallbackMusicRecord(records);
+  const picked = pickCatalogFallbackMusicRecord(records, { minDurationSeconds });
   return picked ? studioMusicFromMediaRecord(picked) : emptyStudioMusic();
 }
 /*__STUDIO_WORKER_END:catalogFallbackMusic__*/
@@ -5567,7 +5576,7 @@ export async function resolveStudioRenderMusic(env, outputRow, requestRecord, ef
   const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
   if (preferred.url) return preferred;
   if (mode !== "yes") return preferred;
-  return catalogFallbackMusic(env);
+  return catalogFallbackMusic(env, { minDurationSeconds: Number(effective?.video_duration_seconds) || 0 });
 }
 /*__STUDIO_WORKER_END:resolveStudioRenderMusic__*/
 
@@ -5839,6 +5848,10 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
   // Requesting music must never silently fall back to a silent render.
   if (effective.background_music_mode === "Yes" && !String(effective.music?.url || "").trim()) {
     effective.issues.push("Background music requested but no approved catalog URL is available.");
+  }
+  if (effective.background_music_mode === "Yes"
+      && Number(effective.music?.duration_seconds || 0) < Number(effective.video_duration_seconds || 0)) {
+    effective.issues.push("Music source is shorter than the video or its duration cannot be verified.");
   }
   if (effective.voiceover_mode === "Yes"
       && String(f(parentContentItem, "Voiceover_Status") || "").trim() === "Generated"
