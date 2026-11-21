@@ -185,14 +185,20 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
   if(!pathname.startsWith(apiPrefix))throw error(404,"Unknown QA route");
   // The production adapter is Supabase-only; a deterministic test harness may
   // inject the same append/list contract. No legacy network gateway exists.
-  const ledger=qaLedger || createSupabaseQaLedger(env);
+  // The versioned QA catalog is static. Do not require Supabase credentials
+  // merely to serve the catalog; actual history/commits remain fail-closed.
+  let ledger=qaLedger;
+  function canonicalLedger(){
+    if(!ledger)ledger=createSupabaseQaLedger(env);
+    return ledger;
+  }
   async function listPage(table,field,value,limit=50,offset=null,sortField=null){
-    return ledger.listPage(table,field,value,limit,offset,sortField);
+    return canonicalLedger().listPage(table,field,value,limit,offset,sortField);
   }
   const list=async(table,field,value,limit=50)=>(
     await listPage(table,field,value,limit)).records;
   async function add(table,recordFields){
-    const result=await ledger.add(table,recordFields);
+    const result=await canonicalLedger().add(table,recordFields);
     if(!result?.id)throw error(503,"QA Supabase commit unverified");
     return result;
   }
