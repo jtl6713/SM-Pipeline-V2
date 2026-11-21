@@ -2374,7 +2374,7 @@ export const QA_CATALOG = Object.freeze({
     },
     {
       "id": "QA-OPS-006",
-      "title": "Supabase mirror read-source controls",
+      "title": "Supabase canonical read-source fail-closed controls",
       "category": "OPS",
       "severity": "Critical",
       "automation": "manual",
@@ -2385,7 +2385,7 @@ export const QA_CATALOG = Object.freeze({
       "steps": [
         {
           "order": 1,
-          "instruction": "Simulate mirror lag/pool exhaustion in isolated test; inspect read-source fallback"
+          "instruction": "Simulate Supabase latency or pool exhaustion in an isolated test; verify bounded errors and no Airtable fallback"
         },
         {
           "order": 2,
@@ -2393,7 +2393,7 @@ export const QA_CATALOG = Object.freeze({
         }
       ],
       "expectedResults": [
-        "No writes move to Supabase and circuit-breaker protects pool"
+        "Reads and writes never fall back to Airtable; bounded failures protect Supabase and preserve existing records"
       ],
       "prohibitedActions": [
         "public_publish",
