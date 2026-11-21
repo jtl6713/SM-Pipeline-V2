@@ -142,7 +142,7 @@ foreach ($spec in @(@{city='New York City';prefix='NYC_'},@{city='Miami';prefix=
     $state.status=$status
     $inventory+=$state
 }
-$matches=@()
+$candidateResults=@()
 foreach ($source in $rows) {
     $number=[int]$source.output_number
     $city=[string]$market[[string]$source.content_profile_id]
@@ -167,15 +167,15 @@ foreach ($source in $rows) {
         elseif ($hits.Count -eq 1) {'single_public_carousel_caption_candidate_requires_asset_proof'}
         elseif (-not $needle) {'caption_too_short_no_negative_proof'}
         else {'no_matching_carousel_in_bounded_history_no_negative_proof'}
-    $matches+=@{output=$number;profile=$city;status=$status;candidate_count=$hits.Count;candidates=$hits;original_asset_proven=$false;retry_authorized=$false}
+    $candidateResults+=@{output=$number;profile=$city;status=$status;candidate_count=$hits.Count;candidates=$hits;original_asset_proven=$false;retry_authorized=$false}
 }
 $counts=@{}
-foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+foreach ($m in @($candidateResults|Where-Object{$_.candidate_count -eq 1})) {
     $key=$m.profile+'|'+[string]$m.candidates[0].id
     if(-not $counts.ContainsKey($key)){$counts[$key]=0}
     $counts[$key]++
 }
-foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+foreach ($m in @($candidateResults|Where-Object{$_.candidate_count -eq 1})) {
     $key=$m.profile+'|'+[string]$m.candidates[0].id
     if($counts[$key] -gt 1){$m.status='shared_provider_candidate_requires_manual_review'}
 }
@@ -193,7 +193,7 @@ $report = @{
     targets=$outputs
     owner_scopes=$ownerChecks
     bounded_media_inventory=$inventory
-    matched_output_candidates=$matches
-    candidate_count=@($matches|Where-Object{$_.candidate_count -gt 0}).Count
+    matched_output_candidates=$candidateResults
+    candidate_count=@($candidateResults|Where-Object{$_.candidate_count -gt 0}).Count
 }
 Write-Output ('ISSUE2374_IG_OWNER_AUTH_AUDIT=' + ($report | ConvertTo-Json -Compress -Depth 6))
