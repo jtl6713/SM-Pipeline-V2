@@ -50,6 +50,16 @@ jobs:
           assert "$ttOwner=@()" not in s, "array cannot be indexed by city string"
           assert "jobstore_rows=$jobstoreRows" in s and "$jobstoreRows=0" in s
           assert "Measure-Object -Property rows" not in s, "empty jobstore must not fail report"
+          assert "issue2374_youtube_tiktok_owner_exact_v2" in s
+          for exact_id in ("cHKqYIVxQNw", "fUNK_Wc4vkM", "6SGaMlwGsiI", "Ls65TemEHSo"):
+              assert exact_id in s, f"missing exact scoped video {exact_id}"
+          assert "youtube/videos/" in s
+          assert "provider_owner_verified=$true" in s
+          assert "same_owner_title_collision" in s
+          assert "asset_match_verified=$false" in s
+          assert "exact_normalized_caption_match" in s
+          assert "$script:httpGets -gt 12" in s
+
           assert "$statusHost=[string]$ttHosts[$city]" in s
           assert "unknown_tiktok_status_owner" in s
           assert "}[$city]" not in s, "PowerShell literal hashtable indexing may be parsed as array indexing"
@@ -138,8 +148,8 @@ jobs:
               jq -r '.job.log // ""' /tmp/issue2374-ops-status.json \
                 | grep '^ISSUE2374_YT_TT_OWNER_AUDIT=' | tail -1 \
                 | sed 's/^ISSUE2374_YT_TT_OWNER_AUDIT=//' > /tmp/issue2374-youtube-tiktok-owner-evidence.json
-              jq -e '.read_only==true and .provider_media_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .retry_authorized==false and .nonpublication_proved==false and .targets==21 and .youtube_targets==13 and .tiktok_targets==8 and .http_get_calls<=12 and (.all_output_dispositions|length)==21' /tmp/issue2374-youtube-tiktok-owner-evidence.json >/dev/null
-              jq -c '{version,targets,youtube_targets,tiktok_targets,http_get_calls,counts,provider_owner_coverage,jobstores_seen,jobstore_rows,provider_media_writes,output_writes}' /tmp/issue2374-youtube-tiktok-owner-evidence.json
+              jq -e '.read_only==true and .provider_media_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .retry_authorized==false and .nonpublication_proved==false and .targets==21 and .youtube_targets==13 and .tiktok_targets==8 and .http_get_calls<=12 and (.all_output_dispositions|length)==21 and .version=="issue2374_youtube_tiktok_owner_exact_v2" and ([.all_output_dispositions[]|select(.output==4869)|.exact_video_checks[]]|length)==2 and ([.all_output_dispositions[]|select(.output==1771)|.exact_video_checks[]]|length)==1 and ([.all_output_dispositions[]|select(.output==5201)|.exact_video_checks[]]|length)==1 and ([.all_output_dispositions[].exact_video_checks[]?|.verified_public]|all(.==false)) and ([.all_output_dispositions[].exact_video_checks[]?|.asset_match_verified]|all(.==false))' /tmp/issue2374-youtube-tiktok-owner-evidence.json >/dev/null
+              jq -c '{version,targets,youtube_targets,tiktok_targets,http_get_calls,counts,exact_youtube:([.all_output_dispositions[]|select(.output==4869 or .output==1771 or .output==5201)|{output,state,checks:.exact_video_checks}]),provider_media_writes,output_writes}' /tmp/issue2374-youtube-tiktok-owner-evidence.json
               exit 0
             elif [[ "$state" == failed ]]; then
               echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
