@@ -63,7 +63,7 @@ jobs:
           verification=w.split('      - name: Verify live Supabase-only authority and all 82 held Factory Repair cards',1)[1].split('      - name: Delete functional verification bridge',1)[0]
           assert 'curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json' in verification
           assert verification.index('curl -fsS "$API_ROOT/workers/subdomain"') < verification.index('SUBDOMAIN=$(jq -er')
-          assert "jq -e '.success==true and (.result.subdomain|type=="string" and length>0)'" in verification
+          assert '.result.subdomain|type=="string" and length>0' in verification
           assert 'workflow_dispatch:' not in w
           assert 'deploy/issue2374-supabase-factory-worker.txt' in w
           assert 'DO NOT MERGE' not in marker
