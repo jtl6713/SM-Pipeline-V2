@@ -6,15 +6,15 @@ const ui = readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), 
 const api = readFileSync(new URL("../studio-api/worker-functions-03.mjs", import.meta.url), "utf8");
 const reads = readFileSync(new URL("../studio-api/supabase-pipeline-reads.mjs", import.meta.url), "utf8");
 
-test("Pipeline fetch walks every Supabase history page, not a newest-250 cap", () => {
+test("Pipeline requests exactly one content page from Supabase", () => {
   const start = ui.indexOf("async function refreshPipelineOutputs(");
   const end = ui.indexOf("async function loadOutputs()", start);
   const body = ui.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(body, /mode=history&offset=/);
-  assert.match(body, /if \(!page\.has_more\) break/);
-  assert.match(body, /next <= offset/);
-  assert.doesNotMatch(body, /\/api\/outputs\?limit=250/);
+  assert.match(body, /pipelineContentPageApiPath\(\)/);
+  assert.doesNotMatch(body, /mode=history&offset=|\/api\/outputs\?limit=250/);
+  assert.match(ui, /per_page: String\(pipelineContentPageSize\)/);
+  assert.match(ui, /pipelineContentHasMore = Boolean\(outputsResult.has_more\)/);
 });
 
 test("History endpoint is Supabase-only and provides an explicit next offset", () => {
@@ -48,5 +48,5 @@ test("Production approval comes from request Submitted_At, never Factory approva
   assert.doesNotMatch(body, /Review_Decision_At/);
   assert.match(api, /production_approved_at: f\(record, "Production_Approved_At"\)/);
   assert.match(ui, /Production approved/);
-  assert.match(ui, /newestApproved/);
+  assert.match(ui, /contentNumber\(b\) - contentNumber\(a\)/);
 });

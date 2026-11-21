@@ -2035,6 +2035,85 @@ export async function listSupabaseManualActionOutputs(env, { profileAirtableId, 
  * pages. Never apply the calendar's schedule-week filter to this inventory.
  * The cursor is a numeric offset; the caller must walk until has_more=false.
  */
+export function pipelineLocalMidnightUtc(day, zone) {
+    const target = Date.parse(day + "T00:00:00Z");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    let utc = target;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(utc))
+        .filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
+      const observed = Date.UTC(parts.year, parts.month - 1, parts.day,
+        parts.hour, parts.minute, parts.second);
+      utc += target - observed;
+    }
+    return new Date(utc).toISOString();
+}
+
+export async function listSupabasePipelineContentPage(env, {
+  profileAirtableId, offset = 0, limit = 10, createdFrom = "", createdTo = "",
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Pipeline unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) throw new Error("Supabase Pipeline profile missing");
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
+  for (const date of [createdFrom, createdTo]) {
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date + "T00:00:00Z")) || new Date(date + "T00:00:00Z").toISOString().slice(0, 10) !== date)) {
+      throw new Error("Invalid creation date");
+    }
+  }
+  if (createdFrom && createdTo && createdFrom > createdTo) throw new Error("Creation date range is reversed");
+  // Resolve the profile's market to its IANA zone; never treat local calendar
+  // days as UTC days (DST boundaries can have 23 or 25 hours).
+  const profileRows = await supabaseRest(env,
+    `content_profiles?id=eq.${profileId}&select=profile_name,market_name&limit=1`);
+  const market = String(profileRows?.[0]?.market_name || profileRows?.[0]?.profile_name || "").toLowerCase();
+  const zone = /los angeles|\bla\b/.test(market) ? "America/Los_Angeles"
+    : /chicago/.test(market) ? "America/Chicago"
+    : /miami|new york|nyc/.test(market) ? "America/New_York" : null;
+  if (!zone) throw new Error("Pipeline profile timezone unavailable");
+  const localMidnightUtc = (day) => pipelineLocalMidnightUtc(day, zone);
+  let filter = `content_profile_id=eq.${profileId}`;
+  if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(localMidnightUtc(createdFrom))}`;
+  if (createdTo) {
+    const nextDay = new Date(Date.parse(createdTo + "T00:00:00Z") + 86400000)
+      .toISOString().slice(0, 10);
+    filter += `&created_at=lt.${encodeURIComponent(localMidnightUtc(nextDay))}`;
+  }
+  const contents = await supabaseRest(env,
+    `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at`
+    + `&order=content_number.desc.nullslast,id.desc&limit=${size + 1}&offset=${skip}`);
+  const page = (contents || []).slice(0, size);
+  const contentByAirtableId = new Map(page.filter(c => c.airtable_record_id).map(c => [
+    c.airtable_record_id, { id: c.airtable_record_id, createdTime: c.created_at,
+      fields: { Content_ID: c.content_number, Content_Title: c.content_title } },
+  ]));
+  const uuids = page.map(c => c.id);
+  let outputs = [];
+  if (uuids.length) {
+    // Query every output of the selected content IDs, not a fixed output count per page.
+    // Fail closed on unusually large groups rather than silently truncate them.
+    const rows = await supabaseRest(env,
+      `platform_outputs?content_item_id=in.(${uuids.join(",")})&test_run_id=is.null`
+      + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast,id.desc&limit=2001`);
+    if (rows.length > 2000) throw new Error("Pipeline content page exceeds output safety bound");
+    outputs = rows.map(flattenOutputRow).map(airtableShapedOutputFromSupabase);
+  }
+  return {
+    records: outputs, contentByAirtableId,
+    content_ids: page.map(c => c.content_number),
+    // Include content without generated outputs so a 10-ID page really shows 10 groups.
+    content_groups: page.map(c => ({ id: c.airtable_record_id || c.id,
+      content_id: c.content_number, title: c.content_title, created_at: c.created_at })),
+    has_more: (contents || []).length > size,
+    next_offset: (contents || []).length > size ? skip + page.length : null,
+    read_source: "supabase",
+  };
+}
+
 export async function listSupabasePipelineHistoryPage(env, {
   profileAirtableId, offset = 0, limit = 150,
 } = {}) {
