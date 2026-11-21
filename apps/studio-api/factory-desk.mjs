@@ -319,6 +319,10 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
       : (row.studio_state || ""),
     protected_media_rework: row.protected_media_rework === true,
     recovery_source_inventory_verified: row.recovery_source_inventory_verified === true,
+    // Read-only, whitelisted originals only. Factory cannot promote these to
+    // Final Approved or use them to bypass platform-specific AP0C staging.
+    recovery_gallery_images: row.protected_media_rework === true && Array.isArray(row.recovery_gallery_images)
+      ? row.recovery_gallery_images.slice(0, 10) : [],
     recovery_stage: row.protected_media_rework === true ? (row.recovery_stage || null) : null,
     recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
     // The existing client checks DNP and review_package_ready before showing
