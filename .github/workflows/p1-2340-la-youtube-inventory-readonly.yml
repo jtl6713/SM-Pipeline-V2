@@ -1,0 +1,88 @@
+name: P1 2340 LA YouTube owner-scoped inventory GET audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-la-youtube-inventory-readonly.yml'
+      - 'repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-la-youtube-owned-history-readonly
+  cancel-in-progress: false
+jobs:
+  la-owned-video-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: $\{{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: $\{{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: $\{{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PowerShell syntax and reject provider writes
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1'
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $source=Get-Content -Raw $file
+          if($source -notmatch 'P1_LA_YT_INVENTORY=' -or $source -notmatch 'UCVt3nBxRfPuuxxduuxmz9sw'){throw 'scope_not_exact_la'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
+            if($source.Contains($bad)){throw 'unsafe_la_inventory_script'}
+          }
+          Write-Output 'LA_GET_ONLY_STATIC_GATE_PASS'
+      - name: Authenticate existing approved Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/la-ops.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true' /tmp/la-ops.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "LA_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Ops credentials unavailable: no provider activity'; exit 1
+      - name: Execute one read-only local LA YouTube inventory via Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib
+          code=pathlib.Path('repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1').read_text()
+          pathlib.Path('/tmp/la-readonly-request.json').write_text(json.dumps({'command':code,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/la-ops-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $LA_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/la-readonly-request.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            echo "Ops rejected read-only audit ($code); no retries"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/la-ops-start.json)
+          for n in $(seq 1 120); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $LA_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/la-ops-job.json
+            status=$(jq -r '.job.status // empty' /tmp/la-ops-job.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/la-ops-job.json | grep '^P1_LA_YT_INVENTORY=' | tail -1 | sed 's/^P1_LA_YT_INVENTORY=//' > /tmp/la-video-inventory.json
+              jq -e '.read_only == true and .provider_writes == 0 and .output_writes == 0 and .airtable_reads == 0 and .expected_channel_id == "UCVt3nBxRfPuuxxduuxmz9sw" and .original_output_record_id == "rec75nNjbFn830TjM"' /tmp/la-video-inventory.json >/dev/null
+              jq -c '{channel,output_number,expected_title,reason,complete,pages_scanned,videos_seen,missing_video_details,matched,read_only,provider_writes,output_writes,airtable_reads}' /tmp/la-video-inventory.json
+              exit 0
+            elif [[ "$status" == "failed" ]]; then
+              echo 'Protected read-only job failed: inspect sanitized artifact; do not reattempt blindly'
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Inventory job unfinished; no provider mutation'; exit 4
+      - name: Save scoped, sanitized 30-day evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-la-youtube-owned-readonly
+          path: /tmp/la-video-inventory.json
+          retention-days: 30
+          if-no-files-found: warn
