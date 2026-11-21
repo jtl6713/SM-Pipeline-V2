@@ -10,12 +10,12 @@ Reference: the November 16 SM Pipeline V2 Airtable CRUD and Egress Audit provide
 - Worker side-table DELETE: checks exactly one Supabase row was deleted, and isolates Pipeline Settings from Engagement Settings.
 - Pipeline Settings mutations: require returned Supabase representation rather than trusting an unverified 204/zero-row PATCH.
 - Python runner reads/writes default to Supabase.
-- Retired the legacy media-intake cleanup, closeout backfill, YouTube uploader OAuth diagnostic GitHub workflows and five standalone scripts with direct Airtable egress.
+- Retired **all 90 direct-URL GitHub Actions workflows identified in the attached November 16 audit** (88 together plus two individually), the closeout backfill workflow, and five standalone scripts with direct Airtable egress. This includes four historically deploy-oriented workflows; do not merge until their deployment responsibilities are either replaced or confirmed redundant. A pull-request CI guard rejects direct Airtable URLs in GitHub Actions YAML.
 
 **Deliberate block:** runner `upsert_record` now fails closed. A2B Drive-ID and native gallery Studio_Transfer_ID operations need a transactional Supabase upsert strategy and verified uniqueness constraints to avoid duplicates. Do not tell operators these stages work until proved.
 
 ## Not complete; do not merge/deploy
-- The audit includes another **87 workflows with direct Airtable endpoint literals** beyond the three disabled here. They must be reviewed as historical, one-off, or active deployments and retired/reimplemented without breaking Cloudflare deployments.
+- **90 audit-listed workflows with direct Airtable URL literals are now disabled** in the draft branch. This deliberately blocks historical repair/diagnostic actions and also four old deployment workflows (`cloudflare-promote-safety-with-envelope`, `cloudflare-safe-update-current-worker`, `deploy-studio-variant-fill-crop-v2`, `deploy-tiktok-auth-la-production`). Confirm their replacement paths before merge. New workflows added after the audit must still be scanned; the new CI guard covers current YAML.
 - Several direct maintenance/repair scripts, staging-only diagnostic modules, and archived source references remain. Distinguish executable active paths from historical evidence, and eliminate or isolate executable ones.
 - Existing production env/secret values, Windows runner .env, Cloudflare secrets and GitHub encrypted PAT envelopes have not been read or modified. A repo code change alone cannot guarantee external services or scheduled jobs have stopped.
 - All 10 Worker read/write source selectors now select Supabase (or `unavailable` when credentials are missing), ignoring stale Airtable rollback flags. Run full functional regression tests because unsupported query/view mappings will now fail visibly.
