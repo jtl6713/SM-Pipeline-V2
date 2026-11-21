@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,61 @@ def source_inventory(rows: list[dict[str, Any]], kind: str) -> dict[str, Any]:
     return {"records": by_id, "count": len(by_id), "digest": digest}
 
 
+# The imported source JSON must agree with each canonical operational column.
+# Checking only the archived JSON and its hash would allow an altered result,
+# execution ID, actor, or timestamp to pass the migration acceptance gate.
+_CANONICAL_COLUMNS = {
+    "runs": (
+        ("Run ID", "run_id"), ("Catalog Revision", "catalog_revision"),
+        ("Environment", "environment"), ("Deployment JSON", "deployment"),
+        ("Created By", "created_by"), ("Created At UTC", "created_at_utc"),
+        ("Status", "status"), ("Idempotency Key", "idempotency_key"),
+        ("Payload Hash", "payload_hash"),
+    ),
+    "events": (
+        ("Run ID", "run_id"), ("Execution ID", "execution_id"),
+        ("Test ID", "test_id"), ("Event Kind", "event_kind"),
+        ("Actor ID", "actor_id"), ("Recorded At UTC", "recorded_at_utc"),
+        ("Payload JSON", "payload_json"),
+        ("Idempotency Key", "idempotency_key"),
+        ("Payload Hash", "payload_hash"),
+    ),
+}
+
+
+def canonical_columns_match(kind: str, actual: dict[str, Any],
+                            source_fields: dict[str, Any]) -> bool:
+    if kind not in _CANONICAL_COLUMNS or not isinstance(actual, dict):
+        return False
+    for source_key, target_key in _CANONICAL_COLUMNS[kind]:
+        expected = source_fields.get(source_key)
+        received = actual.get(target_key)
+        if not isinstance(expected, str) or received is None:
+            return False
+        if target_key in ("deployment", "payload_json"):
+            try:
+                parsed = json.loads(expected)
+            except (ValueError, TypeError):
+                return False
+            if not isinstance(parsed, dict) or not isinstance(received, dict) or received != parsed:
+                return False
+        elif target_key in ("created_at_utc", "recorded_at_utc"):
+            if not isinstance(received, str):
+                return False
+            try:
+                left = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+                right = datetime.fromisoformat(received.replace("Z", "+00:00"))
+                if left.tzinfo is None or right.tzinfo is None:
+                    return False
+                if left.astimezone(timezone.utc) != right.astimezone(timezone.utc):
+                    return False
+            except ValueError:
+                return False
+        elif received != expected:
+            return False
+    return True
+
+
 def reconcile(
     source_runs: list[dict[str, Any]],
     source_events: list[dict[str, Any]],
@@ -126,6 +182,10 @@ def reconcile(
                     blockers.append(kind + ": source field/hash reconciliation failed")
                 if matching is not None and row.get("run_id") != matching["run_id"]:
                     blockers.append(kind + ": stored QA run ID changed")
+                if matching is not None and not canonical_columns_match(
+                    kind, row, matching["fields"]
+                ):
+                    blockers.append(kind + ": canonical columns diverge from immutable source")
             if ids != set(source["records"]):
                 blockers.append(kind + ": missing or extra legacy rows")
     return {
