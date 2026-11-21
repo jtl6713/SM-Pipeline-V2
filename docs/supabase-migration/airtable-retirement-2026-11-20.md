@@ -96,3 +96,10 @@ The static credential-restoration guard revealed **14 distinct historical GitHub
 - `qa-ap1c-7856-7043-stage-restart.yml` and `repair-make-admin-module19-v2.yml`: one-off production/Make repair entrypoints must not be executed with a reconstructed Airtable token. No unattended replacement is enabled; any future required operation needs a separately reviewed Supabase-native, idempotent, non-publishing implementation.
 
 The CI guard must scan for executable credential-envelope references before claiming zero dormant PAT-decryption workflows. The repository cleanup is not token revocation, Git history erasure, or live zero-egress certification.
+
+
+### PAT reference closure and independent ElevenLabs configuration
+- Retired the historical I1 enable workflow, old per-module Studio read-source flag installers (including their Airtable rollback), a redundant old v86 secret-recovery audit, legacy credential-presence checks and the disabled engagement trim workflow. These are no longer approved paths for production mutation. If any still-needed I1 activation requires a successor, it must be scoped, reviewed, and Supabase-only.
+- Preserved the dedicated ElevenLabs TTS/video key installer and read-only video-price preflight; their dependency checks now require the Studio Worker Supabase URL and service-role secret instead of Airtable PAT. Video preflight only accepts a runner whose write authority is Supabase.
+- The PAT inventory CI now fails unless the only remaining workflow references are the read-only `i1-durable-runner-audit.yml` (Windows presence check) and `verify-supabase-production-readonly.yml` (Cloudflare credential-presence audit). These audits are retained to support eventual live credential removal; neither grants Airtable runtime access.
+- None of these branch changes removes already provisioned production secrets. Before removing PAT bindings, obtain direct production audit evidence, complete the production database migration and non-publishing canary, verify the monitored quiet window and retain rollback protection.

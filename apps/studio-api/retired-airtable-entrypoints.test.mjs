@@ -34,6 +34,16 @@ const retired = [
   ".github/workflows/prove-item9-native-covers.yml",
   ".github/workflows/qa-ap1c-7856-7043-stage-restart.yml",
   ".github/workflows/repair-make-admin-module19-v2.yml",
+  ".github/workflows/cloudflare-secret-recovery-readonly.yml",
+  ".github/workflows/credential-presence-audit.yml",
+  ".github/workflows/i1-durable-runner-enable.yml",
+  ".github/workflows/put-studio-api-assets-read.yml",
+  ".github/workflows/put-studio-api-auth-read.yml",
+  ".github/workflows/put-studio-api-b3-factory-ops-read.yml",
+  ".github/workflows/put-studio-api-home-read.yml",
+  ".github/workflows/put-studio-api-music-read.yml",
+  ".github/workflows/repair-secret-presence-check.yml",
+  ".github/workflows/trim-engagement-history.yml",
 ];
 
 test("legacy Airtable-era deployment and config entrypoints remain retired", () => {

@@ -120,3 +120,20 @@ test("replacement variant and LA TikTok deployments are manual and Airtable-free
   const la = source(".github/workflows/deploy-tiktok-auth-la-production.yml");
   assert.ok(!la.includes("Rearm LA TikTok drafts"));
 });
+
+test("ElevenLabs maintenance is Supabase-first and never requires Airtable PAT", () => {
+  for (const path of [
+    ".github/workflows/install-studio-elevenlabs-video-reviewed-price.yml",
+    ".github/workflows/put-studio-api-elevenlabs-secret.yml",
+    ".github/workflows/put-studio-api-elevenlabs-video-secret.yml",
+    ".github/workflows/verify-studio-elevenlabs-video-canary-preflight.yml",
+  ]) {
+    const workflow = source(path);
+    assert.ok(workflow.includes("SUPABASE_URL"), path);
+    assert.ok(workflow.includes("SUPABASE_SERVICE_ROLE_KEY"), path);
+    assert.ok(!workflow.includes("AIRTABLE_PAT"), path);
+  }
+  const preflight = source(".github/workflows/verify-studio-elevenlabs-video-canary-preflight.yml");
+  assert.ok(preflight.includes('payload.get("studio_write_source") == "supabase"'));
+  assert.ok(!preflight.includes('in ("airtable", "supabase")'));
+});
