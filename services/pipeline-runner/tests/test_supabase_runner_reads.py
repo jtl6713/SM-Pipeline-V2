@@ -128,8 +128,8 @@ def test_unsupported_view_fails_closed_instead_of_reading_airtable(monkeypatch):
     with pytest.raises(RuntimeError, match="Supabase list query"):
         client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
 
-def test_unsupported_view_empty_when_fallback_stopped(monkeypatch):
-    """FALLBACK_STOPPED + untranslated view → [] (no Airtable), matching Worker nuke."""
+def test_unsupported_view_fails_explicitly_when_airtable_retired(monkeypatch):
+    """An untranslatable view must not become a fabricated empty result."""
 
     def fake_get(*_a, **_k):
         raise AssertionError("airtable list")
@@ -148,7 +148,8 @@ def test_unsupported_view_empty_when_fallback_stopped(monkeypatch):
         studio_write_source="supabase",
         studio_runner_output_read_source="supabase",
     )
-    assert client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue") == []
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue")
 
 
 def test_snapshotted_view_reads_supabase(monkeypatch):
@@ -430,7 +431,8 @@ def test_partial_supabase_output_patch_does_not_claim_full_airtable_snapshot(mon
     assert row["fields"] == {"Publish_Status": "Scheduled"}
     patches = [r for r in seen if r[0] == "PATCH" and "platform_outputs" in r[1]]
     assert len(patches) == 1
-    assert patches[0][2] == {"publish_status": "Scheduled"}
+    assert patches[0][2]["publish_status"] == "Scheduled"
+    assert patches[0][2]["error_messages"] == {}
 
 def test_supabase_read_failure_never_falls_back_to_airtable(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
@@ -530,7 +532,7 @@ def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
     assert supabase_reads.runner_table_read_source(
         _settings(studio_phase6_write_source="supabase"), PRODUCTION_REQUESTS_TABLE,
     ) == "supabase"
-    assert supabase_reads.runner_table_read_source(_settings(), MEDIA_ASSETS_TABLE) == "airtable"
+    assert supabase_reads.runner_table_read_source(_settings(), MEDIA_ASSETS_TABLE) == "supabase"
 
     seen = []
 

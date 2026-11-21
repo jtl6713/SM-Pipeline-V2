@@ -65,7 +65,9 @@ def test_output_update_uses_supabase_patch_without_legacy_record_enrichment(monk
     assert record == {"id": "recOutput1", "fields": {"Publish_Status": "Scheduled"}}
     patches = [x for x in seen if x[0] == "PATCH" and "platform_outputs" in x[1]]
     assert len(patches) == 1
-    assert patches[0][2] == {"publish_status": "Scheduled"}
+    assert patches[0][2]["publish_status"] == "Scheduled"
+    # The typed status invalidates any stale Airtable-era value in the JSON bag.
+    assert patches[0][2]["error_messages"] == {}
 
 def test_unmapped_table_update_fails_closed_without_airtable(monkeypatch):
     monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))

@@ -20,9 +20,9 @@ def _settings(**extra):
 
 
 class ReferenceCacheTests(unittest.TestCase):
-    def test_enabled_only_under_write_sor(self):
+    def test_supabase_reference_cache_ignores_retired_write_source_flag(self):
         self.assertTrue(reference_cache_enabled(_settings(), BRANDS_TABLE))
-        self.assertFalse(
+        self.assertTrue(
             reference_cache_enabled(
                 {"studio_write_source": "airtable", "supabase_url": "https://x", "supabase_service_role_key": "k"},
                 BRANDS_TABLE,

@@ -3,7 +3,11 @@
 import pytest
 
 from airtable.client import AirtableClient
-from airtable.constants import MEDIA_ASSETS_TABLE, PIPELINE_SETTINGS_TABLE, SOURCE_CANDIDATES_TABLE
+from airtable.constants import (
+    CONTENT_ITEMS_TABLE, MEDIA_ASSETS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE,
+    PIPELINE_SETTINGS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE,
+    SOURCE_CANDIDATES_TABLE,
+)
 
 
 @pytest.fixture
@@ -78,3 +82,24 @@ def test_no_airtable_pat_needed_when_supabase_configured(client):
 def test_missing_supabase_configuration_is_error():
     with pytest.raises(RuntimeError, match="SUPABASE_URL"):
         AirtableClient({"airtable_pat": "retired"})
+
+
+@pytest.mark.parametrize("table", [
+    PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE, PRODUCTION_REQUESTS_TABLE,
+    MEDIA_ASSETS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE,
+])
+def test_obsolete_airtable_source_flags_cannot_disable_supabase_runner(table):
+    from supabase_pipeline import studio_phase6_write_source, studio_write_source
+    from supabase_reads import runner_table_read_source
+
+    settings = {
+        "supabase_url": "https://example.supabase.co",
+        "supabase_service_role_key": "test-only-key",
+        "studio_write_source": "airtable",
+        "studio_phase6_write_source": "airtable",
+        "studio_runner_output_read_source": "airtable",
+        "studio_runner_content_read_source": "airtable",
+    }
+    assert studio_write_source(settings) == "supabase"
+    assert studio_phase6_write_source(settings) == "supabase"
+    assert runner_table_read_source(settings, table) == "supabase"

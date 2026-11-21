@@ -72,3 +72,10 @@ The canonical Studio API deployment is now gated on `SUPABASE_SERVICE_ROLE_KEY` 
 - The canonical Studio API deployment, variant-service deployment, and LA TikTok-auth manual release paths remain in the branch; production credentials, rollback execution, non-publishing canary, and cross-service zero-egress evidence are still unverified.
 
 **Release remains blocked:** re-run the entire PR CI at the latest commit, identify and safely migrate the production Supabase project, verify live Cloudflare/Windows-runner/Make and provider credentials, demonstrate non-publishing parity and a complete monitored zero-Airtable-egress quiet window. Do not merge, deploy or revoke the remaining PAT before evidence exists.
+
+
+### Supabase-only runner selectors and integrity checks
+- Both Python runner write-source selectors now resolve only to `supabase` when credentials are present and to `unavailable` otherwise; stale Airtable rollback flags cannot disable or reroute writer operations.
+- All known runner tables use Supabase reads regardless of obsolete per-table read-source flags. Unsupported views and formulas fail with a visible error; they must not be reported as `[]` or sent to Airtable.
+- Regression tests cover stale flags, the reference-cache authority, typed Output status/JSON bag cleanup, and explicit rejection of unknown views.
+- These changes require a fresh green full regression run and are not evidence of production deployment, connection, or credential revocation.
