@@ -181,11 +181,14 @@ test("quote progress uses the same visible animated track and supports reduced m
 test("acceptance errors refresh the real R2 status without retrying paid generation", () => {
   const action = ui.slice(ui.indexOf("async function decideSceneVideo(index, action)"),
     ui.indexOf("function keyTerms(", ui.indexOf("async function decideSceneVideo(index, action)")));
-  assert.match(action, /catch \\(error\\) \\{[\\s\\S]*?await checkSceneVideo\\(index, true\\)/);
-  assert.doesNotMatch(action, /generateSceneVideo\\(|video\\/start|submitStoryVideo\\(/);
-  assert.match(server, /job\\.state === "accepting"/);
-  assert.match(server, /Original AI video preserved/);
-  assert.match(server, /job\\.state === "accepted"/);
-  assert.match(ui, /Acceptance Needs Reconciliation/);
-  assert.match(ui, /Do not generate a second video/);
+  assert.ok(action.includes("} catch (error) {"));
+  assert.ok(action.includes("await checkSceneVideo(index, true);"));
+  assert.ok(!action.includes("generateSceneVideo("));
+  assert.ok(!action.includes("video/start"));
+  assert.ok(!action.includes("submitStoryVideo("));
+  assert.ok(server.includes('job.state === "accepting"'));
+  assert.ok(server.includes("Original AI video preserved"));
+  assert.ok(server.includes('job.state === "accepted"'));
+  assert.ok(ui.includes("Acceptance Needs Reconciliation"));
+  assert.ok(ui.includes("Do not generate a second video"));
 });
