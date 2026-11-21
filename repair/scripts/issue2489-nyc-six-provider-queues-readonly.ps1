@@ -26,6 +26,7 @@ try {
   $h=@{apikey=$sk;Authorization=('Bearer '+$sk)}
   $select='output_number,airtable_record_id,content_number,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,do_not_publish,auto_publish_enabled,published_at,platform_post_url,platform_publish_response,scheduled_post_date,final_file_url,error_messages'
   $rows=@(Invoke-RestMethod ($su+'/rest/v1/platform_outputs?select='+$select+'&output_number=in.(10840,10841,10842,10843,10844,10845)&order=output_number.asc&limit=7') -Headers $h -Method Get -TimeoutSec 30)
+  if($rows.Count -eq 1 -and $rows[0] -is [array]){$rows=@($rows[0])}
   if($rows.Count -ne 6){throw 'six_output_snapshot_not_exact'}
   $scope=@(
     @{n=10840;id='recZ6eB75E1vOysOV';kind='Facebook Story';file='13_2zllk-N4Ejw8UyERucw32bWpdkMhFg'},
@@ -52,9 +53,11 @@ try {
   }
   if(@($owners|Select-Object -Unique).Count -ne 1){throw 'wrong_owner_scope'}
   $p=@(Invoke-RestMethod ($su+'/rest/v1/content_profiles?id=eq.'+$owners[0]+'&select=market_name,airtable_record_id&limit=2') -Headers $h -Method Get -TimeoutSec 25)
+  if($p.Count -eq 1 -and $p[0] -is [array]){$p=@($p[0])}
   if($p.Count -ne 1 -or $p[0].market_name -ne 'New York City' -or $p[0].airtable_record_id -ne 'recgtK8Z7eNADNtVy'){throw 'wrong_owner_profile'}
   $r.exact_count=6;$r.local_safety_verified=$true
   $settings=@(Invoke-RestMethod ($su+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 40)
+  if($settings.Count -eq 1 -and $settings[0] -is [array]){$settings=@($settings[0])}
   if($settings.Count -ge 500){throw 'settings_pagination_incomplete'}
   $v=@{}
   foreach($s in $settings){
