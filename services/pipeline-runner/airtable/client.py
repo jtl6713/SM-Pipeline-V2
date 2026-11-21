@@ -372,17 +372,74 @@ class AirtableClient:
         merge_field: str,
         typecast: bool = True,
     ) -> tuple[dict[str, Any], bool]:
-        """Atomically create or match one record on an Airtable merge field.
+        """Atomic Supabase media claim by Drive file ID or native-gallery key.
 
-        Airtable's performUpsert resolves simultaneous writers server-side.
-        Never fall back to POST after an ambiguous response or 422: that could
-        create a duplicate. The bool is True only for a confirmed new record.
+        The database owns the concurrency/unique constraints; no GET-then-POST
+        race, no Airtable fallback, and no success without an independent read.
         """
-        import requests
+        import re
 
+        from airtable.constants import MEDIA_ASSETS_TABLE
+        from supabase_pipeline import _media_row, _rest, mint_record_id
+
+        if table_id != MEDIA_ASSETS_TABLE:
+            raise RuntimeError(f"No Supabase atomic upsert for {table_id}")
+        if merge_field not in {"Google Drive File ID", "Studio_Transfer_ID"}:
+            raise ValueError(f"Unsupported media merge field: {merge_field}")
         key = str(fields.get(merge_field) or "").strip()
         if not key:
             raise ValueError(f"{merge_field} must be set for atomic upsert")
-        raise RuntimeError(
-            f"Atomic Supabase upsert not implemented for {table_id}/{merge_field}; no Airtable fallback"
+        if merge_field == "Studio_Transfer_ID" and not key.startswith("ngv2_"):
+            raise ValueError("Only native-gallery ngv2_ transfer identities can be atomically upserted")
+
+        candidate = mint_record_id()
+        asset = _media_row({"id": candidate, "fields": fields})
+        if not asset.get("asset_name"):
+            raise ValueError("Asset Name is required for Supabase media upsert")
+        expected_key = (
+            asset.get("google_drive_file_id")
+            if merge_field == "Google Drive File ID"
+            else (asset.get("metadata") or {}).get("studio_transfer_id")
         )
+        if expected_key != key:
+            raise RuntimeError("Media identity projection mismatch; no write attempted")
+
+        response = _rest(
+            self._settings,
+            "rpc/sm_pipeline_upsert_media_asset",
+            "POST",
+            {
+                "p_merge_field": merge_field,
+                "p_merge_value": key,
+                "p_record_id": candidate,
+                "p_asset": asset,
+            },
+            prefer="return=representation",
+        )
+        record_id = response.get("id") if isinstance(response, dict) else None
+        created = response.get("created") if isinstance(response, dict) else None
+        if (
+            not isinstance(record_id, str)
+            or not re.fullmatch(r"rec[A-Za-z0-9]{14}", record_id)
+            or type(created) is not bool
+        ):
+            raise RuntimeError("Supabase media claim returned no unambiguous persisted identity")
+        response_key = (
+            response.get("google_drive_file_id")
+            if merge_field == "Google Drive File ID"
+            else response.get("studio_transfer_id")
+        )
+        if response_key != key:
+            raise RuntimeError("Supabase media claim returned a mismatched merge key")
+
+        # Independent authoritative read confirms the row has landed before
+        # A2B/native gallery stages can mark the claim successful.
+        stored = self.get_record(table_id, record_id)
+        if (
+            not isinstance(stored, dict)
+            or stored.get("id") != record_id
+            or not isinstance(stored.get("fields"), dict)
+            or stored["fields"].get(merge_field) != key
+        ):
+            raise RuntimeError("Supabase media claim readback failed; reconcile before retry")
+        return stored, created
