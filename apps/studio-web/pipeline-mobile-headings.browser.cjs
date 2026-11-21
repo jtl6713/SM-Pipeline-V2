@@ -45,6 +45,48 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
         assert.ok(result.titleHeight > 0, `${name} ${width}: page title visible`);
         if (width <= 760) assert.notEqual(result.calendarHeading, 'none', `${name} ${width}: calendar heading visible`);
         console.log(`PASS ${name} ${width}px: title, headings, column alignment`);
+
+        await page.evaluate(() => {
+          document.querySelector('#page-outputs').classList.remove('active');
+          document.querySelector('#page-ideas').classList.add('active');
+        });
+        const ideasLayout = await page.evaluate(() => {
+          const heading = document.querySelector('#page-ideas .heading-actions');
+          const actions = [...heading.querySelectorAll(':scope > button')];
+          const group = heading.querySelector('.idea-generate-top-action');
+          const count = heading.querySelector('#ideaGenerateCount');
+          const generate = heading.querySelector('#generateIdeasButton');
+          const box = el => {
+            const rect = el.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width };
+          };
+          return {
+            actions: actions.map(box),
+            group: box(group),
+            count: box(count),
+            generate: box(generate),
+            columns: getComputedStyle(heading).gridTemplateColumns.split(' ').filter(Boolean).length,
+            overflow: heading.scrollWidth > heading.clientWidth + 1,
+          };
+        });
+        assert.equal(ideasLayout.actions.length, 4, name + ' ' + width + ': four normal Ideas actions');
+        assert.equal(ideasLayout.columns, 2, name + ' ' + width + ': two complete Ideas action columns');
+        assert.ok(Math.abs(ideasLayout.actions[0].top - ideasLayout.actions[1].top) < 2,
+          name + ' ' + width + ': Refresh and unused photos share the first row');
+        assert.ok(Math.abs(ideasLayout.actions[2].top - ideasLayout.actions[3].top) < 2,
+          name + ' ' + width + ': VO timeline and New idea share the second row');
+        assert.ok(Math.abs(ideasLayout.actions[0].width - ideasLayout.actions[1].width) < 2,
+          name + ' ' + width + ': both columns have equal width');
+        assert.ok(ideasLayout.actions.every(rect => rect.left >= 0 && rect.right <= width + 1),
+          name + ' ' + width + ': all action tiles fit viewport');
+        assert.ok(!ideasLayout.overflow, name + ' ' + width + ': no Ideas heading overflow');
+        assert.ok(ideasLayout.generate.width < 200, name + ' ' + width + ': compact Generate button');
+        assert.ok(ideasLayout.generate.left >= ideasLayout.count.right &&
+          ideasLayout.generate.left - ideasLayout.count.right < 18,
+          name + ' ' + width + ': Generate button immediately follows quantity');
+        assert.ok(ideasLayout.group.left >= 0 && ideasLayout.group.right <= width + 1,
+          name + ' ' + width + ': paired quantity and Generate fit viewport');
+        console.log('PASS ' + name + ' ' + width + 'px: two Ideas columns, compact Generate action, no overflow');
         await page.close();
       }
     } finally { await browser.close(); }
