@@ -34,7 +34,7 @@ test("Supabase history is profile scoped, excludes test runs and uses stable ser
   assert.ok(start >= 0 && end > start);
   assert.match(body, /content_profile_id=eq/);
   assert.match(body, /test_run_id=is\.null/);
-  assert.match(body, /created_at\.desc\.nullslast,output_number\.desc\.nullslast,id\.desc/);
+  assert.match(body, /production_approved_at\.desc\.nullslast,created_at\.desc\.nullslast,output_number\.desc\.nullslast,id\.desc/);
   assert.match(body, /next_offset:/);
   assert.doesNotMatch(body, /scheduled_post_date/);
 });
@@ -43,8 +43,8 @@ test("Production approval comes from request Submitted_At, never Factory approva
   const start = reads.indexOf("export async function listSupabasePipelineHistoryPage(");
   const end = reads.indexOf("export async function listSupabasePipelineOutputs(", start);
   const body = reads.slice(start, end);
-  assert.match(body, /production_requests\(publish_status\)/);
-  assert.match(body, /publish_status\?\.Submitted_At/);
+  assert.match(body, /production_approved_at\.desc\.nullslast/);
+  assert.match(body, /OUTPUT_SELECT \+ ",production_approved_at"/);
   assert.doesNotMatch(body, /Review_Decision_At/);
   assert.match(api, /production_approved_at: f\(record, "Production_Approved_At"\)/);
   assert.match(ui, /Production approved/);
