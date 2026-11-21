@@ -71,6 +71,26 @@ function expose(table, row) {
     "Payload Hash":row.payload_hash
   }};
 }
+// Compare the complete committed representation, not just the request key.
+// JSON object property order can change during Postgres JSONB normalization.
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(
+    Object.keys(value).sort().map(key=>[key,canonical(value[key])]));
+  return value;
+}
+function assertCommittedFields(table, row, expected) {
+  const timeKeys=table===QA_RUNS_TABLE?new Set(["created_at_utc"]):new Set(["recorded_at_utc"]);
+  for (const [key,value] of Object.entries(expected)) {
+    const saved=row?.[key];
+    if (saved===undefined||saved===null)
+      throw fail(503,"QA ledger insert readback omitted a canonical field");
+    const same=timeKeys.has(key)
+      ? iso(saved)===iso(value)
+      : JSON.stringify(canonical(saved))===JSON.stringify(canonical(value));
+    if (!same) throw fail(503,"QA ledger insert readback field mismatch");
+  }
+}
 function insertColumns(table, fields) {
   const k=(key)=>necessary(fields[key], key, 8192);
   if (table === QA_RUNS_TABLE) return {
@@ -175,14 +195,12 @@ export function createSupabaseQaLedger(env, requester=fetch) {
     },
     async add(table,recordFields) {
       spec(table);
+      const expected=insertColumns(table,recordFields);
       const rows=await send(table,new URLSearchParams({select:spec(table).columns}),
-        "POST",insertColumns(table,recordFields));
+        "POST",expected);
       if (rows.length !== 1) throw fail(503,"QA ledger insert readback not committed");
-      const normalized=expose(table,rows[0]);
-      if (normalized.fields["Payload Hash"] !== recordFields["Payload Hash"] ||
-          normalized.fields["Idempotency Key"] !== recordFields["Idempotency Key"])
-        throw fail(503,"QA ledger insert identity mismatch");
-      return normalized;
+      assertCommittedFields(table,rows[0],expected);
+      return expose(table,rows[0]);
     }
   });
 }
