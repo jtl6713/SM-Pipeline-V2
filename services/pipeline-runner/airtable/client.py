@@ -169,11 +169,9 @@ class AirtableClient:
             pending = {"id": record_id, "fields": fields}
             committed = self._commit_phase6(table_id, [pending])
             if not committed:
-                logger.warning(
-                    "supabase phase6 update commit failed for %s %s; Airtable remains required",
-                    table_id,
-                    record_id,
-                )
+                # A failed canonical commit must never fall through to the
+                # closed archive's success-shaped no-op.
+                raise RuntimeError("Supabase Phase6 authoritative update not confirmed")
             else:
                 logger.info(
                     "Airtable archive kept the Supabase phase6 commit and did not export %s %s",
@@ -185,11 +183,7 @@ class AirtableClient:
             pending = {"id": record_id, "fields": fields}
             committed = self._commit_side_table(table_id, [pending])
             if not committed:
-                logger.warning(
-                    "supabase side-table update commit failed for %s %s; Airtable remains required",
-                    table_id,
-                    record_id,
-                )
+                raise RuntimeError("Supabase side-table authoritative update not confirmed")
             else:
                 logger.info(
                     "Airtable archive kept the Supabase side-table commit and did not export %s %s",
@@ -365,6 +359,10 @@ class AirtableClient:
                         f"Supabase authoritative create did not commit for {table_id}; "
                         "refusing phantom Content/Output identity"
                     )
+                if phase6 or side:
+                    # A partial upstream create cannot be reported as minted.
+                    # Reconcile exact record IDs before any retry.
+                    raise RuntimeError("Supabase Phase6/side-table create not confirmed")
                 logger.info("supabase SoR create miss; skipping Airtable archive POST %s", table_id)
                 if minted:
                     created.extend(minted)

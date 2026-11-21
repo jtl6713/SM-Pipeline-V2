@@ -1,6 +1,7 @@
 """Phase 5 remainder reads. Default stays Airtable. No live calls."""
 
 import requests
+import pytest
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
@@ -771,6 +772,5 @@ def test_write_sor_archive_closed_blocks_any_airtable_http(monkeypatch):
     client = _client(studio_write_source="supabase", studio_phase6_write_source="supabase")
     # Untranslated media formula used to fall through to Airtable.
     assert client.list_records(MEDIA_ASSETS_TABLE, formula='{Bogus_Field}="x"') == []
-    assert client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True}) == {
-        "id": "recMediaNuke00001", "fields": {"Active": True},
-    }
+    with pytest.raises(RuntimeError, match="Supabase Phase6 authoritative update not confirmed"):
+        client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True})
