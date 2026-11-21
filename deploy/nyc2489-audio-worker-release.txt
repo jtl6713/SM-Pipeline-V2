@@ -1,0 +1,5 @@
+P0 NYC #2234 issue #2489 — protected Cloudflare Studio API Worker production deploy.
+Authorized intent 2026-11-21: merge audio-handoff root-cause patch #2495 (already merged at 2b944ea61a54131b6d5fee1ad6ab96984809fde8), then invoke existing production deployment workflow with unchanged credentials/bindings, rollback and auth smoke.
+Do NOT change any of the six publishing holds for outputs 10840–10845, DO_NOT_PUBLISH=true, AUTO_PUBLISH_ENABLED=false. Do not schedule or publish by this release.
+New 1080p audio-verified videos are already atomically relinked in Supabase with Review Sent while held. Corrected 40.667s narrated/music video: Drive 1wXLbNj0ag143etMEiFXxH5uXeYaKersC; 10s music-only Stories: Drive 13_2zllk-N4Ejw8UyERucw32bWpdkMhFg. Original files preserved, original future schedules preserved.
+Manual review and provider-side hold/queue verification must precede eligibility release. Issue remains open until all gates pass.
