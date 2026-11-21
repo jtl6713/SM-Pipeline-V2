@@ -103,3 +103,5 @@ jobs:
           done
           echo "Ops delivery job unfinished"
           exit 4
+
+# Retried only after CAS-guarded Supabase repair restored eight slides and cleared old publish ID.
