@@ -76,15 +76,15 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
     def test_production_identity_audit_only_reports_pat_binding_presence(self):
         expected = (
             "    'legacy_airtable_pat_binding_present':any("
-            "b.get('name')=='AIRTABLE_PAT' for b in bindings),\\n"
-            "    'only_read_operations':True,\\n"
+            "b.get('name')=='AIRTABLE_PAT' for b in bindings),\n"
+            "    'only_read_operations':True,\n"
         )
         name = "audit-studio-supabase-target-readonly.yml"
         self.write(name, expected)
         self.assertEqual(
             unexpected_references(self.root, ("AIRTABLE_PAT",)), []
         )
-        self.write(name, expected + "curl https://api.airtable.com/v0/\\n")
+        self.write(name, expected + "curl https://api.airtable.com/v0/\n")
         self.assertEqual(
             len(unexpected_references(self.root, ("api.airtable.com",))), 1
         )
