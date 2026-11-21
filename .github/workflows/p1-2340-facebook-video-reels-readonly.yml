@@ -109,3 +109,5 @@ jobs:
           path: /tmp/p1-2340-fb-reels-edge-audit.json
           retention-days: 30
           if-no-files-found: warn
+
+# 2026-11-21 issue #2464: protected re-audit of exact five Facebook Reel owner inventories after valid four Page permissions. GET-only video_reels listing, no uploads or output writes.
