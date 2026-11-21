@@ -1489,4 +1489,6 @@ Deploy #2536 Pipeline Content ID Worker from PR #2537: authenticated Supabase co
 
 2026-11-21 Airtable retirement #2364: release merged Supabase-only Worker source after 27/27 PR head checks, preserving active bindings and the exact production Supabase project. Require nonpublishing functional probes and rollback on failure. Do not publish, rearm held outputs, reset provider attempts, clear historic queues or revoke Airtable credentials as part of this code deploy. Original merge c56eb49c324da44f0767a00cc82dd09698cc2808.
 
+Deploy #2546 Ideas independent hourly harvest and five-minute photo-ready priority resume, four bounded handoffs per tick. Cloudflare Worker production from merged #2546. Preserve current bindings/secrets, provider/publish holds and single Remotion enqueue. Verify cron logs plus photo-ready Miami/NYC FIFO progression. 2026-11-21.
+
 2026-11-21 Airtable retirement #2364 recovery release following #2559 rollback: serve QA catalog without eager QA ledger connection; bind QA Test Center to the sole verified production environment; record QA-only readiness without rolling back the separate primary Studio/publishing release. Keep all core Supabase source, publishing, Factory, active-version and credential-preservation acceptance checks and automatic rollback on their failure. No provider publishing or PAT revocation.
