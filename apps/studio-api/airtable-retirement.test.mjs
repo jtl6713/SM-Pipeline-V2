@@ -4,13 +4,18 @@ import { readFileSync } from "node:fs";
 
 const source = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
+// This scans repository *source text*, not user-supplied URL origins.
+// Conservatively reject the retired hostname even when prefixed/suffixed by
+// another host string; do not mistake substring checks for URL validation.
+const retiredAirtableHost = /api\\.airtable\\.com/i;
+
 test("active Worker and Durable Object contain no Airtable HTTP endpoint", () => {
   for (const path of [
     "apps/studio-api/worker.js",
     "apps/studio-api/profile-summary-do.mjs",
     "services/pipeline-runner/airtable/client.py",
   ]) {
-    assert.equal(source(path).includes("https://api.airtable.com/"), false, path);
+    assert.doesNotMatch(source(path), retiredAirtableHost, path);
   }
 });
 
@@ -42,7 +47,7 @@ test("retired standalone scripts cannot request the Airtable API", () => {
     "deploy/bootstrap-studio-insights-tables.py",
     "scripts/diagnose-post-insights-profiles.py",
   ]) {
-    assert.ok(!source(path).includes("api.airtable.com"), path);
+    assert.doesNotMatch(source(path), retiredAirtableHost, path);
     assert.ok(source(path).includes("Retired: Supabase-native replacement required"), path);
   }
 });
@@ -111,7 +116,7 @@ test("replacement variant and LA TikTok deployments are manual and Airtable-free
     assert.ok(flow.includes("workflow_dispatch"), path);
     assert.ok(flow.includes(phrase), path);
     assert.ok(flow.includes("refs/heads/main"), path);
-    assert.ok(!flow.includes("api.airtable.com"), path);
+    assert.doesNotMatch(flow, retiredAirtableHost, path);
     assert.ok(!flow.includes("AIRTABLE_PAT"), path);
     assert.ok(flow.toLowerCase().includes("rollback"), path);
   }
