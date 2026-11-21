@@ -37,9 +37,25 @@ try {
     $ids+= $id
   }
   if(@($ids|Select-Object -Unique).Count -ne 8){throw 'duplicate_photo_receipts'}
-  $saved=$o.error_messages.FB_Photo_IDs_JSON
-  $savedIds=@(ConvertFrom-Json ([string]$saved))
-  if($savedIds.Count -ne 8 -or ($savedIds -join ',') -ne ($ids -join ',')){throw 'parent_photo_receipts_differ'}
+  # ConvertFrom-Json can emit one nested array rather than eight scalar
+  # pipeline elements; keep the JSON array shape explicit using System.Text.Json.
+  $saved=[string]$o.error_messages.FB_Photo_IDs_JSON
+  if(-not $saved){throw 'parent_photo_receipts_differ'}
+  $doc=[System.Text.Json.JsonDocument]::Parse($saved)
+  try {
+    if($doc.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array){throw 'parent_photo_receipts_differ'}
+    $savedIds=@()
+    foreach($item in $doc.RootElement.EnumerateArray()){
+      if($item.ValueKind -ne [System.Text.Json.JsonValueKind]::String){throw 'parent_photo_receipts_differ'}
+      $savedIds+= $item.GetString()
+    }
+  }finally{
+    $doc.Dispose()
+  }
+  if($savedIds.Count -ne 8){throw 'parent_photo_receipts_differ'}
+  for($i=0;$i -lt 8;$i++){
+    if([string]$savedIds[$i] -cne [string]$ids[$i]){throw 'parent_photo_receipts_differ'}
+  }
   $report.all_photo_ids_retained=$true
   $rows=Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 25
   $cfg=@{}
