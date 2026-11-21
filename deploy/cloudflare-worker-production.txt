@@ -1442,3 +1442,5 @@ Deploy Studio API Facebook Story definite-auth-rejection recovery 2026-11-20 PR2
 2026-11-20: Deploy merged PR #2353 Ideas Home parity API: filtered full Supabase unpromoted census and live durable Home idea recount; no Airtable reads in new path, no mutations, preserve existing Worker bindings. Verify protected production activation.
 
 2026-11-20 P1 #2340: Deploy merged PR #2363 b9a1b4f715494df9981471abd0d1d2777ac31d8f. Supabase-authoritative fresh approved publishing via independent five-minute cron; preserve R2 output lock and at-most-once dispatch fence. Prior-attempt/failed outputs remain provider-reconciliation only. Preserve Worker bindings, avoid Airtable fallback, verify production health.
+
+2026-11-20: Deploy merged PR #2377 for issue #2374 — provider evidence lanes in Supabase Exception Recovery census. Treat IG creation containers, TikTok drafts and YouTube IDs as verification-required, never public receipts or retry authorization. Worker-only source change; preserve all original overdue provider holds, existing Cloudflare bindings and no Airtable fallback; no auto publication or scheduling.
