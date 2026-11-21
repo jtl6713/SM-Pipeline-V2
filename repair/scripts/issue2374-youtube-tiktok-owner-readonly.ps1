@@ -127,7 +127,9 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')) {
     }else{$owner.state='uploader_get_failed_or_owner_mismatch';$owner.http=$response.http}
   }else{$owner.state='incomplete_uploader_account_config'}
   $ytOwner[$city]=$owner
-  $statusHost=@{'Chicago'='auth.chicagoshining.com';'Los Angeles'='auth-la.chicagoshining.com';'Miami'='auth-miami.chicagoshining.com';'New York City'='auth-nyc.chicagoshining.com'}[$city]
+  $ttHosts=@{'Chicago'='auth.chicagoshining.com';'Los Angeles'='auth-la.chicagoshining.com';'Miami'='auth-miami.chicagoshining.com';'New York City'='auth-nyc.chicagoshining.com'}
+  $statusHost=[string]$ttHosts[$city]
+  if(-not $statusHost){throw 'unknown_tiktok_status_owner'}
   $tt=SafeGet ('https://'+$statusHost+'/tiktok/status') @{Accept='application/json'}
   $expected=([string]$vals[$pr+'TIKTOK_HANDLE']).ToLowerInvariant().TrimStart('@')
   $actual=([string]$tt.data.creator_username).ToLowerInvariant().TrimStart('@')

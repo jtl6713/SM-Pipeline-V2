@@ -46,6 +46,9 @@ jobs:
           assert "publish_calls=0" in s and "airtable_operations=0" in s
           assert "original_jobstore" in s and "Studio_Overdue_Evidence_Audit_20261120" in s
           assert "test_run_id" in s and "jobs.Values" in s
+          assert "$statusHost=[string]$ttHosts[$city]" in s
+          assert "unknown_tiktok_status_owner" in s
+          assert "}[$city]" not in s, "PowerShell literal hashtable indexing may be parsed as array indexing"
           for bad in ["-Method Post","-Method Patch","-Method Put","-Method Delete",
                       "Invoke-Sqlcmd","/media_publish","Write-Host $key",
                       "Write-Output $key","AIRTABLE_PAT","api.airtable.com"]:
