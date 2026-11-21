@@ -84,6 +84,21 @@ class RetirementEvidenceGateTest(unittest.TestCase):
         rows[4]["hour_utc"] = rows[3]["hour_utc"]
         self.assertFalse(self.check(dup)["evidence_layout_complete"])
 
+    def test_completed_synthetic_qa_history_does_not_gate_pat_retirement(self):
+        # The one legacy QA run and incomplete event were migrated, verified,
+        # and remain unrelated to production content/publishing egress.
+        item = copy.deepcopy(self.manifest)
+        self.assertNotIn("qa_ledger_migration", PROOFS)
+        self.assertTrue(self.check(item)["evidence_layout_complete"])
+        item["proofs"]["qa_ledger_migration"] = {
+            "verified": False,
+            "artifact_ref": "",
+        }
+        self.assertTrue(self.check(item)["evidence_layout_complete"])
+        # Real zero-egress evidence is still required to revoke the PAT.
+        item["quiet_window"]["sources"]["studio_worker"][0]["attempts"] = 1
+        self.assertFalse(self.check(item)["evidence_layout_complete"])
+
     def test_missing_review_artifact_or_attestation_fails_closed(self):
         for key in PROOFS:
             item = copy.deepcopy(self.manifest)

@@ -18,7 +18,7 @@ SOURCES = (
     "github_actions", "make_scenarios", "external_integrations",
 )
 PROOFS = (
-    "production_identity", "production_schema", "qa_ledger_migration", "worker_bindings",
+    "production_identity", "production_schema", "worker_bindings",
     "runner_environment", "external_integrations", "nonpublishing_canary",
     "rollback_plan",
 )

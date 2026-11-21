@@ -29,10 +29,6 @@
     "rollback_plan": {
       "verified": false,
       "artifact_ref": null
-    },
-    "qa_ledger_migration": {
-      "verified": false,
-      "artifact_ref": null
     }
   },
   "quiet_window": {
