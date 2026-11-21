@@ -577,6 +577,7 @@
       image.hidden = true;
     }
     if (empty) empty.hidden = true;
+    dialog?.querySelector("#factoryRecoveryGalleryControls")?.remove();
     dialog?.classList.remove("is-image");
     dialog?.classList.add("is-video");
     if (backdrop) backdrop.hidden = true;
@@ -617,7 +618,55 @@
       if (safeSource) {
         image.src = thumb;
         image.hidden = false;
-        setStatus(`Original held source image · ${cardLabel(card)} · not a complete approved gallery`);
+        // Only independently verified 4:5 source sequences are eligible for
+        // navigation. No slide editing, approval, staging, provider or retry API.
+        const candidate = Array.isArray(card.recovery_gallery_images)
+          ? card.recovery_gallery_images : [];
+        const gallery = candidate.length >= 2 && candidate.length <= 10
+          && candidate[0] === thumb
+          && new Set(candidate).size === candidate.length
+          && candidate.every((url) => typeof url === "string"
+            && /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/(?:lettered|watermarked)\/rec[A-Za-z0-9]{14}\/[0-9]+\.jpg$/i.test(url))
+          ? candidate : [];
+        if (gallery.length) {
+          const controls = document.createElement("div");
+          controls.id = "factoryRecoveryGalleryControls";
+          controls.setAttribute("role", "group");
+          controls.setAttribute("aria-label", "Verified original gallery images, not approved");
+          controls.style.display = "flex";
+          controls.style.gap = ".75rem";
+          controls.style.justifyContent = "center";
+          controls.style.alignItems = "center";
+          controls.style.flexWrap = "wrap";
+          const previous = document.createElement("button");
+          previous.type = "button";
+          previous.className = "secondary-button";
+          previous.textContent = "Previous image";
+          const count = document.createElement("span");
+          count.className = "subtle";
+          count.setAttribute("aria-live", "polite");
+          const next = document.createElement("button");
+          next.type = "button";
+          next.className = "secondary-button";
+          next.textContent = "Next image";
+          let index = 0;
+          const showSource = () => {
+            image.src = gallery[index];
+            image.alt = `Original verified source image ${index + 1} of ${gallery.length}; not staged or approved`;
+            count.textContent = `Source image ${index + 1} of ${gallery.length} · approval required`;
+            previous.disabled = index === 0;
+            next.disabled = index === gallery.length - 1;
+          };
+          previous.addEventListener("click", () => { if (index > 0) { index--; showSource(); } });
+          next.addEventListener("click", () => { if (index < gallery.length - 1) { index++; showSource(); } });
+          controls.append(previous, count, next);
+          dialog.appendChild(controls);
+          showSource();
+          setStatus(`Original verified source gallery · ${cardLabel(card)} · ${gallery.length} images · approval required`);
+        } else {
+          image.alt = "Original held source preview only; complete approved gallery unavailable";
+          setStatus(`Original held source image · ${cardLabel(card)} · not a complete approved gallery`);
+        }
       } else {
         empty.hidden = false;
         empty.textContent = "Original media needs reconstruction. No verified source preview exists yet.";
