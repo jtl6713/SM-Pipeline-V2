@@ -1,21 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-const ui = readFileSync(new URL("./assets/pipeline-content-pagination-2536.js", import.meta.url), "utf8");
+const ui = readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
-test("Pipeline controls load before core and share release cache key", () => {
- assert.ok(html.includes("pipeline-content-pagination-2536.js?v=0.6.1029-pipeline-history"));
- assert.ok(html.indexOf("pipeline-content-pagination-2536.js") < html.indexOf("StudioLazyLoad.boot()"));
+test("Pipeline content controls and release build are integrated natively", () => {
+  assert.ok(html.includes('id="pipelineContentControls"'));
+  assert.ok(!html.includes("pipeline-content-pagination-2536.js"));
+  assert.ok(html.includes("v=0.6.1030-content-pages"));
+  assert.ok(ui.includes('BUILD_ID = "item4-0.6.1030-content-pages"'));
 });
-test("date, group size and paging controls are wired", () => {
- for(const name of ["pipelineContentFrom","pipelineContentTo","pipelineContentSize","pipelineContentPrev","pipelineContentNext"]) assert.ok(ui.includes(name));
- for(const size of ['value="10"','value="20"','value="25"','value="50"']) assert.ok(ui.includes(size));
- for(const key of ["created_from","created_to","per_page","content_page"]) assert.ok(ui.includes(key));
- assert.ok(ui.includes("state.offset += state.size"));
- assert.ok(ui.includes("state.offset - state.size"));
- assert.ok(ui.includes("has_more: false"));
+test("created-date, group size, and Next/Previous are wired to one paged endpoint", () => {
+  for(const id of ["pipelineContentFrom","pipelineContentTo","pipelineContentSize","pipelineContentPrev","pipelineContentNext"])
+    assert.ok(html.includes('id="' + id + '"') && ui.includes(id));
+  for(const size of ['value="10"','value="20"','value="25"','value="50"']) assert.ok(html.includes(size));
+  for(const key of ["created_from","created_to","per_page","content_page"]) assert.ok(ui.includes(key));
+  assert.ok(ui.includes("pipelineContentPageOffset + pipelineContentPageSize"));
+  assert.ok(ui.includes("pipelineContentPageOffset - pipelineContentPageSize"));
+  assert.ok(ui.includes("pipelineContentPageScope()"));
 });
-test("legacy rolling seven-day grid hidden without removing publishing safeguards", () => {
- assert.ok(html.includes("#pipelineScheduleOverview{display:none!important}"));
- assert.ok(!ui.includes("publish-now"));
+test("output groups remain sorted across states, not partitioned into archived groups", () => {
+  const a=ui.indexOf("const body = (() => {",ui.indexOf("function renderOutputsTable"));
+  const b=ui.indexOf("const head =",a);
+  const body=ui.slice(a,b);
+  assert.ok(body.includes("groupedPipelineRecords(source)"));
+  assert.ok(!body.includes("partitionPipelineGroups(source)"));
+  assert.match(html, /#pipelineScheduleOverview\{display:none!important\}/);
 });
