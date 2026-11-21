@@ -272,6 +272,13 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineContentPageOffset = 0;
+  let pipelineContentPageSize = 10;
+  let pipelineContentCreatedFrom = "";
+  let pipelineContentCreatedTo = "";
+  let pipelineContentHasMore = false;
+  let pipelineContentVisibleIds = [];
+  let pipelineContentPagingProfile = "";
   let pipelineListExceptionScope = false;
   let pipelineListUnverified = false;
   let pipelineContentRecords = [];
@@ -336,7 +343,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1029-pipeline-history";
+  const BUILD_ID = "item4-0.6.1030-content-pages";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1038,6 +1045,31 @@
 
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", () => loadPage(button.dataset.refresh, true));
+  });
+
+  $("pipelineContentPrev")?.addEventListener("click", () => {
+    if (pipelineContentPageOffset > 0) changePipelineContentPage(pipelineContentPageOffset - pipelineContentPageSize);
+  });
+  $("pipelineContentNext")?.addEventListener("click", () => {
+    if (pipelineContentHasMore) changePipelineContentPage(pipelineContentPageOffset + pipelineContentPageSize);
+  });
+  const updatePipelineDateFilters = () => {
+    const from = $("pipelineContentFrom")?.value || "";
+    const to = $("pipelineContentTo")?.value || "";
+    const toInput = $("pipelineContentTo");
+    if (from && to && from > to) {
+      toInput?.setCustomValidity("Created to must not precede Created from");
+      toInput?.reportValidity();
+      return;
+    }
+    toInput?.setCustomValidity("");
+    pipelineContentCreatedFrom = from;
+    pipelineContentCreatedTo = to;
+    pipelineContentPageSize = Number($("pipelineContentSize")?.value || 10);
+    changePipelineContentPage(0);
+  };
+  ["pipelineContentFrom", "pipelineContentTo", "pipelineContentSize"].forEach((id) => {
+    $(id)?.addEventListener("change", updatePipelineDateFilters);
   });
 
   $("refreshDashboard").addEventListener("click", () => {
@@ -23019,20 +23051,15 @@ function timedScriptAssetLabel(asset, index) {
       index.get(key).records.push(record);
     }
     for (const group of groups) group.records = sortedPipelineRecords(group.records);
-    // The Pipeline is an inventory of content, not a seven-day calendar.
-    // Order packages by actual Production Approve submission time, newest first.
-    // Legacy rows missing approval evidence sort after dated approvals.
-    const newestApproved = (group) => Math.max(0, ...group.records.map((record) => {
-      const raw = record.production_approved_at || "";
-      const ms = Date.parse(String(raw));
-      return Number.isFinite(ms) ? ms : 0;
-    }));
-    groups.sort((a, b) => {
-      const aApproved = newestApproved(a);
-      const bApproved = newestApproved(b);
-      if (aApproved !== bApproved) return bApproved - aApproved;
-      return Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber));
-    });
+    // Content ID defines order, regardless of approval, scheduling or status.
+    const contentNumber = (group) => {
+      const first = group.records[0] || {};
+      const content = pipelineContentRecordForGroup(group.records);
+      const value = Number(String(content?.content_id ?? first.content_number ?? "").replace(/[^0-9]/g, ""));
+      return Number.isFinite(value) ? value : -1;
+    };
+    groups.sort((a, b) => contentNumber(b) - contentNumber(a)
+      || Math.max(0, ...b.records.map(pipelineOutputNumber)) - Math.max(0, ...a.records.map(pipelineOutputNumber)));
     return groups;
   }
 
@@ -23402,10 +23429,9 @@ function timedScriptAssetLabel(asset, index) {
     };
 
     const body = (() => {
-      const { active, archived } = partitionPipelineGroups(source);
-      const activeBody = active.map((group, index) => renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
-      const archivedBody = renderPipelineArchivedSection(archived, pipelineRow);
-      return `${activeBody}${archivedBody}`;
+      // One list, newest Content ID first: published groups are not archived away.
+      return groupedPipelineRecords(source).map((group, index) =>
+        renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
     })();
 
     const head = `<tr><th>${pipelineSortHeader("output", "Content")}</th><th>${pipelineSortHeader("platform", "Platforms")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule (Your Time)</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`;
@@ -24440,7 +24466,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function pipelineOutputCacheKey() {
-    return `studio.pipelineOutputs.v1:${selectedProfileId || "default"}`;
+    return `studio.pipelineOutputs.v2:${selectedProfileId || "default"}:${pipelineViewFilter}:${pipelineContentPageOffset}:${pipelineContentPageSize}:${pipelineContentCreatedFrom}:${pipelineContentCreatedTo}`;
   }
   function readPipelineOutputCache() {
     try {
@@ -24485,12 +24511,64 @@ function timedScriptAssetLabel(asset, index) {
     return [...byId.values()].sort((a,b) => Number(b.output_id || 0)-Number(a.output_id || 0));
   }
 
+  function pipelineContentPageScope() {
+    return [selectedProfileId, pipelineViewFilter, pipelineContentPageOffset,
+      pipelineContentPageSize, pipelineContentCreatedFrom, pipelineContentCreatedTo].join("|");
+  }
+
+  function pipelineContentPageApiPath() {
+    const params = new URLSearchParams({
+      mode: "content_page", offset: String(pipelineContentPageOffset),
+      per_page: String(pipelineContentPageSize),
+    });
+    if (pipelineContentCreatedFrom) params.set("created_from", pipelineContentCreatedFrom);
+    if (pipelineContentCreatedTo) params.set("created_to", pipelineContentCreatedTo);
+    return "/api/outputs?" + params.toString();
+  }
+
+  function updatePipelineContentControls() {
+    const focused = ["approved_past_due", "approved_missing_date", "failed", "manual", "attention"].includes(pipelineViewFilter);
+    const previous = $("pipelineContentPrev");
+    const next = $("pipelineContentNext");
+    const label = $("pipelineContentPageLabel");
+    const timezone = $("pipelineContentTimezoneHint");
+    if (previous) previous.disabled = focused || pipelineContentPageOffset <= 0;
+    if (next) next.disabled = focused || !pipelineContentHasMore;
+    if (label) {
+      const count = pipelineContentVisibleIds.length;
+      label.textContent = focused ? "Exception view (all matching records)"
+        : count ? "Content IDs " + (pipelineContentPageOffset + 1) + "–"
+          + (pipelineContentPageOffset + count) : "No content IDs on this page";
+    }
+    if (timezone) timezone.textContent = "Creation dates use " + workingStudioTimeZone();
+  }
+
+  function changePipelineContentPage(nextOffset = 0) {
+    pipelineContentPageOffset = Math.max(0, nextOffset);
+    pipelineContentHasMore = false;
+    pipelineContentVisibleIds = [];
+    pipelineOutputs = [];
+    pipelineContentRecords = [];
+    const target = $("outputsList");
+    if (target) target.innerHTML = '<div class="empty">Loading content IDs…</div>';
+    updatePipelineContentControls();
+    refreshPipelineOutputs({ force: true }).finally(schedulePipelinePoll);
+  }
+
   async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
     const target = $("outputsList");
     if (!target) return;
     if (silent && pipelinePollInFlight && !force) return;
     pipelinePollInFlight = true;
+    if (pipelineContentPagingProfile !== selectedProfileId) {
+      pipelineContentPagingProfile = selectedProfileId;
+      pipelineContentPageOffset = 0;
+      pipelineContentHasMore = false;
+      pipelineContentVisibleIds = [];
+      pipelineOutputs = [];
+    }
     const profileAtRequest = selectedProfileId;
+    const pageScopeAtRequest = pipelineContentPageScope();
     const cachedRows = pipelineOutputs.length ? pipelineOutputs : readPipelineOutputCache();
     if (cachedRows.length && !target.querySelector("table")) {
       pipelineOutputs = cachedRows;
@@ -24523,40 +24601,18 @@ function timedScriptAssetLabel(asset, index) {
         pipelineListExceptionScope = true;
         pipelineContentRecords = [];
         pipelineListUnverified = focused.complete === false;
+        updatePipelineContentControls();
         renderOutputsTable(target, focused.records);
         setPipelineLiveHint(focused.complete === false
           ? "Historical exceptions exceed the safe page limit — more records require pagination."
           : "Authoritative " + pipelineFilterLabel() + " · " + focused.records.length + " matching outputs · refreshed");
         return;
       }
-      // Start the heavy history read and small live check concurrently; paint
-      // the newest outputs without waiting on Airtable's open-pack scan.
-      const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
-      const fullPromise = settled((async () => {
-        // All-week Pipeline inventory. Fetch every verified Supabase page; never
-        // silently substitute the former newest-250 snapshot for full history.
-        const records = [];
-        let offset = 0;
-        const seen = new Set();
-        for (;;) {
-          const page = await api(`/api/outputs?mode=history&offset=${offset}`, { timeoutMs: 20000, retries: 1 });
-          if (page?.read_source !== "supabase" || !Array.isArray(page?.records))
-            throw new Error("Pipeline history page was not verified from Supabase");
-          for (const record of page.records) {
-            const id = String(record?.id || "");
-            if (!id || seen.has(id)) continue;
-            seen.add(id);
-            records.push(record);
-          }
-          if (!page.has_more) break;
-          const next = Number(page.next_offset);
-          if (!Number.isSafeInteger(next) || next <= offset)
-            throw new Error("Pipeline history pagination stalled");
-          offset = next;
-        }
-        return { records, stale: false, complete: true };
-      })());
-      const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
+      // Request only this content-ID page. Never fetch all history or merge
+      // latest outputs from other content groups into the requested page.
+      const latestPromise = settled(Promise.resolve({ records: [] }));
+      const fullPromise = settled(api(pipelineContentPageApiPath(), { timeoutMs: 20000, retries: 1 }));
+      const schedulePromise = settled(Promise.resolve({ records: [] }));
       const latestSettled = await latestPromise;
       if (profileAtRequest !== selectedProfileId) return;
       const latestRows = latestSettled.ok && Array.isArray(latestSettled.value?.records)
@@ -24570,7 +24626,7 @@ function timedScriptAssetLabel(asset, index) {
         setPipelineLiveHint("Newest outputs checked live · loading full Pipeline…");
       }
       const [outputsSettled, scheduleSettled] = await Promise.all([fullPromise, schedulePromise]);
-      if (profileAtRequest !== selectedProfileId) return;
+      if (profileAtRequest !== selectedProfileId || pageScopeAtRequest !== pipelineContentPageScope()) return;
       if (!outputsSettled.ok && !latestRows.length) throw outputsSettled.error || new Error("Outputs unavailable");
       const outputsResult = outputsSettled.ok ? outputsSettled.value : { records: [], stale: true };
       const contentResult = { records: [] };
@@ -24597,6 +24653,11 @@ function timedScriptAssetLabel(asset, index) {
       pipelineListUnverified = historyStale;
       pipelineOutputs = records;
       pipelineListExceptionScope = false;
+      if (outputsSettled.ok) {
+        pipelineContentHasMore = Boolean(outputsResult.has_more);
+        pipelineContentVisibleIds = Array.isArray(outputsResult.content_ids) ? outputsResult.content_ids : [];
+      }
+      updatePipelineContentControls();
       if (activeCreativeOutputId && $("creativeOutputMeta")) {
         const freshCreative = records.find((row) => row && row.id === activeCreativeOutputId);
         if (freshCreative) {
