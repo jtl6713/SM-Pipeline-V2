@@ -2431,10 +2431,13 @@ export async function prepareItem4Variants(request, env, url, authorization, ctx
   try { payload = await request.json(); } catch { payload = {}; }
 
   const recordId = item4RequestIdFromPath(url);
+  let stage = "authorized request load";
+  try {
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
 
   const cropsPayload = payload?.crops && typeof payload.crops === "object" ? payload.crops : {};
+  stage = "frame preparation";
   const { reconciled } = await runItem4VariantPrepareCore(env, recordId, authorization, {
     cropsPayload,
     ctx,
@@ -2466,6 +2469,21 @@ export async function prepareItem4Variants(request, env, url, authorization, ctx
           ? `Attaching ${reconciled.manifest?.ready_count || 0} of ${reconciled.manifest?.target_count || 0} clip frames…`
           : "Platform media preparation is still running."),
   }, failed ? 409 : ready ? 200 : 202);
+  } catch (error) {
+    // Preserve ordinary validation/authorization responses and stage-specific
+    // 503s. The generic Worker fallback used to obscure pre-queue exceptions
+    // as "Request failed (500)" with no actionable operator diagnostic.
+    const status = Number(error?.status || 500);
+    if (status < 500 || status === 503) throw error;
+    console.error("studio_frames_prepare_request_failed", {
+      stage, status, request_id: recordId,
+      error_name: String(error?.name || "Error").slice(0, 60),
+      // Error messages can include remote IDs/URLs; never copy them into logs.
+    });
+    throw new HttpError(503,
+      "Frames Prepare stopped during " + stage +
+      ". No crop jobs were confirmed; exact approved assets and narration are preserved.");
+  }
 }
 /*__STUDIO_WORKER_END:prepareItem4Variants__*/
 
