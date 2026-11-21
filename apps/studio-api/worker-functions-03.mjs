@@ -14671,7 +14671,10 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
     const mediaKey = storyVideoMediaKey(ideaId, sceneNumber);
     const readJob = async () => {
       const object = await env.STUDIO_MEDIA.get(jobKey);
-      return object ? { job: JSON.parse(await object.text()), etag: object.etag } : { job: null, etag: null };
+      return object ? {
+        job: JSON.parse(await object.text()), etag: object.etag,
+        uploaded_at: object.uploaded instanceof Date ? object.uploaded.toISOString() : null,
+      } : { job: null, etag: null, uploaded_at: null };
     };
     const writeJob = async (job, etag = null) => {
       const result = await env.STUDIO_MEDIA.put(jobKey, JSON.stringify(job), {
@@ -14991,7 +14994,7 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       if (!assetId) {
         const object = await env.STUDIO_MEDIA.get(mediaKey);
         if (!object) throw new HttpError(410, "Generated video master is missing");
-        latestEtag = await writeJob({ ...job, state: "accepting" }, latestEtag);
+        latestEtag = await writeJob({ ...job, state: "accepting", accepting_started_at: new Date().toISOString() }, latestEtag);
         const bytes = await object.arrayBuffer();
         const base = String(f(idea, "Candidate_Title") || "Script a Short").replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 65) +
           " Scene " + sceneNumber;
