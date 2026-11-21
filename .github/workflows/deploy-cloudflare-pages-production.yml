@@ -26,6 +26,8 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
       - name: Verify owner-global prompt editor #2532
         shell: bash
         run: |
@@ -34,8 +36,6 @@ jobs:
           node apps/studio-web/ui-release-contract.mjs
           node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
 
-      - name: Checkout
-        uses: actions/checkout@v6
 
       - name: Verify Pipeline headings on phone, tablet and desktop
         shell: bash
