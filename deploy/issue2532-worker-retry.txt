@@ -1,0 +1,1 @@
+Issue #2532 Worker-only protected production retry after reconciling stale Profile Summary fail-closed assertion with the active Supabase CRUD path. No changes to publishing, provider retries or production output states.
