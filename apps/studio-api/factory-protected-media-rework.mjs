@@ -108,6 +108,8 @@ export function protectedMediaReworkSummary(record) {
   );
   return {
     media_rework: true,
+    marker: isObject(fields[NEW_MEDIA_REWORK_MARKER])
+      ? NEW_MEDIA_REWORK_MARKER : PROTECTED_MEDIA_REWORK_MARKER,
     source_inventory_verified: verifiedSource,
     // Exact public JPEGs for the human gallery preview only. No IG/R2 stage.
     original_image_previews: originalGallery?.urls || [],
