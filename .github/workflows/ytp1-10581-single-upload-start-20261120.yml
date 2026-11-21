@@ -1,3 +1,5 @@
+# Retest only after prior protected Ops /api/shell returned 409 busy BEFORE accepting a job.
+# Run 44849142895 had no native stage invocation; same exact idempotency and live no-job gates stay mandatory.
 name: 'NYC #10581 one exact YouTube YTP1 upload start'
 on:
   push:
