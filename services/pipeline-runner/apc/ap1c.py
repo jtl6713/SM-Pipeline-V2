@@ -324,7 +324,12 @@ def process_request(
             created_now += 1
             continue
         graph_error = error_message(payload, status_code)
+        # An HTTP 401 is an owner authorization dependency, never a transient
+        # child-container ambiguity that should auto-retry and burn attempts.
+        auth_blocked = status_code == 401
         message = f"AP1C child creation failed for slide {current_order(slide)}. HTTP {status_code}: {graph_error}"
+        if auth_blocked:
+            message = "QA-IG-AP1C-OAUTH-REAUTH-REQUIRED: " + message
         client.update_record(
             CAROUSEL_SLIDES_TABLE,
             slide["id"],
@@ -336,13 +341,18 @@ def process_request(
             typecast=True,
         )
         retry_minutes = AP1C_RATE_LIMIT_RETRY_MINUTES if _is_rate_limited(graph_error) else RETRY_MINUTES
-        _reset_parent(client, output, message, retry_minutes=retry_minutes)
+        _reset_parent(
+            client, output, message,
+            retry_minutes=retry_minutes, park_for_quality=auth_blocked,
+        )
         return {
             "processed": True,
-            "needs_children": True,
+            "needs_children": not auth_blocked,
             "rate_limited": _is_rate_limited(graph_error),
-            "retry_minutes": retry_minutes,
+            "retry_minutes": None if auth_blocked else retry_minutes,
             "retained_count": len(set(retained_child_ids)),
+            "retry_authorized": False if auth_blocked else None,
+            "reason": "provider_oauth_reauthorization_required" if auth_blocked else "graph_child_creation_failed",
             **result,
         }
 
