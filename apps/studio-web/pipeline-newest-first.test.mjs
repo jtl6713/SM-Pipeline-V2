@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 
-test("Pipeline content packages sort by creation timestamp, independent of schedule", () => {
+test("Pipeline content packages currently sort by creation timestamp, independent of schedule", () => {
   const start = app.indexOf("function groupedPipelineRecords(records)");
   const end = app.indexOf("function isPipelineGroupExpanded(", start);
   assert.ok(start >= 0 && end > start);
