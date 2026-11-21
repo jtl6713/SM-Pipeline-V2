@@ -25,27 +25,31 @@ async function checkCatalog({ lookupCatalog, transferId, profileId, HttpError })
   return found;
 }
 
-async function checkDrive({ env, filename, originalSize, watermarkRequired, googleAccessToken, HttpError }) {
-  const token = await googleAccessToken();
-  if (!token) error(HttpError, 503, "Google Drive identity is unavailable. No asset was changed.");
-  const query = new URLSearchParams({
-    q: "name = '" + filename.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "' and trashed = false",
-    fields: "nextPageToken,files(id,name,mimeType,size,trashed,parents)",
-    pageSize: "100", supportsAllDrives: "true", includeItemsFromAllDrives: "true",
-  });
+async function checkDrive({ env, filename, originalSize, watermarkRequired, HttpError }) {
+  // Use the same Drive identity as production library ingest. The Cloudflare
+  // Worker intentionally has no Google OAuth refresh token of its own.
+  const base = pipelineUrl(env);
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "").trim();
+  if (!/^https:\/\//.test(base) || !secret)
+    error(HttpError, 503, "Authenticated Pipeline Runner Drive lookup is not configured. No upload attempted.");
   let response;
   try {
-    response = await fetch("https://www.googleapis.com/drive/v3/files?" + query.toString(), {
-      method: "GET", headers: { Authorization: "Bearer " + token, Accept: "application/json" },
-      signal: AbortSignal.timeout(15000),
+    response = await fetch(base + "/jobs/studio-asset-library/recovery-lookup?"
+      + new URLSearchParams({ filename }), {
+      method: "GET",
+      headers: { "X-Pipeline-Secret": secret, Accept: "application/json" },
+      signal: AbortSignal.timeout(20000),
     });
   } catch {
-    error(HttpError, 503, "Could not verify existing Drive files. No recovery upload attempted.");
+    error(HttpError, 503, "Runner could not verify existing Google Drive files. No upload attempted.");
   }
-  if (!response.ok) error(HttpError, 503, "Google Drive verification failed (" + response.status + "). No new upload attempted.");
+  if (response.status === 404)
+    error(HttpError, 503, "Pipeline Runner needs the original-video recovery lookup update. No upload attempted.");
+  if (!response.ok)
+    error(HttpError, 503, "Runner Google Drive verification failed (" + response.status + "). No upload attempted.");
   const json = await response.json().catch(() => null);
-  if (!json || !Array.isArray(json.files) || json.nextPageToken)
-    error(HttpError, 503, "Existing Drive files could not be checked exhaustively. No upload attempted.");
+  if (json?.ok !== true || json?.complete !== true || !Array.isArray(json.files) || json.nextPageToken)
+    error(HttpError, 503, "The Runner did not confirm an exhaustive Drive lookup. No upload attempted.");
   const selected = selectRecoveredDriveVideo(json.files, filename, originalSize, watermarkRequired);
   if (!["missing", "found"].includes(selected.kind))
     error(HttpError, 409, "The original Drive file has ambiguous or mismatched metadata. Recovery stopped to prevent duplicates.");
@@ -116,7 +120,7 @@ export async function recoverOriginalStoryVideo({
   env, ideaId, sceneNumber, profileId, profileName, title, scene, expectedRunId,
   audioMixAcknowledged, mediaOverride, jobKey, mediaKey,
   readJob, writeJob, lookupCatalog, createMedia, saveSelectedScene,
-  googleAccessToken, watermarkRequired, rightsVerified, HttpError,
+  watermarkRequired, rightsVerified, HttpError,
 }) {
   if (!rightsVerified) error(HttpError, 503, "Commercial usage rights are not verified for the original video.");
   const found = await readJob();
@@ -172,7 +176,7 @@ export async function recoverOriginalStoryVideo({
     etag = await writeJob(next, etag); job = next;
   }
   const drive = await checkDrive({
-    env,filename,originalSize:head.size,watermarkRequired,googleAccessToken,HttpError,
+    env,filename,originalSize:head.size,watermarkRequired,HttpError,
   });
 
   if (drive.kind === "found") {
