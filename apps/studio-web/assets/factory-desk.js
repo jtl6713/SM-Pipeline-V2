@@ -560,7 +560,63 @@
     return false;
   }
 
+  // Exact-original-source, read-only carousel: these are not newly staged
+  // Instagram public assets and must never imply fresh creative approval.
+  function clearFactoryRecoveryGalleryControls() {
+    $("factoryRecoveryGalleryControls")?.remove();
+  }
+
+  function showFactoryRecoverySourceGallery(card, image, dialog) {
+    if (card?.protected_media_rework !== true) return false;
+    const id = String(card.id || "");
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return false;
+    const urls = card.recovery_original_image_previews;
+    if (!Array.isArray(urls) || urls.length < 2 || urls.length > 10) return false;
+    const pattern = new RegExp(
+      "^https://media\\.chicagoshining\\.com/studio/previews/(?:lettered|watermarked)/"
+      + id + "/([0-9])\\.jpg$", "i"
+    );
+    if (!urls.every((url, index) => typeof url === "string"
+      && pattern.exec(url)?.[1] === String(index))) return false;
+
+    const controls = document.createElement("div");
+    controls.id = "factoryRecoveryGalleryControls";
+    controls.className = "factory-recovery-gallery-controls";
+    controls.setAttribute("role", "group");
+    controls.setAttribute("aria-label", "Original recovery image gallery, not yet approved");
+    controls.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:12px 4px";
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "secondary-button";
+    back.textContent = "Previous image";
+    const counter = document.createElement("span");
+    counter.setAttribute("aria-live", "polite");
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "secondary-button";
+    next.textContent = "Next image";
+    controls.append(back, counter, next);
+    let index = 0;
+    function display(indexToShow) {
+      index = indexToShow;
+      image.src = urls[index];
+      image.alt = `Verified original preview image ${index + 1} of ${urls.length}; not an approved or staged Instagram asset`;
+      image.hidden = false;
+      counter.textContent = `${index + 1} / ${urls.length} original images · review only`
+        + (card.recovery_source_count_mismatch === true ? " · source count mismatch" : "");
+      back.disabled = index === 0;
+      next.disabled = index === urls.length - 1;
+      setStatus(`Viewing original ${index + 1} of ${urls.length} for ${cardLabel(card)} · fresh approval and staging still required`);
+    }
+    back.addEventListener("click", () => display(index - 1));
+    next.addEventListener("click", () => display(index + 1));
+    dialog.appendChild(controls);
+    display(0);
+    return true;
+  }
+
   function closeFactoryPreview() {
+    clearFactoryRecoveryGalleryControls();
     const backdrop = $("factoryPreviewBackdrop");
     const video = $("factoryPreviewVideo");
     const image = $("factoryPreviewImage");
@@ -583,6 +639,7 @@
   }
 
   function openFactoryPreview(card) {
+    clearFactoryRecoveryGalleryControls();
     const backdrop = $("factoryPreviewBackdrop");
     const video = $("factoryPreviewVideo");
     const image = $("factoryPreviewImage");
@@ -614,7 +671,10 @@
       const safeSource = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_\/-]+\.(jpg|jpeg|png|webp)$/i.test(thumb);
       dialog.classList.remove("is-video");
       dialog.classList.add("is-image");
-      if (safeSource) {
+      if (showFactoryRecoverySourceGallery(card, image, dialog)) {
+        // Every displayed image is tied to this original output's audited
+        // full 4:5 preview sequence; no legacy video/Drive lookup is made.
+      } else if (safeSource) {
         image.src = thumb;
         image.hidden = false;
         setStatus(`Original held source image · ${cardLabel(card)} · not a complete approved gallery`);
