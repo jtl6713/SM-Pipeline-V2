@@ -116,7 +116,7 @@ test("proveStudioAuthorizationSources accepts org-brand fallback when core ids m
   assert.equal(result.core_match, true);
   assert.equal(result.brand_match, false);
   assert.equal(result.brand_acceptable, true);
-  assert.equal(result.auth_read_source, "airtable");
+  assert.equal(result.auth_read_source, "unavailable");
 });
 
 test("proveStudioAuthorizationSources fails closed when organization ids diverge", async () => {

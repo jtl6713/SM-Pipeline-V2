@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "production_project_ref": null,
+  "proofs": {
+    "production_identity": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "production_schema": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "worker_bindings": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "runner_environment": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "external_integrations": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "nonpublishing_canary": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "rollback_plan": {
+      "verified": false,
+      "artifact_ref": null
+    },
+    "qa_ledger_migration": {
+      "verified": false,
+      "artifact_ref": null
+    }
+  },
+  "quiet_window": {
+    "start_utc": null,
+    "end_utc": null,
+    "sources": {
+      "studio_worker": [],
+      "pipeline_runner": [],
+      "standalone_scripts": [],
+      "github_actions": [],
+      "make_scenarios": [],
+      "external_integrations": []
+    }
+  },
+  "runtime_source_modes": {
+    "studio_primary_read_source": null,
+    "studio_sync_read_source": null,
+    "pipeline_runner_write_source": null
+  }
+}

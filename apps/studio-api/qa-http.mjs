@@ -1,9 +1,11 @@
-// Admin-only QA Test Center HTTP service. All mutation methods append to Airtable.
+// Admin-only QA Test Center HTTP service. Canonical run/event writes append to Supabase.
 // This module has no production-output mutation, scheduling or publishing imports.
 import {QA_CATALOG} from "./qa-catalog.mjs";
 import {validateManualResult,SAFE_ASSERTIONS} from "./qa-test-core.mjs";
 import {executeQaAssertion} from "./qa-registry.mjs";
 import {withQaIdempotencyLock} from "./qa-idempotency-lock.mjs";
+import {createSupabaseQaLedger,QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-supabase-ledger.mjs";
+export {QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-supabase-ledger.mjs";
 
 // The Runner release identity is read only from the trusted production origin.
 // A guessed/client-provided version must never make an incomplete gate green.
@@ -18,19 +20,19 @@ export async function verifiedRunnerVersion(env,requester){
     if(!response.ok)return "unverified";
     const info=await response.json();
     if(info?.ok!==true||info?.service!=="pipeline-runner"||
-      !["airtable","supabase"].includes(info?.studio_write_source)||
+      info?.studio_write_source!=="supabase"||
       typeof info?.version!=="string"||info.version.length>120||!info.version.trim())
       return "unverified";
     return info.version.trim();
   }catch{return "unverified";}
 }
 function configuredQaEnvironment(env){
-  // A selected label is not a target. Only test the environment actually
-  // bound to this Worker, never silently route 'staging' to production.
+  // This Studio has a single live environment. Imported history may retain
+  // older "development" labels, but no new QA run can execute elsewhere.
   const configured=String(env?.STUDIO_QA_EXECUTION_ENV||"production").trim().toLowerCase();
-  if(!["production","staging","development"].includes(configured))
-    throw error(503,"QA execution environment is not configured");
-  return configured;
+  if(configured!=="production")
+    throw error(503,"Only production QA execution is configured on this Worker");
+  return "production";
 }
 export const QA_WORKER_BUILD="0.10.766-qa-release-attestation";
 export const QA_UI_BUILD="0.6.897-qa-center-pilot";
@@ -47,8 +49,6 @@ export function qaDeploymentBlockers(run,boundEnvironment){
     blockers.push("Runner deployment is not attested");
   return blockers;
 }
-export const QA_RUNS_TABLE="tblYwzehVtmyUMzj5";
-export const QA_EVENTS_TABLE="tblsg5E1cq8nb240c";
 const catalog=QA_CATALOG.tests;
 const knownTests=new Map(catalog.map(test=>[test.id,test]));
 function error(status,message){const e=new Error(message);e.status=status;return e;}
@@ -63,10 +63,6 @@ function requestKey(body){
 }
 function exactTest(id){const t=knownTests.get(id);if(!t)throw error(404,"Unknown QA test");return t;}
 function checkRunId(value){const id=required(value,"run ID",100);if(!/^qa-[0-9a-f-]{36}$/i.test(id))throw error(400,"Invalid run ID");return id;}
-function filterFormula(field,value){
-  if(!["Run ID","Idempotency Key"].includes(field))throw error(500,"QA filter forbidden");
-  return "{"+field+"}="+JSON.stringify(String(value));
-}
 async function payloadHash(value){
   const raw=new TextEncoder().encode(JSON.stringify(value));
   const hash=new Uint8Array(await crypto.subtle.digest("SHA-256",raw));
@@ -100,7 +96,7 @@ function exposeEvent(record){
     testId:f["Test ID"],kind:f["Event Kind"],actorId:f["Actor ID"],
     atUtc:f["Recorded At UTC"],payload};
 }
-// Revalidate canonical Airtable observations at release time, not just at submission.
+// Revalidate canonical Supabase observations at release time, not just at submission.
 // A malformed or directly imported legacy Pass must never become a green gate.
 export function qaEvidenceIntegrityBlockers(events){
   const latest=new Map();
@@ -180,37 +176,24 @@ export function compareQaRunResults(baselineEvents,currentEvents){
   }
   return regressions;
 }
-export async function handleQaApi({request,url,env,authorization,airtableFetch,respond,
+export async function handleQaApi({request,url,env,authorization,qaLedger=null,respond,
   clock=()=>new Date(),fetchHealth=fetch}){
   const actor=trustedActor(authorization);
   const send=(body,status=200)=>respond(request,env,body,status);
   const pathname=url.pathname;
   const apiPrefix="/api/admin/qa/";
   if(!pathname.startsWith(apiPrefix))throw error(404,"Unknown QA route");
+  // The production adapter is Supabase-only; a deterministic test harness may
+  // inject the same append/list contract. No legacy network gateway exists.
+  const ledger=qaLedger || createSupabaseQaLedger(env);
   async function listPage(table,field,value,limit=50,offset=null,sortField=null){
-    if(!Number.isInteger(limit)||limit<1||limit>100)throw error(400,"Unbounded QA history request");
-    const query=new URLSearchParams({pageSize:String(Math.min(limit,100))});
-    if(field)query.set("filterByFormula",filterFormula(field,value));
-    if(offset){
-      if(typeof offset!=="string"||offset.length>180||!/^[A-Za-z0-9/+=._-]+$/.test(offset))
-        throw error(400,"Invalid QA pagination cursor");
-      query.set("offset",offset);
-    }
-    if(sortField){
-      if(!["Created At UTC","Recorded At UTC"].includes(sortField))throw error(500,"QA sort field denied");
-      query.set("sort[0][field]",sortField);query.set("sort[0][direction]","desc");
-    }
-    const response=await airtableFetch(env,table,"?"+query.toString());
-    if(!Array.isArray(response.records))throw error(503,"QA canonical history unavailable");
-    return {records:response.records,offset:response.offset||null};
+    return ledger.listPage(table,field,value,limit,offset,sortField);
   }
   const list=async(table,field,value,limit=50)=>(
     await listPage(table,field,value,limit)).records;
   async function add(table,recordFields){
-    const saved=await airtableFetch(env,table,"",{method:"POST",skipSupabaseWriteThrough:true,
-      body:JSON.stringify({records:[{fields:recordFields}],typecast:false})});
-    const result=saved?.records?.[0];
-    if(!result?.id)throw error(503,"QA Airtable commit unverified");
+    const result=await ledger.add(table,recordFields);
+    if(!result?.id)throw error(503,"QA Supabase commit unverified");
     return result;
   }
   async function writeOnce(table,kind,key,identity,payload,makeFields){
@@ -245,7 +228,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   }
   if(pathname===apiPrefix+"catalog"&&request.method==="GET"){
     return send({ok:true,catalogVersion:QA_CATALOG.catalogVersion,tests:catalog,
-      safeAutomations:["QA-DIAG-001","QA-CAT-001","QA-AT-001"],executionEnvironment:configuredQaEnvironment(env),writeAuthority:"Airtable"});
+      safeAutomations:["QA-DIAG-001","QA-CAT-001","QA-AT-001"],executionEnvironment:configuredQaEnvironment(env),writeAuthority:"Supabase"});
   }
   if(pathname===apiPrefix+"runs"){
     if(request.method==="GET"){
@@ -391,7 +374,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       canonicalRun:async()=>{
         const result=await list(QA_RUNS_TABLE,"Run ID",runId,2);
         const record=result.length===1?result[0]:null;
-        return {source:"Airtable",recordId:record?.id||null,
+        return {source:"Supabase",recordId:record?.id||null,
           expectedRunId:runId,runId:fields(record)["Run ID"]||null,
           createdAtUtc:fields(record)["Created At UTC"]||null};
       },
@@ -447,7 +430,10 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   const semanticPayload={...payload,executionId:undefined}; // stable across retries before generated ID
   const identity={runId,testId,actor};
   const result=await writeOnce(QA_EVENTS_TABLE,kind,key,identity,semanticPayload,()=>({
-    "Execution ID":payload.executionId||"qaex-"+crypto.randomUUID(),
+    // HumanApproval points to the observed execution in payload.executionId,
+    // but the approval is a *new immutable event* with its own unique ID.
+    "Execution ID":kind==="HumanApproval"||kind==="Waiver"||kind==="RunFinalized"
+      ?"qaex-"+crypto.randomUUID():payload.executionId,
     "Run ID":runId,"Test ID":testId,"Event Kind":kind,"Actor ID":actor,
     "Recorded At UTC":clock().toISOString(),"Payload JSON":JSON.stringify(payload)
   }));

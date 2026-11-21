@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,qaDeploymentBlockers,QA_WORKER_BUILD,QA_UI_BUILD,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
-function harness(){
+function harness(overrides={}){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
   const leases=new Map();
   const bucket={
@@ -19,24 +19,28 @@ function harness(){
     }
   };
   let seq=0;
-  const airtableFetch=async(_env,table,suffix,options={})=>{
-    const entries=rows.get(table);assert.ok(entries,"only QA tables may be addressed");
-    if(options.method==="POST"){
-      const body=JSON.parse(options.body);
-      assert.equal(body.records.length,1);
-      const record={id:"rec"+String(++seq).padStart(14,"0"),fields:body.records[0].fields};
-      entries.push(record);return {records:[record]};
+  const qaLedger={
+    async listPage(table,field,value,limit=50,offset=null,sortField=null){
+      const entries=rows.get(table);assert.ok(entries,"only QA ledger tables may be read");
+      let selected=entries;
+      if(field){
+        assert.ok(["Run ID","Idempotency Key"].includes(field));
+        selected=selected.filter(row=>row.fields[field]===value);
+      }
+      if(sortField){
+        assert.ok(["Created At UTC","Recorded At UTC"].includes(sortField));
+        selected=[...selected].sort((a,b)=>String(b.fields[sortField]||"").localeCompare(String(a.fields[sortField]||"")));
+      }
+      const begin=offset===null?0:Number(offset);
+      assert.ok(Number.isInteger(begin)&&begin>=0);
+      return {records:selected.slice(begin,begin+limit),
+        offset:begin+limit<selected.length?String(begin+limit):null};
+    },
+    async add(table,recordFields){
+      const entries=rows.get(table);assert.ok(entries,"only QA ledger tables may be written");
+      const record={id:"qa-sb-"+crypto.randomUUID(),fields:recordFields};
+      entries.push(record);return record;
     }
-    assert.ok(!options.method||options.method==="GET","QA API must be append-only");
-    const q=new URLSearchParams(suffix?.startsWith("?")?suffix.slice(1):"");
-    const formula=q.get("filterByFormula");
-    let selected=entries;
-    if(formula){
-      const m=/^\{(Run ID|Idempotency Key)\}=("(?:[^"\\]|\\.)*")$/.exec(formula);
-      assert.ok(m,"structured only QA formula");
-      const value=JSON.parse(m[2]);selected=selected.filter(x=>x.fields[m[1]]===value);
-    }
-    return {records:selected.slice(0,Number(q.get("maxRecords")||50))};
   };
   const now=()=>new Date("2026-11-06T12:00:00.000Z");
   const base="https://studio.chicagoshining.com";
@@ -45,8 +49,8 @@ function harness(){
       method,headers:{"Content-Type":"application/json"},
       ...(body?{body:JSON.stringify(body)}:{})
     });
-    return handleQaApi({request,url:new URL(request.url),env:{STUDIO_MEDIA:bucket},
-      authorization:{user:{record_id:actor}},airtableFetch,clock:now,
+    return handleQaApi({request,url:new URL(request.url),env:{STUDIO_MEDIA:bucket,...overrides},
+      authorization:{user:{record_id:actor}},qaLedger,clock:now,
       respond:(_request,_env,obj,status=200)=>new Response(JSON.stringify(obj),{status}),
       fetchHealth:fetchHealth || (async()=>new Response(JSON.stringify({version:"0.10.764"}),{status:200}))});
   }
@@ -56,7 +60,14 @@ test("catalog exposes 88 versioned cases and read-only safe-check allowlist",asy
   const h=harness(),r=await h.call("GET","catalog");const j=await r.json();
   assert.equal(r.status,200);assert.equal(j.tests.length,88);
   assert.deepEqual(j.safeAutomations,["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
-  assert.equal(j.writeAuthority,"Airtable");
+  assert.equal(j.writeAuthority,"Supabase");
+});
+test("single live Worker refuses staging or development execution flags",async()=>{
+  for(const name of ["staging","development"]){
+    const h=harness({STUDIO_QA_EXECUTION_ENV:name});
+    await assert.rejects(()=>h.call("GET","catalog"),/Only production QA execution is configured/);
+    assert.equal(h.rows.get(QA_RUNS_TABLE).length,0);
+  }
 });
 test("QA environment selection cannot silently send staging tests to production",async()=>{
   const h=harness();
@@ -64,7 +75,7 @@ test("QA environment selection cannot silently send staging tests to production"
     /not configured on this Worker/);
   assert.equal(h.rows.get(QA_RUNS_TABLE).length,0);
 });
-test("run creation is server-stamped and repeated request IDs reuse canonical Airtable rows",async()=>{
+test("run creation is server-stamped and repeated request IDs reuse canonical Supabase rows",async()=>{
   const h=harness(),input={environment:"production",client_request_id:"ui-run-12345678"};
   const first=await h.call("POST","runs",input);const p=await first.json();
   assert.equal(first.status,201);assert.match(p.run.runId,/^qa-/);
@@ -107,10 +118,16 @@ test("falsely healthy assertion never passes and automated Pass needs independen
   await assert.rejects(()=>h.call("POST","runs/"+id+"/approvals",
     {testId:"QA-DIAG-001",executionId:passed.event.payload.executionId,
     decision:"Approved",client_request_id:"ui-self-approve01"}),/Independent reviewer required/);
-  await h.call("POST","runs/"+id+"/approvals",{
+  const reviewed=await (await h.call("POST","runs/"+id+"/approvals",{
     testId:"QA-DIAG-001",executionId:passed.event.payload.executionId,
     decision:"Approved",client_request_id:"ui-review-approve01"
-  },"recADMIN00000002");
+  },"recADMIN00000002")).json();
+  // Observation and review are separate ledger events; the review payload
+  // refers to the observed execution, but its own execution ID is distinct.
+  assert.equal(reviewed.event.payload.executionId,passed.event.payload.executionId);
+  assert.notEqual(reviewed.event.executionId,passed.event.executionId);
+  const eventRows=h.rows.get(QA_EVENTS_TABLE);
+  assert.equal(new Set(eventRows.map(x=>x.fields["Execution ID"])).size,eventRows.length);
   g=(await (await h.call("GET","runs/"+id+"/gate")).json()).gate;
   assert.ok(g.passed.includes("QA-DIAG-001"));
   assert.ok(!g.pendingHuman.includes("QA-DIAG-001"));
@@ -178,18 +195,18 @@ test("catalog-integrity auto assertion records observed schema, not guessed Pass
   assert.equal(result.event.payload.evidence[0].invalidCount,0);
   assert.equal(result.event.payload.requiresHumanApproval,true);
 });
-test("Airtable canonical QA run assertion only passes on observed canonical row",async()=>{
+test("Supabase canonical QA run assertion only passes on observed canonical row",async()=>{
   const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"ui-run-at-00001"})).json();
   const found=await (await h.call("POST","runs/"+created.run.runId+"/execute/QA-AT-001",
     {client_request_id:"ui-check-at-00001"})).json();
   assert.equal(found.event.payload.status,"Pass");
   assert.equal(found.event.payload.evidence[0].runId,created.run.runId);
-  assert.equal(found.event.payload.evidence[0].source,"Airtable");
+  assert.equal(found.event.payload.evidence[0].source,"Supabase");
   assert.ok(found.event.payload.evidence[0].recordId);
 });
 
 
-test("Runner attestation allows only the fixed health origin and known write sources",async()=>{
+test("Runner attestation requires Supabase write authority at fixed health origin",async()=>{
   let calls=0;
   const healthy=async()=>{
     calls++;
@@ -199,7 +216,7 @@ test("Runner attestation allows only the fixed health origin and known write sou
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://unknown.example.com"},healthy),"unverified");
   assert.equal(calls,0);
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},healthy),
-    "2026-11-05-video-watermark-scale-v2");
+    "unverified");
   assert.equal(calls,1);
   const supabaseWrite=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
     version:"v1",studio_write_source:"supabase"}),{status:200});

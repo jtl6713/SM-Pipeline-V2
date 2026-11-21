@@ -1,8 +1,9 @@
-"""Phase 5 runner write-through. No live Airtable or Supabase calls."""
+"""Supabase-only runner mutation contracts. Network calls are isolated fakes."""
 
 import json
 
 import requests
+import pytest
 
 from airtable.client import AirtableClient
 from airtable.constants import (
@@ -45,76 +46,42 @@ def _settings(**extra):
     return base
 
 
-def test_output_update_mirrors_full_airtable_record_and_ignores_missing_outbox(monkeypatch):
+def test_output_update_uses_supabase_patch_without_legacy_record_enrichment(monkeypatch):
     seen = []
-
-    def fake_patch(url, *, headers, json, timeout):
-        seen.append(("airtable", url, json))
-        return Response({
-            "id": "recOutput1",
-            "fields": {
-                "Output_ID": 9,
-                "Platform": "Instagram",
-                "Publish_Status": "Scheduled",
-                "Content_Profile": ["recProfile1"],
-            },
-        })
-
+    def deny_airtable(*_args, **_kwargs):
+        raise AssertionError("retired Airtable write")
     def fake_request(method, url, *, headers, json, timeout):
-        seen.append((method, url, json, headers.get("Prefer")))
-        if "content_profiles" in url:
-            return Response([{"id": "prof-uuid"}])
+        seen.append((method, url, json))
         if "studio_side_effect_outbox" in url:
-            return Response('{"code":"PGRST205","message":"schema cache"}', status_code=404)
+            return Response('{"code":"PGRST205"}', status_code=404)
+        if method == "GET" and "platform_outputs" in url and "error_messages" in url:
+            return Response([{"error_messages": {}}])
         return Response("")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "patch", deny_airtable)
     monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings()).update_record(
-        PLATFORM_OUTPUTS_TABLE,
-        "recOutput1",
-        {"Publish_Status": "Scheduled"},
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Scheduled"}
     )
-    assert record["id"] == "recOutput1"
-    posts = [row for row in seen if row[0] == "POST" and "platform_outputs" in row[1]]
-    assert len(posts) == 1
-    assert posts[0][2][0]["airtable_record_id"] == "recOutput1"
-    assert posts[0][2][0]["content_profile_id"] == "prof-uuid"
-    assert posts[0][2][0]["publish_status"] == "Scheduled"
-    assert "resolution=merge-duplicates" in posts[0][3]
+    assert record == {"id": "recOutput1", "fields": {"Publish_Status": "Scheduled"}}
+    patches = [x for x in seen if x[0] == "PATCH" and "platform_outputs" in x[1]]
+    assert len(patches) == 1
+    assert patches[0][2]["publish_status"] == "Scheduled"
+    # The typed status invalidates any stale Airtable-era value in the JSON bag.
+    assert patches[0][2]["error_messages"] == {}
 
+def test_unmapped_table_update_fails_closed_without_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unexpected Supabase mapping")))
+    with pytest.raises(RuntimeError, match="Supabase update uncommitted"):
+        AirtableClient(settings=_settings()).update_record("tblMedia", "recMedia", {"Asset Name": "clip"})
 
-def test_other_tables_do_not_call_supabase(monkeypatch):
-    called = {"request": 0}
-
-    def fake_patch(url, *, headers, json, timeout):
-        return Response({"id": "recMedia", "fields": json["fields"]})
-
-    def fake_request(*_args, **_kwargs):
-        called["request"] += 1
-        raise AssertionError("supabase should not be called")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
-    monkeypatch.setattr(requests, "request", fake_request)
-    AirtableClient(settings=_settings()).update_record("tblMedia", "recMedia", {"Asset Name": "clip"})
-    assert called["request"] == 0
-
-
-def test_supabase_failure_does_not_fail_airtable_update(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
-        "id": "recOutput1",
-        "fields": {"Output_ID": 1, "Platform": "TikTok"},
-    }))
-
-    def fake_request(*_args, **_kwargs):
-        raise RuntimeError("supabase down")
-
-    monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings()).update_record(
-        PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Failed"}
-    )
-    assert record["id"] == "recOutput1"
-
+def test_supabase_failure_blocks_update_instead_of_using_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable write")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase"):
+        AirtableClient(settings=_settings()).update_record(
+            PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Failed"}
+        )
 
 def test_unconfigured_supabase_skips_mirror(monkeypatch):
     monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
@@ -251,71 +218,22 @@ def test_queue_ready_update_merges_existing_payload(monkeypatch):
     assert payload["preview_status"] == "Pending"
 
 
-def test_queue_update_mirrors_target_links_without_file_bytes(monkeypatch):
-    seen = []
+def test_queue_link_update_cannot_soft_succeed_without_supabase_commit(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable write")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase"):
+        AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE, "recQueue1",
+            {"Target_Production_Request_Outputs": ["recProOutput1"]},
+        )
 
-    def fake_patch(url, *, headers, json, timeout):
-        return Response({
-            "id": "recQueue1",
-            "fields": {
-                "Transfer_Status": "Ready",
-                "Target_Production_Request_Outputs": ["recProOutput1", "not-a-record"],
-                "Source_URL": "https://example.com/file.jpg",
-                "Source_R2_Key": "library/file.jpg",
-            },
-        })
-
-    def fake_request(method, url, *, headers, json, timeout):
-        seen.append((method, url, json))
-        if method == "GET" and "studio_media_transfer_queue?" in url:
-            if "select=payload" in url:
-                return Response([{"airtable_record_id": "recQueue1", "payload": {"transfer_id": "keep"}}])
-            return Response([{"id": "11111111-1111-1111-1111-111111111111", "airtable_record_id": "recQueue1"}])
-        if method == "GET" and "production_request_outputs?" in url:
-            return Response([{"id": "22222222-2222-2222-2222-222222222222", "airtable_record_id": "recProOutput1"}])
-        if "studio_side_effect_outbox" in url:
-            return Response('{"code":"PGRST205"}', status_code=404)
-        return Response("")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
-    monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings()).update_record(
-        MEDIA_TRANSFER_QUEUE_TABLE,
-        "recQueue1",
-        {"Target_Production_Request_Outputs": ["recProOutput1"]},
-    )
-    assert record["id"] == "recQueue1"
-    queued = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
-    assert queued[0][2][0]["payload"]["target_production_request_output_ids"] == ["recProOutput1"]
-    assert "Source_URL" not in str(queued[0][2])
-    assert "Source_R2_Key" not in str(queued[0][2])
-    anchors = [row for row in seen if row[0] == "POST" and "production_request_outputs" in row[1]]
-    assert anchors[0][2] == [{"airtable_record_id": "recProOutput1"}]
-    joins = [row for row in seen if row[0] == "POST" and "studio_media_transfer_targets" in row[1]]
-    assert joins[0][2] == [{
-        "transfer_id": "11111111-1111-1111-1111-111111111111",
-        "production_request_output_id": "22222222-2222-2222-2222-222222222222",
-    }]
-    deletes = [row for row in seen if row[0] == "DELETE" and "studio_media_transfer_targets" in row[1]]
-    assert "transfer_id=eq.11111111-1111-1111-1111-111111111111" in deletes[0][1]
-    assert seen.index(deletes[0]) < seen.index(joins[0])
-
-
-def test_queue_supabase_failure_does_not_fail_airtable_update(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
-        "id": "recQueue2",
-        "fields": {"Transfer_Status": "Error", "Error_Message": "crop failed"},
-    }))
-
-    def fake_request(*_args, **_kwargs):
-        raise RuntimeError("supabase down")
-
-    monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings()).update_record(
-        MEDIA_TRANSFER_QUEUE_TABLE, "recQueue2", {"Transfer_Status": "Error"}
-    )
-    assert record["fields"]["Transfer_Status"] == "Error"
-
+def test_queue_supabase_failure_blocks_state_change(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable write")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase"):
+        AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE, "recQueue2", {"Transfer_Status": "Error"}
+        )
 
 def test_phase6_request_update_keeps_supabase_row_when_airtable_fails(monkeypatch):
     seen = []
@@ -340,46 +258,29 @@ def test_phase6_request_update_keeps_supabase_row_when_airtable_fails(monkeypatc
     assert patches[0][2] == {"request_status": "Submitted"}
 
 
-def test_phase6_flag_off_still_requires_airtable_for_request_updates(monkeypatch):
-    """Write SoR closes the archive: Phase 6 off no longer falls through to Airtable."""
-
-    def fake_patch(*_args, **_kwargs):
-        raise AssertionError("airtable patch")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
-    monkeypatch.setattr(requests, "request", lambda *args, **kwargs: Response(""))
-    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
-        PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
-    )
-    assert record == {"id": "recRequest1", "fields": {"Request_Status": "Submitted"}}
-
+def test_phase6_flag_off_never_restores_airtable_or_fabricates_request_patch(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable write")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unmapped write")))
+    with pytest.raises(RuntimeError, match="Supabase update uncommitted"):
+        AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+            PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
+        )
 
 def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
     seen = []
-
-    def fake_patch(url, *, headers, json, timeout):
-        return Response({
-            "id": "recRequest1",
-            "fields": {"Request_Status": "Submitted"},
-        })
-
     def fake_request(method, url, *, headers, json, timeout):
         seen.append((method, url, json))
         if "studio_side_effect_outbox" in url:
             return Response('{"code":"PGRST205"}', status_code=404)
         return Response("")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
     monkeypatch.setattr(requests, "request", fake_request)
-    record = AirtableClient(settings=_settings()).update_record(
+    record = AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
         PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
     )
     assert record["id"] == "recRequest1"
     patches = [row for row in seen if row[0] == "PATCH" and "production_requests" in row[1]]
-    posts = [row for row in seen if row[0] == "POST" and "production_requests" in row[1]]
-    assert posts == []
-    assert patches[0][2] == {"request_status": "Submitted"}
-
+    assert patches and patches[0][2] == {"request_status": "Submitted"}
 
 def test_phase6_produce_job_patch_persists_production_job(monkeypatch):
     """A themes→audio step write is only Studio_Production_Job_JSON. It must land."""
@@ -453,57 +354,35 @@ def test_runner_media_patch_densifies_content_profile_and_notes(monkeypatch):
     assert meta["studio_transfer_id"] == "LIB-1"
 
 
-def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(monkeypatch):
+def test_media_patch_failure_cannot_fall_back_to_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable write")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase"):
+        AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).update_record(
+            MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
+        )
+
+def test_runner_media_delete_requires_confirmed_supabase_row(monkeypatch):
+    import supabase_pipeline
     seen = []
-
-    def fake_patch(url, *, headers, json, timeout):
-        return Response({
-            "id": "recMedia9",
-            "fields": {
-                "Asset Name": "Pier lights",
-                "Google Drive File ID": "drive-file-9",
-                "Google Drive URL": "https://media.chicagoshining.com/studio/library/pier.jpg",
-                "Studio_Favorite": True,
-            },
-        })
-
-    def fake_request(method, url, *, headers, json, timeout):
-        seen.append((method, url, json))
-        if "media_assets" in url:
-            raise RuntimeError("supabase down")
-        return Response("")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
-    monkeypatch.setattr(requests, "request", fake_request)
-    # Supabase commit fails; write SoR still must not fall through to Airtable.
-    record = AirtableClient(settings=_settings(
-        studio_write_source="supabase",
-        studio_phase6_write_source="supabase",
-    )).update_record(
-        MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
-    )
-    assert record == {"id": "recMedia9", "fields": {"Studio_Favorite": True}}
-    # fake_patch raises if Airtable were contacted.
-
-
-def test_runner_media_delete_does_not_mirror(monkeypatch):
-    monkeypatch.setattr(requests, "delete", lambda *_args, **_kwargs: Response({"deleted": True}))
-    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
+    def deny_airtable(*_args, **_kwargs):
+        raise AssertionError("retired Airtable delete")
+    def fake_rest(_settings, path, method, body=None, *, prefer=None):
+        seen.append((path, method, prefer))
+        return [{"airtable_record_id": "recMedia9"}]
+    monkeypatch.setattr(requests, "delete", deny_airtable)
+    monkeypatch.setattr(supabase_pipeline, "_rest", fake_rest)
     deleted = AirtableClient(settings=_settings()).delete_record(MEDIA_ASSETS_TABLE, "recMedia9")
-    assert deleted["deleted"] is True
+    assert deleted == {"id": "recMedia9", "deleted": True}
+    assert seen[0][1:] == ("DELETE", "return=representation")
 
-
-def test_default_mode_still_raises_airtable_errors(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({"error": "nope"}, status_code=422))
-    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("mirrored")))
-    try:
+def test_default_mode_reports_uncommitted_supabase_instead_of_airtable_error(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase"):
         AirtableClient(settings=_settings()).update_record(
             PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Failed"}
         )
-    except requests.HTTPError:
-        return
-    raise AssertionError("expected Airtable HTTPError")
-
 
 def _supabase_request_log(seen):
     def fake_request(method, url, *, headers, json, timeout):
@@ -568,20 +447,13 @@ def test_output_create_keeps_minted_id_when_airtable_is_archived(monkeypatch):
     assert posts[0][2][0]["airtable_record_id"] == rows[0]["id"]
 
 
-def test_request_create_still_requires_airtable(monkeypatch):
-    """Write SoR closes the archive: create soft-echoes instead of requiring Airtable."""
-    monkeypatch.setattr(
-        requests, "post",
-        lambda url, *, headers, json, timeout: (_ for _ in ()).throw(AssertionError("airtable post")),
-    )
-    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
-    rows = AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
-        PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
-    )
-    assert len(rows) == 1
-    assert rows[0]["fields"]["Requested_Title"] == "Pier"
-    assert str(rows[0]["id"]).startswith("rec")
-
+def test_request_create_without_phase6_supabase_authority_fails_closed(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable create")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unmapped Supabase create")))
+    with pytest.raises(RuntimeError, match="Supabase create uncommitted"):
+        AirtableClient(settings=_settings(studio_write_source="supabase")).create_records(
+            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}]
+        )
 
 def test_phase6_request_create_keeps_supabase_row_when_airtable_fails(monkeypatch):
     seen = []
@@ -609,17 +481,13 @@ def test_phase6_request_create_keeps_supabase_row_when_airtable_fails(monkeypatc
     assert posts[0][2][0]["airtable_record_id"] == records[0]["id"]
 
 
-def test_phase6_create_without_identity_still_requires_airtable(monkeypatch):
-    monkeypatch.setattr(requests, "post", lambda *_args, **_kwargs: Response({"error": "nope"}, status_code=422))
-    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
-    try:
+def test_phase6_create_without_confirmed_supabase_commit_is_rejected(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable create")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase create uncommitted"):
         AirtableClient(settings=_settings(studio_phase6_write_source="supabase")).create_records(
-            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}],
+            PRODUCTION_REQUESTS_TABLE, [{"Requested_Title": "Pier"}]
         )
-    except requests.HTTPError:
-        return
-    raise AssertionError("a Phase 6 create without identity must still require Airtable")
-
 
 def test_partial_ttd1_output_mirror_merges_publish_id_into_bag(monkeypatch):
     """TTD1 stamps Processing + publish_id without Platform/Output_ID. Bag must merge."""

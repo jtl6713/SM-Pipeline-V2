@@ -65,12 +65,14 @@ test("POST/PATCH notifications are scoped to confirmed authoritative output/idea
   assert.equal(calls.length, 2);
 });
 
-test("Airtable response handling enqueues summary after success and before optional mirror", () => {
+test("confirmed Supabase mutation notifies summary; uncommitted CRUD fails before notification", () => {
   const worker = raw("worker.js");
-  const successful = worker.indexOf("if (!response.ok) {");
-  const notify = worker.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
-  const mirror = worker.indexOf("await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body)");
-  assert.ok(successful >= 0 && notify > successful && mirror > notify);
+  const gateway = worker.slice(worker.indexOf("async function airtableFetch("), worker.indexOf("\n}\n", worker.indexOf("async function airtableFetch(")) + 2);
+  const uncommitted = gateway.indexOf("supabase_only_crud_uncommitted");
+  const notify = gateway.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
+  assert.ok(uncommitted >= 0 && notify > uncommitted);
+  assert.match(gateway, /throw new HttpError\(/);
+  assert.doesNotMatch(gateway, /await fetch\(endpoint/);
 });
 
 test("reconciliation fences updates and never publishes staged partial totals", () => {

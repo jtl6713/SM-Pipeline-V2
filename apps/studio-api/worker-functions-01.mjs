@@ -1004,14 +1004,9 @@ export function membershipAllowsBrand(authorization, brandLinks) {
 /*__STUDIO_WORKER_END:membershipAllowsBrand__*/
 
 export function requireConfig(env) {
-  const required = [
-    "AIRTABLE_PAT",
-    "AIRTABLE_BASE_ID",
-    "AIRTABLE_IDEA_TABLE_ID",
-    "AIRTABLE_CONTENT_TABLE_ID",
-    "AIRTABLE_OUTPUT_TABLE_ID",
-    "AIRTABLE_MEDIA_TABLE_ID",
-  ];
+  // Supabase is the sole operational database. Legacy Airtable table IDs
+  // may remain as compatibility identifiers but are not credentials.
+  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"];
   const missing = required.filter((key) => !env[key]);
   if (missing.length) throw new HttpError(500, `Missing Worker configuration: ${missing.join(", ")}`);
 }
@@ -11552,7 +11547,7 @@ export async function opsForceAzNavyPierTitle(env, options = {}) {
   const requestId = "reca7v6zi1b9QNanJ";
   const title = "Final Navy Pier Fireworks - Full Video";
   const phase = String(options.phase || "auto").trim().toLowerCase() || "auto";
-  if (!env?.AIRTABLE_PAT) return { skipped: true, reason: "no_pat" };
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
 
   let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const notes = String(f(record, "Production_Notes") || "");

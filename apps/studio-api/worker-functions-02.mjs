@@ -7949,9 +7949,8 @@ export function studioInsightsLearnedTable(env) {
 /*__STUDIO_WORKER_END:studioInsightsLearnedTable__*/
 
 export function studioInsightsDbEnabled(env) {
-  // Learned models can live in Pipeline Settings under write SoR without PAT.
-  if (studioWriteSource(env) === "supabase") return true;
-  return Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID);
+  // Pipeline Settings are Supabase-backed; an Airtable token is never a fallback.
+  return studioWriteSource(env) === "supabase";
 }
 /*__STUDIO_WORKER_END:studioInsightsDbEnabled__*/
 

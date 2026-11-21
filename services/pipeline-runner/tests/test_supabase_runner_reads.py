@@ -1,6 +1,7 @@
-"""Phase 5 remainder reads. Default stays Airtable. No live calls."""
+"""Supabase-only read contracts; legacy source flags never restore Airtable."""
 
 import requests
+import pytest
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
@@ -11,37 +12,22 @@ def _client(**extra):
     return AirtableClient(settings=_settings(**extra))
 
 
-def test_default_output_list_stays_on_airtable(monkeypatch):
-    airtable = []
-
-    def fake_get(url, *, headers, params, timeout):
-        airtable.append(url)
-        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "Instagram"}}]})
-
-    def fake_request(*_args, **_kwargs):
-        raise AssertionError("supabase read")
-
-    monkeypatch.setattr(requests, "get", fake_get)
+def test_default_output_list_uses_supabase_without_airtable(monkeypatch):
+    seen = []
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url))
+        return Response([{"airtable_record_id": "recOutput1", "platform": "Instagram", "error_messages": {"_runner_record_projection": "v1"}}])
     monkeypatch.setattr(requests, "request", fake_request)
-    # Write SoR still airtable → archive open; default runner output read is Airtable.
     rows = _client().list_records(PLATFORM_OUTPUTS_TABLE, max_records=5)
     assert rows[0]["id"] == "recOutput1"
-    assert airtable
+    assert seen and all("supabase.co" in url for _method, url in seen)
 
-
-def test_write_sor_closes_output_list_without_read_flag(monkeypatch):
-    """STUDIO_WRITE_SOURCE=supabase freezes the archive even without read flags."""
-
-    def fake_get(*_a, **_k):
-        raise AssertionError("airtable list")
-
-    def fake_request(*_a, **_k):
-        raise AssertionError("unexpected supabase")
-
-    monkeypatch.setattr(requests, "get", fake_get)
-    monkeypatch.setattr(requests, "request", fake_request)
-    assert _client(studio_write_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE) == []
-
+def test_write_sor_missing_supabase_does_not_invent_empty_list(monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        _client(studio_write_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
 
 def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
     def fake_get(*_args, **_kwargs):
@@ -113,73 +99,37 @@ def test_unmarked_list_uses_supabase_when_runner_reads_supabase(monkeypatch):
     assert airtable == []
 
 
-def test_formula_and_content_flag_stay_independent(monkeypatch):
-    seen = {"airtable": 0, "supabase": []}
-
-    def fake_get(url, *, headers, params, timeout):
-        seen["airtable"] += 1
-        return Response({"records": [{"id": "recContent1", "fields": {"Content_Title": "Pier"}}]})
-
+def test_stale_content_flag_does_not_restore_airtable_reads(monkeypatch):
+    seen = []
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
     def fake_request(method, url, *, headers, json, timeout):
-        seen["supabase"].append(url)
-        return Response([{
-            "airtable_record_id": "recOutputIg",
-            "platform": "Instagram",
-            "error_messages": {"_runner_record_projection": "v1"},
-        }])
-
-    monkeypatch.setattr(requests, "get", fake_get)
+        seen.append(url)
+        if "platform_outputs" in url:
+            return Response([{"airtable_record_id": "recOutputIg", "platform": "Instagram", "error_messages": {"_runner_record_projection": "v1"}}])
+        if "content_items" in url:
+            return Response([{"airtable_record_id": "recContent1", "content_title": "Pier", "error_messages": {"_runner_record_projection": "v1"}}])
+        raise AssertionError(url)
     monkeypatch.setattr(requests, "request", fake_request)
-    client = _client(
-        studio_runner_output_read_source="supabase",
-        studio_runner_content_read_source="airtable",
-    )
-    formula_rows = client.list_records(
-        PLATFORM_OUTPUTS_TABLE, formula='{Platform}="Instagram"', max_records=2,
-    )
-    content_rows = client.list_records(CONTENT_ITEMS_TABLE, max_records=2)
-    assert formula_rows[0]["id"] == "recOutputIg"
-    assert content_rows[0]["id"] == "recContent1"
-    assert seen["airtable"] == 1
-    assert len(seen["supabase"]) == 1
-    assert "platform.eq.Instagram" in seen["supabase"][0]
+    client = _client(studio_runner_output_read_source="supabase", studio_runner_content_read_source="airtable")
+    outputs = client.list_records(PLATFORM_OUTPUTS_TABLE, formula='{Platform}="Instagram"', max_records=2)
+    contents = client.list_records(CONTENT_ITEMS_TABLE, max_records=2)
+    assert outputs[0]["id"] == "recOutputIg"
+    assert contents[0]["id"] == "recContent1"
+    assert len(seen) == 2
 
-
-def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
-    airtable = []
-    supabase = []
-
-    def fake_get(url, *, headers, params, timeout):
-        airtable.append(params.get("filterByFormula") or params.get("view"))
-        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
-
+def test_unsupported_view_fails_closed_instead_of_reading_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
     def fake_request(method, url, *, headers, json, timeout):
-        supabase.append(url)
-        return Response([{
-            "airtable_record_id": "recRetry1",
-            "platform": "TikTok",
-            "publish_next_retry_at": "2020-01-01T00:00:00Z",
-            "error_messages": {"_runner_record_projection": "v1"},
-        }])
-
-    monkeypatch.setattr(requests, "get", fake_get)
+        return Response([{"airtable_record_id": "recRetry1", "platform": "TikTok", "publish_next_retry_at": "2020-01-01T00:00:00Z", "error_messages": {"_runner_record_projection": "v1"}}])
     monkeypatch.setattr(requests, "request", fake_request)
-    # Archive still open (write SoR airtable); untranslated view falls through.
     client = _client(studio_runner_output_read_source="supabase")
-    find_rows = client.list_records(
-        PLATFORM_OUTPUTS_TABLE,
-        formula='IS_BEFORE({Publish_Next_Retry_At},NOW())',
-        max_records=2,
-    )
-    view_rows = client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
-    assert find_rows[0]["id"] == "recRetry1"
-    assert "publish_next_retry_at.lt." in supabase[0]
-    assert view_rows[0]["fields"]["Platform"] == "TikTok"
-    assert airtable == ["Ready Queue"]
+    rows = client.list_records(PLATFORM_OUTPUTS_TABLE, formula='IS_BEFORE({Publish_Next_Retry_At},NOW())', max_records=2)
+    assert rows[0]["id"] == "recRetry1"
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
 
-
-def test_unsupported_view_empty_when_fallback_stopped(monkeypatch):
-    """FALLBACK_STOPPED + untranslated view → [] (no Airtable), matching Worker nuke."""
+def test_unsupported_view_fails_explicitly_when_airtable_retired(monkeypatch):
+    """An untranslatable view must not become a fabricated empty result."""
 
     def fake_get(*_a, **_k):
         raise AssertionError("airtable list")
@@ -198,7 +148,8 @@ def test_unsupported_view_empty_when_fallback_stopped(monkeypatch):
         studio_write_source="supabase",
         studio_runner_output_read_source="supabase",
     )
-    assert client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue") == []
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue")
 
 
 def test_snapshotted_view_reads_supabase(monkeypatch):
@@ -463,54 +414,31 @@ def test_typed_tiktok_status_wins_over_stale_bag(monkeypatch):
     assert row["fields"]["TikTok_Draft_Publish_ID"] == "v_inbox_url~v2.7707663202070415391"
 
 
-def test_full_mirror_marks_a_resolved_output(monkeypatch):
+def test_partial_supabase_output_patch_does_not_claim_full_airtable_snapshot(monkeypatch):
     seen = []
-
-    def fake_patch(url, *, headers, json, timeout):
-        return Response({
-            "id": "recOutput1",
-            "fields": {
-                "Output_ID": 4,
-                "Platform": "Instagram",
-                "Content_Profile": ["recProfile1"],
-                "Content_Item": ["recContent1"],
-                "Selected_Assets_JSON": {"clips": [2]},
-                "Output_Notes": "ready",
-            },
-        })
-
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
     def fake_request(method, url, *, headers, json, timeout):
         seen.append((method, url, json))
-        if "content_profiles" in url:
-            return Response([{"id": "prof-uuid"}])
-        if "content_items" in url and method == "GET" and "select=id" in url:
-            return Response([{"id": "content-uuid"}])
         if "studio_side_effect_outbox" in url:
             return Response('{"code":"PGRST205"}', status_code=404)
+        if method == "GET" and "platform_outputs" in url and "error_messages" in url:
+            return Response([{"error_messages": {}}])
         return Response("")
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", fake_request)
-    _client().update_record(PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Scheduled"})
-    posts = [row for row in seen if row[0] == "POST" and "platform_outputs" in row[1]]
-    assert posts[0][2][0]["selected_assets"] == {"clips": [2]}
-    assert posts[0][2][0]["error_messages"]["_runner_record_projection"] == "v1"
-    assert posts[0][2][0]["error_messages"]["Output_Notes"] == "ready"
-    assert posts[0][2][0]["content_item_id"] == "content-uuid"
+    row = _client(studio_write_source="supabase").update_record(
+        PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Scheduled"}
+    )
+    assert row["fields"] == {"Publish_Status": "Scheduled"}
+    patches = [r for r in seen if r[0] == "PATCH" and "platform_outputs" in r[1]]
+    assert len(patches) == 1
+    assert patches[0][2]["publish_status"] == "Scheduled"
+    assert patches[0][2]["error_messages"] == {}
 
-
-def test_supabase_read_failure_falls_back_to_airtable(monkeypatch):
-    def fake_get(url, *, headers, params, timeout):
-        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
-
-    def fake_request(*_args, **_kwargs):
-        raise RuntimeError("supabase down")
-
-    monkeypatch.setattr(requests, "get", fake_get)
-    monkeypatch.setattr(requests, "request", fake_request)
-    rows = _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
-    assert rows[0]["fields"]["Platform"] == "TikTok"
-
+def test_supabase_read_failure_never_falls_back_to_airtable(monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Airtable")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        _client(studio_runner_output_read_source="supabase").list_records(PLATFORM_OUTPUTS_TABLE)
 
 def test_due_now_formula_lists_supabase(monkeypatch):
     seen = []
@@ -604,7 +532,7 @@ def test_media_and_request_lists_leave_hard_airtable_return(monkeypatch):
     assert supabase_reads.runner_table_read_source(
         _settings(studio_phase6_write_source="supabase"), PRODUCTION_REQUESTS_TABLE,
     ) == "supabase"
-    assert supabase_reads.runner_table_read_source(_settings(), MEDIA_ASSETS_TABLE) == "airtable"
+    assert supabase_reads.runner_table_read_source(_settings(), MEDIA_ASSETS_TABLE) == "supabase"
 
     seen = []
 
@@ -755,22 +683,15 @@ def test_carousel_slide_patch_skips_airtable_archive(monkeypatch):
     assert body["fields"]["PO_Output_ID"] == [1]
 
 
-def test_write_sor_archive_closed_blocks_any_airtable_http(monkeypatch):
-    """Nuclear quiet-window gate: write SoR means zero Airtable HTTP."""
+def test_archive_closed_blocks_network_egress_and_uncommitted_success(monkeypatch):
     from airtable.constants import MEDIA_ASSETS_TABLE
-
     def boom(*_a, **_k):
-        raise AssertionError("airtable http")
-
-    monkeypatch.setattr(requests, "get", boom)
-    monkeypatch.setattr(requests, "patch", boom)
-    monkeypatch.setattr(requests, "post", boom)
-    monkeypatch.setattr(requests, "delete", boom)
-    monkeypatch.setattr(requests, "request", boom)
-
+        raise AssertionError("all HTTP prohibited")
+    for method in ("get", "patch", "post", "delete", "request"):
+        monkeypatch.setattr(requests, method, boom)
     client = _client(studio_write_source="supabase", studio_phase6_write_source="supabase")
-    # Untranslated media formula used to fall through to Airtable.
-    assert client.list_records(MEDIA_ASSETS_TABLE, formula='{Bogus_Field}="x"') == []
-    assert client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True}) == {
-        "id": "recMediaNuke00001", "fields": {"Active": True},
-    }
+    with pytest.raises(RuntimeError, match="Supabase list query"):
+        client.list_records(MEDIA_ASSETS_TABLE, formula='{Bogus_Field}="x"')
+    with pytest.raises(RuntimeError, match="Supabase"):
+        client.update_record(MEDIA_ASSETS_TABLE, "recMediaNuke00001", {"Active": True})
+

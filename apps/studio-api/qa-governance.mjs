@@ -1,4 +1,4 @@
-// QA governance: pure, fail-closed controls. Persistence adapter must append to Airtable.
+// QA governance: pure, fail-closed controls. Persistence adapter appends to Supabase.
 const statuses=new Set(["Pass","Fail","Blocked","Error","Needs Review"]);
 export function requireQaPermission(actor, permission="qa:write"){
  if(!actor?.id || !Array.isArray(actor.permissions) || !actor.permissions.includes(permission)) throw Error("QA permission denied");
@@ -17,7 +17,7 @@ export function appendQaEvent({actor,run,testId,operation,key,payload={},now=()=
  if(operation==="Waiver") requireQaPermission(actor,"qa:waive");
  if(operation==="Finalize") requireQaPermission(actor,"qa:release");
  if(operation==="HumanApproval"&&payload.subjectActorId===actor.id) throw Error("Self approval denied");
- return Object.freeze({runId:run.runId,testId,kind:operation,idempotencyKey:key,actorId:actor.id,payload:structuredClone(payload),atUtc:now().toISOString(),writeAuthority:"Airtable",appendOnly:true});
+ return Object.freeze({runId:run.runId,testId,kind:operation,idempotencyKey:key,actorId:actor.id,payload:structuredClone(payload),atUtc:now().toISOString(),writeAuthority:"Supabase",appendOnly:true});
 }
 export function qaReleaseGate(catalog,events,waivers=[]){
  const latest=new Map(),approvals=new Set(),now=Date.now();

@@ -408,54 +408,9 @@ export class StudioProfileSummary {
           this.putMeta("error", "");
           continue;
         }
-        const base = code(this.env.AIRTABLE_BASE_ID);
-        const table = kind === "output" ? this.env.AIRTABLE_OUTPUT_TABLE_ID : this.env.AIRTABLE_IDEA_TABLE_ID;
-        if (!base || !table || !this.env.AIRTABLE_PAT) throw new Error("Airtable binding unavailable");
-        const url = new URL("https://api.airtable.com/v0/" + encodeURIComponent(base) + "/" + encodeURIComponent(table));
-        url.searchParams.set("pageSize", "100");
-        url.searchParams.set("filterByFormula", "OR(" + items.map((item) => 'RECORD_ID()="' + item.record_id + '"').join(",") + ")");
-        const fields = kind === "output"
-          ? OUTPUT_LIST_FIELDS
-          : ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"];
-        for (const field of fields) url.searchParams.append("fields[]", field);
-        this.incrementMetric("airtable_dirty_batch_attempts");
-        let res;
-        try {
-          res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
-        } finally {
-          this.recordAirtableEgress("shadow_dirty_replay", "GET", res?.status || 0);
-        }
-        if (!res.ok) throw new Error("Airtable batch reread returned " + res.status);
-        const pack = await res.json();
-        if (!Array.isArray(pack.records) || pack.offset) throw new Error("Incomplete Airtable batch reread");
-        this.incrementMetric("airtable_dirty_batch_successes");
-        const readById = new Map(pack.records.map((row) => [row.id, row]));
-        this.state.storage.transactionSync(() => {
-          // A rebuild may have started during the Airtable fetch. The dirty
-          // queue remains intact and is replayed after the rebuild commits.
-          if (this.getMeta("building_generation")) return;
-          for (const item of items) {
-            const latest = records(this.sql,
-              "SELECT touched_at FROM pending WHERE kind=? AND record_id=?",
-              item.kind, item.record_id)[0];
-            if (!latest || Number(latest.touched_at) !== Number(item.touched_at)) continue;
-            const record = readById.get(item.record_id) || null;
-            const profile = record && eligibleRecord(kind, record) ? this.inferProfile(record) : "";
-            if (record && eligibleRecord(kind, record) && !profile) throw new Error("Cannot resolve profile for " + item.record_id);
-            this.modify(kind, item.record_id, profile,
-              profile ? contributionForRecord(kind, record) : ZERO(),
-              Date.now(), profile ? dueAtForRecord(kind, record) : 0,
-              profile ? approvedFutureAtForRecord(kind, record) : 0);
-            const lag = Math.max(0, Date.now() - Number(item.touched_at));
-            this.incrementMetric("dirty_applied");
-            this.incrementMetric("dirty_lag_sum_ms", lag);
-            this.putMeta("dirty_lag_max_ms", Math.max(Number(this.getMeta("dirty_lag_max_ms") || 0), lag));
-            const bucket = LAG_BUCKET_MS.find((limit) => lag <= limit);
-            this.incrementMetric(bucket ? "dirty_lag_le_" + bucket : "dirty_lag_over_60000");
-            this.sql.exec("DELETE FROM pending WHERE kind=? AND record_id=?", kind, item.record_id);
-          }
-        });
-        this.putMeta("error", "");
+        // Preserve pending dirty records and let the alarm retry.
+        // Never re-query the retired Airtable database on a Supabase miss.
+        throw new Error("Supabase dirty-batch read unavailable; pending changes retained");
       } catch (error) {
         this.incrementMetric("airtable_dirty_batch_errors");
         this.putMeta("error", String(error?.message || error).slice(0, 300));
