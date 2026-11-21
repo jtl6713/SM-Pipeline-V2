@@ -181,7 +181,7 @@ test("routing, explicit original-run token, and user recovery control remain ali
   const recovery=readFileSync(new URL("./story-first-video-recovery-route.mjs",import.meta.url),"utf8");
   assert.match(worker, /if \(videoAction === "recover"\)/);
   assert.match(worker, /expectedRunId: String\(body.expected_run_id/);
-  assert.match(dispatch, /reconcile-unbilled\)\)\$/.test ? /recover\|reconcile-unbilled/ : /recover/);
+  assert.match(dispatch, /recover\|reconcile-unbilled/);
   assert.match(ui, /button\("Recover Existing Video"/);
   assert.match(ui, /expected_run_id:video.run_id/);
   assert.doesNotMatch(recovery,/submitStoryVideo|\/v1\/flows\/video|approve_paid_generation/);
