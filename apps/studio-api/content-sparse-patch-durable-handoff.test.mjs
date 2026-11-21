@@ -47,9 +47,15 @@ test("previously skipped Content directives-only PATCH persists same canonical r
   const requests=[];
   globalThis.fetch=async(url,opts={})=>{
     const path=new URL(url);
-    assert.equal(path.pathname,"/rest/v1/content_items");
     const method=String(opts.method||"GET").toUpperCase();
     requests.push({method,path:path.search,body:opts.body?JSON.parse(opts.body):null});
+    if(path.pathname==="/rest/v1/production_requests"){
+      assert.equal(method,"GET");
+      assert.equal(path.searchParams.get("airtable_record_id"),"eq.recNewOwner000001");
+      return Response.json([{id:"6bd9b96f-905c-40ba-b495-4f7c3c05c1ab",
+        airtable_record_id:"recNewOwner000001"}]);
+    }
+    assert.equal(path.pathname,"/rest/v1/content_items");
     if(method==="GET"){
       if(path.searchParams.get("select")==="id,extras")
         return Response.json([{id:originalId,extras:saved}]);
@@ -64,6 +70,8 @@ test("previously skipped Content directives-only PATCH persists same canonical r
       assert.equal(Object.hasOwn(patch,"content_title"),false,"sparse PATCH must not zero typed title");
       assert.equal(Object.hasOwn(patch,"content_status"),false,"sparse PATCH must not zero typed status");
       assert.equal(Object.hasOwn(patch,"content_profile_id"),false,"sparse PATCH must not erase profile");
+      assert.equal(patch.production_request_id,"6bd9b96f-905c-40ba-b495-4f7c3c05c1ab",
+        "sparse Content PATCH must also persist exact typed Production Request owner");
       assert.deepEqual(patch.extras.Source_Candidate,originalExtras().Source_Candidate);
       assert.deepEqual(patch.extras._studio_recovery,originalExtras()._studio_recovery);
       Object.assign(saved,patch.extras);
@@ -102,19 +110,22 @@ test("Content PATCH cannot succeed when original canonical row is missing",async
   }finally{globalThis.fetch=fetchBefore;}
 });
 
-test("NYC recovery retries old R2 receipts only after confirmed sparse PATCH failure",()=>{
+test("NYC v3 retains prior immutable R2 receipts and retries only Coney and DUMBO after authoritative empty-output preflight",()=>{
   const source=readFileSync(new URL("./worker-functions-02.mjs",import.meta.url),"utf8");
   const start=source.indexOf("export async function studioNyc20261121HandoffCron(");
   const stop=source.indexOf("/*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/",start);
   assert.ok(start>0 && stop>start);
   const body=source.slice(start,stop);
-  assert.match(body,/sparse-patch-v2/);
-  assert.match(body,/previous_failure_not_content_sparse_patch/);
-  assert.match(body,/previous_outcome_not_retryable/);
+  assert.match(body,/sparse-patch-v2/,"v2 receipt is read without resetting it");
+  assert.match(body,/final-two-v3/);
+  assert.match(body,/recF11iJFCPcRbGsk/);
+  assert.match(body,/recNHXsBTfgfuagts/);
+  assert.match(body,/prior_verified_fanout_needs_investigation/);
+  assert.match(body,/prior_v2_verified_fanout_needs_investigation/);
   assert.match(body,/failed_no_auto_retry/);
   assert.match(body,/previous\?\.error/);
   assert.match(body,/if \(await env\.STUDIO_MEDIA\.get\(receiptKey\)\)/);
-  assert.ok(body.indexOf("sparse-patch-v2")<body.indexOf("finalizeProductionRequestPromotion("));
+  assert.ok(body.indexOf("final-two-v3")<body.indexOf("finalizeProductionRequestPromotion("));
   assert.match(body,/existing_platform_outputs_need_reconcile/);
   assert.doesNotMatch(body,/publishPlatform|publishNow|schedulePlatform/i);
 });
