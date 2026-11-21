@@ -39,6 +39,10 @@ jobs:
           assert "$script:graphCalls -gt 100" in s
           assert "graph.facebook.com" in s and "SUPABASE_SERVICE_ROLE_KEY" in s
           assert "wrong_supabase_project_or_credentials" in s
+          for required in ["SameProviderFormat", "'Instagram Story'", "'Facebook Story'",
+                            "'Instagram Carousel'", "'Facebook Reel'", "CAROUSEL_ALBUM",
+                            "cross_format_caption_reuse"]:
+              assert required in s, "provider output kind must be verified"
           assert "'https://vkwvscgisqsbuwagdvtb.supabase.co'" in s
           for bad in ["-Method Post","-Method Patch","-Method Put","-Method Delete",
                       "Invoke-Sqlcmd","Invoke-WebRequest -Method Post","/media_publish",
@@ -114,7 +118,7 @@ jobs:
                 | grep '^ISSUE2374_BATCH_AUDIT=' | tail -1 \
                 | sed 's/^ISSUE2374_BATCH_AUDIT=//' > /tmp/issue2374-full-cohort-audit.json
               jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .targets>0 and .targets<600 and .graph_get_calls<=100 and (.all_output_dispositions|length)==.targets and (.provider_coverage|length)>=8' /tmp/issue2374-full-cohort-audit.json >/dev/null
-              jq -c '{version,targets,graph_get_calls,counts,provider_coverage,public_candidates:(.provider_candidates|length),provider_writes,output_writes}' /tmp/issue2374-full-cohort-audit.json
+              jq -c '{version,targets,graph_get_calls,counts,provider_coverage,public_candidates:(.provider_candidates|length),cross_format_caption_reuse:(.cross_format_caption_reuse|length),provider_writes,output_writes}' /tmp/issue2374-full-cohort-audit.json
               exit 0
             elif [[ "$state" == failed ]]; then
               echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
