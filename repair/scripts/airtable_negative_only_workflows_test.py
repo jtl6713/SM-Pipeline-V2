@@ -3,7 +3,8 @@ import unittest
 from pathlib import Path
 
 from airtable_negative_only_workflows import (
-    permitted_negative_reference_locations, unexpected_references, AIRT_HOST
+    permitted_negative_reference_locations, unexpected_references, AIRT_HOST,
+    EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS, OTHER_EXACT_POWERSHELL_GUARDS,
 )
 
 PYTHON = "" \
@@ -195,6 +196,43 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
             unexpected_references(self.root, (AIRT_HOST,))
         ))
         self.write(name, guard.replace("throw ", "Write-Host "))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
+    def test_new_main_python_readonly_audits_require_exact_rejecting_assertion(self):
+        for name, (previous, token_line, assertion, offset, count) in (
+            EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS.items()
+        ):
+            with self.subTest(name=name):
+                for old in (self.root / ".github/workflows").glob("*.yml"):
+                    old.unlink()
+                # A minimal negative-only guard with the required token line,
+                # exact precursor, and matching rejection at the pinned offset.
+                guard = (previous + "\n" + token_line + "\n"
+                         + ("# bounded forbidden-source scan\n" * (offset - 1))
+                         + assertion + "\n")
+                self.write(name.rsplit("/", 1)[-1], guard)
+                self.assertEqual(unexpected_references(
+                    self.root, (AIRT_HOST, "AIRTABLE_PAT")), [])
+                # Disabling the rejection must never be silently accepted.
+                self.write(name.rsplit("/", 1)[-1],
+                           guard.replace(assertion, "pass # rejection removed"))
+                self.assertTrue(unexpected_references(
+                    self.root, (AIRT_HOST, "AIRTABLE_PAT")))
+                # A second real endpoint occurrence anywhere is never exempt.
+                self.write(name.rsplit("/", 1)[-1],
+                           guard + "curl https://__AIRT_HOST__/v0/base\n")
+                self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
+    def test_new_main_powershell_story_guard_is_exact_not_file_exempt(self):
+        name = "ig-story-1868-2859-exact-owner-getonly.yml"
+        first, second = OTHER_EXACT_POWERSHELL_GUARDS[
+            ".github/workflows/" + name]
+        good = first + "\n" + second + "\n"
+        self.write(name, good)
+        self.assertEqual(unexpected_references(self.root, (AIRT_HOST,)), [])
+        self.write(name, good.replace("throw ", "Write-Host "))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        self.write(name, good + "Invoke-WebRequest https://__AIRT_HOST__/v0\n")
         self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
 
     def test_unknown_workflow_is_never_exempt(self):
