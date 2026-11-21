@@ -25,6 +25,8 @@ import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
+import { loadOwnerGenerationForProfile } from "./owner-generation-supabase.mjs";
+import { effectiveGenerationPrompt } from "./owner-generation-guidance.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioFactoryOpsReadSource,
@@ -12822,11 +12824,23 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeF
   const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
   let creativeGuidance = {};
   if (profileId && /^rec[A-Za-z0-9]{14}$/.test(profileId)) {
+    // Global and profile directions are read from Supabase only. A profile
+    // whose brand cannot be matched uniquely gets no other owner's text.
     try {
-      const setting = await studioSettingsByName(env, creativeSettingName(profileId));
-      creativeGuidance = parseCreativeGuidance(f(setting, "Setting_Value"));
+      const [global, setting] = await Promise.all([
+        loadOwnerGenerationForProfile(env, profileId),
+        studioSettingsByName(env, creativeSettingName(profileId)),
+      ]);
+      creativeGuidance = {
+        ...parseCreativeGuidance(f(setting, "Setting_Value")),
+        owner_global_direction: global.prompt || "",
+      };
+      creativeGuidance.shared_direction = effectiveGenerationPrompt({
+        ownerGlobal: global.prompt,
+        profileWide: creativeGuidance.shared_direction,
+      });
     } catch (error) {
-      console.warn("creative guidance read failed; using script defaults", profileId, error);
+      console.warn("Supabase generation guidance read failed; using script defaults", profileId, error);
     }
   }
   const compact = (catalog || []).map((row) => ({
