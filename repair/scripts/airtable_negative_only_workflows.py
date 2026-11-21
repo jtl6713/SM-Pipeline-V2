@@ -95,6 +95,10 @@ OTHER_EXACT_POWERSHELL_GUARDS = {
         "'__AIRT_HOST__','/media_publish','/media?','airtable.com/v0/','Invoke-Expression')){",
         "if($s.Contains($bad)){throw ('prohibited_provider_or_source_mutation: '+$bad)}",
     ),
+    ".github/workflows/p1-2340-six-new-stories-owned-media-readonly.yml": (
+        "foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/media_publish','__AIRT_HOST__','/stages/ap1_igs','Publish_Retry_Eligible=true')){",
+        "if($s.Contains($bad)){throw ('mutating_operation_found: '+$bad)}",
+    ),
 
 }
 
@@ -122,6 +126,11 @@ EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS = {
         "for banned in ['-Method Post','-Method Patch','-Method Delete','-Method Put',",
         "'__AIRT_HOST__','AIRTABLE_PAT','/media_publish',",
         "assert banned not in s, f'unsafe operation: {banned}'", 2, 1,
+    ),
+    ".github/workflows/issue2489-nyc-six-provider-queues-readonly.yml": (
+        "'/media_publish','/tiktok/draft/video/init',",
+        "'__AIRT_HOST__','Write-Output $sk','Write-Host $sk'):",
+        "assert token not in s, 'unsafe mutation or credential logging'", 1, 1,
     ),
 }
 
