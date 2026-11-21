@@ -1,3 +1,4 @@
+// 2026-11-21: issue #2340 exact 4-profile Home snapshot and live drilldown parity recheck; no output writes.
 // Nov 20 evening: recount after one confirmed LA Meta Story publication and six verified terminal-container classifications (Supabase GET only).
 // 2026-11-20 18:25 Chicago: recount after five provider-confirmed expired Instagram Story status repairs.
 // 2026-11-20 evening publication recovery: exact latest four-profile snapshot verification; no Studio writes.
@@ -90,6 +91,7 @@ try{
    const home=overview.records.find(r=>r.id===profile.id
      || r.profile_id===profile.id || r.content_profile_id===profile.id);
    if(!home)throw Error("home_profile_identity_missing_"+profile.label.replace(/[^a-z]/gi,"_"));
+   if(!Number.isInteger(home.failed))throw Error("invalid_failed_home_count_"+profile.label);
    const item={profile:profile.label,profile_id:profile.id,home_snapshot:{
      past_due:home.approved_past_due,failed:home.failed
    },past_due:[],failed:[],parity:{}};
@@ -138,6 +140,7 @@ try{
  };
  await writeFile("/tmp/home-2340-exact-inventory.json",JSON.stringify(exact,null,2));
  console.log("HOME_EXACT_ID_CENSUS="+JSON.stringify(exact));
+ if(exact.mismatched_profile_modes.length!==0)throw Error("home_drilldown_snapshot_parity_failed_closed");
 }finally{
  if(created){await cf("/workers/scripts/"+bridge,{method:"DELETE"});console.log("temporary_bridge_deleted=PASS");}
 }
