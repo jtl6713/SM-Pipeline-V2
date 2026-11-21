@@ -1,0 +1,104 @@
+name: 'NYC #10581 one exact YouTube YTP1 upload start'
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ytp1-10581-single-upload-start-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ytp1-10581-one-remote-upload-start-20261120
+  cancel-in-progress: false
+jobs:
+  exactly-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Single native upload start with preserved YouTube idempotency; no replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/ytp110581.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="rec21RlfXCIJbQlde";$content="3eb08369-3dbe-490c-a9ed-4dd6c3454de6";$profile="63c2e81b-0cd1-423d-a033-11366e69bdee"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if($health.ok -ne $true -or $health.version -ne "2026-11-20-yt0-exact-parent-title-fallback-v1" -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.studio_runner_content_read_source -ne "supabase" -or $health.airtable_activity.any_read -ne $false -or $health.airtable_activity.any_write -ne $false){throw "ytp110581_health_guard"}
+          $envpath=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if(-not(Test-Path $envpath)){throw "ytp110581_settings_missing"}
+          function Env([string]$k){$l=@(Get-Content $envpath|Where-Object{$_ -match ("^\s*"+[regex]::Escape($k)+"\s*=")})|Select-Object -Last 1;if(-not $l){throw "ytp110581_cred_unavailable"};return ([string]$l -split '=',2)[1].Trim().Trim('"',"'")}
+          $db=Env "SUPABASE_URL";$key=Env "SUPABASE_SERVICE_ROLE_KEY";$secret=Env "PIPELINE_RUNNER_SHARED_SECRET"
+          $h=@{apikey=$key;Authorization=("Bearer "+$key)}
+          $base=$db.TrimEnd("/")+"/rest/v1/"
+          $url=$base+"platform_outputs?airtable_record_id=eq."+$record+"&select=output_number,airtable_record_id,content_item_id,content_profile_id,output_title,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,final_file_url,youtube_stage,youtube_scheduled_publish_at,error_messages"
+          function Preflight {
+           $o=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+           if($o -is [array]){if($o.Count -ne 1){throw "ytp110581_record_ambiguous"};$o=$o[0]}
+           if($o.output_number -ne 10581 -or $o.airtable_record_id -ne $record -or $o.content_item_id -ne $content -or $o.content_profile_id -ne $profile -or
+           $o.output_title -ne "Ride the Roosevelt Island Tram" -or $o.platform -ne "YouTube" -or $o.platform_output_type -ne "YouTube Short" -or
+           $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Failed" -or $o.render_status -ne "Rendered" -or
+           $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or $o.test_run_id -or $o.published_at -or $o.platform_post_url -or
+           $o.youtube_stage -ne "YT1" -or $o.error_messages.YouTube_Package_Status -ne "Ready" -or $o.error_messages.YouTube_Upload_Status -ne "Ready" -or
+           $o.error_messages.YouTube_Idempotency_Key -ne "YT-10581-rec21RlfXCIJbQlde-BASE" -or $o.error_messages.YouTube_Upload_Job_ID -or $o.error_messages.YouTube_Video_ID -or $o.error_messages.Platform_Post_ID -or $o.error_messages.Publish_Locked_By -or
+           $o.error_messages.Studio_Render_Review_Hold_Active -or $o.error_messages.Studio_Review_Hold_ID -or $o.error_messages.Replace_Transaction_ID -or
+           $o.publish_asset_url -notlike "https://media.chicagoshining.com/*" -or -not $o.final_file_url){throw "ytp110581_exact_package_guard"}
+           $dupes=Invoke-RestMethod -Uri ($base+"platform_outputs?content_item_id=eq."+$content+"&platform=eq.YouTube&select=output_number,published_at,platform_post_url,error_messages") -Headers $h -TimeoutSec 25
+           foreach($s in @($dupes)){if($s.output_number -ne 10581 -and ($s.published_at -or $s.platform_post_url -or $s.error_messages.YouTube_Video_ID)){throw "ytp110581_duplicate_receipt"}}
+           return $o
+          }
+          $o=Preflight
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function Stage([bool]$dry){
+           $body=@{output_record_id=$record;extra=@{dry_run=$dry}}|ConvertTo-Json -Depth 4 -Compress
+           return Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/ytp1" -Method POST -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 180
+          }
+          $dry=Stage $true
+          if($dry.status -ne "ok" -or $dry.details.run.dry_run -ne $true -or $dry.details.run.eligibility_reason -or $dry.details.run.upload_request.title -ne "Ride the Roosevelt Island Tram" -or $dry.details.run.upload_request.sourceUrl -ne $o.publish_asset_url){throw "ytp110581_uploader_dry_blocked"}
+          Write-Output "ytp110581_upload_dry=PASS"
+          $o=Preflight
+          $actual=Stage $false
+          Write-Output ("ytp110581_native_status="+[string]$actual.status)
+          Write-Output ("ytp110581_http_status="+[string]$actual.details.run.http_status)
+          Write-Output ("ytp110581_result_reason="+[string]$actual.details.run.reason)
+          $job=[string]$actual.details.run.job_id
+          $after=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+          if($after -is [array]){$after=$after[0]}
+          if($actual.status -eq "ok" -and $job -and $after.youtube_stage -eq "YT2" -and $after.error_messages.YouTube_Upload_Job_ID -eq $job -and $after.publish_status -eq "Publishing" -and -not $after.published_at -and $after.error_messages.YouTube_Idempotency_Key -eq "YT-10581-rec21RlfXCIJbQlde-BASE"){
+           Write-Output ("ytp110581_upload_job="+$job)
+           Write-Output "ytp110581_one_start_confirmed=PASS"
+           exit 0
+          }
+          Write-Output "ytp110581_no_confirmed_upload_job_NO_RETRY"
+          throw "ytp110581_ambiguous_no_replay"
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path("/tmp/ytp110581-submit.json").write_text(json.dumps({"command":pathlib.Path("/tmp/ytp110581.ps1").read_text(),"confirm":True}))
+          PY
+          token=''
+          for t in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$t" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ytp110581-catalog.json -w '%{http_code}' -H "Authorization: Bearer $t" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ytp110581-catalog.json >/dev/null; then token="$t"; break; fi
+          done
+          test -n "$token"
+          code=$(curl -sS --max-time 25 -o /tmp/ytp110581-job.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @/tmp/ytp110581-submit.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "ytp110581_ops_rejected_http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ytp110581-job.json)
+          for n in $(seq 1 80); do
+            curl -sS --max-time 25 -H "Authorization: Bearer $token" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ytp110581-status.json
+            state=$(jq -r '.job.status // empty' /tmp/ytp110581-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ytp110581-status.json | grep '^ytp110581_' || true
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo "ytp110581_job_failed_no_retry"
+              jq -r '.job.log // ""' /tmp/ytp110581-status.json | grep -E '^ytp110581_|Exception|Error|Traceback' | tail -15 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "ytp110581_unverified_no_retry"; exit 4
