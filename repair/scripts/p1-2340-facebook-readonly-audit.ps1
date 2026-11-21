@@ -72,11 +72,11 @@ $report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.
 $report.history_status='not_authorized';$report.history_probes=@()
 if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -eq $true -and $report.scopes['pages_read_engagement'] -eq $true){
  $targets=@(
-  @{n=4907;market='Chicago';page='FACEBOOK_PAGE_ID';token_key='FACEBOOK_PAGE_ACCESS_TOKEN'},
-  @{n=5355;market='Los Angeles';page='LA_FACEBOOK_PAGE_ID';token_key='LA_FACEBOOK_PAGE_ACCESS_TOKEN'},
-  @{n=6256;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID';token_key='MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN'},
-  @{n=6076;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID';token_key='MIAMI_FACEBOOK_PAGE_ACCESS_TOKEN'},
-  @{n=5915;market='New York City';page='NYC_FACEBOOK_PAGE_ID';token_key='NYC_FACEBOOK_PAGE_ACCESS_TOKEN'}
+  @{n=4907;market='Chicago';page='FACEBOOK_PAGE_ID'},
+  @{n=5355;market='Los Angeles';page='LA_FACEBOOK_PAGE_ID'},
+  @{n=6256;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
+  @{n=6076;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
+  @{n=5915;market='New York City';page='NYC_FACEBOOK_PAGE_ID'}
  )
  $nums='(4907,5355,6256,6076,5915)'
  $outputs=@(Invoke-RestMethod ($url+'/rest/v1/platform_outputs?select=output_number,platform,content_profile_id,output_title,output_caption&output_number=in.'+$nums+'&limit=10') -Headers $headers -Method Get -TimeoutSec 30)
@@ -93,7 +93,7 @@ if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -
   if($p.Count -ne 1 -or [string]$p[0].market_name -ne [string]$t.market){throw 'history_target_owner_mismatch'}
   $pageId=[string]$values[[string]$t.page]
   if($pageId.Length -lt 6 -or $pageId.Length -gt 30 -or $pageId -match '[^0-9]'){throw 'history_page_id_unavailable'}
-  $pageToken=[string]$values[[string]$t.token_key]
+  $pageToken=[string]$values[([string]$t.page).Replace('_ID','_ACCESS_TOKEN')]
   if(-not $pageToken){throw 'history_page_token_unavailable'}
   $identity=G ('/'+$pageId+'?fields=id') $pageToken
   if($identity.ok -ne $true -or [string]$identity.body.id -ne $pageId){throw 'history_page_token_identity_mismatch'}
