@@ -3148,11 +3148,15 @@ export async function brandLogo(request, env, authorization) {
 
 /*__STUDIO_WORKER_END:brandLogo__*/
 
-export async function buildIdeasListPayload(env, profile, limit) {
+export async function buildIdeasListPayload(env, profile, limit, options = {}) {
+  const unpromotedOnly = options.unpromotedOnly === true;
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env) && profile?.id) {
-    const records = await listSupabaseIdeasForProfile(env, profile.id, limit);
+    const records = await listSupabaseIdeasForProfile(env, profile.id, limit, { unpromotedOnly });
     return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
   }
+  // Home/Ideas drill-down is Supabase-only. Never silently fall back to an
+  // independently filtered Airtable list when its authority is unavailable.
+  if (unpromotedOnly) throw new HttpError(503,"Supabase ideas source unavailable");
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit,
     sortField: "Create_Date",
@@ -3165,8 +3169,10 @@ export async function buildIdeasListPayload(env, profile, limit) {
 export async function listIdeas(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const limit = clampLimit(url);
-  const memoryKey = `ideas:${profile.id}:${limit}`;
-  const snapshotKey = `studio/state/ideas-list-${profile.id}-${limit}.json`;
+  const unpromotedOnly = url.searchParams.get("unpromoted") === "1";
+  const suffix = unpromotedOnly ? ":unpromoted-v1" : "";
+  const memoryKey = `ideas:${profile.id}:${limit}${suffix}`;
+  const snapshotKey = `studio/state/ideas-list-${profile.id}-${limit}${unpromotedOnly ? "-unpromoted-v1" : ""}.json`;
   return respondStudioMappedList(request, env, ctx, {
     memoryKey,
     snapshotKey,
@@ -3174,7 +3180,7 @@ export async function listIdeas(request, env, url, authorization, ctx = null) {
     ttlMs: STUDIO_READ_SNAPSHOT_FRESH_MS,
     allowRefresh: url.searchParams.get("refresh") !== "0",
     forceFresh: url.searchParams.get("fresh") === "1",
-    builder: () => buildIdeasListPayload(env, profile, limit),
+    builder: () => buildIdeasListPayload(env, profile, limit, { unpromotedOnly }),
   });
 }
 /*__STUDIO_WORKER_END:listIdeas__*/

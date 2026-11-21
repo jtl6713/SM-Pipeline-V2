@@ -7587,7 +7587,7 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
 }
 
 /** Ideas for one profile. Uses the indexed profile id and does not count the table. */
-export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit = 100) {
+export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit = 100, options = {}) {
   const id = String(profileAirtableId || "").trim();
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
   if (!/^rec[A-Za-z0-9]+$/.test(id)) return [];
@@ -7595,18 +7595,48 @@ export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit 
     throw ideaListReadError(error);
   });
   if (!uuid) return [];
-  const rows = await supabaseRest(
-    env,
-    `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`
-      + `&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at`
-      + `&order=created_at.desc&limit=${cap}`,
-    { headers: { Prefer: "return=representation" } },
-  ).catch((error) => {
-    throw ideaListReadError(error);
-  });
-  return (Array.isArray(rows) ? rows : [])
-    .filter((row) => row?.airtable_record_id)
-    .map(airtableShapedIdeaFromSupabase);
+  const unpromotedOnly = options.unpromotedOnly === true;
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at";
+  const profileFilter = `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`;
+  if (!unpromotedOnly) {
+    const rows = await supabaseRest(
+      env,
+      `${profileFilter}&select=${select}&order=created_at.desc&limit=${cap}`,
+      { headers: { Prefer: "return=representation" } },
+    ).catch((error) => { throw ideaListReadError(error); });
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => row?.airtable_record_id)
+      .map(airtableShapedIdeaFromSupabase);
+  }
+  // The Ideas screen shows NOT promoted. Filter status before LIMIT so 500+
+  // newer promoted records cannot displace its open intake records.
+  // Pagination is deliberately complete: a page of promoted-link-but-not-
+  // promoted-status ideas must not hide later valid ideas.
+  const eligible = [];
+  const seen = new Set();
+  const pageSize = 100;
+  for (let offset = 0; offset < 2000; offset += pageSize) {
+    const rows = await supabaseRest(
+      env,
+      `${profileFilter}&or=(status.is.null,status.neq.Promoted)&select=${select}&order=created_at.desc,airtable_record_id.asc&limit=${pageSize}&offset=${offset}`,
+      { headers: { Prefer: "return=representation" } },
+    ).catch((error) => { throw ideaListReadError(error); });
+    if (!Array.isArray(rows)) throw ideaListReadError("Incomplete unpromoted ideas scan");
+    for (const row of rows) {
+      if (!row?.airtable_record_id || seen.has(row.airtable_record_id)) {
+        throw ideaListReadError("Unpromoted ideas scan has missing or duplicate identity");
+      }
+      seen.add(row.airtable_record_id);
+      const record = airtableShapedIdeaFromSupabase(row);
+      const bag = record.fields || {};
+      if (String(bag.Candidate_Status || "") === "Promoted"
+          || Boolean(bag.Promoted_Content_Record_ID)
+          || (Array.isArray(bag["Content Items"]) && bag["Content Items"].length)) continue;
+      eligible.push(record);
+    }
+    if (rows.length < pageSize) return eligible;
+  }
+  throw ideaListReadError("Unpromoted idea census exceeded safe 2000-record limit");
 }
 
 function ideaListReadError(error) {

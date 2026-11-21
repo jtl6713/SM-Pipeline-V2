@@ -90,7 +90,7 @@
   async function ensureIdeasCache() {
     if (ideasCache.length) return ideasCache;
     try {
-      const { records = [] } = await api("/api/ideas?limit=100");
+      const { records = [] } = await api("/api/ideas?limit=100&unpromoted=1");
       if (records.length) ideasCache = records;
     } catch (_error) {
       /* Drafts can still render with the production request ID. */
@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1018-factory-held-visible-review";
+  const BUILD_ID = "item4-0.6.1019-ideas-home-list-parity";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17722,7 +17722,7 @@ function timedScriptAssetLabel(asset, index) {
       // The ordinary list route is intentionally stale-while-revalidate.
       // Intake is an administrative lifecycle screen: never classify a
       // previously promoted idea from an old R2 snapshot.
-      const result = await api("/api/ideas?limit=100&fresh=1", { timeoutMs: 20000, retries: 1 });
+      const result = await api("/api/ideas?limit=100&unpromoted=1&fresh=1", { timeoutMs: 20000, retries: 1 });
       if (result?.live !== true || !Array.isArray(result?.records)) {
         throw new Error("Could not verify live idea statuses. Reopen Ideas to retry; no stale list was shown.");
       }

@@ -24,7 +24,7 @@ test("failed partial NYC I1 batch automatically loads saved candidates from auth
   assert.match(body, /ideaGenerateMore"\)\) \$\("ideaGenerateMore"\)\.hidden = partial/);
   assert.doesNotMatch(body, /textContent = "Retry"/);
   assert.match(list, /forceFresh: url\.searchParams\.get\("fresh"\) === "1"/);
-  assert.match(ui, /\/api\/ideas\?limit=100&fresh=1/);
+  assert.match(ui, /\/api\/ideas\?limit=100&unpromoted=1&fresh=1/);
 });
 
 test("an ambiguous generation POST is never repeated automatically", () => {
