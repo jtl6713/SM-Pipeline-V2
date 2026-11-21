@@ -18,3 +18,20 @@ HOLD this marker until source #2520 merges after all protected checks.
 Validate exactly 82 protected Manual/Repair cards, zero review/publish gates,
 no Airtable egress, preserving Cloudflare bindings and automatic rollback.
 No image creation, C9 slide write, AP0C staging, provider post, or status reset.
+
+Third serial production Worker release 2026-11-21: exact ten newly proven media-defect
+hold identities and original 82 old protected cards, source PR #2543 merged
+at 9320a66790b37793b3519fe5bca11553b56abe32 after all 21 CI checks.
+The new ten have a canonical live database trigger guard (migration
+guard_issue2374_ten_incomplete_gallery_rework_holds); no user-facing
+Approve/Publish/Retry actions are authorized.
+Use ONLY protected no-Airtable issue2374 Worker workflow, never the legacy
+general Worker workflow. Release first while ten additional records remain
+historical Approved/DNP-held (verifier expects 82 originals plus 0 extra).
+After authenticated successful production Worker readback, perform the
+separate exact-ten all-or-none audited creative-rework status transition
+and second authenticated Factory readback expecting 82 originals + 10 new.
+Keep original due timestamps and status history in audit evidence; do not
+claim any provider post or completed media.
+Preserve active Supabase-only publisher fixes #2538 and #2540, all R2 one-shot
+locks, rollback capability, existing 82 original holds and zero Airtable egress.
