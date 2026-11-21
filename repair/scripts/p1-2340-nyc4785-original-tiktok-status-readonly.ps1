@@ -4,7 +4,7 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $r=[ordered]@{
-  output=4785;profile='New York City';saved_original_id=true;read_only=$true
+  output=4785;profile='New York City';saved_original_id=$true;read_only=$true
   owner_verified=$false;status_check_complete=$false;publish_status=''
   delivered_to_inbox=$false;publicly_posted_confirmed=$false
   returned_public_id_count=0;reason='not_started'
