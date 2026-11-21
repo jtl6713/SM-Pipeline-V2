@@ -2331,7 +2331,7 @@ export default {
       if (isQaRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "POST") assertWriteRequest(request, env);
-        return await handleQaApi({request,url,env,authorization,airtableFetch,respond});
+        return await handleQaApi({request,url,env,authorization,respond});
       }
 
       // An approved held revision can be reopened for creative redo without
