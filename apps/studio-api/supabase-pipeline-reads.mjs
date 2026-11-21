@@ -2097,7 +2097,7 @@ export async function listSupabasePipelineContentPage(env, {
     // Fail closed on unusually large groups rather than silently truncate them.
     const rows = await supabaseRest(env,
       `platform_outputs?content_item_id=in.(${uuids.join(",")})&test_run_id=is.null`
-      + `&select=${OUTPUT_SELECT}&order=content_number.desc.nullslast,output_number.desc.nullslast,id.desc&limit=2001`);
+      + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast,id.desc&limit=2001`);
     if (rows.length > 2000) throw new Error("Pipeline content page exceeds output safety bound");
     outputs = rows.map(flattenOutputRow).map(airtableShapedOutputFromSupabase);
   }
