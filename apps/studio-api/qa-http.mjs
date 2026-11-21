@@ -27,12 +27,12 @@ export async function verifiedRunnerVersion(env,requester){
   }catch{return "unverified";}
 }
 function configuredQaEnvironment(env){
-  // A selected label is not a target. Only test the environment actually
-  // bound to this Worker, never silently route 'staging' to production.
+  // This Studio has a single live environment. Imported history may retain
+  // older "development" labels, but no new QA run can execute elsewhere.
   const configured=String(env?.STUDIO_QA_EXECUTION_ENV||"production").trim().toLowerCase();
-  if(!["production","staging","development"].includes(configured))
-    throw error(503,"QA execution environment is not configured");
-  return configured;
+  if(configured!=="production")
+    throw error(503,"Only production QA execution is configured on this Worker");
+  return "production";
 }
 export const QA_WORKER_BUILD="0.10.766-qa-release-attestation";
 export const QA_UI_BUILD="0.6.897-qa-center-pilot";
