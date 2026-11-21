@@ -2316,7 +2316,9 @@ export function normalizedOutputState(record) {
 
   // Historical held Retry Pending is a recovery decision, never proof of a safe retry.
   // This only changes read-only display; canonical stage and provider holds remain.
-  const pendingDisposition = heldRetryPendingDisposition(record);
+  // Standalone extracted-function harnesses do not bind module imports.
+  const pendingDisposition = typeof heldRetryPendingDisposition === "function"
+    ? heldRetryPendingDisposition(record) : null;
   if (pendingDisposition) return pendingDisposition.label;
 
   // A verified TTD0 9:16 asset mismatch cannot be fixed by retrying the
