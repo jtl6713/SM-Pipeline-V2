@@ -6,13 +6,38 @@ on:
       - '.github/workflows/p1-2340-la-youtube-inventory-readonly.yml'
       - 'repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1'
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-la-youtube-inventory-readonly.yml'
+      - 'repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1'
 permissions:
   contents: read
 concurrency:
   group: p1-2340-la-youtube-owned-history-readonly
   cancel-in-progress: false
 jobs:
+  parser-and-static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check LA script syntax and GET-only scope
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-la-youtube-owned-inventory-readonly.ps1'
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $source=Get-Content -Raw $file
+          if($source -notmatch 'P1_LA_YT_INVENTORY=' -or $source -notmatch 'UCVt3nBxRfPuuxxduuxmz9sw'){throw 'scope_not_exact_la'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){
+            if($source.Contains($bad)){throw 'unsafe_la_inventory_script'}
+          }
+          Write-Output 'LA_GET_ONLY_STATIC_GATE_PASS'
   la-owned-video-history:
+    if: github.event_name != 'pull_request'
+    needs: parser-and-static-safety
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
