@@ -32,7 +32,10 @@ test("supported Studio Worker release still requires Supabase and rollback", () 
   const deploy = readFileSync(
     new URL("../../.github/workflows/deploy-cloudflare-worker-production.yml", import.meta.url), "utf8");
   assert.match(deploy, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(deploy, /SUPABASE_URL/);
+  const contract = readFileSync(
+    new URL("../../repair/scripts/studio_api_binding_contract.py", import.meta.url), "utf8");
+  assert.match(contract, /"SUPABASE_URL": "plain_text"/);
+  assert.match(contract, /"SUPABASE_SERVICE_ROLE_KEY": "secret_text"/);
   assert.doesNotMatch(deploy, /'secrets':\{'required':\['AIRTABLE_PAT'/);
   assert.match(deploy, /rollback/i);
 });
