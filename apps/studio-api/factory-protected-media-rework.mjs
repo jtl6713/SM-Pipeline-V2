@@ -5,6 +5,13 @@
  * authorized to create provider media, clear DNP, retry or schedule.
  */
 export const PROTECTED_MEDIA_REWORK_MARKER = "Studio_Overdue_Preflight_Repair_20261120";
+export const NEW_MEDIA_REWORK_MARKER = "Studio_Overdue_UnsafeGallery_Hold_20261121";
+function sourceHold(row) {
+  return isObject(row?.[PROTECTED_MEDIA_REWORK_MARKER])
+    ? row[PROTECTED_MEDIA_REWORK_MARKER]
+    : isObject(row?.[NEW_MEDIA_REWORK_MARKER])
+      ? row[NEW_MEDIA_REWORK_MARKER] : null;
+}
 
 const recordId = (value) => /^rec[A-Za-z0-9]{14}$/.test(String(value || ""));
 const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -13,7 +20,7 @@ const isBlank = (value) => value == null || String(value).trim() === "";
 /** Validate canonical typed Supabase source before importing a held row. */
 export function protectedMediaReworkSourceRow(row) {
   if (!row || !recordId(row.airtable_record_id)) return false;
-  if (!isObject(row.error_messages?.[PROTECTED_MEDIA_REWORK_MARKER])) return false;
+  if (!sourceHold(row.error_messages)) return false;
   return row.review_status === "Changes Requested"
     && row.output_status === "Changes Requested"
     && row.publish_status === "Not Ready"
@@ -32,7 +39,7 @@ export function protectedMediaReworkSourceRow(row) {
 export function protectedMediaReworkShapedRecord(record) {
   const fields = record?.fields;
   if (!recordId(record?.id) || !isObject(fields)) return false;
-  if (!isObject(fields[PROTECTED_MEDIA_REWORK_MARKER])) return false;
+  if (!sourceHold(fields)) return false;
   return fields.Review_Status === "Changes Requested"
     && fields.Output_Status === "Changes Requested"
     && fields.Publish_Status === "Not Ready"
@@ -86,7 +93,7 @@ export function protectedMediaReworkOriginalPreviewGallery(record) {
 export function protectedMediaReworkSummary(record) {
   if (!protectedMediaReworkShapedRecord(record)) return null;
   const fields = record.fields;
-  const evidence = fields[PROTECTED_MEDIA_REWORK_MARKER];
+  const evidence = sourceHold(fields);
   const previewSequence = isObject(
     fields.Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121
   );
@@ -105,14 +112,14 @@ export function protectedMediaReworkSummary(record) {
     // Exact public JPEGs for the human gallery preview only. No IG/R2 stage.
     original_image_previews: originalGallery?.urls || [],
     source_count_mismatch: originalGallery?.count_mismatch === true,
-    stage: String(evidence.stage || "Creative package repair").slice(0, 100),
+    stage: String(evidence.stage || evidence.reason || "Creative package repair").slice(0, 100),
     next_step: previewSequence
       ? "Original public preview sequence verified, but no Final Approved slide records. Reconstruct the exact creative gallery and stage only after fresh Factory review."
       : incompleteOriginal
         ? "Original source folder incomplete or wrong aspect. Rebuild the 4:5 gallery and obtain fresh Factory approval."
         : verifiedSource
           ? "Existing source images verified. Complete platform staging, inspect preview and request fresh Factory approval."
-          : "Rebuild or reconcile the original media package, inspect preview and request fresh Factory approval.",
+          : "Rebuild or reconcile the original missing media/slide package, inspect preview and request fresh Factory approval.",
     can_approve: false,
     can_retry: false,
     can_publish: false,
