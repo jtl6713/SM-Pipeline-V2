@@ -890,3 +890,5 @@ Deploy Studio UI 0.6.1010-revision-drafts: show explicitly returned Draft revisi
 2026-11-20 UI 0.6.1022-video-accept-2401 (#2402): protected Studio Pages deployment. Stop endless 'Asset registration in progress' animation and show stalled-state recovery guidance for NYC Idea 2387 Scene 4 without regenerating the original MP4. Verify custom-domain BUILD_ID/cache key and scene controls.
 
 2026-11-20 UI 0.6.1023-video-recover-2401 / PR #2412: Deploy self-service Recover Existing Video on Studio storyboard with original MP4 preview, consent and persisted-run status polling. Verify exact custom-domain 0.6.1023 BUILD_ID, no provider charge, and unchanged publishing.
+
+2026-11-21 UI 0.6.1024-ideas-count-topbar / PR #2419: Protected Studio Pages production deployment after release gate passes. Place the 1-10 AI Ideas quantity selector beside Generate AI ideas in the Ideas top action row; retain Quality and explicit submit in generator panel. Verify live custom-domain BUILD_ID, selected count retention, and phone layout. UI only; no publishing, scheduling, generation API or approval changes.
