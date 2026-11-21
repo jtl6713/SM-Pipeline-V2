@@ -3,6 +3,7 @@
 import json
 
 import requests
+import pytest
 
 from airtable.client import AirtableClient
 from airtable.constants import (
@@ -475,15 +476,16 @@ def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(mon
 
     monkeypatch.setattr(requests, "patch", fake_patch)
     monkeypatch.setattr(requests, "request", fake_request)
-    # Supabase commit fails; write SoR still must not fall through to Airtable.
-    record = AirtableClient(settings=_settings(
-        studio_write_source="supabase",
-        studio_phase6_write_source="supabase",
-    )).update_record(
-        MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
-    )
-    assert record == {"id": "recMedia9", "fields": {"Studio_Favorite": True}}
-    # fake_patch raises if Airtable were contacted.
+    # Canonical Supabase failure must be visible; frozen Airtable archive stays closed.
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("Airtable archive must not be touched")))
+    with pytest.raises(RuntimeError, match="Supabase Phase6 authoritative update not confirmed"):
+        AirtableClient(settings=_settings(
+            studio_write_source="supabase",
+            studio_phase6_write_source="supabase",
+        )).update_record(
+            MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
+        )
 
 
 def test_runner_media_delete_does_not_mirror(monkeypatch):
@@ -661,3 +663,27 @@ def test_partial_ttd1_output_mirror_merges_publish_id_into_bag(monkeypatch):
     assert body["error_messages"]["_runner_record_projection"] == "v1"
     assert "TikTok_Draft_Publish_ID" not in body  # bag only, not a typed column
     assert "Publish_Error_Message" not in body["error_messages"]
+
+
+def test_supabase_side_table_failure_is_explicit_and_never_uses_airtable(monkeypatch):
+    from airtable.constants import CAROUSEL_SLIDES_TABLE
+    monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(
+        RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase side-table authoritative update not confirmed"):
+        AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+            CAROUSEL_SLIDES_TABLE, "recSlide1", {"Current Order": 2}
+        )
+
+
+def test_supabase_phase6_create_failure_never_claims_minted_asset_id(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("Airtable archive accessed")))
+    monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(
+        RuntimeError("Supabase unavailable")))
+    with pytest.raises(RuntimeError, match="Supabase Phase6/side-table create not confirmed"):
+        AirtableClient(settings=_settings(
+            studio_write_source="supabase",
+            studio_phase6_write_source="supabase",
+        )).create_records(MEDIA_ASSETS_TABLE, [{"Asset Name": "Never minted"}])
