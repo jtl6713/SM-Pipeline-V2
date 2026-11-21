@@ -180,7 +180,7 @@ try {
    remote_id:fbBody.remote_id||null, status:fbBody.status||null,
    verified_public:fbBody.verified_public===true,
    evidence:String(fbBody.evidence||'unverified').slice(0,100),
-   no_output_write:fbBody.verification?.no_output_write!==false,
+   no_output_write:fbBody.verification?.no_output_write===true,
  };
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
