@@ -50,19 +50,17 @@ try {
   $saved=[string]$o.error_messages.FB_Photo_IDs_JSON
   if(-not $saved){throw 'parent_photo_receipts_differ'}
   $report.stage='parse-parent-json-document'
-  $doc=[System.Text.Json.JsonDocument]::Parse($saved)
-  try {
-    $report.stage='validate-json-root-kind'
-    if($doc.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array){throw 'parent_photo_receipts_differ'}
-    $report.stage='enumerate-json-photo-ids'
-    $savedIds=@()
-    foreach($item in $doc.RootElement.EnumerateArray()){
-      if($item.ValueKind -ne [System.Text.Json.JsonValueKind]::String){throw 'parent_photo_receipts_differ'}
-      $savedIds+= $item.GetString()
-    }
-  }finally{
-    $doc.Dispose()
-  }
+  # This source column is a JSON array of exactly eight digit-only photo IDs.
+  # Windows Ops PowerShell may not load System.Text.Json. Validate the entire
+  # syntax before extracting digit captures; never interpret arbitrary JSON.
+  $report.stage='validate-strict-parent-id-array'
+  $strictPattern='^\[\s*"\d{12,30}"\s*(,\s*"\d{12,30}"){7}\s*\]$'
+  if($saved -cnotmatch $strictPattern){throw 'parent_photo_receipts_differ'}
+  $report.stage='enumerate-strict-photo-ids'
+  $photoIdTokens=[regex]::Matches($saved,'"(\d{12,30})"')
+  if($photoIdTokens.Count -ne 8){throw 'parent_photo_receipts_differ'}
+  $savedIds=@()
+  foreach($tokenMatch in $photoIdTokens){$savedIds += [string]$tokenMatch.Groups[1].Value}
   $report.stage='compare-parent-photo-count'
   if($savedIds.Count -ne 8){throw 'parent_photo_receipts_differ'}
   $report.stage='compare-all-ordered-photo-ids'
