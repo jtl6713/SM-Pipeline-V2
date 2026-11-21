@@ -42,6 +42,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # A malformed guard module must fail clearly before endpoint scanning.
+          python -m py_compile repair/scripts/airtable_negative_only_workflows.py
           # Only exact forbidden-token assertions in audited read-only workflows
           # are permitted; any other endpoint occurrence fails closed.
           python - <<'PY'
