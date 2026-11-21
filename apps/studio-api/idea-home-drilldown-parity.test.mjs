@@ -17,7 +17,7 @@ const makeList=({page})=>new Function(
  async()=> "00000000-0000-4000-8000-000000000001",
  async(_env,url)=>{
   assert.match(url,/content_profile_id=eq\./);
-  assert.match(url,/status=neq.Promoted/);
+  assert.match(url,/or=\(status\.is\.null,status\.neq\.Promoted\)/);
   const offset=Number(url.match(/&offset=(\d+)/)?.[1]||0);
   return page(offset);
  },
