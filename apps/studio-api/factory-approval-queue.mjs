@@ -765,6 +765,30 @@ export async function factoryBatchMarkExceptionRouted(bucket, {
 }
 
 /**
+ * Fair, bounded Factory receipt reconciliation window.
+ * Stable age ordering plus a rotating eight-child window prevents a flood of
+ * newer jobs or permanently mismatched receipts from hiding older requests.
+ * The returned children are only candidates: exact Supabase receipts still
+ * control every R2 bookkeeping write.
+ */
+export function factoryBatchCronReceiptCandidates(jobs, { nowMs = Date.now(), limit = 8 } = {}) {
+  const take = Math.max(1, Math.min(8, Math.floor(Number(limit) || 8)));
+  const eligible = (Array.isArray(jobs) ? jobs : []).filter(candidate =>
+    candidate?.job?.group_request_id &&
+    ["queued", "running"].includes(candidate.job.status) &&
+    (candidate.job.items || []).some(item => ["pending", "processing"].includes(item.status))
+  ).sort((a, b) =>
+    (Date.parse(a.job.created_at || "") || 0) - (Date.parse(b.job.created_at || "") || 0) ||
+    String(a.requestId || "").localeCompare(String(b.requestId || ""))
+  );
+  if (!eligible.length) return [];
+  const minute = Math.floor(Math.max(0, Number(nowMs) || 0) / 60000);
+  const first = ((minute % eligible.length) * take) % eligible.length;
+  return Array.from({ length: Math.min(take, eligible.length) },
+    (_, index) => eligible[(first + index) % eligible.length]);
+}
+
+/**
  * Repair R2 progress only after an exact, still-current Supabase approval receipt
  * from THIS Factory request has been read back. This never calls the approval
  * writer, MAE, or any publisher. The receipt is verified against immutable
