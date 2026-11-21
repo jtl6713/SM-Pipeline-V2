@@ -1,0 +1,109 @@
+name: P1 2340 NYC4785 original TikTok draft status audit
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-nyc4785-tiktok-status.yml'
+      - 'repair/scripts/p1-2340-nyc4785-original-tiktok-status-readonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-nyc4785-tiktok-status.yml'
+      - 'repair/scripts/p1-2340-nyc4785-original-tiktok-status-readonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-nyc4785-original-status-readonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify script syntax and exact original-draft-only status request
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-nyc4785-original-tiktok-status-readonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $src=Get-Content -Raw $file
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','v_inbox_url~v2.7706207567982462989','tiktok/draft/status','tiktok/status','media_create_calls=0','media_publish_calls=0','supabase_writes=0','airtable_operations=0')){
+            if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
+          }
+          if(([regex]::Matches($src,'-Method Post')).Count -ne 1 -or ([regex]::Matches($src,'/tiktok/draft/status')).Count -ne 1){throw 'only_one_original_status_fetch_allowed'}
+          foreach($bad in @('/tiktok/draft/photo/init','/tiktok/draft/video/init','/tiktok/publish-private','/media_publish','-Method Patch','-Method Put','-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){
+            if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}
+          }
+          Write-Output 'NYC4785_ORIGINAL_STATUS_READONLY_STATIC_PASS'
+  live-status-fetch:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Obtain existing protected Ops credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/p1-4785-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/p1-4785-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_4785_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Ops authentication unavailable; no TikTok action';exit 1
+      - name: Run single saved TikTok publish ID status/fetch (no upload or publish)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/p1-2340-nyc4785-original-tiktok-status-readonly.ps1').read_text(),
+            'confirm':True}))
+          PY
+          admitted=false
+          for attempt in $(seq 1 10); do
+            http=$(curl -sS --max-time 30 -o /tmp/p1-4785-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $P1_4785_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/p1-4785-request.json || true)
+            if [[ "$http" == 200 || "$http" == 202 ]]; then admitted=true;break;fi
+            if [[ "$http" != 409 ]]; then echo "Ops denied protected status check ($http)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$admitted" != true ]]; then echo 'Ops busy; no provider status call';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-4785-start.json)
+          for n in $(seq 1 130); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_4785_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-4785-job.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-4785-job.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-4785-job.json | grep '^P1_NYC4785_TIKTOK_STATUS=' | tail -1 | sed 's/^P1_NYC4785_TIKTOK_STATUS=//' > /tmp/p1-4785-evidence.json
+              jq -e '.output==4785 and .profile=="New York City" and .read_only==true and .saved_original_id==true and .provider_status_fetch_calls<=1 and .media_create_calls==0 and .media_publish_calls==0 and .supabase_writes==0 and .airtable_operations==0 and .publicly_posted_confirmed==false' /tmp/p1-4785-evidence.json >/dev/null
+              jq -c '{output,profile,owner_verified,status_check_complete,publish_status,delivered_to_inbox,returned_public_id_count,reason,provider_status_fetch_calls,media_create_calls,media_publish_calls}' /tmp/p1-4785-evidence.json
+              if ! jq -e '.owner_verified==true and .status_check_complete==true' /tmp/p1-4785-evidence.json >/dev/null;then
+                echo 'Provider status unavailable; no retry authorized';exit 3
+              fi
+              exit 0
+            elif [[ "$status" == failed ]];then echo 'Ops status job failed; no provider retries';exit 3;fi
+            sleep 4
+          done
+          echo 'Original TikTok status unresolved';exit 4
+      - name: Retain sanitized status evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-nyc4785-original-tiktok-status
+          path: /tmp/p1-4785-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
