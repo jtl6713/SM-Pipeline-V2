@@ -4056,6 +4056,78 @@ test("Phase6 Production Request and Media GETs plus autonomous drafts read from 
   assert.match(side, /kind === "media"/);
 });
 
+test("autonomous draft lane prioritizes asset-ready ideas over hundreds of older empty drafts", async () => {
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  const ready = (id, time) => ({
+    airtable_record_id: id,
+    request_status: "Draft",
+    master_asset_status: "Ready",
+    production_notes: "origin=autonomous",
+    created_at: time,
+    publish_status: { Studio_Master_Asset_Count: 10, Active: true },
+  });
+  try {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      urls.push(href);
+      if (href.includes("master_asset_status=eq.Ready")) {
+        // The same draft may be present in recent and oldest scans.
+        return new Response(JSON.stringify([
+          ready("recReadyNew", "2026-11-21T15:00:00Z"),
+          ready("recReadyOld", "2026-11-20T15:00:00Z"),
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error("Unexpected unready fallback while ready drafts exist: " + href);
+    };
+    const rows = await listSupabaseAutonomousDraftRequests(env, { limit: 40 });
+    assert.deepEqual(rows.map((row) => row.id), ["recReadyNew", "recReadyOld"]);
+    assert.equal(urls.length, 2);
+    assert.ok(urls.some((url) => url.includes("order=created_at.desc.nullslast")));
+    assert.ok(urls.some((url) => url.includes("order=created_at.asc.nullslast")));
+    assert.ok(urls.every((url) => url.includes("master_asset_status=eq.Ready")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("autonomous draft lane scans incomplete legacy rows only if none are asset-ready", async () => {
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      urls.push(href);
+      const rows = href.includes("master_asset_status=eq.Ready")
+        ? []
+        : [{ airtable_record_id: "recUnreadyLegacy", request_status: "Draft",
+             production_notes: "origin=autonomous", created_at: "2026-10-18T10:00:00Z" }];
+      return new Response(JSON.stringify(rows), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    };
+    const rows = await listSupabaseAutonomousDraftRequests(env, { limit: 40 });
+    assert.deepEqual(rows.map((row) => row.id), ["recUnreadyLegacy"]);
+    assert.equal(urls.length, 3);
+    assert.match(urls[2], /order=created_at.asc.nullslast&limit=10/);
+    assert.doesNotMatch(urls[2], /master_asset_status=eq.Ready/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("library batch existing names read from Supabase under Phase6", async () => {
   const { listSupabaseLibraryBatchExistingNames } = await import("./supabase-pipeline-reads.mjs");
   const env = {
