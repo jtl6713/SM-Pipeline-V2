@@ -537,7 +537,7 @@ def test_supabase_side_table_failure_is_explicit_and_never_uses_airtable(monkeyp
         AssertionError("Airtable archive accessed")))
     monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(
         RuntimeError("Supabase unavailable")))
-    with pytest.raises(RuntimeError, match="Supabase side-table authoritative update not confirmed"):
+    with pytest.raises(RuntimeError, match="Supabase update uncommitted.*no Airtable fallback"):
         AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
             CAROUSEL_SLIDES_TABLE, "recSlide1", {"Current Order": 2}
         )
@@ -548,7 +548,7 @@ def test_supabase_phase6_create_failure_never_claims_minted_asset_id(monkeypatch
         AssertionError("Airtable archive accessed")))
     monkeypatch.setattr(requests, "request", lambda *_a, **_k: (_ for _ in ()).throw(
         RuntimeError("Supabase unavailable")))
-    with pytest.raises(RuntimeError, match="Supabase Phase6/side-table create not confirmed"):
+    with pytest.raises(RuntimeError, match="Supabase create uncommitted.*no Airtable fallback"):
         AirtableClient(settings=_settings(
             studio_write_source="supabase",
             studio_phase6_write_source="supabase",
