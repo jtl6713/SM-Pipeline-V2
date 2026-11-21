@@ -17,6 +17,11 @@ const ytRecoveryTargets=[
  {route:'yt5321',record:'recLzqmtWJGQvLNTZ',output_id:5321,video_id:'ekWGUhmlnaQ'},
  {route:'yt4140',record:'recT2eb5eOeioD0nY',output_id:4140,video_id:'PGNXR-WNI3g'},
  {route:'yt4050',record:'rec0259hg7cjoKl3j',output_id:4050,video_id:'gm9Mxa8ScnM'},
+ {route:'yt10627',record:'recp0qMXD0sNOjkOY',output_id:10627,video_id:'Y7rZNlEKVMw'},
+ {route:'yt10634',record:'recKpst2oF5qM3vKY',output_id:10634,video_id:'WMszupIwRgg'},
+ {route:'yt10677',record:'recM4QtGwXHOUC3Gz',output_id:10677,video_id:'oZfmF_Re8Bk'},
+ {route:'yt10710',record:'recynyn3nG1xt5C1S',output_id:10710,video_id:'Etu2LCeXpjE'},
+ {route:'yt10749',record:'reckI9jDPe6WMbimo',output_id:10749,video_id:'YqtbbQmVmAE'},
 ];
 const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
 if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
@@ -73,6 +78,12 @@ try {
     '/${token}/yt5321':'/api/admin/exception-recovery/recLzqmtWJGQvLNTZ/receipt?authenticated=1',
     '/${token}/yt4140':'/api/admin/exception-recovery/recT2eb5eOeioD0nY/receipt?authenticated=1',
     '/${token}/yt4050':'/api/admin/exception-recovery/rec0259hg7cjoKl3j/receipt?authenticated=1',
+    '/${token}/fb5885':'/api/admin/exception-recovery/recfj1dIKNTAnHNWp/receipt',
+    '/${token}/yt10627':'/api/admin/exception-recovery/recp0qMXD0sNOjkOY/receipt?authenticated=1',
+    '/${token}/yt10634':'/api/admin/exception-recovery/recKpst2oF5qM3vKY/receipt?authenticated=1',
+    '/${token}/yt10677':'/api/admin/exception-recovery/recM4QtGwXHOUC3Gz/receipt?authenticated=1',
+    '/${token}/yt10710':'/api/admin/exception-recovery/recynyn3nG1xt5C1S/receipt?authenticated=1',
+    '/${token}/yt10749':'/api/admin/exception-recovery/reckI9jDPe6WMbimo/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -159,6 +170,18 @@ try {
     evidence:String(evidence.evidence||evidence.error||'unverified').slice(0,120),
   });
  }
+ // P1 #2340: exact already-published LA Facebook Reel post ID, GET only.
+ // A generic Graph receipt is not proof of Page ownership; never authorize
+ // a re-publish from this result alone.
+ const fb = await probe('fb5885');
+ const fbBody = fb.body || {};
+ report.issue_2340_fb5885 = {
+   record_id:'recfj1dIKNTAnHNWp', output_id:5885, http_status:fb.status,
+   remote_id:fbBody.remote_id||null, status:fbBody.status||null,
+   verified_public:fbBody.verified_public===true,
+   evidence:String(fbBody.evidence||'unverified').slice(0,100),
+   no_output_write:fbBody.verification?.no_output_write!==false,
+ };
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
  if(receipt.status!==200||Number(data.output_id)!==rollout.canary_output_id||data.remote_id!==rollout.canary_video_id||data.channel_id!==rollout.canary_channel_id)throw new Error('canary_exact_identity_not_verified');
