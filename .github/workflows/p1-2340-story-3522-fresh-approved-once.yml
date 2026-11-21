@@ -1,0 +1,128 @@
+name: P1 2340 Chicago 3522 approved expired Story one-time replacement
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-story-3522-fresh-approved-once.yml'
+      - 'repair/scripts/p1-2340-story-3522-fresh-approved-once.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-story-3522-fresh-approved-once.yml'
+      - 'repair/scripts/p1-2340-story-3522-fresh-approved-once.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-3522-approved-fresh-story-once
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse exact recovery PowerShell
+        shell: pwsh
+        run: |
+          $path='repair/scripts/p1-2340-story-3522-fresh-approved-once.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $src=Get-Content $path -Raw
+          foreach($required in @('vkwvscgisqsbuwagdvtb','reco2Iix0eaXJHMGD','17910983553575604','https://media.chicagoshining.com/studio/previews/reco2Iix0eaXJHMGD/current.mp4','approved_replacement_preflight_failed','quality_agent_recovery_events','old_container_not_proven_expired','created_container_checkpoint_not_saved_no_publish','new_container_not_finished_no_publish','publish_unique_fence_failed','provider_published_but_db_finalization_unverified',"original_hold_preserved=$true")){
+            if(-not $src.Contains($required)){throw ('required_approved_replacement_safety_missing: '+$required)}
+          }
+          if(([regex]::Matches($src,'/media_publish')).Count -ne 1 -or ([regex]::Matches($src,"'/media'")).Count -ne 1){throw 'not_one_exact_meta_creation_and_publish'}
+          if(([regex]::Matches($src,'/rest/v1/quality_agent_recovery_events')).Count -ne 2){throw 'two_independent_unique_fences_required'}
+          foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','-Method Put','Write-Output $token','Write-Host $token')){
+            if($src.Contains($bad)){throw 'unsafe_operation_or_secret_output'}
+          }
+          Write-Output 'P1_3522_APPROVED_FRESH_STORY_PARSER_AND_STATIC_PASS'
+  approved-one-shot:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate protected Ops shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-3522-ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-3522-ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_3522_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable; no Meta changes made';exit 1
+      - name: Build small source-SHA256-verified loader for exact merged commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          script=pathlib.Path('repair/scripts/p1-2340-story-3522-fresh-approved-once.ps1')
+          sha=hashlib.sha256(script.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(c in '0123456789abcdef' for c in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{script.as_posix()}'
+          command=(
+           "$ErrorActionPreference='Stop';"+
+           f"$url='{url}';"+
+           "$body=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"+
+           "$sha=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($body))).Replace('-','').ToLowerInvariant();"+
+           f"if($sha -ne '{sha}'){{throw 'pinned_main_source_hash_mismatch'}};"+
+           "& ([ScriptBlock]::Create($body))"
+          )
+          pathlib.Path('/tmp/p1-3522-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          print('main_commit_immutable_loader=PASS')
+          PY
+      - name: Perform exactly one new approved Story container plus public publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          admitted=false
+          for n in $(seq 1 15); do
+            code=$(curl -sS --max-time 30 -o /tmp/p1-3522-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $P1_3522_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/p1-3522-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops rejected original one-shot job ($code)";exit 2;fi
+            echo 'Ops busy, no job admitted; waiting for protected shell lock'
+            sleep 10
+          done
+          if [[ "$admitted" != true ]];then echo 'Ops remained busy; no Meta create attempt';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-3522-start.json)
+          for n in $(seq 1 230); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_3522_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-3522-job.json
+            state=$(jq -r '.job.status // empty' /tmp/p1-3522-job.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-3522-job.json | grep '^P1_3522_FRESH_STORY=' | tail -1 | sed 's/^P1_3522_FRESH_STORY=//' > /tmp/p1-3522-evidence.json
+              jq -e '.output==3522 and .airtable_ops==0 and .create_calls<=1 and .publish_calls<=1 and .original_hold_preserved==true' /tmp/p1-3522-evidence.json >/dev/null
+              jq -c '{output,state,fence_created,old_confirmed_expired,create_calls,publish_calls,saved_published,error,new_container,new_media_id,original_hold_preserved}' /tmp/p1-3522-evidence.json
+              if ! jq -e '.saved_published==true and .state=="genuinely_published_original_approved_media_replacement"' /tmp/p1-3522-evidence.json >/dev/null;then
+                 echo 'No verified public receipt. Keep failed hold and do not replay';exit 3
+              fi
+              echo 'P1_3522_ACTUAL_VERIFIED_STORY_PUBLICATION=PASS'
+              exit 0
+            elif [[ "$state" == failed ]];then echo 'One-shot job failed; never replay ambiguous create/publish';exit 3;fi
+            sleep 4
+          done
+          echo 'One-shot job uncertain; do not retry';exit 4
+      - name: Save sanitized original-versus-replacement publication proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-chicago-3522-approved-story-once
+          path: /tmp/p1-3522-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
