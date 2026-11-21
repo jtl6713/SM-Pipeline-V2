@@ -41,6 +41,22 @@ POWERSHELL_GUARDS = {
         "if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}",
         1,
     ),
+    ".github/workflows/p1-2340-nyc4785-tiktok-status.yml": (
+        ",'-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){",
+        "if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}",
+        1,
+    ),
+    ".github/workflows/p1-2340-story-3522-fresh-approved-once.yml": (
+        "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','-Method Put','Write-Output $token','Write-Host $token')){",
+        "if($src.Contains($bad)){throw 'unsafe_operation_or_secret_output'}",
+        1,
+    ),
+    ".github/workflows/p1-2340-ten-approved-stories.yml": (
+        "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','Write-Output $token','Write-Host $token')){",
+        "if($s.Contains($bad)){throw 'unsafe_operation'}",
+        1,
+    )
+}
 }
 
 
