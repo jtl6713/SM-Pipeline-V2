@@ -144,8 +144,12 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
 }
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
-  requestId = "", policy = null, pilotRollout = null, verifyImages = verifyReviewImages,
+  requestId = "", policy = null, pilotRollout = null,
+  verifyImages = verifyReviewImages, onStage = async () => {},
 } = {}) {
+  // These exact awaited checkpoints are observational only; the canonical
+  // read, hold check, CAS write and readback remain the approval authority.
+  await onStage("validating");
   const entries = await factorySupabaseApprovalRows(env, [id]);
   const entry = entries.get(id);
   if (!entry || entry.profileId !== profileId) {
@@ -199,9 +203,11 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     + (row.content_profile_id ? "&content_profile_id=eq." + encodeURIComponent(row.content_profile_id) : "")
     + "&do_not_publish=eq.false"
     + "&" + valueFilter("test_run_id", row.test_run_id);
+  await onStage("approving");
   const updated = await supabaseRest(env, selector, {
     method: "PATCH", body: fields, headers: { Prefer: "return=representation" },
   });
+  await onStage("verifying");
   if (!Array.isArray(updated) || updated.length !== 1) {
     const fresh = (await factorySupabaseApprovalRows(env, [id])).get(id);
     if (fresh?.profileId === profileId && satisfied(fresh.row)) {
