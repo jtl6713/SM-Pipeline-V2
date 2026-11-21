@@ -10742,10 +10742,9 @@ async function exceptionRecoveryReadProvider(env, row, verifiedProfile = null) {
   }});
 }
 /**
- * Resolve the authoritative Airtable identity chain, never the
- * Platform Output.Content_Profile lookup label:
- * Platform Output.Content_Item -> Content Item.Content_Profile -> Profile.
- * Every read of an output for the autonomous status-only reconciler uses this.
+ * Resolve the authoritative Supabase owner chain, never the legacy
+ * display-only Content_Profile lookup: Output -> Content Item -> Profile.
+ * Missing/mismatched identities fail closed before any provider GET.
  */
 async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
   // P1 #2340: this owner chain is required before any profile-scoped provider
@@ -10849,6 +10848,11 @@ async function appendPublicationRecoveryAudit(env,event) {
     throw new Error("audit_append_readback_failed");
 }
 export async function studioPublicationRecoveryCron(env) {
+  // Do not run a legacy Airtable discovery/PATCH reconciler after the
+  // canonical write source has moved to Supabase. Explicitly fail closed.
+  if (studioWriteSource(env) === "supabase")
+    return {ok:false,disabled:true,reason:"legacy_airtable_recovery_writer_disabled",
+      read_only:true};
   return runPublicationRecovery(env,{
     discover:async options=>{
       const page=await listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{...options,limit:100});
