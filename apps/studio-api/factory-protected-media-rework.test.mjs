@@ -383,3 +383,87 @@ test("protected Factory cards distinguish original 82 from newly fenced gallery 
   assert.equal(card.can_retry,false);
   assert.equal(card.can_approve,false);
 });
+
+test("all ten original 4:5 sources are display-only, original-owner and audit run bound", () => {
+  const recordId = "recYnHtxkSljy762z";
+  const hold = {
+    issue:2374,output_number:10793,source_slide_count:0,
+    no_provider_retry_authorized:true, reconstruction_and_fresh_approval_required:true,
+    original_approval_and_errors_preserved:true,historical_schedule_preserved:true,
+    provider_calls_performed:0,
+  };
+  const urls = [0,1,2,3].map(i =>
+    `https://media.chicagoshining.com/studio/previews/lettered/${recordId}/${i}.jpg`);
+  const proof = {
+    source_class:"original_output_preview_folder",
+    verification_type:"read_only_cdn_http_decoded_image_header",
+    provider_read_only_audit_run_id:44943264131,
+    output_number:10793,
+    expected_image_count:4,
+    verified_4x5_image_count:4,
+    candidate_original_image_urls:urls,
+    original_slide_records_present:false,
+    original_factory_approved_slide_identity_proven:false,
+    fresh_factory_creative_review_required:true,
+    ap0c_instagram_public_asset_staging_done:false,
+    owner_original_provider_publication_proven:false,
+    new_publish_retry_authorized:false,
+    facebook_remote_photo_ids_present:false,
+    ig_remote_child_ids_present:false,
+    source_image_approval_is_not_proven:true,
+    reconstruction_and_fresh_factory_approval_required:true,
+  };
+  const newProof = "Studio_Recovery_NewMedia_Original_Preview_Gallery_Verified_20261121";
+  const row = shaped({
+    id: recordId,
+    fields: {
+      ...shaped().fields,Output_ID:10793,
+      Studio_Overdue_Preflight_Repair_20261120:null,
+      Studio_Overdue_UnsafeGallery_Hold_20261121:hold,
+      [newProof]:proof,
+      Studio_Recovery_Source_Gallery_Verified_20261121:null,
+    },
+  });
+  assert.equal(protectedMediaReworkShapedRecord(row),true);
+  assert.deepEqual(protectedMediaReworkOriginalPreviewGallery(row),{urls,count_mismatch:false});
+  const summary = protectedMediaReworkSummary(row);
+  assert.deepEqual(summary.original_image_previews,urls);
+  assert.equal(summary.media_rework,true);
+  assert.equal(summary.source_inventory_verified,true);
+  assert.match(summary.next_step,/fresh Factory review required/);
+  assert.equal(summary.can_approve,false);
+  assert.equal(summary.can_retry,false);
+  assert.equal(summary.can_publish,false);
+  for(const override of [
+    {provider_read_only_audit_run_id:1234},
+    {output_number:10802},
+    {verified_4x5_image_count:3},
+    {candidate_original_image_urls:urls.slice(1)},
+    {candidate_original_image_urls:[...urls.slice(0,3),urls[1]]},
+    {candidate_original_image_urls:[...urls.slice(0,3),urls[3].replace(recordId,"recAAAAAAAAAAAAAA")]},
+    {original_slide_records_present:true},
+    {facebook_remote_photo_ids_present:true},
+    {ig_remote_child_ids_present:true},
+    {source_image_approval_is_not_proven:false},
+    {reconstruction_and_fresh_factory_approval_required:false},
+    {new_publish_retry_authorized:true},
+    {original_factory_approved_slide_identity_proven:true},
+  ]){
+    const bad={...row,fields:{...row.fields,[newProof]:{...proof,...override}}};
+    assert.equal(protectedMediaReworkOriginalPreviewGallery(bad),null,JSON.stringify(override));
+  }
+  // The one FB output #10802 got four C9 rows from another writer, but
+  // those are explicitly NOT a new Factory approval or remote FB photos.
+  const fbId="recr4kD97CT3X2JLX";
+  const fbRow={...row,id:fbId,fields:{
+    ...row.fields,Output_ID:10802,
+    Studio_Overdue_UnsafeGallery_Hold_20261121:{...hold,output_number:10802},
+    [newProof]:{...proof,output_number:10802,original_slide_records_present:true,
+      candidate_original_image_urls:urls.map(url=>url.replace(recordId,fbId))},
+  }};
+  const fbGallery=protectedMediaReworkOriginalPreviewGallery(fbRow);
+  assert.equal(fbGallery?.urls?.length,4);
+  assert.equal(protectedMediaReworkSummary(fbRow)?.can_publish,false);
+  assert.equal(protectedMediaReworkOriginalPreviewGallery({...fbRow,fields:{...fbRow.fields,
+    [newProof]:{...fbRow.fields[newProof],original_slide_records_present:false}}),null);
+});
