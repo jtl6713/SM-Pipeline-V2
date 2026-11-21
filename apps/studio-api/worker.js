@@ -4935,10 +4935,15 @@ export default {
       } catch (error) {
         console.warn("story companion drift heal failed", error);
       }
-      try {
-        await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
-      } catch (error) {
-        console.warn("overdue scheduled publish rescue cron failed", error);
+      if (!supabaseFreshPublishing) {
+        // Legacy rescue can initiate a second provider create after the new
+        // Supabase lane has begun. In Supabase mode ONLY the independently
+        // fenced initial-publish flow may send the first remote publish.
+        try {
+          await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
+        } catch (error) {
+          console.warn("legacy overdue scheduled rescue cron failed", error);
+        }
       }
       if (!supabaseFreshPublishing) {
         try {

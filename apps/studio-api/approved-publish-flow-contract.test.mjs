@@ -7,11 +7,12 @@ test("fresh publish selector gets only due approved never-dispatched Supabase ou
   const query = deskHealOutputFilter("fresh_publish_ready", { nowMs: Date.parse("2026-11-20T19:00:00Z") });
   for (const fragment of [
     "do_not_publish=eq.false", "auto_publish_enabled=eq.true",
-    "review_status=eq.Approved", "output_status=eq.", "publish_status=eq.",
+    "review_status=eq.Approved", "output_status=eq.", "publish_status=in.",
     "published_at=is.null", "Studio_Publish_Dispatch_Count",
-    "publish_retry_eligible.is.null", "publish_next_retry_at.lte.",
+    "publish_next_retry_at.lte.",
     "scheduled_post_date.lte.", "platform.eq.TikTok",
   ]) assert.ok(query.includes(fragment), fragment);
+  assert.ok(!query.includes("publish_retry_eligible="), "fresh first posts may prohibit retry");
   assert.ok(query.includes("2026-11-20T19%3A15%3A00"), "TikTok lead cannot be widened");
 });
 test("Supabase publisher does not fall back to Airtable and is fenced before provider call", () => {
@@ -37,4 +38,16 @@ test("Supabase publisher does not fall back to Airtable and is fenced before pro
   const cooling = worker.indexOf("cron skipped: Airtable cooling down");
   assert.ok(anchored > 0 && cooling > anchored, "Supabase flow must run before Airtable cooldown exit");
   assert.match(worker, /if \(!supabaseFreshPublishing\) \{\s*try \{\s*await studioReconcileApprovedPublishes/);
+});
+
+test("Supabase has only one initial publish cron owner, including scheduled due", () => {
+  const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const marker = worker.indexOf("legacy overdue scheduled rescue cron failed");
+  assert.ok(marker > 0);
+  const guard = worker.lastIndexOf("if (!supabaseFreshPublishing)", marker);
+  assert.ok(guard > 0 && marker - guard < 700, "legacy overdue rescue must be disabled when Supabase flow runs");
+  const filter = deskHealOutputFilter("fresh_publish_ready", { nowMs: Date.parse("2026-11-20T19:00:00Z") });
+  assert.match(filter, /publish_status=in\.\(/);
+  assert.match(filter, /Ready%20to%20Schedule/);
+  assert.match(filter, /Ready%20to%20Publish/);
 });
