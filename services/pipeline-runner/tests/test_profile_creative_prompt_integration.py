@@ -54,3 +54,18 @@ def test_owner_global_prompt_precedes_profile_and_type_specific_in_all_generator
         assert suffix.index("Maintain consistent") < suffix.index("specific local architecture")
         assert suffix.index("specific local architecture") < suffix.index(specific)
         assert "safety requirements" in suffix
+
+
+def test_i1_idea_prompt_includes_owner_and_profile_but_not_thumbnail_only_text():
+    from studio_produce.creative_guidance import creative_prompt_suffix
+
+    prompt = creative_prompt_suffix({
+        "owner_global_direction": "Shared standards for all owned cities",
+        "shared_direction": "Specific local places",
+        "thumbnail_instructions": "Big 3D cover lettering",
+        "narration_instructions": "Spoken outro",
+    }, mode="ideas")
+    assert "Shared standards for all owned cities" in prompt
+    assert "Specific local places" in prompt
+    assert "Big 3D cover lettering" not in prompt
+    assert "Spoken outro" not in prompt
