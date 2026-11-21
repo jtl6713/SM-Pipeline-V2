@@ -46,7 +46,7 @@ test("#2489: effective full video retains 39.66-second narration; Stories defaul
     outputEffectiveText:(row,key,req,master)=>f(row,key)||f(req,master)||"",
     item4ResolvedVideoDurationSeconds:()=>30,
     resolvedThumbnailMode:()=>"Yes",
-    resolveStudioRenderMusic:async()=>({record_id:"recLicensedMusic",url:"https://example.test/verified-music.mp3"}),
+    resolveStudioRenderMusic:async()=>({record_id:"recLicensedMusic",url:"https://example.test/verified-music.mp3",rights_status:"Licensed",duration_seconds:49.08}),
     studioIsFinishedPassthrough:()=>false,
     outputWorkItemIssues:()=>[],
   });
@@ -133,4 +133,25 @@ test("#2489: full request JSONB writer retains exact script and audio master int
   assert.equal(result.publish_status.Requested_Script,"Do not replace exact script");
   assert.equal(result.publish_status.Voiceover_Duration_Seconds,39.66);
   assert.equal(result.publish_status.Video_Duration_Seconds,30);
+});
+
+test("#2489: catalog music is licensed, active and long enough; unsafe music fails closed", () => {
+  const from=extract(worker,"studioMusicFromMediaRecord",{
+    f,emptyStudioMusic:()=>({record_id:null,url:null}),
+    googleDriveFileId:r=>f(r,"Google Drive File ID"),
+    stringOrNull:x=>x||null,
+    googleDriveDownloadUrl:id=>"https://example.test/"+id,
+  });
+  const licensed={id:"recLicensedMusic",fields:{"Asset Name":"Licensed 49s bed",
+    Rights_Status:"Licensed",Duration_Seconds:49.087,"Google Drive File ID":"licensed49"}};
+  const unlicensed={id:"recUnlicensed",fields:{"Asset Name":"Song",
+    Rights_Status:"Unknown",Duration_Seconds:180,"Google Drive File ID":"unlicensed"}};
+  assert.equal(from(licensed).rights_status,"Licensed");
+  assert.equal(from(licensed).duration_seconds,49.087);
+  assert.equal(from(unlicensed).url,null);
+  const pick=extract(worker,"pickCatalogFallbackMusicRecord",{
+    f,studioMusicFromMediaRecord:from,studioCatalogMusicScore:()=>0,
+  });
+  assert.equal(pick([unlicensed,licensed],{random:()=>0,minDurationSeconds:40}).id,"recLicensedMusic");
+  assert.equal(pick([unlicensed,licensed],{random:()=>0,minDurationSeconds:50}),null);
 });
