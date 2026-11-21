@@ -72,7 +72,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
-  factoryBatchCronSelectJobs, factoryBatchFailureRouted, factoryBatchFailure,
+  factoryBatchCronSelectJobs, factoryBatchCronReceiptCandidates, factoryBatchFailureRouted, factoryBatchFailure,
   factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
   factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
   factoryBatchReconcileSupabaseApprovalReceipts,
@@ -19459,12 +19459,12 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // from their SAME original request receipts, with no second approval call.
   // Limit reads to eight recent group children per cron tick; a missing or
   // ambiguous Supabase read fails closed for that child without starving cron.
-  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    const receiptCandidates = distinct.filter(row =>
-      row.job?.group_request_id && ["queued", "running"].includes(row.job.status) &&
-      (row.job.items || []).some(item => ["pending", "processing"].includes(item.status)))
-      .sort((a, b) => Date.parse(b.job.created_at || "") - Date.parse(a.job.created_at || ""))
-      .slice(0, 8);
+  // Global Factory approvals always use the Supabase-native exact approval
+  // writer. Their receipt repair must not depend on the unrelated ambient
+  // studioWriteSource setting (which can still be Airtable during migration).
+  // No R2 item changes without the original-request Supabase receipt checks.
+  if (studioSupabaseConfigured(env)) {
+    const receiptCandidates = factoryBatchCronReceiptCandidates(distinct);
     for (const candidate of receiptCandidates) {
       try {
         const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(env.STUDIO_MEDIA, {
