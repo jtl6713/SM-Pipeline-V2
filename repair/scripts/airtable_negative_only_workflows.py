@@ -91,6 +91,20 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             for i in matches
         ):
             safe.update((filename, i) for i in matches)
+    # The merged, GET-only production identity audit reports presence of a
+    # legacy credential binding by *name*; this is not an egress credential use.
+    # Permit exactly one fixed expression, not the entire workflow.
+    identity_audit = ".github/workflows/audit-studio-supabase-target-readonly.yml"
+    audit_path = root / identity_audit
+    if audit_path.exists():
+        audit_lines = audit_path.read_text(encoding="utf-8").splitlines()
+        token_lines = [i for i, line in enumerate(audit_lines)
+                       if "AIRTABLE_PAT" in line or "api.airtable.com" in line]
+        required = ("'legacy_airtable_pat_binding_present':any("
+                    "b.get('name')=='AIRTABLE_PAT' for b in bindings),")
+        if (len(token_lines) == 1 and audit_lines[token_lines[0]].strip() == required
+            and "'only_read_operations':True" in audit_path.read_text(encoding="utf-8")):
+            safe.add((identity_audit, token_lines[0]))
     return safe
 
 
