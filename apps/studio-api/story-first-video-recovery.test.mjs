@@ -21,7 +21,7 @@ function fixture({
   let job={run_id:RUN,idea_id:ID,profile_id:PROFILE,scene_number:4,
     attempt:1,state,approved_at:recent(ageMinutes),scene_visual:"West 28th Street",
     settings:{model_id:"veo-3.1-fast-generate-001",generate_audio:false}};
-  let etag=0, uploads=0, driveSearches=0, writes=0, creates=0, selected=null, paid=0;
+  let etag=0, uploads=0, driveSearches=0, writes=0, creates=0, selected=null, paid=0, createdFields=null;
   let files=driveFiles, rows=catalog;
   const head={size:ORIGINAL_SIZE,customMetadata:{run_id:RUN,ideaId:ID,profileId:PROFILE,sceneNumber:"4"}};
   const env={PIPELINE_RUNNER_URL:"https://runner.example",PIPELINE_RUNNER_SHARED_SECRET:"test"};
@@ -35,7 +35,7 @@ function fixture({
       job=next;etag++;writes++;return String(etag);},
     lookupCatalog:async()=>rows,
     createMedia:async fields=>{
-      creates++;
+      creates++;createdFields=fields;
       rows=[{airtable_record_id:"reca1234567890ab1",media_class:"Video",
         google_drive_file_id: fields["Google Drive File ID"],active:true,do_not_use:false,
         metadata:{studio_transfer_id:"LIB-AIV-"+RUN,content_profile_airtable_id:PROFILE}}];
@@ -69,7 +69,7 @@ function fixture({
   };
   return {
     context,restore:()=>{globalThis.fetch=originalFetch;},
-    stats:()=>({uploads,driveSearches,writes,creates,selected,paid,job}),
+    stats:()=>({uploads,driveSearches,writes,creates,createdFields,selected,paid,job}),
     setFiles:newFiles=>{files=newFiles;},
     setRows:newRows=>{rows=newRows;},
     setJob:newJob=>{job=newJob;},
@@ -116,6 +116,10 @@ test("existing exact Drive file registers once, then selects without any new upl
     assert.equal(result.state,"accepted");
     assert.equal(fx.stats().selected,"reca1234567890ab1");
     assert.equal(fx.stats().creates,1);
+    assert.equal(fx.stats().createdFields.Asset_Role,"Raw Footage");
+    assert.equal(fx.stats().createdFields.Capture_Source,"AI Generated");
+    assert.equal(fx.stats().createdFields.Raw_Source_Eligibility,"Not Applicable");
+    assert.equal(fx.stats().createdFields.Rights_Status,"Licensed");
     assert.equal(fx.stats().uploads,0);
     assert.equal(fx.stats().paid,0);
   }finally{fx.restore();}
