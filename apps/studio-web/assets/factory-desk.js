@@ -537,6 +537,9 @@
   }
 
   function canDelete(card, { candidate = false } = {}) {
+    // Recovery Source approved media is intentionally preserved. A generic
+    // Delete button in Repair must not destroy the only source of the package.
+    if (card?.protected_media_rework === true) return false;
     if (candidate) return false;
     if (card?.kind === "idea") return true;
     if (card?.kind === "output") return true;
@@ -602,6 +605,27 @@
     const previewUrl = String(card.preview_url || "").trim()
       || (/^rec[A-Za-z0-9]+$/.test(String(card.id || "")) ? `/api/outputs/${card.id}/preview` : "");
     const imageOnly = looksLikeImageOnly(card);
+
+    // A recovery-marked, publishing-held gallery is NOT a video preview.
+    // The generic /api/outputs/:id/preview route still resolves legacy
+    // provider/Drive data. For protected repair use the exact trusted public
+    // first image only, and never send a video request or a stale Airtable GET.
+    if (card.protected_media_rework === true) {
+      const safeSource = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_\/-]+\.(jpg|jpeg|png|webp)$/i.test(thumb);
+      dialog.classList.remove("is-video");
+      dialog.classList.add("is-image");
+      if (safeSource) {
+        image.src = thumb;
+        image.hidden = false;
+        setStatus(`Original held source image · ${cardLabel(card)} · not a complete approved gallery`);
+      } else {
+        empty.hidden = false;
+        empty.textContent = "Original media needs reconstruction. No verified source preview exists yet.";
+        setStatus(`No verified recovery preview for ${cardLabel(card)}`, true);
+      }
+      backdrop.hidden = false;
+      return;
+    }
 
     if (imageOnly && thumb) {
       dialog.classList.remove("is-video");
@@ -2094,9 +2118,13 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.review_package_ready === false
-      ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
-      : (card.studio_state || (alert ? "Needs repair" : "—"));
+    const stateLabel = card.protected_media_rework === true
+      ? (card.recovery_source_inventory_verified === true
+        ? "Source verified · Needs creative review"
+        : "Media repair · Source unresolved")
+      : (card.review_package_ready === false
+        ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
+        : (card.studio_state || (alert ? "Needs repair" : "—")));
     const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
@@ -2108,6 +2136,9 @@
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${card.protected_media_rework === true
+          ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Rebuild/stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
+          : ""}
       </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}

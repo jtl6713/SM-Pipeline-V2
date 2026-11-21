@@ -1,3 +1,4 @@
+import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
@@ -11729,10 +11730,13 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env);
+      if (pack.mediaReworkScanWarning) fetchErrors.push(pack.mediaReworkScanWarning);
       const packedOutputs = pack.outputs || [];
       const packedRequests = pack.requests || [];
       // Empty pack usually means Phase 4 sync has not warmed requests/outputs yet.
-      if (packedOutputs.length || packedRequests.length) {
+      if (packedOutputs.length || packedRequests.length || (pack.reviewOutputs || []).length) {
+        // A healthy Supabase-only Factory may have nothing except protected
+        // source-rework outputs. Never silently fall back to Airtable for them.
         profiles = pack.profiles || [];
         outputs = packedOutputs;
         requests = packedRequests;
@@ -11977,6 +11981,12 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
     const readiness = evaluateReviewPackage(record);
+    const mediaRework = protectedMediaReworkSummary(record);
+    // Recovery previews are display-only; do not pass an MP4 into an <img>.
+    const sourcePreview = String(f(record, "Studio_Preview_URL") || "").trim();
+    const mediaReworkThumbnail = mediaRework &&
+      /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_\/-]+\.(jpg|jpeg|png|webp)$/i.test(sourcePreview)
+        ? sourcePreview : null;
     const reviewVisibility = factoryReviewVisibility(
       record, readiness, studioState, outputCreativeAvailable(record),
     );
@@ -12016,6 +12026,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       remotion_job_id: mapped.remotion_job_id || null,
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
+      protected_media_rework: Boolean(mediaRework),
+      recovery_source_inventory_verified: mediaRework?.source_inventory_verified || false,
+      recovery_stage: mediaRework?.stage || null,
+      recovery_next_step: mediaRework?.next_step || null,
       review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
       safety_hold_active: Boolean(String(f(record, "Factory_Review_Handoff_Safety_Hold_At") || "").trim()),
       held_review_decision: f(record, "SM_Factory_Held_Review_Receipt")?.decision || null,
@@ -12028,7 +12042,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At") || null,
       published_at: f(record, "Published_At") || null,
       platform_post_url: f(record, "Platform_Post_URL") || null,
-      thumbnail_url: mapped.thumbnail_url || null,
+      thumbnail_url: mapped.thumbnail_url || mediaReworkThumbnail || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
       render_queue_total: mapped.render_queue_total || renderQueueTotal,
@@ -12057,7 +12071,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       creative_available: outputCreativeAvailable(record),
       // One shared review-package validator governs Factory counts/eligibility.
       // This is metadata validation; the approval route probes actual CDN bytes.
-      review_package_ready: reviewVisibility.visible,
+      // Never let recovered source images turn a Changes Requested item into
+      // a Factory Approve candidate. It belongs in manual creative repair.
+      review_package_ready: mediaRework ? false : reviewVisibility.visible,
       review_package_held_preview_only: reviewVisibility.held_preview_only,
       review_package_readiness: readiness.readiness,
       review_package_missing: readiness.missing_requirements,
