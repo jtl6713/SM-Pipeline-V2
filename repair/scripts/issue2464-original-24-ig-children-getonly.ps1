@@ -20,10 +20,10 @@ function SourceGet([string]$path){
  return Invoke-RestMethod ($base+$path) -Headers $headers -Method Get -TimeoutSec 40
 }
 $expected=@{
- 8128=@{record='recHQwaHW6hO38tct';profile='Miami';count=4;prefix='MIAMI_'}
- 8138=@{record='recl1JDd3hoyCOQLM';profile='New York City';count=4;prefix='NYC_'}
- 8357=@{record='recSiZREAQuoicqm7';profile='Miami';count=8;prefix='MIAMI_'}
- 8417=@{record='recHS9wbhrIEiwNsM';profile='New York City';count=8;prefix='NYC_'}
+ '8128'=@{record='recHQwaHW6hO38tct';profile='Miami';count=4;prefix='MIAMI_'}
+ '8138'=@{record='recl1JDd3hoyCOQLM';profile='New York City';count=4;prefix='NYC_'}
+ '8357'=@{record='recSiZREAQuoicqm7';profile='Miami';count=8;prefix='MIAMI_'}
+ '8417'=@{record='recHS9wbhrIEiwNsM';profile='New York City';count=8;prefix='NYC_'}
 }
 $numbers='8128,8138,8357,8417'
 $select='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,review_status,output_status,publish_status,ig_carousel_status,do_not_publish,auto_publish_enabled,publish_retry_eligible,published_at,platform_post_url,error_messages'
