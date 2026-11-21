@@ -342,9 +342,17 @@ export function studioPhase5WritesMode(env) {
 export function studioLegacyExportEnabled(env, tableId) {
   if (studioWriteSource(env) !== "supabase") return false;
   const table = String(tableId || "");
+  // Cloudflare deployments may omit legacy Airtable table-ID bindings after
+  // Supabase becomes the authority. The stable table IDs and logical names
+  // must still be routed to Supabase; otherwise POST falls through to a fake
+  // local echo and silently loses Content Items / Platform Outputs.
   return Boolean(
     (env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID)
-    || (env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID),
+    || (env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID)
+    || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === CONTENT_ITEMS_TABLE_ID
+    || table === "Platform Outputs"
+    || table === "Content Items",
   );
 }
 
@@ -528,9 +536,11 @@ export async function studioSupabaseCommitOutputContentFirst(env, tableId, recor
   const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
   if (!rows.length) return { skipped: true, reason: "no_records" };
   const table = String(tableId || "");
-  const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
+  const kind = ((env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID)
+    || table === PLATFORM_OUTPUTS_TABLE_ID || table === "Platform Outputs")
     ? "output"
-    : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
+    : ((env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID)
+      || table === CONTENT_ITEMS_TABLE_ID || table === "Content Items")
       ? "content"
       : "";
   if (!kind) return { skipped: true, reason: "table" };
@@ -2392,6 +2402,8 @@ const PRO_OUTPUT_SELECT = [
   "notes",
   "scheduled_at",
   "created_at",
+  "platform_output_id",
+  "content_item_id",
   "production_request_airtable_id",
   "production_request_airtable_ids",
   "brand_airtable_id",
@@ -2422,6 +2434,10 @@ export function airtableShapedProOutputFromSupabase(row) {
       Output_Type: row.output_type || "",
       Aspect_Ratio: row.aspect_ratio || "",
       Enabled: enabled,
+      // Phase-6 typed FK is authoritative even when inverse Airtable links
+      // are absent. Never treat a previously routed PRO as a fresh output.
+      Platform_Output_Exists: Boolean(row.platform_output_id),
+      Content_Item_Exists: Boolean(row.content_item_id),
       // Active is not a typed column; schedule densify uses Enabled as the gate.
       Active: enabled,
       Output_Order: 0,
@@ -5987,6 +6003,14 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
     const ideaId = await resolveSupabaseLinkedId(env, "idea_candidates", ideaAirtableId);
     if (ideaId) row.idea_candidate_id = ideaId;
   }
+  if ("Promoted_Content_Item" in fields) {
+    const originalId = firstLink(fields.Promoted_Content_Item);
+    row.promoted_content_item_id = originalId
+      ? await resolveSupabaseLinkedId(env, "content_items", originalId)
+      : null;
+    if (originalId && !row.promoted_content_item_id)
+      throw new Error("Production Request promoted Content Item is missing in authoritative Supabase");
+  }
   if (bagPatch && Object.keys(bagPatch).length) {
     const existing = options.create === true
       ? {}
@@ -9522,6 +9546,51 @@ async function commitProOutputRecords(env, records, { insert = false } = {}) {
   }
   if (!prepared.length) return null;
   await syncPlanScheduleRowsToSupabase(env, prepared, { partial: !insert });
+  // The plan/schedule densifier intentionally ignores linkage fields. But an
+  // I4 fanout PATCH carries Content_Item + Platform_Output (the exact FK owner);
+  // without this patch the PRO stays unlinked and the next recovery duplicates
+  // already-created outputs. Resolve both through native Supabase identities.
+  for (const row of prepared) {
+    const input = records.find(source => String(source?.id || "") === row.id)?.fields || {};
+    const hasParent = Object.prototype.hasOwnProperty.call(input, "Content_Item");
+    const hasOutput = Object.prototype.hasOwnProperty.call(input, "Platform_Output");
+    if (!hasParent && !hasOutput) continue;
+    const patch = {};
+    if (hasParent) {
+      const links = recordLinkIds(input.Content_Item);
+      if (links.length > 1) throw new Error("PRO Content_Item must have at most one parent");
+      patch.content_item_id = links.length
+        ? await resolveSupabaseLinkedId(env, "content_items", links[0]) : null;
+      if (links.length && !patch.content_item_id)
+        throw new Error("PRO Content_Item Supabase FK cannot be resolved");
+    }
+    if (hasOutput) {
+      const links = recordLinkIds(input.Platform_Output);
+      if (links.length > 1) throw new Error("PRO Platform_Output must have at most one output");
+      patch.platform_output_id = links.length
+        ? await resolveSupabaseLinkedId(env, "platform_outputs", links[0]) : null;
+      if (links.length && !patch.platform_output_id)
+        throw new Error("PRO Platform_Output Supabase FK cannot be resolved");
+    }
+    if (patch.platform_output_id) {
+      const saved = await supabaseRest(env,
+        `platform_outputs?id=eq.${encodeURIComponent(patch.platform_output_id)}`
+          + "&select=id,platform,studio_output_type,content_item_id,error_messages&limit=1");
+      const output = Array.isArray(saved) ? saved[0] : null;
+      if (!output) throw new Error("PRO Platform_Output readback missing");
+      const ownerIds = Array.isArray(output.error_messages?.Production_Request_Output)
+        ? output.error_messages.Production_Request_Output : [];
+      if (!ownerIds.includes(row.id)
+          || output.platform !== String(input.Platform || row.fields?.Platform || "")
+          || output.studio_output_type !== String(input.Output_Type || row.fields?.Output_Type || "")
+          || (patch.content_item_id && output.content_item_id !== patch.content_item_id)) {
+        throw new Error("PRO Platform_Output owner/plan mismatch; refusing incorrect FK");
+      }
+    }
+    await supabaseRest(env,
+      `production_request_outputs?airtable_record_id=eq.${encodeURIComponent(row.id)}`,
+      { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+  }
   return prepared;
 }
 

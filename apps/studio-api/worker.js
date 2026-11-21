@@ -772,6 +772,7 @@ import {
   getPlaceReviews,
   postPlaceReviewAction,
   promoteProductionRequestViaI3I4,
+  studioNyc20261121HandoffCron,
   promoteIdeaViaI3I4,
   ideaPhotoListeningSessionRoute,
   getAuthorizedIdeaRoute,
@@ -4473,6 +4474,14 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Incident 2026-11-21: bounded, exact NYC I4 fanout recovery.
+    // The recovered parents already exist; one request/one minute, never
+    // schedule or publish, durable one-attempt R2 receipt per request.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil(studioNyc20261121HandoffCron(env, ctx, Number(event?.scheduledTime) || Date.now())
+        .then((outcome) => { if (outcome && !outcome.skipped) console.info("NYC handoff recovery", outcome); })
+        .catch((error) => console.warn("NYC handoff exact recovery unavailable; no status assumed", String(error?.message || error))));
+    }
     // One bounded listener on the EXISTING minute cron. Independent deployment
     // flags govern verification and status correction; no publisher is called.
     if (String(event?.cron || "").trim() === "* * * * *" &&
@@ -5746,6 +5755,19 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       throw new HttpError(
         503,
         `Studio could not save ${tableKind || "Phase 6"} changes. Try again in a moment.`
+      );
+    }
+    // An unsaved Content Item or Platform Output must never be reported as a
+    // successful POST/PATCH. The prior echo had no durable record identity:
+    // I3 marked the Idea Promoted, but I4/Factory could never find its parent.
+    // Callers that already performed their own guarded Supabase commit opt
+    // out explicitly with skipSupabaseWriteThrough.
+    if (studioAirtableOutputOrContentTable(env, tableId)
+        && options?.skipSupabaseWriteThrough !== true) {
+      console.warn("supabase output/content mutation did not commit", { table_kind: tableKind, method });
+      throw new HttpError(
+        503,
+        `Studio ${tableKind || "content/output"} ${method} was not saved to Supabase; no status advanced.`,
       );
     }
     console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
@@ -7400,6 +7422,7 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:completeProductionRequestPromotionSideEffects__*/
 /*__STUDIO_WORKER_EXTRACT:assertProductionRequestFanoutComplete__*/
 /*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:studioNyc20261121HandoffCron__*/
 /*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
 // Clearing that id made the next P2 pulse buy the same sentence again

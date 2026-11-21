@@ -44,10 +44,10 @@ class AirtableClient:
             )
         return getattr(requests, method.lower())(url, **kwargs)
 
-    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
+    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
         from supabase_pipeline import mirror_airtable_records
 
-        mirror_airtable_records(self._settings, table_id, records, partial=partial)
+        return mirror_airtable_records(self._settings, table_id, records, partial=partial)
 
     def _legacy_export(self, table_id: str) -> bool:
         from supabase_pipeline import legacy_export_enabled
@@ -156,7 +156,9 @@ class AirtableClient:
             )
             return {"id": record_id, "fields": fields}
         if self._legacy_export(table_id):
-            self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            result = self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            if not isinstance(result, dict) or not result.get("ok") or result.get("count") != 1:
+                raise RuntimeError(f"Supabase update failed for {table_id} {record_id}; refusing success echo")
             logger.info(
                 "Airtable archive kept the Supabase commit and did not export %s %s",
                 table_id,
@@ -196,11 +198,16 @@ class AirtableClient:
                 )
                 return pending
         if self._archive_closed():
-            logger.info(
-                "supabase SoR mutation miss; skipping Airtable archive WRITE %s %s",
-                table_id,
-                record_id,
-            )
+            # Output/Content writes must not pretend success when Supabase is
+            # authoritative. Other legacy Phase-6 routes retain their existing
+            # behavior until their separate write-SoR remediation.
+            from supabase_pipeline import table_kind
+            if table_kind(table_id) in ("content", "output"):
+                raise RuntimeError(
+                    f"Supabase authoritative update did not commit for {table_id} {record_id}; "
+                    "refusing success echo"
+                )
+            logger.info("supabase SoR mutation miss; skipping Airtable archive WRITE %s %s", table_id, record_id)
             return {"id": record_id, "fields": fields}
         record = self._patch_record(table_id, record_id, fields, typecast=typecast)
         self._mirror(table_id, [record])
@@ -351,10 +358,14 @@ class AirtableClient:
                 created.extend(minted)
                 continue
             if self._archive_closed():
-                logger.info(
-                    "supabase SoR create miss; skipping Airtable archive POST %s",
-                    table_id,
-                )
+                # I4 must never mark an Idea promoted with an unsaved Content ID.
+                from supabase_pipeline import table_kind
+                if table_kind(table_id) in ("content", "output"):
+                    raise RuntimeError(
+                        f"Supabase authoritative create did not commit for {table_id}; "
+                        "refusing phantom Content/Output identity"
+                    )
+                logger.info("supabase SoR create miss; skipping Airtable archive POST %s", table_id)
                 if minted:
                     created.extend(minted)
                 else:
@@ -431,10 +442,12 @@ class AirtableClient:
             if not body["records"]:
                 continue
             if legacy:
-                self._mirror(table_id, [
+                mirrored = self._mirror(table_id, [
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
                 ], partial=True)
+                if not isinstance(mirrored, dict) or not mirrored.get("ok") or mirrored.get("count") != len(chunk):
+                    raise RuntimeError(f"Supabase batch update failed for {table_id}; refusing success echo")
                 logger.info("Airtable archive kept the Supabase batch and did not export %s", table_id)
                 updated.extend(
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
@@ -483,10 +496,13 @@ class AirtableClient:
                     )
                     continue
             if self._archive_closed():
-                logger.info(
-                    "supabase SoR batch mutation miss; skipping Airtable archive WRITE %s",
-                    table_id,
-                )
+                from supabase_pipeline import table_kind
+                if table_kind(table_id) in ("content", "output"):
+                    raise RuntimeError(
+                        f"Supabase authoritative batch update did not commit for {table_id}; "
+                        "refusing success echo"
+                    )
+                logger.info("supabase SoR batch mutation miss; skipping Airtable archive WRITE %s", table_id)
                 updated.extend(
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
