@@ -30,6 +30,11 @@
  * - production_requests.publish_status → request link bag for Factory
  */
 
+import {
+  protectedMediaReworkSourceRow,
+  protectedMediaReworkShapedRecord,
+} from "./factory-protected-media-rework.mjs";
+
 export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
   "GET /api/outputs",
   "GET /api/outputs?mode=latest",
@@ -4186,7 +4191,12 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // out of that sample (NYC had 30 actionable records while Factory showed 0).
   // Fetch the review queue independently and paginate past Supabase's 1000-row
   // response cap; do not silently convert an incomplete review scan into zero.
-  const [outputRows, reviewReadyRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  // Independent exact marker-scoped lane: the ordinary output sample
+  // explicitly excludes DNP=true and the Ready-for-Review scan excludes
+  // Changes Requested. Without this, protected recovery media vanishes from
+  // Factory even when its source images have been restored.
+  let mediaReworkScanWarning = null;
+  const [outputRows, reviewReadyRows, heldReworkRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
@@ -4200,6 +4210,20 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).then((rows) => {
       if (rows.length >= 10000) throw new Error("Factory review-ready output scan exceeded safety ceiling");
       return rows;
+    }),
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.true&review_status=eq.Changes%20Requested`
+        + `&output_status=eq.Changes%20Requested`
+        + `&error_messages->>Studio_Overdue_Preflight_Repair_20261120=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast`,
+      { pageSize: 200, maxRows: 500 },
+    ).catch((error) => {
+      // Never fall back to Airtable if the optional recovery lane is
+      // unavailable. Other Factory output/review reads can continue safely.
+      mediaReworkScanWarning = "Protected media rework read unavailable; do not treat an empty repair lane as zero work";
+      console.warn("Supabase Factory protected rework scan failed", String(error?.message || error));
+      return [];
     }),
     supabaseRest(
       env,
@@ -4219,7 +4243,10 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Merge by authoritative output identity, retaining the independent
   // review-ready scan even when its records predate the newest-output sample.
   const outputById = new Map();
-  for (const row of [...(outputRows || []), ...(reviewReadyRows || [])]) {
+  const protectedReworkRows = (heldReworkRows || []).filter(protectedMediaReworkSourceRow);
+  // Only canonical, still-held, unpublished records with an explicit exact
+  // source marker qualify. Never show test, scheduled or published candidates.
+  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
   const rawShapedOutputs = [...outputById.values()]
@@ -4240,7 +4267,8 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
 
   const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
-  const reviewOutputs = shapedOutputs.filter((row) => matchesOpsQueueReviewFormula(row.fields));
+  const reviewOutputs = shapedOutputs.filter((row) =>
+    matchesOpsQueueReviewFormula(row.fields) || protectedMediaReworkShapedRecord(row));
   const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
   // Factory reviews can outlive the recent Production Request window. Resolve
@@ -4337,6 +4365,8 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     outputs,
     renderLaneOutputs,
     reviewOutputs,
+    mediaReworkScanWarning,
+    protectedMediaReworkCount: protectedReworkRows.length,
     activeHolds,
     requests,
     reviewParentRequests: [...reviewParentByContent.values()],
