@@ -1,3 +1,4 @@
+import { selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
@@ -10875,7 +10876,9 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows, requestRecord);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
-    ? outputRows.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
+    ? outputRows.filter((row) =>
+        !Boolean(f(row, "Platform_Output_Exists"))
+        && !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
     : outputRows;
   const batch = batchLimit == null ? candidates : candidates.slice(0, batchLimit);
   const remaining = Math.max(0, candidates.length - batch.length);
@@ -11200,6 +11203,115 @@ export async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, wi
   return toCancel;
 }
 /*__STUDIO_WORKER_END:cancelSiblingProductionRequestsForIdea__*/
+
+export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtMs = Date.now()) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
+    return { skipped: "authority_unavailable" };
+  const target = selectExactNycHandoffSlot(scheduledAtMs);
+  if (!target) return { skipped: "outside_incident_window" };
+  const receiptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
+  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "already_attempted" };
+
+  // Each ID is from one of the two original NYC batches. An unrelated
+  // request, revision, source identity or partial fanout is never recovered.
+  let requestRecord, idea, parent, rows;
+  try {
+    [requestRecord, idea, parent] = await Promise.all([
+      airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request),
+      airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, target.idea),
+      airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, target.content),
+    ]);
+    rows = await outputRowsForProductionRequest(env, target.request);
+  } catch (error) {
+    return { request: target.request, skipped: "authoritative_read_unavailable", error: String(error?.message || error).slice(0, 160) };
+  }
+  const reason = exactNycHandoffPreflight({ target, request: requestRecord, idea, parent, rows });
+  if (reason) return { request: target.request, skipped: reason };
+  // A partially committed fanout can have real Platform Outputs even when
+  // Phase-6 PRO FKs are hollow. Checking only the PRO link would duplicate
+  // those real outputs. Verify the ORIGINAL parent UUID's complete PO inventory.
+  let existingOutputs;
+  try {
+    existingOutputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+  } catch (error) {
+    return { request: target.request, skipped: "platform_output_census_unavailable" };
+  }
+  if (existingOutputs.length) {
+    return { request: target.request, skipped: "existing_platform_outputs_need_reconcile",
+      existing_count: existingOutputs.length };
+  }
+  const started = new Date().toISOString();
+  const receipt = { schema: "studio.nyc-20261121-handoff-once.1", request: target.request,
+    idea: target.idea, content: target.content, expected: target.expected, started_at: started,
+    publish_actions: 0, schedule_actions: 0, status: "attempted" };
+  // R2 durable receipt precedes side effects. A failure here means NO mutation.
+  await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  try {
+    const result = await finalizeProductionRequestPromotion(env, target.request, idea, ctx);
+    const actual = result?.outputFanout;
+    const fields = result?.requestRecord?.fields || {};
+    const valid = fields.Request_Status === "Promoted"
+      && !result?.supersededByRequestId
+      && Number(actual?.enabled_output_count) === target.expected
+      && Number(actual?.routed_count) === target.expected
+      && Number(actual?.blocked_count || 0) === 0
+      && Number(actual?.remaining || 0) === 0;
+    let checked = false;
+    let resumeAccepted = false;
+    let resumeReason = "";
+    if (valid) {
+      try {
+        const outputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+        const links = await outputRowsForProductionRequest(env, target.request);
+        const names = new Set(outputs.map(o =>
+          `${String(f(o, "Platform") || "")}::${String(f(o, "Studio_Output_Type") || "")}`));
+        const expected = new Set(rows.map(o =>
+          `${String(f(o, "Platform") || "")}::${String(f(o, "Output_Type") || "")}`));
+        checked = outputs.length === target.expected && links.length === target.expected
+          && links.every(o => Boolean(f(o, "Platform_Output_Exists")))
+          && names.size === expected.size && [...expected].every(name => names.has(name));
+        if (!checked) resumeReason = "output_identity_or_link_readback_mismatch";
+      } catch (error) {
+        resumeReason = "output_owner_readback_failed";
+      }
+    }
+    // This exact allowlist was proven to have ZERO live Platform Outputs before
+    // recovery, with escalation solely caused by missing outputs. One resume of
+    // the SAME job is authorized only after readback confirms all destinations.
+    // The normal publisher and scheduler are never invoked here.
+    if (valid && checked) {
+      try {
+        const resumed = await enqueueStudioProductionJob(env, target.request, { resume: true });
+        resumeAccepted = resumed?.accepted === true || resumed?.ok === true;
+        if (!resumeAccepted) resumeReason = String(resumed?.reason || resumed?.skipped || "resume_not_accepted").slice(0, 120);
+      } catch (error) {
+        resumeReason = String(error?.message || error).slice(0, 160);
+      }
+    }
+    const done = { ...receipt,
+      status: !valid || !checked ? "needs_investigation" : resumeAccepted
+        ? "verified_fanout_resumed" : "verified_fanout_resume_held",
+      finished_at: new Date().toISOString(), routed: Number(actual?.routed_count || 0),
+      blocked: Number(actual?.blocked_count || 0), promoted: fields.Request_Status === "Promoted",
+      owner_readback_verified: checked, resume_accepted: resumeAccepted, resume_reason: resumeReason };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(done), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    if (!valid) console.error("NYC exact handoff verification failed", done);
+    return { request: target.request, ...done };
+  } catch (error) {
+    const failed = { ...receipt, status: "failed_no_auto_retry",
+      finished_at: new Date().toISOString(), error: String(error?.message || error).slice(0, 300) };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(failed), {
+      httpMetadata: { contentType: "application/json" },
+    }).catch(() => {});
+    console.error("NYC exact handoff failed closed", failed);
+    return { request: target.request, ...failed };
+  }
+}
+/*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
