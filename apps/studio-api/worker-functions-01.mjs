@@ -2312,6 +2312,16 @@ export function normalizedOutputState(record) {
     return "Manual Action Required";
   }
 
+  // A verified TTD0 9:16 asset mismatch cannot be fixed by retrying the
+  // TikTok publisher. This label makes the required upstream media repair
+  // explicit without changing or hiding any canonical publishing status.
+  if (
+    text("Platform").toLowerCase() === "tiktok"
+    && text("TikTok_Draft_Status") === "Retry Pending"
+    && text("Publish_Error_Stage") === "TTD0_ASSETS"
+    && fields.Publish_Retry_Eligible === false
+  ) return "Needs Asset Repair";
+
   // Meta action throttling is a timed automatic retry, not a terminal failure.
   if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
 
@@ -2773,6 +2783,11 @@ export function platformPublishStatus(record) {
   if (platform === "tiktok") {
     const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
     const publish = String(f(record, "Publish_Status") || "").trim();
+    if (
+      draft === "Retry Pending"
+      && String(f(record, "Publish_Error_Stage") || "").trim() === "TTD0_ASSETS"
+      && f(record, "Publish_Retry_Eligible") === false
+    ) return "Needs Asset Repair";
     // Future-dated TikTok drafts keep an internal arming status, but the Pipeline
     // publish column should say the post is waiting on schedule — not asset work.
     if (/waiting for schedule/i.test(draft)) return draft;
