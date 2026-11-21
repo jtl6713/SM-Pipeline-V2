@@ -48,6 +48,29 @@ def test_confirmed_runner_mirror_receipt_is_returned_not_lost(
     assert recorded == [(PLATFORM_OUTPUTS_TABLE, 1, True)]
 
 
+def test_blank_legacy_environment_flags_cannot_resurrect_airtable(monkeypatch):
+    from config import load_settings
+
+    keys = (
+        "STUDIO_WRITE_SOURCE", "STUDIO_PHASE6_WRITE_SOURCE",
+        "STUDIO_RUNNER_OUTPUT_READ_SOURCE",
+        "STUDIO_RUNNER_CONTENT_READ_SOURCE",
+    )
+    for key in keys:
+        monkeypatch.setenv(key, "")
+    load_settings.cache_clear()
+    try:
+        settings = load_settings()
+        for value in (
+            "studio_write_source", "studio_phase6_write_source",
+            "studio_runner_output_read_source",
+            "studio_runner_content_read_source",
+        ):
+            assert settings[value] == "supabase", value
+    finally:
+        load_settings.cache_clear()
+
+
 @pytest.mark.parametrize("operation", ["create", "update", "batch_update", "list"])
 def test_unmapped_crud_never_simulates_success(client, operation):
     table = "UNMAPPED_TABLE"
