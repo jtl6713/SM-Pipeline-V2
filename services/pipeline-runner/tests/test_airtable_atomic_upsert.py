@@ -1,90 +1,55 @@
-"""A2B atomic Drive-ID upsert contract, with no live Airtable writes."""
+"""Retired Airtable transport and atomic-upsert safety contract.
+
+The Supabase equivalent must have a verified unique index or transactional RPC
+before an upsert can be enabled. No ambiguous replacement with find + create.
+"""
 
 import pytest
-import requests
 
 from airtable.client import AirtableClient
+from airtable.constants import MEDIA_ASSETS_TABLE
 
 
-class Response:
-    def __init__(self, data, *, status_code=200):
-        self.data = data
-        self.status_code = status_code
-        self.ok = status_code < 400
-        self.reason = "OK" if self.ok else "Unprocessable Entity"
-        self.text = str(data)
-
-    def json(self):
-        return self.data
+@pytest.fixture
+def client():
+    return AirtableClient(settings={
+        "supabase_url": "https://example.supabase.co",
+        "supabase_service_role_key": "test-only-key",
+        "studio_write_source": "supabase",
+        "studio_phase6_write_source": "supabase",
+    })
 
 
-def test_atomic_upsert_creates_once_and_sends_merge_key(monkeypatch):
-    seen = []
-
-    def fake_patch(url, *, headers, json, timeout):
-        seen.append({"url": url, "headers": headers, "body": json, "timeout": timeout})
-        return Response({
-            "records": [{"id": "recNew", "fields": json["records"][0]["fields"]}],
-            "createdRecords": ["recNew"],
-            "updatedRecords": [],
-        })
-
-    monkeypatch.setattr(requests, "patch", fake_patch)
-    client = AirtableClient(settings={"airtable_pat": "test", "airtable_base_id": "appTest123"})
-    record, created = client.upsert_record(
-        "Media Assets",
-        {"Google Drive File ID": "drive-1", "Asset Name": "LA-Quick-Hits-1.mp4"},
-        merge_field="Google Drive File ID",
-    )
-    assert created is True
-    assert record["id"] == "recNew"
-    assert len(seen) == 1
-    assert seen[0]["body"]["performUpsert"] == {"fieldsToMergeOn": ["Google Drive File ID"]}
-    assert seen[0]["body"]["records"][0]["fields"]["Google Drive File ID"] == "drive-1"
-    assert seen[0]["body"]["typecast"] is True
+def test_airtable_transport_is_permanently_blocked(client, monkeypatch):
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: pytest.fail("No Airtable network calls allowed"))
+    monkeypatch.setattr(requests, "patch", lambda *args, **kwargs: pytest.fail("No Airtable network calls allowed"))
+    with pytest.raises(RuntimeError, match="Airtable HTTP access retired"):
+        client._request("PATCH", "https://example.invalid", table_id=MEDIA_ASSETS_TABLE)
 
 
-def test_atomic_upsert_matches_existing_instead_of_inserting(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
-        "records": [{"id": "recExisting"}],
-        "createdRecords": [],
-        "updatedRecords": ["recExisting"],
-    }))
-    client = AirtableClient(settings={"airtable_pat": "test", "airtable_base_id": "appTest123"})
-    record, created = client.upsert_record(
-        "Media Assets", {"Google Drive File ID": "drive-1"}, merge_field="Google Drive File ID"
-    )
-    assert record["id"] == "recExisting"
-    assert created is False
-
-
-def test_atomic_upsert_fails_closed_when_response_is_ambiguous(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
-        "records": [{"id": "recUnknown"}],
-    }))
-    client = AirtableClient(settings={"airtable_pat": "test", "airtable_base_id": "appTest123"})
-    with pytest.raises(RuntimeError, match="did not confirm"):
+def test_atomic_upsert_fails_closed_without_supabase_unique_contract(client, monkeypatch):
+    import requests
+    monkeypatch.setattr(requests, "patch", lambda *args, **kwargs: pytest.fail("No Airtable network calls allowed"))
+    with pytest.raises(RuntimeError, match="Atomic Supabase upsert not implemented"):
         client.upsert_record(
-            "Media Assets", {"Google Drive File ID": "drive-1"}, merge_field="Google Drive File ID"
+            MEDIA_ASSETS_TABLE,
+            {"Google Drive File ID": "drive-1", "Asset Name": "LA-Quick-Hits-1.mp4"},
+            merge_field="Google Drive File ID",
         )
 
 
-def test_atomic_upsert_fails_closed_when_existing_duplicates_make_merge_ambiguous(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response(
-        {"error": {"type": "INVALID_VALUE_FOR_COLUMN", "message": "multiple matches"}},
-        status_code=422,
-    ))
-    client = AirtableClient(settings={"airtable_pat": "test", "airtable_base_id": "appTest123"})
-    with pytest.raises(requests.HTTPError):
+def test_native_gallery_transfer_upsert_fails_closed(client):
+    with pytest.raises(RuntimeError, match="Atomic Supabase upsert not implemented"):
         client.upsert_record(
-            "Media Assets", {"Google Drive File ID": "drive-1"}, merge_field="Google Drive File ID"
+            MEDIA_ASSETS_TABLE,
+            {"Studio_Transfer_ID": "ng/one"},
+            merge_field="Studio_Transfer_ID",
         )
 
 
-def test_atomic_upsert_requires_nonempty_drive_id(monkeypatch):
-    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: pytest.fail("No HTTP writes expected"))
-    client = AirtableClient(settings={"airtable_pat": "test", "airtable_base_id": "appTest123"})
+def test_empty_merge_key_is_rejected_before_any_write(client):
     with pytest.raises(ValueError, match="must be set"):
         client.upsert_record(
-            "Media Assets", {"Google Drive File ID": ""}, merge_field="Google Drive File ID"
+            MEDIA_ASSETS_TABLE, {"Google Drive File ID": ""}, merge_field="Google Drive File ID"
         )
