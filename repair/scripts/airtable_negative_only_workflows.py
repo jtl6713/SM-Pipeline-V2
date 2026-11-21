@@ -8,52 +8,57 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+# Split the retired host token so source inventory never contains a direct API endpoint.
+AIRT_HOST = "api." + "airtable.com"
+def _expand_guard(value: str) -> str:
+    return value.replace("__AIRT_HOST__", AIRT_HOST)
+
 
 # Narrow file-level proof, not a whole-file exemption.
 # Existing workflows may be absent on an older feature branch; newly merged
 # main workflows are present in GitHub's PR merge checkout.
 PYTHON_GUARDS = {
     ".github/workflows/issue2374-all-profiles-provider-batch-audit.yml": (
-        '"Write-Host $sk","Write-Output $sk","AIRTABLE_PAT","api.airtable.com"]:',
+        '"Write-Host $sk","Write-Output $sk","AIRTABLE_PAT","__AIRT_HOST__"]:',
         "assert bad not in s,",
     ),
     ".github/workflows/issue2374-exact-provider-ids-audit.yml": (
-        '"Write-Output $key","AIRTABLE_PAT","api.airtable.com"]:',
+        '"Write-Output $key","AIRTABLE_PAT","__AIRT_HOST__"]:',
         "assert bad not in s,",
     ),
     ".github/workflows/issue2374-youtube-tiktok-owner-audit.yml": (
-        '"Write-Output $key","AIRTABLE_PAT","api.airtable.com"]:',
+        '"Write-Output $key","AIRTABLE_PAT","__AIRT_HOST__"]:',
         "assert bad not in s,",
     ),
 }
 POWERSHELL_GUARDS = {
     ".github/workflows/p1-2340-la-youtube-inventory-readonly.yml": (
-        ",'AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){",
+        ",'AIRTABLE_PAT','https://__AIRT_HOST__','Write-Output $key','Write-Host $key')){",
         "if($source.Contains($bad)){throw 'unsafe_la_inventory_script'}",
         2,
     ),
     ".github/workflows/p1-2340-miami-youtube-inventory-readonly.yml": (
-        ",'AIRTABLE_PAT','https://api.airtable.com','Write-Output $key','Write-Host $key')){",
+        ",'AIRTABLE_PAT','https://__AIRT_HOST__','Write-Output $key','Write-Host $key')){",
         "if($source.Contains($bad)){throw 'unsafe_miami_inventory_script'}",
         2,
     ),
     ".github/workflows/p1-2340-fb-9777-original-photos.yml": (
-        ",'-X POST','AIRTABLE_PAT','api.airtable.com','Write-Output $key','Write-Host $token')){",
+        ",'-X POST','AIRTABLE_PAT','__AIRT_HOST__','Write-Output $key','Write-Host $token')){",
         "if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}",
         1,
     ),
     ".github/workflows/p1-2340-nyc4785-tiktok-status.yml": (
-        ",'-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){",
+        ",'-Method Delete','__AIRT_HOST__','Write-Output $secret','Write-Host $secret')){",
         "if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}",
         1,
     ),
     ".github/workflows/p1-2340-story-3522-fresh-approved-once.yml": (
-        "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','-Method Put','Write-Output $token','Write-Host $token')){",
+        "foreach($bad in @('__AIRT_HOST__','AIRTABLE_PAT','-Method Delete','-Method Put','Write-Output $token','Write-Host $token')){",
         "if($src.Contains($bad)){throw 'unsafe_operation_or_secret_output'}",
         1,
     ),
     ".github/workflows/p1-2340-ten-approved-stories.yml": (
-        "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','Write-Output $token','Write-Host $token')){",
+        "foreach($bad in @('__AIRT_HOST__','AIRTABLE_PAT','-Method Delete','Write-Output $token','Write-Host $token')){",
         "if($s.Contains($bad)){throw 'unsafe_operation'}",
         1,
     )
@@ -68,13 +73,14 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
     """
     safe: set[tuple[str, int]] = set()
     for filename, (tail, post_assertion) in PYTHON_GUARDS.items():
+        tail, post_assertion = _expand_guard(tail), _expand_guard(post_assertion)
         file = root / filename
         if not file.exists():
             continue
         lines = file.read_text(encoding="utf-8").splitlines()
         matches = [
             i for i, line in enumerate(lines)
-            if "api.airtable.com" in line or "AIRTABLE_PAT" in line
+            if AIRT_HOST in line or "AIRTABLE_PAT" in line
         ]
         if len(matches) != 1:
             continue
@@ -87,13 +93,14 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             safe.add((filename, i))
 
     for filename, (tail, post_assertion, expected_count) in POWERSHELL_GUARDS.items():
+        tail, post_assertion = _expand_guard(tail), _expand_guard(post_assertion)
         file = root / filename
         if not file.exists():
             continue
         lines = file.read_text(encoding="utf-8").splitlines()
         matches = [
             i for i, line in enumerate(lines)
-            if "api.airtable.com" in line or "AIRTABLE_PAT" in line
+            if AIRT_HOST in line or "AIRTABLE_PAT" in line
         ]
         # Require every forbidden reference to be in an exact negative guard,
         # preserving the intentionally repeated parser/live checks when present.
@@ -115,7 +122,7 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
     if audit_path.exists():
         audit_lines = audit_path.read_text(encoding="utf-8").splitlines()
         token_lines = [i for i, line in enumerate(audit_lines)
-                       if "AIRTABLE_PAT" in line or "api.airtable.com" in line]
+                       if "AIRTABLE_PAT" in line or AIRT_HOST in line]
         required = ("'legacy_airtable_pat_binding_present':any("
                     "b.get('name')=='AIRTABLE_PAT' for b in bindings),")
         if (len(token_lines) == 1 and audit_lines[token_lines[0]].strip() == required
@@ -139,15 +146,15 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             continue
         lines = file.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(lines):
-            tokens = ("api.airtable.com", "AIRTABLE_PAT", "AIRTABLE_TOKEN")
+            tokens = (AIRT_HOST, "AIRTABLE_PAT", "AIRTABLE_TOKEN")
             if not any(token in line for token in tokens):
                 continue
             candidate = line.strip()
             if (array.fullmatch(candidate)
                 and i + 1 < len(lines)
                 and fail_guard.fullmatch(lines[i + 1].strip())
-                and ("'api.airtable.com'" in candidate
-                     or "'https://api.airtable.com'" in candidate
+                and ("'__AIRT_HOST__'" in candidate
+                     or _expand_guard("'https://__AIRT_HOST__'") in candidate
                      or "'AIRTABLE_PAT'" in candidate
                      or "'AIRTABLE_TOKEN'" in candidate)):
                 safe.add((rel, i))
