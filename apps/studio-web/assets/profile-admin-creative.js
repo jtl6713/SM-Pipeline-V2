@@ -130,7 +130,9 @@
       savedCreative = currentCreative();
       disable(!canEdit);
       refreshSaveState();
-      status("Loaded existing Airtable prompts and profile overrides. Save creates a selected-profile version; shared Brand, Persona and P1/P2 templates remain unchanged.");
+      status(canEdit
+        ? "Loaded profile instructions. Edit a field to enable Save; shared Brand, Persona and P1/P2 templates remain unchanged."
+        : "This profile is currently read-only according to the server. Save is unavailable until your editing permission or the server configuration is corrected.", !canEdit);
     } catch (error) {
       if (serial !== requestSerial) return;
       status(error.message || String(error), true);
@@ -139,7 +141,7 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = loadedProfile;
-    if (pending || !id || id !== profileSelect.value) return;
+    if (pending || !canEdit || !id || id !== profileSelect.value || save.disabled) return;
     const serial = ++requestSerial;
     const creative = Object.fromEntries(fields.map((key) => [key, controls[key].value]));
     pending = true;
@@ -159,7 +161,7 @@
       });
       status("Saved profile-specific instructions to Airtable for " + ($("operationsCreativeProfile").textContent || "this profile") + ". Shared prompts were not changed.");
     } catch (error) {
-      if (serial === requestSerial) status(error.message || String(error), true);
+      if (serial === requestSerial) status("Save failed; your edits are still in the form. " + (error.message || String(error)), true);
     } finally {
       pending = false;
       if (serial === requestSerial && profileSelect.value === id) {
