@@ -16322,6 +16322,10 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       force: Boolean(options.force),
       deferProduce: priorProduceInFlight,
       priorProduceRequestId,
+      // Photo-ready SLA: four bounded handoffs per five-minute resume tick.
+      // The existing runAll guard still enqueues only one active Remotion job;
+      // later handoffs are staged/deferred, never an uncontrolled publish burst.
+      drainLimit: options.resume_only ? 4 : undefined,
     });
     if (resumed?.status !== "no_enabled_profile") return resumed;
   }

@@ -336,7 +336,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1029-pipeline-history";
+  const BUILD_ID = "item4-0.6.1030-ideas-generator-clock";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2626,7 +2626,9 @@
   function setIdeaGeneratorOpen(open, { reset = false } = {}) {
     const panel = $("ideaGeneratePanel");
     if (!panel) return;
-    panel.hidden = !open;
+    // The AI generation card now lives permanently in the Ideas action area.
+    // Opening/closing other intake flows must never hide its controls.
+    panel.hidden = false;
     if (open) setIdeaFormOpen(false);
     if (reset) {
       stopIdeaGenerationPoll();
@@ -2644,6 +2646,26 @@
       setIdeaGenerateMessage();
     }
   }
+
+  // Chicago/Central scheduled top-of-hour harvest. Compute from UTC hour boundaries
+  // (Chicago always differs from UTC by an integral number of hours) and format
+  // with the IANA zone so DST changes do not shift the displayed local hour.
+  function updateIdeasNextPullCountdown() {
+    const node = $("ideasNextPullCountdown");
+    if (!node) return;
+    const nowMs = Date.now();
+    const nextMs = (Math.floor(nowMs / 3600000) + 1) * 3600000;
+    const nextTime = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true,
+    }).format(new Date(nextMs));
+    const seconds = Math.max(0, Math.ceil((nextMs - nowMs) / 1000));
+    const minutesRemaining = Math.floor(seconds / 60);
+    const secondsRemaining = seconds % 60;
+    node.textContent = `Next Idea Pull will be at ${nextTime} CT (in ${minutesRemaining}m ${String(secondsRemaining).padStart(2, "0")}s)`;
+    node.title = "Scheduled hourly idea harvest; actual processing may be delayed by an operational fault or hold.";
+  }
+  updateIdeasNextPullCountdown();
+  window.setInterval(updateIdeasNextPullCountdown, 1000);
 
   async function pollIdeaGenerationBatch() {
     if (!activeIdeaGenerationBatchId) return;
@@ -3144,8 +3166,6 @@
       }
     }
   });
-  $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
-  $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
   $("ideaGenerateMore")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: true }));
   $("ideaGenerateView")?.addEventListener("click", async () => {
     await loadIdeas();

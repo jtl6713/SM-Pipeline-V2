@@ -7608,14 +7608,43 @@ async function readMediaRow(env, id) {
 export async function listSupabaseAutonomousDraftRequests(env, { limit = 50 } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
-  const rows = await supabaseRest(
-    env,
-    `production_requests?request_status=in.(Draft,Ready,Submitted)`
-      + `&or=(production_notes.ilike.*origin=autonomous*,production_notes.ilike.*origin=prepare-to-review*)`
-      + `&select=${REQUEST_SELECT}&order=created_at.asc.nullslast&limit=${cap}`,
+  const base = `production_requests?request_status=in.(Draft,Ready,Submitted)`
+    + `&or=(production_notes.ilike.*origin=autonomous*,production_notes.ilike.*origin=prepare-to-review*)`
+    + `&select=${REQUEST_SELECT}`;
+
+  // Do NOT scan the oldest unready drafts first. There were 656 open autonomous
+  // requests on 2026-11-21, 629 without ready masters. The old oldest-40 page
+  // never contained today's 27 asset-ready drafts, including 19 matched ideas
+  // waiting 4–5 hours. Give asset-ready work an SLA-priority lane.
+  // Reserve a small oldest-ready slice so even earlier ready work stays visible.
+  const recentLimit = Math.max(1, Math.ceil(cap * 0.8));
+  const oldestLimit = Math.max(0, cap - recentLimit);
+  const readyUrl = `${base}&master_asset_status=eq.Ready`;
+  const [recent, oldest] = await Promise.all([
+    supabaseRest(env, `${readyUrl}&order=created_at.desc.nullslast&limit=${recentLimit}`).catch(() => null),
+    oldestLimit
+      ? supabaseRest(env, `${readyUrl}&order=created_at.asc.nullslast&limit=${oldestLimit}`).catch(() => null)
+      : Promise.resolve([]),
+  ]);
+  if (!Array.isArray(recent) || !Array.isArray(oldest)) return null;
+  const ready = new Map();
+  for (const row of [...recent, ...oldest]) {
+    if (row?.airtable_record_id && !ready.has(row.airtable_record_id)) {
+      ready.set(row.airtable_record_id, row);
+    }
+  }
+  if (ready.size) {
+    return [...ready.values()].slice(0, cap)
+      .map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+  }
+
+  // Only when no asset-ready work exists, allow a bounded pass over old
+  // incomplete drafts to park/heal them. Never let them crowd out ready Ideas.
+  const unready = await supabaseRest(env,
+    `${base}&order=created_at.asc.nullslast&limit=${Math.min(cap, 10)}`,
   ).catch(() => null);
-  if (!Array.isArray(rows)) return null;
-  return rows.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
+  if (!Array.isArray(unready)) return null;
+  return unready.map(airtableShapedProductionRequestFromSupabase).filter((row) => row?.id);
 }
 
 const REQUEST_TEST_RUN_QUIET =
