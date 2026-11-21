@@ -1,5 +1,6 @@
 Issue #2374 Supabase-only Factory Worker controlled production release.
-2026-11-21. Do not merge before source PR #2485 passes all protected CI and merges to main.
+2026-11-21 controlled retry #2. Do not merge before verified verifier repair PR #2507 passes CI and merges to main.
+Original protected run 44913285478 rolled back after missing account-subdomain.json at readback (no provider writes).
 Deploy source feature PR #2473 (merged cf07df605e1f3542d25497cd80ef3c1c13d49b21)
 plus no-Airtable fail-closed source PR #2485.
 Use only .github/workflows/deploy-issue2374-supabase-only-factory-worker.yml.
