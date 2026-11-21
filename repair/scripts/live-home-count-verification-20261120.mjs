@@ -1,3 +1,4 @@
+// Nov 20 evening: recount after one confirmed LA Meta Story publication and six verified terminal-container classifications (Supabase GET only).
 // 2026-11-20 18:25 Chicago: recount after five provider-confirmed expired Instagram Story status repairs.
 // 2026-11-20 evening publication recovery: exact latest four-profile snapshot verification; no Studio writes.
 import crypto from "node:crypto";
