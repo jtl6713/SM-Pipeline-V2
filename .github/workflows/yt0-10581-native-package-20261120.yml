@@ -1,0 +1,100 @@
+name: 'Single NYC YT0 #10581 native package stage no uploader'
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/yt0-10581-native-package-20261120.yml'
+permissions:
+  contents: read
+concurrency:
+  group: yt0-single-10581-package-20261120
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Exact YT0 dry and single package prep only for NYC 10581
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/yt0-dry.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $n=10581;$record="rec21RlfXCIJbQlde";$content="3eb08369-3dbe-490c-a9ed-4dd6c3454de6"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if($health.ok -ne $true -or $health.version -ne "2026-11-20-yt0-exact-parent-title-fallback-v1" -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.studio_runner_content_read_source -ne "supabase" -or $health.airtable_activity.any_read -ne $false -or $health.airtable_activity.any_write -ne $false){throw "yt0_dry_runner_health_fence"}
+          $envpath=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if(-not (Test-Path $envpath)){throw "yt0_dry_env_missing"}
+          function Env([string]$k){$l=@(Get-Content $envpath|Where-Object{$_ -match ("^\s*"+[regex]::Escape($k)+"\s*=")})|Select-Object -Last 1;if(-not $l){throw "yt0_dry_cred_missing"};return ([string]$l -split '=',2)[1].Trim().Trim('"',"'")}
+          $db=Env "SUPABASE_URL";$key=Env "SUPABASE_SERVICE_ROLE_KEY";$secret=Env "PIPELINE_RUNNER_SHARED_SECRET"
+          $h=@{apikey=$key;Authorization=("Bearer "+$key)}
+          $base=$db.TrimEnd("/")+"/rest/v1/"
+          $url=$base+"platform_outputs?airtable_record_id=eq."+$record+"&select=output_number,airtable_record_id,content_item_id,platform,platform_output_type,review_status,output_status,publish_status,render_status,publish_method,auto_publish_enabled,do_not_publish,test_run_id,published_at,platform_post_url,publish_asset_url,final_file_url,output_title,error_messages"
+          $o=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+          if($o -is [array]){if($o.Count -ne 1){throw "yt0_dry_record_ambiguous"};$o=$o[0]}
+          if($o.output_number -ne $n -or $o.airtable_record_id -ne $record -or $o.content_item_id -ne $content -or $o.platform -ne "YouTube" -or $o.platform_output_type -ne "YouTube Short" -or $o.review_status -ne "Approved" -or $o.output_status -ne "Approved for Publishing" -or $o.publish_status -ne "Failed" -or $o.render_status -ne "Rendered" -or $o.publish_method -ne "Automated" -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -ne $false -or $o.test_run_id -or $o.published_at -or $o.platform_post_url -or -not $o.output_title -or -not $o.final_file_url -or -not $o.publish_asset_url -or $o.error_messages.YouTube_Video_ID -or $o.error_messages.YouTube_Upload_Job_ID -or $o.error_messages.Platform_Post_ID -or $o.error_messages.Publish_Locked_By -or $o.error_messages.Publish_Error_Stage -ne "YT0" -or $o.error_messages.YouTube_Upload_Status -ne "Failed"){throw "yt0_dry_exact_package_preflight"}
+          $su=$base+"platform_outputs?content_item_id=eq."+$content+"&platform=eq.YouTube&select=output_number,published_at,platform_post_url,error_messages"
+          $sib=@(Invoke-RestMethod -Uri $su -Headers $h -TimeoutSec 25)
+          foreach($s in $sib){if($s.output_number -ne $n -and ($s.published_at -or $s.platform_post_url -or $s.error_messages.YouTube_Video_ID)){throw "yt0_dry_same_content_youtube_receipt"}}
+          $body=@{output_record_id=$record;extra=@{dry_run=$true}}|ConvertTo-Json -Depth 4 -Compress
+          $r=Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/yt0" -Headers @{"X-Pipeline-Secret"=$secret} -Method POST -ContentType "application/json" -Body $body -TimeoutSec 120
+          Write-Output ("yt0_dry_output="+$n)
+          Write-Output ("yt0_dry_native_status="+[string]$r.status)
+          Write-Output ("yt0_dry_eligibility="+[string]$r.details.run.eligibility_reason)
+          Write-Output ("yt0_dry_has_title="+[string]$r.details.run.has_title)
+          Write-Output ("yt0_dry_source_present="+[string]([bool]$r.details.run.source_url))
+          if($r.status -ne "ok" -or $r.details.run.dry_run -ne $true -or $r.details.run.eligibility_reason -or $r.details.run.has_title -ne $true -or -not $r.details.run.source_url){throw "yt0_dry_native_package_blocked"}
+          $check=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+          if($check -is [array]){$check=$check[0]}
+          if($check.publish_status -ne "Failed" -or $check.published_at -or $check.error_messages.YouTube_Video_ID -or $check.error_messages.YouTube_Upload_Job_ID){throw "yt0_dry_mutation_detected"}
+          Write-Output "yt0_dry_verified_no_mutation=PASS"
+          $again=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+          if($again -is [array]){$again=$again[0]}
+          if($again.output_number -ne 10581 -or $again.publish_status -ne "Failed" -or $again.error_messages.YouTube_Video_ID -or $again.error_messages.YouTube_Upload_Job_ID -or $again.error_messages.Publish_Error_Stage -ne "YT0"){throw "yt0_10581_pre_package_race"}
+          $realbody=@{output_record_id=$record;extra=@{dry_run=$false}}|ConvertTo-Json -Depth 4 -Compress
+          $actual=Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/yt0" -Headers @{"X-Pipeline-Secret"=$secret} -Method POST -ContentType "application/json" -Body $realbody -TimeoutSec 145
+          Write-Output ("yt0_10581_native_status="+[string]$actual.status)
+          Write-Output ("yt0_10581_stage="+[string]$actual.details.run.youtube_stage)
+          Write-Output ("yt0_10581_needs_upload="+[string]$actual.details.run.needs_upload)
+          $latest=Invoke-RestMethod -Uri $url -Headers $h -TimeoutSec 25
+          if($latest -is [array]){$latest=$latest[0]}
+          if($actual.status -ne "ok" -or $actual.details.run.needs_upload -ne $true -or $actual.details.run.youtube_stage -ne "YT1"){throw "yt0_10581_native_package_failed"}
+          if($latest.output_number -ne 10581 -or $latest.airtable_record_id -ne $record -or $latest.published_at -or $latest.platform_post_url){throw "yt0_10581_unexpected_identity_or_publication"}
+          Write-Output ("yt0_10581_package_status="+[string]$latest.error_messages.YouTube_Package_Status)
+          Write-Output ("yt0_10581_upload_status="+[string]$latest.error_messages.YouTube_Upload_Status)
+          Write-Output ("yt0_10581_saved_idempotency="+[string]([bool]$latest.error_messages.YouTube_Idempotency_Key))
+          if($latest.error_messages.YouTube_Package_Status -ne "Ready" -or -not $latest.error_messages.YouTube_Idempotency_Key){throw "yt0_10581_package_readback_unverified"}
+          Write-Output "yt0_10581_package_only=PASS"
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path("/tmp/yt0-dry-payload.json").write_text(json.dumps({"command":pathlib.Path("/tmp/yt0-dry.ps1").read_text(),"confirm":True}))
+          PY
+          token=''
+          for t in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$t" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/yt0-dry-catalog.json -w '%{http_code}' -H "Authorization: Bearer $t" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/yt0-dry-catalog.json >/dev/null; then token="$t"; break; fi
+          done
+          test -n "$token"
+          code=$(curl -sS --max-time 25 -o /tmp/yt0-dry-submit.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @/tmp/yt0-dry-payload.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then echo "yt0_dry_submission_http=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/yt0-dry-submit.json)
+          for n in $(seq 1 65); do
+            curl -sS --max-time 25 -H "Authorization: Bearer $token" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/yt0-dry-status.json
+            state=$(jq -r '.job.status // empty' /tmp/yt0-dry-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/yt0-dry-status.json | grep '^yt0_dry_\|^yt0_10581_' || true
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo "yt0_dry_failed_no_upload"
+              jq -r '.job.log // ""' /tmp/yt0-dry-status.json | grep -E 'yt0_dry_|Exception|Error|Traceback' | tail -12 || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo "yt0_dry_not_confirmed"; exit 4
