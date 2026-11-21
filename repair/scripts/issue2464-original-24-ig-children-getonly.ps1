@@ -71,9 +71,9 @@ foreach($s in $slides){
  $children+=@{output=$num;profile=$spec.profile;slide=$originalId;order=$order;container_id=$child;saved_status=[string]$s.fields.'IG_Child_Container_Status'}
 }
 foreach($num in @(8128,8138,8357,8417)){
- $ordered=@($children|Where-Object{$_.output -eq $num}|Sort-Object order)
+ $ordered=@($children | Where-Object { [int]$_['output'] -eq $num } | ForEach-Object { [int]$_['order'] } | Sort-Object)
  if($ordered.Count -ne $expected[[string]$num].count){throw 'original_gallery_size_changed'}
- for($i=0;$i -lt $ordered.Count;$i++){if($ordered[$i].order -ne ($i+1)){throw 'original_gallery_order_changed'}}
+ for($i=0;$i -lt $ordered.Count;$i++){if([int]$ordered[$i] -ne ($i+1)){throw 'original_gallery_order_changed'}}
 }
 if($children.Count -ne 24){throw 'original_24_count_mismatch'}
 $settings=@(SourceGet '/rest/v1/engagement_settings?select=payload&limit=500')
@@ -116,7 +116,7 @@ foreach($name in @('Miami','New York City')){
  $ownerOk[$name]=$ok
 }
 $results=@()
-foreach($child in @($children|Sort-Object output,order)){
+foreach($child in @($children|Sort-Object @{Expression={[int]$_['output']}},@{Expression={[int]$_['order']}})){
  $prefix=$expected[[string]$child.output].prefix
  $token=[string]$config[$prefix+'META_GRAPH_API_ACCESS_TOKEN']
  if($ownerOk[$child.profile]){
