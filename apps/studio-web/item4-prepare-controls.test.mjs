@@ -96,6 +96,29 @@ test("Error status is not treated as a retryable 500 hang", () => {
   }, { variant_status: "Error" }), false);
 });
 
+test("failed Prepare with no persisted job preserves original server error", () => {
+  const noJob = { variant_status: "None" };
+  assert.equal(item4IsRetryablePrepareFailure({ message: "Request failed (503)" }, noJob), false);
+  assert.equal(item4IsRetryablePrepareFailure({ message: "Request timed out" }, noJob), false);
+  assert.equal(item4IsRetryablePrepareFailure({ message: "Request failed (502)" }, {}), false);
+  assert.equal(item4IsRetryablePrepareFailure({ message: "Request failed (503)" },
+    { variant_status: "Preparing" }), true);
+  assert.equal(item4IsRetryablePrepareFailure({ bodyStatus: "Error", message: "Crop error" },
+    { variant_status: "Preparing" }), false);
+});
+
+test("runtime does not hide missing frame jobs behind a generic retry", async () => {
+  const fs = await import("node:fs");
+  const runtime = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
+  const start = runtime.indexOf("  function item4IsRetryablePrepareFailure(");
+  const end = runtime.indexOf("  function item4TimelineAutoPrepareEligibleUi(", start);
+  assert.ok(start >= 0 && end > start);
+  const helper = runtime.slice(start, end);
+  assert.match(helper, /return variantStatus === "Preparing"/);
+  assert.doesNotMatch(helper, /request failed/);
+  assert.match(runtime, /Frame preparation did not start on the server/);
+});
+
 test("failed prepare answers 409 instead of 500", () => {
   assert.equal(item4PrepareHttpStatus("Error"), 409);
   assert.equal(item4PrepareHttpStatus("Ready"), 200);
