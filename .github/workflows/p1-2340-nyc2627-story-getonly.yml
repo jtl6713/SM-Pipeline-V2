@@ -34,6 +34,8 @@ jobs:
           foreach($forbidden in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','api.airtable.com','/media_publish','/media?','airtable.com/v0/')){
             if($s.Contains($forbidden)){throw ('write_or_unscoped_provider_call_forbidden: '+$forbidden)}
           }
+          if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_automatic_PROFILE_variable_must_not_be_assigned'}
+          if($s -notmatch 'stage='){throw 'sanitized_failure_stage_required'}
           Write-Output 'P1_2340_2627_STRICT_READONLY_STATIC_PASS'
   audited-original-status:
     if: github.event_name == 'push'
@@ -100,7 +102,7 @@ jobs:
             if [[ "$status" == ok ]];then
               jq -r '.job.log // ""' /tmp/p1-2627-job.json | grep '^P1_2340_2627_OWNED_STORY_GETONLY=' | tail -1 | sed 's/^P1_2340_2627_OWNED_STORY_GETONLY=//' > /tmp/p1-2627-evidence.json
               jq -e '.output==2627 and .provider_writes==0 and .source_writes==0 and .airtable_ops==0' /tmp/p1-2627-evidence.json >/dev/null
-              jq -c '{output,state,reason,publish_fence_reserved,account_owned,replacement_container_status,recent_stories_checked,candidate_count,candidates,scan_complete,provider_gets,provider_writes,source_writes}' /tmp/p1-2627-evidence.json
+              jq -c '{output,state,stage,reason,publish_fence_reserved,account_owned,replacement_container_status,recent_stories_checked,candidate_count,candidates,scan_complete,provider_gets,provider_writes,source_writes}' /tmp/p1-2627-evidence.json
               jq -e '.state=="read_only_evidence" and .publish_fence_reserved==true and .account_owned==true' /tmp/p1-2627-evidence.json >/dev/null || exit 3
               echo 'P1_2340_2627_OWNER_GET_ONLY_AUDIT=PASS';exit 0
             elif [[ "$status" == failed ]];then echo 'GET-only audit failed closed; no publication calls';exit 3;fi
