@@ -9,7 +9,7 @@ import {
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
   factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
   factoryBatchItemProgress,
-  factoryBatchReconcileSupabaseApprovalReceipts,
+  factoryBatchReconcileSupabaseApprovalReceipts, factoryBatchCronReceiptCandidates,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -825,4 +825,69 @@ test("Factory live stage never invents progress for legacy items, failed or wait
   assert.equal(factoryBatchItemProgress(final.items[0]).phase, "failed");
   assert.ok(Date.parse(final.items[0].last_progress_at));
   assert.equal(final.items[0].status, "failed");
+});
+
+test("NYC five-output original Supabase receipts repair an R2 0/5 batch, with no approval replay", async () => {
+  const bucket = new FakeR2();
+  const group = "a350556c-2b1b-4dbe-8c4f-3994b2a91523";
+  const request = "fgc_nyc_five_20261121";
+  const outputs = records.slice(0, 5);
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: request, groupRequestId: group, records: outputs,
+  });
+  assert.equal(factoryBatchCounts(await factoryBatchRead(bucket, profileId, request)).pending_count, 5);
+  const receipts = new Map(outputs.map(item => [item.id, {
+    profileId,
+    row: {
+      airtable_record_id: item.id, output_number: item.output_id,
+      review_status: "Approved", output_status: "Approved for Publishing",
+      error_messages: { SM_Factory_Supabase_Approval_Receipt: {
+        authority: "supabase", request_id: group, output_record_id: item.id,
+        profile_record_id: profileId, output_number: item.output_id,
+        approved_at: "2026-11-21T08:45:21.723Z",
+      } },
+    },
+  }]));
+  let reads = 0;
+  const loadRecords = async ids => {
+    reads++;
+    return new Map(ids.map(id => [id, receipts.get(id)]));
+  };
+  const nowMs = Date.now() + 180000;
+  const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: request, loadRecords, nowMs,
+  });
+  assert.equal(repaired.status, "completed");
+  assert.deepEqual(factoryBatchCounts(repaired), {
+    total: 5, approved_count: 5, skipped_count: 0, failed_count: 0, pending_count: 0,
+  });
+  assert.equal(reads, 1);
+  assert.ok(repaired.items.every(item =>
+    item.status === "approved" &&
+    item.timeline.at(-1)?.reason === "exact_supabase_original_request_receipt"));
+  const again = await factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+    profileId, requestId: request, loadRecords, nowMs: nowMs + 60000,
+  });
+  assert.equal(again.status, "completed");
+  assert.equal(reads, 1, "completed original request must not be reprocessed");
+});
+
+test("Factory receipt cron selector rotates fairly; newer jobs cannot indefinitely hide old approvals", () => {
+  const jobs = Array.from({ length: 20 }, (_, i) => ({
+    profileId, requestId: "fgc_rotate_" + i.toString().padStart(2, "0"),
+    job: {
+      group_request_id: "factory_group_fair_test",
+      status: "queued",
+      created_at: new Date(1700000000000 + i * 1000).toISOString(),
+      items: [{ status: "pending", id: records[i].id }],
+    },
+  }));
+  const selected = [0, 60000, 120000].flatMap(nowMs =>
+    factoryBatchCronReceiptCandidates(jobs, { nowMs }));
+  assert.equal(selected.length, 24);
+  assert.equal(new Set(selected.map(row => row.requestId)).size, 20,
+    "every one of 20 pending groups must be reached within three cron minutes");
+  assert.ok(selected.every(row => jobs.includes(row)));
+  const noPending = [{ ...jobs[0], job: { ...jobs[0].job, status: "completed" } }];
+  assert.deepEqual(factoryBatchCronReceiptCandidates(noPending, { nowMs: 0 }), []);
 });
