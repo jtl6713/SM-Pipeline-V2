@@ -6,6 +6,7 @@ retired PAT or endpoint. This never permits a real provider HTTP operation.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 # Narrow file-level proof, not a whole-file exemption.
@@ -120,6 +121,36 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
         if (len(token_lines) == 1 and audit_lines[token_lines[0]].strip() == required
             and "'only_read_operations':True" in audit_path.read_text(encoding="utf-8")):
             safe.add((identity_audit, token_lines[0]))
+    # New GitHub workflows may be merged during the retirement PR. Accept an
+    # *unlisted* PowerShell forbidden-token fixture only when the entire
+    # containing line is a literal foreach($bad ...) array and the immediately
+    # next statement rejects that token using a literal Contains()+throw.
+    # This is a narrowly parsed statement, NOT a whole-file or path exemption.
+    # Previously pinned files still require their exact original guard counts.
+    pinned = set(PYTHON_GUARDS) | set(POWERSHELL_GUARDS) | {identity_audit}
+    array = re.compile(r"^foreach\(\$bad in @\('(?:[^'\r\n]*)'(?:,'(?:[^'\r\n]*)')*\)\)\{$")
+    fail_guard = re.compile(
+        r"^if\(\$(?:src|s|source|code)\.Contains\(\$bad\)\)"
+        r"\{throw '[A-Za-z0-9_]+'\}$"
+    )
+    for file in sorted((root / ".github/workflows").glob("*.y*ml")):
+        rel = file.relative_to(root).as_posix()
+        if rel in pinned:
+            continue
+        lines = file.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            tokens = ("api.airtable.com", "AIRTABLE_PAT", "AIRTABLE_TOKEN")
+            if not any(token in line for token in tokens):
+                continue
+            candidate = line.strip()
+            if (array.fullmatch(candidate)
+                and i + 1 < len(lines)
+                and fail_guard.fullmatch(lines[i + 1].strip())
+                and ("'api.airtable.com'" in candidate
+                     or "'https://api.airtable.com'" in candidate
+                     or "'AIRTABLE_PAT'" in candidate
+                     or "'AIRTABLE_TOKEN'" in candidate)):
+                safe.add((rel, i))
     return safe
 
 
