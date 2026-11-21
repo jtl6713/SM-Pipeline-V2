@@ -37,7 +37,8 @@ jobs:
           if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_automatic_PROFILE_variable_must_not_be_assigned'}
           if($s -notmatch 'stage='){throw 'sanitized_failure_stage_required'}
           if($s.Contains('$script:report.provider_gets++')){throw 'script_scope_request_counter_breaks_invoke_scriptblock'}
-          if(([regex]::Matches($s,'\$report\.provider_gets=\[int\]\$report\.provider_gets\+1')).Count -ne 3){throw 'three_bounded_account_and_container_gets_required'}
+          if(([regex]::Matches($s,'\$report\.provider_gets=\[int\]\$report\.provider_gets\+1')).Count -ne 4){throw 'four_bounded_owner_container_and_content_gets_required'}
+          foreach($proof in @('candidate_id_or_permalink_drift','original_approved_video_asset_changed','normalized_mean_absolute_error','provider_and_approved_frames_not_similar_enough','content_verified=$true','ffmpeg_not_available_to_compare_media')){if(-not $s.Contains($proof)){throw ('content_identity_gate_missing: '+$proof)}}
           Write-Output 'P1_2340_2627_STRICT_READONLY_STATIC_PASS'
   audited-original-status:
     if: github.event_name == 'push'
@@ -104,8 +105,8 @@ jobs:
             if [[ "$status" == ok ]];then
               jq -r '.job.log // ""' /tmp/p1-2627-job.json | grep '^P1_2340_2627_OWNED_STORY_GETONLY=' | tail -1 | sed 's/^P1_2340_2627_OWNED_STORY_GETONLY=//' > /tmp/p1-2627-evidence.json
               jq -e '.output==2627 and .provider_writes==0 and .source_writes==0 and .airtable_ops==0' /tmp/p1-2627-evidence.json >/dev/null
-              jq -c '{output,state,stage,reason,publish_fence_reserved,account_owned,replacement_container_status,recent_stories_checked,candidate_count,candidates,scan_complete,provider_gets,provider_writes,source_writes}' /tmp/p1-2627-evidence.json
-              jq -e '.state=="read_only_evidence" and .publish_fence_reserved==true and .account_owned==true' /tmp/p1-2627-evidence.json >/dev/null || exit 3
+              jq -c '{output,state,stage,reason,publish_fence_reserved,account_owned,replacement_container_status,recent_stories_checked,candidate_count,candidates,content_verified,frame_mae,scan_complete,provider_gets,provider_writes,source_writes}' /tmp/p1-2627-evidence.json
+              jq -e '.state=="read_only_evidence" and .publish_fence_reserved==true and .account_owned==true and .content_verified==true and (.frame_mae|length)==2' /tmp/p1-2627-evidence.json >/dev/null || exit 3
               echo 'P1_2340_2627_OWNER_GET_ONLY_AUDIT=PASS';exit 0
             elif [[ "$status" == failed ]];then echo 'GET-only audit failed closed; no publication calls';exit 3;fi
             sleep 4
