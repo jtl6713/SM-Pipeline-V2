@@ -11,7 +11,7 @@ from c8.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from carousel.chain import trigger_next
 from carousel.constants import C8_EXISTING_OUTPUTS_VIEW
 from carousel.formulas import c8_existing_output_formula
-from carousel.mapping import c8_group_key, c8_include_slide, platform_output_mapping
+from carousel.mapping import c8_group_key, c8_include_slide, final_gallery_identity_reason, platform_output_mapping
 from carousel.parent import load_linked_slides, load_parent
 from carousel.timeutil import iso_utc, stamp_minutes
 from render.fields import field, field_str
@@ -157,6 +157,23 @@ def process_request(
         first = slides[0]
         platform = field_str(first, "Platform")
         ratio = field_str(first, "AI Image Ratio") or field_str(first, "Aspect Ratio")
+        reason = final_gallery_identity_reason(
+            slides,
+            min_slides=2 if platform == "Instagram" else 1,
+            max_slides=10 if platform == "Instagram" else None,
+        )
+        if reason:
+            # No new/updated Platform Output or slide link is authorized when
+            # alternate approved records make the intended gallery ambiguous.
+            results.append({
+                "output_record_id": None,
+                "created": False,
+                "blocked": True,
+                "reason": reason,
+                "graph_creates": 0,
+                "slide_count": len(slides),
+            })
+            continue
         existing = _find_existing(
             client,
             content_id=field(parent, "Content_ID"),
