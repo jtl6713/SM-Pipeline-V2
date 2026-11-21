@@ -25,7 +25,7 @@ import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
 import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
-import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
+import { overdueSkipReceiptFields, publishDispatchAttemptStampFields, preDispatchScheduledHold } from "./overdue-retry-receipt.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
@@ -14431,6 +14431,9 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
+  // A future scheduling hold never reached a provider. Do not stamp a
+  // dispatch attempt, write the legacy source, or pollute future admission.
+  if (preDispatchScheduledHold(note)) return;
   const attemptStamp = publishDispatchAttemptStampFields({
     note,
     priorCount: f(record, "Studio_Publish_Dispatch_Count"),
@@ -14463,7 +14466,8 @@ export async function studioStampPublishDispatch(env, record, note) {
 export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
   if (!studioPublishCanDispatchNow(record)) {
     const heldUntil = studioPublishHeldUntilIso(record);
-    await studioStampPublishDispatch(env, record, `held until ${heldUntil || "scheduled time"}`);
+    // Approval/schedule registration is NOT a provider dispatch. Let the
+    // due-time publisher make its own idempotently fenced decision later.
     return { ok: true, skipped: "scheduled-hold", held_until: heldUntil, record };
   }
   const plan = studioPublishDispatchTarget(record);
