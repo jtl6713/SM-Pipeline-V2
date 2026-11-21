@@ -39,10 +39,17 @@ class RetirementEvidenceGateTest(unittest.TestCase):
 
     def test_empty_or_unidentified_project_fails_closed(self):
         self.assertFalse(self.check({})["evidence_layout_complete"])
-        for ref in (None, "", "vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"):
+        for ref in (None, "", "yxhfaksetrxdezoodibq"):
             item = copy.deepcopy(self.manifest)
             item["production_project_ref"] = ref
             self.assertFalse(self.check(item)["evidence_layout_complete"])
+
+    def test_historically_named_dev_project_is_valid_when_evidence_is_complete(self):
+        item = copy.deepcopy(self.manifest)
+        item["production_project_ref"] = "vkwvscgisqsbuwagdvtb"
+        result = self.check(item)
+        self.assertTrue(result["evidence_layout_complete"])
+        self.assertFalse(result["release_authorized"])
 
     def test_legacy_live_airtable_primary_read_blocks_release(self):
         item = copy.deepcopy(self.manifest)

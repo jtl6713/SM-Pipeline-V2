@@ -12,7 +12,7 @@ Reference: the November 16 SM Pipeline V2 Airtable CRUD and Egress Audit provide
 - Python runner reads/writes default to Supabase.
 - Retired **all 90 direct-URL GitHub Actions workflows identified in the attached November 16 audit** (88 together plus two individually), the closeout backfill workflow, five direct maintenance/bootstrap/diagnostic scripts, **22 additional historical repair, test-target and manual publish-once entrypoints**, and migrated the runner environment bootstrap to Supabase settings REST. This blocks every standalone direct URL execution path identified in the audit apart from inert test/staging fixtures and egress-monitoring utilities. This includes four historically deploy-oriented workflows; do not merge until their deployment responsibilities are either replaced or confirmed redundant. A pull-request CI guard rejects direct Airtable URLs in GitHub Actions YAML.
 
-**Resolved in development, not production:** the runner media upsert now uses a transactional Supabase RPC and development-only uniqueness verification, as detailed below. Production schema and non-publishing verification remain hard release gates.
+**Resolved on the connected Studio database, which the owner confirms is live production despite its `-dev` name:** the runner media upsert now uses a transactional Supabase RPC and uniqueness verification. Independent live Worker configuration and non-publishing verification remain release gates.
 
 ## Not complete; do not merge/deploy
 - Ninety audit-listed legacy workflow implementations were retired; two functional successors for variant and LA TikTok are restored on the PR branch, and the two Studio-only paths map to the canonical Studio API production deploy. Confirm their replacement paths before merge. New workflows added after the audit must still be scanned; the new CI guard covers current YAML.
@@ -38,7 +38,7 @@ No live production calls, schema updates, deployment, or provider credential rev
 - Added `docs/supabase-migration/phase7/010_media_atomic_upsert.sql` containing `public.sm_pipeline_upsert_media_asset`. It accepts only `Google Drive File ID` and deterministic `Studio_Transfer_ID` keys prefixed `ngv2_`.
 - Uses a transaction-scoped advisory lock and database unique indexes to serialize competing upserts; existing `google_drive_file_id` index protects A2B, and a **scoped** unique expression index protects only `ngv2_` identities. Legacy transfer IDs cannot be constrained globally because the connected development database has 969 duplicated transfer keys.
 - Python `AirtableClient.upsert_record` calls the Supabase RPC and checks both the returned identity and an independent Supabase readback before reporting created/existing. It no longer performs an Airtable request.
-- Applied the migration to connected **development** project `sm-pipeline-v2-dev` and validated create/reuse/read-index behavior in a SQL transaction that was rolled back; verified no synthetic test records remained and that `anon`/`authenticated` cannot execute the RPC while `service_role` can.
+- Applied the migration to the connected project `sm-pipeline-v2-dev` (later identified by its owner as the **live Studio production database**) and validated create/reuse/read-index behavior in a SQL transaction that was rolled back; verified no synthetic test records remained and that `anon`/`authenticated` cannot execute the RPC while `service_role` can. No repeat migration is necessary solely because the project has a development-looking name.
 - **Production migration NOT applied.** Identify the authoritative production Supabase project, inspect production duplicate keys/indexes, apply reviewed migration, and perform controlled non-publishing canaries before release.
 
 ### Deployment replacement map
@@ -83,7 +83,7 @@ The canonical Studio API deployment is now gated on `SUPABASE_SERVICE_ROLE_KEY` 
 
 ### Continued PR work — remove legacy Airtable deployment authority
 - Six `AIRTABLE_*_ID` bindings were moved out of the **required** Studio API Worker core contract and into transition-only optional bindings. Existing production bindings remain preserved until controlled cutover; missing Airtable IDs no longer block future release validation.
-- The production deploy no longer uses a hardcoded Airtable base ID as its identity check. It now requires independently approved `STUDIO_PRODUCTION_SUPABASE_PROJECT_REF` (GitHub Actions variable), matches the live `SUPABASE_URL` to that exact project, and rejects the two currently connected non-production projects. **Without this variable or a matching live URL, deployment fails before touching the Worker.**
+- The production deploy no longer uses a hardcoded Airtable base ID as its identity check. It now requires independently approved `STUDIO_PRODUCTION_SUPABASE_PROJECT_REF` (GitHub Actions variable), matches the live `SUPABASE_URL` to that exact project, and rejects the unrelated Task Organizer project. The live Studio project retains its old development name. **Without this variable or a matching live URL, deployment fails before touching the Worker.**
 - The manual read-only production audit validates that both the active Studio Worker URL and the GitHub-configured Supabase URL match the same approved project reference. The operator must verify the production project outside this workflow before setting the variable; never infer it from the development connector.
 - Removed the historical encrypted Airtable PAT envelope files, marker and verification workflow from this PR branch. Git history can retain prior encrypted blobs. No live token was revoked; after production validation and observed zero Airtable API egress, revoke it at the provider and remove Cloudflare, runner and GitHub secrets.
 - CI and targeted tests now prevent restoring the tracked credential envelope and check that six Airtable IDs are not required by the production deployment core.
@@ -199,3 +199,11 @@ gate prepared, quiet window NOT certified; 5 release NOT authorized.
   modes for Worker primary read, Worker sync read, and runner writes to equal
   `supabase`. An old `airtable` value is a hard blocker even if collection
   windows show zero attempts. These fields remain null in the template.
+
+### Production identity correction — 2026-11-20
+
+The Studio owner explicitly confirmed that **Supabase project `vkwvscgisqsbuwagdvtb` (named `sm-pipeline-v2-dev`) is the actual production database** and was never renamed after cutover. The prior project-name-based non-production block was an incorrect assumption. This branch removes that veto in the production identity helper, read-only discovery tests and evidence-packet schema. The unrelated Task Organizer project `yxhfaksetrxdezoodibq` remains excluded.
+
+The SQL preflight and atomic-upsert migration checks previously described as `dev` actually targeted this production Supabase project. As confirmed by the read-only preflight, media RPC, scoped native-gallery and Drive uniqueness indexes and role grants exist, and duplicate `ngv2_`/Drive identity groups were zero. **Do not reapply migration or repeat writes just to switch environment labels.**
+
+Remaining controls still apply: independently match live Cloudflare `SUPABASE_URL` and GitHub settings to this exact ref, set the explicit `STUDIO_PRODUCTION_SUPABASE_PROJECT_REF` release variable, prove non-publishing live parity, capture six-hour cross-service zero-Airtable egress evidence, and obtain protected release approval. Previous live telemetry reported an Airtable primary read flag, so the runtime transition remains unverified. This correction alone authorizes no merge, deployment, credential revocation or publishing.

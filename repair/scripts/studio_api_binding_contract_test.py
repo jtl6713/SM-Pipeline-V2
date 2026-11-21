@@ -36,7 +36,14 @@ class StudioApiBindingContractTest(unittest.TestCase):
     def test_production_target_requires_approved_supabase_ref(self):
         good = "p" * 20
         self.assertEqual(assert_production_supabase_target(f"https://{good}.supabase.co", good), good)
-        for ref in (None, "", "bad", "vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"):
+        self.assertEqual(
+            assert_production_supabase_target(
+                "https://vkwvscgisqsbuwagdvtb.supabase.co",
+                "vkwvscgisqsbuwagdvtb",
+            ),
+            "vkwvscgisqsbuwagdvtb",
+        )
+        for ref in (None, "", "bad", "yxhfaksetrxdezoodibq"):
             with self.subTest(ref=ref), self.assertRaises(SystemExit):
                 assert_production_supabase_target(f"https://{good}.supabase.co", ref)
         for url in (

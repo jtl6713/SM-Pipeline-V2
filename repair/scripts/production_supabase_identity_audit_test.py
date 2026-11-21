@@ -32,13 +32,23 @@ class ProductionTargetDiscoveryTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_approved_target(self.bindings, self.ref, None)
 
-    def test_dev_and_unrelated_projects_can_be_discovered_but_not_approved(self):
-        for ref in ("vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"):
-            bindings = [dict(self.bindings[0], text=f"https://{ref}.supabase.co"), self.bindings[1]]
-            result = inspect_studio_bindings(bindings)
-            self.assertTrue(result["candidate_is_known_nonproduction"])
-            with self.assertRaises(SystemExit):
-                assert_approved_target(bindings, ref, f"https://{ref}.supabase.co")
+    def test_live_production_project_retains_historical_dev_name(self):
+        ref = "vkwvscgisqsbuwagdvtb"
+        url = f"https://{ref}.supabase.co"
+        bindings = [dict(self.bindings[0], text=url), self.bindings[1]]
+        result = inspect_studio_bindings(bindings)
+        self.assertFalse(result["candidate_is_known_nonproduction"])
+        self.assertFalse(result["independently_verified_production"])
+        self.assertTrue(assert_approved_target(bindings, ref, url)["approved_project_configuration_matches"])
+
+    def test_unrelated_task_organizer_remains_excluded(self):
+        ref = "yxhfaksetrxdezoodibq"
+        url = f"https://{ref}.supabase.co"
+        bindings = [dict(self.bindings[0], text=url), self.bindings[1]]
+        result = inspect_studio_bindings(bindings)
+        self.assertTrue(result["candidate_is_known_nonproduction"])
+        with self.assertRaises(SystemExit):
+            assert_approved_target(bindings, ref, url)
 
     def test_missing_duplicate_or_wrong_type_bindings_fail_closed(self):
         self.assertFalse(inspect_studio_bindings(self.bindings[:1])["worker_supabase_binding_types_valid"])

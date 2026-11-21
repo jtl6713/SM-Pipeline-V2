@@ -8,9 +8,10 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
+# Studio's live production project still bears its former development name.
+# The distinct Task Organizer project is not a Studio production target.
 KNOWN_NONPRODUCTION_REFS = frozenset({
-    "vkwvscgisqsbuwagdvtb",  # connected sm-pipeline-v2-dev
-    "yxhfaksetrxdezoodibq",  # connected Task Organizer
+    "yxhfaksetrxdezoodibq",
 })
 
 

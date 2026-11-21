@@ -22,7 +22,9 @@ PROOFS = (
     "runner_environment", "external_integrations", "nonpublishing_canary",
     "rollback_plan",
 )
-NONPRODUCTION_REFS = frozenset({"vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"})
+# The live Studio project retains the old "dev" name. Only the unrelated
+# Task Organizer project is excluded by identity.
+NONPRODUCTION_REFS = frozenset({"yxhfaksetrxdezoodibq"})
 
 
 def utc(value):

@@ -223,8 +223,12 @@ def assert_production_supabase_target(url: str | None, approved_project_ref: str
     ref = str(approved_project_ref or "").strip()
     if not re.fullmatch(r"[a-z0-9]{20}", ref):
         raise SystemExit("Set STUDIO_PRODUCTION_SUPABASE_PROJECT_REF after verifying production ownership")
-    if ref in {"vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"}:
-        raise SystemExit("A connected non-production Supabase project is not a Studio production target")
+    # sm-pipeline-v2-dev (vkwvscgisqsbuwagdvtb) is the LIVE Studio
+    # production database; its project name was not changed at cutover.
+    # Never infer the environment from the project name. Require explicit
+    # approved-ref + exact live Worker URL matching as before.
+    if ref == "yxhfaksetrxdezoodibq":
+        raise SystemExit("The separate Task Organizer project is not Studio production")
     parsed = urlsplit(str(url or "").strip())
     if (parsed.scheme != "https"
             or parsed.netloc != f"{ref}.supabase.co"
