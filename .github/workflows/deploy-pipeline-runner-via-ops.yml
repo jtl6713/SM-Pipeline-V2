@@ -9,6 +9,10 @@ on:
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
+      - 'services/pipeline-runner/fb/assets.py'
+      - 'services/pipeline-runner/fb/fb0.py'
+      - 'services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py'
+      - 'services/pipeline-runner/config.py'
       - 'services/pipeline-runner/app.py'
       - 'services/pipeline-runner/config.py'
       - 'services/pipeline-runner/tests/test_studio_video_recovery_lookup.py'
@@ -45,6 +49,8 @@ jobs:
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py \
+            services/pipeline-runner/tests/test_fb0_limits.py \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
             services/pipeline-runner/tests/test_i1_partial_creation.py \
