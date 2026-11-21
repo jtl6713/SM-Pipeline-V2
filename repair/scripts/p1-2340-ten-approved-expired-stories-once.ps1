@@ -14,7 +14,7 @@ $t=@(
  @{n=5039;rid='recssYvd2nxOOqGgq';old='18133360240783117';city='New York City';prefix='NYC_'},
  @{n=5047;rid='rec7IerfkxmU6Kmxb';old='18132659572783117';city='New York City';prefix='NYC_'}
 )
-$report=[ordered]@{targets=$t.Count;canary_3522_proven=$false;outcomes=@();provider_create_calls=0;provider_publish_calls=0;verified_published=0;airtable_ops=0;skipped_copyright_sensitive=5628}
+$report=[ordered]@{targets=$t.Count;canary_3522_proven=$false;outcomes=@();provider_create_calls=0;reused_saved_containers=0;provider_publish_calls=0;verified_published=0;airtable_ops=0;skipped_copyright_sensitive=5628}
 $health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -Method Get -TimeoutSec 20
 if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase'){throw 'authority_unverified'}
 $ef=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
@@ -69,29 +69,51 @@ foreach($x in $t){
   $previous=GraphGet $x.old 'id,status_code' $account.headers
   if([string]$previous.id -ne $x.old -or [string]$previous.status_code -ne 'EXPIRED'){throw 'prior_original_container_not_expired'}
   $ek='P1-2340:'+$x.n+':approved-expired-story-replacement-create-v1'
-  $eid='recP12340IGS'+$x.n+'A'
-  $event=@(@{airtable_record_id=$eid;event_key=$ek;outcome='approved_fresh_story_create_reserved';output_record_id=$x.rid;output_number=$x.n;fields=@{Event_Key=$ek;Output_ID=$x.n;Outcome='approved_fresh_story_create_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
-  $saved=Invoke-RestMethod ($su+'/rest/v1/quality_agent_recovery_events') -Headers ($h+@{Prefer='return=representation'}) -Method Post -ContentType 'application/json' -Body $event -TimeoutSec 25
-  if(@($saved).Count -ne 1 -or [string]$saved[0].event_key -ne $ek){throw 'unique_create_fence_not_durable'}
-  $row.state='create_ambiguous_no_replay';$row.create_calls=1;$report.provider_create_calls++
-  $newData=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+'/'+$account.acct+'/media') -Headers $account.headers -Method Post -Body @{media_type='STORIES';video_url=$asset} -TimeoutSec 75
-  $new=[string]$newData.id
-  if($new -notmatch '^\d{12,30}$'){throw 'new_container_response_missing'}
-  $row.new_container=$new
   $bag=@{};foreach($field in $e.PSObject.Properties){$bag[$field.Name]=$field.Value}
-  $bag['P1_2340_Story_Replacement_Container_ID']=$new
-  $bag['P1_2340_Story_Replacement_Create_Fence']=$ek
-  $updated=Invoke-RestMethod ($su+'/rest/v1/platform_outputs?output_number=eq.'+$x.n+'&airtable_record_id=eq.'+$x.rid+'&publish_status=eq.Failed&updated_at=eq.'+[uri]::EscapeDataString([string]$o.updated_at)) -Headers ($h+@{Prefer='return=representation'}) -Method Patch -ContentType 'application/json' -Body (@{error_messages=$bag}|ConvertTo-Json -Compress -Depth 75) -TimeoutSec 30
-  if(@($updated).Count -ne 1){throw 'new_container_not_saved_no_publish'}
-  $row.state='poll_original_replacement'
-  $ready=$false
-  for($i=0;$i -lt 10;$i++){
-   Start-Sleep -Seconds 8
-   $status=GraphGet $new 'id,status_code' $account.headers
-   if([string]$status.id -ne $new){throw 'created_container_identity_mismatch'}
-   if([string]$status.status_code -eq 'FINISHED'){$ready=$true;break}
-   if([string]$status.status_code -in @('ERROR','EXPIRED','PUBLISHED')){throw 'new_container_terminal'}
+  $previousNew=[string]$e.P1_2340_Story_Replacement_Container_ID
+  $previousFence=[string]$e.P1_2340_Story_Replacement_Create_Fence
+  if($x.n -eq 4123){
+    # First batch created this exact one original replacement; do not create again.
+    if($previousNew -ne '17911963848575604' -or $previousFence -ne $ek){throw 'saved_original_container_not_exact'}
+    $events=ReadS ('/rest/v1/quality_agent_recovery_events?airtable_record_id=eq.recP12340IGS4123A&select=event_key,output_number&limit=2')
+    if(@($events).Count -ne 1 -or [string]$events[0].event_key -ne $ek -or $events[0].output_number -ne 4123){throw 'existing_create_fence_unverified'}
+    $new=$previousNew
+    $row.reused_container=$true
+    $row.new_container=$new
+    $report.reused_saved_containers++
+  }else{
+    if($previousNew -or $previousFence){throw 'unplanned_prior_create_must_not_replay'}
+    $eid='recP12340IGS'+$x.n+'A'
+    $event=@(@{airtable_record_id=$eid;event_key=$ek;outcome='approved_fresh_story_create_reserved';output_record_id=$x.rid;output_number=$x.n;fields=@{Event_Key=$ek;Output_ID=$x.n;Outcome='approved_fresh_story_create_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
+    $saved=Invoke-RestMethod ($su+'/rest/v1/quality_agent_recovery_events') -Headers ($h+@{Prefer='return=representation'}) -Method Post -ContentType 'application/json' -Body $event -TimeoutSec 25
+    if(@($saved).Count -ne 1 -or [string]$saved[0].event_key -ne $ek){throw 'unique_create_fence_not_durable'}
+    $row.state='create_ambiguous_no_replay';$row.create_calls=1;$report.provider_create_calls++
+    $newData=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+'/'+$account.acct+'/media') -Headers $account.headers -Method Post -Body @{media_type='STORIES';video_url=$asset} -TimeoutSec 75
+    $new=[string]$newData.id
+    if($new -notmatch '^\d{12,30}$'){throw 'new_container_response_missing'}
+    $row.new_container=$new
+    $bag['P1_2340_Story_Replacement_Container_ID']=$new
+    $bag['P1_2340_Story_Replacement_Create_Fence']=$ek
+    $updated=Invoke-RestMethod ($su+'/rest/v1/platform_outputs?output_number=eq.'+$x.n+'&airtable_record_id=eq.'+$x.rid+'&publish_status=eq.Failed&updated_at=eq.'+[uri]::EscapeDataString([string]$o.updated_at)) -Headers ($h+@{Prefer='return=representation'}) -Method Patch -ContentType 'application/json' -Body (@{error_messages=$bag}|ConvertTo-Json -Compress -Depth 75) -TimeoutSec 30
+    if(@($updated).Count -ne 1){throw 'new_container_not_saved_no_publish'}
   }
+  $row.state='poll_original_replacement'
+  $ready=$false;$readErrors=0
+  for($i=0;$i -lt 18;$i++){
+    Start-Sleep -Seconds 7
+    try{$status=GraphGet $new 'id,status_code' $account.headers}
+    catch {
+      $readErrors++
+      $row.status_get_errors=$readErrors
+      try{$row.last_get_http=[int]$_.Exception.Response.StatusCode}catch{}
+      if($readErrors -ge 5){throw 'existing_new_container_status_get_unavailable'}
+      continue # GET retry only; no create/publish retry
+    }
+    if([string]$status.id -ne $new){throw 'created_container_identity_mismatch'}
+    if([string]$status.status_code -eq 'FINISHED'){$ready=$true;break}
+    if([string]$status.status_code -in @('ERROR','EXPIRED','PUBLISHED')){throw 'new_container_terminal'}
+  }
+  $row.status_get_errors=$readErrors
   if(-not $ready){throw 'new_container_not_finished'}
   $pe='P1-2340:'+$x.n+':approved-expired-story-replacement-publish-v1'
   $pid='recP12340PUB'+$x.n+'A'
@@ -103,8 +125,17 @@ foreach($x in $t){
   $post=[string]$posted.id
   if($post -notmatch '^\d{12,30}$'){throw 'public_media_id_absent'}
   $row.public_media=$post
-  $proof=GraphGet $post 'id,permalink,timestamp,media_type' $account.headers
-  if([string]$proof.id -ne $post -or [string]$proof.media_type -notin @('VIDEO','IMAGE','CAROUSEL_ALBUM')){throw 'published_media_not_verified'}
+  # The Meta publish POST already returned the real post ID. If its GET edge
+  # is briefly eventual-consistent, retry READ ONLY; never resend media_publish.
+  $proof=$null
+  for($verify=0;$verify -lt 6;$verify++){
+    try{
+      $candidate=GraphGet $post 'id,permalink,timestamp,media_type' $account.headers
+      if([string]$candidate.id -eq $post){$proof=$candidate;break}
+    }catch{}
+    Start-Sleep -Seconds 5
+  }
+  if($null -eq $proof -or [string]$proof.id -ne $post -or [string]$proof.media_type -notin @('VIDEO','IMAGE','CAROUSEL_ALBUM')){throw 'published_media_not_verified'}
   $perma=[string]$proof.permalink
   if($perma -and $perma -notmatch '^https://(www\.)?instagram\.com/'){throw 'public_permalink_not_verified'}
   $bag['P1_2340_Story_Original_Expired_Container_ID']=$x.old
@@ -120,7 +151,7 @@ foreach($x in $t){
   $row.state='published_verified';$report.verified_published++
  }catch{
   $msg=[string]$_.Exception.Message
-  $allowed=@('target_output_missing','approved_original_row_not_exact','safety_hold_origin_not_verified','approved_video_media_url_not_exact','approved_media_unavailable','prior_original_container_not_expired','unique_create_fence_not_durable','new_container_response_missing','new_container_not_saved_no_publish','created_container_identity_mismatch','new_container_terminal','new_container_not_finished','unique_publish_fence_not_durable','public_media_id_absent','published_media_not_verified','public_permalink_not_verified','provider_post_created_but_source_finalization_unverified')
+  $allowed=@('target_output_missing','approved_original_row_not_exact','saved_original_container_not_exact','existing_create_fence_unverified','unplanned_prior_create_must_not_replay','existing_new_container_status_get_unavailable','safety_hold_origin_not_verified','approved_video_media_url_not_exact','approved_media_unavailable','prior_original_container_not_expired','unique_create_fence_not_durable','new_container_response_missing','new_container_not_saved_no_publish','created_container_identity_mismatch','new_container_terminal','new_container_not_finished','unique_publish_fence_not_durable','public_media_id_absent','published_media_not_verified','public_permalink_not_verified','provider_post_created_but_source_finalization_unverified')
   $row.error=if($allowed -contains $msg){$msg}else{'provider_or_runtime_failure_no_replay'}
  }
  $report.outcomes+= $row
