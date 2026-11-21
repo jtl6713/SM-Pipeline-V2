@@ -20,6 +20,34 @@ def client():
     })
 
 
+@pytest.mark.parametrize("receipt,accepted", [
+    ({"ok": True, "count": 1}, True),
+    ({"ok": True, "count": 0}, False),
+    ({"ok": False, "count": 1}, False),
+    ({"count": 1}, False),
+    (None, False),
+])
+def test_confirmed_runner_mirror_receipt_is_returned_not_lost(
+    client, monkeypatch, receipt, accepted,
+):
+    import supabase_pipeline
+
+    recorded = []
+    def fake_mirror(settings, table, records, *, partial=False):
+        recorded.append((table, len(records), partial))
+        return receipt
+
+    monkeypatch.setattr(supabase_pipeline, "mirror_airtable_records", fake_mirror)
+    request = [{"id": "rec00000000000001", "fields": {"Publish_Status": "Scheduled"}}]
+    if accepted:
+        result = client._mirror(PLATFORM_OUTPUTS_TABLE, request, partial=True)
+        assert result == receipt
+    else:
+        with pytest.raises(RuntimeError, match="Supabase mutation not confirmed"):
+            client._mirror(PLATFORM_OUTPUTS_TABLE, request, partial=True)
+    assert recorded == [(PLATFORM_OUTPUTS_TABLE, 1, True)]
+
+
 @pytest.mark.parametrize("operation", ["create", "update", "batch_update", "list"])
 def test_unmapped_crud_never_simulates_success(client, operation):
     table = "UNMAPPED_TABLE"
