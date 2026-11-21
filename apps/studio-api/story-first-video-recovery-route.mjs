@@ -210,7 +210,9 @@ export async function recoverOriginalStoryVideo({
         Intake_Status:"Created",Intake_Date:isoNow(),
         Drive_Access_Status:"Public",Classification_Status:"Processing",
         Asset_Status:"Available",Active:true,Do_Not_Use:false,
-        Capture_Source:"AI Generated",Rights_Status:"Licensed",Asset_Role:"Other",
+        // An approved generated MP4 is an original production video master;
+        // keep its AI capture provenance but categorize its role as usable footage.
+        Capture_Source:"AI Generated",Rights_Status:"Licensed",Asset_Role:"Raw Footage",
         Raw_Source_Eligibility:"Not Applicable",
         Asset_Description: "Recovered already-paid ElevenLabs video for Idea " + ideaId
           + " scene " + sceneNumber + ", original run " + job.run_id + ".",
