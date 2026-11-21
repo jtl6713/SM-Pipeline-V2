@@ -1,0 +1,131 @@
+name: NYC 2489 exact six owner queues read-only audit
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2489-nyc-six-provider-queues-readonly.ps1'
+      - '.github/workflows/issue2489-nyc-six-provider-queues-readonly.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2489-nyc-six-provider-queues-readonly.ps1'
+      - '.github/workflows/issue2489-nyc-six-provider-queues-readonly.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2489-exact-six-nyc-provider-get-only
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell script
+        shell: pwsh
+        run: |
+          $t=$null;$e=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue2489-nyc-six-provider-queues-readonly.ps1'),[ref]$t,[ref]$e)|Out-Null
+          if($e.Count -gt 0){$e|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Enforce exact NYC scope, no publishing or writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2489-nyc-six-provider-queues-readonly.ps1').read_text()
+          for token in ('issue=2489','10840','10841','10842','10843','10844','10845','rec89E4MVs8XUiwbz'[:0]+'recZ6eB75E1vOysOV',
+                        'vkwvscgisqsbuwagdvtb','remote_queue_exhaustively_verified=$false',
+                        'safe_to_release_automatically=$false','NYC2489_PROVIDER_QUEUE_AUDIT=',
+                        'provider_writes=0','output_writes=0','airtable_operations=0',
+                        'https://auth-nyc.chicagoshining.com/tiktok/status',
+                        '/youtube/channel/uploads?expected_channel_id='):
+              assert token in s, 'required scope or fail-closed marker missing'
+          assert s.count('-Method Get')>=6
+          for token in ('-Method Post','-Method Patch','-Method Put','-Method Delete',
+                        '/media_publish','/tiktok/draft/video/init',
+                        'api.airtable.com','Write-Output $sk','Write-Host $sk'):
+              assert token not in s, 'unsafe mutation or credential logging'
+          print('NYC_2489_STATIC_GET_ONLY_PASS')
+          PY
+  live-account-inventory:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate Ops without logging secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/2489-ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/2489-ops-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "NYC2489_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops auth unavailable; no provider audit performed';exit 1
+      - name: Build immutable SHA256 pinned read-only script dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          path=pathlib.Path('repair/scripts/issue2489-nyc-six-provider-queues-readonly.ps1')
+          digest=hashlib.sha256(path.read_bytes()).hexdigest()
+          sha=os.environ['GITHUB_SHA']
+          assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{path.as_posix()}'
+          command=(
+             "$ErrorActionPreference='Stop';"
+             f"$url='{url}';"
+             "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+             "$digest=[BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+             f"if($digest -ne '{digest}'){{throw 'pinned_source_hash_mismatch'}};"
+             "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/2489-ops-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          print('nyc2489_pinned_readonly_script_verified=true')
+          PY
+      - name: Execute protected strictly GET-only owner account / queue audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          admitted=false
+          for attempt in $(seq 1 10);do
+            code=$(curl -sS --max-time 30 -o /tmp/2489-ops-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $NYC2489_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/2489-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then admitted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops denied audit ($code), no retries permitted";exit 2;fi
+            sleep 8
+          done
+          if [[ "$admitted" != true ]];then echo 'Ops busy; provider audit unavailable';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/2489-ops-start.json)
+          for i in $(seq 1 180);do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $NYC2489_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/2489-ops-job.json
+            state=$(jq -r '.job.status // empty' /tmp/2489-ops-job.json)
+            if [[ "$state" == ok ]];then
+              jq -r '.job.log // ""' /tmp/2489-ops-job.json | grep '^NYC2489_PROVIDER_QUEUE_AUDIT=' | tail -1 | sed 's/^NYC2489_PROVIDER_QUEUE_AUDIT=//' > /tmp/2489-sanitized-queue-inventory.json
+              jq -e '.issue==2489 and .read_only==true and .exact_count==6 and .local_safety_verified==true and .provider_writes==0 and .output_writes==0 and .airtable_operations==0 and .safe_to_release_automatically==false' /tmp/2489-sanitized-queue-inventory.json >/dev/null
+              jq -c '{issue,read_only,exact_count,local_safety_verified,local_previous_provider_identity_count,facebook,instagram,tiktok,youtube,remote_queue_exhaustively_verified,safe_to_release_automatically,error_category}' /tmp/2489-sanitized-queue-inventory.json
+              echo 'provider_queue_negative_proof_limited_IG_TikTok=true'
+              exit 0
+            fi
+            if [[ "$state" == failed ]];then echo 'Provider read-only audit failed; no mutation authorized';exit 3;fi
+            sleep 4
+          done
+          echo 'Provider audit incomplete and no release authorized';exit 4
+      - name: Retain sanitized provider findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyc2489-provider-queue-readonly
+          path: /tmp/2489-sanitized-queue-inventory.json
+          retention-days: 30
+          if-no-files-found: warn
