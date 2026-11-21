@@ -907,3 +907,5 @@ zero Airtable egress and zero Approve/Retry/Publish authorization.
 Only then deploy Studio original-image gallery Prev/Next view.
 
 Deploy #2531 Pipeline all-week history pagination and production-approved sorting UI 0.6.1029 from merged PR #2534; 22/22 CI checks green.
+
+# 2026-11-21 PR #2533 issue #2532: release owner-scoped Supabase global generation prompt, editable per-profile every-generation guidance, I1/ITS1/SAI1/P1/thumbnail inheritance, and UI 0.6.1035. Preserve publication holds; no publishing on deployment.
