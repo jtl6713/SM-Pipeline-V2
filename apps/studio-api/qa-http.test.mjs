@@ -70,7 +70,7 @@ test("static QA catalog stays available without ledger credentials, but history 
   assert.equal(response.status,200);
   assert.equal(body.writeAuthority,"Supabase");
   assert.equal(body.tests.length,88);
-  await assert.rejects(()=>invoke("runs?limit=1"),e=>e.status===503&&/QA ledger service credential unavailable/.test(e.message));
+  await assert.rejects(()=>invoke("runs?limit=1"),e=>e.status===503&&/QA ledger URL unavailable/.test(e.message));
 });
 
 test("catalog exposes 88 versioned cases and read-only safe-check allowlist",async()=>{
