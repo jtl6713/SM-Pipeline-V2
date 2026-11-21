@@ -28,7 +28,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $src=Get-Content -Raw $file
-          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','oembed','public-saved-url-oembed-get','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','public-saved-url-oembed-get','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
             if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
           }
           if($src.Contains('-Method Post') -or $src.Contains('Invoke-RestMethod -Method Post')){throw 'no_provider_post_allowed'}
