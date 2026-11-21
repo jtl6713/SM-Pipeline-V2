@@ -51,3 +51,14 @@ test("saved per-profile edits override database guidance without mutating shared
   assert.equal(result.sources.thumbnail_instructions.inherited, false);
   assert.equal(brand.Thumbnail_Style_Guidelines, "Original shared brand rule");
 });
+
+test("explicitly cleared fields persist rather than silently restoring inherited style", () => {
+  const saved = { shared_direction: "", thumbnail_instructions: "", narration_instructions: "" };
+  const result = resolveCreativeGuidance({
+    saved, savedRowExists: true,
+    brand: { Brand_Personality: "Original shared style", Thumbnail_Style_Guidelines: "Inherit only before first save" },
+    profile: { Brand_Voice: "Original voice" },
+  });
+  assert.deepEqual(result.creative, saved);
+  for (const field of Object.keys(saved)) assert.equal(result.sources[field].inherited, false);
+});
