@@ -1,0 +1,105 @@
+name: TikTok 10685 one-shot controlled delivery after cover repair
+on:
+  push:
+    branches: [ops/tiktok-10685-readonly-20261120]
+    paths: ['.github/workflows/tiktok-10685-controlled-delivery-20261120.yml']
+permissions:
+  contents: read
+concurrency:
+  group: tiktok-10685-controlled-delivery-once
+  cancel-in-progress: false
+jobs:
+  one-shot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "https://ops.chicagoshining.com/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "Ops authentication unavailable"
+          exit 1
+      - name: Use native TTD1 and TTD2 only for exact repaired output
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/tt10685-controlled.ps1 <<'PS'
+          $ErrorActionPreference="Stop"
+          $record="rec4E9TMeiRXb4M6B"
+          $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_not_supabase_authoritative" }
+          $envfile=Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line=@(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret=([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+          if (-not $secret) { throw "runner_secret_missing" }
+          $headers=@{"X-Pipeline-Secret"=$secret}
+          function Stage([string]$name,[bool]$dry) {
+            $body=@{output_record_id=$record;extra=@{dry_run=$dry;wait=$true}} | ConvertTo-Json -Compress -Depth 5
+            return Invoke-RestMethod -Uri ("http://127.0.0.1:3350/stages/"+$name) -Method POST -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 220
+          }
+          $preview=Stage "ttd1" $true
+          Write-Output ("TIKTOK_10685_DRY_STATUS="+[string]$preview.status)
+          Write-Output ("TIKTOK_10685_DRY_REASON="+[string]$preview.details.run.reason)
+          if ($preview.status -ne "ok" -or $preview.details.run.dry_run -ne $true -or $preview.details.run.eligibility_reason) { throw "ttd1_dry_run_refused" }
+          $created=Stage "ttd1" $false
+          Write-Output ("TIKTOK_10685_INIT_STATUS="+[string]$created.status)
+          Write-Output ("TIKTOK_10685_INIT_REASON="+[string]$created.details.run.reason)
+          $newid=[string]$created.details.run.publish_id
+          if ($created.status -ne "ok" -or -not $newid -or $newid -eq "p_inbox_url~v2.7710418465512851486") { throw "no_new_tiktok_publish_id" }
+          Write-Output ("TIKTOK_10685_NEW_PUBLISH_ID="+$newid)
+          for ($i=1;$i -le 8;$i++) {
+            Start-Sleep -Seconds 12
+            $polled=Stage "ttd2" $false
+            Write-Output ("TIKTOK_10685_POLL_"+$i+"="+[string]$polled.status+" reason="+[string]$polled.details.run.reason+" provider="+[string]$polled.details.run.tiktok_status)
+            if ($polled.details.run.tiktok_status -eq "SEND_TO_USER_INBOX") {
+              Write-Output "TIKTOK_10685_FRESH_DELIVERY_CONFIRMED=PASS"
+              $dryEmail=Stage "ttd3" $true
+              Write-Output ("TIKTOK_10685_HANDOFF_DRY="+[string]$dryEmail.status+" reason="+[string]$dryEmail.details.run.reason)
+              if ($dryEmail.status -eq "ok" -and $dryEmail.details.run.dry_run -eq $true) {
+                $email=Stage "ttd3" $false
+                Write-Output ("TIKTOK_10685_HANDOFF_STATUS="+[string]$email.status+" email_sent="+[string]$email.details.run.email_sent)
+              }
+              exit 0
+            }
+            if ($polled.status -eq "error" -or $polled.details.run.tiktok_status -eq "FAILED") { throw "tiktok_provider_processing_failure" }
+          }
+          Write-Output "TIKTOK_10685_PROVIDER_PENDING=NO_SECOND_INIT"
+          PS
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          Path("/tmp/tt10685-controlled.json").write_text(json.dumps({"command":Path("/tmp/tt10685-controlled.ps1").read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/ops-job.json -w '%{http_code}' -X POST "https://ops.chicagoshining.com/api/shell" -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/tt10685-controlled.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then echo "Ops refused call HTTP=$code"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ops-job.json)
+          for n in $(seq 1 145); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-status.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep '^TIKTOK_10685_' || true
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status.json | grep -E '^TIKTOK_10685_|ttd1_dry_run_refused|no_new_tiktok_publish_id|tiktok_provider_processing_failure' | tail -20 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo "Ops delivery job unfinished"
+          exit 4
