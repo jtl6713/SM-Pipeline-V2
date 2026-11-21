@@ -5636,9 +5636,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     }
   }
   let sideRead = null;
-  let sideReadAttempted = false;
   if (method === "GET" && studioWriteSource(env) === "supabase") {
-    sideReadAttempted = true;
     sideRead = await studioSideTableRead(env, tableId, pathOrParams).catch((error) => {
       console.warn("supabase side-table read failed; Airtable remains required", error);
       return null;
@@ -5662,7 +5660,6 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     else if (sideArchive) archiveRecords = sideArchive;
   }
   let body = {};
-  let airtableCommitted = false;
   if (sideRead) {
     body = sideRead;
   } else if (archiveRecords) {
@@ -5689,36 +5686,6 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   if (method !== "GET") {
     await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
-    });
-  }
-  if (mintedCreates.length && airtableCommitted) {
-    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
-    try {
-      if (airtableRecords.length) {
-        await studioSupabaseCommitOutputContentFirst(env, tableId, airtableRecords, { create: true });
-      }
-      await releaseMintedAirtableIds(env, tableId, mintedCreates.map((row) => row.id));
-    } catch (error) {
-      console.warn("supabase minted create adoption failed", tableId, error);
-    }
-  }
-  if (phase6Minted.length && airtableCommitted) {
-    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
-    try {
-      if (airtableRecords.length) {
-        const identity = await adoptMintedPhase6MediaIds(env, tableId, phase6Minted, airtableRecords);
-        if (identity?.ok === false) throw new Error("phase6 media identity adoption failed: " + identity.reason);
-        const adopted = await studioSupabaseCommitPhase6First(env, tableId, airtableRecords, { create: true });
-        if (!adopted?.ok) throw new Error("phase6 create adoption missing identity");
-      }
-      await releaseMintedAirtableIds(env, tableId, phase6Minted.map((row) => row.id));
-    } catch (error) {
-      console.warn("supabase phase6 minted create adoption failed", tableId, error);
-    }
-  }
-  if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
-    await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
-      console.warn("supabase airtable write-through failed", tableId, error);
     });
   }
   return body;
