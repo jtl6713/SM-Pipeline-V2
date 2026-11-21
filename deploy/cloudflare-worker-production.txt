@@ -1440,3 +1440,5 @@ Deploy Studio API Facebook Story definite-auth-rejection recovery 2026-11-20 PR2
 
 2026-11-20 P1 #2340: Deploy merged #2346 79ef6cfde0761c0fb913ca501dc5c33f474639d8. GET-only YouTube provider receipt transport key resolves from active global Supabase Pipeline Setting when scoped bulk lookup omits it. No Airtable fallback, no provider posts or output mutations. Preserve existing live Worker bindings and strict ownership check. Run protected live canary before any publication recovery decision.
 2026-11-20: Deploy merged PR #2353 Ideas Home parity API: filtered full Supabase unpromoted census and live durable Home idea recount; no Airtable reads in new path, no mutations, preserve existing Worker bindings. Verify protected production activation.
+
+2026-11-20 P1 #2340: Deploy merged PR #2363 b9a1b4f715494df9981471abd0d1d2777ac31d8f. Supabase-authoritative fresh approved publishing via independent five-minute cron; preserve R2 output lock and at-most-once dispatch fence. Prior-attempt/failed outputs remain provider-reconciliation only. Preserve Worker bindings, avoid Airtable fallback, verify production health.
