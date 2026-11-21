@@ -18515,13 +18515,16 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
           approve: (id, currentJob, checkpoint = () => {}) =>
             withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
-              checkpoint("supabase_approval_started");
+              // Awaited checkpoints let Factory poll actual in-flight stages
+              // without ever triggering an additional approval or publish.
+              await checkpoint("supabase_approval_started");
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
+                onStage: checkpoint,
               });
-              checkpoint("supabase_approval_finished");
+              await checkpoint("supabase_approval_finished");
               return result;
             }),
         });
