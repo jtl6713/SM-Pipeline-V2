@@ -42,6 +42,18 @@ class QaLedgerSqlReviewOnlyTest(unittest.TestCase):
         self.assertEqual(s.count("legacy_row_sha256 ~ '^[0-9a-f]{64}$'"), 2)
         self.assertEqual(s.count("legacy_record_id is not null and length(payload_hash) between 1 and 200"), 2)
 
+    def test_only_production_is_a_live_qa_environment(self):
+        s = self.sql
+        self.assertIn(
+            "legacy_record_id is null and environment = 'production'", s
+        )
+        self.assertIn(
+            "legacy_record_id is not null and environment in ('production','staging','development')", s
+        )
+        self.assertNotIn(
+            "check (environment in ('production','staging','development'))", s
+        )
+
     def test_service_role_only_routing_and_append_only_preflight(self):
         s = self.sql.lower()
         self.assertEqual(len(re.findall(r"\bbefore update or delete\b", s)), 2)
