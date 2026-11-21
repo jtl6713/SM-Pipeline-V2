@@ -26,6 +26,8 @@ function harness({rows=outputs,writeSource="airtable",phase6Source="supabase"}={
     airtableFetch:async()=>{airtableHits++;throw new Error("legacy archive forbidden");},
     listRecords:async()=>{airtableHits++;throw new Error("legacy archive forbidden");},
     listRecordsPage:async()=>{airtableHits++;throw new Error("legacy archive forbidden");},
+    PRODUCTION_REQUEST_TABLE:"Production Requests",
+    PRODUCTION_REQUEST_OUTPUT_TABLE:"Production Request Outputs",
     f:(row,key)=>row?.fields?.[key],
     arrayOrEmpty:(a)=>Array.isArray(a)?a:[],
     HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}}
