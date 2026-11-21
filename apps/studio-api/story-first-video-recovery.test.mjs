@@ -14,7 +14,8 @@ const NAME="New-York-City-Then-and-Now-Scene-4-deadbeef.mp4";
 const ORIGINAL_SIZE=12_500;
 const recent = minutes => new Date(Date.now()-minutes*60_000).toISOString();
 function fixture({
-  state="accepting", ageMinutes=90, driveFiles=[], catalog=[], runnerStatus="processing",
+  state="accepting", ageMinutes=90, acceptingAgeMinutes=ageMinutes,
+  driveFiles=[], catalog=[], runnerStatus="processing",
   headValid=true, asyncStatus=202,
 }={}) {
   let job={run_id:RUN,idea_id:ID,profile_id:PROFILE,scene_number:4,
@@ -29,7 +30,7 @@ function fixture({
     title:"New York City: Then and Now",scene:{visual:"West 28th Street",media:"clip"},
     expectedRunId:RUN,audioMixAcknowledged:false,mediaOverride:false,
     jobKey:"key",mediaKey:"mp4",
-    readJob:async()=>({job,etag:String(etag)}),
+    readJob:async()=>({job,etag:String(etag),uploaded_at:recent(acceptingAgeMinutes)}),
     writeJob:async(next,expected)=>{if(expected!==String(etag)) throw new HttpError(409,"CAS lost");
       job=next;etag++;writes++;return String(etag);},
     lookupCatalog:async()=>rows,
@@ -122,6 +123,16 @@ test("existing exact Drive file registers once, then selects without any new upl
 
 test("recent ambiguous registration cannot start a second Drive upload",async()=>{
   const fx=fixture({ageMinutes:2});
+  try{
+    const result=await recoverOriginalStoryVideo(fx.context);
+    assert.equal(result.state,"recovering");
+    assert.equal(fx.stats().uploads,0);
+    assert.equal(fx.stats().paid,0);
+  }finally{fx.restore();}
+});
+
+test("old paid generation but recent Drive-accept CAS never causes a second upload",async()=>{
+  const fx=fixture({ageMinutes:90,acceptingAgeMinutes:2});
   try{
     const result=await recoverOriginalStoryVideo(fx.context);
     assert.equal(result.state,"recovering");
