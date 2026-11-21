@@ -50,6 +50,8 @@ export const IDEA_LIBRARY_NAMED_PLACES = [
   "central park", "times square", "brooklyn bridge", "statue of liberty",
   "high line", "washington square", "bryant park", "grand central",
   "one world trade", "tribeca", "soho", "chelsea", "dumbo", "harlem",
+  "coney island", "governors island", "roosevelt island", "staten island",
+  "gantry plaza state park", "flushing meadows", "unisphere",
   "santa monica pier", "griffith observatory",
   "venice beach", "rodeo drive", "hollywood sign",
 ];
@@ -150,6 +152,14 @@ const IDEA_LIBRARY_GENERIC_PLACE_TOKENS = new Set([
   "chicago", "miami", "angeles",
 ]);
 
+// These words describe thousands of unrelated places. When an Idea also has
+// a distinctive place key (for example `coney` or `dumbo`), a generic token
+// must never be enough to make a library asset a high-confidence match.
+const IDEA_LIBRARY_AMBIGUOUS_PLACE_TOKENS = new Set([
+  "island", "boardwalk", "bridge", "park", "square", "station", "street",
+  "avenue", "waterfront", "beach", "pier", "market", "museum", "center",
+]);
+
 /** Airtable FIND keys: place anchors plus brand/transit subjects from the title.
  * A neighborhood such as Tribeca must not be crowded out by "New York". */
 export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
@@ -177,8 +187,13 @@ export function rankIdeaLibraryFields({
   if (queryTokens.length && !queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) {
     return null;
   }
-  const locationPlaceHits = ideaLibraryFieldHits(location, placeKeys);
-  const namePlaceHits = ideaLibraryFieldHits(name, placeKeys);
+  const distinctivePlaceKeys = (placeKeys || []).filter((token) =>
+    !IDEA_LIBRARY_GENERIC_PLACE_TOKENS.has(token)
+    && !IDEA_LIBRARY_AMBIGUOUS_PLACE_TOKENS.has(token)
+  );
+  const anchorPlaceKeys = distinctivePlaceKeys.length ? distinctivePlaceKeys : placeKeys;
+  const locationPlaceHits = ideaLibraryFieldHits(location, anchorPlaceKeys);
+  const namePlaceHits = ideaLibraryFieldHits(name, anchorPlaceKeys);
   const locationSubjectHits = ideaLibraryFieldHits(location, subjectKeys);
   const nameSubjectHits = ideaLibraryFieldHits(name, subjectKeys);
   const haySubjectHits = ideaLibraryFieldHits(haystack, subjectKeys);
