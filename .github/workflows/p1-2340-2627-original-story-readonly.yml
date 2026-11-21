@@ -1,0 +1,120 @@
+name: P1 2340 NYC 2627 original fenced Story provider GET only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-2627-original-story-readonly.yml'
+      - 'repair/scripts/p1-2340-2627-existing-story-readonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-2627-original-story-readonly.yml'
+      - 'repair/scripts/p1-2340-2627-existing-story-readonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-nyc-2627-original-story-readonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell parse and strict no-provider-write check
+        shell: pwsh
+        run: |
+          $f='repair/scripts/p1-2340-2627-existing-story-readonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($needed in @('vkwvscgisqsbuwagdvtb','rec84IjfUIcvTHDKc','18134595583783117','both_one_time_original_fences_not_verified','NYC_INSTAGRAM_BUSINESS_ACCOUNT_ID','P1_2627_ORIGINAL_RECEIPT_GET=','no_replay','PUBLISHED_but_no_owner_story_in_window')){
+            if(-not $s.Contains($needed)){throw ('missing_read_only_guard: '+$needed)}
+          }
+          if(-not $s.Contains('provider_writes=0;output_writes=0;airtable_reads=0')){throw 'missing_zero_write_evidence'}
+          if($s -match '(?i)\b(Method|Verb)\s+(Post|Patch|Put|Delete)\b'){throw 'write_call_prohibited'}
+          foreach($bad in @('api.airtable.com','AIRTABLE_PAT','/media_publish',' -Method Patch',' -Method Post',' -Method Delete')){
+            if($s.Contains($bad)){throw ('unexpected_unsafe_operation: '+$bad)}
+          }
+          Write-Output 'P1_NYC_2627_PROVIDER_GET_ONLY_STATIC=PASS'
+  exact-provider-get:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate protected production Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C";do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-2627-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-2627-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "P1_2627_OPS=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'No protected Ops credential; no provider GET';exit 1
+      - name: SHA-pinned original-only read script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          f=pathlib.Path('repair/scripts/p1-2340-2627-existing-story-readonly.ps1')
+          h=hashlib.sha256(f.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{f.as_posix()}'
+          cmd=("$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$script=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($script))).Replace('-','').ToLowerInvariant();"
+            f"if($hash -ne '{h}'){{throw 'pinned_source_mismatch'}};"
+            "& ([ScriptBlock]::Create($script))")
+          pathlib.Path('/tmp/p1-2627-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          PY
+      - name: Query existing Meta container and current owner stories without any writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for n in $(seq 1 18);do
+            code=$(curl -sS --max-time 30 -o /tmp/p1-2627-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $P1_2627_OPS" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/p1-2627-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops read-only job rejected ($code)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$accepted" != true ]];then echo 'Ops busy; no read performed';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-2627-start.json)
+          for n in $(seq 1 85);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_2627_OPS" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-2627-job.json
+            state=$(jq -r '.job.status // empty' /tmp/p1-2627-job.json)
+            if [[ "$state" == ok ]];then
+              jq -r '.job.log // ""' /tmp/p1-2627-job.json | grep '^P1_2627_ORIGINAL_RECEIPT_GET=' | tail -1 | sed 's/^P1_2627_ORIGINAL_RECEIPT_GET=//' > /tmp/p1-2627-evidence.json
+              jq -e '.output==2627 and .read_only==true and .provider_writes==0 and .output_writes==0 and .airtable_reads==0' /tmp/p1-2627-evidence.json >/dev/null
+              jq -c '{output,reason,container_status,matching_window_count,recent_stories_count,window_candidates,provider_gets,provider_writes,output_writes}' /tmp/p1-2627-evidence.json
+              echo 'P1_2627_RECEIPT_GET_ONLY=PASS';exit 0
+            elif [[ "$state" == failed ]];then echo 'Read-only provider query failed; original POST must remain fenced';exit 3;fi
+            sleep 3
+          done
+          echo 'Read-only outcome incomplete; original POST remains fenced';exit 4
+      - name: Preserve sanitized NYC 2627 original-provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-nyc-2627-original-story-readonly
+          path: /tmp/p1-2627-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
