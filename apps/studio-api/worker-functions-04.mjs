@@ -52,6 +52,7 @@ import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { reconcileCreativeMasterAtFactoryApproval } from "./creative-master-factory-guard.mjs";
 import { creativeSettingName, parseCreativeGuidance, resolveCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
 import { ownerGenerationSettingName, parseOwnerGenerationGuidance, validateOwnerGenerationPrompt, effectiveGenerationLayers, effectiveGenerationPrompt } from "./owner-generation-guidance.mjs";
+import { resolveOwnerOrganizationForProfile, loadOwnerGenerationForProfile } from "./owner-generation-supabase.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
@@ -14508,6 +14509,16 @@ export async function studioProfileCreativeGuidance(request, env, url, authoriza
   const profileId = match[1];
   const profile = await readSupabaseContentProfile(env, profileId);
   if (!profile?.id) throw new HttpError(404, "Content Profile was not found in Supabase");
+  const orgId = await resolveOwnerOrganizationForProfile(env, profileId);
+  const linkedBrand = firstLinkedRecordId(f(profile, "Brand"));
+  const allowedBrandIds = new Set([
+    authorization?.brand?.record_id,
+    ...(authorization?.allowed_brands || []).map((brand) => brand?.record_id),
+  ].filter(Boolean));
+  if (orgId !== authorization?.organization?.record_id
+      && !(orgId == null && linkedBrand && allowedBrandIds.has(linkedBrand))) {
+    throw new HttpError(403, "Content Profile is not owned by your Studio organization");
+  }
   const name = creativeSettingName(profileId);
   const globalName = ownerGenerationSettingName(authorization?.organization?.record_id);
   const [stored, ownerStored] = await Promise.all([
