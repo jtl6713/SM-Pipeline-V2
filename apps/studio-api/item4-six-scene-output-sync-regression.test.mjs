@@ -10,7 +10,7 @@ const sourceOne = fs.readFileSync(new URL("./worker-functions-01.mjs", import.me
 const sourceTwo = fs.readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
 function extract(source, name) {
   const start = source.indexOf("export async function " + name + "(");
-  const end = source.indexOf("/*__STUDIO_WORKER_END:" + name + "*/", start);
+  const end = source.indexOf("/*__STUDIO_WORKER_END:" + name + "__*/", start);
   assert.ok(start >= 0 && end > start, "missing extracted Worker function: " + name);
   return "(" + source.slice(start, end).trim().replace(/^export /, "") + ")";
 }
