@@ -1,3 +1,4 @@
+// P0 #2340 post-deploy census: re-read exact four-profile Home buckets ONLY after verified live Worker rollout; no output mutations.
 // 2026-11-21: issue #2340 exact 4-profile Home snapshot and live drilldown parity recheck; no output writes.
 // Nov 20 evening: recount after one confirmed LA Meta Story publication and six verified terminal-container classifications (Supabase GET only).
 // 2026-11-20 18:25 Chicago: recount after five provider-confirmed expired Instagram Story status repairs.
