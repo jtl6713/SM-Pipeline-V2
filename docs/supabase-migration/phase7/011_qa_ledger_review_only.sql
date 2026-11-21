@@ -37,7 +37,7 @@ create table public.studio_qa_runs (
 create table public.studio_qa_events (
   record_id text primary key default ('qa-sb-' || gen_random_uuid()::text),
   run_id text not null references public.studio_qa_runs(run_id) on delete restrict,
-  execution_id text not null,
+  execution_id text not null unique,
   test_id text not null,
   event_kind text not null,
   actor_id text not null,
