@@ -2390,12 +2390,33 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
   let rows = [];
   try {
     if (supabaseMode) {
-      const candidates = await listSupabaseDeskHealOutputs(env, {
-        kind: "fresh_publish_ready", limit: 80, nowMs,
-      });
-      rows = candidates
-        .filter(row => assessFreshSupabasePublish(row, { nowMs }).eligible)
-        .slice(0, limit);
+      // Bounded oldest-due-first scan. Older incomplete candidates must never
+      // starve newer complete outputs just because the first page is filtered.
+      // Provider retries, old dispatch counters and held outputs are excluded
+      // by the selector AND rechecked under the per-output lock below.
+      const pageSize = 80;
+      const blocked = {};
+      let inspected = 0;
+      for (let offset = 0; offset < 480 && rows.length < limit; offset += pageSize) {
+        const candidates = await listSupabaseDeskHealOutputs(env, {
+          kind: "fresh_publish_ready", limit: pageSize, offset, nowMs,
+        });
+        inspected += candidates.length;
+        for (const candidate of candidates) {
+          const admission = assessFreshSupabasePublish(candidate, { nowMs });
+          if (admission.eligible) rows.push(candidate);
+          else blocked[admission.reason] = (blocked[admission.reason] || 0) + 1;
+          if (rows.length >= limit) break;
+        }
+        if (candidates.length < pageSize) break;
+      }
+      // Do not quietly call a blocked queue "healthy". Never rewrite statuses
+      // or clear attempt markers just to suppress an overdue exception.
+      if (inspected > 0 && (rows.length === 0 || Object.keys(blocked).length)) {
+        console.warn("Supabase due-publish admission diagnostics", JSON.stringify({
+          inspected, admitted: rows.length, blocked,
+        }));
+      }
     } else {
       rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit,
