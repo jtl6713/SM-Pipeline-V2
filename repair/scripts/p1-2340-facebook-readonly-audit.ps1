@@ -1,223 +1,61 @@
-# P1 #2340 — exact profile-scoped Meta Page credential diagnostic.
-# All provider requests GET only. No raw tokens, Page names, or upstream bodies in logs.
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$health = Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
-if ($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or
-    $health.studio_runner_output_read_source -ne 'supabase' -or
-    $health.supabase_pipeline_writes -ne $true) { throw 'runner_not_supabase_authoritative' }
-$envfile = Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
-if (-not (Test-Path $envfile)) { throw 'runner_env_missing' }
-function EnvValue([string]$key) {
-  $line = @(Get-Content $envfile | Where-Object { $_ -match ('^\s*'+[regex]::Escape($key)+'\s*=') }) | Select-Object -Last 1
-  if (-not $line) { throw 'required_runner_setting_missing' }
-  return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -TimeoutSec 20
+if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase' -or $health.supabase_pipeline_writes -ne $true){throw 'runner_not_supabase_authoritative'}
+$envfile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+if(-not (Test-Path $envfile)){throw 'runner_env_missing'}
+function EnvValue($name){
+$line=@(Get-Content $envfile|Where-Object{$_ -match ('^\s*'+[regex]::Escape($name)+'\s*=')})|Select-Object -Last 1
+if(-not $line){throw 'runner_setting_unavailable'}
+return ([string]$line -split '=',2)[1].Trim().Trim('"',"'")
 }
-$dburl=(EnvValue 'SUPABASE_URL').TrimEnd('/')
-$dbkey=EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
-if ($dburl -notmatch '^https://[a-z0-9-]+\.supabase\.co$' -or -not $dbkey) { throw 'unsafe_supabase_source' }
-$headers=@{apikey=$dbkey;Authorization=('Bearer '+$dbkey)}
-# Fetch settings into process memory. Values never appear in logs/artifacts.
-$settingsUrl=$dburl.TrimEnd('/')+'/rest/v1/engagement_settings?select=payload&limit=500'
-$source=@(Invoke-RestMethod -Uri $settingsUrl -Headers $headers -Method Get -TimeoutSec 30)
-# Some Windows PowerShell editions wrap a JSON response array as one nested
-# object. Normalize before enforcing count, without ever logging secret rows.
-if ($source.Count -eq 1 -and $source[0] -is [array]) { $source=@($source[0]) }
-if ($source.Count -lt 1 -or $source.Count -ge 500) {
-  throw ('settings_inventory_unavailable_or_truncated_count_'+$source.Count)
+$url=(EnvValue 'SUPABASE_URL').TrimEnd('/')
+$key=EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
+if($url -notmatch '^https://[a-z0-9-]+\.supabase\.co$' -or -not $key){throw 'unsafe_source'}
+$headers=@{apikey=$key;Authorization=('Bearer '+$key)}
+$items=@(Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $headers -Method Get -TimeoutSec 30)
+if($items.Count -eq 1 -and $items[0] -is [array]){$items=@($items[0])}
+if($items.Count -eq 0 -or $items.Count -ge 500){throw 'settings_incomplete'}
+$values=@{}
+foreach($item in $items){
+$p=$item.payload
+if($null -eq $p -or [string]$p.source -ne 'pipeline' -or [string]$p.Active -ne 'True'){continue}
+$name=[string]$p.Setting_Name
+if($name -and $name -match '^(META_LONG_LIVED_USER_ACCESS_TOKEN|FACEBOOK_GRAPH_API_VERSION|FACEBOOK_PAGE_ID|LA_FACEBOOK_PAGE_ID|MIAMI_FACEBOOK_PAGE_ID|NYC_FACEBOOK_PAGE_ID)$'){
+if($values.ContainsKey($name)){throw 'duplicate_active_setting'}
+$values[$name]=[string]$p.Setting_Value
 }
-$settings=@{}
-foreach($record in $source) {
-  $p=$record.payload
-  if ($null -eq $p -or [string]$p.source -ne 'pipeline' -or [string]$p.Active -ne 'True') { continue }
-  $name=[string]$p.Setting_Name
-  if (-not $name) { continue }
-  if ($settings.ContainsKey($name)) { throw 'duplicate_active_settings_name' }
-  $settings[$name]=[string]$p.Setting_Value
 }
-function GraphGet([string]$path,[string]$token,[string]$version) {
-  if ($version -notmatch '^v\d{1,2}\.\d$' -or
-      $path -notmatch '^/[A-Za-z0-9_/?=,&-]+$') { throw 'invalid_graph_destination' }
-  $uri='https://graph.facebook.com/'+$version+$path
-  try {
-    $body=Invoke-RestMethod -Uri $uri -Method Get -Headers @{Authorization=('Bearer '+$token);Accept='application/json'} -TimeoutSec 35
-    if ($null -ne $body.error) { return @{ok=$false;http=200;code=[int]$body.error.code;subcode=[int]$body.error.error_subcode} }
-    return @{ok=$true;http=200;data=$body}
-  } catch {
-    $http=0
-    try { $http=[int]$_.Exception.Response.StatusCode } catch {}
-    $code=0; $subcode=0
-    try {
-      $details=$_.ErrorDetails.Message | ConvertFrom-Json
-      $code=[int]$details.error.code
-      $subcode=[int]$details.error.error_subcode
-    } catch {}
-    return @{ok=$false;http=$http;code=$code;subcode=$subcode}
-  }
+$token=[string]$values['META_LONG_LIVED_USER_ACCESS_TOKEN']
+$ver=[string]$values['FACEBOOK_GRAPH_API_VERSION']
+if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
+$report=@{read_only=$true;provider_operations='GET only';output_writes=0;provider_writes=0;source_rows=$items.Count;user_state='unverified';pages=@();accounts_http=0;accounts_code=0;accounts_complete=$false}
+function G($path){
+try {
+$d=Invoke-RestMethod ('https://graph.facebook.com/'+$ver+$path) -Method Get -Headers @{Authorization=('Bearer '+$token);Accept='application/json'} -TimeoutSec 35
+return @{ok=$true;status=200;body=$d;code=0}
+}catch{
+$status=0;$code=0
+try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+try{$e=$_.ErrorDetails.Message|ConvertFrom-Json;$code=[int]$e.error.code}catch{}
+return @{ok=$false;status=$status;code=$code;body=$null}
 }
-$profiles=@(
-  @{label='Chicago';prefix='';failed_output=4907},
-  @{label='LA';prefix='LA_';failed_output=5355},
-  @{label='Miami';prefix='MIAMI_';failed_output=6256},
-  @{label='NYC';prefix='NYC_';failed_output=0}
-)
-# Test the already-stored long-lived USER token through read-only /me/accounts
-# to identify Page assignments without requesting or exporting access_token.
-$userToken=[string]$settings['META_LONG_LIVED_USER_ACCESS_TOKEN']
-$userAudit=@{token_present=([bool]$userToken);token_state='unverified';
-  accounts_http=0;accounts_code=0;list_complete=$false;assigned_page_count=0}
-$userPageTasks=@{}
-if($userToken) {
-  $globalVersion=[string]$settings['FACEBOOK_GRAPH_API_VERSION']
-  if(-not $globalVersion){$globalVersion='v26.0'}
-  $userMe=GraphGet '/me?fields=id' $userToken $globalVersion
-  if($userMe.ok -eq $true) {
-    $userAudit.token_state='valid_user_identity'
-    $userAccounts=GraphGet '/me/accounts?fields=id,tasks&limit=100' $userToken $globalVersion
-    $userAudit.accounts_http=$userAccounts.http
-    $userAudit.accounts_code=$userAccounts.code
-    if($userAccounts.ok -eq $true -and $null -ne $userAccounts.data.data) {
-      $userAudit.list_complete=(-not $userAccounts.data.paging.next)
-      foreach($account in @($userAccounts.data.data)) {
-        $id=[string]$account.id
-        if($id -match '^\d{6,35}
-  $prefix=$profile.prefix
-  $pageId=[string]$settings[($prefix+'FACEBOOK_PAGE_ID')]
-  $token=[string]$settings[($prefix+'FACEBOOK_PAGE_ACCESS_TOKEN')]
-  $version=[string]$settings[($prefix+'FACEBOOK_GRAPH_API_VERSION')]
-  if (-not $version) { $version=[string]$settings['FACEBOOK_GRAPH_API_VERSION'] }
-  if (-not $version) { $version='v26.0' }
-  $report=@{profile=$profile.label;failed_output=$profile.failed_output;checked_at=(Get-Date).ToUniversalTime().ToString('o');
-    token_present=([bool]$token);page_id_present=([bool]$pageId);
-    page_identity_verified=$false;token_state='unverified';read_feed_verified=$false;
-    page_create_content_task=$null;pages_manage_posts_permission=$null;
-    user_page_assigned=$null;user_can_create_content=$null;
-    feed_http=0;feed_code=0;feed_subcode=0;
-    tasks_http=0;tasks_code=0;permissions_http=0;permissions_code=0;
-    provider_http=0;provider_code=0;provider_subcode=0;
-    no_provider_writes=$true;no_output_writes=$true;duplicate_absence_proven=$false}
-  if (-not $token -or $pageId -notmatch '^\d{6,35}$') { $report.token_state='missing_or_invalid_configuration';$reports+= $report;continue }
-  $me=GraphGet '/me?fields=id,name' $token $version
-  $report.provider_http=$me.http; $report.provider_code=$me.code; $report.provider_subcode=$me.subcode
-  if ($me.ok -ne $true) {
-    $report.token_state=if($me.code -eq 190){'expired_or_invalid'}elseif($me.code -eq 200){'permission_denied'}else{'provider_rejected'}
-    $reports+=$report;continue
-  }
-  if ([string]$me.data.id -ne $pageId) {
-    $report.token_state='different_page_owner';$reports+=$report;continue
-  }
-  $report.page_identity_verified=$true
-  $report.token_state='valid_page_identity'
-  if ($userAudit.list_complete -eq $true) {
-    $report.user_page_assigned=$userPageTasks.ContainsKey($pageId)
-    if($report.user_page_assigned) {
-      $report.user_can_create_content=(@($userPageTasks[$pageId]) -contains 'CREATE_CONTENT')
-    }
-  }
-  # Read permissions cannot prove publish permission; an unsupported edge stays unknown.
-  $tasks=GraphGet ('/'+$pageId+'?fields=id,tasks') $token $version
-  $report.tasks_http=$tasks.http;$report.tasks_code=$tasks.code
-  if ($tasks.ok -eq $true -and $null -ne $tasks.data.tasks) {
-    $report.page_create_content_task=(@($tasks.data.tasks) -contains 'CREATE_CONTENT')
-  }
-  $perms=GraphGet '/me/permissions' $token $version
-  $report.permissions_http=$perms.http;$report.permissions_code=$perms.code
-  if ($perms.ok -eq $true -and $null -ne $perms.data.data) {
-    $granted=@($perms.data.data | Where-Object { $_.permission -eq 'pages_manage_posts' -and $_.status -eq 'granted' })
-    $report.pages_manage_posts_permission=($granted.Count -gt 0)
-  }
-  $feed=GraphGet ('/'+$pageId+'/feed?fields=id&limit=1') $token $version
-  $report.feed_http=$feed.http;$report.feed_code=$feed.code;$report.feed_subcode=$feed.subcode
-  $report.read_feed_verified=($feed.ok -eq $true -and $null -ne $feed.data.data)
-  $reports+=$report
 }
-# Existing LA #5885 has an exact stored remote video ID. Inspect it without
-# using a token from another Page; permalink alone is not ownership proof.
-$reel=@{output_id=5885;read_only=$true;verified_public=$false;page_identity_verified=$false;exact_id_verified=$false;http=0;code=0}
-$la=@($reports | Where-Object {$_.profile -eq 'LA'}) | Select-Object -First 1
-if ($la.page_identity_verified -eq $true) {
-  $token=[string]$settings['LA_FACEBOOK_PAGE_ACCESS_TOKEN']
-  $ver=[string]$settings['FACEBOOK_GRAPH_API_VERSION']; if (-not $ver) {$ver='v26.0'}
-  $v=GraphGet '/1841282600545084?fields=id,permalink_url,is_published' $token $ver
-  $reel.http=$v.http;$reel.code=$v.code
-  $reel.page_identity_verified=$true
-  $reel.exact_id_verified=($v.ok -eq $true -and [string]$v.data.id -eq '1841282600545084')
-  $reel.verified_public=($reel.exact_id_verified -and $v.data.is_published -eq $true -and
-    [string]$v.data.permalink_url -match '^https://(?:www\.)?facebook\.com/')
+if($token){
+$m=G '/me?fields=id'
+if($m.ok -eq $true){
+$report.user_state='valid_user_identity'
+$a=G '/me/accounts?fields=id,tasks&limit=100'
+$report.accounts_http=$a.status;$report.accounts_code=$a.code
+if($a.ok -eq $true -and $null -ne $a.body.data){
+$report.accounts_complete=(-not $a.body.paging.next)
+$accounts=@($a.body.data)
+foreach($pair in @(@('Chicago','FACEBOOK_PAGE_ID'),@('LA','LA_FACEBOOK_PAGE_ID'),@('Miami','MIAMI_FACEBOOK_PAGE_ID'),@('NYC','NYC_FACEBOOK_PAGE_ID'))){
+$id=[string]$values[$pair[1]]
+$page=@($accounts|Where-Object{[string]$_.id -eq $id})
+$report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.Count -eq 1 -and @($page[0].tasks) -contains 'CREATE_CONTENT')}
 }
-$result=@{task='P1-2340-meta-page-token-diagnostic';read_only=$true;provider_operations='GET only';
-  report_time=(Get-Date).ToUniversalTime().ToString('o');supabase_setting_rows=$source.Count;user_token_audit=$userAudit;profiles=$reports;
-  existing_facebook_5885=$reel; output_writes=0;provider_writes=0;
-  finding='GET access is not a proof of publish permission or duplicate absence'}
-Write-Output ('P1_META_AUDIT='+($result | ConvertTo-Json -Depth 8 -Compress))
-) {
-          $userPageTasks[$id]=@($account.tasks)
-        }
-      }
-      $userAudit.assigned_page_count=$userPageTasks.Count
-    }
-  } else {
-    $userAudit.token_state=if($userMe.code -eq 190){'expired_or_invalid'}else{'provider_rejected'}
-    $userAudit.accounts_http=$userMe.http
-    $userAudit.accounts_code=$userMe.code
-  }
 }
-$reports=@()
-foreach($profile in $profiles) {
-  $prefix=$profile.prefix
-  $pageId=[string]$settings[($prefix+'FACEBOOK_PAGE_ID')]
-  $token=[string]$settings[($prefix+'FACEBOOK_PAGE_ACCESS_TOKEN')]
-  $version=[string]$settings[($prefix+'FACEBOOK_GRAPH_API_VERSION')]
-  if (-not $version) { $version=[string]$settings['FACEBOOK_GRAPH_API_VERSION'] }
-  if (-not $version) { $version='v26.0' }
-  $report=@{profile=$profile.label;failed_output=$profile.failed_output;checked_at=(Get-Date).ToUniversalTime().ToString('o');
-    token_present=([bool]$token);page_id_present=([bool]$pageId);
-    page_identity_verified=$false;token_state='unverified';read_feed_verified=$false;
-    page_create_content_task=$null;pages_manage_posts_permission=$null;
-    provider_http=0;provider_code=0;provider_subcode=0;
-    no_provider_writes=$true;no_output_writes=$true;duplicate_absence_proven=$false}
-  if (-not $token -or $pageId -notmatch '^\d{6,35}$') { $report.token_state='missing_or_invalid_configuration';$reports+= $report;continue }
-  $me=GraphGet '/me?fields=id,name' $token $version
-  $report.provider_http=$me.http; $report.provider_code=$me.code; $report.provider_subcode=$me.subcode
-  if ($me.ok -ne $true) {
-    $report.token_state=if($me.code -eq 190){'expired_or_invalid'}elseif($me.code -eq 200){'permission_denied'}else{'provider_rejected'}
-    $reports+=$report;continue
-  }
-  if ([string]$me.data.id -ne $pageId) {
-    $report.token_state='different_page_owner';$reports+=$report;continue
-  }
-  $report.page_identity_verified=$true
-  $report.token_state='valid_page_identity'
-  # Read permissions cannot prove publish permission; an unsupported edge stays unknown.
-  $tasks=GraphGet ('/'+$pageId+'?fields=id,tasks') $token $version
-  if ($tasks.ok -eq $true -and $null -ne $tasks.data.tasks) {
-    $report.page_create_content_task=(@($tasks.data.tasks) -contains 'CREATE_CONTENT')
-  }
-  $perms=GraphGet '/me/permissions' $token $version
-  if ($perms.ok -eq $true -and $null -ne $perms.data.data) {
-    $granted=@($perms.data.data | Where-Object { $_.permission -eq 'pages_manage_posts' -and $_.status -eq 'granted' })
-    $report.pages_manage_posts_permission=($granted.Count -gt 0)
-  }
-  $feed=GraphGet ('/'+$pageId+'/feed?fields=id&limit=1') $token $version
-  $report.read_feed_verified=($feed.ok -eq $true -and $null -ne $feed.data.data)
-  $reports+=$report
-}
-# Existing LA #5885 has an exact stored remote video ID. Inspect it without
-# using a token from another Page; permalink alone is not ownership proof.
-$reel=@{output_id=5885;read_only=$true;verified_public=$false;page_identity_verified=$false;exact_id_verified=$false;http=0;code=0}
-$la=@($reports | Where-Object {$_.profile -eq 'LA'}) | Select-Object -First 1
-if ($la.page_identity_verified -eq $true) {
-  $token=[string]$settings['LA_FACEBOOK_PAGE_ACCESS_TOKEN']
-  $ver=[string]$settings['FACEBOOK_GRAPH_API_VERSION']; if (-not $ver) {$ver='v26.0'}
-  $v=GraphGet '/1841282600545084?fields=id,permalink_url,is_published' $token $ver
-  $reel.http=$v.http;$reel.code=$v.code
-  $reel.page_identity_verified=$true
-  $reel.exact_id_verified=($v.ok -eq $true -and [string]$v.data.id -eq '1841282600545084')
-  $reel.verified_public=($reel.exact_id_verified -and $v.data.is_published -eq $true -and
-    [string]$v.data.permalink_url -match '^https://(?:www\.)?facebook\.com/')
-}
-$result=@{task='P1-2340-meta-page-token-diagnostic';read_only=$true;provider_operations='GET only';
-  report_time=(Get-Date).ToUniversalTime().ToString('o');supabase_setting_rows=$source.Count;profiles=$reports;
-  existing_facebook_5885=$reel; output_writes=0;provider_writes=0;
-  finding='GET access is not a proof of publish permission or duplicate absence'}
-Write-Output ('P1_META_AUDIT='+($result | ConvertTo-Json -Depth 8 -Compress))
+}else{$report.user_state=if($m.code -eq 190){'expired_or_invalid'}else{'rejected'};$report.accounts_http=$m.status;$report.accounts_code=$m.code}
+}else{$report.user_state='missing'}
+Write-Output ('P1_META_AUDIT='+($report|ConvertTo-Json -Compress -Depth 6))
