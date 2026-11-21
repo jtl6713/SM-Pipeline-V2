@@ -31,6 +31,13 @@ jobs:
           node --check apps/studio-api/worker-functions-01.mjs
           node --check apps/studio-api/worker-functions-02.mjs
           node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+
+      - name: Verify NYC audio handoff and audio-safe render admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/nyc-audio-handoff-2489.test.mjs
 
       - name: Run isolated upload recovery assertions
         shell: bash
