@@ -21,5 +21,5 @@ test("the Idea picker shows canonical numeric ID and keeps opaque record id as v
   assert.match(ui, /row\.candidate_id \|\| row\.id/);
   assert.match(ui, /new Option\(row\.title \+ " · Idea "/);
   assert.match(worker, /async function commitIdeaRecords/);
-  assert.match(worker, /SELECT.*Candidate_ID/s);
+  assert.match(worker, /canonicalNumber = readback\?\.\[0\]\?\.payload\?\.Candidate_ID/);
 });
