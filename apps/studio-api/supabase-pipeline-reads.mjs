@@ -3109,6 +3109,22 @@ export function deskHealOutputFilter(kind, options = {}) {
   if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
     return tiktokReconcileOutputFilter(kind, options);
   }
+  if (kind === "fresh_publish_ready") {
+    // Supabase SoR initial-publication lane. Never replay an existing
+    // dispatch, remote upload or explicit retry hold through this selector.
+    // Continuations and old Past Due/Failed rows require provider receipts.
+    const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+    const due = encodeDeskFilterValue(new Date(nowMs).toISOString());
+    const tiktokLead = encodeDeskFilterValue(new Date(nowMs + 15 * 60000).toISOString());
+    const neverDispatched = "or=(error_messages->>Studio_Publish_Dispatch_Count.is.null,error_messages->>Studio_Publish_Dispatch_Count.eq.0)";
+    const retryAllowed = "or=(publish_retry_eligible.is.null,publish_retry_eligible.eq.true)";
+    const retryDue = `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${due})`;
+    const scheduled = `or=(scheduled_post_date.lte.${due},and(platform.eq.TikTok,scheduled_post_date.lte.${tiktokLead}))`;
+    return `${quiet}&auto_publish_enabled=eq.true&review_status=eq.Approved&published_at=is.null`
+      + `&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&publish_status=eq.${encodeDeskFilterValue("Ready to Publish")}`
+      + `&${neverDispatched}&${retryAllowed}&${retryDue}&${scheduled}`;
+  }
   if (kind === "overdue_scheduled") {
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
     const dueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
@@ -3393,7 +3409,9 @@ export async function listSupabaseDeskHealOutputs(env, {
   // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
   // TTD2 must fair-queue by Last_Checked (nulls first). output_number.desc
   // kept pulsing the same high-ID Processing rows and never reached 4121.
-  const order = (kind === "ttd0_ready" || kind === "ttd1_ready")
+  const order = kind === "fresh_publish_ready"
+    ? `order=scheduled_post_date.desc.nullslast`
+    : (kind === "ttd0_ready" || kind === "ttd1_ready")
     ? `order=scheduled_post_date.${direction}.nullslast`
     : kind === "overdue_scheduled"
       ? `order=scheduled_post_date.${direction}.nullsfirst`
