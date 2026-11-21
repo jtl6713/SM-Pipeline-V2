@@ -95,6 +95,20 @@ test("canonical Studio deployment uses Supabase credential contract", () => {
   assert.ok(flow.includes("assert_production_supabase_target"));
 });
 
+test("Issue 2374 independent production deploy cannot bypass retired-credential and QA release gates", () => {
+  const flow=source(".github/workflows/deploy-issue2374-supabase-only-factory-worker.yml");
+  assert.ok(flow.includes("vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF"));
+  assert.ok(flow.includes("vars.STUDIO_QA_SUPABASE_LEDGER_VERIFIED"));
+  assert.ok(flow.includes("approved_ref != 'vkwvscgisqsbuwagdvtb'"));
+  assert.ok(flow.includes("plain_vars.get('SUPABASE_URL','').rstrip('/')"));
+  assert.ok(flow.includes("approved QA history cutover gate missing"));
+  assert.ok(flow.includes("'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}"));
+  assert.doesNotMatch(flow, /AIRTABLE_PAT|AIRTABLE_BASE_ID/);
+  const gate=flow.indexOf("approved QA history cutover gate missing");
+  const deploy=flow.indexOf("wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log");
+  assert.ok(gate>=0&&deploy>gate, "QA gate must fail closed before issue2374 deploy");
+});
+
 test("tracked Airtable credential envelope cannot be restored accidentally", () => {
   for (const path of [
     ".github/workflows/airtable-secret-envelope-bootstrap.yml",
