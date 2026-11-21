@@ -2602,7 +2602,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
       throw new HttpError(503, "Supabase Pipeline content paging unavailable");
     const offsetRaw = String(url.searchParams.get("offset") || "0");
-    if (!/^\\d{1,9}$/.test(offsetRaw)) throw new HttpError(400, "Invalid Pipeline offset");
+    if (!/^\d{1,9}$/.test(offsetRaw)) throw new HttpError(400, "Invalid Pipeline offset");
     const packed = await listSupabasePipelineContentPage(env, {
       profileAirtableId: profile.id, offset: Number(offsetRaw),
       // The setting controls content groups, never individual output rows.
