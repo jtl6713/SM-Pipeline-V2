@@ -1482,3 +1482,5 @@ NYC 2026-11-21 final-two licensed-music v4: exact Coney+DUMBO, v3 NOT_FOUND evid
 
 Deploy #2531 Pipeline Supabase history API from merged PR #2534; 22/22 CI checks green; no publishing changes.
 2026-11-21: Deploy Worker 0.10.1012-idea-reset-guards. Require distinctive place matches so Coney/DUMBO cannot inherit generic island, bridge, park, or borough photos, and verify every autonomous music asset still exists and is licensed before stamping it onto a request.
+
+2026-11-21 P0 #2340 urgent production release: both underlying root fixes already merged and tested (#2538 21/21 green, #2540 9/9 green). Fix false scheduled-hold publish-dispatch count; due-time queue oldest-first + bounded scan; Factory Approved requires a committed profile-local MAE future slot, enabled automatic publisher and atomic receipt. Preserve current Cloudflare bindings/secrets, verified active version and rollback. Do NOT rearm historical old provider operations, remove 2099/DNP fences, reset attempts, change past due dates or claim Published without provider evidence. Verify production deployed then run exact Home Past Due/Failed census. Issue #2340 stays open until genuine zero.
