@@ -11758,7 +11758,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       }
       queueReadSource = "supabase";
     } catch (error) {
-      console.error("Supabase Factory/Operations read unavailable; Airtable fallback forbidden",
+      console.error("supabase factory/ops queue read failed; legacy Airtable fallback forbidden",
         String(error?.message || error));
       throw new HttpError(503, "Factory data temporarily unavailable from Supabase. No legacy source fallback permitted.");
     }
