@@ -38,6 +38,17 @@ with target(table_name, id_constraint, event_table) as (
       and k.conname=d.table_name || '_idempotency_key_key'
     ) as unique_idempotency,
     exists(
+      select 1 from pg_constraint k
+      where k.conrelid=d.table_oid and k.contype='u'
+      and k.conname=d.table_name || '_legacy_record_id_key'
+    ) as unique_legacy_source_identity,
+    (not d.event_table or exists(
+      select 1 from pg_constraint k
+      where k.conrelid=d.table_oid and k.contype='f'
+        and k.confrelid=to_regclass('public.studio_qa_runs')
+        and k.conname='studio_qa_events_run_id_fkey'
+    )) as event_references_runs,
+    exists(
       select 1 from pg_trigger tr
       where tr.tgrelid=d.table_oid and not tr.tgisinternal
         and tr.tgenabled='O'
@@ -74,7 +85,8 @@ select
   not (anon_select or anon_insert or anon_update or anon_delete) as anon_denied,
   not (authenticated_select or authenticated_insert or authenticated_update or authenticated_delete) as authenticated_denied,
   (service_select and service_insert and not service_update and not service_delete) as service_insert_select_only,
-  unique_identity, unique_idempotency, append_only_trigger,
+  unique_identity, unique_idempotency, unique_legacy_source_identity,
+  event_references_runs, append_only_trigger,
   legacy_provenance_atomic, hash_rule,
   direct_rls_policy_count=0 as no_direct_browser_rls_policy,
   (
@@ -83,7 +95,8 @@ select
     and not (anon_select or anon_insert or anon_update or anon_delete)
     and not (authenticated_select or authenticated_insert or authenticated_update or authenticated_delete)
     and service_select and service_insert and not service_update and not service_delete
-    and unique_identity and unique_idempotency and append_only_trigger
+    and unique_identity and unique_idempotency and unique_legacy_source_identity
+    and event_references_runs and append_only_trigger
     and legacy_provenance_atomic and hash_rule
     and direct_rls_policy_count=0
   ) as qa_table_ready
