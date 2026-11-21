@@ -1,13 +1,7 @@
-"""Phase 5 remainder: optional runner reads of Platform Outputs and Content Items.
+"""Supabase-only runner records. All legacy Airtable read flags are ignored.
 
-Airtable stays the default. Each table has its own flag, so a global
-STUDIO_READ_SOURCE value cannot turn both on. STUDIO_WRITE_SOURCE does not
-turn these reads on. Allowlisted formulas translate to PostgREST filters;
-views and FIND/ARRAYJOIN that are not a stored-column view or a text/link
-lookup stay on Airtable. OR of allowlisted predicates is translated. Three
-Studio produce Platform Output link lookups are the FIND exception, including
-inside AND. OR of a link lookup stays on Airtable. A substring FIND on a JSON
-column stays on Airtable.
+Allowlisted formulas/views translate to PostgREST queries. Unsupported
+predicates fail explicitly and never use Airtable or fabricated empty lists.
 """
 
 from __future__ import annotations
@@ -103,34 +97,14 @@ _MEDIA_FIELDS = {
 
 
 def runner_table_read_source(settings: dict | None, table_id: str) -> str:
-    """Return supabase when this table's rows already live there under SoR.
+    """Only Supabase is a valid runner read authority.
 
-    Platform Outputs and Content Items still honor their runner read flags.
-    Settings, ideas, slides, and Phase 6 tables leave the hard airtable return
-    when the matching write source is supabase. Untranslated formulas still
-    return None from try_list_supabase_records and stay on Airtable.
+    Ignore STUDIO_RUNNER_*_READ_SOURCE and legacy write toggles. A missing
+    credential or unsupported table is unavailable, never an Airtable fallback.
     """
     if not supabase_configured(settings):
-        return "airtable"
-    if table_id == PLATFORM_OUTPUTS_TABLE:
-        key = "studio_runner_output_read_source"
-        raw = str((settings or {}).get(key) or "airtable").strip().lower()
-        return "supabase" if raw == "supabase" else "airtable"
-    if table_id == CONTENT_ITEMS_TABLE:
-        key = "studio_runner_content_read_source"
-        raw = str((settings or {}).get(key) or "airtable").strip().lower()
-        return "supabase" if raw == "supabase" else "airtable"
-    if settings_source(table_id) and studio_write_source(settings) == "supabase":
-        return "supabase"
-    if table_id in {SOURCE_CANDIDATES_TABLE, CAROUSEL_SLIDES_TABLE, IDEA_BATCHES_TABLE} and studio_write_source(settings) == "supabase":
-        return "supabase"
-    if table_id in {PRODUCTION_REQUESTS_TABLE, MEDIA_ASSETS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE}:
-        if studio_phase6_write_source(settings) == "supabase":
-            return "supabase"
-    if table_id == CONTENT_PROFILES_TABLE and studio_write_source(settings) == "supabase":
-        return "supabase"
-    return "airtable"
-
+        return "unavailable"
+    return "supabase" if table_id in FALLBACK_STOPPED_TABLES else "unavailable"
 
 def _columns_for(table_id: str) -> dict[str, str]:
     if table_id == PLATFORM_OUTPUTS_TABLE:
@@ -193,7 +167,7 @@ def try_list_supabase_records(
     sort_field: str | None = None,
     sort_direction: str = "asc",
 ) -> list[dict] | None:
-    """Airtable-shaped rows, or None when this call must use Airtable."""
+    """Supabase-shaped compatibility rows, or None for unsupported queries."""
     from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
     from queue_reads import try_list_queue_records
     from settings_store import list_settings
@@ -203,7 +177,7 @@ def try_list_supabase_records(
     try:
         stored_settings = list_settings(settings, table_id, formula, max_records)
     except Exception as error:
-        logger.warning("supabase settings read failed for %s; using Airtable: %s", table_id, error)
+        logger.warning("supabase settings read failed for %s; no Airtable fallback: %s", table_id, error)
         stored_settings = None
     if stored_settings is not None:
         return stored_settings
@@ -216,25 +190,20 @@ def try_list_supabase_records(
     # lock gates the same way. An unknown Airtable view name must not force
     # Airtable when that formula translates.
     view_filter = ""
-    archive_closed = (
-        table_id in FALLBACK_STOPPED_TABLES
-        and studio_write_source(settings) == "supabase"
-    )
     if view:
         view_filter = view_to_postgrest_filter(table_id, view)
         if view_filter is None:
             if table_id in {CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE} and formula:
                 view_filter = ""
             else:
-                # Untranslated view under write SoR: empty answer (no Airtable).
-                return [] if archive_closed else None
+                # Unsupported view is not evidence of a zero-row result.
+                return None
     formula_filter = None
     if formula:
         formula_filter = formula_to_postgrest_filter(table_id, formula)
         if formula_filter is None:
-            # Untranslated formula was the drip that kept GET:media alive after
-            # FALLBACK_STOPPED. Under write SoR the empty list is the answer.
-            return [] if archive_closed else None
+            # Unsupported formula must not be misreported as an empty query.
+            return None
     if view_filter and formula_filter:
         from supabase_formula import _join_filters
 

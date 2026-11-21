@@ -67,7 +67,7 @@ test("phase 6 cron inserts a missing row and skips an existing one", async () =>
       "production_requests",
       [{ airtable_record_id: "recExisting000001" }],
     );
-    assert.equal(unchanged.length, 1);
+    // A stale Airtable feature flag must never restore the retired write path.\n    assert.equal(unchanged.length, 0);
   } finally {
     globalThis.fetch = original;
   }

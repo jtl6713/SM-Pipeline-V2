@@ -8870,7 +8870,7 @@ pre{background:#102829;color:#dff8f5;padding:16px;border-radius:10px;white-space
 </head>
 <body><main>
 <h1>Studio Admin — Make Blueprint Deploy</h1>
-<p>Signed in as ${escapeHtml(displayName)}. This deployer uses the Studio API Worker's server-side Airtable credential and reads the Make API credential from Pipeline Settings. No local AIRTABLE_PAT is used or requested.</p>
+<p>Signed in as ${escapeHtml(displayName)}. This deployer reads Make API configuration from Supabase Pipeline Settings. No Airtable credentials are used or requested.</p>
 <div class="note"><strong>Safety:</strong> The current live blueprint is backed up to the Make Admin Queue before the Make PATCH is attempted. Scheduling/activation are not changed.</div>
 <label>Scenario ID</label><input id="scenario" type="number" value="5556716">
 <label>Expected current name</label><input id="expected" value="R4 - Start Remotion Render v2.4.1 - Remotion Props toString Fix">
@@ -8998,7 +8998,7 @@ export async function adminMakeDeploy(request, env, authorization) {
           Started_At: requestedAt,
           Requested_By: String(authorization?.email || "studio-admin"),
           Correlation_ID: correlationId,
-          Notes: "Server-side Studio Admin deployment. Uses Cloudflare Worker AIRTABLE_PAT and Make API credentials stored in Pipeline Settings; no local AIRTABLE_PAT. Live blueprint backed up before PATCH. Scheduling/activation unchanged.",
+          Notes: "Server-side Studio Admin deployment. Uses Supabase Pipeline Settings and configured Make API credentials; no Airtable token. Live blueprint backed up before PATCH. Scheduling/activation unchanged.",
         },
       }],
       typecast: true,

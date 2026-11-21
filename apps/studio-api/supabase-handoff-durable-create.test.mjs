@@ -21,7 +21,8 @@ test("canonical content/output IDs commit to Supabase when archived Airtable bin
     assert.equal(studioLegacyExportEnabled(supabase, table), true, table);
   }
   assert.equal(studioLegacyExportEnabled(supabase, "unknown"), false);
-  assert.equal(studioLegacyExportEnabled({ ...supabase, STUDIO_WRITE_SOURCE: "airtable" }, CONTENT_ITEMS_TABLE_ID), false);
+  // Legacy Airtable preference flags cannot override canonical Supabase routing.
+  assert.equal(studioLegacyExportEnabled({ ...supabase, STUDIO_WRITE_SOURCE: "airtable" }, CONTENT_ITEMS_TABLE_ID), true);
 });
 
 test("canonical Content Items create writes a real Supabase row rather than returning a skipped echo", async () => {
@@ -56,9 +57,14 @@ test("Supabase-only Worker refuses an unsaved Output/Content mutation instead of
   const end = worker.indexOf("const AIRTABLE_BATCH_LIMIT", start);
   assert.ok(start > 0 && end > start);
   const handler = worker.slice(start, end);
-  assert.match(handler, /studioAirtableOutputOrContentTable\(env, tableId\)/);
-  assert.match(handler, /supabase output\/content mutation did not commit/);
+  // The retired Worker rejects ALL uncommitted Supabase CRUD operations.
+  // The old narrower Airtable soft-echo branch no longer exists.
+  assert.match(handler, /supabase_only_crud_uncommitted/);
+  assert.match(handler, /Airtable is retired/);
   assert.match(handler, /throw new HttpError\(\s*503,/);
+  assert.doesNotMatch(handler, /await airtableRequestSlot\(/);
+  assert.doesNotMatch(handler, /body = \{ records: \[\] \}/);
+  assert.doesNotMatch(handler, /deleted: true/);
 });
 
 

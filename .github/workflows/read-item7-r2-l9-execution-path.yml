@@ -1,124 +1,14 @@
-name: Read Item7 R2 L9 Execution Path
-
+# Retired 2026-11-20: legacy GitHub Action issued direct Airtable API HTTP requests.
+# Historical implementation is available in Git history; this entrypoint no longer runs.
+# Supabase-only replacements must use verified database access and release gates.
+name: Retired - read-item7-r2-l9-execution-path
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/read-item7-r2-l9-execution-path.yml'
-
+  workflow_dispatch:
 permissions:
   contents: read
-
-concurrency:
-  group: read-item7-r2-l9-execution-path
-  cancel-in-progress: false
-
 jobs:
-  audit:
+  retired:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      SCENARIO_ID: '5569495'
-      FIELD_ID: 'fldEzxfia9EtHbg2F'
     steps:
-      - uses: actions/checkout@v6
-      - name: Resolve Make API credentials without logging values
-        shell: bash
-        run: |
-          set -euo pipefail; umask 077
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
-          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
-          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
-          PAT=$(cat /tmp/pat.txt)
-          python - <<'PY' >/tmp/q.txt
-          import urllib.parse
-          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
-          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
-          PY
-          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
-          python - <<'PY'
-          import json
-          d=json.load(open('/tmp/settings.json'))
-          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
-          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
-          if not t or not b: raise SystemExit('Missing active Make API settings')
-          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
-          PY
-      - name: Read recent R2 Module 9 blueprint mappings
-        shell: bash
-        run: |
-          set -euo pipefail
-          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID="$SCENARIO_ID"
-          curl -fsS "$BASE/scenarios/$SID/blueprints" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/versions.json
-          python - <<'PY' >/tmp/ids.txt
-          import json
-          d=json.load(open('/tmp/versions.json'))
-          raw=(d.get('response',{}).get('scenariosBlueprints') if isinstance(d.get('response'),dict) else None) or d.get('scenariosBlueprints') or (d.get('response',{}).get('blueprints') if isinstance(d.get('response'),dict) else None) or d.get('blueprints') or d.get('response') or d
-          if isinstance(raw,dict): raw=[raw]
-          for v in (raw if isinstance(raw,list) else [])[:30]:
-              x=v.get('id',v.get('blueprintId',v.get('blueprint_id',v.get('version')))) if isinstance(v,dict) else None
-              if x is not None: print(x)
-          PY
-          mkdir -p /tmp/bps
-          while read -r BID; do
-            [[ -n "$BID" ]] || continue
-            code=$(curl -sS -o "/tmp/bps/$BID.json" -w '%{http_code}' "$BASE/scenarios/$SID/blueprint?blueprintId=$BID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
-            echo "blueprint_${BID}_http=$code"
-          done </tmp/ids.txt
-          python - <<'PY'
-          import json, os, glob
-          fid=os.environ['FIELD_ID']
-          versions_meta=json.load(open('/tmp/versions.json'))
-          raw=(versions_meta.get('response',{}).get('scenariosBlueprints') if isinstance(versions_meta.get('response'),dict) else None) or versions_meta.get('scenariosBlueprints') or (versions_meta.get('response',{}).get('blueprints') if isinstance(versions_meta.get('response'),dict) else None) or versions_meta.get('blueprints') or versions_meta.get('response') or versions_meta
-          if isinstance(raw,dict): raw=[raw]
-          meta={}
-          for v in (raw if isinstance(raw,list) else []):
-              if not isinstance(v,dict): continue
-              bid=v.get('id',v.get('blueprintId',v.get('blueprint_id',v.get('version'))))
-              if bid is not None: meta[str(bid)]={k:v.get(k) for k in ('id','blueprintId','blueprint_id','version','createdAt','created_at','created','timestamp','draft','isDraft','is_draft') if k in v}
-          def find(flow,mid):
-              for n in flow if isinstance(flow,list) else []:
-                  if str(n.get('id'))==str(mid): return n
-                  for r in n.get('routes',[]) if isinstance(n.get('routes'),list) else []:
-                      z=find(r.get('flow'),mid)
-                      if z: return z
-              return None
-          def as_obj(v):
-              if isinstance(v,dict): return v
-              if isinstance(v,str):
-                  try: return json.loads(v)
-                  except Exception: return None
-              return None
-          out=[]
-          for p in glob.glob('/tmp/bps/*.json'):
-              bid=os.path.basename(p)[:-5]
-              try: d=json.load(open(p))
-              except Exception: continue
-              candidate=(d.get('response',{}).get('blueprint') if isinstance(d.get('response'),dict) else None) or d.get('blueprint') or d.get('response')
-              bp=as_obj(candidate)
-              if not isinstance(bp,dict): continue
-              m=find(bp.get('flow'),9)
-              mapper=(m or {}).get('mapper') or {}
-              out.append({'blueprint_id':bid,'meta':meta.get(bid,{}),'module9_name':((m or {}).get('metadata',{}).get('designer',{}).get('name')),'review_html_mapping':(mapper.get('record') or {}).get(fid) if isinstance(mapper.get('record'),dict) else mapper.get(fid),'module9_field_count':len((mapper.get('record') or {})) if isinstance(mapper.get('record'),dict) else len(mapper) if isinstance(mapper,dict) else None})
-          def sortkey(x):
-              try:return int(x['blueprint_id'])
-              except:return -1
-          out.sort(key=sortkey,reverse=True)
-          open('/tmp/item7-r2-module9-history.json','w').write(json.dumps({'scenario_id':int(os.environ['SCENARIO_ID']),'field_id':fid,'versions':out},indent=2,sort_keys=True))
-          print(json.dumps({'version_count':len(out),'mappings':[{'blueprint_id':x['blueprint_id'],'meta':x['meta'],'review_html_mapping':x['review_html_mapping']} for x in out]},indent=2,sort_keys=True))
-          PY
-      - name: Destroy transient credentials
-        if: always()
-        shell: bash
-        run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt /tmp/versions.json /tmp/ids.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
-          rm -rf /tmp/bps
-      - name: Upload sanitized evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: item7-r2-module9-history-${{ github.run_id }}
-          path: /tmp/item7-r2-module9-history.json
-          if-no-files-found: warn
-          retention-days: 30
+      - run: echo "Airtable access retired; Supabase-only replacement required"

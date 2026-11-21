@@ -142,10 +142,8 @@ def supabase_configured(settings: dict | None) -> bool:
 
 
 def studio_write_source(settings: dict | None) -> str:
-    raw = str((settings or {}).get("studio_write_source") or "airtable").strip().lower()
-    if raw == "supabase" and supabase_configured(settings):
-        return "supabase"
-    return "airtable"
+    """The Airtable source selector is retired; valid Supabase credentials are the only authority."""
+    return "supabase" if supabase_configured(settings) else "unavailable"
 
 
 def table_kind(table_id: str) -> str:
@@ -179,11 +177,8 @@ def side_table_export_enabled(settings: dict | None, table_id: str) -> bool:
 
 
 def studio_phase6_write_source(settings: dict | None) -> str:
-    """Phase 6 updates only. STUDIO_WRITE_SOURCE does not select this."""
-    raw = str((settings or {}).get("studio_phase6_write_source") or "airtable").strip().lower()
-    if raw == "supabase" and supabase_configured(settings):
-        return "supabase"
-    return "airtable"
+    """All Phase 6 writes require Supabase, regardless of stale Airtable rollback flags."""
+    return "supabase" if supabase_configured(settings) else "unavailable"
 
 
 def phase6_table_kind(table_id: str) -> str:

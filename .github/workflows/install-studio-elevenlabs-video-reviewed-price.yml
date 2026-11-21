@@ -51,7 +51,8 @@ jobs:
               return version,{row["name"]:row["type"] for row in (info.get("resources") or {}).get("bindings") or []}
           first_version,before=active_bindings()
           required={
-            "AIRTABLE_PAT":"secret_text",
+            "SUPABASE_URL":"plain_text",
+            "SUPABASE_SERVICE_ROLE_KEY":"secret_text",
             "STUDIO_MEDIA":"r2_bucket",
             "ELEVENLABS_API_KEY":"secret_text",
             "ELEVENLABS_VIDEO_API_KEY":"secret_text"

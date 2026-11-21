@@ -1,0 +1,170 @@
+name: Supabase-Only CRUD Retirement Tests
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/**'
+      - 'services/pipeline-runner/**'
+      - 'scripts/**'
+      - 'deploy/bootstrap-studio-insights-tables.py'
+      - 'repair/scripts/production_supabase_identity_audit*.py'
+      - 'repair/scripts/airtable_retirement_evidence_gate*.py'
+      - 'repair/scripts/qa_retirement_preflight*.py'
+      - 'repair/scripts/qa_ledger_backfill_preflight*.py'
+      - 'repair/scripts/qa_ledger_live_readback*.py'
+      - 'repair/scripts/qa_ledger_backfill_apply*.py'
+      - 'repair/scripts/qa_production_backup_inventory*.py'
+      - 'repair/scripts/qa_ledger_sql_review_test.py'
+      - 'docs/supabase-migration/phase7/011_qa_ledger_review_only.sql'
+      - 'docs/supabase-migration/phase7/012_qa_ledger_verify_readonly.sql'
+      - 'repair/scripts/qa_ledger_schema_acceptance_test.py'
+      - '.github/workflows/cloudflare-production-bindings-audit.yml'
+      - '.github/workflows/deploy-cloudflare-worker-production.yml'
+      - 'docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql'
+      - '.github/workflows/verify-supabase-production-readonly.yml'
+      - '.github/workflows/supabase-migration-gate-readonly.yml'
+      - '.github/workflows/supabase-only-crud-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-no-airtable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reject executable GitHub Actions with Airtable API endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A malformed guard module must fail clearly before endpoint scanning.
+          python -m py_compile repair/scripts/airtable_negative_only_workflows.py
+          # Only exact forbidden-token assertions in audited read-only workflows
+          # are permitted; any other endpoint occurrence fails closed.
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from airtable_negative_only_workflows import unexpected_references
+          host="api."+"airtable.com"
+          bad=unexpected_references(Path.cwd(), (host,))
+          if bad:
+              raise SystemExit("Direct Airtable endpoint in executable workflow: "+",".join(bad))
+          print("PASS: only structurally validated forbidden-token assertions mention Airtable host")
+          PY
+      - name: Reject tracked encrypted Airtable credential envelope and restoration jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e deploy/credential-envelope/public.pem
+          test ! -e deploy/credential-envelope/private.pem.enc
+          test ! -e deploy/credential-envelope/airtable_pat.ciphertext.b64
+          test ! -e .github/workflows/airtable-secret-envelope-bootstrap.yml
+          # Exclude the guard itself from this grep, since it names the retired paths.
+          marker="deploy/credential"
+          marker+="-envelope"
+          if git grep -n -F "$marker" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' \
+            ':(exclude).github/workflows/supabase-only-crud-regression.yml' \
+            'scripts/*.py' 'repair/scripts/*.py' 'repair/tools/*.py'; then
+            echo 'FAIL: executable Airtable encrypted credential restoration remains'
+            exit 1
+          fi
+          echo 'PASS: encrypted credential envelope is retired'
+      - name: Inventory residual Airtable PAT references without exposing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from airtable_negative_only_workflows import unexpected_references
+          pat="AIR"+"TABLE_PAT"
+          token="AIR"+"TABLE_TOKEN"
+          allow_presence={
+              ".github/workflows/i1-durable-runner-audit.yml",
+              ".github/workflows/verify-supabase-production-readonly.yml",
+          }
+          flagged=[location for location in unexpected_references(Path.cwd(), (pat,token))
+                   if location.rsplit(":",1)[0] not in allow_presence]
+          if flagged:
+              raise SystemExit("Unsafe credential reference in executable workflow: "+", ".join(flagged))
+          print("PASS: only approved presence audits and validated negative-only checks mention retired PAT")
+          PY
+      - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
+        shell: bash
+        run: |
+          host="https://api." && host+="airtable.com"
+          if git grep -n -F "$host" -- \
+            'scripts/*.py' 'repair/scripts/*.py' 'repair/scripts/*.sh' \
+            'repair/tools/*.py' 'repair/_tmp_make/*.py' 'repair/archive/workflows/*.yml' \
+            'services/pipeline-runner/scripts/*.py' 'deploy/local-services/*.ps1' \
+            'deploy/bootstrap-studio-insights-tables.py'; then
+            echo 'FAIL: a maintenance or runner script still contains a direct Airtable API endpoint'
+            exit 1
+          fi
+          echo 'PASS: no direct Airtable endpoints in audited maintenance scripts'
+      - name: Inventory any remaining hardcoded Airtable API references in source
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="api." && host+="airtable.com"
+          git grep -l -F "$host" -- '*.js' '*.mjs' '*.py' '*.sh' '*.ps1' '*.ts' \
+            ':!*.test.*' ':!**/tests/**' ':!docs/**' ':!repair/archive/**' \
+            ':!services/pipeline-runner/airtable/egress_monitor.py' \
+            ':!repair/scripts/airtable_standalone_egress.py' \
+            > /tmp/remaining-airtable-source-paths.txt || true
+          echo "remaining_direct_url_source_files=$(wc -l </tmp/remaining-airtable-source-paths.txt)"
+          cat /tmp/remaining-airtable-source-paths.txt
+          if test -s /tmp/remaining-airtable-source-paths.txt; then
+            echo 'FAIL: executable source still embeds a retired Airtable HTTP endpoint'
+            exit 1
+          fi
+          echo 'PASS: no executable source with a direct Airtable endpoint'
+      - name: Syntax-check modified Worker modules and run no-egress guard
+        run: |
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/profile-summary-do.mjs
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --test apps/studio-api/airtable-retirement.test.mjs
+          node --check apps/studio-api/qa-supabase-ledger.mjs
+          node --check apps/studio-api/qa-http.mjs
+          node --test apps/studio-api/qa-supabase-ledger.test.mjs apps/studio-api/qa-http.test.mjs apps/studio-api/qa-governance.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify production Supabase project binding contract and retirement tests
+        run: |
+          python -m py_compile repair/scripts/studio_api_binding_contract.py
+          python -m unittest discover -s repair/scripts -p 'studio_api_binding_contract_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'production_supabase_identity_audit_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'airtable_retirement_evidence_gate_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_retirement_preflight_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_preflight_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_plan_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_live_readback_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_backfill_apply_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_production_backup_inventory_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_sql_review_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'qa_ledger_schema_acceptance_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'airtable_negative_only_workflows_test.py' -v
+          # The evidence template is intentionally BLOCKED until real production
+          # project and full six-source hourly attestations are supplied.
+          if python repair/scripts/airtable_retirement_evidence_gate.py --manifest docs/supabase-migration/airtable-retirement-release-evidence.template.json; then
+            echo 'FAIL: incomplete release evidence was accepted'
+            exit 1
+          fi
+          echo 'PASS: missing production release evidence fails closed'
+      - name: Run focused Python CRUD regression tests
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: |
+          python -m pip install --disable-pip-version-check pytest -r services/pipeline-runner/requirements.txt
+          python -m compileall -q services/pipeline-runner/airtable/client.py services/pipeline-runner/settings_store.py
+          python -m pytest -q services/pipeline-runner/tests/test_airtable_atomic_upsert.py services/pipeline-runner/tests/test_supabase_only_crud_contract.py
