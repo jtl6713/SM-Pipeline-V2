@@ -21,6 +21,17 @@ jobs:
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Parse approved PowerShell exact-canary script without executing
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/p1-2340-nyc-9855-ap3c-once.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Output 'P1_2340_AP3C_PARSER_OK'
       - name: Reject provider writes and unsafe variable token logging
         shell: bash
         run: |
