@@ -7618,7 +7618,7 @@ export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit 
   for (let offset = 0; offset < 2000; offset += pageSize) {
     const rows = await supabaseRest(
       env,
-      `${profileFilter}&status=neq.Promoted&select=${select}&order=created_at.desc,airtable_record_id.asc&limit=${pageSize}&offset=${offset}`,
+      `${profileFilter}&or=(status.is.null,status.neq.Promoted)&select=${select}&order=created_at.desc,airtable_record_id.asc&limit=${pageSize}&offset=${offset}`,
       { headers: { Prefer: "return=representation" } },
     ).catch((error) => { throw ideaListReadError(error); });
     if (!Array.isArray(rows)) throw ideaListReadError("Incomplete unpromoted ideas scan");
