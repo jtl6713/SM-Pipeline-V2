@@ -37,6 +37,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/cloudflare-worker-production.txt'
+      - 'deploy/issue2532-owner-global-prompt.txt'
       - 'deploy/nyc2489-audio-worker-release.txt'
 
 permissions:
