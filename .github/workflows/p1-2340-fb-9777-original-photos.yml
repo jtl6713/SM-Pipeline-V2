@@ -32,15 +32,16 @@ jobs:
           foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','-X POST','AIRTABLE_PAT','api.airtable.com','Write-Output $key','Write-Host $token')){
             if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}
           }
-          # Guard against ConvertFrom-Json array envelope ambiguity (the
-          # first live GET run stopped safely before contacting Meta).
-          if($code -notmatch 'JsonDocument' -or $code -notmatch 'EnumerateArray' -or $code -match 'savedIds=@\(ConvertFrom-Json'){throw 'parent_json_array_contract_missing'}
-          $sample=[System.Text.Json.JsonDocument]::Parse('["122129565183476558","122129565231476558"]')
-          try{
-            $items=@()
-            foreach($entry in $sample.RootElement.EnumerateArray()){$items+= $entry.GetString()}
-            if($items.Count -ne 2 -or $items[0] -cne '122129565183476558' -or $items[1] -cne '122129565231476558'){throw 'photo_id_json_regression'}
-          }finally{$sample.Dispose()}
+          # Windows Ops PowerShell does not require modern System.Text.Json:
+          # accept ONLY a JSON array with exactly eight digit-only photo IDs.
+          if($code -notmatch '\$strictPattern=' -or $code -notmatch '\[regex\]::Matches' -or $code -match '\[System\.Text\.Json\.' -or $code -match 'ConvertFrom-Json'){throw 'portable_eight_numeric_photo_id_contract_missing'}
+          $strictPattern='^\[\s*"\d{12,30}"\s*(,\s*"\d{12,30}"){7}\s*\]$'
+          $valid='["122129565183476558","122129565231476558","122129330175476558","122129330223476558","122129330271476558","122129330319476558","122129330373476558","122129330427476558"]'
+          $short='["122129565183476558","122129565231476558"]'
+          $nonNumeric='["wrong","122129565231476558","122129330175476558","122129330223476558","122129330271476558","122129330319476558","122129330373476558","122129330427476558"]'
+          if($valid -cnotmatch $strictPattern -or $short -cmatch $strictPattern -or $nonNumeric -cmatch $strictPattern){throw 'numeric_parent_array_parser_regression'}
+          $tokensMatch=[regex]::Matches($valid,'"(\d{12,30})"')
+          if($tokensMatch.Count -ne 8 -or [string]$tokensMatch[0].Groups[1].Value -cne '122129565183476558' -or [string]$tokensMatch[7].Groups[1].Value -cne '122129330427476558'){throw 'numeric_parent_array_capture_regression'}
           if($code -notmatch "stage='meta-page-owner-get'" -or $code -notmatch "stage='compare-saved-photo-identities'"){throw 'safe_failure_stage_instrumentation_missing'}
           if($code -notmatch "stage='compare-all-ordered-photo-ids'" -or $code -notmatch "exception_type="){throw 'safe_diagnostics_missing'}
           Write-Output 'P1_FB9777_GET_ONLY_STATIC_PASS'
