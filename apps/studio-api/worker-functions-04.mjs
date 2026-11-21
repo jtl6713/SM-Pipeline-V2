@@ -11704,6 +11704,11 @@ export function mapOpsQueueProfileName(profileMap, linked) {
 /*__STUDIO_WORKER_END:mapOpsQueueProfileName__*/
 
 export async function getStudioOperationsQueue(request, env, authorization) {
+  // Production writes have already migrated. Never turn a missing or stale
+  // Factory/Operations read-source flag into an Airtable record lookup.
+  if (studioWriteSource(env) === "supabase" && studioFactoryOpsReadSource(env) !== "supabase") {
+    throw new HttpError(503, "Factory Supabase read authority not configured. No Airtable fallback.");
+  }
   const controls = await readOpsQueueControls(env);
   const fetchErrors = [];
   const settleList = async (label, promise) => {
@@ -11733,30 +11738,29 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       if (pack.mediaReworkScanWarning) fetchErrors.push(pack.mediaReworkScanWarning);
       const packedOutputs = pack.outputs || [];
       const packedRequests = pack.requests || [];
-      // Empty pack usually means Phase 4 sync has not warmed requests/outputs yet.
-      if (packedOutputs.length || packedRequests.length || (pack.reviewOutputs || []).length) {
-        // A healthy Supabase-only Factory may have nothing except protected
-        // source-rework outputs. Never silently fall back to Airtable for them.
-        profiles = pack.profiles || [];
-        outputs = packedOutputs;
-        requests = packedRequests;
-        activeHolds = pack.activeHolds || [];
-        renderLaneOutputs = pack.renderLaneOutputs || [];
-        reviewOutputs = pack.reviewOutputs || [];
-        reviewParentRequests = pack.reviewParentRequests || [];
-        contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
-        for (const idea of pack.ideas || []) {
-          if (!idea?.id) continue;
-          ideaMetaById.set(idea.id, {
-            profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
-            title: String(f(idea, "Candidate_Title") || "").trim(),
-          });
-        }
-        queueReadSource = "supabase";
+      // A successful canonical Supabase read remains authoritative even when
+      // the queue is legitimately empty. Do not treat zero rows as a reason
+      // to cross the retired Airtable read boundary.
+      profiles = pack.profiles || [];
+      outputs = packedOutputs;
+      requests = packedRequests;
+      activeHolds = pack.activeHolds || [];
+      renderLaneOutputs = pack.renderLaneOutputs || [];
+      reviewOutputs = pack.reviewOutputs || [];
+      reviewParentRequests = pack.reviewParentRequests || [];
+      contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
+      for (const idea of pack.ideas || []) {
+        if (!idea?.id) continue;
+        ideaMetaById.set(idea.id, {
+          profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
+          title: String(f(idea, "Candidate_Title") || "").trim(),
+        });
       }
+      queueReadSource = "supabase";
     } catch (error) {
-      console.warn("supabase factory/ops queue read failed; falling back to Airtable", error);
-      fetchErrors.push(`supabase: ${error?.message || error}`);
+      console.error("supabase factory/ops queue read failed; legacy Airtable fallback forbidden",
+        String(error?.message || error));
+      throw new HttpError(503, "Factory data temporarily unavailable from Supabase. No legacy source fallback permitted.");
     }
   }
 

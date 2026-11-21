@@ -5,6 +5,8 @@ on:
       - 'apps/studio-api/factory-protected-media-rework.mjs'
       - 'apps/studio-api/factory-protected-media-rework.test.mjs'
       - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/factory-supabase-only-read.test.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/factory-desk.mjs'
       - 'apps/studio-web/assets/factory-desk.js'
@@ -15,6 +17,8 @@ on:
       - 'apps/studio-api/factory-protected-media-rework.mjs'
       - 'apps/studio-api/factory-protected-media-rework.test.mjs'
       - 'apps/studio-api/supabase-pipeline-reads.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/factory-supabase-only-read.test.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/factory-desk.mjs'
       - 'apps/studio-web/assets/factory-desk.js'
@@ -39,6 +43,10 @@ jobs:
           done
       - name: Exact marker, owner and publish-hold guard tests
         run: node --test apps/studio-api/factory-protected-media-rework.test.mjs
+      - name: Production Supabase Factory no-Airtable fallback behavior
+        run: |
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --test apps/studio-api/factory-supabase-only-read.test.mjs
       - name: Existing Factory desk and client eligibility regression
         run: |
           node --test apps/studio-api/factory-desk.test.mjs

@@ -1140,6 +1140,12 @@ export async function writeFactoryDeskControls(env, controls, actor = null) {
 /*__STUDIO_WORKER_END:writeFactoryDeskControls__*/
 
 export async function loadFactoryIdeaCandidates(env) {
+  // Canonical output writes + a missing Supabase read flag are an outage,
+  // not permission to query the former Airtable idea system.
+  if (studioWriteSource(env) === "supabase" && studioFactoryOpsReadSource(env) !== "supabase") {
+    console.warn("Factory photo-waiting ideas suppressed: Supabase read authority required");
+    return [];
+  }
   if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env, { outputLimit: 50, requestLimit: 20 });
@@ -1161,7 +1167,10 @@ export async function loadFactoryIdeaCandidates(env) {
         };
       });
     } catch (error) {
-      console.warn("supabase factory idea candidates failed; falling back to Airtable", error);
+      // Production runs on Supabase-only authority. An unavailable ideas pack
+      // must NEVER cause an Airtable list as an implicit fallback.
+      console.warn("Supabase Factory idea candidates unavailable; legacy fallback forbidden", String(error?.message || error));
+      return [];
     }
   }
   if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
