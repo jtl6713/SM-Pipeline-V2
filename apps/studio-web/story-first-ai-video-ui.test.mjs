@@ -50,7 +50,7 @@ test("paid video requires a reviewed quote and direct human authorization", () =
 });
 
 test("Worker admits scene video endpoints, not autonomous publishing", () => {
-  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled)"));
+  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|recover|reconcile-unbilled)"));
   assert.match(server, /storyVideoJobKey\(ideaId, sceneNumber\)/);
   assert.match(server, /Video is not ready for explicit acceptance/);
   assert.match(server, /studioProfileRequiresChicagoWatermark\(profile\)/);
@@ -190,5 +190,6 @@ test("acceptance errors refresh the real R2 status without retrying paid generat
   assert.ok(server.includes("Original AI video preserved"));
   assert.ok(server.includes('job.state === "accepted"'));
   assert.ok(ui.includes("Acceptance Needs Reconciliation"));
-  assert.ok(ui.includes("Do not generate a second video"));
+  assert.ok(ui.includes("Recover Existing Video"));
+  assert.ok(ui.includes("No new ElevenLabs charge"));
 });
