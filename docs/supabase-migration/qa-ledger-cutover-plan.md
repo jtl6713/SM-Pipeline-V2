@@ -94,3 +94,52 @@ No production SQL, backfill, deployment, publishing or credential mutation is
 authorized by this document or the current branch. The six-hour system-wide
 Airtable quiet-window evidence must come **after** any approved source export
 and the controlled cutover.
+
+
+## Approval-gated resumable historical import (operator-only; NOT executed)
+
+The draft now includes `repair/scripts/qa_ledger_backfill_apply.py`.
+It uses the validated private Airtable source export, derives the complete import
+plan again, and performs **GET then one append-only POST per missing run/event**,
+always importing parent runs before dependent events. Existing legacy IDs may
+be reused only after exact source provenance comparisons. If a POST returns
+409, the importer GETs the contested row and accepts the retry **only when
+every expected historical field agrees**. Mismatches remain hard blockers.
+It never performs PATCH, PUT, DELETE, DDL or publication.
+
+The default invocation is an **offline dry run**. A live attempt requires all
+of the following, none of which can be fabricated by this script:
+
+1. Independently frozen, **private, complete** source export files and the
+   separately verified expected row counts and source inventory SHA-256 digests.
+   Never place the exports, keys, or private approval manifest in this repo.
+2. Independently established production backup evidence, tested restore/rollback
+   procedure and a formally approved maintenance change window. The importer
+   only checks that evidence *references* were documented; **it cannot
+   verify that backup, restore or human approval actually occurred**.
+3. A private approval JSON file stored outside the repository, including:
+   `project_ref`, `source_runs`, `source_events`, `runs_digest`,
+   `events_digest`, `independent_review_approved` (boolean),
+   `backup_evidence_ref`, `rollback_evidence_ref`, `reviewed_by`,
+   `reviewed_at_utc`, and `maintenance_change_id`.
+4. Exact `--apply` plus the intentional runtime confirmation
+   `STUDIO_QA_IMPORT_EXACT_CONFIRMATION`, approved project binding
+   `STUDIO_PRODUCTION_SUPABASE_PROJECT_REF`, and a private server-side
+   `SUPABASE_SERVICE_ROLE_KEY`. These must never be logged or placed in GitHub
+   comments. Do not use a browser anon/publishable key.
+5. An independently audited complete **live Supabase GET-only readback** after
+   import. The importer calls `qa_ledger_live_readback.inspect` and still
+   always returns `release_authorized:false`, even after perfect parity.
+   Unexpected writes, concurrent new source rows, missing history, provider
+   uncertainty or mismatched source hashes block the release.
+
+If any event fails after a run was safely inserted, the importer can be
+resumed against the exact same frozen source and approval: prior committed
+rows are verified, not overwritten; any conflict fails closed. It must never
+be rerun with a guessed source count or substitute synthetic QA records.
+
+**This operator-only facility is staged code, not a migration approval.**
+The live production QA tables remain absent pending independently verified
+backup/rollback and migration authorization. No six-hour Airtable quiet-window
+certification can start until the separate production cutover and its final
+source export have completed.
