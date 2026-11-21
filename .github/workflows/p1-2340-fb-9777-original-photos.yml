@@ -1,0 +1,105 @@
+name: P1 2340 Miami FB9777 original photos GET-only audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-fb-9777-original-photos.yml'
+      - 'repair/scripts/p1-2340-fb-9777-original-photos-readonly.ps1'
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-fb-9777-original-photos.yml'
+      - 'repair/scripts/p1-2340-fb-9777-original-photos-readonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-fb-9777-owned-photos-get-once
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse original photos PowerShell and enforce GET-only
+        shell: pwsh
+        run: |
+          $file='repair/scripts/p1-2340-fb-9777-original-photos-readonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $code=Get-Content -Raw $file
+          if($code -notmatch 'P1_FB9777_RECEIPTS=' -or $code -notmatch 'recmd8mSZlqbRBh8K' -or $code -notmatch 'vkwvscgisqsbuwagdvtb'){throw 'identity_or_project_missing'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','-X POST','AIRTABLE_PAT','api.airtable.com','Write-Output $key','Write-Host $token')){
+            if($code.Contains($bad)){throw 'mutation_or_secret_output_prohibited'}
+          }
+          Write-Output 'P1_FB9777_GET_ONLY_STATIC_PASS'
+  owned-photos-get:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/fb9777-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/fb9777-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_9777_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Ops unavailable; no Facebook calls made';exit 1
+      - name: Run exact eight saved photo IDs GET-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/fb9777-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/p1-2340-fb-9777-original-photos-readonly.ps1').read_text(),
+            'confirm': True
+          }))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/fb9777-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $P1_9777_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/fb9777-request.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then
+            echo "Ops did not accept read-only inventory ($code)";exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/fb9777-start.json)
+          for n in $(seq 1 130); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_9777_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/fb9777-job.json
+            state=$(jq -r '.job.status // empty' /tmp/fb9777-job.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/fb9777-job.json | grep '^P1_FB9777_RECEIPTS=' | tail -1 | sed 's/^P1_FB9777_RECEIPTS=//' > /tmp/fb9777-evidence.json
+              jq -e '.read_only==true and .output_number==9777 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .expected==8' /tmp/fb9777-evidence.json >/dev/null
+              jq -c '{output_number,profile,expected,verified_owned,all_photo_ids_retained,page_owned,reason,observations,provider_writes,output_writes,airtable_reads}' /tmp/fb9777-evidence.json
+              if jq -e '.reason=="not_started" or .reason=="provider_or_runtime_get_unavailable"' /tmp/fb9777-evidence.json >/dev/null; then
+                echo 'Original photo receipt GET was blocked; no publication authorized';exit 3
+              fi
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Read-only Ops job failed; inspect sanitized evidence without retry';exit 3
+            fi
+            sleep 4
+          done
+          echo 'Ops read-only job not complete';exit 4
+      - name: Preserve sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-fb9777-original-photos-getonly
+          path: /tmp/fb9777-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
