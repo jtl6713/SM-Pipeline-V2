@@ -80,6 +80,12 @@ jobs:
               exit 0
             elif [[ "$status" == failed ]]; then
               echo 'Read-only Ops audit failed; no provider actions authorized'
+              # Sanitize error text; never print tokens, URLs, bearer headers, or
+              # the submitted PowerShell script. Retain only diagnostic tails.
+              jq -r '.job.log // ""' /tmp/p1-2340-ops-status.json | tail -n 14 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|FACEBOOK_PAGE_ACCESS_TOKEN|META_GRAPH_API_ACCESS_TOKEN' \
+                | tail -n 10 || true
               exit 3
             fi
             sleep 4
