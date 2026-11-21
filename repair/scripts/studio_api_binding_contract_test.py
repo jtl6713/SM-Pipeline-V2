@@ -4,7 +4,9 @@ import unittest
 
 from studio_api_binding_contract import (
     CORE_BINDINGS,
+    OPTIONAL_BINDINGS,
     RESERVATION_BINDINGS,
+    assert_production_supabase_target,
     assert_live_contract,
     evaluate_bindings,
 )
@@ -13,6 +15,38 @@ from studio_api_binding_contract import (
 class StudioApiBindingContractTest(unittest.TestCase):
     def legacy_core(self):
         return dict(CORE_BINDINGS)
+
+
+    def test_retired_airtable_ids_are_optional_and_types_still_checked(self):
+        names = (
+            "AIRTABLE_BASE_ID", "AIRTABLE_CONTENT_TABLE_ID", "AIRTABLE_IDEA_TABLE_ID",
+            "AIRTABLE_MEDIA_TABLE_ID", "AIRTABLE_MUSIC_VIEW_ID", "AIRTABLE_OUTPUT_TABLE_ID",
+        )
+        self.assertTrue(all(name not in CORE_BINDINGS for name in names))
+        self.assertTrue(all(OPTIONAL_BINDINGS[name] == "plain_text" for name in names))
+        got = dict(CORE_BINDINGS)
+        got.update(RESERVATION_BINDINGS)
+        self.assertTrue(assert_live_contract(got, "post-retirement")["ok"])
+        got.update({name: "plain_text" for name in names})
+        self.assertTrue(assert_live_contract(got, "transitional")["ok"])
+        got["AIRTABLE_BASE_ID"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "wrong type")
+
+    def test_production_target_requires_approved_supabase_ref(self):
+        good = "p" * 20
+        self.assertEqual(assert_production_supabase_target(f"https://{good}.supabase.co", good), good)
+        for ref in (None, "", "bad", "vkwvscgisqsbuwagdvtb", "yxhfaksetrxdezoodibq"):
+            with self.subTest(ref=ref), self.assertRaises(SystemExit):
+                assert_production_supabase_target(f"https://{good}.supabase.co", ref)
+        for url in (
+            f"https://{'q'*20}.supabase.co", f"http://{good}.supabase.co",
+            f"https://{good}.supabase.co.other.test",
+            f"https://{good}.supabase.co/rest/v1",
+            f"https://{good}.supabase.co/?key=abc",
+        ):
+            with self.subTest(url=url), self.assertRaises(SystemExit):
+                assert_production_supabase_target(url, good)
 
     def test_default_contract_requires_reservation_bindings(self):
         result = evaluate_bindings(self.legacy_core())

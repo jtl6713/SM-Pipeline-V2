@@ -94,7 +94,7 @@ jobs:
             echo '### Studio API production binding audit'
             echo "- Active version: $ACTIVE"
             echo "- Active binding count: $ACTIVE_COUNT"
-            echo "- Core 10-binding contract: $CORE_OK"
+            echo "- Supabase core binding contract: $CORE_OK"
             echo "- ELEVENLABS_API_KEY present: $ELEVEN (optional)"
             echo "- Durable Object namespaces: $DOS"
             echo "- Sanitized feature flags: $FLAGS"

@@ -80,6 +80,26 @@ test("canonical Studio deployment uses Supabase credential contract", () => {
   assert.ok(core.includes('"SUPABASE_SERVICE_ROLE_KEY": "secret_text"'));
   assert.ok(core.includes('"SUPABASE_URL": "plain_text"'));
   assert.ok(!core.includes('"AIRTABLE_PAT": "secret_text"'));
+  for (const name of [
+    "AIRTABLE_BASE_ID", "AIRTABLE_CONTENT_TABLE_ID", "AIRTABLE_IDEA_TABLE_ID",
+    "AIRTABLE_MEDIA_TABLE_ID", "AIRTABLE_MUSIC_VIEW_ID", "AIRTABLE_OUTPUT_TABLE_ID",
+  ]) {
+    assert.ok(!core.includes(`"${name}": "plain_text"`), name);
+  }
+  assert.ok(flow.includes("STUDIO_PRODUCTION_SUPABASE_PROJECT_REF"));
+  assert.ok(flow.includes("assert_production_supabase_target"));
+});
+
+test("tracked Airtable credential envelope cannot be restored accidentally", () => {
+  for (const path of [
+    ".github/workflows/airtable-secret-envelope-bootstrap.yml",
+    "deploy/airtable-secret-envelope-bootstrap.txt",
+    "deploy/credential-envelope/public.pem",
+    "deploy/credential-envelope/private.pem.enc",
+    "deploy/credential-envelope/airtable_pat.ciphertext.b64",
+  ]) {
+    assert.throws(() => source(path), /ENOENT/, path);
+  }
 });
 
 test("replacement variant and LA TikTok deployments are manual and Airtable-free", () => {

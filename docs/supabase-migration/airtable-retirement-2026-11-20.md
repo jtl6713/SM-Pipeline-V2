@@ -79,3 +79,12 @@ The canonical Studio API deployment is now gated on `SUPABASE_SERVICE_ROLE_KEY` 
 - All known runner tables use Supabase reads regardless of obsolete per-table read-source flags. Unsupported views and formulas fail with a visible error; they must not be reported as `[]` or sent to Airtable.
 - Regression tests cover stale flags, the reference-cache authority, typed Output status/JSON bag cleanup, and explicit rejection of unknown views.
 - These changes require a fresh green full regression run and are not evidence of production deployment, connection, or credential revocation.
+
+
+### Continued PR work — remove legacy Airtable deployment authority
+- Six `AIRTABLE_*_ID` bindings were moved out of the **required** Studio API Worker core contract and into transition-only optional bindings. Existing production bindings remain preserved until controlled cutover; missing Airtable IDs no longer block future release validation.
+- The production deploy no longer uses a hardcoded Airtable base ID as its identity check. It now requires independently approved `STUDIO_PRODUCTION_SUPABASE_PROJECT_REF` (GitHub Actions variable), matches the live `SUPABASE_URL` to that exact project, and rejects the two currently connected non-production projects. **Without this variable or a matching live URL, deployment fails before touching the Worker.**
+- The manual read-only production audit validates that both the active Studio Worker URL and the GitHub-configured Supabase URL match the same approved project reference. The operator must verify the production project outside this workflow before setting the variable; never infer it from the development connector.
+- Removed the historical encrypted Airtable PAT envelope files, marker and verification workflow from this PR branch. Git history can retain prior encrypted blobs. No live token was revoked; after production validation and observed zero Airtable API egress, revoke it at the provider and remove Cloudflare, runner and GitHub secrets.
+- CI and targeted tests now prevent restoring the tracked credential envelope and check that six Airtable IDs are not required by the production deployment core.
+- The branch is **preparatory**, not proof of any live production migration, token revocation or zero-egress quiet window. Leave the PR draft and unmerged until the latest checks and production gates pass.

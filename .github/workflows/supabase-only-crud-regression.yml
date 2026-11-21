@@ -31,6 +31,24 @@ jobs:
             exit 1
           fi
           echo 'PASS: no direct Airtable API endpoints in GitHub Actions workflows'
+      - name: Reject tracked encrypted Airtable credential envelope and restoration jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e deploy/credential-envelope/public.pem
+          test ! -e deploy/credential-envelope/private.pem.enc
+          test ! -e deploy/credential-envelope/airtable_pat.ciphertext.b64
+          test ! -e .github/workflows/airtable-secret-envelope-bootstrap.yml
+          # Exclude the guard itself from this grep, since it names the retired paths.
+          marker="deploy/credential"
+          marker+="-envelope"
+          if git grep -n -F "$marker" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' \
+            ':(exclude).github/workflows/supabase-only-crud-regression.yml' \
+            'scripts/*.py' 'repair/scripts/*.py' 'repair/tools/*.py'; then
+            echo 'FAIL: executable Airtable encrypted credential restoration remains'
+            exit 1
+          fi
+          echo 'PASS: encrypted credential envelope is retired'
       - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
         shell: bash
         run: |

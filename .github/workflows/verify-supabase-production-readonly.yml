@@ -21,7 +21,11 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      STUDIO_PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Audit active Cloudflare binding names and types
         shell: bash
         run: |
@@ -37,6 +41,20 @@ jobs:
             version=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/sm-prod-audit/deployments.json)
             curl -fsS --retry 2 "$API/$target/versions/$version" -H "$AUTH" -o /tmp/sm-prod-audit/version.json
             jq -e '.success==true' /tmp/sm-prod-audit/version.json >/dev/null
+            if [[ "$target" == "chicagoshining-studio-api" ]]; then
+              python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_production_supabase_target
+          payload=json.loads(Path('/tmp/sm-prod-audit/version.json').read_text())
+          bindings=((payload.get('result') or {}).get('resources') or {}).get('bindings') or []
+          live_url=next((str(b.get('text')) for b in bindings
+                         if b.get('name')=='SUPABASE_URL' and b.get('type')=='plain_text'),None)
+          assert_production_supabase_target(live_url, os.environ.get('STUDIO_PRODUCTION_SUPABASE_PROJECT_REF'))
+          print('active_studio_supabase_project_identity=VERIFIED')
+          PY
+            fi
             jq -c --arg worker "$target" '
               (.result.resources.bindings // []) as $b |
               {
@@ -81,6 +99,17 @@ jobs:
           set -euo pipefail
           test -n "$SUPABASE_URL"
           test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_production_supabase_target
+          assert_production_supabase_target(
+              os.environ.get('SUPABASE_URL'),
+              os.environ.get('STUDIO_PRODUCTION_SUPABASE_PROJECT_REF'),
+          )
+          print('github_supabase_project_identity=VERIFIED')
+          PY
           code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
             "${SUPABASE_URL%/}/rest/v1/media_assets?select=airtable_record_id&limit=0" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
