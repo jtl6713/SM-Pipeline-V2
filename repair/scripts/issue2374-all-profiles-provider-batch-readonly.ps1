@@ -21,7 +21,7 @@ function Supa([string]$path){
   return Invoke-RestMethod ($su+$path) -Headers $sh -Method Get -TimeoutSec 45
 }
 $utc=[DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
-$select='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,scheduled_post_date,published_at,platform_post_url,output_caption,output_hashtags,output_title,do_not_publish,auto_publish_enabled,publish_retry_eligible,error_messages'
+$select='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,scheduled_post_date,published_at,platform_post_url,output_caption,output_hashtags,output_title,test_run_id,do_not_publish,auto_publish_enabled,publish_retry_eligible,error_messages'
 $query='/rest/v1/platform_outputs?select='+$select+'&review_status=eq.Approved&output_status=eq.Approved%20for%20Publishing&scheduled_post_date=lt.'+$utc+'&published_at=is.null&limit=1000'
 $source=@(Supa $query)
 if($source.Count -eq 1 -and $source[0] -is [array]){$source=@($source[0])}
@@ -115,9 +115,9 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
         foreach($m in $entries){
           $remote[$scope]+=@{
             id=[string]$m.id
-            text=Norm ([string]($m.caption ?? $m.description ?? $m.message))
+            text=Norm ([string]$(if($m.caption){$m.caption}elseif($m.description){$m.description}else{$m.message}))
             url=[string]$m.permalink
-            timestamp=[string]($m.timestamp ?? $m.created_time ?? $m.updated_time)
+            timestamp=[string]$(if($m.timestamp){$m.timestamp}elseif($m.created_time){$m.created_time}else{$m.updated_time})
             kind=[string]$m.media_type
             edge=$edge
           }
