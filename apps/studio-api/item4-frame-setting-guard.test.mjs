@@ -8,10 +8,11 @@ const begin=source.indexOf("export async function item4PipelineSetting(");
 const end=source.indexOf("/*__STUDIO_WORKER_END:item4PipelineSetting__*/",begin);
 assert.ok(begin>=0 && end>begin,"settings guard and Worker split marker must exist");
 
-function readSetting({primary=null,secondary=null}={}){
+function readSetting({primary=null,secondary=null,studioSource="supabase",phase6Source="supabase"}={}){
   let archived=0,secondaryReads=0;
   const context={
-    studioWriteSource:()=> "supabase",
+    studioWriteSource:()=> studioSource,
+    studioPhase6WriteSource:()=> phase6Source,
     studioSupabaseConfigured:()=>true,
     readSupabasePipelineSetting:async()=> primary,
     listSupabasePipelineSettingsByNames:async()=>{secondaryReads++;return secondary;},
@@ -43,4 +44,17 @@ test("unverified folder fails closed as 503 instead of generic 500 or Airtable f
     error=>error.status===503 && /Supabase/.test(error.message) && /No new frame jobs/.test(error.message));
   assert.equal(x.stats().archived,0);
   assert.equal(x.stats().secondaryReads,1);
+});
+
+test("Phase6-only Supabase authority still resolves the verified folder without Airtable",async()=>{
+  const x=readSetting({primary:setting("driveFolderConfirmed"),
+    studioSource:"airtable",phase6Source:"supabase"});
+  assert.equal(await x.fn({},"STUDIO_VARIANT_DRIVE_FOLDER_ID"),"driveFolderConfirmed");
+  assert.equal(x.stats().archived,0);
+});
+test("Phase6-only missing folder fails closed without returning to retired Airtable",async()=>{
+  const x=readSetting({secondary:[],studioSource:"airtable",phase6Source:"supabase"});
+  await assert.rejects(()=>x.fn({},"STUDIO_VARIANT_DRIVE_FOLDER_ID"),
+    error=>error.status===503 && /Supabase/.test(error.message));
+  assert.equal(x.stats().archived,0);
 });
