@@ -12,7 +12,7 @@ Reference: the November 16 SM Pipeline V2 Airtable CRUD and Egress Audit provide
 - Python runner reads/writes default to Supabase.
 - Retired **all 90 direct-URL GitHub Actions workflows identified in the attached November 16 audit** (88 together plus two individually), the closeout backfill workflow, five direct maintenance/bootstrap/diagnostic scripts, **22 additional historical repair, test-target and manual publish-once entrypoints**, and migrated the runner environment bootstrap to Supabase settings REST. This blocks every standalone direct URL execution path identified in the audit apart from inert test/staging fixtures and egress-monitoring utilities. This includes four historically deploy-oriented workflows; do not merge until their deployment responsibilities are either replaced or confirmed redundant. A pull-request CI guard rejects direct Airtable URLs in GitHub Actions YAML.
 
-**Deliberate block:** runner `upsert_record` now fails closed. A2B Drive-ID and native gallery Studio_Transfer_ID operations need a transactional Supabase upsert strategy and verified uniqueness constraints to avoid duplicates. Do not tell operators these stages work until proved.
+**Resolved in development, not production:** the runner media upsert now uses a transactional Supabase RPC and development-only uniqueness verification, as detailed below. Production schema and non-publishing verification remain hard release gates.
 
 ## Not complete; do not merge/deploy
 - Ninety audit-listed legacy workflow implementations were retired; two functional successors for variant and LA TikTok are restored on the PR branch, and the two Studio-only paths map to the canonical Studio API production deploy. Confirm their replacement paths before merge. New workflows added after the audit must still be scanned; the new CI guard covers current YAML.
@@ -60,3 +60,15 @@ The canonical Studio API deployment is now gated on `SUPABASE_SERVICE_ROLE_KEY` 
 - Extended the pull-request regression suite with both media-claim modes, invalid/ambiguous response handling, independent readback failure, and deployment-source static contracts.
 - Supabase dev transactional smoke tests passed and left zero test rows. GitHub Actions regression jobs have been observed running; do not equate queued jobs with green checks.
 - **Do not merge or deploy** until the most recent PR SHA's checks are green and the production migration and non-publishing canary pass.
+
+
+### Continuation: regression fixes and irreversible legacy workflow removal (2026-11-20)
+
+- Corrected the stale Phase 6 cron regression that expected `STUDIO_PHASE6_WRITE_SOURCE=airtable` to bypass Supabase-only deduplication. Legacy selector flags no longer restore an Airtable write path.
+- Retired the old Factory staging HTTP workflow, shell driver, and Wrangler configuration. Their now-inert templates are **not** evidence of deployed HTTP acceptance. The replacement `factory-batch-http-staging.yml` runs Worker HTTP contract tests with local Supabase fixtures and explicitly emits `DEPLOYED_STAGING_HTTP=NOT_TESTED`.
+- Removed the old automatic deploy-contract patcher that could replace the canonical Supabase binding requirement with `AIRTABLE_PAT`, plus old fixed-version v86 Cloudflare release/rollback, lease-table repair, obsolete phase-5/6 source-enable workflows, and their patch entrypoints. No historical deployment or environment restoration action may re-enable the retired Airtable architecture.
+- Added regression assertions requiring those legacy workflow and patch paths to remain absent; prior phase-5/6 transition tests were retired because their rollout preconditions were obsolete and contradicted Supabase-only source authority.
+- Rechecked connected Supabase projects: only `sm-pipeline-v2-dev` and an unrelated Task Organizer project are visible. A read-only dev query confirms the media RPC, Drive-ID and scoped native-gallery uniqueness indexes, server-only execute grants, and zero existing `ngv2_` rows. This does **not** establish production readiness.
+- The canonical Studio API deployment, variant-service deployment, and LA TikTok-auth manual release paths remain in the branch; production credentials, rollback execution, non-publishing canary, and cross-service zero-egress evidence are still unverified.
+
+**Release remains blocked:** re-run the entire PR CI at the latest commit, identify and safely migrate the production Supabase project, verify live Cloudflare/Windows-runner/Make and provider credentials, demonstrate non-publishing parity and a complete monitored zero-Airtable-egress quiet window. Do not merge, deploy or revoke the remaining PAT before evidence exists.
