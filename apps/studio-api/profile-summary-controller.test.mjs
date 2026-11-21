@@ -80,8 +80,8 @@ test("confirmed Supabase mutation notifies summary; uncommitted CRUD fails befor
     && throwAt > uncommitted && notify > throwAt,
     "real Supabase commit precedes archived result; missing commit throws before notification");
   assert.match(gateway.slice(throwAt, notify), /503/);
-  assert.doesNotMatch(gateway, /api\\.airtable\\.com|await airtableRequestSlot\\(/);
-  assert.doesNotMatch(gateway, /body = \\{ records: \\[\\] \\}|deleted: true/);
+  assert.doesNotMatch(gateway, /api\.airtable\.com|await airtableRequestSlot\(/);
+  assert.doesNotMatch(gateway, /body = \{ records: \[\] \}|deleted: true/);
 });
 
 test("reconciliation fences updates and never publishes staged partial totals", () => {
