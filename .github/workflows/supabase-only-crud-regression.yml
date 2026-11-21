@@ -81,32 +81,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pat="AIR"; pat+="TABLE_PAT"
-          token="AIR"; token+="TABLE_TOKEN"
-          {
-            git grep -l -F "$pat" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' || true
-            git grep -l -F "$token" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' || true
-          } | sort -u > /tmp/legacy-pat-workflows.txt
-          echo "legacy_pat_workflow_file_count=$(wc -l </tmp/legacy-pat-workflows.txt)"
-          cat /tmp/legacy-pat-workflows.txt
-          # Only the read-only production and Windows-runner presence audits
-          # may mention the retired PAT until live revocation is verified.
-          : > /tmp/unapproved-pat-workflows.txt
-          while IFS= read -r workflow; do
-            case "$workflow" in
-              .github/workflows/i1-durable-runner-audit.yml|.github/workflows/verify-supabase-production-readonly.yml)
-                ;;
-              *)
-                printf '%s\n' "$workflow" >> /tmp/unapproved-pat-workflows.txt
-                ;;
-            esac
-          done < /tmp/legacy-pat-workflows.txt
-          if test -s /tmp/unapproved-pat-workflows.txt; then
-            echo 'FAIL: executable workflows still reference retired Airtable credentials'
-            cat /tmp/unapproved-pat-workflows.txt
-            exit 1
-          fi
-          echo 'PASS: Airtable credential mentions limited to read-only retirement audits'
+          python - <<'PY'
+          from pathlib import Path
+          pat="AIR"+"TABLE_PAT"
+          token="AIR"+"TABLE_TOKEN"
+          host="api."+"airtable.com"
+          presence={
+              ".github/workflows/i1-durable-runner-audit.yml",
+              ".github/workflows/verify-supabase-production-readonly.yml",
+          }
+          negative={
+              ".github/workflows/issue2374-all-profiles-provider-batch-audit.yml",
+              ".github/workflows/issue2374-exact-provider-ids-audit.yml",
+          }
+          flagged=[]
+          for f in sorted(Path(".github/workflows").glob("*.y*ml")):
+              lines=f.read_text().splitlines()
+              hits=[(i,line.strip()) for i,line in enumerate(lines)
+                    if pat in line or token in line]
+              if not hits:
+                  continue
+              name=str(f)
+              if name in presence:
+                  continue
+              if name in negative and len(hits)==1:
+                  i,line=hits[0]
+                  preceding="\n".join(lines[max(0,i-7):i])
+                  if line.endswith('"'+pat+'","'+host+'"]:') and "for bad in [" in preceding:
+                      continue
+              flagged.append(name)
+          if flagged:
+              raise SystemExit("Unsafe credential reference in executable workflow: "+", ".join(flagged))
+          print("PASS: only approved presence audits and validated negative-only checks mention retired PAT")
+          PY
       - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
         shell: bash
         run: |
