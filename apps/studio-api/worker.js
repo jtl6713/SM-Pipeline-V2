@@ -4536,6 +4536,19 @@ export default {
       }
       return;
     }
+    // Canonical Supabase publishing must not stop when an unrelated legacy
+    // Airtable request enters cooldown. Run the fresh-only/at-most-once lane
+    // independently, and never use Airtable as a fallback in Supabase mode.
+    const supabaseFreshPublishing = studioWriteSource(env) === "supabase";
+    if (supabaseFreshPublishing && studioSupabaseConfigured(env)) {
+      ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 8 })
+        .then((results) => console.info("Supabase fresh-publish flow", JSON.stringify({
+          inspected: results?.length || 0,
+          fenced: (results || []).filter((r) => r?.fenced).length,
+          blocked: (results || []).filter((r) => r?.skipped).length,
+        })))
+        .catch((error) => console.warn("Supabase fresh-publish flow failed closed", String(error?.message || error))));
+    }
     // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
     // + heals every 5 minutes, colliding with Studio UI polls and Airtable 429
     // cooldowns (603 Worker hung-cancels in 3h). Light = publish/produce rescue
@@ -4927,10 +4940,12 @@ export default {
       } catch (error) {
         console.warn("overdue scheduled publish rescue cron failed", error);
       }
-      try {
-        await studioReconcileApprovedPublishes(env);
-      } catch (error) {
-        console.warn("publish reconcile cron failed", error);
+      if (!supabaseFreshPublishing) {
+        try {
+          await studioReconcileApprovedPublishes(env);
+        } catch (error) {
+          console.warn("legacy publish reconcile cron failed", error);
+        }
       }
       try {
         await healStuckStudioRenders(env, { skipR4Admission: true });
