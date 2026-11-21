@@ -14,17 +14,17 @@ $key=EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
 if($url -notmatch '^https://[a-z0-9-]+\.supabase\.co$' -or -not $key){throw 'unsafe_supabase_source'}
 $h=@{apikey=$key;Authorization=('Bearer '+$key)}
 $ids=@('18133932856783117','18133932877783117','18133932916783117','18133932955783117')
-$o=@(Invoke-RestMethod ($url+'/rest/v1/platform_outputs?output_number=eq.9899&select=airtable_record_id,output_number,content_profile_id,platform,platform_output_type,publish_status,ig_carousel_status,error_messages&limit=2') -Headers $h -Method Get -TimeoutSec 20)
+$o=Invoke-RestMethod ($url+'/rest/v1/platform_outputs?output_number=eq.9899&select=airtable_record_id,output_number,content_profile_id,platform,platform_output_type,publish_status,ig_carousel_status,error_messages&limit=2') -Headers $h -Method Get -TimeoutSec 20
 if($o.Count -ne 1 -or $o[0].airtable_record_id -ne 'recjtnU9qXp8BcGvn' -or $o[0].platform -ne 'Instagram' -or $o[0].ig_carousel_status -ne 'Children Processing'){throw 'output_state_drift'}
-$p=@(Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o[0].content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 20)
+$p=Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o[0].content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 20
 if($p.Count -ne 1 -or $p[0].market_name -ne 'New York City'){throw 'profile_ownership_drift'}
 $joined=$ids -join ','
-$slides=@(Invoke-RestMethod ($url+'/rest/v1/carousel_slides?ig_child_container_id=in.('+$joined+')&select=ig_child_container_id,current_order,fields,deleted_from_carousel&limit=10') -Headers $h -Method Get -TimeoutSec 20)
-if($slides.Count -ne 4){throw 'incomplete_child_receipts'}
+$slides=Invoke-RestMethod ($url+'/rest/v1/carousel_slides?ig_child_container_id=in.('+$joined+')&select=ig_child_container_id,current_order,fields,deleted_from_carousel&limit=10') -Headers $h -Method Get -TimeoutSec 20
+if(@($slides).Count -ne 4){throw ('incomplete_child_receipts_count_'+@($slides).Count)}
 foreach($s in $slides){
  if($ids -notcontains [string]$s.ig_child_container_id -or [string]$s.fields.'PO_Output_ID'[0] -ne '9899' -or [string]$s.fields.'Review Status' -ne 'Final Approved' -or $s.deleted_from_carousel -eq $true){throw 'child_identity_or_approval_drift'}
 }
-$settings=@(Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 20)
+$settings=Invoke-RestMethod ($url+'/rest/v1/engagement_settings?select=payload&limit=500') -Headers $h -Method Get -TimeoutSec 20
 $v=@{}
 foreach($item in $settings){
  $row=$item.payload
