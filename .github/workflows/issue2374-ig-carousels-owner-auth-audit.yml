@@ -1,4 +1,4 @@
-name: Issue 2374 NYC Miami Carousel Meta OAuth Exact Owner GET
+name: Issue 2374 NYC Miami Carousel Owner Media GET
 on:
   pull_request:
     paths:
@@ -37,12 +37,12 @@ jobs:
           assert "ISSUE2374_IG_OWNER_AUTH_AUDIT=" in s
           assert "output_writes=0" in s and "provider_writes=0" in s
           assert "publish_calls=0" in s and "airtable_operations=0" in s
-          assert "$script:providerGets -gt 4" in s
+          assert "$script:providerGets -gt 14" in s
           assert "graph.facebook.com" in s and "SUPABASE_SERVICE_ROLE_KEY" in s
           assert "production_identity_mismatch" in s
           for label in ["9868,9882,9893,9895,9905,10631", "New York City",
                         "Miami", "historical_401_source_drift", "media_read_authorized",
-                        "account_identity_confirmed", "owner_oauth_401_reauthorization_needed"]:
+                        "account_identity_confirmed", "owner_oauth_401_reauthorization_needed", "CAROUSEL_ALBUM", "original_asset_proven"]:
               assert label in s, "critical per-owner identity gate missing"
           assert "'https://vkwvscgisqsbuwagdvtb.supabase.co'" in s
           for bad in ["-Method Post", "-Method Patch", "-Method Put", "-Method Delete",
@@ -98,7 +98,7 @@ jobs:
           pathlib.Path('/tmp/issue2374-ops-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
           print('immutable_main_source_hash_guard=PASS')
           PY
-      - name: Execute six-output two-owner scoped Meta OAuth GET diagnostic
+      - name: Execute exact six-output owned Instagram carousel media GET inventory
         shell: bash
         run: |
           set -euo pipefail
@@ -130,8 +130,8 @@ jobs:
               jq -r '.job.log // ""' /tmp/issue2374-ops-status.json \
                 | grep '^ISSUE2374_IG_OWNER_AUTH_AUDIT=' | tail -1 \
                 | sed 's/^ISSUE2374_IG_OWNER_AUTH_AUDIT=//' > /tmp/issue2374-ig-owner-oauth.json
-              jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .exact_target_count==6 and .provider_get_calls<=4 and (.targets|length)==6 and (.owner_scopes|length)==2' /tmp/issue2374-ig-owner-oauth.json >/dev/null
-              jq -c '{version,exact_target_count,provider_get_calls,owner_scopes,provider_writes,output_writes,airtable_operations}' /tmp/issue2374-ig-owner-oauth.json
+              jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .exact_target_count==6 and .provider_get_calls<=14 and (.bounded_media_inventory|length)==2 and (.matched_output_candidates|length)==6 and (.targets|length)==6 and (.owner_scopes|length)==2' /tmp/issue2374-ig-owner-oauth.json >/dev/null
+              jq -c '{version,exact_target_count,provider_get_calls,owner_scopes,bounded_media_inventory,matched_output_candidates,candidate_count,provider_writes,output_writes,airtable_operations}' /tmp/issue2374-ig-owner-oauth.json
               exit 0
             elif [[ "$state" == failed ]]; then
               echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
