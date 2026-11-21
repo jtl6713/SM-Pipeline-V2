@@ -869,6 +869,23 @@
     }
   }
 
+  function updateFactoryBatchFreshness() {
+    const updated = $("factoryBatchUpdated");
+    if (!updated || state.completedOpen) return;
+    if (!state.lastBatchSuccessMs) {
+      updated.textContent = state.batchActivityError || "Waiting for first activity update…";
+      return;
+    }
+    const ageSeconds = Math.floor((Date.now() - state.lastBatchSuccessMs) / 1000);
+    const ageLabel = ageSeconds < 5 ? "just now" : ageSeconds + "s ago";
+    if (state.batchActivityError || ageSeconds > 15) {
+      updated.textContent = "Status delayed · last updated " + ageLabel +
+        (state.batchActivityError ? " · retrying" : "");
+    } else {
+      updated.textContent = "Updated " + ageLabel + " · auto-refreshing";
+    }
+  }
+
   function factoryLiveElapsed(since, now = Date.now()) {
     const start = Date.parse(String(since || ""));
     if (!Number.isFinite(start)) return "unknown";
@@ -932,23 +949,6 @@
     return `<div class="factory-batch-live-summary">` +
       `<strong>${isCurrent ? "Current" : "Next"}: ${esc(title)}</strong>` +
       factoryLiveItemHtml(item, true, now) + `</div>`;
-  }
-
-  function updateFactoryBatchFreshness() {
-    const updated = $("factoryBatchUpdated");
-    if (!updated || state.completedOpen) return;
-    if (!state.lastBatchSuccessMs) {
-      updated.textContent = state.batchActivityError || "Waiting for first activity update…";
-      return;
-    }
-    const ageSeconds = Math.floor((Date.now() - state.lastBatchSuccessMs) / 1000);
-    const ageLabel = ageSeconds < 5 ? "just now" : ageSeconds + "s ago";
-    if (state.batchActivityError || ageSeconds > 15) {
-      updated.textContent = "Status delayed · last updated " + ageLabel +
-        (state.batchActivityError ? " · retrying" : "");
-    } else {
-      updated.textContent = "Updated " + ageLabel + " · auto-refreshing";
-    }
   }
 
   function renderFactoryBatchActivity(batch) {
