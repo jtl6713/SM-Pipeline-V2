@@ -2,6 +2,7 @@
 // 2026-11-20 18:25 Chicago: recount after five provider-confirmed expired Instagram Story status repairs.
 // 2026-11-20 evening publication recovery: exact latest four-profile snapshot verification; no Studio writes.
 import crypto from "node:crypto";
+import { writeFile } from "node:fs/promises";
 const apiToken=process.env.CLOUDFLARE_API_TOKEN,account=process.env.CLOUDFLARE_ACCOUNT_ID,run=process.env.GITHUB_RUN_ID;
 if(!apiToken||!account||!/^\d+$/.test(run||""))throw new Error("cloudflare_credentials_or_run_missing");
 const root="https://api.cloudflare.com/client/v4/accounts/"+account,target="chicagoshining-studio-api";
@@ -32,7 +33,15 @@ try{
    const url=new URL(request.url);
    if(request.method!=="GET")return new Response("Method not allowed",{status:405});
    const paths={"/${nonce}/overview":"/api/profiles/overview","/${nonce}/health":"/api/health"};
-   const path=paths[url.pathname];if(!path)return new Response("Not found",{status:404});
+   let path=paths[url.pathname];
+   const parts=url.pathname.split("/");
+   const allowed=new Set(["recT2rbKX3MF7cVFU","recF7UAn0LkMZZrWZ","recpNlNn6U6eq0M9r","recgtK8Z7eNADNtVy"]);
+   if(parts.length===4 && parts[1]==="${nonce}"
+      && ["past_due","failed"].includes(parts[2]) && allowed.has(parts[3])) {
+     const mode=parts[2]==="past_due"?"approved_past_due":"failed";
+     path="/api/outputs?mode="+mode+"&profile="+encodeURIComponent(parts[3]);
+   }
+   if(!path)return new Response("Not found",{status:404});
    const headers={"Accept":"application/json","Origin":"https://studio.chicagoshining.com",
     "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com"};
    const result=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+path,{method:"GET",headers}));
@@ -68,6 +77,68 @@ try{
   home_summary_read_flag:binding("STUDIO_HOME_PROFILE_SUMMARY_READS"),snapshot_generation:overview.snapshot_generation||null,
   snapshot_at:overview.snapshot_at||null,approved_past_due_total:rows.reduce((s,r)=>s+r.approved_past_due,0),profiles:rows,checked_at:new Date().toISOString(),temporary_bridge_deleted:false};
  console.log("HOME_COUNTS_RESULT="+JSON.stringify(report));
+ // P1 #2340: enumerate exact Home drill-down identities only after the
+ // source-fixed Worker is deployed. Never use date-only SQL to authorize retries.
+ const profiles=[
+  {id:"recT2rbKX3MF7cVFU",label:"ChicagoShining - Chicago"},
+  {id:"recF7UAn0LkMZZrWZ",label:"LA - Los Angeles"},
+  {id:"recpNlNn6U6eq0M9r",label:"Miami - Miami"},
+  {id:"recgtK8Z7eNADNtVy",label:"NYC - New York City"},
+ ];
+ const inventories=[];
+ for(const profile of profiles){
+   const home=overview.records.find(r=>r.id===profile.id
+     || r.profile_id===profile.id || r.content_profile_id===profile.id);
+   if(!home)throw Error("home_profile_identity_missing_"+profile.label.replace(/[^a-z]/gi,"_"));
+   const item={profile:profile.label,profile_id:profile.id,home_snapshot:{
+     past_due:home.approved_past_due,failed:home.failed
+   },past_due:[],failed:[],parity:{}};
+   for(const mode of ["past_due","failed"]){
+     const reply=await read(mode+"/"+profile.id);
+     if(reply.ok!==true || reply.read_source!=="supabase"
+        || reply.complete!==true || !Array.isArray(reply.records)
+        || reply.count!==reply.records.length)
+       throw Error("incomplete_supabase_exact_inventory_"+profile.label+"_"+mode);
+     const entries=reply.records.map(row=>{
+       if(!/^rec[A-Za-z0-9]{14}$/.test(String(row.id||"")))
+         throw Error("invalid_exact_output_identity_"+mode);
+       if(mode==="past_due" && row.home_exception_kind!=="approved_past_due")
+         throw Error("home_exception_classifier_mismatch_"+row.id);
+       if(mode==="failed" && row.home_failed!==true)
+         throw Error("home_failed_classifier_mismatch_"+row.id);
+       return {record_id:row.id,output_id:row.output_id,platform:row.platform,
+         type:row.platform_output_type,publish_status:row.publish_status,
+         studio_state:row.studio_state,publish_error_stage:row.publish_error_stage,
+         has_external_id:!!row.platform_post_id,
+         has_external_url:!!row.platform_post_url,
+         retry_eligible:row.publish_retry_eligible===true};
+     });
+     if(new Set(entries.map(x=>x.record_id)).size!==entries.length)
+       throw Error("repeated_exact_identity_"+mode);
+     item[mode]=entries;
+     const snapshot=mode==="past_due"?home.approved_past_due:home.failed;
+     item.parity[mode]={
+       snapshot_count:Number.isInteger(snapshot)?snapshot:null,
+       live_count:entries.length,
+       matches:Number.isInteger(snapshot)?snapshot===entries.length:null,
+     };
+   }
+   inventories.push(item);
+ }
+ const exact={
+   safety:"READ ONLY; no provider posts, status mutation, Airtable reads, or rearm",
+   worker_version_id:selected,
+   home_snapshot_generation:overview.snapshot_generation||null,
+   observed_at:new Date().toISOString(),
+   past_due_total:inventories.reduce((s,x)=>s+x.past_due.length,0),
+   failed_total:inventories.reduce((s,x)=>s+x.failed.length,0),
+   mismatched_profile_modes:inventories.flatMap(x=>Object.entries(x.parity)
+     .filter(([,p])=>p.matches===false)
+     .map(([mode,p])=>({profile:x.profile,mode,...p}))),
+   inventories,
+ };
+ await writeFile("/tmp/home-2340-exact-inventory.json",JSON.stringify(exact,null,2));
+ console.log("HOME_EXACT_ID_CENSUS="+JSON.stringify(exact));
 }finally{
  if(created){await cf("/workers/scripts/"+bridge,{method:"DELETE"});console.log("temporary_bridge_deleted=PASS");}
 }
