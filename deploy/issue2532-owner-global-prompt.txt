@@ -1,0 +1,4 @@
+2026-11-21 | Issue #2532 | PR #2533
+Production release request for Studio UI 0.6.1035, organization-scoped Global Admin prompt and profile Every Generation Save repair.
+Trigger controlled Studio Pages and API Worker deploy workflows when merged to main. Runner deployment is independently triggered by deploy/i1-durable-runner-release.txt.
+Do not publish, mutate approved outputs, or modify current publication holds during deployment.
