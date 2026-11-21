@@ -31,6 +31,11 @@ jobs:
           foreach($required in @('fresh_story_canary_not_proven_stop_all','vkwvscgisqsbuwagdvtb','prior_original_container_not_expired','quality_agent_recovery_events','approved_original_row_not_exact','safety_hold_origin_not_verified','prior_original_container_not_expired','unique_create_fence_not_durable','new_container_not_saved_no_publish','unique_publish_fence_not_durable','published_verified','P1_2340_TEN_FRESH_STORIES=')){
             if(-not $s.Contains($required)){throw ('missing_required_fence_or_guard: '+$required)}
           }
+          if(-not $s.Contains('fence.previous_do_not_publish -ne $false') -or
+             -not $s.Contains('fence.previous_auto_publish_enabled -ne $true') -or
+             -not $s.Contains('fence.provider_container_preserved -ne $x.old')){
+            throw 'original_json_hold_provenance_not_typed'
+          }
           if(([regex]::Matches($s,'@\{n=\d+;rid=')).Count -ne 10){throw 'expected_exact_ten_selected_stories'}
           if(([regex]::Matches($s,'/media_publish')).Count -ne 1 -or ([regex]::Matches($s,"'/media'")).Count -ne 1){throw 'one_meta_create_and_publish_operation_per_target'}
           if(([regex]::Matches($s,'/rest/v1/quality_agent_recovery_events')).Count -ne 2){throw 'separate_unique_create_and_publish_fences_required'}
