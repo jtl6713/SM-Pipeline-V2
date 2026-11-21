@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const ui = readFileSync(new URL("./assets/pipeline-content-pagination-2536.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 test("Pipeline controls load before core and share release cache key", () => {
- assert.match(html, /pipeline-content-pagination-2536\\.js\\?v=0\\.6\\.1029-pipeline-history/);
+ assert.ok(html.includes("pipeline-content-pagination-2536.js?v=0.6.1029-pipeline-history"));
  assert.ok(html.indexOf("pipeline-content-pagination-2536.js") < html.indexOf("StudioLazyLoad.boot()"));
 });
 test("date, group size and paging controls are wired", () => {
