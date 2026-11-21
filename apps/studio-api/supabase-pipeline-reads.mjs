@@ -2045,7 +2045,7 @@ export async function listSupabasePipelineContentPage(env, {
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
   const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
   for (const date of [createdFrom, createdTo]) {
-    if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z")))) {
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z")))) {
       throw new Error("Invalid creation date");
     }
   }
@@ -2055,7 +2055,7 @@ export async function listSupabasePipelineContentPage(env, {
   const profileRows = await supabaseRest(env,
     `content_profiles?id=eq.${profileId}&select=profile_name,market_name&limit=1`);
   const market = String(profileRows?.[0]?.market_name || profileRows?.[0]?.profile_name || "").toLowerCase();
-  const zone = /los angeles|\\bla\\b/.test(market) ? "America/Los_Angeles"
+  const zone = /los angeles|\bla\b/.test(market) ? "America/Los_Angeles"
     : /chicago/.test(market) ? "America/Chicago"
     : /miami|new york|nyc/.test(market) ? "America/New_York" : null;
   if (!zone) throw new Error("Pipeline profile timezone unavailable");
