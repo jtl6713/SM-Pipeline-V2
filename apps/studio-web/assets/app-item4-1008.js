@@ -23381,7 +23381,8 @@ function timedScriptAssetLabel(asset, index) {
     // not the sibling-expanded package size.
     const countFilter = ["attention", "manual", "approved_past_due", "approved_missing_date"].includes(pipelineViewFilter);
     updatePipelineFilterBar(countFilter ? matchingCount : source.length);
-    if (!source.length) {
+    const showEmptyContentGroups = pipelineViewFilter === "all" && !pipelineColumnFiltersActive();
+    if (!source.length && !(showEmptyContentGroups && pipelineContentRecords.length)) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty
         ? `<div class="empty pipeline-compact-empty">${pipelineScheduledSearchActive ? "No scheduled outputs match that search in any week." : "No outputs match the current filters."}</div>`
@@ -23429,9 +23430,29 @@ function timedScriptAssetLabel(asset, index) {
     };
 
     const body = (() => {
-      // One list, newest Content ID first: published groups are not archived away.
-      return groupedPipelineRecords(source).map((group, index) =>
-        renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
+      const groups = groupedPipelineRecords(source);
+      const represented = new Set(groups.flatMap(group => [
+        String(group.key), String(group.records[0]?.content_number ?? ""),
+      ]));
+      // Content IDs with no outputs still take a page slot and are visible.
+      const missing = showEmptyContentGroups
+        ? pipelineContentRecords.filter(content => !represented.has(String(content.id))
+            && !represented.has(String(content.content_id ?? "")))
+        : [];
+      const entries = [
+        ...groups.map(group => ({ group, number: Number(
+          pipelineContentRecordForGroup(group.records)?.content_id
+          ?? group.records[0]?.content_number ?? 0) || 0 })),
+        ...missing.map(content => ({ content, number: Number(content.content_id) || 0 })),
+      ].sort((a, b) => b.number - a.number);
+      return entries.map((entry, index) => {
+        if (entry.group) return renderPipelineGroupTbody(entry.group, pipelineRow, { isNewest: index === 0 });
+        const content = entry.content;
+        const number = escapeHtml(String(content.content_id ?? ""));
+        const title = escapeHtml(String(content.title || "Untitled content"));
+        return '<tbody class="pipeline-content-empty"><tr><td colspan="6"><strong>Content #' + number
+          + ' – ' + title + '</strong><div class="subtle">No platform outputs generated yet</div></td></tr></tbody>';
+      }).join("");
     })();
 
     const head = `<tr><th>${pipelineSortHeader("output", "Content")}</th><th>${pipelineSortHeader("platform", "Platforms")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule (Your Time)</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`;
@@ -24629,7 +24650,7 @@ function timedScriptAssetLabel(asset, index) {
       if (profileAtRequest !== selectedProfileId || pageScopeAtRequest !== pipelineContentPageScope()) return;
       if (!outputsSettled.ok && !latestRows.length) throw outputsSettled.error || new Error("Outputs unavailable");
       const outputsResult = outputsSettled.ok ? outputsSettled.value : { records: [], stale: true };
-      const contentResult = { records: [] };
+      const contentResult = { records: Array.isArray(outputsResult.content_groups) ? outputsResult.content_groups : [] };
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
