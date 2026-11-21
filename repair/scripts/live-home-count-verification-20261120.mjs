@@ -110,8 +110,7 @@ try{
          type:row.platform_output_type,publish_status:row.publish_status,
          studio_state:row.studio_state,publish_error_stage:row.publish_error_stage,
          has_external_id:!!row.platform_post_id,
-         has_external_url:!!row.platform_post_url,
-         retry_eligible:row.publish_retry_eligible===true};
+         has_external_url:!!row.platform_post_url};
      });
      if(new Set(entries.map(x=>x.record_id)).size!==entries.length)
        throw Error("repeated_exact_identity_"+mode);
