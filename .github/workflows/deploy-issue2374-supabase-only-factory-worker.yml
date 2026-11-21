@@ -633,6 +633,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          jq -e '.success==true and (.result.subdomain|type=="string" and length>0)' /tmp/account-subdomain.json >/dev/null
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
