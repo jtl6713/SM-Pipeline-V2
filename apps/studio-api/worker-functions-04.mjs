@@ -12052,6 +12052,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
       protected_media_rework: Boolean(mediaRework),
+      recovery_hold_marker: mediaRework?.marker || null,
       recovery_source_inventory_verified: mediaRework?.source_inventory_verified || false,
       recovery_original_image_previews: mediaRework?.original_image_previews || [],
       recovery_source_count_mismatch: mediaRework?.source_count_mismatch === true,
