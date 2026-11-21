@@ -30,7 +30,7 @@ SELECT
   to_regclass('public.media_assets') IS NOT NULL AS media_assets_exists,
   to_regprocedure('public.sm_pipeline_upsert_media_asset(text,text,text,jsonb)') IS NOT NULL AS atomic_media_rpc_exists,
   coalesce((SELECT NOT prosecdef FROM rpc), false) AS media_rpc_security_invoker,
-  coalesce((SELECT 'search_path=' = ANY(proconfig) FROM rpc), false) AS media_rpc_empty_search_path,
+  coalesce((SELECT 'search_path=' = ANY(proconfig) OR 'search_path=""' = ANY(proconfig) FROM rpc), false) AS media_rpc_empty_search_path,
   exists (
     SELECT 1 FROM pg_catalog.pg_indexes
     WHERE schemaname='public' AND tablename='media_assets'
