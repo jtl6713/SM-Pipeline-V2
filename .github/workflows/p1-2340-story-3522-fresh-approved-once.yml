@@ -28,7 +28,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $src=Get-Content $path -Raw
-          foreach($required in @('vkwvscgisqsbuwagdvtb','reco2Iix0eaXJHMGD','17910983553575604','https://media.chicagoshining.com/studio/previews/reco2Iix0eaXJHMGD/current.mp4','approved_replacement_preflight_failed','quality_agent_recovery_events','old_container_not_proven_expired','created_container_checkpoint_not_saved_no_publish','new_container_not_finished_no_publish','publish_unique_fence_failed','provider_published_but_db_finalization_unverified',"original_hold_preserved=$true")){
+          foreach($required in @('vkwvscgisqsbuwagdvtb','reco2Iix0eaXJHMGD','17910983553575604','https://media.chicagoshining.com/studio/previews/reco2Iix0eaXJHMGD/current.mp4','approved_replacement_preflight_failed','quality_agent_recovery_events','old_container_not_proven_expired','created_container_checkpoint_not_saved_no_publish','new_container_not_finished_no_publish','publish_unique_fence_failed','provider_published_but_db_finalization_unverified','original_hold_preserved=$true')){
             if(-not $src.Contains($required)){throw ('required_approved_replacement_safety_missing: '+$required)}
           }
           if(([regex]::Matches($src,'/media_publish')).Count -ne 1 -or ([regex]::Matches($src,"'/media'")).Count -ne 1){throw 'not_one_exact_meta_creation_and_publish'}
