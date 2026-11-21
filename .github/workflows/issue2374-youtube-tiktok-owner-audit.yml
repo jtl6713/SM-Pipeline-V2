@@ -48,6 +48,8 @@ jobs:
           assert "test_run_id" in s and "jobs.Values" in s
           assert "$ytOwner=@{};$ttOwner=@{}" in s, "both owner maps must be keyed hashtables"
           assert "$ttOwner=@()" not in s, "array cannot be indexed by city string"
+          assert "jobstore_rows=$jobstoreRows" in s and "$jobstoreRows=0" in s
+          assert "Measure-Object -Property rows" not in s, "empty jobstore must not fail report"
           assert "$statusHost=[string]$ttHosts[$city]" in s
           assert "unknown_tiktok_status_owner" in s
           assert "}[$city]" not in s, "PowerShell literal hashtable indexing may be parsed as array indexing"
