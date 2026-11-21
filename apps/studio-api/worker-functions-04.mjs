@@ -18,6 +18,7 @@ import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitRe
 import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-autonomous-schedule.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
+import { assessFreshSupabasePublish } from "./approved-publish-flow.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -2371,27 +2372,85 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
 /*__STUDIO_WORKER_END:studioHealStoryCompanionDrift__*/
 
 export async function studioReconcileApprovedPublishes(env, options = {}) {
-  await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
-    console.warn("approved missing-schedule heal before reconcile failed", error);
-  });
+  const supabaseMode = studioWriteSource(env) === "supabase";
+  // Supabase ownership must fail closed; no legacy Airtable read fallback.
+  if (supabaseMode && !studioSupabaseConfigured(env)) {
+    console.warn("Supabase approved-publish flow unavailable: canonical store not configured");
+    return [];
+  }
+  if (!supabaseMode) {
+    await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
+      console.warn("approved missing-schedule heal before reconcile failed", error);
+    });
+  }
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
   let rows = [];
   try {
-    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
-      sortField: "Scheduled_Post_Date",
-      sortDirection: "asc",
-    });
+    if (supabaseMode) {
+      const candidates = await listSupabaseDeskHealOutputs(env, {
+        kind: "fresh_publish_ready", limit: 80, nowMs,
+      });
+      rows = candidates
+        .filter(row => assessFreshSupabasePublish(row, { nowMs }).eligible)
+        .slice(0, limit);
+    } else {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
+        sortField: "Scheduled_Post_Date",
+        sortDirection: "asc",
+      });
+    }
   } catch (error) {
     console.warn("publish reconcile scan failed", error);
     return [];
   }
   const results = [];
   for (const row of rows) {
+    if (supabaseMode) {
+      // Fence BEFORE the first provider operation. If Graph succeeds and the
+      // output PATCH fails, the next cron still cannot publish a second copy.
+      try {
+        const outcome = await withOutputApprovalLock(env.STUDIO_MEDIA, row.id, async () => {
+          const current = await readSupabaseShapedOutput(env, row.id);
+          const preflight = assessFreshSupabasePublish(current, { nowMs: Date.now() });
+          if (!preflight.eligible) return { id: row.id, skipped: preflight.reason };
+          const key = "studio/state/initial-publish-fence/v1/" + row.id + ".json";
+          if (await env.STUDIO_MEDIA.get(key)) {
+            return { id: row.id, skipped: "prior_fenced_dispatch_requires_provider_reconciliation" };
+          }
+          const fence = await env.STUDIO_MEDIA.put(key, JSON.stringify({
+            output_record_id: row.id, state: "dispatch_entered",
+            created_at: new Date().toISOString(),
+            requires_provider_reconciliation_before_reentry: true,
+          }), { onlyIf: new Headers({ "If-None-Match": "*" }),
+            httpMetadata: { contentType: "application/json" } });
+          if (!fence || !(await env.STUDIO_MEDIA.get(key))) {
+            throw new Error("initial_publish_dispatch_fence_unavailable");
+          }
+          const primary = await studioDispatchApprovedPublishNow(env, current);
+          await studioStampPublishDispatch(env, current, "reconcile: " + studioPublishDispatchNote(primary));
+          // Retain the per-output lease across the publisher continuation.
+          await studioDispatchApprovedPublishTail(env, current, primary).catch((error) => {
+            console.warn("Supabase publish continuation failed; fenced for provider readback", row.id, error);
+          });
+          return { id: row.id, target: primary?.target || primary?.plan?.target || null,
+            ok: primary?.ok !== false, skipped: primary?.skipped || null,
+            fenced: true, requires_provider_readback: true };
+        }, { owner: "supabase-fresh-publish-" + crypto.randomUUID() });
+        results.push(outcome);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("Supabase fresh-publish flow failed closed", row.id, message);
+        results.push({ id: row.id, skipped: error?.status === 409 ? "output_approval_lease_active"
+          : "fresh_publisher_unavailable", error: message });
+      }
+      continue;
+    }
     try {
       const primary = await studioDispatchApprovedPublishNow(env, row);
-      await studioStampPublishDispatch(env, row, `reconcile: ${studioPublishDispatchNote(primary)}`);
+      await studioStampPublishDispatch(env, row, "reconcile: " + studioPublishDispatchNote(primary));
       results.push({ id: row.id, target: primary?.target || primary?.skipped || null, ok: primary?.ok !== false });
       await studioDispatchApprovedPublishTail(env, row, primary).catch((error) => {
         console.warn("publish reconcile tail failed", row.id, error);
@@ -2399,7 +2458,7 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("publish reconcile dispatch failed", row.id, error);
-      await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      await studioStampPublishDispatch(env, row, "reconcile failed: " + message);
       results.push({ id: row.id, error: message });
     }
   }
