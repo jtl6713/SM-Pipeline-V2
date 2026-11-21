@@ -116,6 +116,11 @@ def load_profile_creative_guidance(client: Any, *records: dict[str, Any] | None)
     profile_id = profile_id_from_records(*records)
     if not profile_id:
         return parse_creative_guidance({})
+    from supabase_pipeline import studio_write_source, supabase_configured
+    settings = getattr(client, "_settings", {}) or {}
+    if studio_write_source(settings) != "supabase" or not supabase_configured(settings):
+        _LOG.warning("Skipping creative guidance: authoritative Supabase is not configured")
+        return parse_creative_guidance({})
     name = "Studio_Profile_Creative_" + profile_id
     try:
         # The profile ID is strictly validated before being interpolated.
