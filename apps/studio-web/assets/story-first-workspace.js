@@ -1031,7 +1031,12 @@
     } catch (error) {
       try { await checkSceneVideo(index, true); } catch {}
       throw error;
-    } finally { current.busy = false; }
+    } finally {
+      current.busy = false;
+      // Status refresh re-renders while the request lock is held. Unlock the
+      // recovery action before leaving so a later manual retry stays usable.
+      render();
+    }
   }
   function keyTerms(value) {
     return [...new Set(String(value || "").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/)
