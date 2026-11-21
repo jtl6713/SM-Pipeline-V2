@@ -104,6 +104,8 @@ foreach($x in $t){
     try{$status=GraphGet $new 'id,status_code' $account.headers}
     catch {
       $readErrors++
+      $row.status_get_errors=$readErrors
+      try{$row.last_get_http=[int]$_.Exception.Response.StatusCode}catch{}
       if($readErrors -ge 5){throw 'existing_new_container_status_get_unavailable'}
       continue # GET retry only; no create/publish retry
     }
