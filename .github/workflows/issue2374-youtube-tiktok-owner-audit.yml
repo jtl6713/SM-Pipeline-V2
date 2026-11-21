@@ -46,6 +46,8 @@ jobs:
           assert "publish_calls=0" in s and "airtable_operations=0" in s
           assert "original_jobstore" in s and "Studio_Overdue_Evidence_Audit_20261120" in s
           assert "test_run_id" in s and "jobs.Values" in s
+          assert "$ytOwner=@{};$ttOwner=@{}" in s, "both owner maps must be keyed hashtables"
+          assert "$ttOwner=@()" not in s, "array cannot be indexed by city string"
           assert "$statusHost=[string]$ttHosts[$city]" in s
           assert "unknown_tiktok_status_owner" in s
           assert "}[$city]" not in s, "PowerShell literal hashtable indexing may be parsed as array indexing"
