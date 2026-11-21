@@ -55,9 +55,26 @@ test("production Worker keeps five-minute Studio cron and isolates Factory one-m
   assert.ok(scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy) <
     scheduled.indexOf('const coolMs = airtableCooldownWaitMs();', heavy),
     "five-minute Factory fallback must run before the Airtable cooldown return");
-  assert.ok(scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy) <
-    scheduled.indexOf('runStudioAutonomousProduce(null, env,', heavy),
-    "fallback Factory recovery runs before costly heavy Studio tasks");
+  assert.ok(scheduled.indexOf('runStudioAutonomousProduce(null, env,', heavy) <
+    scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy),
+    "independent Idea pull starts before five-minute Factory recovery");
+});
+
+test("Idea harvest and five-minute photo-ready resume start independently of cooldown", () => {
+  const scheduled = scheduledBody();
+  const cronStart = scheduled.indexOf("const cadence = studioCronAirtableCadence");
+  const ideaStart = scheduled.indexOf("IDEA HARVEST SLA", cronStart);
+  const factoryStart = scheduled.indexOf("Fail-safe Factory recovery before", cronStart);
+  const cooldown = scheduled.indexOf("const coolMs = airtableCooldownWaitMs();", factoryStart);
+  assert.ok(cronStart >= 0 && ideaStart > cronStart);
+  assert.ok(factoryStart > ideaStart && cooldown > factoryStart);
+  const independent = scheduled.slice(ideaStart, factoryStart);
+  assert.match(independent, /ctx\.waitUntil\(\(async \(\) => \{/);
+  assert.match(independent, /atHour = cadence\.heavy && Number\(cadence\.minute\) === 0/);
+  assert.match(independent, /resume_only: !atHour/);
+  assert.match(independent, /runStudioAutonomousProduce/);
+  assert.doesNotMatch(independent, /airtableCooldownWaitMs\(\)/);
+  assert.equal((scheduled.match(/runStudioAutonomousProduce\(null, env,/g) || []).length, 1);
 });
 
 test("scheduled retries daily ideas throughout Chicago hour 1, not only heavy ticks", () => {
@@ -111,9 +128,10 @@ test("light ticks run bounded existing-ID continuation; heavy owns mutating plat
   const beforeHeavy = scheduled.slice(0, heavyGate);
   assert.match(beforeHeavy, /studioHealPhantomRerender/);
   assert.match(beforeHeavy, /studioHealAutonomousRevisionLock/);
+  const ideaResume = beforeHeavy.indexOf("resume_only: !atHour");
   const revisionHeal = beforeHeavy.indexOf("studioHealAutonomousRevisionLock");
-  const lightResume = beforeHeavy.indexOf("resume_only: true");
-  assert.ok(revisionHeal >= 0 && lightResume > revisionHeal);
+  assert.ok(ideaResume >= 0 && revisionHeal > ideaResume,
+    "photo-ready Idea continuation must not wait for late revision healing");
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
   // TTD draft / TTD2 / missing-publish-id heals are Supabase+runner SoR.
