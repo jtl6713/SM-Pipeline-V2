@@ -69,3 +69,34 @@ test("all Studio storage selectors ignore stale Airtable fallback flags", () => 
     assert.ok(!body.includes('return "airtable"'), name);
   }
 });
+
+test("canonical Studio deployment uses Supabase credential contract", () => {
+  const flow = source(".github/workflows/deploy-cloudflare-worker-production.yml");
+  assert.ok(flow.includes("'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}"));
+  assert.ok(flow.includes("wrangler deploy --config wrangler.jsonc --dry-run"));
+  assert.ok(flow.includes("Automatic rollback") || flow.includes("rollback"));
+  const contract = source("repair/scripts/studio_api_binding_contract.py");
+  const core = contract.slice(contract.indexOf("CORE_BINDINGS = {"), contract.indexOf("RESERVATION_BINDINGS = {"));
+  assert.ok(core.includes('"SUPABASE_SERVICE_ROLE_KEY": "secret_text"'));
+  assert.ok(core.includes('"SUPABASE_URL": "plain_text"'));
+  assert.ok(!core.includes('"AIRTABLE_PAT": "secret_text"'));
+});
+
+test("replacement variant and LA TikTok deployments are manual and Airtable-free", () => {
+  for (const [path, phrase] of [
+    [".github/workflows/deploy-studio-variant-fill-crop-v2.yml", "DEPLOY-SUPABASE-VARIANT"],
+    [".github/workflows/deploy-tiktok-auth-la-production.yml", "DEPLOY-LA-TIKTOK-AUTH"],
+  ]) {
+    const flow = source(path);
+    assert.ok(flow.includes("workflow_dispatch"), path);
+    assert.ok(flow.includes(phrase), path);
+    assert.ok(flow.includes("refs/heads/main"), path);
+    assert.ok(!flow.includes("api.airtable.com"), path);
+    assert.ok(!flow.includes("AIRTABLE_PAT"), path);
+    assert.ok(flow.toLowerCase().includes("rollback"), path);
+  }
+  const variant = source(".github/workflows/deploy-studio-variant-fill-crop-v2.yml");
+  assert.ok(variant.includes("/rest/v1/engagement_settings"));
+  const la = source(".github/workflows/deploy-tiktok-auth-la-production.yml");
+  assert.ok(!la.includes("Rearm LA TikTok drafts"));
+});
