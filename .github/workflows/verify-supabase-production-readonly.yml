@@ -1,0 +1,97 @@
+name: Verify Supabase Production Bindings (Read Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter AUDIT-SUPABASE-PRODUCTION (read only; no deploys or revocation)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'AUDIT-SUPABASE-PRODUCTION' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Audit active Cloudflare binding names and types
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          mkdir -p /tmp/sm-prod-audit
+          for target in chicagoshining-studio-api chicagoshining-studio-variant-service chicagoshining-tiktok-auth-la; do
+            curl -fsS --retry 2 "$API/$target/deployments" -H "$AUTH" -o /tmp/sm-prod-audit/deployments.json
+            version=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/sm-prod-audit/deployments.json)
+            curl -fsS --retry 2 "$API/$target/versions/$version" -H "$AUTH" -o /tmp/sm-prod-audit/version.json
+            jq -e '.success==true' /tmp/sm-prod-audit/version.json >/dev/null
+            jq -c --arg worker "$target" '
+              (.result.resources.bindings // []) as $b |
+              {
+                worker: $worker,
+                binding_names_types: ($b | map({name,type}) | sort_by(.name)),
+                deprecated_airtable_pat_present: any($b[]; .name=="AIRTABLE_PAT")
+              }
+            ' /tmp/sm-prod-audit/version.json >>/tmp/sm-prod-audit/binding-types.jsonl
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('/tmp/sm-prod-audit/binding-types.jsonl').read_text().splitlines()]
+          by={r['worker']: {b['name']:b['type'] for b in r['binding_names_types']} for r in rows}
+          studio=by['chicagoshining-studio-api']
+          variant=by['chicagoshining-studio-variant-service']
+          tiktok=by['chicagoshining-tiktok-auth-la']
+          ok=(studio.get('SUPABASE_URL')=='plain_text'
+              and studio.get('SUPABASE_SERVICE_ROLE_KEY')=='secret_text'
+              and studio.get('STUDIO_MEDIA')=='r2_bucket'
+              and variant.get('IMAGES')=='images'
+              and variant.get('STUDIO_VARIANT_SERVICE_TOKEN')=='secret_text'
+              and tiktok.get('TIKTOK_AUTH')=='kv_namespace'
+              and tiktok.get('TIKTOK_CLIENT_SECRET')=='secret_text')
+          report={
+            'ok':bool(ok), 'supabase_primary_binding_contract':bool(ok),
+            'retired_pat_still_bound': {r['worker']:r['deprecated_airtable_pat_present'] for r in rows},
+            'verified_worker_count':len(rows),
+            'credentials_values_collected':False,
+            'audit_only':True,
+          }
+          Path('/tmp/sm-prod-audit/report.json').write_text(json.dumps(report,indent=2))
+          print('production_binding_contract=' + ('PASS' if ok else 'FAIL'))
+          print('legacy_pat_presence_checked=PASS')
+          if not ok:
+            raise SystemExit('Required production binding missing or type mismatch')
+          PY
+          rm -f /tmp/sm-prod-audit/deployments.json /tmp/sm-prod-audit/version.json
+      - name: Read-only Supabase REST connectivity probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+            "${SUPABASE_URL%/}/rest/v1/media_assets?select=airtable_record_id&limit=0" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
+          test "$code" = '200'
+          echo 'supabase_rest_connectivity=PASS'
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-production-readonly-${{ github.run_id }}
+          path: /tmp/sm-prod-audit/report.json
+          if-no-files-found: ignore
+          retention-days: 14
