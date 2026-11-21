@@ -106,58 +106,81 @@ foreach ($spec in @(
     }
     $ownerChecks += $r
 }
-# Fresh owner-scoped, GET-only inventory: caption and native CAROUSEL_ALBUM
-# type are only possible candidates, never original-asset or receipt proof.
+
+# Scan up to five native owner media pages per verified account.
+# A caption match is ONLY a candidate; no remote post or source status changes.
 function NormalizeCaption([string]$text) {
     if (-not $text) { return '' }
-    return [regex]::Replace($text.ToLowerInvariant(),'\\s+',' ').Trim()
+    return [regex]::Replace($text.ToLowerInvariant(),'\s+',' ').Trim()
 }
-$inventory = @()
-$mediaByOwner = @{}
-foreach ($spec in @(
-    @{city='New York City';prefix='NYC_'},
-    @{city='Miami';prefix='MIAMI_'}
-)) {
-    $scope = @($ownerChecks | Where-Object { $_.profile -eq $spec.city })[0]
-    $mediaByOwner[$spec.city] = @()
-    $summary = [ordered]@{profile=$spec.city;pages=0;objects=0;status='not_started'}
-    if (-not $scope.media_read_authorized) {
-        $summary.status = 'owner_media_read_not_authorized_no_negative_proof'
-        $inventory += $summary
+$inventory=@()
+$ownedMedia=@{}
+foreach ($spec in @(@{city='New York City';prefix='NYC_'},@{city='Miami';prefix='MIAMI_'})) {
+    $city=[string]$spec.city
+    $ownedMedia[$city]=@()
+    $owner=@($ownerChecks|Where-Object{$_.profile -eq $city})[0]
+    $state=[ordered]@{profile=$city;pages=0;objects=0;status='not_started'}
+    if (-not $owner.media_read_authorized) {
+        $state.status='owner_media_read_unavailable_no_negative_proof'
+        $inventory+=$state
         continue
     }
-    $id = [string]$config[$spec.prefix + 'INSTAGRAM_BUSINESS_ACCOUNT_ID']
-    $token = [string]$config[$spec.prefix + 'META_GRAPH_API_ACCESS_TOKEN']
-    $next = 'https://graph.facebook.com/' + $version + '/' + $id + '/media?fields=id,caption,permalink,timestamp,media_type,media_product_type&limit=100'
-    $pages = 0
-    $status = 'complete'
+    $id=[string]$config[$spec.prefix+'INSTAGRAM_BUSINESS_ACCOUNT_ID']
+    $token=[string]$config[$spec.prefix+'META_GRAPH_API_ACCESS_TOKEN']
+    $next='https://graph.facebook.com/'+$version+'/'+$id+'/media?fields=id,caption,permalink,timestamp,media_type,media_product_type&limit=100'
+    $pages=0;$status='complete'
     while ($next -and $pages -lt 5) {
-        $g = OwnerGet $next $token
-        if (-not $g.ok -or $null -eq $g.data.data) { $status = 'media_history_get_unavailable_no_negative_proof';break }
-        $mediaByOwner[$spec.city] += @($g.data.data)
+        $g=OwnerGet $next $token
+        if (-not $g.ok -or $null -eq $g.data.data) {$status='media_history_incomplete_no_negative_proof';break}
+        $ownedMedia[$city]+=@($g.data.data)
         $pages++
-        $next = [string]$g.data.paging.next
+        $next=[string]$g.data.paging.next
     }
-    if ($next -and $status -eq 'complete') { $status = 'pagination_capped_no_negative_proof' }
-    $summary.pages = $pages
-    $summary.objects = @($mediaByOwner[$spec.city]).Count
-    $summary.status = $status
-    $inventory += $summary
+    if ($next -and $status -eq 'complete') {$status='pagination_capped_no_negative_proof'}
+    $state.pages=$pages
+    $state.objects=@($ownedMedia[$city]).Count
+    $state.status=$status
+    $inventory+=$state
 }
-$matches = @()
+$matches=@()
 foreach ($source in $rows) {
-    $number = [int]$source.output_number
-    $city = [string]$market[[string]$source.content_profile_id]
-    $caption = NormalizeCaption ([string]$source.output_caption)
-    $needle = if ($caption.Length -ge 85) { $caption.Substring(0, [Math]::Min(120,$caption.Length)) } else { '' }
-    $hits = @()
+    $number=[int]$source.output_number
+    $city=[string]$market[[string]$source.content_profile_id]
+    $body=NormalizeCaption ([string]$source.output_caption)
+    $needle=if ($body.Length -ge 85) {$body.Substring(0,[Math]::Min(120,$body.Length))} else {''}
+    $hits=@();$seen=@{}
     if ($needle) {
-        foreach ($post in @($mediaByOwner[$city])) {
-            $remoteId = [string]$post.id
-            $type = [string]$post.media_type
-            $url = [string]$post.permalink
-            $remoteCaption = NormalizeCaption ([string]$post.caption)
-            if ($remoteId -match '^\\d{6,30}    version='issue2374_ig_carousel_owner_history_v2'
+        foreach ($item in @($ownedMedia[$city])) {
+            $id=[string]$item.id
+            $type=[string]$item.media_type
+            $permalink=[string]$item.permalink
+            $cap=NormalizeCaption ([string]$item.caption)
+            if ($id -match '^\d{6,30}$' -and $type -eq 'CAROUSEL_ALBUM' -and
+                $permalink -match '^https://(www\.)?instagram\.com/p/' -and
+                $cap.StartsWith($needle) -and -not $seen.ContainsKey($id)) {
+                $seen[$id]=$true
+                $hits+=@{id=$id;published_at=[string]$item.timestamp;public_permalink=$permalink}
+            }
+        }
+    }
+    $status=if ($hits.Count -gt 1) {'multiple_public_carousel_caption_candidates_require_asset_proof'}
+        elseif ($hits.Count -eq 1) {'single_public_carousel_caption_candidate_requires_asset_proof'}
+        elseif (-not $needle) {'caption_too_short_no_negative_proof'}
+        else {'no_matching_carousel_in_bounded_history_no_negative_proof'}
+    $matches+=@{output=$number;profile=$city;status=$status;candidate_count=$hits.Count;candidates=$hits;original_asset_proven=$false;retry_authorized=$false}
+}
+$counts=@{}
+foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+    $key=$m.profile+'|'+[string]$m.candidates[0].id
+    if(-not $counts.ContainsKey($key)){$counts[$key]=0}
+    $counts[$key]++
+}
+foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
+    $key=$m.profile+'|'+[string]$m.candidates[0].id
+    if($counts[$key] -gt 1){$m.status='shared_provider_candidate_requires_manual_review'}
+}
+$report = @{
+    version='issue2374_ig_carousel_owner_history_v2'
     source='production_supabase'
     read_only=$true
     output_writes=0
@@ -172,46 +195,5 @@ foreach ($source in $rows) {
     bounded_media_inventory=$inventory
     matched_output_candidates=$matches
     candidate_count=@($matches|Where-Object{$_.candidate_count -gt 0}).Count
-}
-Write-Output ('ISSUE2374_IG_OWNER_AUTH_AUDIT=' + ($report | ConvertTo-Json -Compress -Depth 6))
- -and $type -eq 'CAROUSEL_ALBUM' -and
-                $url -match '^https://(www\\.)?instagram\\.com/p/' -and
-                $remoteCaption.StartsWith($needle)) {
-                $hits += @{ id=$remoteId; published_at=[string]$post.timestamp; public_permalink=$url; match='owner_native_carousel_caption_prefix_only' }
-            }
-        }
-    }
-    $seen = @{};$uniq = @()
-    foreach ($hit in $hits) { if (-not $seen.ContainsKey($hit.id)) { $seen[$hit.id]=$true;$uniq+=$hit } }
-    $status = if ($uniq.Count -gt 1) {'multiple_public_carousel_text_candidates_require_asset_proof'}
-        elseif ($uniq.Count -eq 1) {'single_public_carousel_text_candidate_requires_asset_proof'}
-        elseif (-not $needle) {'caption_too_short_no_negative_proof'}
-        else {'no_native_carousel_caption_match_in_bounded_history_no_negative_proof'}
-    $matches += @{output=$number;profile=$city;status=$status;candidate_count=$uniq.Count;candidates=$uniq;original_asset_proven=$false;retry_authorized=$false}
-}
-# A single remote Instagram item cannot prove delivery for two source outputs.
-$claimed = @{}
-foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
-    $key=$m.profile+'|'+[string]$m.candidates[0].id
-    if (-not $claimed.ContainsKey($key)) {$claimed[$key]=0}
-    $claimed[$key]++
-}
-foreach ($m in @($matches|Where-Object{$_.candidate_count -eq 1})) {
-    $key=$m.profile+'|'+[string]$m.candidates[0].id
-    if ($claimed[$key] -gt 1) {$m.status='shared_remote_candidate_requires_manual_review'}
-}
-$report = @{
-    version='issue2374_ig_carousel_oauth_v1'
-    source='production_supabase'
-    read_only=$true
-    output_writes=0
-    provider_writes=0
-    publish_calls=0
-    airtable_operations=0
-    checked_at=[DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
-    exact_target_count=$outputs.Count
-    provider_get_calls=$script:providerGets
-    targets=$outputs
-    owner_scopes=$ownerChecks
 }
 Write-Output ('ISSUE2374_IG_OWNER_AUTH_AUDIT=' + ($report | ConvertTo-Json -Compress -Depth 6))
