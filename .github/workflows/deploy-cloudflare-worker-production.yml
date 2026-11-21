@@ -352,7 +352,7 @@ jobs:
             'observability':{'enabled':True,'head_sampling_rate':1},
             'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
-            'secrets':{'required':['AIRTABLE_PAT']}
+            'secrets':{'required':['SUPABASE_SERVICE_ROLE_KEY']}
           }
           # Independent SQLite namespace. No schedule reservation data is shared.
           cfg['durable_objects']={'bindings':[{
