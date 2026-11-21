@@ -139,6 +139,59 @@ try {
       $report.page_stories+=@{page_story_id=$sid;get_ok=$false;page_owned=$false}
     }
   }
+  # Inspect account-owned Page posts in original creation window, GET only.
+  # An absent exact parent in this bounded window is NOT non-delivery proof.
+  $report.album_scan=[ordered]@{
+    attempted=$false;complete=$false;pages=0;posts=0;exact_eight_attachment_candidates=0;
+    candidate_parent_id='';candidate_permalink='';reason='not_started'
+  }
+  $report.stage='meta-page-post-album-association-get'
+  try {
+    $scan=$report.album_scan
+    $scan.attempted=$true
+    $fields='id,from,created_time,permalink_url,attachments.limit(10){target,subattachments.limit(25){target}}'
+    $next='https://graph.facebook.com/'+$ver+'/'+$page+'/posts?fields='+[uri]::EscapeDataString($fields)+'&since=2026-11-16&until=2026-11-21&limit=100'
+    $seenNext=@{}
+    for($pn=0;$pn -lt 5 -and $next;$pn++){
+      if($next -notmatch '^https://graph[.]facebook[.]com/' -or $seenNext.ContainsKey($next)){throw 'unsafe_cursor'}
+      $seenNext[$next]=$true
+      $result=Invoke-RestMethod -Uri $next -Method Get -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 35
+      $scan.pages++
+      foreach($post in @($result.data)){
+        if($null -eq $post){continue}
+        $scan.posts++
+        $postId=[string]$post.id
+        if($postId -notmatch ('^'+[regex]::Escape($page)+'_\d{6,30}$') -or [string]$post.from.id -ne $page){continue}
+        $attachmentIds=@()
+        foreach($a in @($post.attachments.data)){
+          if($null -eq $a){continue}
+          if([string]$a.target.id -match '^\d{12,30}$'){$attachmentIds+=[string]$a.target.id}
+          foreach($sub in @($a.subattachments.data)){
+            if($null -ne $sub -and [string]$sub.target.id -match '^\d{12,30}$'){$attachmentIds+=[string]$sub.target.id}
+          }
+        }
+        $uniqueAttachments=@($attachmentIds|Sort-Object -Unique)
+        $matched=@($ids|Where-Object{$uniqueAttachments -contains $_})
+        if($matched.Count -eq 8){
+          $scan.exact_eight_attachment_candidates++
+          $perma=[string]$post.permalink_url
+          if($perma -match '^https://(www[.]|m[.])?facebook[.]com/'){
+            $scan.candidate_parent_id=$postId
+            $scan.candidate_permalink=$perma
+          }else{$scan.reason='attachment_match_but_permalink_unverified'}
+        }
+      }
+      $following=[string]$result.paging.next
+      if($following -and $following -notmatch '^https://graph[.]facebook[.]com/'){throw 'unsafe_page_cursor'}
+      $next=$following
+    }
+    $scan.complete=(-not $next)
+    if(-not $scan.complete){$scan.reason='pagination_bound_reached_no_absence_claim'}
+    elseif($scan.exact_eight_attachment_candidates -eq 1 -and $scan.candidate_parent_id -and $scan.candidate_permalink){
+      $scan.reason='exact_eight_attachment_parent_candidate_requires_approval_and_public_verification'
+    }elseif($scan.exact_eight_attachment_candidates -gt 1){$scan.reason='multiple_existing_parent_candidates_no_duplicate_publish'}
+    else{$scan.reason='no_exact_eight_attachment_parent_in_bounded_window_no_absence_claim'}
+  }catch{$report.album_scan.reason='bounded_account_owned_album_get_unavailable'}
   $report.stage='completed'
   $report.reason=if($report.verified_owned -ne 8){'original_photo_ids_incomplete_or_ambiguous_no_publish'}elseif($report.distinct_page_story_ids -eq 0){'eight_owned_photos_without_story_refs_parent_post_not_proven'}elseif($report.distinct_page_story_ids -eq 1 -and $report.owned_story_refs -eq 1){'one_page_owned_existing_story_candidate_parent_attachments_unverified'}elseif($report.distinct_page_story_ids -gt 1){'multiple_original_page_stories_detected_do_not_create_duplicate_parent'}else{'original_page_story_association_ambiguous_no_publish'}
 }catch{
