@@ -25,3 +25,11 @@ jobs:
           node-version: '22'
       - name: Verify exact current 4-profile Home counts via Supabase-only Worker service binding
         run: node repair/scripts/live-home-count-verification-20261120.mjs
+      - name: Preserve exact Home exception identities for P1 #2340
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-2340-exact-id-census
+          path: /tmp/home-2340-exact-inventory.json
+          if-no-files-found: warn
+          retention-days: 30
