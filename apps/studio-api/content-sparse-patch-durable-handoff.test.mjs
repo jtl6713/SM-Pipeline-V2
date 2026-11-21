@@ -110,7 +110,7 @@ test("Content PATCH cannot succeed when original canonical row is missing",async
   }finally{globalThis.fetch=fetchBefore;}
 });
 
-test("NYC v3 retains prior immutable R2 receipts and retries only Coney and DUMBO after authoritative empty-output preflight",()=>{
+test("NYC v4 retains prior R2 receipts and retries only after exact NOT_FOUND and verified licensed replacement",()=>{
   const source=readFileSync(new URL("./worker-functions-02.mjs",import.meta.url),"utf8");
   const start=source.indexOf("export async function studioNyc20261121HandoffCron(");
   const stop=source.indexOf("/*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/",start);
@@ -118,6 +118,9 @@ test("NYC v3 retains prior immutable R2 receipts and retries only Coney and DUMB
   const body=source.slice(start,stop);
   assert.match(body,/sparse-patch-v2/,"v2 receipt is read without resetting it");
   assert.match(body,/final-two-v3/);
+  assert.match(body,/licensed-music-v4/);
+  assert.match(body,/v3_outcome_not_exact_not_found/);
+  assert.match(body,/licensed_music_asset_failed_preflight/);
   assert.match(body,/recF11iJFCPcRbGsk/);
   assert.match(body,/recNHXsBTfgfuagts/);
   assert.match(body,/prior_verified_fanout_needs_investigation/);
