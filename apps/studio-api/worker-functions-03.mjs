@@ -14896,6 +14896,12 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
         await env.STUDIO_MEDIA.delete(mediaKey).catch(() => {});
         return respond(request, env, visible({ ...job, state: "declined" }));
       }
+      if (job.state === "accepting") {
+        throw new HttpError(409, "Original AI video preserved, but its Drive/Asset Manager registration is incomplete or still in progress. Refresh Video Status and reconcile the existing registration before retrying. Do not regenerate.");
+      }
+      if (job.state === "accepted") {
+        throw new HttpError(409, "Video job was already accepted. Refresh the saved storyboard to confirm scene selection; reconcile the original asset if selection is missing.");
+      }
       if (!["awaiting_review", "registered"].includes(job.state)) {
         throw new HttpError(409, "Video is not ready for explicit acceptance");
       }
