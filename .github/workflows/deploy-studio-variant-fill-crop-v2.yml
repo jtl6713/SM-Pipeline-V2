@@ -1,12 +1,12 @@
 name: Deploy Studio Variant Fill Crop V2
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/studio-variant-service/**'
-      - '.github/workflows/deploy-studio-variant-fill-crop-v2.yml'
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter DEPLOY-SUPABASE-VARIANT to authorize release'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,11 +17,14 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'DEPLOY-SUPABASE-VARIANT' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TARGET_WORKER: chicagoshining-studio-variant-service
       VERIFY_WORKER: chicagoshining-variant-v2-verify
       WRANGLER_VERSION: 4.123.0
@@ -36,8 +39,8 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -s apps/studio-variant-service/worker.mjs
           test -s apps/studio-variant-service/wrangler.jsonc
-          test -s deploy/credential-envelope/private.pem.enc
-          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
           node --check apps/studio-variant-service/worker.mjs
           node --test apps/studio-variant-service/worker.test.mjs
           grep -q 'fill-crop-v2' apps/studio-variant-service/worker.mjs
@@ -46,42 +49,46 @@ jobs:
             exit 1
           fi
 
-      - name: Recover live variant endpoint and token in runner temp
+      - name: Read active variant service settings from Supabase only
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass env:CLOUDFLARE_API_TOKEN \
-            -in deploy/credential-envelope/private.pem.enc \
-            -out /tmp/airtable-envelope-private.pem
-          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
-          openssl pkeyutl -decrypt \
-            -inkey /tmp/airtable-envelope-private.pem \
-            -in /tmp/airtable-pat.enc \
-            -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha256 \
-            -pkeyopt rsa_mgf1_md:sha256 \
-            -out /tmp/airtable-pat.txt
-          PAT=$(tr -d '\r\n' </tmp/airtable-pat.txt)
-          test "${PAT#pat}" != "$PAT"
-          curl -fsS \
-            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql/recMROc2eVH1xlthP' \
-            -H "Authorization: Bearer $PAT" \
-            -o /tmp/variant-base-setting.json
-          curl -fsS \
-            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql/recn0Kjduge0Dv2ac' \
-            -H "Authorization: Bearer $PAT" \
-            -o /tmp/variant-token-setting.json
-          jq -er '
-            select(.fields.Active == true and .fields.Setting_Name == "STUDIO_VARIANT_SERVICE_BASE_URL") | .fields.Setting_Value
-          ' /tmp/variant-base-setting.json >/tmp/variant-base-url.txt
-          jq -er '
-            select(.fields.Active == true and .fields.Setting_Name == "STUDIO_VARIANT_SERVICE_TOKEN") | .fields.Setting_Value
-          ' /tmp/variant-token-setting.json >/tmp/variant-token.txt
-          test -n "$(cat /tmp/variant-base-url.txt)"
-          test -n "$(cat /tmp/variant-token.txt)"
-          rm -f /tmp/variant-base-setting.json /tmp/variant-token-setting.json
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          curl -fsS --retry 2 --max-time 25 --get \
+            "${SUPABASE_URL%/}/rest/v1/engagement_settings" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H 'Accept: application/json' \
+            --data-urlencode 'payload->>source=eq.pipeline' \
+            --data-urlencode 'payload->>Active=eq.true' \
+            --data-urlencode 'payload->>Setting_Name=in.(STUDIO_VARIANT_SERVICE_BASE_URL,STUDIO_VARIANT_SERVICE_TOKEN)' \
+            --data-urlencode 'select=payload' \
+            -o /tmp/variant-supabase-settings.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=json.loads(Path('/tmp/variant-supabase-settings.json').read_text())
+          expected={'STUDIO_VARIANT_SERVICE_BASE_URL','STUDIO_VARIANT_SERVICE_TOKEN'}
+          if not isinstance(rows,list) or len(rows)!=2:
+              raise SystemExit('Supabase variant service settings must have exactly two active rows')
+          vals={}
+          for row in rows:
+              payload=row.get('payload') or {}
+              name=str(payload.get('Setting_Name') or '')
+              value=str(payload.get('Setting_Value') or '').strip()
+              if name not in expected or name in vals or not value:
+                  raise SystemExit('Invalid/duplicate Supabase variant setting')
+              vals[name]=value
+          if set(vals)!=expected or not vals['STUDIO_VARIANT_SERVICE_BASE_URL'].startswith('https://'):
+              raise SystemExit('Supabase variant endpoint/token missing')
+          Path('/tmp/variant-base-url.txt').write_text(vals['STUDIO_VARIANT_SERVICE_BASE_URL'].rstrip('/'))
+          Path('/tmp/variant-token.txt').write_text(vals['STUDIO_VARIANT_SERVICE_TOKEN'])
+          print('variant_supabase_settings=PASS')
+          PY
+          chmod 600 /tmp/variant-base-url.txt /tmp/variant-token.txt
+          rm -f /tmp/variant-supabase-settings.json
 
       - name: Generate deterministic wide PNG fixture
         shell: bash
@@ -391,7 +398,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in /tmp/variant-token.txt /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc; do
+          for file in /tmp/variant-token.txt /tmp/variant-base-url.txt /tmp/variant-supabase-settings.json; do
             if [[ -e "$file" ]]; then shred -u "$file" 2>/dev/null || rm -f "$file"; fi
           done
 

@@ -265,10 +265,18 @@ jobs:
               print(f"GATE[{mark}] {name}" + (f" — {detail}" if detail else ""))
 
           check("health.ok", health.get("ok") is True)
+          # The historical Workstream A probe is also consumed by release
+          # monitoring. A still-live Airtable primary source MUST NOT pass.
+          primary_read_is_supabase = (
+              health.get("studio_read_source") == "supabase"
+              and sync.get("read_source") == "supabase"
+          )
+          print("AIRTABLE_RETIREMENT_PRIMARY_READ_GATE=" +
+                ("PASS" if primary_read_is_supabase else "BLOCKED"))
           check(
-              "studio_read_source=airtable",
-              health.get("studio_read_source") == "airtable",
-              f"got {health.get('studio_read_source')!r}",
+              "studio_primary_read_source=supabase",
+              primary_read_is_supabase,
+              f"health={health.get('studio_read_source')!r} sync={sync.get('read_source')!r}",
           )
           check(
               "studio_supabase_phase5_writes_v1",
@@ -519,6 +527,10 @@ jobs:
               "runner": {
                   k: runner.get(k)
                   for k in ("ok", "version", "studio_write_source", "supabase_pipeline_writes")
+              },
+              "airtable_retirement_primary_read_gate": {
+                  "ok": primary_read_is_supabase,
+                  "note": "Legacy Workstream A success is not Airtable retirement acceptance.",
               },
               "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks],
               "note": (

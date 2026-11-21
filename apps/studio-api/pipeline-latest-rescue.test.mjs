@@ -43,14 +43,15 @@ test("Newest live rows override stale snapshot rows without losing older items",
   assert.equal(actual[1].studio_state,"Ready for Review");
   assert.equal(fn(old,[fresh[0]]).length,2);
 });
-test("UI renders newest arrivals first and marks stale history",()=>{
+test("Paged Pipeline does not inject unrelated latest outputs and fails closed on stale data", () => {
   const start=app.indexOf("async function refreshPipelineOutputs");
   const section=app.slice(start,app.indexOf("\n  async function loadOutputs",start));
-  assert.match(section,/\/api\/outputs\?mode=latest/);
-  assert.match(section,/const latestSettled = await latestPromise/);
-  assert.match(section,/renderOutputsTable\(target, liveRows\)/);
+  assert.match(section,/pipelineContentPageApiPath\(\)/);
   assert.match(section,/pipelineListUnverified = historyStale/);
-  assert.match(section,/Newest outputs checked live/);
-  const cache=app.slice(app.indexOf("function readPipelineOutputCache"),app.indexOf("function writePipelineOutputCache"));
-  assert.doesNotMatch(cache,/localStorage\.getItem\("studio\.pipelineOutputs\.v1"\)/);
+  assert.match(section,/pageScopeAtRequest !== pipelineContentPageScope\(\)/);
+  assert.doesNotMatch(section,/api\("\/api\/outputs\?mode=latest"/);
+  const cache=app.slice(app.indexOf("function pipelineOutputCacheKey"),app.indexOf("function readPipelineOutputCache"));
+  assert.match(cache,/pipelineContentPageOffset/);
+  assert.match(cache,/pipelineContentCreatedFrom/);
+  assert.match(cache,/pipelineContentCreatedTo/);
 });

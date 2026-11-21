@@ -1287,6 +1287,15 @@
  </details>
  </div>
  </section>
+ <section id="pipelineContentControls" class="pipeline-content-controls" aria-label="Pipeline content ID pagination">
+  <label>Created from <input id="pipelineContentFrom" type="date" aria-label="Created from date"></label>
+  <label>Created to <input id="pipelineContentTo" type="date" aria-label="Created to date"></label>
+  <label>Content IDs per page <select id="pipelineContentSize" aria-label="Content IDs per page"><option value="10">10</option><option value="20">20</option><option value="25">25</option><option value="50">50</option></select></label>
+  <button type="button" id="pipelineContentPrev" disabled>Previous</button>
+  <span id="pipelineContentPageLabel" aria-live="polite">Content IDs 1–10</span>
+  <button type="button" id="pipelineContentNext" disabled>Next</button>
+  <span class="subtle" id="pipelineContentTimezoneHint">Creation dates follow the profile timezone</span>
+ </section>
 
  <section class="panel pipeline-schedule-overview pipeline-schedule-collapsed" id="pipelineScheduleOverview">
  <div class="panel-heading pipeline-schedule-overview-heading">
@@ -2104,6 +2113,7 @@
    </div>
   </form>
  </section>
+
 
  <section class="ops-schedule-settings" aria-labelledby="operationsScheduleSettingsHeading" style="margin:1rem 0 1.5rem;padding:1rem 0;border-top:1px solid rgba(0,0,0,.08);border-bottom:1px solid rgba(0,0,0,.08)">
  <h3 id="operationsScheduleSettingsHeading" style="margin:0 0 .35rem">Global scheduling</h3>
@@ -3290,6 +3300,13 @@
  <link rel="stylesheet" href="/assets/manual-asset-classification.css?v=0.6.1035-owner-global-generation-2532">
 <script defer src="/assets/studio-nav-autoclose.js?v=0.6.1035-owner-global-generation-2532"></script>
 <script defer src="/assets/manual-asset-classification.js?v=0.6.1035-owner-global-generation-2532"></script>
+ <style>
+ .pipeline-content-controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:12px 14px}
+ .pipeline-content-controls label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+ .pipeline-content-controls input,.pipeline-content-controls select{min-height:36px;max-width:180px}
+ .pipeline-content-controls button{min-height:36px}
+ #pipelineScheduleOverview{display:none!important}
+ </style>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){

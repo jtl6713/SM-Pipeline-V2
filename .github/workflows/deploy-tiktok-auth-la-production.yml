@@ -1,10 +1,12 @@
 name: Deploy LA TikTok Auth Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'deploy/tiktok-auth-la-production.txt'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter DEPLOY-LA-TIKTOK-AUTH (never rearm or publish automatically)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'DEPLOY-LA-TIKTOK-AUTH' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -104,49 +107,26 @@ jobs:
           jq -e '.ok==true' /tmp/health.json >/dev/null
           echo "la_tiktok_worker_deploy=PASS"
 
-      - name: Rearm LA TikTok drafts 889/937/963 after auth alignment
-        env:
-          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      - name: Roll back on failed deployment verification
+        if: ${{ failure() }}
         shell: bash
         run: |
           set -euo pipefail
-          PAT=$(printf '%s' "${AIRTABLE_PAT:-}" | tr -d '\r\n')
-          if [ -z "$PAT" ]; then
-            echo "AIRTABLE_PAT missing; skip rearm of 889/937/963"
-            exit 0
-          fi
-          ROOT="https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0"
-          python - <<'PY' >/tmp/la-rearm.json
-          import json
-          records = []
-          for rec in ["rect8fjS3MmqDvpvZ", "recOrS8vLYhZY7Y3b", "recjcpGYFqRNEJtin"]:
-              records.append({
-                  "id": rec,
-                  "fields": {
-                      "TikTok_Draft_Status": "Ready for Delivery",
-                      "Publish_Status": "Ready to Publish",
-                      "Manual_Fallback_Required": False,
-                      "Publish_Retry_Eligible": True,
-                      "Publish_Attempt_Count": 0,
-                      "Studio_Publish_Dispatch_Count": 0,
-                      "Publish_Error_Message": "",
-                      "Publish_Error_Stage": "",
-                      "Publish_Locked_By": "",
-                      "Publish_Locked_At": None,
-                      "Publish_Started_At": None,
-                      "Publish_Next_Retry_At": None,
-                  },
-              })
-          print(json.dumps({"records": records, "typecast": True}, separators=(",", ":")))
-          PY
-          code=$(curl -sS -o /tmp/la-rearm-result.json -w '%{http_code}' -X PATCH "$ROOT" \
-            -H "Authorization: Bearer $PAT" \
+          if [[ ! -s /tmp/previous-version.txt ]]; then exit 0; fi
+          if [[ ! -s /tmp/deploy.log ]]; then exit 0; fi
+          PREV=$(cat /tmp/previous-version.txt)
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          jq -n --arg prev "$PREV" '{
+            strategy:"percentage",
+            versions:[{version_id:$prev,percentage:100}],
+            annotations:{"workers/message":"Rollback LA TikTok auth failed verification"}
+          }' >/tmp/rollback-on-failure.json
+          curl -fsS -X POST "$API/deployments?force=true" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data-binary @/tmp/la-rearm.json)
-          echo "la_rearm_http=$code"
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '.records|length==3' /tmp/la-rearm-result.json >/dev/null
-          echo "la_tiktok_889_937_963_rearm=PASS"
+            --data-binary @/tmp/rollback-on-failure.json >/tmp/rollback-on-failure-result.json
+          jq -e '.success==true' /tmp/rollback-on-failure-result.json >/dev/null
+          echo "la_tiktok_auth_rollback=PASS"
 
       - name: Upload sanitized deployment evidence
         if: always()

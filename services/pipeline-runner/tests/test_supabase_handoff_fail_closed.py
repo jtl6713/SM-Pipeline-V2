@@ -21,7 +21,7 @@ def test_create_rejects_phantom_content_item(monkeypatch):
     # I4 then marked the Idea Promoted, hiding it with no Content Item.
     monkeypatch.setattr("supabase_pipeline.commit_minted_creates", lambda *a, **k: False)
     client = _client()
-    with pytest.raises(RuntimeError, match="authoritative create did not commit"):
+    with pytest.raises(RuntimeError, match="Supabase create uncommitted.*no Airtable fallback"):
         client.create_records(CONTENT_ITEMS_TABLE, [{"Content_Title": "NYC handoff"}])
 
 

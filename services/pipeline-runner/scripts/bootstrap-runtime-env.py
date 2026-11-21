@@ -1,4 +1,8 @@
-"""Bootstrap pipeline-runner runtime .env from YouTube uploader + Airtable settings."""
+"""Bootstrap pipeline-runner runtime .env using Supabase settings only.
+
+The previous implementation read Airtable Pipeline Settings and copied its PAT
+into the runner .env. Airtable is retired; no network fallback is permitted.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +16,6 @@ from pathlib import Path
 PIPELINE_ROOT = Path(r"D:\Content Creation\ChicagoShining Pipeline")
 RUNTIME_ENV = PIPELINE_ROOT / "Services" / "pipeline-runner" / "service" / ".env"
 YOUTUBE_ENV = PIPELINE_ROOT / "Services" / "youtube-uploader" / "service" / ".env"
-BASE = "appe33zkZn35yirTL"
-SETTINGS = "tblpHPWeEkyJaF7ql"
-PAT = os.environ.get("AIRTABLE_PAT", "")
 
 SETTING_NAMES = [
     "STUDIO_VARIANT_SERVICE_BASE_URL",
@@ -38,26 +39,46 @@ def read_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def airtable_setting(name: str) -> str:
-    formula = urllib.parse.urlencode(
-        {"filterByFormula": f"AND({{Setting_Name}}='{name}',{{Active}}=1)", "maxRecords": 1}
-    )
-    url = f"https://api.airtable.com/v0/{BASE}/{SETTINGS}?{formula}"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {PAT}"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        payload = json.loads(resp.read().decode())
-    records = payload.get("records", [])
-    if not records:
+def supabase_setting(name: str, *, url: str, key: str) -> str:
+    if name not in SETTING_NAMES:
+        raise ValueError("Unrecognized runner bootstrap setting")
+    if not url.startswith("https://") or not key:
+        raise RuntimeError("Supabase URL and service role key are required")
+    query = urllib.parse.urlencode([
+        ("payload->>source", "eq.pipeline"),
+        ("payload->>Setting_Name", "eq." + name),
+        ("payload->>Active", "eq.true"),
+        ("select", "payload"),
+        ("limit", "2"),
+    ])
+    endpoint = url.rstrip("/") + "/rest/v1/engagement_settings?" + query
+    req = urllib.request.Request(endpoint, headers={
+        "Authorization": "Bearer " + key,
+        "apikey": key,
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        rows = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(rows, list) or len(rows) > 1:
+        raise RuntimeError("Supabase bootstrap setting lookup ambiguous for " + name)
+    if not rows:
         return ""
-    return str(records[0].get("fields", {}).get("Setting_Value") or "").strip()
+    payload = rows[0].get("payload")
+    if not isinstance(payload, dict):
+        raise RuntimeError("Supabase bootstrap settings payload invalid for " + name)
+    return str(payload.get("Setting_Value") or "").strip()
 
 
 def main() -> None:
-    if not PAT:
-        raise SystemExit("AIRTABLE_PAT missing")
-
     youtube = read_dotenv(YOUTUBE_ENV)
     existing = read_dotenv(RUNTIME_ENV)
+    url = os.environ.get("SUPABASE_URL", "").strip() or existing.get("SUPABASE_URL", "").strip()
+    key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        or existing.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
+    if not url or not key:
+        raise SystemExit("Supabase credentials missing; runner bootstrap did not change the .env")
 
     values = {
         "PORT": "3350",
@@ -66,8 +87,12 @@ def main() -> None:
         "PUBLIC_BASE_URL": "https://pipeline.chicagoshining.com",
         "PIPELINE_RUNNER_SHARED_SECRET": existing.get("PIPELINE_RUNNER_SHARED_SECRET")
         or secrets.token_urlsafe(32),
-        "AIRTABLE_PAT": PAT,
-        "AIRTABLE_BASE_ID": BASE,
+        "SUPABASE_URL": url,
+        "SUPABASE_SERVICE_ROLE_KEY": key,
+        "STUDIO_WRITE_SOURCE": "supabase",
+        "STUDIO_PHASE6_WRITE_SOURCE": "supabase",
+        "STUDIO_RUNNER_OUTPUT_READ_SOURCE": "supabase",
+        "STUDIO_RUNNER_CONTENT_READ_SOURCE": "supabase",
         "GOOGLE_CLIENT_ID": youtube.get("GOOGLE_CLIENT_ID", existing.get("GOOGLE_CLIENT_ID", "")),
         "GOOGLE_CLIENT_SECRET": youtube.get(
             "GOOGLE_CLIENT_SECRET", existing.get("GOOGLE_CLIENT_SECRET", "")
@@ -77,7 +102,7 @@ def main() -> None:
         "GOOGLE_REDIRECT_URI": youtube.get("GOOGLE_REDIRECT_URI")
         or existing.get("GOOGLE_REDIRECT_URI")
         or "http://localhost:3341/oauth2callback",
-        "SERVICE_VERSION": "2026-08-23-smv1",
+        "SERVICE_VERSION": existing.get("SERVICE_VERSION", "2026-11-20-supabase-only"),
     }
 
     for name in SETTING_NAMES:
@@ -88,12 +113,17 @@ def main() -> None:
             "R2_UPLOAD_WORKER_SECRET": "R2_UPLOAD_WORKER_SECRET",
             "STUDIO_PREVIEW_R2_PREFIX": "STUDIO_PREVIEW_R2_PREFIX",
         }[name]
-        values[env_key] = existing.get(env_key) or airtable_setting(name)
+        values[env_key] = existing.get(env_key) or supabase_setting(name, url=url, key=key)
 
-    lines = [f"{key}={value}" for key, value in values.items() if value]
+    lines = [f"{k}={v}" for k, v in values.items() if v]
     RUNTIME_ENV.parent.mkdir(parents=True, exist_ok=True)
     RUNTIME_ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(json.dumps({"ok": True, "env_path": str(RUNTIME_ENV), "keys_written": list(values.keys())}, indent=2))
+    print(json.dumps({
+        "ok": True,
+        "env_path": str(RUNTIME_ENV),
+        "keys_written": sorted(values),
+        "source": "supabase",
+    }, indent=2))
 
 
 if __name__ == "__main__":

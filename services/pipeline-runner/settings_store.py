@@ -159,19 +159,22 @@ def commit_setting(settings: dict, table_id: str, record_id: str, fields: dict) 
     payload = {**prior, **dict(fields or {}), "source": source}
     body = {"airtable_record_id": record_id, "payload": payload}
     if isinstance(existing, list) and existing:
-        _rest(
+        saved = _rest(
             settings,
-            f"engagement_settings?airtable_record_id=eq.{quote(record_id, safe='')}",
+            f"engagement_settings?airtable_record_id=eq.{quote(record_id, safe='')}"
+            f"&payload->>source=eq.{source}&select=airtable_record_id",
             "PATCH",
             body,
-            prefer="return=minimal",
+            prefer="return=representation",
         )
     else:
-        _rest(
+        saved = _rest(
             settings,
             "engagement_settings?on_conflict=airtable_record_id",
             "POST",
             [body],
-            prefer="resolution=merge-duplicates,return=minimal",
+            prefer="resolution=merge-duplicates,return=representation",
         )
+    if not isinstance(saved, list) or len(saved) != 1 or saved[0].get("airtable_record_id") != record_id:
+        raise RuntimeError(f"Supabase setting commit not confirmed for {record_id}")
     return True

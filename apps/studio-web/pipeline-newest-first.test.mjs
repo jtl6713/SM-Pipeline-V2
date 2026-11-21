@@ -4,14 +4,13 @@ import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 
-test("Pipeline content packages sort by Production approval timestamp, independent of schedule", () => {
+test("Pipeline content packages sort by numeric Content ID descending, independent of approval and schedule", () => {
   const start = app.indexOf("function groupedPipelineRecords(records)");
   const end = app.indexOf("function isPipelineGroupExpanded(", start);
   assert.ok(start >= 0 && end > start);
   const source = app.slice(start, end);
-  assert.match(source, /record\.production_approved_at/);
-  assert.match(source, /bApproved - aApproved/);
-  assert.doesNotMatch(source, /scheduled_post_date|publish_date/);
+  assert.match(source, /contentNumber\(b\) - contentNumber\(a\)/);
+  assert.doesNotMatch(source, /production_approved_at|scheduled_post_date|publish_date/);
   assert.match(source, /pipelineOutputNumber/);
 });
 

@@ -1485,4 +1485,6 @@ Deploy #2531 Pipeline Supabase history API from merged PR #2534; 22/22 CI checks
 
 2026-11-21 P0 #2340 urgent production release: both underlying root fixes already merged and tested (#2538 21/21 green, #2540 9/9 green). Fix false scheduled-hold publish-dispatch count; due-time queue oldest-first + bounded scan; Factory Approved requires a committed profile-local MAE future slot, enabled automatic publisher and atomic receipt. Preserve current Cloudflare bindings/secrets, verified active version and rollback. Do NOT rearm historical old provider operations, remove 2099/DNP fences, reset attempts, change past due dates or claim Published without provider evidence. Verify production deployed then run exact Home Past Due/Failed census. Issue #2340 stays open until genuine zero.
 
+Deploy #2536 Pipeline Content ID Worker from PR #2537: authenticated Supabase content_page reader, profile-local date bounds, zero Airtable read; read-only query, no publishing state writes.
+
 # 2026-11-21 PR #2533 issue #2532: release owner-scoped Supabase global generation prompt, editable per-profile every-generation guidance, I1/ITS1/SAI1/P1/thumbnail inheritance, and UI 0.6.1035. Preserve publication holds; no publishing on deployment.

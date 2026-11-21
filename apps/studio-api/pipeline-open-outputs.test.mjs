@@ -24,7 +24,8 @@ test("Pipeline keeps unfinished packages via open-output merge", async () => {
   assert.match(worker, /FIND\("Manual Action",\{TikTok_Draft_Status\}/);
   assert.match(worker, /FIND\("Manual Fallback",\{TikTok_Draft_Status\}/);
   assert.match(worker, /manual fallback/);
-  assert.match(app, /mode=history&offset=/);
+  assert.match(app, /mode: "content_page"/);
+  assert.match(app, /pipelineContentPageApiPath/);
   const refresh = app.slice(app.indexOf("async function refreshPipelineOutputs("), app.indexOf("async function loadOutputs()"));
   assert.doesNotMatch(refresh, /\/api\/outputs\?limit=250/);
   assert.match(app, /BUILD_ID = "item4-0[.]6[.][0-9]+[-a-zA-Z0-9.]*"/);
