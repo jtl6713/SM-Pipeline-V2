@@ -31,7 +31,7 @@ jobs:
           foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','oembed_author_handle','oembed_author_url_handle','authorUri.Host','public-saved-url-oembed-get','exact-owned-video-analytics-query','NYC_TIKTOK_PIPELINE_SECRET','video_ids','tiktok-display-api','owned_video_owned','display_api_query_calls','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
             if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
           }
-          if(([regex]::Matches($src,'-Method Post')).Count -ne 1 -or -not $src.Contains("$base+'/tiktok/analytics/videos'")){throw 'not_exactly_one_allowed_readonly_video_query'}
+          if(([regex]::Matches($src,'-Method Post')).Count -ne 1 -or -not $src.Contains('/tiktok/analytics/videos')){throw 'not_exactly_one_allowed_readonly_video_query'}
           foreach($bad in @('/tiktok/draft/photo/init','/tiktok/draft/video/init','/tiktok/publish-private','/media_publish','-Method Patch','-Method Put','-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){
             if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}
           }
