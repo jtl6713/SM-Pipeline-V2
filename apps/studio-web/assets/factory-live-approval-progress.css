@@ -1,0 +1,55 @@
+/* Factory's live approval stages, sourced from durable R2 checkpoints. */
+.factory-batch-live-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .3rem .65rem;
+  margin-top: .4rem;
+  padding: .45rem .6rem;
+  border: 1px solid var(--line, #d7e0e9);
+  border-radius: .6rem;
+  background: var(--surface-2, #f2f7fb);
+  color: var(--ink, #143354);
+  font-size: .84rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.factory-batch-live-summary strong { font-size: .84rem; white-space: normal; overflow-wrap: anywhere; }
+.factory-live-phase {
+  display: inline-flex;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--ink, #133457);
+  border: 1px solid var(--line, #d0dce9);
+  border-radius: .35rem;
+  background: #eef5fc;
+  padding: .12rem .4rem;
+  max-width: 100%;
+}
+.factory-live-meta {
+  display: inline-block;
+  color: var(--muted, #48647f);
+  font-size: .78rem;
+  font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  line-height: 1.35;
+}
+.factory-live-idle { color: var(--muted, #48647f); font-size: .8rem; }
+.factory-batch-item-list .factory-live-phase { margin-inline: .2rem; }
+.factory-batch-item-list .factory-live-meta { display: block; margin-top: .2rem; }
+.factory-batch-child .factory-batch-live-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .25rem;
+  padding: .35rem .45rem;
+  margin-top: .4rem;
+}
+.factory-batch-recent-row .factory-batch-live-summary { text-align: left; }
+@media (max-width: 600px) {
+  .factory-batch-live-summary { gap: .25rem .4rem; padding: .4rem; }
+  .factory-live-phase, .factory-live-meta { font-size: .76rem; }
+  .factory-batch-recent-row .factory-batch-live-summary { width: 100%; }
+}

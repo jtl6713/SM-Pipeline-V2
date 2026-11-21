@@ -105,6 +105,27 @@ def test_ttd_retry_backoff_and_attempt_ceiling():
     )) is None
 
 
+def test_ttd0_asset_repair_hold_requires_explicit_rearm():
+    held = _record(
+        Platform="TikTok",
+        Auto_Publish_Enabled=True,
+        Do_Not_Publish=False,
+        TikTok_Draft_Status="Retry Pending",
+        Publish_Error_Stage="TTD0_ASSETS",
+        Publish_Retry_Eligible=False,
+        Publish_Attempt_Count=1,
+    )
+    assert ttd0_eligibility_reason(held) == "tiktok_asset_repair_required"
+
+    # The retry ceiling and previous attempts remain intact; only a verified,
+    # intentional stage rearm can continue with the corrected 9:16 assets.
+    held["fields"]["TikTok_Draft_Status"] = "Ready for Assets"
+    assert ttd0_eligibility_reason(held) is None
+    held["fields"]["TikTok_Draft_Status"] = "Retry Pending"
+    held["fields"]["Publish_Retry_Eligible"] = True
+    assert ttd0_eligibility_reason(held) is None
+
+
 def test_ttd1_unknown_remote_result_is_not_retried():
     class FakeClient:
         def __init__(self):

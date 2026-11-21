@@ -1323,7 +1323,7 @@ input, select, textarea, button {
 /* STUDIO_MANUAL_IDEA_GENERATOR_UI_V1 — compact Ideas-page generator */
 .idea-generate-panel{margin-bottom:18px}
 .idea-generate-form{padding:16px 20px;display:flex;align-items:end;gap:14px;flex-wrap:wrap}
-.idea-generate-fields{display:flex;gap:12px;align-items:end;flex:1;min-width:260px}
+.idea-generate-fields{display:flex;gap:12px;align-items:end;flex:1;min-width:180px}
 .idea-generate-fields .form-field{min-width:150px;flex:1}
 .idea-generate-fields select{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:10px 11px;font:inherit;outline:none}
 .idea-generate-fields select:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
@@ -1333,6 +1333,11 @@ input, select, textarea, button {
 .idea-generate-complete[hidden]{display:none}
 .idea-generate-panel[hidden]{display:none}
 @media(max-width:760px){.idea-generate-form{align-items:stretch}.idea-generate-fields{display:grid;grid-template-columns:1fr 1fr;width:100%}.idea-generate-actions{width:100%}.idea-generate-actions button{flex:1}}
+/* Ideas quantity is visible beside its top Generate AI ideas action. */
+#page-ideas .heading-actions .idea-generate-top-count{display:inline-flex;align-items:center;gap:8px;margin:0;white-space:nowrap;color:var(--ink);font-size:13px;font-weight:700}
+#page-ideas .heading-actions .idea-generate-top-count input{width:78px;min-width:0;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font:inherit}
+#page-ideas .heading-actions .idea-generate-top-count input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+@media(max-width:760px){#page-ideas .heading-actions .idea-generate-top-count{flex:0 0 auto}#page-ideas .heading-actions .idea-generate-top-count input{width:66px}}
 /* STUDIO_MANUAL_IDEA_GENERATOR_UI_V1_END */
 
 /* Companion Story / native still preview in the Review player */

@@ -1,0 +1,98 @@
+name: NYC handoff incident R2 receipt audit (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/nyc-handoff-r2-receipts-audit-20261121.yml'
+permissions:
+  contents: read
+concurrency:
+  group: nyc-20261121-exact-r2-receipts-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Verify read-only authority and production bucket binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl --fail-with-body -sS --retry 2 --max-time 25 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/settings" \
+            > /tmp/nyc-worker-settings.json
+          jq -e '.success==true' /tmp/nyc-worker-settings.json >/dev/null
+          jq -er '[.result.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | .bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/nyc-worker-settings.json >/tmp/nyc-production-bucket
+          echo "verified_live_r2_binding=STUDIO_MEDIA"
+      - name: Read only exact NYC original R2 handoff receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="$(cat /tmp/nyc-production-bucket)"
+          npm exec --yes --package=wrangler@4.123.0 -- wrangler --version
+          mkdir -p /tmp/nyc-receipts
+          cat >/tmp/nyc-allowlist <<'IDS'
+          rec0np6YuzVN966hP
+          rec8JA6CPgUMS0xKS
+          recAbkOm30VUXSzA4
+          recbD8PLtJpez8Oz0
+          recBiDsEj1JVat2pR
+          recD5yjZGttX2azkM
+          recEoEZL4BZJRBzgf
+          recF11iJFCPcRbGsk
+          recfcYT3Oo3DQEdgh
+          recibgbtE7UgU4xha
+          reciVKyYkqdLmGHYw
+          recNGPEWX3rZ4nNRB
+          recNHXsBTfgfuagts
+          recT1GaqAjEg9iBLt
+          rectEE56Kf81ZSOFC
+          recW2MYD8BFrElIB9
+          recYAuVSnDghuTS87
+          recz5rJXf59lA6RFv
+          recZaLHvoyR4oOcTb
+          IDS
+          test "$(wc -l </tmp/nyc-allowlist)" -eq 19
+          while IFS= read -r request; do
+            path="studio/recovery/nyc-20261121/exact/$request.json"
+            if timeout 35s npm exec --yes --package=wrangler@4.123.0 -- \
+              wrangler r2 object get "$BUCKET/$path" --remote --file "/tmp/nyc-receipts/$request.json" \
+              >/tmp/nyc-object-get.log 2>&1; then
+              jq -c --arg request "$request" '{
+                request:$request,receipt:"found",schema,status,expected,routed,blocked,
+                promoted,owner_readback_verified,resume_accepted,
+                resume_reason:(.resume_reason//""|tostring|.[0:120]),
+                error:(.error//""|tostring|.[0:120]),
+                started_at,finished_at
+              }' "/tmp/nyc-receipts/$request.json"
+            else
+              reason="unknown_read_failure"
+              if grep -Eqi 'not found|404|does not exist|no such key' /tmp/nyc-object-get.log; then
+                reason="object_not_found"
+              elif grep -Eqi '403|401|forbidden|permission|not authorized|authentication error|scope' /tmp/nyc-object-get.log; then
+                reason="token_lacks_r2_object_read"
+              elif grep -Eqi 'unknown argument|unknown command|error parsing arguments' /tmp/nyc-object-get.log; then
+                reason="wrangler_cli_syntax"
+              elif grep -Eqi 'internal error|network|connection|timeout' /tmp/nyc-object-get.log; then
+                reason="network_or_internal_error"
+              fi
+              printf '{"request":"%s","receipt":"unreadable","reason":"%s"}\n' "$request" "$reason"
+            fi
+          done </tmp/nyc-allowlist | tee /tmp/nyc-handoff-receipts-sanitized.jsonl
+          test "$(wc -l </tmp/nyc-handoff-receipts-sanitized.jsonl)" -eq 19
+          echo "all_19_receipt_paths_checked=true"
+      - name: Save sanitized status-only audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyc-handoff-20261121-r2-sanitized-status
+          path: /tmp/nyc-handoff-receipts-sanitized.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

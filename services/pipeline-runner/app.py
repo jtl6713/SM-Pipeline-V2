@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re
 
 from flask import Flask, Response, jsonify, request
 
@@ -684,6 +685,47 @@ def run_studio_asset_library():
         result.get("kind"),
     )
     return jsonify(result), 201
+
+
+@app.get("/jobs/studio-asset-library/recovery-lookup")
+def lookup_original_story_video_in_drive():
+    """Read-only exact-name lookup using the Runner's existing Drive OAuth.
+
+    No Drive credentials, raw media, or arbitrary search expression crosses to
+    Studio; a failed or incomplete listing must never authorize re-upload.
+    """
+    if not str(settings.get("pipeline_runner_shared_secret") or "").strip():
+        return jsonify(ok=False, error="runner_auth_unconfigured"), 503
+    denied, status = _verify_secret()
+    if denied is not None:
+        return denied, status
+
+    filename = str(request.args.get("filename") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,90}-Scene-[1-9][0-9]{0,2}-[0-9a-f]{8}\.mp4", filename):
+        return jsonify(ok=False, error="invalid_original_video_filename"), 422
+    # The filename comes from Studio's original immutable paid-generation run.
+    # No client-provided Drive query, folder, or token can be supplied.
+    escaped = filename  # Validated safe ASCII; no quotes or backslashes.
+    query = f"name = '{escaped}' and trashed = false"
+    try:
+        files = GoogleDriveClient().list_files(
+            query=query, page_size=100,
+            fields="files(id,name,mimeType,size,trashed,parents)",
+        )
+    except Exception:
+        logger.exception("studio video recovery Drive lookup unavailable")
+        return jsonify(ok=False, error="drive_lookup_unavailable"), 503
+    if not isinstance(files, list) or len(files) > 1000:
+        return jsonify(ok=False, error="drive_lookup_incomplete"), 503
+    safe = [
+        {key: entry.get(key) for key in ("id", "name", "mimeType", "size", "trashed", "parents")}
+        for entry in files if isinstance(entry, dict)
+    ]
+    if len(safe) != len(files):
+        return jsonify(ok=False, error="drive_lookup_incomplete"), 503
+    reply = jsonify(ok=True, complete=True, files=safe)
+    reply.headers["Cache-Control"] = "no-store"
+    return reply, 200
 
 
 @app.get("/jobs/studio-asset-library/<job_id>")

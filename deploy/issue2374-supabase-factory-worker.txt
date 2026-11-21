@@ -1,0 +1,14 @@
+Issue #2374 Supabase-only Factory Worker controlled production release.
+2026-11-21 controlled retry #2. Do not merge before verified verifier repair PR #2507 passes CI and merges to main.
+Original protected run 44913285478 rolled back after missing account-subdomain.json at readback (no provider writes).
+Deploy source feature PR #2473 (merged cf07df605e1f3542d25497cd80ef3c1c13d49b21)
+plus no-Airtable fail-closed source PR #2485.
+Use only .github/workflows/deploy-issue2374-supabase-only-factory-worker.yml.
+The old deploy-cloudflare-worker-production.yml marker MUST NOT be changed or triggered.
+Maintain exact Cloudflare binding contract, existing R2, secret preservation, rollback,
+10-core binding/source hash verification, Supabase-only authority, Airtable activity 0,
+and one authenticated GET verifying 82 original DNP-held media repair cards
+on Factory Manual lane, zero approval/delete/publish/retry authorization.
+No output writes, no media creation, no provider publication, no automatic schedule.
+On source drift, mismatched marker counts, unauthorized session, or Airtable egress:
+fail closed, roll back the Worker, keep all 82 creative holds and issue #2374 OPEN.

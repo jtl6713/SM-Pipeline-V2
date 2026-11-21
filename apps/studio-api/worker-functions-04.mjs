@@ -1,3 +1,4 @@
+import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
@@ -18,6 +19,7 @@ import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitRe
 import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-autonomous-schedule.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
+import { assessFreshSupabasePublish } from "./approved-publish-flow.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -70,9 +72,10 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
-  factoryBatchCronSelectJobs, factoryBatchFailureRouted, factoryBatchFailure,
+  factoryBatchCronSelectJobs, factoryBatchCronReceiptCandidates, factoryBatchFailureRouted, factoryBatchFailure,
   factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
   factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
+  factoryBatchReconcileSupabaseApprovalReceipts,
   factoryBatchLock, factoryBatchUnlock,
 } from "./factory-approval-queue.mjs";
 import {
@@ -2371,27 +2374,85 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
 /*__STUDIO_WORKER_END:studioHealStoryCompanionDrift__*/
 
 export async function studioReconcileApprovedPublishes(env, options = {}) {
-  await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
-    console.warn("approved missing-schedule heal before reconcile failed", error);
-  });
+  const supabaseMode = studioWriteSource(env) === "supabase";
+  // Supabase ownership must fail closed; no legacy Airtable read fallback.
+  if (supabaseMode && !studioSupabaseConfigured(env)) {
+    console.warn("Supabase approved-publish flow unavailable: canonical store not configured");
+    return [];
+  }
+  if (!supabaseMode) {
+    await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
+      console.warn("approved missing-schedule heal before reconcile failed", error);
+    });
+  }
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
   let rows = [];
   try {
-    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
-      sortField: "Scheduled_Post_Date",
-      sortDirection: "asc",
-    });
+    if (supabaseMode) {
+      const candidates = await listSupabaseDeskHealOutputs(env, {
+        kind: "fresh_publish_ready", limit: 80, nowMs,
+      });
+      rows = candidates
+        .filter(row => assessFreshSupabasePublish(row, { nowMs }).eligible)
+        .slice(0, limit);
+    } else {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
+        sortField: "Scheduled_Post_Date",
+        sortDirection: "asc",
+      });
+    }
   } catch (error) {
     console.warn("publish reconcile scan failed", error);
     return [];
   }
   const results = [];
   for (const row of rows) {
+    if (supabaseMode) {
+      // Fence BEFORE the first provider operation. If Graph succeeds and the
+      // output PATCH fails, the next cron still cannot publish a second copy.
+      try {
+        const outcome = await withOutputApprovalLock(env.STUDIO_MEDIA, row.id, async () => {
+          const current = await readSupabaseShapedOutput(env, row.id);
+          const preflight = assessFreshSupabasePublish(current, { nowMs: Date.now() });
+          if (!preflight.eligible) return { id: row.id, skipped: preflight.reason };
+          const key = "studio/state/initial-publish-fence/v1/" + row.id + ".json";
+          if (await env.STUDIO_MEDIA.get(key)) {
+            return { id: row.id, skipped: "prior_fenced_dispatch_requires_provider_reconciliation" };
+          }
+          const fence = await env.STUDIO_MEDIA.put(key, JSON.stringify({
+            output_record_id: row.id, state: "dispatch_entered",
+            created_at: new Date().toISOString(),
+            requires_provider_reconciliation_before_reentry: true,
+          }), { onlyIf: new Headers({ "If-None-Match": "*" }),
+            httpMetadata: { contentType: "application/json" } });
+          if (!fence || !(await env.STUDIO_MEDIA.get(key))) {
+            throw new Error("initial_publish_dispatch_fence_unavailable");
+          }
+          const primary = await studioDispatchApprovedPublishNow(env, current);
+          await studioStampPublishDispatch(env, current, "reconcile: " + studioPublishDispatchNote(primary));
+          // Retain the per-output lease across the publisher continuation.
+          await studioDispatchApprovedPublishTail(env, current, primary).catch((error) => {
+            console.warn("Supabase publish continuation failed; fenced for provider readback", row.id, error);
+          });
+          return { id: row.id, target: primary?.target || primary?.plan?.target || null,
+            ok: primary?.ok !== false, skipped: primary?.skipped || null,
+            fenced: true, requires_provider_readback: true };
+        }, { owner: "supabase-fresh-publish-" + crypto.randomUUID() });
+        results.push(outcome);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("Supabase fresh-publish flow failed closed", row.id, message);
+        results.push({ id: row.id, skipped: error?.status === 409 ? "output_approval_lease_active"
+          : "fresh_publisher_unavailable", error: message });
+      }
+      continue;
+    }
     try {
       const primary = await studioDispatchApprovedPublishNow(env, row);
-      await studioStampPublishDispatch(env, row, `reconcile: ${studioPublishDispatchNote(primary)}`);
+      await studioStampPublishDispatch(env, row, "reconcile: " + studioPublishDispatchNote(primary));
       results.push({ id: row.id, target: primary?.target || primary?.skipped || null, ok: primary?.ok !== false });
       await studioDispatchApprovedPublishTail(env, row, primary).catch((error) => {
         console.warn("publish reconcile tail failed", row.id, error);
@@ -2399,7 +2460,7 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("publish reconcile dispatch failed", row.id, error);
-      await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      await studioStampPublishDispatch(env, row, "reconcile failed: " + message);
       results.push({ id: row.id, error: message });
     }
   }
@@ -11643,6 +11704,11 @@ export function mapOpsQueueProfileName(profileMap, linked) {
 /*__STUDIO_WORKER_END:mapOpsQueueProfileName__*/
 
 export async function getStudioOperationsQueue(request, env, authorization) {
+  // Production writes have already migrated. Never turn a missing or stale
+  // Factory/Operations read-source flag into an Airtable record lookup.
+  if (studioWriteSource(env) === "supabase" && studioFactoryOpsReadSource(env) !== "supabase") {
+    throw new HttpError(503, "Factory Supabase read authority not configured. No Airtable fallback.");
+  }
   const controls = await readOpsQueueControls(env);
   const fetchErrors = [];
   const settleList = async (label, promise) => {
@@ -11669,30 +11735,32 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env);
+      if (pack.mediaReworkScanWarning) fetchErrors.push(pack.mediaReworkScanWarning);
       const packedOutputs = pack.outputs || [];
       const packedRequests = pack.requests || [];
-      // Empty pack usually means Phase 4 sync has not warmed requests/outputs yet.
-      if (packedOutputs.length || packedRequests.length) {
-        profiles = pack.profiles || [];
-        outputs = packedOutputs;
-        requests = packedRequests;
-        activeHolds = pack.activeHolds || [];
-        renderLaneOutputs = pack.renderLaneOutputs || [];
-        reviewOutputs = pack.reviewOutputs || [];
-        reviewParentRequests = pack.reviewParentRequests || [];
-        contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
-        for (const idea of pack.ideas || []) {
-          if (!idea?.id) continue;
-          ideaMetaById.set(idea.id, {
-            profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
-            title: String(f(idea, "Candidate_Title") || "").trim(),
-          });
-        }
-        queueReadSource = "supabase";
+      // A successful canonical Supabase read remains authoritative even when
+      // the queue is legitimately empty. Do not treat zero rows as a reason
+      // to cross the retired Airtable read boundary.
+      profiles = pack.profiles || [];
+      outputs = packedOutputs;
+      requests = packedRequests;
+      activeHolds = pack.activeHolds || [];
+      renderLaneOutputs = pack.renderLaneOutputs || [];
+      reviewOutputs = pack.reviewOutputs || [];
+      reviewParentRequests = pack.reviewParentRequests || [];
+      contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
+      for (const idea of pack.ideas || []) {
+        if (!idea?.id) continue;
+        ideaMetaById.set(idea.id, {
+          profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
+          title: String(f(idea, "Candidate_Title") || "").trim(),
+        });
       }
+      queueReadSource = "supabase";
     } catch (error) {
-      console.warn("supabase factory/ops queue read failed; falling back to Airtable", error);
-      fetchErrors.push(`supabase: ${error?.message || error}`);
+      console.error("supabase factory/ops queue read failed; legacy Airtable fallback forbidden",
+        String(error?.message || error));
+      throw new HttpError(503, "Factory data temporarily unavailable from Supabase. No legacy source fallback permitted.");
     }
   }
 
@@ -11917,6 +11985,12 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
     const readiness = evaluateReviewPackage(record);
+    const mediaRework = protectedMediaReworkSummary(record);
+    // Recovery previews are display-only; do not pass an MP4 into an <img>.
+    const sourcePreview = String(f(record, "Studio_Preview_URL") || "").trim();
+    const mediaReworkThumbnail = mediaRework &&
+      /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_\/-]+\.(jpg|jpeg|png|webp)$/i.test(sourcePreview)
+        ? sourcePreview : null;
     const reviewVisibility = factoryReviewVisibility(
       record, readiness, studioState, outputCreativeAvailable(record),
     );
@@ -11956,6 +12030,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       remotion_job_id: mapped.remotion_job_id || null,
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
+      protected_media_rework: Boolean(mediaRework),
+      recovery_source_inventory_verified: mediaRework?.source_inventory_verified || false,
+      recovery_stage: mediaRework?.stage || null,
+      recovery_next_step: mediaRework?.next_step || null,
       review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
       safety_hold_active: Boolean(String(f(record, "Factory_Review_Handoff_Safety_Hold_At") || "").trim()),
       held_review_decision: f(record, "SM_Factory_Held_Review_Receipt")?.decision || null,
@@ -11968,7 +12046,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At") || null,
       published_at: f(record, "Published_At") || null,
       platform_post_url: f(record, "Platform_Post_URL") || null,
-      thumbnail_url: mapped.thumbnail_url || null,
+      thumbnail_url: mapped.thumbnail_url || mediaReworkThumbnail || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
       render_queue_total: mapped.render_queue_total || renderQueueTotal,
@@ -11997,7 +12075,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       creative_available: outputCreativeAvailable(record),
       // One shared review-package validator governs Factory counts/eligibility.
       // This is metadata validation; the approval route probes actual CDN bytes.
-      review_package_ready: reviewVisibility.visible,
+      // Never let recovered source images turn a Changes Requested item into
+      // a Factory Approve candidate. It belongs in manual creative repair.
+      review_package_ready: mediaRework ? false : reviewVisibility.visible,
       review_package_held_preview_only: reviewVisibility.held_preview_only,
       review_package_readiness: readiness.readiness,
       review_package_missing: readiness.missing_requirements,
@@ -18455,13 +18535,16 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
           approve: (id, currentJob, checkpoint = () => {}) =>
             withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
-              checkpoint("supabase_approval_started");
+              // Awaited checkpoints let Factory poll actual in-flight stages
+              // without ever triggering an additional approval or publish.
+              await checkpoint("supabase_approval_started");
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
+                onStage: checkpoint,
               });
-              checkpoint("supabase_approval_finished");
+              await checkpoint("supabase_approval_finished");
               return result;
             }),
         });
@@ -19309,7 +19392,13 @@ export async function factoryBatchCronResume(env, ctx = null) {
   const candidates = [];
   if (factoryGlobalPolicy(env).enabled) {
     try {
-      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, { maxScan: 50 });
+      // Never advance the persistent parent cursor past groups we will not
+      // inspect. Reading 50 keys but processing only 12 permanently skipped
+      // some groups on every cursor cycle when the history was large.
+      const parentInspectionBudget = 12;
+      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, {
+        maxScan: parentInspectionBudget,
+      });
       let groupResumes = 0, inspectedGroups = 0;
       for (const groupId of groupIds) {
         try {
@@ -19318,7 +19407,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
             await factoryApprovalGroupResume(env.STUDIO_MEDIA, groupId);
             groupResumes++;
           }
-          if (!Array.isArray(parent?.children) || inspectedGroups >= 12) continue;
+          if (!Array.isArray(parent?.children) || inspectedGroups >= parentInspectionBudget) continue;
           inspectedGroups++;
           for (const child of parent.children.slice(0, 5)) {
             const profileId = String(child.profile_id || "");
@@ -19371,6 +19460,30 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // The same child may appear in both indexes; dispatch it only once.
   const distinct = [...new Map(candidates.map(row =>
     [row.profileId + "/" + row.requestId, row])).values()];
+  // Supabase can commit the exact approval before an interrupted waitUntil
+  // acknowledges the child R2 ledger. Repair those aged bookkeeping rows
+  // from their SAME original request receipts, with no second approval call.
+  // Limit reads to eight recent group children per cron tick; a missing or
+  // ambiguous Supabase read fails closed for that child without starving cron.
+  // Global Factory approvals always use the Supabase-native exact approval
+  // writer. Their receipt repair must not depend on the unrelated ambient
+  // studioWriteSource setting (which can still be Airtable during migration).
+  // No R2 item changes without the original-request Supabase receipt checks.
+  if (studioSupabaseConfigured(env)) {
+    const receiptCandidates = factoryBatchCronReceiptCandidates(distinct);
+    for (const candidate of receiptCandidates) {
+      try {
+        const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(env.STUDIO_MEDIA, {
+          profileId: candidate.profileId, requestId: candidate.requestId,
+          loadRecords: ids => factorySupabaseApprovalRows(env, ids),
+        });
+        if (repaired) candidate.job = repaired;
+      } catch (error) {
+        console.warn("Factory Supabase receipt reconciliation skipped",
+          candidate.requestId, String(error?.message || error).slice(0, 140));
+      }
+    }
+  }
   const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
   for (const candidate of selected) {
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);

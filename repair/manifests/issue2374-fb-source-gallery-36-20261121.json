@@ -1,0 +1,2108 @@
+{
+  "version": "issue2374_fb_photo_source_gallery_v1",
+  "generated_utc": "2026-11-21",
+  "production_project": "vkwvscgisqsbuwagdvtb",
+  "read_only_source_scan": true,
+  "output_writes": 0,
+  "provider_writes": 0,
+  "record_count": 36,
+  "canonical_source_candidates": 30,
+  "ambiguous_human_review": 6,
+  "release_to_publish_authorized": false,
+  "graph_creates_authorized": false,
+  "asset_url_http_verified": false,
+  "source_image_aspect": "4:5",
+  "notes": "Source inventory only. URLs not independently HTTP verified. No Facebook photo IDs, no account-owner publication proof, and no fresh Factory approval. Retain 82 existing rework holds. Do not auto-delete or choose alternate duplicate slides.",
+  "entries": [
+    {
+      "output_number": 5438,
+      "output_title": "Windy City Name Myth",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "4d34c1a8-a9f2-4773-876f-747a1c60d1f6",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recHYseZNYeA81aWC/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "0edd4496-e76f-4312-bbc4-bc17e3ea7347",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recHYseZNYeA81aWC/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "51c5b79d-e893-4881-bae9-02488201fcab",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recHYseZNYeA81aWC/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "13c94ce3-e31d-4652-bd3b-df7276e06b8a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recHYseZNYeA81aWC/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9272,
+      "output_title": "Ferry Sunset Loop",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "c3e6180e-dc2f-41dc-b959-cc3582c83d9c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/watermarked/recOg2NHnAmxHd9RI/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "7c96eda9-34d5-4453-9790-8092038e69e2",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recOg2NHnAmxHd9RI/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "bca3d7ee-e269-4473-9047-afbf5753221b",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recOg2NHnAmxHd9RI/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "47dc99ce-1b01-4d3e-98d9-b7827ec6548c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recOg2NHnAmxHd9RI/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9314,
+      "output_title": "Central Park Foliage Watch",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "a708c636-e132-423b-a287-06a1e56195f7",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recZmhAFzWxkb1joh/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "c5eeda21-e7f5-4fc0-8b68-a11be85e9558",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recZmhAFzWxkb1joh/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "54e73420-db40-40b3-b66c-8787f55d989e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recZmhAFzWxkb1joh/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "6ea25d21-8cf1-435d-8700-c0fcaf82b7af",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recZmhAFzWxkb1joh/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9319,
+      "output_title": "Subway Etiquette Myths",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "33cfb93d-43c6-44c9-bb89-e67e0cae408a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recimNDwPenHpsdAX/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "202d17af-8d9c-46f4-b978-e5028926d17a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recimNDwPenHpsdAX/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "612fc629-7ab9-4c53-9fa4-e8e0b6fc6425",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recimNDwPenHpsdAX/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "daff644b-2a70-4476-8fe8-16b9175df0e3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recimNDwPenHpsdAX/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9401,
+      "output_title": "NYC Tap Water Facts",
+      "market_name": "New York City",
+      "slide_count": 2,
+      "unique_number_count": 2,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 2,
+      "ready_4x5_count": 2,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "ea094875-fee5-496e-ba05-f30f0ec826f2",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recDytuTgIUVlHEiK/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "01d123d9-73cb-4c53-ab8f-08818f8c91cf",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recDytuTgIUVlHEiK/1.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9789,
+      "output_title": "Flatiron Texture Closeups",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "2c23d8bf-38b3-4c4f-9310-383c92e00fe3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recaccJdPpsw9tBiP/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "152014ba-0b7d-4b9c-a53e-a5382b300fb9",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recaccJdPpsw9tBiP/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "4b5fe375-08df-4b0f-9ad4-c98669244637",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recaccJdPpsw9tBiP/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "c1b6751a-e0fc-47b9-900d-a578d54ae3fc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recaccJdPpsw9tBiP/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9791,
+      "output_title": "DUMBO to Promenade Hour",
+      "market_name": "New York City",
+      "slide_count": 8,
+      "unique_number_count": 8,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "a80c187a-c069-41fa-b4a5-dfb9ef1e563a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "e0ba76c8-0179-457a-b0e5-3e7835768453",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "9a6fb780-46f6-4cca-b93f-494da2891c51",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "2cf3830e-70b5-47a1-a9fe-e64da79dc69f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "c67cabb3-53d0-4650-9c69-4a702e7ce008",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "5685c1ae-7d89-44ac-a106-91f76f24d39a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "f9d22ff5-3389-4fe1-9b87-ebabd5f20782",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "f86a25bb-0232-4fbd-9f1c-41ee9b0bc4d1",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgOjS6jjHxYdXCe/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9803,
+      "output_title": "Times Square Neon Pop",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "cd030aff-0ab3-41a1-ae7b-b555892645bc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrHxDojgfbtcU3X/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "3ae160bf-9e78-4c40-b64c-836cb73bb379",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrHxDojgfbtcU3X/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "cb5ed286-8156-4929-b0dc-9f60f45378f2",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrHxDojgfbtcU3X/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "76979da3-4fba-482a-8189-515b5c21a7eb",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrHxDojgfbtcU3X/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9808,
+      "output_title": "NYC First-Timer Mistakes",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "097d9415-d5ad-47ca-96c4-e9b9e28f4e88",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recqFGXGGDQHUIAvV/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "c7d15d9f-67a3-4fa6-995e-57aec77f494e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recqFGXGGDQHUIAvV/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "405dcd9c-f32c-4ba9-bcc0-89ac42f5a226",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recqFGXGGDQHUIAvV/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "ceebd166-a02d-44fb-8923-ac484faf786d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recqFGXGGDQHUIAvV/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9812,
+      "output_title": "Free Ferry View Plan",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "eeed9c0a-2b04-4089-9baa-3600dc9c2003",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recvDeY7WhsKsYzp9/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "0dbfba67-57df-4929-9ea5-332ac4dcf383",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recvDeY7WhsKsYzp9/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "8f6a0704-1ada-43dd-be76-531e5f53d446",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recvDeY7WhsKsYzp9/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "7e77ba58-7e3e-4985-9115-8b31de05b713",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recvDeY7WhsKsYzp9/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9822,
+      "output_title": "Chinatown Dumpling Hop",
+      "market_name": "New York City",
+      "slide_count": 24,
+      "unique_number_count": 8,
+      "cover_count": 3,
+      "first_cover_count": 3,
+      "deleted_count": 0,
+      "approved_count": 24,
+      "ready_4x5_count": 24,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "3c39eb77-908e-4dbf-91e4-edda49c6e52c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/0.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "851f46f1-e1a1-4f1e-8f98-fa67e4ad8a0d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/1.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "f2f74cda-119e-4cb4-b7f7-f2d9a31474d3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "1f8e667d-cbd1-4d69-9b08-f0218c3ca06e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "26c533fe-409d-428c-84b8-9cd86895fd6a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "77e8a1b1-600a-4050-be53-f26fd4449db8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "29d76319-feb5-4348-92ba-e31b0d873187",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/7.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "3f20b73d-5548-4e76-9130-d031edf41484",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "734d3bab-eb4b-4eff-8f80-fa68c648fd6c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "4cbe76a2-1bf1-4f2c-acfb-25c31e0f408e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "77404491-2da6-40aa-86a3-5b0ad6de37ab",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "bed4fdc9-1997-46b6-9bdc-2811a73f148a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "5ef83f31-1a56-433f-8af4-8faa0b54c1f6",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "73c7bbd2-e081-4fd7-836b-bf17fd6c26a6",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "cf05e877-4331-416a-8f72-f0770b567cbd",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "22ec0cdb-1d79-4c08-881e-85ec58d32bb9",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "8db1751c-c587-4e6a-9c8f-4ab9e4ab10c6",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "f3f9af04-7082-45f2-a47c-2eb8d2dc05c7",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "230f39ad-6c76-4d7c-a525-e5fc8ddb2d8c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "341bda7a-9ba9-4e46-b5fa-b8cde13ebda0",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "7d95802b-013a-4387-8c87-02893ee528ae",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "3553a42c-10a2-4ce6-bb00-b314b9424b14",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/7.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "73a2fee9-43c5-4554-9f64-505654af6c65",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/7.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "78196200-3dcb-4cd7-8aaf-848e353a5158",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recEHvN54UP6Zf1ZV/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9856,
+      "output_title": "Doyers Street Flavor Shot",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "2593b0bf-5187-4e40-b844-57eddf90aa2d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recnuU7GicnrQynJt/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "290dd51a-b1f1-478a-8fdc-24ac215d4b20",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recnuU7GicnrQynJt/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "cef27e86-0372-41cf-9ac1-047ad64545f8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recnuU7GicnrQynJt/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "f898f0f9-a2ba-449e-a602-8722283af854",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recnuU7GicnrQynJt/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9876,
+      "output_title": "Brooklyn Bridge Sunrise Frame",
+      "market_name": "New York City",
+      "slide_count": 8,
+      "unique_number_count": 4,
+      "cover_count": 2,
+      "first_cover_count": 2,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "a0e8dffc-efdb-4711-bc41-fb29f3c4fe02",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/0.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "a1fac5b6-a71f-4fa6-a02e-d2554a457367",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "201947dd-4580-4131-b1aa-7d73fe5b468e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "3a5165c6-ca84-4384-9dbe-391ca103ce52",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "183881fd-7978-4d9b-8eac-997ba1f0ade2",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "9ac82dc9-786c-4ced-9fe7-f044b665166f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "69f80511-9526-4b0e-80c5-e375b2c14094",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "fa0c89f0-a986-4ce7-a35c-d1bc4887748b",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyGcB4xFz5k93Vg/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9883,
+      "output_title": "Subway Mistakes To Avoid",
+      "market_name": "New York City",
+      "slide_count": 8,
+      "unique_number_count": 4,
+      "cover_count": 2,
+      "first_cover_count": 2,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "76adb705-c623-4bd6-a6f0-c69bbafdca6d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/1.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "d7771869-a02e-4f8d-a89d-6f8e29e504fe",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "726d9e12-84bd-4e66-b796-5fed14e33efd",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "c9e5d1b0-67aa-40f9-b889-f30413a4614d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "25498704-a68e-4abb-8731-234337b6789a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "a8b61337-a6db-4083-922e-b001b796edbc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "1aa99ed9-2e71-4b42-a159-ead33e5a21cc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "4347f1c7-cfc1-4ec5-a74e-4b8ceb5e623b",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLieXCv4IHYwWQn/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9891,
+      "output_title": "Roosevelt Tram Mini Plan",
+      "market_name": "New York City",
+      "slide_count": 8,
+      "unique_number_count": 8,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "d2131eea-b862-457e-a3b5-dd60971b4a90",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "23db395a-08d5-4c29-9c1b-cb6648d0ec8f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "9e11013a-fcd4-4026-a1ac-c5eddbe0ccbb",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "5f5346ae-9c3c-466b-b053-9ce451ba2543",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "603a21c1-2375-4edb-942d-d4bc7ff75335",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "88e2c656-aea7-4d99-b027-d514674c1cc5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "6c68718e-675e-4eba-b3f0-935d7bc18ece",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "bf5e5939-2a8f-4ae6-9027-a23a9fac62f9",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recsSnG7KWnCcM5h2/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9896,
+      "output_title": "Express vs Local Plays",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "fd487af7-14e8-4bf0-a4ae-f83c4d279fd8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLUshBb0ZXSSU6b/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "75e8e7d7-8249-4b3c-8602-50efae6fb0c3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLUshBb0ZXSSU6b/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "a1acb41d-1766-479b-b672-73facae90090",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLUshBb0ZXSSU6b/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "f919f1a5-afc0-44f4-a1a0-7e6f1828727f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recLUshBb0ZXSSU6b/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9900,
+      "output_title": "Flatiron Details",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "1283a1f4-ca3f-4d79-8278-7c5b97e2ca2f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkVtEliApTNPyq/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "29b2b7b5-ea88-4662-8be6-157abd4aebf5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkVtEliApTNPyq/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "e4ee84cd-cce3-41f5-b491-4078b58c7893",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkVtEliApTNPyq/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "b2a7c990-3206-4373-82ee-5f9515ec85ac",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkVtEliApTNPyq/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9906,
+      "output_title": "Ferry Window Hack",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "49a7a524-a5f6-404d-b72b-ccc96e6238c3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recssMMgdWrcPXv3m/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "6703724f-3794-47f8-9357-8ba1a5b337d5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recssMMgdWrcPXv3m/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "9a1f2124-e3b3-46d5-917a-409905a2a224",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recssMMgdWrcPXv3m/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "56fcc756-6031-4b07-8d5b-6a8932036ad8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recssMMgdWrcPXv3m/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9909,
+      "output_title": "High Line Art Now",
+      "market_name": "New York City",
+      "slide_count": 8,
+      "unique_number_count": 8,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "8fddcd09-5d20-4bd1-a829-a3f0e96a6742",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "d1fd7528-c2e8-48bb-b7ea-f195978fd088",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "d05473e1-54af-4778-bc73-521765310b1d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "12d73f6c-9c17-4d36-bbdd-54fbf0396b3f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "27975b68-9bd6-4648-98d0-05fcc839dd63",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "32fce296-bab1-4c12-ad0c-05a609670c13",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "89d057d8-fdb8-4281-b315-f8d85ef7722a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "1ac6a1cd-1082-4640-b70c-e53e7a015066",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recrVWCYjsDHH4GDt/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9913,
+      "output_title": "Central Park Fall Title",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "4325e7b7-7087-454f-8b7a-28210acedb11",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec3OKQZUZEiOS5CC/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "58b242e0-3335-4c5c-b430-26f092426bb3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec3OKQZUZEiOS5CC/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "fff3392f-973d-4fde-a91e-25ab9cd7ce4f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec3OKQZUZEiOS5CC/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "aad68012-7b8c-4130-9de4-fe0637b420e6",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec3OKQZUZEiOS5CC/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9914,
+      "output_title": "Rainy Midtown Plan",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "368c742b-2a71-41fb-b843-01e415237378",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQJXMeeExHU3Hq9/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "e69b5263-334e-4d57-81c4-3b9d3ce9067e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQJXMeeExHU3Hq9/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "be6e5a38-9ae6-4af5-aa52-86135d375e66",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQJXMeeExHU3Hq9/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "478a08d1-9528-4d37-94ff-4432083c4975",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQJXMeeExHU3Hq9/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9920,
+      "output_title": "Chinatown Noodles Three Ways",
+      "market_name": "New York City",
+      "slide_count": 16,
+      "unique_number_count": 8,
+      "cover_count": 2,
+      "first_cover_count": 2,
+      "deleted_count": 0,
+      "approved_count": 16,
+      "ready_4x5_count": 16,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "01ee7be5-afd8-4b7b-bfdc-aadec0bbdbaa",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/0.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "b1db756b-09c6-4741-92a9-3f90a2de176a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "e6ecde88-991d-4c41-b724-93ff5c7e69b4",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "ec73344d-6640-44f8-a1f7-e31862b0d50d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "84475b7a-e675-451b-aa69-864260a150da",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "c02fe9ac-dafc-4480-a980-6b3677094e9a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "2502761c-c8d4-4b56-b4b1-b2a58b175f26",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "d0adeec2-cf5b-47ff-8124-c6e6b050faa4",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/7.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "7d0f8e61-3524-4948-a12f-da614d70c085",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "d787004a-1cc9-4d49-b434-bafea53d0bf5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "2d3e97a9-ea14-4474-bf73-f66c571553ec",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "43105aec-d11b-4f0f-bf4d-7bbb55fdab66",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "7e703a56-8eb1-4737-9140-602fcbba795e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "96a3480c-8a5c-4681-b691-52da74954d0a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "827f280f-28d9-450c-b417-b91dc8bc3fb5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/7.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "a7b68db7-b36a-407d-9d97-870fe0eb65f1",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recX1MR8NKRLqziWB/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9935,
+      "output_title": "Times Square Blue Hour",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "453b74ac-85aa-4b84-ad29-59c838ca1bff",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1huPaUthe10J2u/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "9d866a3d-b89d-4899-be99-44462335eaea",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1huPaUthe10J2u/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "9294f271-7e76-4c50-89a2-47272045d0d8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1huPaUthe10J2u/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "9d99aedb-5be3-4eb1-8c1c-0300d4a69f4c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1huPaUthe10J2u/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9944,
+      "output_title": "Ferry Sunset Playbook",
+      "market_name": "New York City",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "9d67d237-6ecc-4cc3-909e-f25e74adb225",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recNv2wy93hwrsldQ/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "21cf0c22-111f-41ae-b5b9-25ef57ee1768",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recNv2wy93hwrsldQ/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "bd2cb51d-d988-4bab-9b6a-cfd79d1cbc0f",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recNv2wy93hwrsldQ/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "b3aff57a-0e87-40d6-980f-ed9ad9d3c5eb",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recNv2wy93hwrsldQ/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9950,
+      "output_title": "Wrigleyville Game Day Eats",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "0633b446-5178-4b3e-a442-e481f636241a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recky4jsco3sTZmlC/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "556af229-83c7-4343-a9ab-8efc6cded9fc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recky4jsco3sTZmlC/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "4d8175bf-3236-4b7e-a485-d846eca72b01",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recky4jsco3sTZmlC/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "abc25408-57bc-4eab-a063-dfb303d42c80",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recky4jsco3sTZmlC/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9952,
+      "output_title": "Buckingham Fountain Mistake",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "4dec2cd3-37ec-487d-ba39-1ce54047039b",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2R0JgkvOeosyS1/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "7fed89f4-1e4a-43e6-ba82-a889eb616bfb",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2R0JgkvOeosyS1/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "40c0f23d-1057-4462-bd6d-b1d49e55d5df",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2R0JgkvOeosyS1/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "e751d0cf-4f5b-478a-8fcb-bc5bd9f449cb",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2R0JgkvOeosyS1/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9959,
+      "output_title": "Chicago Cultural Center Dome",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "3921dffd-ca21-4fe9-8087-c66b2cba72c8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recceaiou8uaHKcvo/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "20b74f25-e0c3-4430-9e70-503c5e6c286e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recceaiou8uaHKcvo/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "74b5217b-7f69-4f5d-a436-39fa6f6c6a7d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recceaiou8uaHKcvo/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "6fe6d1e9-f844-4068-bbe9-136dc2422759",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recceaiou8uaHKcvo/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9965,
+      "output_title": "Pilsen Color Walk",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "d59296a5-639f-4b0a-b470-11b6c6a04c78",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec9Qr5BB2fFapPr7/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "0943aa3b-68ba-4f3d-87c2-5d4e36c5c875",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec9Qr5BB2fFapPr7/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "04bfa644-2489-4ce0-b016-699b27a64adf",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec9Qr5BB2fFapPr7/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "4ff82d61-1158-472a-bcc2-a3f556183751",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rec9Qr5BB2fFapPr7/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 9967,
+      "output_title": "CTA River View Seats",
+      "market_name": "Chicago",
+      "slide_count": 8,
+      "unique_number_count": 4,
+      "cover_count": 2,
+      "first_cover_count": 2,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "60c140ff-b7ea-403a-8345-0c707b05d99e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/0.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "a5f6c8d2-222f-423e-ba5f-fb57d03a51e4",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "28fc232a-2df6-4f60-b3b3-11f392418000",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "7f17a78f-a820-4b47-9650-e849a1341493",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "8db68f93-7a6c-465c-946e-421709df1326",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "edfb3dfd-f372-4042-b60d-2aede86156d8",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "39a6acbb-8464-4c44-8db6-1c9b18748283",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "7f16f8a3-c260-4fbb-a609-83540d40af94",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rece3b0mN5VyiY1Gf/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10018,
+      "output_title": "Riverwalk Art Finds",
+      "market_name": "Chicago",
+      "slide_count": 8,
+      "unique_number_count": 8,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "6364713c-5532-4cde-866e-b4e426420d01",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "7d6f3adc-9dc1-4bd6-bb37-e8a735612c54",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "03f75796-b4eb-4fea-86c8-cf78a79e4721",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "0b36e0be-dfea-4919-b058-5d4984d6b6a0",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 5,
+          "number": 5,
+          "slide_id": "6b02f11a-13f4-413f-87ab-16df386d53ab",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/4.jpg"
+        },
+        {
+          "cover": false,
+          "order": 6,
+          "number": 6,
+          "slide_id": "1f31619c-e373-4a2c-bfaa-81bf2314fb6d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/5.jpg"
+        },
+        {
+          "cover": false,
+          "order": 7,
+          "number": 7,
+          "slide_id": "e9e9b07b-0971-4d32-b52e-d5f1867e953e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/6.jpg"
+        },
+        {
+          "cover": false,
+          "order": 8,
+          "number": 8,
+          "slide_id": "3668acc0-15a3-4137-85b5-eacf432a6a80",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/rechbbQVjTsIvITgX/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10020,
+      "output_title": "Buckingham Details",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "c63e93e4-eed6-4a5a-bb22-e667ae8fa315",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recTZGCsfaKBNSFkm/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "a414fe60-df92-4a83-b5e8-0512aae86095",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recTZGCsfaKBNSFkm/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "e98887b4-a4f4-4234-9d00-ddec6f5e67ce",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recTZGCsfaKBNSFkm/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "e39bffe3-f729-409e-b242-cf7d1d0c3e8e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recTZGCsfaKBNSFkm/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10022,
+      "output_title": "Cozy Andersonville Stops",
+      "market_name": "Chicago",
+      "slide_count": 8,
+      "unique_number_count": 4,
+      "cover_count": 2,
+      "first_cover_count": 2,
+      "deleted_count": 0,
+      "approved_count": 8,
+      "ready_4x5_count": 8,
+      "canonical_candidate": false,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "07158798-8f51-4fa1-8da4-0664bb618b06",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQUB6vkOhmEXzMC/1.jpg"
+        },
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "b080c88c-7b6b-47ee-819d-cb94c9d4ed4c",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQUB6vkOhmEXzMC/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "652fe34d-d13f-439b-a0d5-ebb1359b05b4",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQUB6vkOhmEXzMC/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "fbc4be37-3988-4e61-ad15-374ca58aa6c3",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recQUB6vkOhmEXzMC/3.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "77bd8e47-4a85-4ec8-8534-b5f1f8cc31bf",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/item4/recdG1L0Q2FDfJheX/ITEM4-VARIANT-fill-crop-v2-recdG1L0Q2FDfJheX-fb4fd210eed24c7aad-4x5-1TNQC8aTtSwpYKERFcWSZ16eoiHv-myOQ.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "b3c0da0e-3277-4f01-be58-33af1d1d769e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/item4/recdG1L0Q2FDfJheX/ITEM4-VARIANT-fill-crop-v2-recdG1L0Q2FDfJheX-fb4fd210eed24c7aad-4x5-1TNQC8aTtSwpYKERFcWSZ16eoiHv-myOQ.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "e1a244fb-ef7c-4d48-9cbd-0fab9766d36d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/item4/recdG1L0Q2FDfJheX/ITEM4-VARIANT-fill-crop-v2-recdG1L0Q2FDfJheX-f431441cbbe54d3eb3-4x5-1ZMkw_UE3Td7zxLhQNwF6_zqI5BqMMycZ.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "e29dd795-bb75-4bea-a7d1-327deaeb1560",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/item4/recdG1L0Q2FDfJheX/ITEM4-VARIANT-fill-crop-v2-recdG1L0Q2FDfJheX-f431441cbbe54d3eb3-4x5-1ZMkw_UE3Td7zxLhQNwF6_zqI5BqMMycZ.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10032,
+      "output_title": "Marina City Night",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "d6e43213-4c84-4396-a880-69d32c678fc5",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyB1HspqPPd1BlE/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "9b845e9a-d860-462a-8cc6-bfb638650f9a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyB1HspqPPd1BlE/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "ce575bb6-77da-464a-9186-60b2945a9571",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyB1HspqPPd1BlE/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "8bcf09ba-5460-4ec1-acc4-f234d3609e1d",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recyB1HspqPPd1BlE/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10034,
+      "output_title": "Lakefront Transit Tip",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "6444321f-2167-4756-934d-7288ef83c5bd",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recK5hoD7jfyd7lcu/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "7ae74687-cafd-4b58-b4cd-4cfd0cb80cb1",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recK5hoD7jfyd7lcu/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "cf38bf30-1ab8-413c-87cd-08326af90047",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recK5hoD7jfyd7lcu/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "5ffe17b2-bc59-49a6-ad77-61576c9dfdc4",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recK5hoD7jfyd7lcu/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10044,
+      "output_title": "Rainy Museum Plan",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "5627b1c6-4882-4018-af7d-a25fdf26e7bc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgUvIKjx4yw9Gjw/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "e354ba7e-cb68-4bf9-9a65-c275ef75a8dc",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgUvIKjx4yw9Gjw/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "d9f693d4-4e0f-45f9-9182-cd27835711a2",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgUvIKjx4yw9Gjw/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "9ae8a9ac-8073-445e-a8ec-a18c31a71923",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recgUvIKjx4yw9Gjw/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10095,
+      "output_title": "Fulton Lunch Timing",
+      "market_name": "Chicago",
+      "slide_count": 4,
+      "unique_number_count": 4,
+      "cover_count": 1,
+      "first_cover_count": 1,
+      "deleted_count": 0,
+      "approved_count": 4,
+      "ready_4x5_count": 4,
+      "canonical_candidate": true,
+      "protected_hold": true,
+      "previous_output_image_count": 0,
+      "previous_output_assets_ready": 0,
+      "slides": [
+        {
+          "cover": true,
+          "order": 1,
+          "number": 1,
+          "slide_id": "6cfadbb8-01f8-4602-a2e4-b4063266a9a0",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recwpMRXCIEdCnd2u/0.jpg"
+        },
+        {
+          "cover": false,
+          "order": 2,
+          "number": 2,
+          "slide_id": "c0034c17-3ae6-41a1-b9de-451e5b32750a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recwpMRXCIEdCnd2u/1.jpg"
+        },
+        {
+          "cover": false,
+          "order": 3,
+          "number": 3,
+          "slide_id": "74fe7dba-d9ca-4843-9797-ab978dd62c7e",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recwpMRXCIEdCnd2u/2.jpg"
+        },
+        {
+          "cover": false,
+          "order": 4,
+          "number": 4,
+          "slide_id": "a6b2ad98-e889-496e-a22b-aea24a1d564a",
+          "public_4x5_url": "https://media.chicagoshining.com/studio/previews/lettered/recwpMRXCIEdCnd2u/3.jpg"
+        }
+      ]
+    }
+  ]
+}

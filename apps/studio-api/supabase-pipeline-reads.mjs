@@ -30,6 +30,11 @@
  * - production_requests.publish_status → request link bag for Factory
  */
 
+import {
+  protectedMediaReworkSourceRow,
+  protectedMediaReworkShapedRecord,
+} from "./factory-protected-media-rework.mjs";
+
 export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
   "GET /api/outputs",
   "GET /api/outputs?mode=latest",
@@ -243,9 +248,17 @@ export function studioPhase5WritesMode(env) {
 export function studioLegacyExportEnabled(env, tableId) {
   if (studioWriteSource(env) !== "supabase") return false;
   const table = String(tableId || "");
+  // Cloudflare deployments may omit legacy Airtable table-ID bindings after
+  // Supabase becomes the authority. The stable table IDs and logical names
+  // must still be routed to Supabase; otherwise POST falls through to a fake
+  // local echo and silently loses Content Items / Platform Outputs.
   return Boolean(
     (env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID)
-    || (env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID),
+    || (env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID)
+    || table === PLATFORM_OUTPUTS_TABLE_ID
+    || table === CONTENT_ITEMS_TABLE_ID
+    || table === "Platform Outputs"
+    || table === "Content Items",
   );
 }
 
@@ -417,9 +430,11 @@ export async function studioSupabaseCommitOutputContentFirst(env, tableId, recor
   const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
   if (!rows.length) return { skipped: true, reason: "no_records" };
   const table = String(tableId || "");
-  const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
+  const kind = ((env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID)
+    || table === PLATFORM_OUTPUTS_TABLE_ID || table === "Platform Outputs")
     ? "output"
-    : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
+    : ((env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID)
+      || table === CONTENT_ITEMS_TABLE_ID || table === "Content Items")
       ? "content"
       : "";
   if (!kind) return { skipped: true, reason: "table" };
@@ -630,6 +645,20 @@ export function packContentExtras(fields = {}) {
     if (!key || TYPED_CONTENT_FIELD_KEYS.has(key)) continue;
     if (value == null || value === "") continue;
     bag[key] = value;
+  }
+  return bag;
+}
+
+export function mergePresentContentBagFields(existing, fields = {}) {
+  // Sparse I3/I4 Content Item PATCHes contain only production directives:
+  // preserve original Idea, media provenance and runner projection metadata.
+  const bag = isPlainObject(existing) ? { ...existing } : {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!key || key.startsWith("_") || key === "__proto__"
+        || key === "prototype" || key === "constructor"
+        || TYPED_CONTENT_FIELD_KEYS.has(key)) continue;
+    if (value == null || value === "") delete bag[key];
+    else bag[key] = value;
   }
   return bag;
 }
@@ -880,6 +909,7 @@ export function airtableShapedMusicFromSupabase(row) {
       File_Size_Bytes: bytes,
       File_Size_MB: sizeMb,
       Rights_Status: meta.rights_status || null,
+      Duration_Seconds: meta.duration_seconds != null ? Number(meta.duration_seconds) : null,
       Asset_Description: meta.asset_description || null,
       Studio_Transfer_ID: meta.studio_transfer_id || null,
       Added_At: meta.added_at || row.created_at || null,
@@ -1540,6 +1570,15 @@ export function airtableShapedProductionRequestFromSupabase(row) {
         ? bag.Studio_Master_Media_Assets
         : [],
       Background_Music_Mode: bag.Background_Music_Mode || null,
+      Voiceover_Mode: bag.Voiceover_Mode || null,
+      Script_Mode: bag.Script_Mode || null,
+      Requested_Script: bag.Requested_Script || null,
+      Video_Duration_Seconds: bag.Video_Duration_Seconds ?? null,
+      Voiceover_Duration_Seconds: bag.Voiceover_Duration_Seconds ?? null,
+      Music_Start_Seconds: bag.Music_Start_Seconds ?? null,
+      Voiceover_Tail_Seconds: bag.Voiceover_Tail_Seconds ?? null,
+      Video_Clip_Count_Mode: bag.Video_Clip_Count_Mode || null,
+      Video_Clip_Count_Exact: bag.Video_Clip_Count_Exact ?? null,
       Active: bag.Active !== false,
       Master_Content_Type: bag.Master_Content_Type || null,
       Target_Platforms: Array.isArray(bag.Target_Platforms) ? bag.Target_Platforms : [],
@@ -2228,6 +2267,13 @@ export async function listSupabaseCarouselSlidesByIds(env, ids) {
   return rows.map(airtableShapedCarouselSlide);
 }
 
+export const PRO_AUDIO_OVERRIDE_FIELDS = Object.freeze([
+  "Voiceover_Mode_Override", "Background_Music_Mode_Override",
+  "Video_Duration_Seconds_Override", "Voiceover_Duration_Seconds",
+  "Music_Start_Seconds", "Voiceover_Tail_Seconds_Override",
+  "Selected_Music_Asset_Override",
+]);
+
 export function mapPlanScheduleRow(record, { partial = false } = {}) {
   const fields = record?.fields || {};
   if (!record?.id) return null;
@@ -2242,6 +2288,13 @@ export function mapPlanScheduleRow(record, { partial = false } = {}) {
   }
   if (present("Enabled")) row.enabled = checkboxOn(fields.Enabled);
   if (present("Notes")) row.notes = String(fields.Notes || "").trim() || null;
+  // Overrides have no typed columns. Preserve them in the PRO JSONB
+  // effective_resolution rather than silently losing explicit Yes/No choices.
+  const overrides = {};
+  for (const name of PRO_AUDIO_OVERRIDE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(fields, name)) overrides[name] = fields[name] ?? null;
+  }
+  if (Object.keys(overrides).length) row.effective_resolution = overrides;
   if (present("Brand")) {
     const brands = recordLinkIds(fields.Brand);
     row.brand_airtable_id = brands[0] || null;
@@ -2279,8 +2332,11 @@ const PRO_OUTPUT_SELECT = [
   "aspect_ratio",
   "enabled",
   "notes",
+  "effective_resolution",
   "scheduled_at",
   "created_at",
+  "platform_output_id",
+  "content_item_id",
   "production_request_airtable_id",
   "production_request_airtable_ids",
   "brand_airtable_id",
@@ -2311,6 +2367,10 @@ export function airtableShapedProOutputFromSupabase(row) {
       Output_Type: row.output_type || "",
       Aspect_Ratio: row.aspect_ratio || "",
       Enabled: enabled,
+      // Phase-6 typed FK is authoritative even when inverse Airtable links
+      // are absent. Never treat a previously routed PRO as a fresh output.
+      Platform_Output_Exists: Boolean(row.platform_output_id),
+      Content_Item_Exists: Boolean(row.content_item_id),
       // Active is not a typed column; schedule densify uses Enabled as the gate.
       Active: enabled,
       Output_Order: 0,
@@ -2318,6 +2378,9 @@ export function airtableShapedProOutputFromSupabase(row) {
       Scheduled_At: row.scheduled_at || "",
       Production_Request: requests,
       Brand: brands,
+      ...Object.fromEntries(PRO_AUDIO_OVERRIDE_FIELDS
+        .filter((name) => Object.prototype.hasOwnProperty.call(row.effective_resolution || {}, name))
+        .map((name) => [name, row.effective_resolution[name]])),
     },
   };
 }
@@ -2544,6 +2607,18 @@ export async function syncPlanScheduleRowsToSupabase(env, records, options = {})
   const linkedRows = attachPlanScheduleRequestForeignKeys(rows, requestIdMap, {
     strict: studioPhase6WriteSource(env) === "supabase",
   });
+  // Do not replace existing JSONB overrides with a sparse PATCH. A failed
+  // existing-row read must stop the write instead of erasing explicit No.
+  for (const row of linkedRows) {
+    if (!row.effective_resolution) continue;
+    const prior = await supabaseRest(env,
+      `production_request_outputs?airtable_record_id=eq.${encodeURIComponent(row.airtable_record_id)}&select=effective_resolution&limit=1`);
+    if (!Array.isArray(prior)) throw new Error("PRO audio override readback unavailable");
+    row.effective_resolution = {
+      ...(isPlainObject(prior[0]?.effective_resolution) ? prior[0].effective_resolution : {}),
+      ...row.effective_resolution,
+    };
+  }
   const size = options.partial === true ? 1 : 40;
   for (let index = 0; index < linkedRows.length; index += size) {
     await upsertChunk(env, "production_request_outputs", linkedRows.slice(index, index + size));
@@ -2998,6 +3073,23 @@ export function deskHealOutputFilter(kind, options = {}) {
   if (kind === "ttd0_ready" || kind === "ttd1_ready" || kind === "ttd2_processing" || kind === "ttd3_email") {
     return tiktokReconcileOutputFilter(kind, options);
   }
+  if (kind === "fresh_publish_ready") {
+    // Supabase SoR initial-publication lane. Never replay an existing
+    // dispatch, remote upload or explicit retry hold through this selector.
+    // Continuations and old Past Due/Failed rows require provider receipts.
+    const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+    const due = encodeDeskFilterValue(new Date(nowMs).toISOString());
+    const tiktokLead = encodeDeskFilterValue(new Date(nowMs + 15 * 60000).toISOString());
+    const neverDispatched = "or=(error_messages->>Studio_Publish_Dispatch_Count.is.null,error_messages->>Studio_Publish_Dispatch_Count.eq.0)";
+    // A never-attempted approved row may have retry=false; the per-record
+    // preflight rejects any prior remote attempt or ID. Honor cooldowns.
+    const retryDue = `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${due})`;
+    const scheduled = `or=(scheduled_post_date.lte.${due},and(platform.eq.TikTok,scheduled_post_date.lte.${tiktokLead}))`;
+    return `${quiet}&auto_publish_enabled=eq.true&review_status=eq.Approved&published_at=is.null`
+      + `&output_status=eq.${encodeDeskFilterValue("Approved for Publishing")}`
+      + `&publish_status=in.(${["Ready to Publish", "Ready to Schedule"].map(encodeDeskFilterValue).join(",")})`
+      + `&${neverDispatched}&${retryDue}&${scheduled}`;
+  }
   if (kind === "overdue_scheduled") {
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
     const dueIso = encodeDeskFilterValue(new Date(nowMs).toISOString());
@@ -3282,7 +3374,9 @@ export async function listSupabaseDeskHealOutputs(env, {
   // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
   // TTD2 must fair-queue by Last_Checked (nulls first). output_number.desc
   // kept pulsing the same high-ID Processing rows and never reached 4121.
-  const order = (kind === "ttd0_ready" || kind === "ttd1_ready")
+  const order = kind === "fresh_publish_ready"
+    ? `order=scheduled_post_date.desc.nullslast`
+    : (kind === "ttd0_ready" || kind === "ttd1_ready")
     ? `order=scheduled_post_date.${direction}.nullslast`
     : kind === "overdue_scheduled"
       ? `order=scheduled_post_date.${direction}.nullsfirst`
@@ -3878,7 +3972,9 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     // project's PostgREST, and a rejected filter fell through to an Airtable scan
     // that cannot finish inside the refresh budget. Blank statuses still count.
     const openOutputFilter = [
-      "do_not_publish=eq.false",
+      // A safety hold prevents dispatch; it must NOT erase an unresolved
+      // Failed output from Home. Include only terminal failures among held rows.
+      "or=(do_not_publish.eq.false,publish_status.eq.Failed,output_status.eq.Failed,render_status.eq.Failed)",
       "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))",
       "or=(publish_status.is.null,publish_status.neq.Published)",
     ].join("&");
@@ -4054,7 +4150,12 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // out of that sample (NYC had 30 actionable records while Factory showed 0).
   // Fetch the review queue independently and paginate past Supabase's 1000-row
   // response cap; do not silently convert an incomplete review scan into zero.
-  const [outputRows, reviewReadyRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  // Independent exact marker-scoped lane: the ordinary output sample
+  // explicitly excludes DNP=true and the Ready-for-Review scan excludes
+  // Changes Requested. Without this, protected recovery media vanishes from
+  // Factory even when its source images have been restored.
+  let mediaReworkScanWarning = null;
+  const [outputRows, reviewReadyRows, heldReworkRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
@@ -4068,6 +4169,20 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).then((rows) => {
       if (rows.length >= 10000) throw new Error("Factory review-ready output scan exceeded safety ceiling");
       return rows;
+    }),
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.true&review_status=eq.Changes%20Requested`
+        + `&output_status=eq.Changes%20Requested`
+        + `&error_messages->>Studio_Overdue_Preflight_Repair_20261120=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.asc.nullslast`,
+      { pageSize: 200, maxRows: 500 },
+    ).catch((error) => {
+      // Never fall back to Airtable if the optional recovery lane is
+      // unavailable. Other Factory output/review reads can continue safely.
+      mediaReworkScanWarning = "Protected media rework read unavailable; do not treat an empty repair lane as zero work";
+      console.warn("Supabase Factory protected rework scan failed", String(error?.message || error));
+      return [];
     }),
     supabaseRest(
       env,
@@ -4087,7 +4202,10 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Merge by authoritative output identity, retaining the independent
   // review-ready scan even when its records predate the newest-output sample.
   const outputById = new Map();
-  for (const row of [...(outputRows || []), ...(reviewReadyRows || [])]) {
+  const protectedReworkRows = (heldReworkRows || []).filter(protectedMediaReworkSourceRow);
+  // Only canonical, still-held, unpublished records with an explicit exact
+  // source marker qualify. Never show test, scheduled or published candidates.
+  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
   const rawShapedOutputs = [...outputById.values()]
@@ -4108,7 +4226,8 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
 
   const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
-  const reviewOutputs = shapedOutputs.filter((row) => matchesOpsQueueReviewFormula(row.fields));
+  const reviewOutputs = shapedOutputs.filter((row) =>
+    matchesOpsQueueReviewFormula(row.fields) || protectedMediaReworkShapedRecord(row));
   const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
   // Factory reviews can outlive the recent Production Request window. Resolve
@@ -4205,6 +4324,8 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     outputs,
     renderLaneOutputs,
     reviewOutputs,
+    mediaReworkScanWarning,
+    protectedMediaReworkCount: protectedReworkRows.length,
     activeHolds,
     requests,
     reviewParentRequests: [...reviewParentByContent.values()],
@@ -4594,6 +4715,15 @@ export function mapAirtableProductionRequestToSupabase(record, profileUuid = nul
         ? fields.Studio_Master_Media_Assets
         : [],
       Background_Music_Mode: fields.Background_Music_Mode || null,
+      Voiceover_Mode: fields.Voiceover_Mode || null,
+      Script_Mode: fields.Script_Mode || null,
+      Requested_Script: fields.Requested_Script || null,
+      Video_Duration_Seconds: fields.Video_Duration_Seconds ?? null,
+      Voiceover_Duration_Seconds: fields.Voiceover_Duration_Seconds ?? null,
+      Music_Start_Seconds: fields.Music_Start_Seconds ?? null,
+      Voiceover_Tail_Seconds: fields.Voiceover_Tail_Seconds ?? null,
+      Video_Clip_Count_Mode: fields.Video_Clip_Count_Mode || null,
+      Video_Clip_Count_Exact: fields.Video_Clip_Count_Exact ?? null,
       Active: fields.Active !== false && fields.Active !== 0,
       Master_Content_Type: fields.Master_Content_Type || null,
       Target_Platforms: Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [],
@@ -5591,6 +5721,19 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
     const profileAirtableId = firstLink(fields.Content_Profile);
     const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
     const row = mapAirtableContentToSupabase(record, profileUuid || null, { fullRecord: false });
+    // I4 Content Items carry an original Production_Request link. Its typed FK
+    // is required for Factory and subsequent route/readback joins. The prior
+    // create wrote only extras.Production_Request, silently orphaning parent
+    // discovery despite successful output fanout (Museum Mile 2026-11-21).
+    if (Object.prototype.hasOwnProperty.call(fields, "Production_Request")) {
+      const ownerRecordId = firstLink(fields.Production_Request);
+      row.production_request_id = ownerRecordId
+        ? await resolveSupabaseLinkedId(env, "production_requests", ownerRecordId)
+        : null;
+      if (ownerRecordId && !row.production_request_id) {
+        throw new Error("Supabase Content Item Production_Request owner cannot be resolved");
+      }
+    }
     await upsertChunk(env, "content_items", [row]);
     await mergeCreativeMasterExtras(env, [record]).catch((error) => {
       console.warn("creative master copy failed", error);
@@ -5598,23 +5741,9 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
     return { ok: true, mode: "create" };
   }
   const fields = record.fields || {};
-  const profileAirtableId = firstLink(fields.Content_Profile);
-  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
-  const canUpsert = Boolean(profileUuid) && (
-    fields.Content_ID != null || fields.Content_Status != null || fields.Content_Title != null
-  );
-  if (canUpsert) {
-    let row = mapAirtableContentToSupabase(record, profileUuid, { fullRecord: options.fullRecord === true });
-    if (options.fullRecord !== true) {
-      [row] = await applyStoredProjection(env, "content_items", [row], "extras");
-    }
-    await upsertChunk(env, "content_items", [row]);
-    await mergeCreativeMasterExtras(env, [record]).catch((error) => {
-      console.warn("creative master copy failed", error);
-    });
-    return { ok: true, mode: "upsert" };
-  }
-
+  // Never upsert a sparse PATCH: mapAirtableContentToSupabase sets absent
+  // typed title/status/parent to null. Partial writes must preserve all
+  // unchanged columns and the original Idea/media JSON provenance.
   const patch = {};
   if ("Content_ID" in fields) patch.content_number = fields.Content_ID ?? null;
   if ("Content_Title" in fields) patch.content_title = fields.Content_Title || null;
@@ -5623,23 +5752,51 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
   if ("Voiceover_Status" in fields) patch.voiceover_status = selectName(fields.Voiceover_Status);
   if ("Thumbnail_URL" in fields) patch.thumbnail_url = fields.Thumbnail_URL || null;
   if ("Created_At" in fields || record.createdTime) patch.created_at = fields.Created_At || record.createdTime || null;
-  if ("Content_ID" in fields) {
-    const [kept] = await applyStoredProjection(env, "content_items", [{
-      airtable_record_id: record.id,
-      extras: packContentExtras(fields),
-    }], "extras");
-    if (kept?.extras) patch.extras = kept.extras;
+  if ("Content_Profile" in fields) {
+    const requestedProfile = firstLink(fields.Content_Profile);
+    patch.content_profile_id = requestedProfile
+      ? await resolveSupabaseProfileId(env, requestedProfile)
+      : null;
+    if (requestedProfile && !patch.content_profile_id) {
+      throw new Error("Supabase Content Item profile cannot be resolved");
+    }
   }
-  if (!Object.keys(patch).length) return { skipped: true, reason: "empty_patch" };
-  await supabaseRest(
+  if (Object.prototype.hasOwnProperty.call(fields, "Production_Request")) {
+    const ownerRecordId = firstLink(fields.Production_Request);
+    patch.production_request_id = ownerRecordId
+      ? await resolveSupabaseLinkedId(env, "production_requests", ownerRecordId)
+      : null;
+    if (ownerRecordId && !patch.production_request_id) {
+      throw new Error("Supabase Content Item Production_Request owner cannot be resolved");
+    }
+  }
+  const hasBagPatch = Object.keys(fields).some(key =>
+    key && !key.startsWith("_") && !TYPED_CONTENT_FIELD_KEYS.has(key));
+  if (!Object.keys(patch).length && !hasBagPatch) {
+    return { skipped: true, reason: "empty_patch" };
+  }
+  // Validate the original durable identity first, then apply only present
+  // fields. An HTTP 204 on zero matching rows is NOT a successful handoff.
+  const prior = await supabaseRest(env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=id,extras&limit=2`);
+  if (!Array.isArray(prior) || prior.length !== 1 || !prior[0]?.id) {
+    throw new Error("Supabase Content Item identity missing or ambiguous");
+  }
+  if (hasBagPatch) {
+    patch.extras = mergePresentContentBagFields(prior[0].extras, fields);
+  }
+  const committed = await supabaseRest(
     env,
-    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=id`,
     {
       method: "PATCH",
       body: patch,
-      headers: { Prefer: "return=minimal" },
+      headers: { Prefer: "return=representation" },
     },
   );
+  if (!Array.isArray(committed) || committed.length !== 1 || committed[0]?.id !== prior[0].id) {
+    throw new Error("Supabase Content Item sparse PATCH did not persist the original identity");
+  }
   await mergeCreativeMasterExtras(env, [record]).catch((error) => {
     console.warn("creative master copy failed", error);
   });
@@ -5709,7 +5866,13 @@ function productionRequestPublishStatusPatch(fields) {
   if ("Target_Platforms" in fields) {
     bag.Target_Platforms = Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [];
   }
-  if ("Background_Music_Mode" in fields) bag.Background_Music_Mode = fields.Background_Music_Mode || null;
+  for (const key of [
+    "Background_Music_Mode", "Voiceover_Mode", "Script_Mode", "Requested_Script",
+    "Video_Duration_Seconds", "Voiceover_Duration_Seconds", "Music_Start_Seconds",
+    "Voiceover_Tail_Seconds", "Video_Clip_Count_Mode", "Video_Clip_Count_Exact",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) bag[key] = fields[key] ?? null;
+  }
   if ("Selected_Music_Asset" in fields) {
     bag.Selected_Music_Asset = Array.isArray(fields.Selected_Music_Asset) ? fields.Selected_Music_Asset : [];
   }
@@ -5792,6 +5955,28 @@ async function readProductionRequestPublishStatus(env, airtableId) {
   return isPlainObject(bag) ? bag : {};
 }
 
+/**
+ * A generic Production settings save must not silently erase an approved
+ * storyboard's exact script, scene order and media authority marker.
+ * Only an explicit replacement carrying its own validated directive changes it.
+ */
+export function preserveApprovedStoryboardProductionNotes(previous, incoming) {
+  const marker = "[story-first-production.1] ";
+  const before = String(previous || "");
+  const after = String(incoming ?? "");
+  const directives = before.split(/\r?\n/).filter(line => line.startsWith(marker));
+  if (!directives.length) return after;
+  if (directives.length !== 1) throw new Error("Stored storyboard production directives conflict");
+  let directive;
+  try { directive = JSON.parse(directives[0].slice(marker.length)); }
+  catch { throw new Error("Stored storyboard production directive is invalid"); }
+  if (directive?.schema !== "story-first-production.1" || !Array.isArray(directive.scenes) ||
+      !directive.scenes.length || directive.scenes.some(scene => !/^rec[A-Za-z0-9]{14}$/.test(String(scene?.asset_id || ""))))
+    throw new Error("Stored storyboard production selection is invalid");
+  if (after.includes(marker)) return after;
+  return [after.trimEnd(), directives[0]].filter(Boolean).join("\n");
+}
+
 export async function syncAirtableProductionRequestRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
@@ -5799,6 +5984,21 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
   const bagPatch = drafted.publish_status_patch || null;
   delete drafted.publish_status_patch;
   const row = { ...drafted };
+  if (options.create !== true && Object.hasOwn(row, "production_notes")) {
+    // Phase6 Supabase is authoritative. Read the current directive before
+    // accepting a replacement from a generic settings form. Fail closed if
+    // the current row cannot be verified, rather than silently drop scenes.
+    const previous = await supabaseRest(
+      env,
+      `production_requests?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=production_notes&limit=1`,
+    );
+    if (!Array.isArray(previous)) throw new Error("Cannot verify original storyboard notes");
+    if (previous.length) {
+      row.production_notes = preserveApprovedStoryboardProductionNotes(
+        previous[0].production_notes, row.production_notes,
+      );
+    }
+  }
   if (options.create === true) {
     if (row.production_request_id == null) row.production_request_id = record.id;
     if (row.request_status == null) row.request_status = "Draft";
@@ -5817,6 +6017,14 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record, op
     ideaAirtableId = firstLink(fields.Idea_Candidate);
     const ideaId = await resolveSupabaseLinkedId(env, "idea_candidates", ideaAirtableId);
     if (ideaId) row.idea_candidate_id = ideaId;
+  }
+  if ("Promoted_Content_Item" in fields) {
+    const originalId = firstLink(fields.Promoted_Content_Item);
+    row.promoted_content_item_id = originalId
+      ? await resolveSupabaseLinkedId(env, "content_items", originalId)
+      : null;
+    if (originalId && !row.promoted_content_item_id)
+      throw new Error("Production Request promoted Content Item is missing in authoritative Supabase");
   }
   if (bagPatch && Object.keys(bagPatch).length) {
     const existing = options.create === true
@@ -9168,7 +9376,24 @@ async function commitIdeaRecords(env, records) {
     await linkIdeaCandidateToBatch(env, record.id, firstLink(fields.Idea_Batch) || firstLink(prior.Idea_Batch)).catch((error) => {
       console.warn("idea batch link failed", String(error?.message || error));
     });
-    saved.push({ id: record.id, fields: payload });
+    // The numeric Candidate_ID is assigned by Supabase's insert trigger.
+    // Read it back on CREATE so the first Studio save response displays the
+    // real Idea number instead of falling back to the internal rec... key.
+    // A temporary readback error must never turn a committed create into an
+    // ambiguous failure that encourages a duplicate retry.
+    let canonicalNumber = payload.Candidate_ID ?? null;
+    if (!existing && !canonicalNumber) {
+      const readback = await supabaseRest(
+        env,
+        `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+      ).catch(() => []);
+      canonicalNumber = readback?.[0]?.payload?.Candidate_ID ?? null;
+    }
+    saved.push({ id: record.id, fields: {
+      ...payload,
+      ...(String(canonicalNumber || "").match(/^[0-9]+$/)
+        ? { Candidate_ID: Number(canonicalNumber) } : {}),
+    } });
   }
   return saved;
 }
@@ -9336,6 +9561,51 @@ async function commitProOutputRecords(env, records, { insert = false } = {}) {
   }
   if (!prepared.length) return null;
   await syncPlanScheduleRowsToSupabase(env, prepared, { partial: !insert });
+  // The plan/schedule densifier intentionally ignores linkage fields. But an
+  // I4 fanout PATCH carries Content_Item + Platform_Output (the exact FK owner);
+  // without this patch the PRO stays unlinked and the next recovery duplicates
+  // already-created outputs. Resolve both through native Supabase identities.
+  for (const row of prepared) {
+    const input = records.find(source => String(source?.id || "") === row.id)?.fields || {};
+    const hasParent = Object.prototype.hasOwnProperty.call(input, "Content_Item");
+    const hasOutput = Object.prototype.hasOwnProperty.call(input, "Platform_Output");
+    if (!hasParent && !hasOutput) continue;
+    const patch = {};
+    if (hasParent) {
+      const links = recordLinkIds(input.Content_Item);
+      if (links.length > 1) throw new Error("PRO Content_Item must have at most one parent");
+      patch.content_item_id = links.length
+        ? await resolveSupabaseLinkedId(env, "content_items", links[0]) : null;
+      if (links.length && !patch.content_item_id)
+        throw new Error("PRO Content_Item Supabase FK cannot be resolved");
+    }
+    if (hasOutput) {
+      const links = recordLinkIds(input.Platform_Output);
+      if (links.length > 1) throw new Error("PRO Platform_Output must have at most one output");
+      patch.platform_output_id = links.length
+        ? await resolveSupabaseLinkedId(env, "platform_outputs", links[0]) : null;
+      if (links.length && !patch.platform_output_id)
+        throw new Error("PRO Platform_Output Supabase FK cannot be resolved");
+    }
+    if (patch.platform_output_id) {
+      const saved = await supabaseRest(env,
+        `platform_outputs?id=eq.${encodeURIComponent(patch.platform_output_id)}`
+          + "&select=id,platform,studio_output_type,content_item_id,error_messages&limit=1");
+      const output = Array.isArray(saved) ? saved[0] : null;
+      if (!output) throw new Error("PRO Platform_Output readback missing");
+      const ownerIds = Array.isArray(output.error_messages?.Production_Request_Output)
+        ? output.error_messages.Production_Request_Output : [];
+      if (!ownerIds.includes(row.id)
+          || output.platform !== String(input.Platform || row.fields?.Platform || "")
+          || output.studio_output_type !== String(input.Output_Type || row.fields?.Output_Type || "")
+          || (patch.content_item_id && output.content_item_id !== patch.content_item_id)) {
+        throw new Error("PRO Platform_Output owner/plan mismatch; refusing incorrect FK");
+      }
+    }
+    await supabaseRest(env,
+      `production_request_outputs?airtable_record_id=eq.${encodeURIComponent(row.id)}`,
+      { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+  }
   return prepared;
 }
 

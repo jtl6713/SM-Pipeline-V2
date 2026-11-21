@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from urllib.parse import urlsplit
+
 from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from apc.assets import current_order, list_final_slides, list_ready_public_assets
@@ -46,6 +48,48 @@ AP1C_RATE_LIMIT_RETRY_MINUTES = 30
 def _is_rate_limited(message: str) -> bool:
     text = str(message or "").casefold()
     return "too many actions" in text or "rate limit" in text or "request limit" in text
+
+
+def ap1c_duplicate_slide_order(slides: list[dict[str, Any]]) -> bool:
+    """Multiple slide variants are not authority to pick a publishing set."""
+    orders = [current_order(slide) for slide in slides]
+    return len(orders) != len(set(orders))
+
+
+def ap1c_unstaged_asset_reason(
+    slides: list[dict[str, Any]], *, force_fresh_children: bool = False,
+) -> str | None:
+    """Never create a Meta child with an empty/unready Instagram public URL.
+
+    Asset_4x5_Public_URL is NOT a valid implicit fallback: AP0C must stage
+    the approved 4:5 image and confirm IG_Public_Asset_URL + Ready first.
+    Healthy saved children need no new URL unless their parent expired.
+    """
+    for slide in slides:
+        child = field_str(slide, "IG_Child_Container_ID")
+        child_status = field_str(slide, "IG_Child_Container_Status").casefold()
+        if child and child_status not in {"error", "expired"} and not force_fresh_children:
+            continue
+        staged = field_str(slide, "IG_Public_Asset_URL")
+        status = field_str(slide, "IG_Public_Asset_Status").casefold()
+        if status != "ready" or not staged:
+            return (
+                "QA-IG-AP1C-UNSTAGED-ASSET: slide "
+                f"{current_order(slide)} lacks AP0C-confirmed public Instagram asset. "
+                "Re-stage the approved image in AP0C; do not call Graph or retry automatically."
+            )
+        try:
+            url = urlsplit(staged)
+        except ValueError:
+            url = None
+        if (url is None or url.scheme.lower() != "https" or not url.hostname
+                or url.username or url.password or url.fragment):
+            return (
+                "QA-IG-AP1C-UNSAFE-ASSET-URL: slide "
+                f"{current_order(slide)} has no safe HTTPS image URL. "
+                "Fix AP0C asset staging; do not call Graph or retry automatically."
+            )
+    return None
 
 
 def _reset_parent(
@@ -168,15 +212,17 @@ def process_request(
             # Two slide-number sets are not proof that their media/order match.
             # Never arbitrarily discard records or create Instagram children.
             doubled = len(slides) == 2 * expected_before_clamp and len(ready_slides) == len(slides)
-            if doubled:
+            duplicate_orders = ap1c_duplicate_slide_order(slides) or ap1c_duplicate_slide_order(ready_slides)
+            ambiguous_set = doubled or duplicate_orders
+            if ambiguous_set:
                 message = "QA-IG-AP1C-DUPLICATE-SLIDE-SETS: " + message
             _reset_parent(
                 client, output, message,
                 retry_minutes=AP1C_RATE_LIMIT_RETRY_MINUTES,
-                park_for_quality=doubled,
+                park_for_quality=ambiguous_set,
             )
-            return {"processed": True, "needs_children": False if doubled else True,
-                    "reason": "duplicate_slide_sets" if doubled else "incomplete_slide_set", **result}
+            return {"processed": True, "needs_children": False if ambiguous_set else True,
+                    "reason": "duplicate_slide_sets" if ambiguous_set else "incomplete_slide_set", **result}
     slides, capped = clamp_ig_graph_children(slides, IG_GRAPH_MAX_CHILDREN)
     if capped:
         client.update_record(
@@ -190,9 +236,34 @@ def process_request(
         output["fields"]["Image_Count"] = len(slides)
         result["children_capped"] = True
         result["expected_child_count"] = len(slides)
+    # Even an apparently correct N-of-N view can repeat slide numbers.
+    # Never infer which approved image is the intended winner or send Graph
+    # children in an ambiguous order; preserve all existing slide variants.
+    if ap1c_duplicate_slide_order(slides):
+        _reset_parent(
+            client, output,
+            "QA-IG-AP1C-DUPLICATE-SLIDE-SETS: selected slide order has duplicates. "
+            "Choose the canonical approved gallery before any Graph create.",
+            park_for_quality=True,
+        )
+        return {
+            "processed": True, "needs_children": False,
+            "new_children": 0, "retry_authorized": False,
+            "reason": "duplicate_slide_sets", **result,
+        }
+    force_fresh_children = _requires_fresh_children_after_expired_parent(output)
+    unstaged = ap1c_unstaged_asset_reason(slides, force_fresh_children=force_fresh_children)
+    if unstaged:
+        # An IG asset missing from AP0C is not a transient Graph failure.
+        # Park before any Graph creation or destructive child-ID reset.
+        _reset_parent(client, output, unstaged, park_for_quality=True)
+        return {
+            "processed": True, "needs_assets": True,
+            "new_children": 0, "retry_authorized": False,
+            "reason": "unstaged_public_asset", **result,
+        }
     settings = PipelineSettings(client)
     graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
-    force_fresh_children = _requires_fresh_children_after_expired_parent(output)
     retained_child_ids: list[str] = []
     created_now = 0
     for slide in slides:
@@ -253,7 +324,12 @@ def process_request(
             created_now += 1
             continue
         graph_error = error_message(payload, status_code)
+        # An HTTP 401 is an owner authorization dependency, never a transient
+        # child-container ambiguity that should auto-retry and burn attempts.
+        auth_blocked = status_code == 401
         message = f"AP1C child creation failed for slide {current_order(slide)}. HTTP {status_code}: {graph_error}"
+        if auth_blocked:
+            message = "QA-IG-AP1C-OAUTH-REAUTH-REQUIRED: " + message
         client.update_record(
             CAROUSEL_SLIDES_TABLE,
             slide["id"],
@@ -265,13 +341,18 @@ def process_request(
             typecast=True,
         )
         retry_minutes = AP1C_RATE_LIMIT_RETRY_MINUTES if _is_rate_limited(graph_error) else RETRY_MINUTES
-        _reset_parent(client, output, message, retry_minutes=retry_minutes)
+        _reset_parent(
+            client, output, message,
+            retry_minutes=retry_minutes, park_for_quality=auth_blocked,
+        )
         return {
             "processed": True,
-            "needs_children": True,
+            "needs_children": not auth_blocked,
             "rate_limited": _is_rate_limited(graph_error),
-            "retry_minutes": retry_minutes,
+            "retry_minutes": None if auth_blocked else retry_minutes,
             "retained_count": len(set(retained_child_ids)),
+            "retry_authorized": False if auth_blocked else None,
+            "reason": "provider_oauth_reauthorization_required" if auth_blocked else "graph_child_creation_failed",
             **result,
         }
 

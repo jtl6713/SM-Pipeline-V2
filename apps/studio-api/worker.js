@@ -772,6 +772,7 @@ import {
   getPlaceReviews,
   postPlaceReviewAction,
   promoteProductionRequestViaI3I4,
+  studioNyc20261121HandoffCron,
   promoteIdeaViaI3I4,
   ideaPhotoListeningSessionRoute,
   getAuthorizedIdeaRoute,
@@ -1134,7 +1135,7 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
-      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled))$/.test(url.pathname);
+      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|recover|reconcile-unbilled))$/.test(url.pathname);
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -4474,6 +4475,14 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Incident 2026-11-21: bounded, exact NYC I4 fanout recovery.
+    // The recovered parents already exist; one request/one minute, never
+    // schedule or publish, durable one-attempt R2 receipt per request.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil(studioNyc20261121HandoffCron(env, ctx, Number(event?.scheduledTime) || Date.now())
+        .then((outcome) => { if (outcome && !outcome.skipped) console.info("NYC handoff recovery", outcome); })
+        .catch((error) => console.warn("NYC handoff exact recovery unavailable; no status assumed", String(error?.message || error))));
+    }
     // One bounded listener on the EXISTING minute cron. Independent deployment
     // flags govern verification and status correction; no publisher is called.
     if (String(event?.cron || "").trim() === "* * * * *" &&
@@ -4536,6 +4545,19 @@ export default {
           .catch((error) => console.warn("Minute legacy Idea listener failed", error)));
       }
       return;
+    }
+    // Canonical Supabase publishing must not stop when an unrelated legacy
+    // Airtable request enters cooldown. Run the fresh-only/at-most-once lane
+    // independently, and never use Airtable as a fallback in Supabase mode.
+    const supabaseFreshPublishing = studioWriteSource(env) === "supabase";
+    if (supabaseFreshPublishing && studioSupabaseConfigured(env)) {
+      ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 8 })
+        .then((results) => console.info("Supabase fresh-publish flow", JSON.stringify({
+          inspected: results?.length || 0,
+          fenced: (results || []).filter((r) => r?.fenced).length,
+          blocked: (results || []).filter((r) => r?.skipped).length,
+        })))
+        .catch((error) => console.warn("Supabase fresh-publish flow failed closed", String(error?.message || error))));
     }
     // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
     // + heals every 5 minutes, colliding with Studio UI polls and Airtable 429
@@ -4923,15 +4945,22 @@ export default {
       } catch (error) {
         console.warn("story companion drift heal failed", error);
       }
-      try {
-        await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
-      } catch (error) {
-        console.warn("overdue scheduled publish rescue cron failed", error);
+      if (!supabaseFreshPublishing) {
+        // Legacy rescue can initiate a second provider create after the new
+        // Supabase lane has begun. In Supabase mode ONLY the independently
+        // fenced initial-publish flow may send the first remote publish.
+        try {
+          await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
+        } catch (error) {
+          console.warn("legacy overdue scheduled rescue cron failed", error);
+        }
       }
-      try {
-        await studioReconcileApprovedPublishes(env);
-      } catch (error) {
-        console.warn("publish reconcile cron failed", error);
+      if (!supabaseFreshPublishing) {
+        try {
+          await studioReconcileApprovedPublishes(env);
+        } catch (error) {
+          console.warn("legacy publish reconcile cron failed", error);
+        }
       }
       try {
         await healStuckStudioRenders(env, { skipR4Admission: true });
@@ -6500,6 +6529,7 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:loadFactoryIdeaCandidates__*/
 /*__STUDIO_WORKER_EXTRACT:writeOpsQueueControls__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadRenderQueueCandidates__*/
+/*__STUDIO_WORKER_EXTRACT:studioRenderAudioPreflight__*/
 /*__STUDIO_WORKER_EXTRACT:studioAdmitRenderQueue__*/
 /*__STUDIO_WORKER_EXTRACT:item4PulseR4Python__*/
 /*__STUDIO_WORKER_EXTRACT:item4PulseR5Python__*/
@@ -7194,6 +7224,7 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:completeProductionRequestPromotionSideEffects__*/
 /*__STUDIO_WORKER_EXTRACT:assertProductionRequestFanoutComplete__*/
 /*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:studioNyc20261121HandoffCron__*/
 /*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
 // Clearing that id made the next P2 pulse buy the same sentence again

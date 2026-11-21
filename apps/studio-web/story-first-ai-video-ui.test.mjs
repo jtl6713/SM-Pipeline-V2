@@ -50,7 +50,7 @@ test("paid video requires a reviewed quote and direct human authorization", () =
 });
 
 test("Worker admits scene video endpoints, not autonomous publishing", () => {
-  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled)"));
+  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|recover|reconcile-unbilled)"));
   assert.match(server, /storyVideoJobKey\(ideaId, sceneNumber\)/);
   assert.match(server, /Video is not ready for explicit acceptance/);
   assert.match(server, /studioProfileRequiresChicagoWatermark\(profile\)/);
@@ -176,4 +176,20 @@ test("quote progress uses the same visible animated track and supports reduced m
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /story-first-video-progress\[hidden\]/);
   assert.doesNotMatch(css, /width:\s*100%.*estimated|percent-complete/i);
+});
+
+test("acceptance errors refresh the real R2 status without retrying paid generation", () => {
+  const action = ui.slice(ui.indexOf("async function decideSceneVideo(index, action)"),
+    ui.indexOf("function keyTerms(", ui.indexOf("async function decideSceneVideo(index, action)")));
+  assert.ok(action.includes("} catch (error) {"));
+  assert.ok(action.includes("await checkSceneVideo(index, true);"));
+  assert.ok(!action.includes("generateSceneVideo("));
+  assert.ok(!action.includes("video/start"));
+  assert.ok(!action.includes("submitStoryVideo("));
+  assert.ok(server.includes('job.state === "accepting"'));
+  assert.ok(server.includes("Original AI video preserved"));
+  assert.ok(server.includes('job.state === "accepted"'));
+  assert.ok(ui.includes("Acceptance Needs Reconciliation"));
+  assert.ok(ui.includes("Recover Existing Video"));
+  assert.ok(ui.includes("No new ElevenLabs charge"));
 });

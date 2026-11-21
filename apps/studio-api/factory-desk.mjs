@@ -170,6 +170,14 @@ function isTransientFactoryStuck(row) {
 }
 
 function isManualLane(row) {
+  // Exact, still-held creative packages remain visible in Factory Repair
+  // without entering the Approve or Publishing lanes. Source recovery alone
+  // cannot authorize approval, retry, or a new MAE date.
+  if (row?.kind === "output" && row?.protected_media_rework === true &&
+      row?.do_not_publish === true && row?.output_status === "Changes Requested" &&
+      row?.review_status === "Changes Requested" &&
+      row?.publish_status === "Not Ready" && row?.auto_publish_enabled === false &&
+      !row?.published_at && !row?.platform_post_url) return true;
   const state = String(row?.studio_state || "").toLowerCase();
   const status = String(row?.output_status || row?.request_status || "").toLowerCase();
   const step = String(row?.produce_step || "").toLowerCase();
@@ -304,10 +312,23 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     title: row.title || "Untitled",
     profile_name: row.profile_name || "",
     profile_id: row.profile_id || null,
-    studio_state: row.studio_state || "",
+    studio_state: row.protected_media_rework === true
+      ? (row.recovery_source_inventory_verified === true
+        ? "Media sources verified · Creative repair / Factory review"
+        : "Creative package repair · Source review needed")
+      : (row.studio_state || ""),
+    protected_media_rework: row.protected_media_rework === true,
+    recovery_source_inventory_verified: row.recovery_source_inventory_verified === true,
+    recovery_stage: row.protected_media_rework === true ? (row.recovery_stage || null) : null,
+    recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
+    // The existing client checks DNP and review_package_ready before showing
+    // approval actions; explicit card state protects other clients too.
+    can_approve: row.protected_media_rework === true ? false : undefined,
+    can_retry: row.protected_media_rework === true ? false : undefined,
+    can_publish: row.protected_media_rework === true ? false : undefined,
     output_status: row.output_status || null,
     review_status: row.review_status || null,
-    review_package_ready: row.review_package_ready !== false,
+    review_package_ready: row.protected_media_rework === true ? false : row.review_package_ready !== false,
     review_package_readiness: row.review_package_readiness || null,
     review_package_missing: row.review_package_missing || [],
     review_package_reason: row.review_package_reason || null,

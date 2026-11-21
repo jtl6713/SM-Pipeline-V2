@@ -37,6 +37,45 @@ def platform_output_mapping(platform: str) -> tuple[str, str]:
     return "Carousel", "Instagram Carousel"
 
 
+def final_gallery_identity_reason(
+    slides: list[dict[str, Any]],
+    *, min_slides: int = 1, max_slides: int | None = None,
+) -> str | None:
+    """Reject ambiguous, incomplete or duplicated approved creative sets.
+
+    No selection based on newest timestamp, image URL, approval label or record
+    iteration order may determine which of two approved variants to publish.
+    C8/C9 must leave the output not-ready until a canonical set is reviewed.
+    """
+    if len(slides) < min_slides:
+        return "insufficient_final_slides"
+    if max_slides is not None and len(slides) > max_slides:
+        return "too_many_final_slides_for_platform"
+    numbers: list[int] = []
+    ids: list[str] = []
+    for slide in slides:
+        number = field(slide, "Slide Number")
+        if isinstance(number, bool):
+            return "invalid_final_slide_number"
+        try:
+            numeric = float(number)
+            if not numeric.is_integer():
+                return "invalid_final_slide_number"
+            n = int(numeric)
+        except (TypeError, ValueError, OverflowError):
+            return "invalid_final_slide_number"
+        if n < 1:
+            return "invalid_final_slide_number"
+        numbers.append(n)
+        if slide.get("id"):
+            ids.append(str(slide["id"]))
+    if len(numbers) != len(set(numbers)) or len(ids) != len(set(ids)):
+        return "duplicate_final_slide_number_or_identity"
+    if sorted(numbers) != list(range(1, len(numbers) + 1)):
+        return "noncontiguous_final_slide_sequence"
+    return None
+
+
 def c2_should_generate(slide: dict[str, Any]) -> bool:
     mode = field_str(slide, "Image Generation Mode").lower()
     prompt = field_str(slide, "AI Prompt")

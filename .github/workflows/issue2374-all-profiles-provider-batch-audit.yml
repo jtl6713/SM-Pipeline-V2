@@ -1,0 +1,152 @@
+name: Issue 2374 All-Profile Provider History Batch Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2374-all-profiles-provider-batch-readonly.ps1'
+      - '.github/workflows/issue2374-all-profiles-provider-batch-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2374-all-profiles-provider-batch-readonly.ps1'
+      - '.github/workflows/issue2374-all-profiles-provider-batch-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2374-meta-provider-history-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell script and fail on syntax errors
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue2374-all-profiles-provider-batch-readonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Require bounded provider GET, source-only reads, no status writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2374-all-profiles-provider-batch-readonly.ps1').read_text()
+          assert "ISSUE2374_BATCH_AUDIT=" in s and "output_writes=0" in s
+          assert "provider_writes=0" in s and "publish_calls=0" in s
+          assert "$script:graphCalls -gt 100" in s
+          assert "graph.facebook.com" in s and "SUPABASE_SERVICE_ROLE_KEY" in s
+          assert "wrong_supabase_project_or_credentials" in s
+          for required in ["SameProviderFormat", "'Instagram Story'", "'Facebook Story'",
+                            "'Instagram Carousel'", "'Facebook Reel'", "CAROUSEL_ALBUM",
+                            "cross_format_caption_reuse"]:
+              assert required in s, "provider output kind must be verified"
+          assert "'https://vkwvscgisqsbuwagdvtb.supabase.co'" in s
+          for bad in ["-Method Post","-Method Patch","-Method Put","-Method Delete",
+                      "Invoke-Sqlcmd","Invoke-WebRequest -Method Post","/media_publish",
+                      "Write-Host $sk","Write-Output $sk","AIRTABLE_PAT","api.airtable.com"]:
+              assert bad not in s, "unsafe provider/database or credential behavior"
+          print("issue2374_batch_static_gate=GET_ONLY")
+          PY
+  live-readonly-audit:
+    if: github.event_name != 'pull_request'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate Ops without revealing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/issue2374-ops-check.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/issue2374-ops-check.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "ISSUE2374_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable';exit 1
+      - name: Build SHA256 pinned immutable GET-only source loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          path=pathlib.Path('repair/scripts/issue2374-all-profiles-provider-batch-readonly.ps1')
+          sha=hashlib.sha256(path.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(x in '0123456789abcdef' for x in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{path.as_posix()}'
+          cmd=(
+              "$ErrorActionPreference='Stop';"
+              f"$url='{url}';"
+              "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+              "$digest=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+              f"if($digest -ne '{sha}'){{throw 'pinned_source_hash_mismatch'}};"
+              "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/issue2374-ops-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          print('immutable_main_source_hash_guard=PASS')
+          PY
+      - name: Execute one full-cohort owner-scoped provider GET batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only HTTP 409 (Ops admitted ZERO job, another protected recovery
+          # currently owns the shell) may be retried. Never resubmit a 200/202
+          # accepted job; this is a read-only audit but other jobs may publish.
+          admitted=false
+          for admission in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2374-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE2374_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue2374-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true; break; fi
+            if [[ "$code" != 409 ]]; then
+              echo "Ops audit rejected ($code), no replay or provider action";exit 2
+            fi
+            echo "Ops shell busy: waiting for owner job without bypassing its lock"
+            sleep 12
+          done
+          if [[ "$admitted" != true ]]; then
+            echo 'Ops remained occupied; audit not executed, no retry/publish permitted';exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/issue2374-ops-start.json)
+          for attempt in $(seq 1 320); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $ISSUE2374_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue2374-ops-status.json
+            state=$(jq -r '.job.status // empty' /tmp/issue2374-ops-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/issue2374-ops-status.json \
+                | grep '^ISSUE2374_BATCH_AUDIT=' | tail -1 \
+                | sed 's/^ISSUE2374_BATCH_AUDIT=//' > /tmp/issue2374-full-cohort-audit.json
+              jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .targets>0 and .targets<600 and .graph_get_calls<=100 and (.all_output_dispositions|length)==.targets and (.provider_coverage|length)>=8' /tmp/issue2374-full-cohort-audit.json >/dev/null
+              jq -c '{version,targets,graph_get_calls,counts,provider_coverage,public_candidates:(.provider_candidates|length),cross_format_caption_reuse:(.cross_format_caption_reuse|length),provider_writes,output_writes}' /tmp/issue2374-full-cohort-audit.json
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
+              jq -r '.job.log // ""' /tmp/issue2374-ops-status.json | tail -n 12 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|ACCESS_TOKEN' | tail -n 8 || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo 'Provider-history audit incomplete or timed out; no negative-delivery claims';exit 4
+      - name: Retain per-output sanitized evidence for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2374-all-profiles-provider-history
+          path: /tmp/issue2374-full-cohort-audit.json
+          retention-days: 30
+          if-no-files-found: warn

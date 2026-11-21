@@ -1,0 +1,133 @@
+name: P1 2340 ten approved expired Instagram Stories after verified canary
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-ten-approved-stories.yml'
+      - 'repair/scripts/p1-2340-ten-approved-expired-stories-once.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-ten-approved-stories.yml'
+      - 'repair/scripts/p1-2340-ten-approved-expired-stories-once.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-ten-approved-stories-once
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell parse and bounded original approval audit
+        shell: pwsh
+        run: |
+          $f='repair/scripts/p1-2340-ten-approved-expired-stories-once.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($required in @('fresh_story_canary_not_proven_stop_all','vkwvscgisqsbuwagdvtb','prior_original_container_not_expired','quality_agent_recovery_events','approved_original_row_not_exact','safety_hold_origin_not_verified','prior_original_container_not_expired','unique_create_fence_not_durable','existing_create_fence_unverified','saved_original_container_not_exact','existing_new_container_status_get_unavailable','new_container_not_saved_no_publish','unique_publish_fence_not_durable','published_verified','P1_2340_TEN_FRESH_STORIES=')){
+            if(-not $s.Contains($required)){throw ('missing_required_fence_or_guard: '+$required)}
+          }
+          if(-not $s.Contains('fence.previous_do_not_publish -ne $false') -or
+             -not $s.Contains('fence.previous_auto_publish_enabled -ne $true') -or
+             -not $s.Contains('fence.provider_container_preserved -ne $x.old')){
+            throw 'original_json_hold_provenance_not_typed'
+          }
+          if(([regex]::Matches($s,'@\{n=\d+;rid=')).Count -ne 10){throw 'expected_exact_ten_selected_stories'}
+          if(([regex]::Matches($s,'/media_publish')).Count -ne 1 -or ([regex]::Matches($s,"'/media'")).Count -ne 1){throw 'one_meta_create_and_publish_operation_per_target'}
+          if($s -match '(?im)^\s*\$pid\s*=' -or $s -notmatch '\$publishEventRecordId='){throw 'reserved_PowerShell_PID_variable_must_not_be_assigned'}
+          if(([regex]::Matches($s,'/rest/v1/quality_agent_recovery_events')).Count -ne 3){throw 'one_original_create_event_GET_and_two_unique_fenced_writes_required'}
+          if($s -match "@\{n=5628;" -or $s -notmatch 'skipped_copyright_sensitive=5628'){throw 'prior_vizcaya_copyright_sensitive_hold_must_remain'}
+          foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete','Write-Output $token','Write-Host $token')){
+            if($s.Contains($bad)){throw 'unsafe_operation'}
+          }
+          Write-Output 'P1_APPROVED_EXPIRED_STORIES_SAFE_BATCH_PREVIEW=PASS'
+  publish-exact-ten:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 33
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate production Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C";do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-story-batch-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-story-batch-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "P1_STORY_BATCH_OPS=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops credential unavailable';exit 1
+      - name: Bind script byte hash to immutable merged commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,json,pathlib
+          file=pathlib.Path('repair/scripts/p1-2340-ten-approved-expired-stories-once.ps1')
+          sha=hashlib.sha256(file.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(v in '0123456789abcdef' for v in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{file.as_posix()}'
+          command=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$s=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($s -ne '{sha}'){{throw 'pinned_batch_source_sha_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/p1-story-batch-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+      - name: Run only after exact canary publication; no automatic replay of any provider call
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for n in $(seq 1 30);do
+            code=$(curl -sS --max-time 30 -o /tmp/p1-story-batch-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $P1_STORY_BATCH_OPS" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/p1-story-batch-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops not accepting batch ($code)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$accepted" != true ]];then echo 'Ops busy; no batch launched';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-story-batch-start.json)
+          for n in $(seq 1 400);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_STORY_BATCH_OPS" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-story-batch-job.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-story-batch-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/p1-story-batch-job.json | grep '^P1_2340_TEN_FRESH_STORIES=' | tail -1 | sed 's/^P1_2340_TEN_FRESH_STORIES=//' > /tmp/p1-story-batch-evidence.json
+              jq -e '.canary_3522_proven==true and .targets==10 and .provider_create_calls<=9 and .reused_saved_containers<=1 and .provider_publish_calls<=10 and .airtable_ops==0 and (.outcomes|length)<=10' /tmp/p1-story-batch-evidence.json >/dev/null
+              jq -c '{targets,canary_3522_proven,verified_published,provider_create_calls,reused_saved_containers,provider_publish_calls,skipped_copyright_sensitive,outcomes}' /tmp/p1-story-batch-evidence.json
+              if jq -e '.verified_published==10 and .provider_create_calls==9 and .reused_saved_containers==1 and .provider_publish_calls==10' /tmp/p1-story-batch-evidence.json >/dev/null;then
+                echo 'P1_2340_TEN_GENUINELY_PUBLISHED=PASS';exit 0
+              fi
+              echo 'Partial verified Story results; no replay allowed';exit 3
+            elif [[ "$status" == failed ]];then echo 'Protected batch job failed; do not replay ambiguous Meta requests';exit 3;fi
+            sleep 4
+          done
+          echo 'Job outcome ambiguous: do not replay';exit 4
+      - name: Preserve original/output Meta receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-ten-approved-stories-provider-receipts
+          path: /tmp/p1-story-batch-evidence.json
+          retention-days: 30
+          if-no-files-found: warn

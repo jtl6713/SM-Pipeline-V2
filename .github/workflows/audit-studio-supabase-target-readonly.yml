@@ -1,0 +1,104 @@
+name: Audit Live Studio Supabase Project (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-studio-supabase-target-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-supabase-target-readonly
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GITHUB_SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+      GITHUB_APPROVED_REF: ${{ vars.STUDIO_PRODUCTION_SUPABASE_PROJECT_REF }}
+      EXPECTED_STUDIO_REF: vkwvscgisqsbuwagdvtb
+    steps:
+      - name: Inspect active deployment and compare production project references
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p /tmp/studio-target-evidence
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 25 "$BASE/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-target-evidence/deployments.json
+          jq -e '.success==true' /tmp/studio-target-evidence/deployments.json >/dev/null
+          version=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/studio-target-evidence/deployments.json)
+          curl -fsS --max-time 25 "$BASE/versions/$version" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-target-evidence/version.json
+          jq -e '.success==true' /tmp/studio-target-evidence/version.json >/dev/null
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          def project_ref(url):
+              try:
+                  parsed=urlsplit(str(url or '').strip())
+                  if parsed.scheme!='https' or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.port or parsed.path not in ('', '/'):
+                      return None
+                  match=re.fullmatch(r'([a-z0-9]{20})\.supabase\.co',parsed.hostname or '')
+                  return match.group(1) if match else None
+              except (TypeError,ValueError):
+                  return None
+
+          raw=json.loads(Path('/tmp/studio-target-evidence/version.json').read_text())
+          v=raw.get('result') or {}
+          bindings=(v.get('resources') or {}).get('bindings') or []
+          urls=[b for b in bindings if b.get('name')=='SUPABASE_URL']
+          roles=[b for b in bindings if b.get('name')=='SUPABASE_SERVICE_ROLE_KEY']
+          worker_ref=project_ref(urls[0].get('text')) if len(urls)==1 and urls[0].get('type')=='plain_text' else None
+          role_type_ok=(len(roles)==1 and roles[0].get('type')=='secret_text')
+          expected=os.environ.get('EXPECTED_STUDIO_REF')
+          github_ref=project_ref(os.environ.get('GITHUB_SUPABASE_URL'))
+          approved=os.environ.get('GITHUB_APPROVED_REF')
+          checks={
+              'active_worker_ref_matches_confirmed_production':worker_ref==expected,
+              'github_supabase_url_ref_matches_confirmed_production':github_ref==expected,
+              'github_approved_production_ref_matches':approved==expected,
+              'worker_service_role_binding_type_valid':role_type_ok,
+          }
+          report={
+              'ok':all(checks.values()),
+              'active_version_id':v.get('id'),
+              'confirmed_production_ref':expected,
+              'worker_candidate_ref':worker_ref,
+              'github_candidate_ref':github_ref,
+              'configured_github_approval_present':bool(approved),
+              'checks':checks,
+              'legacy_airtable_pat_binding_present':any(b.get('name')=='AIRTABLE_PAT' for b in bindings),
+              'binding_names_types':sorted([{'name':b.get('name'),'type':b.get('type')} for b in bindings],key=lambda x:str(x.get('name') or '')),
+              'secrets_collected':False,
+              'only_read_operations':True,
+          }
+          Path('/tmp/studio-target-evidence/report.json').write_text(json.dumps(report,indent=2,sort_keys=True))
+          print(json.dumps({k:v for k,v in report.items() if k!='binding_names_types'},sort_keys=True))
+          if not report['ok']:
+              raise SystemExit('BLOCKED: live Worker, GitHub URL and approved project reference are not all verified')
+          PY
+      - name: Remove unredacted Cloudflare API payloads
+        if: always()
+        shell: bash
+        run: |
+          rm -f /tmp/studio-target-evidence/deployments.json /tmp/studio-target-evidence/version.json
+      - name: Publish sanitized audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-production-supabase-target-${{ github.run_id }}
+          path: /tmp/studio-target-evidence/report.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -58,6 +58,34 @@ export function factoryBatchNeedsAttention(job) {
     (job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item)) ||
     !["completed", "failed"].includes(job.status);
 }
+/** Public, bounded progress projection shared by single and global R2 batches.
+ * Unknown legacy checkpoints remain "Processing"; never invent an active phase. */
+export function factoryBatchItemProgress(item) {
+  const status = String(item?.status || "pending");
+  const phase = status === "failed" ? "failed"
+    : ["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(status) ? "completed"
+    : status === "pending" ? "queued"
+    : ["validating","approving","verifying"].includes(item?.processing_stage)
+      ? item.processing_stage : "processing";
+  const events = Array.isArray(item?.timeline) ? item.timeline : [];
+  const attemptStarted = item?.attempt_started_at ||
+    [...events].reverse().find(row => row.state === "processing")?.at || null;
+  const lastProgress = item?.last_progress_at || events.at(-1)?.at || null;
+  const completedAt = item?.completed_at ||
+    (phase === "completed" || phase === "failed" ? events.at(-1)?.at || null : null);
+  return {
+    phase,
+    attempt_started_at: attemptStarted,
+    stage_started_at: item?.stage_started_at || attemptStarted,
+    last_progress_at: lastProgress,
+    completed_at: completedAt,
+    next_attempt_ms: Number(item?.next_attempt_ms || 0),
+    total_attempts: Number(item?.total_attempts || item?.attempts || 0),
+    auto_retry_count: Number(item?.auto_retry_count || 0),
+    manual_retry_count: Number(item?.manual_retry_count || 0),
+  };
+}
+
 export function factoryBatchSummary(job) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
   const counts = factoryBatchCounts(job);
@@ -77,6 +105,7 @@ export function factoryBatchSummary(job) {
       failure_history: item.failure_history || [],
       removed_original_error: item.removed_original_error || null,
       previous_failure_error: item.previous_failure_error || null,
+      ...factoryBatchItemProgress(item),
       timing: factoryApprovalItemTiming(item),
     })),
   };
@@ -371,7 +400,9 @@ export async function factoryBatchDrain(bucket, options) {
       job = await cas(bucket, key, value => ({
         ...value, status: "running", updated_at: stamp,
         items: value.items.map(row => row.id === item.id
-          ? { ...row, status: "processing", attempts: (row.attempts || 0) + 1,
+          ? { ...row, status: "processing", processing_stage: "processing",
+            attempt_started_at: stamp, stage_started_at: stamp, last_progress_at: stamp,
+            completed_at: null, attempts: (row.attempts || 0) + 1,
             total_attempts: (row.total_attempts || row.attempts || 0) + 1, error: null,
             timeline: [...(row.timeline || []), {
               state: "processing", at: stamp,
@@ -383,9 +414,27 @@ export async function factoryBatchDrain(bucket, options) {
       processed++;
       const attempt = (item.total_attempts || item.attempts || 0) + 1;
       const events = [];
-      const checkpoint = state => {
+      const checkpoint = async state => {
         if (typeof state !== "string" || !/^[a-z_]{3,64}$/.test(state) || events.length >= 64) return;
-        events.push({ state, at: new Date(now()).toISOString(), attempt });
+        const at = new Date(now()).toISOString();
+        events.push({ state, at, attempt });
+        // Only actual observed phases are published live. Persist through
+        // bounded R2 CAS so a slow provider/readback appears during the await.
+        // Diagnostics must never become a prerequisite for approval writes.
+        if (!["validating", "approving", "verifying"].includes(state)) return;
+        try {
+          await cas(bucket, key, value => {
+            const current = value.items.find(row => row.id === item.id);
+            if (current?.status !== "processing" || Number(current.total_attempts) !== attempt) return null;
+            return { ...value, updated_at: at, items: value.items.map(row => row.id === item.id
+              ? { ...row, processing_stage: state, stage_started_at: at, last_progress_at: at,
+                  timeline: [...(row.timeline || []), { state, at, attempt }].slice(-180) }
+              : row) };
+          });
+        } catch (error) {
+          console.warn("Factory live phase checkpoint unavailable", requestId,
+            String(error?.message || error).slice(0, 100));
+        }
       };
       let outcome;
       try {
@@ -412,6 +461,10 @@ export async function factoryBatchDrain(bucket, options) {
           ...value, updated_at: completedAt,
           items: value.items.map(row => row.id === item.id ? {
             ...row, ...outcome,
+            processing_stage: outcome.status === "pending" ? "queued" :
+              outcome.status === "failed" ? "failed" : "completed",
+            stage_started_at: completedAt, last_progress_at: completedAt,
+            completed_at: outcome.status === "pending" ? null : completedAt,
             timeline: [...(row.timeline || []), ...events, {
               state: outcome.status, at: completedAt, attempt,
             }].slice(-180),
@@ -708,6 +761,112 @@ export async function factoryBatchMarkExceptionRouted(bucket, {
       }].slice(-180),
     } : item);
     return {...job, items, updated_at: at};
+  });
+}
+
+/**
+ * Fair, bounded Factory receipt reconciliation window.
+ * Stable age ordering plus a rotating eight-child window prevents a flood of
+ * newer jobs or permanently mismatched receipts from hiding older requests.
+ * The returned children are only candidates: exact Supabase receipts still
+ * control every R2 bookkeeping write.
+ */
+export function factoryBatchCronReceiptCandidates(jobs, { nowMs = Date.now(), limit = 8 } = {}) {
+  const take = Math.max(1, Math.min(8, Math.floor(Number(limit) || 8)));
+  const eligible = (Array.isArray(jobs) ? jobs : []).filter(candidate =>
+    candidate?.job?.group_request_id &&
+    ["queued", "running"].includes(candidate.job.status) &&
+    (candidate.job.items || []).some(item => ["pending", "processing"].includes(item.status))
+  ).sort((a, b) =>
+    (Date.parse(a.job.created_at || "") || 0) - (Date.parse(b.job.created_at || "") || 0) ||
+    String(a.requestId || "").localeCompare(String(b.requestId || ""))
+  );
+  if (!eligible.length) return [];
+  const minute = Math.floor(Math.max(0, Number(nowMs) || 0) / 60000);
+  const first = ((minute % eligible.length) * take) % eligible.length;
+  return Array.from({ length: Math.min(take, eligible.length) },
+    (_, index) => eligible[(first + index) % eligible.length]);
+}
+
+/**
+ * Repair R2 progress only after an exact, still-current Supabase approval receipt
+ * from THIS Factory request has been read back. This never calls the approval
+ * writer, MAE, or any publisher. The receipt is verified against immutable
+ * record number, profile, and parent/child request identity before CAS.
+ *
+ * Intentionally limited to aged global-group pending/processing rows. Terminal
+ * failures have a separate audited recovery path and are never rewritten here.
+ */
+export async function factoryBatchReconcileSupabaseApprovalReceipts(bucket, {
+  profileId, requestId, loadRecords, nowMs = Date.now(), minAgeMs = 60000,
+} = {}) {
+  assertBucket(bucket);
+  if (typeof loadRecords !== "function") throw Error("Canonical Supabase receipt reader required");
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  if (!snapshot?.group_request_id || !["queued", "running"].includes(snapshot.status)) return snapshot;
+  const createdMs = Date.parse(snapshot.created_at || "");
+  if (!Number.isFinite(createdMs) || nowMs - createdMs < minAgeMs) return snapshot;
+  if (new Set(snapshot.items.map(row => row.id)).size !== snapshot.items.length) {
+    throw Error("Duplicate Factory ledger identities; receipt reconciliation denied");
+  }
+  const candidates = snapshot.items.filter(row =>
+    row.status === "pending" || row.status === "processing");
+  if (!candidates.length) return snapshot;
+  // The source reader must make an authoritative exact-ID read, not use the
+  // eventually-consistent Factory Desk or the browser's saved selection.
+  const records = await loadRecords(candidates.map(row => row.id));
+  if (!(records instanceof Map)) throw Error("Canonical Supabase receipt read unavailable");
+  const verified = new Map();
+  for (const item of candidates) {
+    const entry = records.get(item.id);
+    const row = entry?.row;
+    const receipt = row?.error_messages?.SM_Factory_Supabase_Approval_Receipt;
+    if (entry?.profileId !== profileId || row?.airtable_record_id !== item.id ||
+        Number(row?.output_number) !== Number(item.output_id) ||
+        row?.review_status !== "Approved" ||
+        !["Approved for Publishing", "Scheduled", "Published"].includes(String(row?.output_status || "")) ||
+        receipt?.authority !== "supabase" ||
+        receipt?.request_id !== snapshot.group_request_id ||
+        receipt?.profile_record_id !== profileId ||
+        receipt?.output_record_id !== item.id ||
+        Number(receipt?.output_number) !== Number(item.output_id) ||
+        !Number.isFinite(Date.parse(String(receipt?.approved_at || "")))) continue;
+    // Don't change an R2 row while the same active drain is still completing.
+    const lastProcessing = [...(item.timeline || [])].reverse().find(event => event.state === "processing");
+    if (item.status === "processing" && lastProcessing &&
+        nowMs - Date.parse(lastProcessing.at || "") < minAgeMs) continue;
+    verified.set(item.id, { output_id: Number(item.output_id), approved_at: receipt.approved_at });
+  }
+  if (!verified.size) return snapshot;
+  const at = new Date(nowMs).toISOString();
+  return cas(bucket, factoryBatchKey(profileId, requestId), current => {
+    if (current?.group_request_id !== snapshot.group_request_id ||
+        new Set((current.items || []).map(row => row.id)).size !== (current.items || []).length) {
+      throw Error("Factory ledger identity changed; no receipt reconciliation");
+    }
+    let changed = 0;
+    const items = current.items.map(item => {
+      const proof = verified.get(item.id);
+      if (!proof || Number(item.output_id) !== proof.output_id ||
+          !["pending", "processing"].includes(item.status)) return item;
+      changed++;
+      return {
+        ...item, status: "approved", error: null, next_attempt_ms: 0,
+        approval_verified_at: at,
+        timeline: [...(item.timeline || []), {
+          state: "approved", at, attempt: item.total_attempts || 0,
+          reason: "exact_supabase_original_request_receipt",
+          canonical_approved_at: proof.approved_at,
+        }].slice(-180),
+      };
+    });
+    if (!changed) return null;
+    const counts = factoryBatchCounts({ ...current, items });
+    return {
+      ...current, items, updated_at: at,
+      status: counts.pending_count ? "running"
+        : counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed",
+    };
   });
 }
 

@@ -1,5 +1,7 @@
+import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
+import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
@@ -1138,6 +1140,12 @@ export async function writeFactoryDeskControls(env, controls, actor = null) {
 /*__STUDIO_WORKER_END:writeFactoryDeskControls__*/
 
 export async function loadFactoryIdeaCandidates(env) {
+  // Canonical output writes + a missing Supabase read flag are an outage,
+  // not permission to query the former Airtable idea system.
+  if (studioWriteSource(env) === "supabase" && studioFactoryOpsReadSource(env) !== "supabase") {
+    console.warn("Factory photo-waiting ideas suppressed: Supabase read authority required");
+    return [];
+  }
   if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env, { outputLimit: 50, requestLimit: 20 });
@@ -1159,7 +1167,10 @@ export async function loadFactoryIdeaCandidates(env) {
         };
       });
     } catch (error) {
-      console.warn("supabase factory idea candidates failed; falling back to Airtable", error);
+      // Production runs on Supabase-only authority. An unavailable ideas pack
+      // must NEVER cause an Airtable list as an implicit fallback.
+      console.warn("Supabase Factory idea candidates unavailable; legacy fallback forbidden", String(error?.message || error));
+      return [];
     }
   }
   if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
@@ -1239,6 +1250,26 @@ export async function studioLoadRenderQueueCandidates(env, { limit = 80, fields 
   return sortRenderQueueCandidates(rows, f, controls);
 }
 /*__STUDIO_WORKER_END:studioLoadRenderQueueCandidates__*/
+
+export function studioRenderAudioPreflight(row) {
+  const mode = (name) => String(f(row, name) || "").trim().toLowerCase();
+  const voice = mode("Studio_Effective_Voiceover_Mode") === "yes";
+  const music = mode("Studio_Effective_Background_Music_Mode") === "yes";
+  if (voice) {
+    if (!String(f(row, "Voiceover_URL") || "").trim()) return "voiceover_missing";
+    const seconds = Number(f(row, "Voiceover_Duration_Seconds")
+      || f(row, "Studio_Effective_Voiceover_Duration_Seconds") || 0);
+    const frames = Number(f(row, "Render_Total_Frames") || 0);
+    if (!(seconds > 0) || !(frames > 0) || frames / 30 < seconds + 0.1)
+      return "voiceover_exceeds_video";
+  }
+  if (music && !String(
+    f(row, "Music_URL") || f(row, "Preferred_Music_URL") || f(row, "Selected_Music_URL") || ""
+  ).trim()) return "background_music_missing";
+  if (music && !(Number(f(row, "Music_Volume")) > 0)) return "background_music_muted";
+  return null;
+}
+/*__STUDIO_WORKER_END:studioRenderAudioPreflight__*/
 
 export async function studioAdmitRenderQueue(env, options = {}) {
   const controls = options.controls || await readOpsQueueControls(env);
@@ -1362,6 +1393,12 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       Boolean(String(f(latest, "Final_File_URL") || "").trim())
     ) {
       skipped.push({ id: head.id, reason: "no_longer_eligible" });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
+    const missingAudio = studioRenderAudioPreflight(latest);
+    if (missingAudio) {
+      skipped.push({ id: head.id, reason: missingAudio });
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
       continue;
     }
@@ -2177,6 +2214,22 @@ export async function item4ReconcileVariants(env, recordId, record = null, optio
 }
 /*__STUDIO_WORKER_END:item4ReconcileVariants__*/
 
+async function item4FramePrepareStage(name, operation) {
+  try { return await operation(); }
+  catch (error) {
+    if (error?.status && Number(error.status) < 500) throw error;
+    // No asset names, auth tokens, Drive URLs or user notes in this log.
+    console.error("studio_frame_prepare_failed", {
+      stage: name,
+      code: Number(error?.status || 500),
+      reason: String(error?.message || "unavailable").slice(0, 180),
+    });
+    throw new HttpError(503,
+      "Frames Prepare could not complete " + name +
+      ". The original assets and approved storyboard are preserved; no automatic generation or publish was started.");
+  }
+}
+
 export async function runItem4VariantPrepareCore(env, recordId, authorization, options = {}) {
   const {
     cropsPayload = {},
@@ -2198,21 +2251,79 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
   }
 
   if (Object.keys(cropsPayload).length && assets.length) {
-    record = await item4UpdateRequestState(env, recordId, {
-      Studio_Master_Assets_JSON: JSON.stringify(assets),
-    });
-    assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    // The Supabase Phase6 PATCH succeeds but its Airtable-shaped response is
+    // intentionally sparse: only updated fields, not the saved output plan.
+    // Never treat a mutation echo as an authorized, complete Production Request.
+    const savedIdentity = assets.map((asset) => ({
+      id: String(asset?.id || ""),
+      media_asset_record_id: String(asset?.media_asset_record_id || ""),
+      google_drive_file_id: String(asset?.google_drive_file_id || ""),
+    }));
+    await item4FramePrepareStage("crop settings save",
+      () => item4UpdateRequestState(env, recordId, {
+        Studio_Master_Assets_JSON: JSON.stringify(assets),
+      }));
+    record = await item4FramePrepareStage("crop save full request reload",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    const reloadedAssets = item4AssetManifest(record)
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    if (reloadedAssets.length !== savedIdentity.length ||
+        reloadedAssets.some((asset, index) =>
+          String(asset?.id || "") !== savedIdentity[index].id ||
+          String(asset?.media_asset_record_id || "") !== savedIdentity[index].media_asset_record_id ||
+          String(asset?.google_drive_file_id || "") !== savedIdentity[index].google_drive_file_id)) {
+      throw new HttpError(409,
+        "Master source identities changed during crop save. Refresh Production; no frames were started.");
+    }
+    assets = reloadedAssets;
   }
 
-  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  let plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   if (f(record, "Studio_Output_Plan_Status") !== "Ready" || !plan?.items?.length) {
     throw new HttpError(409, "Build a complete platform output plan before preparing platform media");
+  }
+
+  const integrity = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (integrity.kind === "invalid")
+    throw new HttpError(409, integrity.reason + "; no frame jobs were started.");
+  if (integrity.kind === "repair") {
+    // The approved storyboard, not a 1-photo UI default, owns the exact
+    // source order. Re-read before saving so a concurrent operator edit wins.
+    const latest = await item4FramePrepareStage("concurrent storyboard verification",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    const latestAssets = item4AssetManifest(latest)
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    if (JSON.stringify(latestAssets) !== JSON.stringify(item4AssetManifest(record)
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))) ||
+        JSON.stringify(item4ParseJson(f(latest, "Studio_Output_Plan_JSON"), null)) !== JSON.stringify(plan) ||
+        String(f(latest, "Production_Notes") || "") !== String(f(record, "Production_Notes") || "")) {
+      throw new HttpError(409, "Storyboard or source media changed while preparing frames. Refresh Production; no frames started.");
+    }
+    await item4FramePrepareStage("approved storyboard plan reconciliation",
+      () => item4UpdateRequestState(env, recordId, {
+        Studio_Output_Plan_JSON: JSON.stringify(integrity.plan),
+      }));
+    // Read the actual saved row, not a partial PATCH echo. Fail closed if a
+    // concurrent write prevents the six-scene correction from persisting.
+    record = await item4FramePrepareStage("approved plan full request reload",
+      () => loadAuthorizedProductionRequest(env, recordId, authorization));
+    plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+    if (reconcileApprovedStoryFirstSourcePlan(
+      f(record, "Production_Notes"), item4AssetManifest(record)
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)), plan,
+    ).kind !== "ready") {
+      throw new HttpError(409,
+        "Approved storyboard plan could not be verified after saving. Refresh Production; no frames were started.");
+    }
   }
 
   const ratios = item4RequiredRatios(plan);
   if (!ratios.length) throw new HttpError(409, "The platform output plan does not contain any supported image ratios");
 
-  let masterAuthority = await item4ReconcileMasterAuthority(env, recordId, record);
+  let masterAuthority = await item4FramePrepareStage("master verification",
+    () => item4ReconcileMasterAuthority(env, recordId, record));
   record = masterAuthority.record;
   let authoritativeAssets = masterAuthority.assets.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
@@ -2250,26 +2361,40 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
 
   authoritativeAssets = item4MergeAssetCrops(authoritativeAssets, cropsPayload);
 
-  const outputRows = await outputRowsForProductionRequest(env, recordId);
-  const preparingRecord = await item4UpdateRequestState(env, recordId, {
-    Studio_Variant_Status: "Preparing",
-    Studio_Variant_Error: null,
-    Studio_Item4_State: "Plan Ready",
-  });
+  const outputRows = await item4FramePrepareStage("platform output lookup",
+    () => outputRowsForProductionRequest(env, recordId));
+  if (!outputRows.length)
+    throw new HttpError(409, "No enabled platform destinations were found. Rebuild the platform plan before Prepare.");
+  await item4FramePrepareStage("frame preparation checkpoint",
+    () => item4UpdateRequestState(env, recordId, {
+      Studio_Variant_Status: "Preparing",
+      Studio_Variant_Error: null,
+      Studio_Item4_State: "Plan Ready",
+    }));
+  // Rehydrate before variant reconciliation, which needs the full masters
+  // and output plan and must never receive a sparse state-PATCH response.
+  const preparingRecord = await item4FramePrepareStage("frame checkpoint full request reload",
+    () => loadAuthorizedProductionRequest(env, recordId, authorization));
+  if (String(f(preparingRecord, "Studio_Variant_Status") || "").trim() !== "Preparing") {
+    throw new HttpError(503,
+      "Frames Prepare checkpoint was not saved. No new frames were confirmed.");
+  }
 
-  const expected = await item4UpsertVariantQueue(
-    env,
-    recordId,
-    authoritativeAssets,
-    ratios,
-    outputRows,
-    plan,
-    { forceRetry }
-  );
+  const expected = await item4FramePrepareStage("frame queue creation",
+    () => item4UpsertVariantQueue(
+      env,
+      recordId,
+      authoritativeAssets,
+      ratios,
+      outputRows,
+      plan,
+      { forceRetry }
+    ));
   // Under write SoR, queue creates can soft-echo without persisting. Fail closed
   // so Prepare never returns 202/None and the UI does not say "did not finish."
   if (expected.length) {
-    const persisted = await item4VariantQueueRows(env, recordId);
+    const persisted = await item4FramePrepareStage("frame queue readback",
+      () => item4VariantQueueRows(env, recordId));
     const expectedIds = new Set(expected.map((row) => String(row?.transfer_id || "").trim()).filter(Boolean));
     const scoped = (Array.isArray(persisted) ? persisted : []).filter((row) =>
       expectedIds.has(String(f(row, "Transfer_ID") || "").trim())
@@ -2281,7 +2406,8 @@ export async function runItem4VariantPrepareCore(env, recordId, authorization, o
       );
     }
   }
-  let reconciled = await item4ReconcileVariants(env, recordId, preparingRecord);
+  let reconciled = await item4FramePrepareStage("frame manifest reconciliation",
+    () => item4ReconcileVariants(env, recordId, preparingRecord));
 
   // Prefer a short sync pulse, then finish in waitUntil/cron so Prepare returns
   // while crops continue instead of holding the HTTP request for the full budget.
@@ -2381,10 +2507,13 @@ export async function prepareItem4Variants(request, env, url, authorization, ctx
   try { payload = await request.json(); } catch { payload = {}; }
 
   const recordId = item4RequestIdFromPath(url);
+  let stage = "authorized request load";
+  try {
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
 
   const cropsPayload = payload?.crops && typeof payload.crops === "object" ? payload.crops : {};
+  stage = "frame preparation";
   const { reconciled } = await runItem4VariantPrepareCore(env, recordId, authorization, {
     cropsPayload,
     ctx,
@@ -2416,6 +2545,21 @@ export async function prepareItem4Variants(request, env, url, authorization, ctx
           ? `Attaching ${reconciled.manifest?.ready_count || 0} of ${reconciled.manifest?.target_count || 0} clip frames…`
           : "Platform media preparation is still running."),
   }, failed ? 409 : ready ? 200 : 202);
+  } catch (error) {
+    // Preserve ordinary validation/authorization responses and stage-specific
+    // 503s. The generic Worker fallback used to obscure pre-queue exceptions
+    // as "Request failed (500)" with no actionable operator diagnostic.
+    const status = Number(error?.status || 500);
+    if (status < 500 || status === 503) throw error;
+    console.error("studio_frames_prepare_request_failed", {
+      stage, status, request_id: recordId,
+      error_name: String(error?.name || "Error").slice(0, 60),
+      // Error messages can include remote IDs/URLs; never copy them into logs.
+    });
+    throw new HttpError(503,
+      "Frames Prepare stopped during " + stage +
+      ". No crop jobs were confirmed; exact approved assets and narration are preserved.");
+  }
 }
 /*__STUDIO_WORKER_END:prepareItem4Variants__*/
 
@@ -5272,14 +5416,18 @@ export function arrayOrEmpty(value) {
 }
 /*__STUDIO_WORKER_END:arrayOrEmpty__*/
 
-export function resolvedOutputTriState(outputRow, overrideField, requestRecord, requestField, profileDefault) {
+export function resolvedOutputTriState(outputRow, overrideField, requestRecord, requestField, profileDefault, parentIntent = null) {
   const override = String(f(outputRow, overrideField) || "Inherit").trim() || "Inherit";
-
   if (override === "Yes" || override === "No") return override;
   if (override === "Use Profile Default") return profileDefault ? "Yes" : "No";
 
-  const master = String(f(requestRecord, requestField) || "Use Profile Default").trim() || "Use Profile Default";
+  const master = String(f(requestRecord, requestField) || "").trim();
   if (master === "Yes" || master === "No") return master;
+  if (master === "Use Profile Default") return profileDefault ? "Yes" : "No";
+  // Phase6 older request snapshots omitted Voiceover_Mode. Do not turn a
+  // parent's explicit Yes into No merely because that JSONB field is missing.
+  const contentIntent = String(parentIntent ?? "").trim();
+  if (contentIntent === "Yes" || contentIntent === "No") return contentIntent;
   return profileDefault ? "Yes" : "No";
 }
 /*__STUDIO_WORKER_END:resolvedOutputTriState__*/
@@ -5352,13 +5500,19 @@ export function emptyStudioMusic() {
 /*__STUDIO_WORKER_END:emptyStudioMusic__*/
 
 export function studioMusicFromMediaRecord(record) {
-  if (!record?.id) return emptyStudioMusic();
+  if (!record?.id || Boolean(f(record, "Do_Not_Use"))) return emptyStudioMusic();
+  const rights = String(f(record, "Rights_Status") || "").trim();
+  // Catalog access and a stock filename alone do not grant publishing rights.
+  if (!["Licensed", "Owned", "Public Domain"].includes(rights)) return emptyStudioMusic();
   const fileId = googleDriveFileId(record);
+  const seconds = Number(f(record, "Duration_Seconds") || f(record, "Duration (seconds)") || 0);
   return {
     record_id: record.id,
     url: stringOrNull(f(record, "Google Drive URL")) || (fileId ? googleDriveDownloadUrl(fileId) : null),
     google_drive_file_id: fileId,
     name: stringOrNull(f(record, "Asset Name")),
+    rights_status: rights,
+    duration_seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : 0,
   };
 }
 /*__STUDIO_WORKER_END:studioMusicFromMediaRecord__*/
@@ -5388,9 +5542,12 @@ export function studioCatalogMusicScore(record) {
 }
 /*__STUDIO_WORKER_END:studioCatalogMusicScore__*/
 
-export function pickCatalogFallbackMusicRecord(records, { random = Math.random } = {}) {
+export function pickCatalogFallbackMusicRecord(records, { random = Math.random, minDurationSeconds = 0 } = {}) {
   const usable = (Array.isArray(records) ? records : [])
-    .filter((record) => Boolean(studioMusicFromMediaRecord(record).url));
+    .filter((record) => {
+      const music = studioMusicFromMediaRecord(record);
+      return Boolean(music.url) && music.duration_seconds >= minDurationSeconds;
+    });
   if (!usable.length) return null;
   const ranked = [...usable].sort((a, b) => studioCatalogMusicScore(b) - studioCatalogMusicScore(a));
   const topScore = studioCatalogMusicScore(ranked[0]);
@@ -5401,12 +5558,12 @@ export function pickCatalogFallbackMusicRecord(records, { random = Math.random }
 }
 /*__STUDIO_WORKER_END:pickCatalogFallbackMusicRecord__*/
 
-export async function catalogFallbackMusic(env) {
+export async function catalogFallbackMusic(env, { minDurationSeconds = 0 } = {}) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Asset_Role}='Music',NOT({Do_Not_Use}))",
   });
-  const picked = pickCatalogFallbackMusicRecord(records);
+  const picked = pickCatalogFallbackMusicRecord(records, { minDurationSeconds });
   return picked ? studioMusicFromMediaRecord(picked) : emptyStudioMusic();
 }
 /*__STUDIO_WORKER_END:catalogFallbackMusic__*/
@@ -5419,7 +5576,7 @@ export async function resolveStudioRenderMusic(env, outputRow, requestRecord, ef
   const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
   if (preferred.url) return preferred;
   if (mode !== "yes") return preferred;
-  return catalogFallbackMusic(env);
+  return catalogFallbackMusic(env, { minDurationSeconds: Number(effective?.video_duration_seconds) || 0 });
 }
 /*__STUDIO_WORKER_END:resolveStudioRenderMusic__*/
 
@@ -5516,24 +5673,33 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
     "AI decides"
   );
 
+  const companionStory = String(f(outputRow, "Output_Type") || "").trim() === "Story";
+  const hasVoiceOverride = ["Yes", "No", "Use Profile Default"].includes(
+    String(f(outputRow, "Voiceover_Mode_Override") || "").trim()
+  );
+  const hasMusicOverride = ["Yes", "No", "Use Profile Default"].includes(
+    String(f(outputRow, "Background_Music_Mode_Override") || "").trim()
+  );
   const effective = {
     platform: String(f(outputRow, "Platform") || "").trim(),
     output_type: String(f(outputRow, "Output_Type") || "").trim(),
     route,
 
-    voiceover_mode: resolvedOutputTriState(
+    voiceover_mode: companionStory && !hasVoiceOverride ? "No" : resolvedOutputTriState(
       outputRow,
       "Voiceover_Mode_Override",
       requestRecord,
       "Voiceover_Mode",
-      profileDefaults.include_voiceover
+      profileDefaults.include_voiceover,
+      f(parentContentItem, "Include_Voiceover")
     ),
-    background_music_mode: resolvedOutputTriState(
+    background_music_mode: companionStory && !hasMusicOverride ? "Yes" : resolvedOutputTriState(
       outputRow,
       "Background_Music_Mode_Override",
       requestRecord,
       "Background_Music_Mode",
-      profileDefaults.include_background_music
+      profileDefaults.include_background_music,
+      f(parentContentItem, "Include_Background_Music")
     ),
     thumbnail_mode: studioIsFinishedPassthrough(requestRecord)
       ? "Yes"
@@ -5654,6 +5820,20 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
     scheduled_at: f(outputRow, "Scheduled_At") || null,
   };
 
+  // Exact original narration wins over an earlier 30s request plan. Keep all
+  // six approved scenes, never cut off the end of spoken audio.
+  if (effective.voiceover_mode === "Yes" && !companionStory) {
+    const parentSeconds = Number(f(parentContentItem, "Voiceover_Duration_Seconds") || 0);
+    const validParent = Number.isFinite(parentSeconds) && parentSeconds > 0 ? parentSeconds : 0;
+    effective.voiceover_duration_seconds = Math.max(
+      Number(effective.voiceover_duration_seconds) || 0, validParent
+    );
+    if (effective.voiceover_duration_seconds > 0) {
+      const tail = Math.max(0, Number(effective.voiceover_tail_seconds) || 0);
+      const speechCoverage = Math.ceil((effective.voiceover_duration_seconds + tail + 0.4) * 30) / 30;
+      effective.video_duration_seconds = Math.max(effective.video_duration_seconds, speechCoverage);
+    }
+  }
   effective.music = await resolveStudioRenderMusic(env, outputRow, requestRecord, effective);
   const ezOrigin = String(f(requestRecord, "Production_Notes") || "").includes("origin=ez-button");
   if (ezOrigin) {
@@ -5665,6 +5845,19 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
   }
   if (studioIsFinishedPassthrough(requestRecord)) effective.thumbnail_mode = "Yes";
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
+  // Requesting music must never silently fall back to a silent render.
+  if (effective.background_music_mode === "Yes" && !String(effective.music?.url || "").trim()) {
+    effective.issues.push("Background music requested but no approved catalog URL is available.");
+  }
+  if (effective.background_music_mode === "Yes"
+      && Number(effective.music?.duration_seconds || 0) < Number(effective.video_duration_seconds || 0)) {
+    effective.issues.push("Music source is shorter than the video or its duration cannot be verified.");
+  }
+  if (effective.voiceover_mode === "Yes"
+      && String(f(parentContentItem, "Voiceover_Status") || "").trim() === "Generated"
+      && !String(f(parentContentItem, "Voiceover_URL") || "").trim()) {
+    effective.issues.push("Voiceover marked Generated without a retrievable URL.");
+  }
   return effective;
 }
 /*__STUDIO_WORKER_END:buildOutputWorkItemEffective__*/
@@ -7314,21 +7507,18 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Requested_Carousel_Slide_Count_Max: effective.carousel_slide_count_mode === "Target range" ? effective.carousel_slide_count_max : null,
     Studio_Effective_Carousel_Image_Mode: effective.carousel_image_mode,
     Preferred_Music_Media_Asset_ID: effective.music?.record_id || null,
-    Preferred_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Selected_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.url || null),
-    Selected_Music_Media_Asset_ID: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? null
-      : (effective.music?.record_id || null),
-    Music_Volume: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
-      ? 0
-      : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
+    // Companion Stories intentionally have no narration but MUST retain music.
+    // Only finished-video passthrough forbids a new soundtrack overlay.
+    Preferred_Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Selected_Music_URL: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.url || null),
+    Selected_Music_Media_Asset_ID: studioIsFinishedPassthrough(requestRecord)
+      ? null : (effective.music?.record_id || null),
+    Music_Volume: studioIsFinishedPassthrough(requestRecord)
+      ? 0 : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
     Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
@@ -10766,7 +10956,9 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows, requestRecord);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
-    ? outputRows.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
+    ? outputRows.filter((row) =>
+        !Boolean(f(row, "Platform_Output_Exists"))
+        && !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
     : outputRows;
   const batch = batchLimit == null ? candidates : candidates.slice(0, batchLimit);
   const remaining = Math.max(0, candidates.length - batch.length);
@@ -11091,6 +11283,183 @@ export async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, wi
   return toCancel;
 }
 /*__STUDIO_WORKER_END:cancelSiblingProductionRequestsForIdea__*/
+
+export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtMs = Date.now()) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
+    return { skipped: "authority_unavailable" };
+  // All other 17 original NYC requests have verified fanout. Focus the
+  // incident-only cron on the TWO still Submitted with zero Platform Outputs.
+  // The existing 19-request registry is the only trusted identity source.
+  const scheduled = selectExactNycHandoffSlot(scheduledAtMs);
+  if (!scheduled) return { skipped: "outside_incident_window" };
+  const lastTwo = ["recF11iJFCPcRbGsk", "recNHXsBTfgfuagts"];
+  const nextId = lastTwo[Math.floor(Number(scheduledAtMs) / 60000) % lastTwo.length];
+  const target = NYC_20261121_EXACT_HANDOFF.find(item => item.request === nextId);
+  if (!target) return { skipped: "unrecognized_incident_request" };
+  const firstAttemptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
+  const priorVersionKey = `studio/recovery/nyc-20261121/sparse-patch-v2/${target.request}.json`;
+  const failedV3Key = `studio/recovery/nyc-20261121/final-two-v3/${target.request}.json`;
+  const receiptKey = `studio/recovery/nyc-20261121/licensed-music-v4/${target.request}.json`;
+  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v4_already_attempted" };
+  // No replay of a previously successful or uncertain attempt. EXACT v3
+  // must have failed before outputs on the proven missing music-record GET.
+  const v3Object = await env.STUDIO_MEDIA.get(failedV3Key);
+  if (!v3Object) return { request: target.request, skipped: "v3_missing_no_retry" };
+  let v3Previous;
+  try { v3Previous = JSON.parse(await v3Object.text()); }
+  catch { return { request: target.request, skipped: "v3_unreadable_no_retry" }; }
+  if (v3Previous?.status !== "failed_no_auto_retry"
+      || String(v3Previous?.error || "") !== "NOT_FOUND"
+      || v3Previous?.request !== target.request
+      || Number(v3Previous?.expected) !== target.expected)
+    return { request: target.request, skipped: "v3_outcome_not_exact_not_found" };
+  // Preserve all prior receipts. If an earlier receipt claimed verified
+  // outputs, a subsequent zero-output count would be a destructive anomaly,
+  // not permission to regenerate; hold for investigation.
+  let earlierStatus = null, earlierError = null, v2Status = null;
+  const originalObject = await env.STUDIO_MEDIA.get(firstAttemptKey);
+  if (originalObject) {
+    let previous;
+    try { previous = JSON.parse(await originalObject.text()); }
+    catch { return { request: target.request, skipped: "unreadable_first_receipt" }; }
+    earlierStatus = String(previous?.status || "").slice(0, 80);
+    earlierError = String(previous?.error || "").slice(0, 240);
+    if (/^verified_fanout/.test(earlierStatus))
+      return { request: target.request, skipped: "prior_verified_fanout_needs_investigation" };
+  }
+  const v2Object = await env.STUDIO_MEDIA.get(priorVersionKey);
+  if (v2Object) {
+    let previous;
+    try { previous = JSON.parse(await v2Object.text()); }
+    catch { return { request: target.request, skipped: "unreadable_v2_receipt" }; }
+    v2Status = String(previous?.status || "").slice(0, 80);
+    if (/^verified_fanout/.test(v2Status))
+      return { request: target.request, skipped: "prior_v2_verified_fanout_needs_investigation" };
+  }
+
+  // Each ID is from one of the two original NYC batches. An unrelated
+  // request, revision, source identity or partial fanout is never recovered.
+  let requestRecord, idea, parent, rows;
+  try {
+    [requestRecord, idea, parent] = await Promise.all([
+      airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request),
+      airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, target.idea),
+      airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, target.content),
+    ]);
+    rows = await outputRowsForProductionRequest(env, target.request);
+  } catch (error) {
+    return { request: target.request, skipped: "authoritative_read_unavailable", error: String(error?.message || error).slice(0, 160) };
+  }
+  const reason = exactNycHandoffPreflight({ target, request: requestRecord, idea, parent, rows });
+  if (reason) return { request: target.request, skipped: reason };
+  // The original selected music recB16KVhLkAsh7rj was absent from the
+  // authoritative Supabase media catalog. The two exact PRs were patched
+  // transactionally to this existing Adobe Stock licensed, unrestricted
+  // soundtrack while preserving the original music ID and source photos in
+  // an incident audit. Never run if the operator changed the selection.
+  const musicId = "rectuNg9zTiPiF81G";
+  const selected = f(requestRecord, "Selected_Music_Asset");
+  if (!Array.isArray(selected) || selected.length !== 1 || selected[0] !== musicId)
+    return { request: target.request, skipped: "licensed_music_selection_changed" };
+  let music;
+  try { music = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, musicId); }
+  catch { return { request: target.request, skipped: "licensed_music_asset_read_unavailable" }; }
+  if (String(f(music, "Media_Class") || "") !== "Audio"
+      || String(f(music, "Asset_Role") || "") !== "Music"
+      || String(f(music, "Asset_Status") || "") !== "Available"
+      || String(f(music, "Rights_Status") || "") !== "Licensed"
+      || Boolean(f(music, "Do_Not_Use"))
+      || !String(f(music, "Google Drive File ID") || "").trim()
+      || (Array.isArray(f(music, "Content_Profile")) && f(music, "Content_Profile").length))
+    return { request: target.request, skipped: "licensed_music_asset_failed_preflight" };
+  // A partially committed fanout can have real Platform Outputs even when
+  // Phase-6 PRO FKs are hollow. Checking only the PRO link would duplicate
+  // those real outputs. Verify the ORIGINAL parent UUID's complete PO inventory.
+  let existingOutputs;
+  try {
+    existingOutputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+  } catch (error) {
+    return { request: target.request, skipped: "platform_output_census_unavailable" };
+  }
+  if (existingOutputs.length) {
+    return { request: target.request, skipped: "existing_platform_outputs_need_reconcile",
+      existing_count: existingOutputs.length };
+  }
+  const started = new Date().toISOString();
+  const receipt = { schema: "studio.nyc-20261121-licensed-music-v4.1", request: target.request,
+    idea: target.idea, content: target.content, expected: target.expected, started_at: started,
+    previous_receipt_status: earlierStatus, previous_receipt_error: earlierError,
+    v2_receipt_status: v2Status, v3_receipt_status: v3Previous.status, v3_error: v3Previous.error,
+    original_missing_music_id: "recB16KVhLkAsh7rj", music_id: musicId,
+    licensed_music_verified: true, publish_actions: 0, schedule_actions: 0, status: "attempted" };
+  // R2 durable receipt precedes side effects. A failure here means NO mutation.
+  await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  try {
+    const result = await finalizeProductionRequestPromotion(env, target.request, idea, ctx);
+    const actual = result?.outputFanout;
+    const fields = result?.requestRecord?.fields || {};
+    const valid = fields.Request_Status === "Promoted"
+      && !result?.supersededByRequestId
+      && Number(actual?.enabled_output_count) === target.expected
+      && Number(actual?.routed_count) === target.expected
+      && Number(actual?.blocked_count || 0) === 0
+      && Number(actual?.remaining || 0) === 0;
+    let checked = false;
+    let resumeAccepted = false;
+    let resumeReason = "";
+    if (valid) {
+      try {
+        const outputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+        const links = await outputRowsForProductionRequest(env, target.request);
+        const names = new Set(outputs.map(o =>
+          `${String(f(o, "Platform") || "")}::${String(f(o, "Studio_Output_Type") || "")}`));
+        const expected = new Set(rows.map(o =>
+          `${String(f(o, "Platform") || "")}::${String(f(o, "Output_Type") || "")}`));
+        checked = outputs.length === target.expected && links.length === target.expected
+          && links.every(o => Boolean(f(o, "Platform_Output_Exists")))
+          && names.size === expected.size && [...expected].every(name => names.has(name));
+        if (!checked) resumeReason = "output_identity_or_link_readback_mismatch";
+      } catch (error) {
+        resumeReason = "output_owner_readback_failed";
+      }
+    }
+    // This exact allowlist was proven to have ZERO live Platform Outputs before
+    // recovery, with escalation solely caused by missing outputs. One resume of
+    // the SAME job is authorized only after readback confirms all destinations.
+    // The normal publisher and scheduler are never invoked here.
+    if (valid && checked) {
+      try {
+        const resumed = await enqueueStudioProductionJob(env, target.request, { resume: true });
+        resumeAccepted = resumed?.accepted === true || resumed?.ok === true;
+        if (!resumeAccepted) resumeReason = String(resumed?.reason || resumed?.skipped || "resume_not_accepted").slice(0, 120);
+      } catch (error) {
+        resumeReason = String(error?.message || error).slice(0, 160);
+      }
+    }
+    const done = { ...receipt,
+      status: !valid || !checked ? "needs_investigation" : resumeAccepted
+        ? "verified_fanout_resumed" : "verified_fanout_resume_held",
+      finished_at: new Date().toISOString(), routed: Number(actual?.routed_count || 0),
+      blocked: Number(actual?.blocked_count || 0), promoted: fields.Request_Status === "Promoted",
+      owner_readback_verified: checked, resume_accepted: resumeAccepted, resume_reason: resumeReason };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(done), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    if (!valid) console.error("NYC exact handoff verification failed", done);
+    return { request: target.request, ...done };
+  } catch (error) {
+    const failed = { ...receipt, status: "failed_no_auto_retry",
+      finished_at: new Date().toISOString(), error: String(error?.message || error).slice(0, 300) };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(failed), {
+      httpMetadata: { contentType: "application/json" },
+    }).catch(() => {});
+    console.error("NYC exact handoff failed closed", failed);
+    return { request: target.request, ...failed };
+  }
+}
+/*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);

@@ -1,0 +1,77 @@
+{
+  "schema_version": "issue2374_original_ig_preview_candidates_v1",
+  "created_utc": "2026-11-21",
+  "source": "production_supabase",
+  "output_count": 7,
+  "original_expected_images": 32,
+  "read_only": true,
+  "do_not_publish": true,
+  "fresh_factory_approval_required": true,
+  "publish_calls_authorized": false,
+  "notes": "Seven held IG outputs with zero linked C9 slides. Original existing studio_preview_url is authentic first image, not proof adjacent index assets exist. Image index 1..expected-1 are only hypothetical paths until bounded exact CDN GET verifies. Never mark these as Final Approved carousel_slides or IG staged assets from filename inference alone.",
+  "outputs": [
+    {
+      "output_number": 10635,
+      "content_number": 2142,
+      "content_title": "Wynwood Walls Texture Tease",
+      "market_name": "Miami",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recRUDVEZnps4kAAb/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10678,
+      "content_number": 2148,
+      "content_title": "PAMM Breezeway Drift",
+      "market_name": "Miami",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recT7rcahHGbyfXYE/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10700,
+      "content_number": 2196,
+      "content_title": "Concert Hall Closeups",
+      "market_name": "Los Angeles",
+      "expected_image_count": 8,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/rec1hDvvowIEhG89i/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10734,
+      "content_number": 2135,
+      "content_title": "Hollywood Sign Angles",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recDSrTOA5GyF0F5K/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10762,
+      "content_number": 2130,
+      "content_title": "Santa Monica Pier Myths",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recnXC4vCYbJOvlLP/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10813,
+      "content_number": 2134,
+      "content_title": "Echo Park Golden Hour",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/watermarked/recwbEmS7tPOE7Z6p/0.jpg",
+      "held_verified": true
+    },
+    {
+      "output_number": 10821,
+      "content_number": 2198,
+      "content_title": "Runyon Sunrise Tease",
+      "market_name": "Los Angeles",
+      "expected_image_count": 4,
+      "original_first_image": "https://media.chicagoshining.com/studio/previews/lettered/recOKxetxFH2qYJX6/0.jpg",
+      "held_verified": true
+    }
+  ]
+}

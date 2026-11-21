@@ -1,0 +1,71 @@
+name: Issue 2374 Supabase-only Factory Worker Release Contract
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deploy-issue2374-supabase-only-factory-worker.yml'
+      - '.github/workflows/issue2374-supabase-worker-release-contract.yml'
+      - 'deploy/issue2374-supabase-factory-worker.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-issue2374-supabase-only-factory-worker.yml'
+      - '.github/workflows/issue2374-supabase-worker-release-contract.yml'
+      - 'deploy/issue2374-supabase-factory-worker.txt'
+permissions:
+  contents: read
+jobs:
+  no-airtable-production-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse legacy Airtable QA reads and weakening of production rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          w=Path('.github/workflows/deploy-issue2374-supabase-only-factory-worker.yml').read_text()
+          marker=Path('deploy/issue2374-supabase-factory-worker.txt').read_text()
+          required=[
+            'chicagoshining-studio-api-production-deploy',
+            'Verify Supabase-only Factory source and fail-closed behavior before deploy',
+            'Verify live Supabase-only authority and all 82 held Factory Repair cards',
+            'Capture production rollback point and exact binding contract',
+            'Generate binding-preserving Wrangler config and dry run',
+            'Verify active source and live 10-core binding contract',
+            'Roll back to captured production version on any failure',
+            'studio_write_source=="supabase"',
+            'studio_factory_ops_read_source=="supabase"',
+            'airtable_activity.any_activity==false',
+            'protected_media_rework==true',
+            '.lanes.manual',
+            'review_package_ready==false',
+            'can_approve==false',
+            'can_retry==false',
+            'can_publish==false',
+            '/api/factory/desk',
+            'CLOUDFLARE_API_TOKEN',
+            'STUDIO_MEDIA',
+            'production/studio-api-worker',
+          ]
+          for item in required: assert item in w, item
+          forbidden=[
+            '/api/admin/qa/', '/qa-catalog', '/qa-runs', 'api.airtable.com',
+            'app.airtable.com', 'Airtable history through protected service',
+            'studioAdoptCreativeMasterReviewMediaOnly(', 'publish_media(',
+            'media_publish', 'auto_approve', 'allow_public_publish',
+          ]
+          for item in forbidden: assert item not in w, item
+          assert w.count('https://studio.chicagoshining.com" + path')==1
+          # Verify this release's exact two-GET step obtains the Cloudflare
+          # account subdomain before building the one-time verification URL.
+          verification=w.split('      - name: Verify live Supabase-only authority and all 82 held Factory Repair cards',1)[1].split('      - name: Delete functional verification bridge',1)[0]
+          assert 'curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json' in verification
+          assert verification.index('curl -fsS "$API_ROOT/workers/subdomain"') < verification.index('SUBDOMAIN=$(jq -er')
+          assert '.result.subdomain|type=="string" and length>0' in verification
+          assert 'workflow_dispatch:' not in w
+          assert 'deploy/issue2374-supabase-factory-worker.txt' in w
+          assert 'DO NOT MERGE' not in marker
+          print('issue2374_supabase_only_worker_release_contract=PASS')
+          PY

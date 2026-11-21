@@ -10,6 +10,7 @@
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchRetryEligible,
+  factoryBatchItemProgress,
 } from "./factory-approval-queue.mjs";
 import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 
@@ -197,6 +198,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
         failure_history: item?.failure_history || [],
         removed_original_error: item?.removed_original_error || null,
         previous_failure_error: item?.previous_failure_error || null,
+        ...factoryBatchItemProgress(item),
         timing: item ? factoryApprovalItemTiming(item) : null });
     }
   }

@@ -884,7 +884,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
     for (const outputCall of outputCalls) {
       assert.equal(outputCall.prefer, "count=none");
       assert.match(outputCall.href, /content_profile_id=eq\./);
-      assert.match(outputCall.href, /do_not_publish=eq\.false/);
+      assert.match(outputCall.href, /or=\(do_not_publish\.eq\.false,publish_status\.eq\.Failed,output_status\.eq\.Failed,render_status\.eq\.Failed\)/);
       assert.match(outputCall.href, /output_status\.is\.null/);
       assert.match(outputCall.href, /output_status\.neq\.Published/);
       assert.match(outputCall.href, /output_status\.neq\.Cancelled/);
@@ -1191,9 +1191,21 @@ const supabaseEnv = {
 test("phase 5 content write-through patches present columns when profile is unresolved", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
+  const canonicalId = "89f98c73-c39a-4ae4-a7ba-ec611ec91ca5";
   globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
-    return { ok: true, async text() { return ""; } };
+    const href = String(url);
+    const method = String(init?.method || "GET");
+    calls.push({ url: href, method, body: init?.body || "" });
+    if (method === "GET" && href.includes("select=id,extras")) {
+      return { ok: true, async text() { return JSON.stringify([{id:canonicalId,extras:{Source_Candidate:["recSource1"]}}]); } };
+    }
+    if (method === "GET" && href.includes("select=airtable_record_id,extras")) {
+      return { ok: true, async text() { return JSON.stringify([{airtable_record_id:"recContent1",extras:{Source_Candidate:["recSource1"]}}]); } };
+    }
+    if (method === "PATCH") {
+      return { ok: true, async text() { return JSON.stringify([{id:canonicalId}]); } };
+    }
+    return { ok: true, async text() { return "[]"; } };
   };
   try {
     const result = await syncAirtableContentRowToSupabase(supabaseEnv, {
@@ -1209,6 +1221,8 @@ test("phase 5 content write-through patches present columns when profile is unre
     assert.equal(body.content_title, "Pier");
     assert.equal(body.content_status, "Thumbnail Ready");
     assert.equal(body.content_profile_id, undefined);
+    assert.equal(body.extras, undefined, "typed-only PATCH must preserve original extras");
+    assert.equal(calls.some(call => call.method === "POST"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1484,15 +1498,27 @@ test("held reschedule patch stores the hold and the note for Supabase readback",
   }
 });
 
-test("phase 5 content write-through upserts when the profile uuid resolves", async () => {
+test("phase 5 content write-through patches existing row when profile resolves", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
+  const canonicalId = "39546953-fb70-4a7e-88ab-d66dbd22acbe";
   globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
-    if (String(url).includes("content_profiles")) {
-      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid", airtable_record_id: "recProfile1" }]); } };
+    const href = String(url);
+    const method = String(init?.method || "GET");
+    calls.push({ url: href, method, body: init?.body || "" });
+    if (href.includes("content_profiles")) {
+      return { ok: true, async text() { return JSON.stringify([{id:"prof-uuid",airtable_record_id:"recProfile1"}]); } };
     }
-    return { ok: true, async text() { return ""; } };
+    if (method === "GET" && href.includes("select=id,extras")) {
+      return { ok: true, async text() { return JSON.stringify([{id:canonicalId,extras:{Source_Candidate:["recOriginalSource1"]}}]); } };
+    }
+    if (method === "GET" && href.includes("select=airtable_record_id,extras")) {
+      return { ok: true, async text() { return JSON.stringify([{airtable_record_id:"recContent2",extras:{Source_Candidate:["recOriginalSource1"]}}]); } };
+    }
+    if (method === "PATCH") {
+      return { ok: true, async text() { return JSON.stringify([{id:canonicalId}]); } };
+    }
+    return { ok: true, async text() { return "[]"; } };
   };
   try {
     const result = await syncAirtableContentRowToSupabase(supabaseEnv, {
@@ -1504,13 +1530,14 @@ test("phase 5 content write-through upserts when the profile uuid resolves", asy
         Content_Profile: ["recProfile1"],
       },
     });
-    assert.equal(result.mode, "upsert");
-    const post = calls.find((call) => call.method === "POST" && call.url.includes("content_items"));
-    assert.ok(post);
-    const rows = JSON.parse(post.body);
-    assert.equal(rows[0].airtable_record_id, "recContent2");
-    assert.equal(rows[0].content_profile_id, "prof-uuid");
-    assert.equal(rows[0].content_number, 44);
+    assert.equal(result.mode, "patch");
+    const patch = calls.find(call => call.method === "PATCH" && call.url.includes("content_items"));
+    assert.ok(patch);
+    const body = JSON.parse(patch.body);
+    assert.equal(body.content_profile_id, "prof-uuid");
+    assert.equal(body.content_number, 44);
+    assert.equal(body.content_title, "Walk");
+    assert.equal(calls.some(call => call.method === "POST"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

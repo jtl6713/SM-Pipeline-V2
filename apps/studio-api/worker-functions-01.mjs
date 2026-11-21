@@ -2,11 +2,13 @@ import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upse
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
+import { heldRetryPendingDisposition } from "./held-retry-pending-disposition.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -41,6 +43,7 @@ import {
   listSupabaseProductionRequestsByIds,
   listSupabaseRequestsWithProductionJob,
   readSupabasePipelineSetting,
+  listSupabasePipelineSettingsByNames,
   syncPlanScheduleRowsToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -2306,6 +2309,23 @@ export function normalizedOutputState(record) {
     return "Manual Action Required";
   }
 
+  // Historical held Retry Pending is a recovery decision, never proof of a safe retry.
+  // This only changes read-only display; canonical stage and provider holds remain.
+  // Standalone extracted-function harnesses do not bind module imports.
+  const pendingDisposition = typeof heldRetryPendingDisposition === "function"
+    ? heldRetryPendingDisposition(record) : null;
+  if (pendingDisposition) return pendingDisposition.label;
+
+  // A verified TTD0 9:16 asset mismatch cannot be fixed by retrying the
+  // TikTok publisher. This label makes the required upstream media repair
+  // explicit without changing or hiding any canonical publishing status.
+  if (
+    text("Platform").toLowerCase() === "tiktok"
+    && text("TikTok_Draft_Status") === "Retry Pending"
+    && text("Publish_Error_Stage") === "TTD0_ASSETS"
+    && fields.Publish_Retry_Eligible === false
+  ) return "Needs Asset Repair";
+
   // Meta action throttling is a timed automatic retry, not a terminal failure.
   if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
 
@@ -2767,6 +2787,11 @@ export function platformPublishStatus(record) {
   if (platform === "tiktok") {
     const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
     const publish = String(f(record, "Publish_Status") || "").trim();
+    if (
+      draft === "Retry Pending"
+      && String(f(record, "Publish_Error_Stage") || "").trim() === "TTD0_ASSETS"
+      && f(record, "Publish_Retry_Eligible") === false
+    ) return "Needs Asset Repair";
     // Future-dated TikTok drafts keep an internal arming status, but the Pipeline
     // publish column should say the post is waiting on schedule — not asset work.
     if (/waiting for schedule/i.test(draft)) return draft;
@@ -4658,10 +4683,16 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
     includeInactive,
     limit: 500,
   }).catch(() => null);
-  // Under STUDIO_WRITE_SOURCE=supabase Airtable PRO lists are empty. Use densified
-  // rows for plan/prepare even when Platform_Output is not yet a typed column.
-  // Fanout still reuses Platform Outputs by PRO record id before POST (#1907).
-  if (Array.isArray(fromSupabase) && fromSupabase.length > 0 && studioWriteSource(env) === "supabase") {
+  // Phase 6 Production Request Outputs belong to Supabase whenever the Phase 6
+  // write authority is Supabase. Do not gate these reads on STUDIO_WRITE_SOURCE,
+  // an independent Output/Content flag. Otherwise a valid six-output Supabase
+  // result falls into legacy Airtable listRecordsPage scans and Frames Prepare
+  // can fail before its first durable frame checkpoint.
+  if (studioPhase6WriteSource(env) === "supabase") {
+    if (!Array.isArray(fromSupabase)) {
+      throw new HttpError(503,
+        "Production output lookup is unavailable in Supabase. No frames were started.");
+    }
     const filtered = includeInactive
       ? fromSupabase
       : fromSupabase.filter((row) => Boolean(f(row, "Active") || f(row, "Enabled")));
@@ -4985,13 +5016,18 @@ export async function syncProductionRequestOutputs(request, env, url, authorizat
     || prevPlatforms.some((value, index) => value !== nextPlatforms[index]);
   let updatedParent = parent;
   if (platformsChanged || destinationsChanged) {
-    updatedParent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
+    // Phase6 writes return a sparse PATCH echo, not the complete request.
+    // Re-read the authorized record before calculating source counts or
+    // synchronizing output destinations. Otherwise six masters become 0 and
+    // item4ReconcilePlanWithEnabledOutputs falls back to one source.
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
       method: "PATCH",
       body: JSON.stringify({
         fields: { Target_Platforms: targetPlatforms, Updated_At: now },
         typecast: false,
       }),
     });
+    updatedParent = await loadAuthorizedProductionRequest(env, parent.id, authorization);
   }
   updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, planItems);
   if (destinationsChanged) {
@@ -9188,11 +9224,30 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
   // The selected Production Request Outputs are the sole authority for output
   // destinations. Rebuild the plan from that exact set: the previous add-only
   // reconciliation retained deleted formats and left Platforms/Frames misleading.
+  // A Phase6 PATCH echo only contains changed fields. Never interpret its
+  // missing master list or output plan as proof of a one-source request.
+  if (studioPhase6WriteSource(env) === "supabase" &&
+      (!record?.fields ||
+       !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Master_Assets_JSON") ||
+       !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Output_Plan_JSON"))) {
+    if (!record?.id) throw new HttpError(409, "Production Request identity is missing; no output plan was changed.");
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id);
+    if (!record?.fields ||
+        !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Master_Assets_JSON") ||
+        !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Output_Plan_JSON")) {
+      throw new HttpError(503, "The complete source inventory could not be verified; no output plan was changed.");
+    }
+  }
   const assets = item4AssetManifest(record);
-  const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
+  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const sourceProof = existingPlan?.items?.length
+    ? reconcileApprovedStoryFirstSourcePlan(f(record, "Production_Notes"), assets, existingPlan)
+    : { kind: "not_story" };
+  if (sourceProof.kind === "invalid")
+    throw new HttpError(409, sourceProof.reason + "; no output plan was changed.");
+  const photoCount = sourceProof.count || item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
   const hasVideo = item4PlanHasVideo(record, assets);
   const mappingIndex = await item4MappingIndex(env);
-  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const previousItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
   const items = [];
   const seen = new Set();
@@ -9222,10 +9277,13 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
   const needsReview = items.some((item) => !item.aspect_ratio);
   const expectedStatus = needsReview ? "Needs Review" : "Ready";
   const storedStatus = String(f(record, "Studio_Output_Plan_Status") || "");
-  if (sameKeys && storedStatus === expectedStatus) return record;
+  const countMetadataAccurate = Number(existingPlan?.source_asset_count) === photoCount
+    && existingPlan?.photo_count_kind === item4PhotoCountKind(photoCount)
+    && previousItems.every((item) => Number(item?.source_asset_count) === photoCount);
+  if (sameKeys && storedStatus === expectedStatus && countMetadataAccurate) return record;
 
   const previousRatios = item4RequiredRatios(existingPlan).join("|");
-  const plan = {
+  let plan = {
     ...(existingPlan && typeof existingPlan === "object" ? existingPlan : {}),
     schema_version: "item4.output-plan.1",
     generated_at: new Date().toISOString(),
@@ -9234,6 +9292,12 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
     photo_count_kind: item4PhotoCountKind(photoCount),
     items,
   };
+  const storyIntegrity = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (storyIntegrity.kind === "invalid")
+    throw new HttpError(409, storyIntegrity.reason + "; no output plan was changed.");
+  if (storyIntegrity.kind === "repair") plan = storyIntegrity.plan;
   const nextRatios = item4RequiredRatios(plan).join("|");
   const fields = {
     Target_Platforms: [...new Set(items.map((item) => item.platform))],
@@ -9246,7 +9310,9 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
     fields.Studio_Variant_Updated_At = null;
     fields.Studio_Variant_Error = null;
   }
-  return item4UpdateRequestState(env, record.id, fields);
+  await item4UpdateRequestState(env, record.id, fields);
+  // Never propagate a sparse Phase6 mutation echo to queue relinking or UI.
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id);
 }
 /*__STUDIO_WORKER_END:item4ReconcilePlanWithEnabledOutputs__*/
 
@@ -9527,7 +9593,16 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   if (!plannedItems.length) {
     throw new HttpError(409, "No supported platform output destinations in plan. Choose Instagram, Facebook, TikTok or YouTube.");
   }
-  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
+  let plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
+  const approvedSourceProof = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (approvedSourceProof.kind === "invalid")
+    throw new HttpError(409, approvedSourceProof.reason + "; no output plan was changed.");
+  if (approvedSourceProof.kind === "repair") {
+    plan = approvedSourceProof.plan;
+    plannedItems = plan.items;
+  }
   needsReview = plannedItems.some((item) => !item.aspect_ratio);
 
   if (payload.check_fbs1 === true && !payload.skip_fbs1_guard && plannedItems.some(item =>
@@ -9976,9 +10051,24 @@ export async function syncMiamiTikTokPipelineSecret(request, env) {
 /*__STUDIO_WORKER_END:syncMiamiTikTokPipelineSecret__*/
 
 export async function item4PipelineSetting(env, name) {
-  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    const row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
-    if (row?.id) return String(f(row, "Setting_Value") || "").trim();
+  if ((studioWriteSource(env) === "supabase" || studioPhase6WriteSource(env) === "supabase")
+      && studioSupabaseConfigured(env)) {
+    // No Airtable fallback when either Studio or Phase6 authority is Supabase. One bounded
+    // alternative read protects Frames from a transient empty lookup; if both
+    // fail, surface a safe, actionable 503 rather than an unexplained 500.
+    let row = await readSupabasePipelineSetting(env, name, { activeOnly: true }).catch(() => null);
+    if (!String(f(row || {}, "Setting_Value") || "").trim()) {
+      const rows = await listSupabasePipelineSettingsByNames(env, [name], { limit: 5 }).catch(() => null);
+      row = Array.isArray(rows)
+        ? rows.find(candidate => String(f(candidate, "Setting_Name") || "") === name) || null
+        : null;
+    }
+    const value = String(f(row || {}, "Setting_Value") || "").trim();
+    if (!value) {
+      throw new HttpError(503, "Production frame destination setting " + String(name) +
+        " could not be verified in Supabase. No new frame jobs were started.");
+    }
+    return value;
   }
   const rows = await listRecords(env, "Pipeline Settings", {
     limit: 5,
@@ -9993,7 +10083,7 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");
-  if (!driveFolderId) throw new HttpError(500, "STUDIO_VARIANT_DRIVE_FOLDER_ID is not configured");
+  if (!driveFolderId) throw new HttpError(503, "STUDIO_VARIANT_DRIVE_FOLDER_ID is not configured; no frame jobs were started.");
 
   const existingRows = await item4VariantQueueRows(env, recordId);
   const byTransferId = new Map(

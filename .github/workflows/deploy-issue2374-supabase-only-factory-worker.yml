@@ -1,0 +1,808 @@
+name: Issue 2374 Supabase-only Factory Worker Production Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/issue2374-supabase-factory-worker.txt'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      VERIFY_BRIDGE: chicagoshining-studio-issue2374-verify
+      WRANGLER_VERSION: 4.123.0
+      ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
+      ACTIVATE_SCHEDULE_CONFIRMATION: ${{ inputs.activate_schedule_confirmation || '' }}
+      BOOTSTRAP_RESERVATION: ${{ inputs.bootstrap_schedule_reservation_namespace || 'false' }}
+      BOOTSTRAP_CONFIRMATION: ${{ inputs.bootstrap_confirmation || '' }}
+      ENABLE_PROFILE_SUMMARY_SHADOW: ${{ inputs.enable_profile_summary_shadow || 'false' }}
+      PROFILE_SUMMARY_SHADOW_CONFIRMATION: ${{ inputs.profile_summary_shadow_confirmation || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify Post Insights Supabase published-post and refresh regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --test apps/studio-api/post-insights-supabase-regression.test.mjs
+
+      - name: Verify engagement auth recovery regression before deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/engagement-service.mjs
+          node --check apps/studio-api/review-package-readiness.mjs
+          node --check apps/studio-api/pre-factory-ready-recovery.mjs
+          node --test apps/studio-api/review-package-readiness.test.mjs apps/studio-api/pre-factory-ready-recovery.test.mjs apps/studio-api/factory-private-review-visibility.test.mjs apps/studio-api/factory-review-state-parity.test.mjs apps/studio-api/factory-review-writer-terminal.test.mjs
+          node --check apps/studio-api/rendering-review-plan-persist.mjs
+          node --check apps/studio-api/rendering-review-factory-handoff.mjs
+          node --check apps/studio-api/rendering-review-factory-preview.mjs
+          node --check apps/studio-api/rendering-review-factory-return.mjs
+          node --test apps/studio-api/rendering-review-factory-preview.test.mjs apps/studio-api/rendering-review-factory-bridge.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
+          node --test apps/studio-api/rendering-review-plan-persist.test.mjs
+          node --test apps/studio-api/rendering-review-plan-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-catalog-assets.test.mjs apps/studio-api/rendering-review-library-prepare.test.mjs
+          node --test apps/studio-api/engagement-auth-recovery.test.mjs
+          node --test apps/studio-api/idea-list-authoritative-fresh.test.mjs
+          node --test apps/studio-api/production-photo-wait-visibility.test.mjs
+          node --test apps/studio-api/production-content-linked-outputs.test.mjs
+          node --test apps/studio-api/production-request-suggested-platforms-fallback.test.mjs
+          node --test apps/studio-api/failed-output-monitor.test.mjs
+          node --test apps/studio-api/facebook-story-rate-limit-quality.test.mjs
+          node --test apps/studio-api/facebook-preapproval-recovery.test.mjs
+          node --test apps/studio-api/autonomous-verification-recovery.test.mjs
+          node --test apps/studio-api/facebook-story-remote-verification.test.mjs
+          node --test apps/studio-api/quality-checks.test.mjs
+          node --test apps/studio-api/profiles-overview-refresh.test.mjs
+          node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
+          node --test apps/studio-api/overview-dispatch-counts.test.mjs
+          PYTHONPATH=repair/scripts python -m unittest studio_api_binding_contract_test studio_api_rollback_lifecycle_test
+          node --test apps/studio-api/profile-summary-controller.test.mjs apps/studio-api/profile-summary-classification.test.mjs
+          node --check apps/studio-api/schedule-reservation-authority.mjs
+          node --check apps/studio-api/schedule-reservation-transaction.mjs
+          node --check apps/studio-api/schedule-reservation-quality.mjs
+          node --test \
+            apps/studio-api/schedule-reservation-authority.test.mjs \
+            apps/studio-api/schedule-reservation-transaction.test.mjs \
+            apps/studio-api/schedule-reservation-concurrency.test.mjs \
+            apps/studio-api/schedule-reservation-quality.test.mjs \
+            apps/studio-api/schedule-reservation-integration.test.mjs \
+            apps/studio-api/schedule-reservation-policy.test.mjs \
+            apps/studio-api/schedule-reservation-writer-audit.test.mjs \
+            apps/studio-api/schedule-reservation-runtime.test.mjs
+
+      - name: Verify exact duplicate Factory batch reconciliation semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/factory-approval-duplicate-supersede.test.mjs
+
+      - name: Validate source and install pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in worker.js worker-functions-01.mjs worker-functions-02.mjs worker-functions-03.mjs worker-functions-04.mjs desk-inventory.mjs quality-checks.mjs asset-library.mjs operations-oversized.mjs; do
+            if [[ ! -s "apps/studio-api/$f" ]]; then
+              echo "missing or empty: apps/studio-api/$f" >&2
+              ls -la apps/studio-api >&2 || true
+              exit 1
+            fi
+          done
+          mkdir -p /tmp/studio-check
+          cp apps/studio-api/worker.js /tmp/studio-check/worker.mjs
+          cp apps/studio-api/*.mjs /tmp/studio-check/
+          rm -f /tmp/studio-check/*.test.mjs
+          node --check /tmp/studio-check/worker.mjs
+          mkdir -p /tmp/wrangler-production
+          cd /tmp/wrangler-production
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION"
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+
+      - name: Capture production rollback point and exact binding contract
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e '.success==true' /tmp/deployments-before.json >/dev/null
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$BEFORE" >/tmp/active-before.txt
+          echo "before_version=$BEFORE" >> "$GITHUB_OUTPUT"
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/version-before.json
+          jq -e '.success==true' /tmp/version-before.json >/dev/null
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract, assert_global_factory_binding_tuple
+          r=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(x.get('name')):str(x.get('type')) for x in bindings}
+          contract=assert_live_contract(
+              got,
+              'Predeploy live Worker',
+              allow_reservation_absent=True,
+          )
+          reservation_bootstrapped = (
+              got.get('STUDIO_SCHEDULE_RESERVATIONS') == 'durable_object_namespace'
+              and got.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') == 'plain_text'
+          )
+          Path('/tmp/reservation-binding-state.txt').write_text(
+              'bootstrapped' if reservation_bootstrapped else 'absent'
+          )
+          print('reservation_binding_state=' + ('bootstrapped' if reservation_bootstrapped else 'absent'))
+          from studio_api_rollback_lifecycle import durable_object_names, sanitize_runtime_flags
+          Path('/tmp/before-do-namespaces.json').write_text(json.dumps(sorted(durable_object_names(bindings))))
+          # Read the active deployment's plain-text values as the authoritative
+          # source. A failed, rolled-back version can still be Wrangler's
+          # --keep-vars source and silently reintroduce old global flags.
+          plain_vars={str(b['name']):str(b['text']) for b in bindings if b.get('type')=='plain_text' and 'text' in b}
+          if len(plain_vars) != sum(b.get('type')=='plain_text' for b in bindings):
+              raise SystemExit('Cannot preserve active Worker plaintext bindings: missing binding text')
+          print('predeploy_profile_summary_flags=' + json.dumps(sanitize_runtime_flags(plain_vars)))
+          prior_stage=assert_global_factory_binding_tuple(plain_vars,'Predeploy Worker',allow_absent=True)
+          print('predeploy_global_factory_stage='+prior_stage)
+          Path('/tmp/active-plain-vars.json').write_text(json.dumps(plain_vars))
+          prod_base=next((b.get('text') for b in bindings if b.get('name')=='AIRTABLE_BASE_ID'),None)
+          if prod_base != 'appe33zkZn35yirTL':
+              raise SystemExit('Factory canary predeploy refused: production Airtable base identity mismatch')
+          r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
+          bucket=r2.get('bucket_name') or r2.get('bucket')
+          if not bucket:
+              raise SystemExit('STUDIO_MEDIA R2 binding has no recoverable bucket identifier')
+          Path('/tmp/studio-media-bucket.txt').write_text(str(bucket))
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
+          Path('/tmp/predeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
+          print('predeploy_binding_contract=PASS')
+          PY
+
+      - name: Generate binding-preserving Wrangler config and dry run
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp apps/studio-api/worker.js /tmp/wrangler-production/worker.js
+          cp apps/studio-api/*.mjs /tmp/wrangler-production/
+          rm -f /tmp/wrangler-production/*.test.mjs
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          visual_rollout=json.loads(Path('deploy/visual-voiceover-production-rollout.json').read_text())
+          if visual_rollout.get('scope')!='do_not_publish_only':
+              raise SystemExit('Visual voiceover rollout must remain do_not_publish_only')
+          if type(visual_rollout.get('enabled')) is not bool:
+              raise SystemExit('Visual voiceover rollout enabled must be boolean')
+          canary_ids=[str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()]
+          if visual_rollout.get('enabled'):
+              import re
+              if len(canary_ids)!=1 or not re.fullmatch(r'rec[A-Za-z0-9]{14}',canary_ids[0]):
+                  raise SystemExit('Enabled visual voiceover rollout requires exactly one Airtable canary record id')
+          safe_modes={'chicago_ig_reel_v1':1,'chicago_ig_reels_v2':5}
+          assert rollout.get('mode') in safe_modes
+          assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
+          assert rollout.get('platform')=='Instagram' and rollout.get('output_type')=='Reel'
+          assert rollout.get('max_items')==safe_modes[rollout['mode']]
+          assert type(rollout.get('enabled')) is bool
+          from importlib.util import spec_from_file_location, module_from_spec
+          spec=spec_from_file_location('studio_api_binding_contract', 'repair/scripts/studio_api_binding_contract.py')
+          module=module_from_spec(spec);spec.loader.exec_module(module)
+          global_vars=module.global_factory_manifest_values(rollout)
+          factory_vars={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
+            **global_vars,
+          }
+          visual_vars={
+            'STUDIO_VISUAL_TIMELINE_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('timeline_enabled') else 'false',
+            'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
+            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(canary_ids),
+          }
+          # Summary reads remain OFF until independent shadow parity and
+          # production latency/freshness verification have passed.
+          # The namespace is isolated from existing schedule reservation lanes.
+          # Preserve all active plaintext settings explicitly; never use
+          # --keep-vars, which can inherit stale settings from rolled-back
+          # Worker versions instead of the currently active deployment.
+          active_vars=json.loads(Path('/tmp/active-plain-vars.json').read_text())
+          module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
+          active_vars.update(factory_vars)
+          active_vars.update(visual_vars)
+          # Scoped, Git-reviewed publication reconciliation. An unattended
+          # status correction is never enabled by inheriting stale Worker vars.
+          import re
+          recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
+          if recovery.get('schema')!='publication-reconciliation-rollout-v1' or recovery.get('stage') not in ('read_only','canary','bounded'):
+              raise SystemExit('Unsupported publication recovery rollout manifest')
+          if recovery.get('approval')!='user-authorized-background-verified-status-only-reconciliation-2026-10-24' or recovery.get('no_remote_provider_writes') is not True:
+              raise SystemExit('Unapproved publication status-repair rollout')
+          if not re.fullmatch(r'rec[A-Za-z0-9]{14}',str(recovery.get('canary_record_id') or '')):
+              raise SystemExit('Invalid exact canary record id')
+          if int(recovery.get('batch_size',0)) not in range(1,6) or int(recovery.get('scan_interval_minutes',0)) not in range(5,1441):
+              raise SystemExit('Unsafe publication recovery scan budget')
+          if recovery['stage']=='bounded' and not re.fullmatch(r'publication-recovery:[A-Za-z0-9_-]+:outcome',str(recovery.get('canary_corrected_audit_event_key') or '')):
+              raise SystemExit('Bounded rollout needs durable corrected-canary audit identity')
+          active_vars.update({
+            'PUBLICATION_RECONCILIATION_SCAN_ENABLED':'true' if recovery['stage']!='read_only' else 'false',
+            'PUBLICATION_RECONCILIATION_ENABLED':'true' if recovery['stage']!='read_only' else 'false',
+            'PUBLICATION_RECONCILIATION_BOUNDED_ENABLED':'true' if recovery['stage']=='bounded' else 'false',
+            'PUBLICATION_RECONCILIATION_CANARY_RECORD':str(recovery['canary_record_id']),
+            'PUBLICATION_RECONCILIATION_BATCH_SIZE':str(recovery['batch_size']),
+            'PUBLICATION_RECONCILIATION_INTERVAL_MINUTES':str(recovery['scan_interval_minutes']),
+            'PUBLICATION_RECONCILIATION_COOLDOWN_MINUTES':str(recovery['cooldown_minutes']),
+            'PUBLICATION_RECONCILIATION_MAX_ATTEMPTS':str(recovery['max_attempts']),
+          })
+          print('publication_recovery_requested_stage='+recovery['stage'])
+          # Home and refill reads stay OFF in this workflow. Shadow capture and
+          # reconciliation are independently gated and default off.
+          active_vars['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
+          active_vars['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
+          shadow=os.environ.get('ENABLE_PROFILE_SUMMARY_SHADOW','').strip().lower()=='true'
+          if shadow:
+              if os.environ.get('PROFILE_SUMMARY_SHADOW_CONFIRMATION','')!='SHADOW-PROFILE-SUMMARY':
+                  raise SystemExit('Shadow profile-summary enablement refused: confirmation mismatch')
+              active_vars['STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED']='true'
+              active_vars['STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED']='true'
+          else:
+              active_vars.setdefault('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED','false')
+              active_vars.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false')
+          reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
+          import re
+          activation=os.environ.get('ACTIVATE_SCHEDULE_LANE','').strip()
+          confirmation=os.environ.get('ACTIVATE_SCHEDULE_CONFIRMATION','').strip()
+          if activation or confirmation:
+              if confirmation!='ACTIVATE-SCHEDULE-LANE' or not re.fullmatch(r'rec[A-Za-z0-9]{14}::(?:facebook|instagram|tiktok|youtube)',activation):
+                  raise SystemExit('Activation refused: exact profile::platform lane and confirmation required')
+              if reservation_state!='bootstrapped':
+                  raise SystemExit('Activation refused: Durable Object namespace not bootstrapped')
+              if os.environ.get('BOOTSTRAP_RESERVATION','false').lower()=='true':
+                  raise SystemExit('Activation and bootstrap must be separate runs')
+          Path('/tmp/schedule-activation-lane.txt').write_text(activation)
+          bootstrap_requested=os.environ.get('BOOTSTRAP_RESERVATION','false').strip().lower()=='true'
+          lifecycle_change = reservation_state == 'absent' and bootstrap_requested
+          Path('/tmp/reservation-lifecycle-change.txt').write_text('true' if lifecycle_change else 'false')
+          cfg={
+            'name':os.environ['TARGET_WORKER'],
+            'main':'worker.js',
+            'compatibility_date':'2026-08-02',
+            'workers_dev':False,
+            'keep_vars':False,
+            'vars':active_vars,
+            'triggers':{'crons':['*/5 * * * *', '0 6 * * *', '* * * * *']},
+            'observability':{'enabled':True,'head_sampling_rate':1},
+            'limits':{'cpu_ms':180000},
+            'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'secrets':{'required':['AIRTABLE_PAT']}
+          }
+          # Independent SQLite namespace. No schedule reservation data is shared.
+          cfg['durable_objects']={'bindings':[{
+            'name':'STUDIO_PROFILE_SUMMARIES','class_name':'StudioProfileSummary'
+          }]}
+          cfg['exports']={'StudioProfileSummary':{'type':'durable-object','storage':'sqlite'}}
+          if reservation_state == 'bootstrapped' or lifecycle_change:
+              # Preserve an existing namespace, or perform the explicit one-time
+              # bootstrap. In both cases the scheduling authority remains OFF.
+              # Preserve active atomic lanes on ordinary push deployments; only an
+              # explicit dispatch may add a new lane. Do not silently disable
+              # the reservation authority on the next source deploy.
+              existing_lanes=[v.strip() for v in active_vars.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in existing_lanes:
+                  existing_lanes.append(activation)
+              if activation:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=','.join(existing_lanes)
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true'
+              else:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']=active_vars.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','false')
+              cfg['durable_objects']['bindings'].append({
+                  'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                  'class_name':'ScheduleReservationLane',
+              })
+              cfg['exports']['ScheduleReservationLane']={
+                  'type':'durable-object',
+                  'storage':'sqlite',
+              }
+          else:
+              # Before the explicit bootstrap runs, ordinary production deploys
+              # keep the legacy binding/configuration tuple unchanged.
+              active_vars.pop('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED', None)
+          Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
+          PY
+          cd /tmp/wrangler-production
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run >/tmp/wrangler-dry-run.log 2>&1
+          echo "wrangler_dry_run=PASS"
+
+      - name: Deploy source with preserved vars secrets and explicit R2 binding
+        id: deploy_source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-production
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log 2>&1 || { echo 'Wrangler deploy failed; full log withheld to avoid exposing preserved plaintext binding values'; exit 1; }
+          echo "wrangler_deploy=PASS"
+
+      - name: Verify Supabase-only Factory source and fail-closed behavior before deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/supabase-pipeline-reads.mjs
+          node --test apps/studio-api/factory-protected-media-rework.test.mjs apps/studio-api/factory-supabase-only-read.test.mjs
+          # This workflow may not be used to publish while the canonical source
+          # still can silently read Airtable when Supabase is unavailable.
+          python3 - <<'PY'
+          from pathlib import Path
+          ops=Path('apps/studio-api/worker-functions-04.mjs').read_text()
+          ideas=Path('apps/studio-api/worker-functions-02.mjs').read_text()
+          gate=Path('apps/studio-api/factory-protected-media-rework.mjs').read_text()
+          assert 'No legacy source fallback permitted.' in ops
+          assert 'Supabase read authority not configured. No Airtable fallback.' in ops
+          assert 'legacy Airtable fallback forbidden' in ops
+          assert 'legacy fallback forbidden' in ideas
+          assert 'Studio_Overdue_Preflight_Repair_20261120' in gate
+          print('factory_supabase_no_airtable_source=PASS')
+          PY
+
+      - name: Verify active source and live 10-core binding contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BEFORE=$(cat /tmp/active-before.txt)
+          ACTIVE=''
+          # Cloudflare /deployments can 404 briefly after activate (same class as
+          # content/v2). Do not let set -e abort the poll on the first miss.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json; then
+              ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json 2>/dev/null || true)
+              [[ -n "$ACTIVE" && "$ACTIVE" != "$BEFORE" ]] && break
+            else
+              echo "worker deployments poll $i failed; retrying"
+            fi
+            sleep 2
+          done
+          test -n "$ACTIVE"
+          test "$ACTIVE" != "$BEFORE"
+          printf '%s' "$ACTIVE" >/tmp/active-after.txt
+          version_ok=0
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json; then
+              version_ok=1
+              break
+            fi
+            echo "worker versions/$ACTIVE attempt $i failed; retrying"
+            sleep 2
+          done
+          test "$version_ok" = "1"
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract
+          r=json.loads(Path('/tmp/version-after.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(x.get('name')):str(x.get('type')) for x in bindings}
+          reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
+          lifecycle_change=Path('/tmp/reservation-lifecycle-change.txt').read_text().strip() == 'true'
+          expected_bootstrapped = reservation_state == 'bootstrapped' or lifecycle_change
+          contract=assert_live_contract(
+              got,
+              'Postdeploy live Worker',
+              allow_reservation_absent=(not expected_bootstrapped),
+          )
+          if got.get('STUDIO_PROFILE_SUMMARIES') != 'durable_object_namespace':
+              raise SystemExit('Home summary Durable Object namespace is missing')
+          if expected_bootstrapped:
+              if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+                  raise SystemExit('Atomic scheduling Durable Object binding disappeared after deploy')
+          else:
+              if ('STUDIO_SCHEDULE_RESERVATIONS' in got
+                  or 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in got):
+                  raise SystemExit('Ordinary production deploy unexpectedly bootstrapped atomic scheduling bindings')
+          # Catch any dropped or changed runtime settings, including optional
+          # secrets, before the new version is accepted. Never print values.
+          before=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          prior=(before.get('resources') or {}).get('bindings') or []
+          before_types={str(b['name']):str(b['type']) for b in prior}
+          if any(got.get(n)!=t for n,t in before_types.items()):
+              raise SystemExit('Worker lost or changed a predeploy binding type')
+          prior_plain=json.loads(Path('/tmp/active-plain-vars.json').read_text())
+          after_plain={str(b['name']):str(b['text']) for b in bindings if b.get('type')=='plain_text' and 'text' in b}
+          from studio_api_binding_contract import global_factory_manifest_values, assert_global_factory_binding_tuple
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          visual_rollout=json.loads(Path('deploy/visual-voiceover-production-rollout.json').read_text())
+          expected={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
+            **global_factory_manifest_values(rollout),
+            'STUDIO_VISUAL_TIMELINE_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('timeline_enabled') else 'false',
+            'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
+            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
+          }
+          expected['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
+          expected['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
+          recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
+          expected.update({
+            'PUBLICATION_RECONCILIATION_SCAN_ENABLED':'true' if recovery['stage']!='read_only' else 'false',
+            'PUBLICATION_RECONCILIATION_ENABLED':'true' if recovery['stage']!='read_only' else 'false',
+            'PUBLICATION_RECONCILIATION_BOUNDED_ENABLED':'true' if recovery['stage']=='bounded' else 'false',
+            'PUBLICATION_RECONCILIATION_CANARY_RECORD':str(recovery['canary_record_id']),
+            'PUBLICATION_RECONCILIATION_BATCH_SIZE':str(recovery['batch_size']),
+            'PUBLICATION_RECONCILIATION_INTERVAL_MINUTES':str(recovery['scan_interval_minutes']),
+            'PUBLICATION_RECONCILIATION_COOLDOWN_MINUTES':str(recovery['cooldown_minutes']),
+            'PUBLICATION_RECONCILIATION_MAX_ATTEMPTS':str(recovery['max_attempts']),
+          })
+          import os as _os
+          if _os.environ.get('ENABLE_PROFILE_SUMMARY_SHADOW','').strip().lower()=='true':
+              expected['STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED']='true'
+              expected['STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED']='true'
+          else:
+              expected.setdefault('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED','false'))
+              expected.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false'))
+          from studio_api_rollback_lifecycle import sanitize_runtime_flags
+          print('postdeploy_profile_summary_flags=' + json.dumps(sanitize_runtime_flags(after_plain)))
+          for name,value in prior_plain.items():
+              if name not in expected and name not in ('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') and after_plain.get(name)!=value:
+                  raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
+          binding_values=after_plain
+          if expected_bootstrapped:
+              activation=Path('/tmp/schedule-activation-lane.txt').read_text().strip()
+              # Scheduling rollout is persisted as an active Worker binding, not
+              # part of the unrelated factory/visual expected-release dict.
+              # Preserve every previously activated lane on source deployments.
+              expected_lanes=[v.strip() for v in prior_plain.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in expected_lanes:
+                  expected_lanes.append(activation)
+              expected_enabled = 'true' if expected_lanes else 'false'
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != expected_enabled:
+                  raise SystemExit('Atomic scheduling authority flag differs from preserved rollout')
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != ','.join(expected_lanes):
+                  raise SystemExit('Atomic scheduling lane allowlist differs from preserved rollout')
+          elif 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in binding_values:
+              raise SystemExit('Atomic scheduling feature flag appeared before namespace bootstrap')
+          for name,value in expected.items():
+              if binding_values.get(name)!=value:
+                  raise SystemExit('Factory batch release verification mismatch: '+name)
+          print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max='+str(rollout['max_items'])+' enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
+          stage=assert_global_factory_binding_tuple(binding_values,'Postdeploy Worker')
+          if stage!=rollout['global']['stage']:
+              raise SystemExit('Global Factory production stage mismatch')
+          print('factory_global_release_gate=PASS signed_stage='+stage+
+              ' max_total='+str(rollout['global']['max_total'])+
+              ' max_per_profile='+str(rollout['global']['max_per_profile']))
+          print('visual_voiceover_rollout=PASS scope='+str(visual_rollout.get('scope'))+
+              ' timeline='+expected['STUDIO_VISUAL_TIMELINE_V1']+
+              ' script='+expected['STUDIO_VISUAL_SCRIPT_V1']+
+              ' allowlist='+expected['STUDIO_VISUAL_CANARY_OUTPUT_IDS'])
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
+          Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
+          print('postdeploy_binding_contract=PASS')
+          PY
+
+          # content/v2 can 404 briefly right after activate (0.10.922 class).
+          # Retry before treating the deploy as failed / rolling back.
+          content_ok=0
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$API/content/v2" -H "$AUTH" -D /tmp/worker-after-headers.txt -o /tmp/worker-after-body.bin; then
+              content_ok=1
+              break
+            fi
+            echo "worker content/v2 attempt $i failed; retrying"
+            sleep 3
+          done
+          test "$content_ok" = "1"
+          python - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          from pathlib import Path
+          import hashlib
+          import re
+          headers=Path('/tmp/worker-after-headers.txt').read_bytes(); body=Path('/tmp/worker-after-body.bin').read_bytes()
+          text=headers.decode('latin-1',errors='replace')
+          matches=re.findall(r'(?im)^content-type:\s*(.+?)\r?$',text)
+          content_type=matches[-1].strip() if matches else ''
+          out=Path('/tmp/worker-after.js')
+          if content_type.lower().startswith('multipart/'):
+              msg=BytesParser(policy=default).parsebytes(f'Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n'.encode()+body)
+              candidates=[]
+              for part in msg.walk():
+                  if part.is_multipart(): continue
+                  ctype=part.get_content_type().lower(); filename=part.get_filename() or ''; payload=part.get_payload(decode=True) or b''
+                  if 'javascript' in ctype or filename.lower().endswith(('.js','.mjs')): candidates.append((filename,payload,ctype,len(payload)))
+              if not candidates: raise SystemExit('No JavaScript module found in active Worker content')
+              print('live_js_candidates=' + ','.join(f'{name or "unnamed"}:{length}' for name, _payload, _ctype, length in candidates))
+              preferred=next((x for x in candidates if x[0] in ('worker.js','index.js','src/index.js')),candidates[0])
+              out.write_bytes(preferred[1])
+          else:
+              print(f'live_content_type={content_type or "missing"} live_body_bytes={len(body)}')
+              out.write_bytes(body)
+          def norm(value):
+              if value.startswith(b'\xef\xbb\xbf'):
+                  value = value[3:]
+              return value.replace(b'\r\n', b'\n')
+          repo = Path('apps/studio-api/worker.js').read_bytes()
+          live = out.read_bytes()
+          if norm(repo) == norm(live):
+              print('active_source_byte_match=PASS')
+          else:
+              markers = [
+                  b'phase6_voice_preview_proxy',
+                  b'0.10.10-elevenlabs-v2-catalog',
+                  b'phase6VoicePreview',
+                  b'chicagoshining-studio-api',
+                  b'repair_item7_rr1_canonical_maxrecords_v9',
+                  b'studio_home_overview_force_refresh_v1',
+              ]
+              missing = [marker.decode() for marker in markers if marker not in live]
+              bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
+              # Compare the bundled Worker against ALL production ESM sources,
+              # not only worker-functions-*.mjs: the review workspace imports
+              # other real modules (including the isolated storyboard adapter).
+              # Exclude *.test.mjs so test fixtures cannot mask a mismatch.
+              sources=[p for p in Path('apps/studio-api').glob('*.mjs')
+                       if '.test.' not in p.name]
+              source_bytes = len(repo) + sum(p.stat().st_size for p in sources)
+              size_ok = abs(len(live) - source_bytes) <= max(int(source_bytes * 0.30), 512000)
+              print(f'repo_bytes={len(repo)} modular_source_bytes={source_bytes} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
+              if bundled and size_ok and not missing:
+                  print('active_source_byte_match=WRANGLER_BUNDLE_EQUIVALENT')
+              else:
+                  print(f'repo_sha256={hashlib.sha256(norm(repo)).hexdigest()}')
+                  print(f'live_sha256={hashlib.sha256(norm(live)).hexdigest()}')
+                  print(f'live_head={live[:160]!r}')
+                  raise SystemExit('active Worker source does not match apps/studio-api/worker.js')
+          PY
+
+      - name: Build and upload one-time functional verification bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/verify-token.txt
+          cat >/tmp/verify-worker.js <<EOF
+          // Issue #2374: exact two-GET, source-only verification bridge.
+          // Never expose Airtable QA catalog/history, media upload or publishing.
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              const path = url.pathname === "/$TOKEN/health" ? "/health"
+                : url.pathname === "/$TOKEN/factory-desk" ? "/api/factory/desk"
+                : null;
+              if (!path || request.method !== "GET") {
+                return new Response("Not found", {status: 404});
+              }
+              const internal = new Request("https://studio.chicagoshining.com" + path, {
+                method: "GET",
+                headers: {
+                  "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+                  "Origin": "https://studio.chicagoshining.com",
+                  "Accept": "application/json",
+                },
+              });
+              const response = await env.STUDIO_API.fetch(internal);
+              return new Response(await response.text(), {
+                status: response.status,
+                headers: {"Content-Type": "application/json", "Cache-Control": "no-store"},
+              });
+            }
+          };
+          EOF
+          cat >/tmp/verify-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verify-worker.js
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/verify-subdomain.json >/dev/null
+
+      - name: Verify live Supabase-only authority and all 82 held Factory Repair cards
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          jq -e '.success==true and (.result.subdomain|type=="string" and length>0)' /tmp/account-subdomain.json >/dev/null
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          # This bridge permits precisely two authenticated service GET paths,
+          # /health and /api/factory/desk. No QA or Airtable network probe.
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 45 -o /tmp/issue2374-health.json -w '%{http_code}' "$BASE/health" || true)
+            if [[ "$code" == 200 ]] && jq -e '
+              .ok==true and .studio_write_source=="supabase"
+              and .studio_factory_ops_read_source=="supabase"
+              and .studio_supabase_configured==true
+              and .airtable_activity.ok==true
+              and .airtable_activity.any_activity==false
+            ' /tmp/issue2374-health.json >/dev/null 2>&1; then break; fi
+            # Do not misinterpret a provider/egress violation as startup lag.
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/issue2374-health.json >/dev/null; then
+              echo 'Supabase/zero-Airtable authority gate rejected live Worker'; exit 1
+            fi
+            if [[ "$code" != 000 && "$code" != 404 && "$code" != 503 ]]; then
+              echo "Health probe failed closed ($code)"; exit 1
+            fi
+            sleep 3
+          done
+          test "$code" = 200
+          jq -e '.ok==true and .studio_factory_ops_read_source=="supabase" and .airtable_activity.any_activity==false' /tmp/issue2374-health.json >/dev/null
+          echo 'supabase_write_read_authority_and_no_airtable_egress=PASS'
+
+          # Read Factory through exactly one authenticated service binding GET.
+          # An empty read, error, or Airtable fallback must not become success.
+          code=$(curl -sS --max-time 90 -o /tmp/issue2374-factory-desk.json -w '%{http_code}' "$BASE/factory-desk" || true)
+          test "$code" = 200
+          jq -e '
+            .ok==true and .read_source=="supabase"
+            and (.lanes.manual|type)=="array"
+            and ([.lanes.manual[]|select(.protected_media_rework==true)]|length)==82
+            and ([.lanes.manual[]|select(.protected_media_rework==true
+              and .do_not_publish==true
+              and .output_status=="Changes Requested"
+              and .review_package_ready==false
+              and .can_approve==false
+              and .can_retry==false
+              and .can_publish==false)]|length)==82
+            and ([.lanes.needs_eyes[]?|select(.protected_media_rework==true)]|length)==0
+            and ([.lanes.auto_high[]?|select(.protected_media_rework==true)]|length)==0
+            and ([.lanes.auto_low[]?|select(.protected_media_rework==true)]|length)==0
+          ' /tmp/issue2374-factory-desk.json >/dev/null
+          jq -c '{factory_read_source:.read_source,held_manual_repair:([.lanes.manual[]|select(.protected_media_rework==true)]|length),needs_eyes_held:([.lanes.needs_eyes[]?|select(.protected_media_rework==true)]|length)}' /tmp/issue2374-factory-desk.json
+          echo 'factory_82_held_visible_without_approval=PASS'
+
+      - name: Delete functional verification bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH")
+          if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then jq -e '.success==true' /tmp/verify-delete.json >/dev/null || true; elif [[ "$code" != "404" ]]; then exit 1; fi
+
+      - name: Publish Studio API production deployment status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE="failure"
+          DESCRIPTION="Studio API deploy failed or was rolled back"
+          if [[ "$DEPLOY_JOB_STATUS" == "success" ]]; then
+            STATE="success"
+            DESCRIPTION="Studio API deployed; Home overview force-refresh canary passed"
+          fi
+          PAYLOAD=$(jq -nc --arg state "$STATE" --arg context "production/studio-api-worker" --arg description "$DESCRIPTION" \
+            '{state:$state,context:$context,description:$description}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$PAYLOAD" >/tmp/github-deploy-status.json
+          jq -e '.context=="production/studio-api-worker" and (.state=="success" or .state=="failure")' /tmp/github-deploy-status.json >/dev/null
+
+      - name: Roll back to captured production version on any failure
+        if: failure() && steps.capture.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
+          CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          curl -fsS "$API/versions/$CURRENT" -H "$AUTH" -o /tmp/rollback-current-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_rollback_lifecycle import decide_rollback
+          before=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          current=json.loads(Path('/tmp/rollback-current-version.json').read_text())['result']
+          before_bindings=(before.get('resources') or {}).get('bindings') or []
+          current_bindings=(current.get('resources') or {}).get('bindings') or []
+          current_plain={str(b['name']):str(b['text']) for b in current_bindings if b.get('type')=='plain_text' and 'text' in b}
+          decision=decide_rollback(
+              before_version=Path('/tmp/active-before.txt').read_text().strip(),
+              current_version=current.get('id') or '',
+              before_bindings=before_bindings,
+              current_bindings=current_bindings,
+              current_plain=current_plain,
+          )
+          Path('/tmp/rollback-decision.json').write_text(json.dumps(decision, indent=2, sort_keys=True))
+          print('rollback_decision=' + decision['action'])
+          print('rollback_reason=' + decision['reason'])
+          print('rollback_lifecycle=' + json.dumps(decision['lifecycle']))
+          print('rollback_safe_flags=' + json.dumps(decision['flags']))
+          PY
+          ACTION=$(jq -er '.action' /tmp/rollback-decision.json)
+          if [[ "$ACTION" == "noop" ]]; then
+            echo "automatic_rollback_not_needed=production_version_unchanged"
+            exit 0
+          fi
+          if [[ "$ACTION" == "skip_lifecycle" ]]; then
+            # Cloudflare cannot roll a Worker back across either
+            # STUDIO_SCHEDULE_RESERVATIONS or STUDIO_PROFILE_SUMMARIES becoming
+            # present. Keep the new dormant namespaces, verify Home/refill reads
+            # stayed off, and fail the job with explicit evidence instead of
+            # attempting an invalid historical rollback.
+            jq -e '.flags.STUDIO_HOME_PROFILE_SUMMARY_READS!="true" and .flags.STUDIO_REFILL_PROFILE_SUMMARY_READS!="true"' /tmp/rollback-decision.json >/dev/null
+            echo "automatic_rollback_skipped=durable_object_lifecycle_boundary"
+            echo "production_safe_state=home_and_refill_reads_off"
+            exit 0
+          fi
+          cat >/tmp/rollback.json <<EOF
+          {"strategy":"percentage","versions":[{"version_id":"$BEFORE","percentage":100}],"annotations":{"workers/message":"Automatic rollback after Studio API deployment verification failure"}}
+          EOF
+          code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "automatic_rollback_http=$code" >&2
+            jq -c '{success,errors}' /tmp/rollback-result.json >&2 || true
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/rollback-result.json >/dev/null
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/rollback-check.json
+            CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rollback-check.json)
+            [[ "$CURRENT" == "$BEFORE" ]] && break
+            sleep 2
+          done
+          test "$CURRENT" = "$BEFORE"
+          echo "automatic_rollback_verified=true"
+
+      - name: Upload sanitized deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-api-production-deploy-${{ github.run_id }}
+          path: |
+            /tmp/predeploy-contract-sanitized.json
+            /tmp/postdeploy-contract-sanitized.json
+            /tmp/session.json
+            /tmp/overview-before.json
+            /tmp/overview-refresh-status.json
+            /tmp/overview-after.json
+            /tmp/ready-production-diagnostic.json
+            /tmp/rollback-decision.json
+          if-no-files-found: ignore
+          retention-days: 30

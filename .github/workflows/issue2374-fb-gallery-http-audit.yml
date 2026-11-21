@@ -1,0 +1,81 @@
+name: Issue 2374 Facebook Source Gallery Image GET Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2374-fb-gallery-http-readonly.py'
+      - 'repair/manifests/issue2374-fb-source-gallery-36-20261121.json'
+      - '.github/workflows/issue2374-fb-gallery-http-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2374-fb-gallery-http-readonly.py'
+      - 'repair/manifests/issue2374-fb-source-gallery-36-20261121.json'
+      - '.github/workflows/issue2374-fb-gallery-http-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2374-fb-gallery-readonly-source-http
+  cancel-in-progress: false
+jobs:
+  verify-source-gallery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate all 36 gallery manifests before any HTTP request
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          raw=json.loads(Path('repair/manifests/issue2374-fb-source-gallery-36-20261121.json').read_text())
+          assert raw['record_count']==36 and raw['canonical_source_candidates']==30
+          assert raw['ambiguous_human_review']==6 and raw['read_only_source_scan'] is True
+          assert raw['release_to_publish_authorized'] is False
+          assert raw['asset_url_http_verified'] is False
+          entries=raw['entries']
+          assert len(entries)==36 and len({e['output_number'] for e in entries})==36
+          assert sum(len(e['slides']) for e in entries)==206
+          assert all(e['protected_hold'] is True for e in entries)
+          source=Path('repair/scripts/issue2374-fb-gallery-http-readonly.py').read_text()
+          for required in ('max_workers=7','EXPECTED = 206','source_asset_verified',
+                           'host_allowlisted', 'media.chicagoshining.com',
+                           'auto_publish": False', 'provider_writes": 0'):
+              assert required in source
+          for bad in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','-Method Post',
+                      '/media_publish','api.airtable.com'):
+              assert bad not in source
+          print('issue2374_source_gallery_static_safety=PASS')
+          PY
+      - name: Install pinned image header reader
+        run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: GET image headers for all 206 stored source slides (no writes)
+        run: python repair/scripts/issue2374-fb-gallery-http-readonly.py
+      - name: Verify report is complete and distinguishes accessible from publish-ready
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/issue2374-fb-gallery-http-verification.json').read_text())
+          assert r['read_only'] is True and r['provider_writes']==0 and r['output_writes']==0 and r['publish_calls']==0
+          assert r['slides_examined']==206 and len(r['dispositions'])==36
+          assert r['rework_held']==36 and r['auto_approval'] is False and r['auto_publish'] is False
+          assert r['ambiguous_galleries_not_auto_released']==6
+          print('source_gallery_images_checked=',r['slides_examined'],
+                'verified_image_headers=',r['http_header_verified'],
+                'verified_4x5=',r['four_by_five_verified'],
+                'distinct_galleries_for_human_review=',r['canonical_galleries_available_for_review'])
+          PY
+      - name: Retain per-source and per-output evidence (30 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2374-fb-gallery-http-readonly
+          path: /tmp/issue2374-fb-gallery-http-verification.json
+          retention-days: 30
+          if-no-files-found: warn

@@ -1,0 +1,113 @@
+name: P1 2340 five Facebook Page Reels exact listing GET audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-facebook-video-reels-readonly.yml'
+      - 'repair/scripts/p1-2340-facebook-video-reels-readonly.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-miami-reel-public-getonly
+  cancel-in-progress: false
+jobs:
+  exact-carousel-children:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse approved read-only PowerShell audit
+        shell: pwsh
+        run: |
+          $tokens=$null
+          $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/p1-2340-facebook-video-reels-readonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          Write-Output 'P1_2340_FB_REELS_PARSER_OK'
+      - name: Reject provider writes and unsafe variable token logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          code=Path('repair/scripts/p1-2340-facebook-video-reels-readonly.ps1').read_text()
+          assert "P1_FB_REELS_EDGE_AUDIT=" in code and "FACEBOOK_PAGE_ACCESS_TOKEN" in code
+          assert "Invoke-RestMethod" in code and "-Method Get" in code
+          assert "video_reels" in code
+          for forbidden in ["Invoke-RestMethod -Method Post", "Invoke-WebRequest -Method Post",
+                            "Invoke-RestMethod -Method Patch", "Invoke-WebRequest -Method Patch",
+                            "Write-Output $token", "Write-Host $token"]:
+              assert forbidden not in code, "Mutating or sensitive output operation prohibited"
+          print("meta_2340_static_scope=GET_ONLY")
+          PY
+      - name: Authenticate approved Ops service without echoing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-2340-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-2340-ops-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_2340_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable'; exit 1
+      - name: Execute GET-only four-Page Graph audit on authoritative local runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,json
+          pathlib.Path('/tmp/p1-2340-fb-reels-edge-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/p1-2340-facebook-video-reels-readonly.ps1').read_text(),
+            'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/p1-2340-fb-reels-edge-ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $P1_2340_OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/p1-2340-fb-reels-edge-request.json || true)
+          if [[ "$code" != 200 && "$code" != 202 ]]; then
+            echo "Ops did not accept read-only diagnostic ($code)"; exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-2340-fb-reels-edge-ops-start.json)
+          for n in $(seq 1 140); do
+            curl -fsS --max-time 30 \
+              -H "Authorization: Bearer $P1_2340_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-2340-fb-reels-edge-ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-2340-fb-reels-edge-ops-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-2340-fb-reels-edge-ops-status.json | grep '^P1_FB_REELS_EDGE_AUDIT=' | tail -1 | sed 's/^P1_FB_REELS_EDGE_AUDIT=//' > /tmp/p1-2340-fb-reels-edge-audit.json
+              jq -e '.read_only == true and .output_writes == 0 and .provider_writes == 0 and (.results|length)==5 and (.results|all(.edge_status == "complete" or .edge_status == "provider_edge_unavailable" or .edge_status == "missing_data" or .edge_status == "pagination_incomplete"))' /tmp/p1-2340-fb-reels-edge-audit.json >/dev/null
+              jq -c '{read_only,source,results,output_writes,provider_writes}' /tmp/p1-2340-fb-reels-edge-audit.json
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              echo 'Read-only Ops audit failed; no provider actions authorized'
+              # Sanitize error text; never print tokens, URLs, bearer headers, or
+              # the submitted PowerShell script. Retain only diagnostic tails.
+              jq -r '.job.log // ""' /tmp/p1-2340-fb-reels-edge-ops-status.json | tail -n 14 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|FACEBOOK_PAGE_ACCESS_TOKEN|META_GRAPH_API_ACCESS_TOKEN' \
+                | tail -n 10 || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Read-only Ops audit did not complete'; exit 4
+      - name: Preserve sanitized Page diagnostic as 30-day evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-facebook-video-reels-readonly
+          path: /tmp/p1-2340-fb-reels-edge-audit.json
+          retention-days: 30
+          if-no-files-found: warn
+
+# 2026-11-21 issue #2464: protected re-audit of exact five Facebook Reel owner inventories after valid four Page permissions. GET-only video_reels listing, no uploads or output writes.

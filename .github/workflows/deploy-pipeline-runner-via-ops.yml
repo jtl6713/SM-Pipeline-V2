@@ -9,8 +9,18 @@ on:
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
+      - 'services/pipeline-runner/app.py'
+      - 'services/pipeline-runner/config.py'
+      - 'services/pipeline-runner/tests/test_studio_video_recovery_lookup.py'
       - 'services/pipeline-runner/publish_queue.py'
       - 'services/pipeline-runner/tests/test_publish_queue.py'
+      # Issue #2374: carousel publishing safety needs an actual runner rollout.
+      - 'services/pipeline-runner/apc/ap1c.py'
+      - 'services/pipeline-runner/carousel/mapping.py'
+      - 'services/pipeline-runner/c8/processor.py'
+      - 'services/pipeline-runner/c9/processor.py'
+      - 'services/pipeline-runner/tests/test_ap1c_unstaged_asset_2374.py'
+      - 'services/pipeline-runner/tests/test_c8_c9_gallery_identity_2374.py'
 
 permissions:
   contents: read
@@ -60,6 +70,10 @@ jobs:
             services/pipeline-runner/tests/test_supabase_youtube_title_fallback.py \
             services/pipeline-runner/tests/test_supabase_formula.py \
             services/pipeline-runner/tests/test_visual_watermark.py \
+            services/pipeline-runner/tests/test_apc_eligibility.py \
+            services/pipeline-runner/tests/test_carousel_chain.py \
+            services/pipeline-runner/tests/test_ap1c_unstaged_asset_2374.py \
+            services/pipeline-runner/tests/test_c8_c9_gallery_identity_2374.py \
             services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py \
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
             services/pipeline-runner/tests/test_ap1_igs_graph_rate_limit.py \
@@ -91,6 +105,7 @@ jobs:
             services/pipeline-runner/tests/test_studio_compress.py \
             services/pipeline-runner/tests/test_a1s_eligibility.py \
             services/pipeline-runner/tests/test_a1_local_compressor.py \
+            services/pipeline-runner/tests/test_studio_video_recovery_lookup.py \
             services/pipeline-runner/tests/test_internal_media_guard.py \
             services/pipeline-runner/tests/test_native_gallery_staging_settings.py \
             services/pipeline-runner/tests/test_native_gallery_readiness_http.py \

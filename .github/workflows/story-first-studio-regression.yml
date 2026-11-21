@@ -5,12 +5,15 @@ on:
       - 'apps/studio-api/idea-first-storyboard*'
       - 'apps/studio-api/story-first-production-atomicity.test.mjs'
       - 'apps/studio-api/story-first-ai-video-unbilled-reconciliation.*'
+      - 'apps/studio-api/story-first-video-recovery*.mjs'
       - 'apps/studio-web/story-first-ai-video-ui.test.mjs'
       - 'apps/studio-api/worker-functions-0*.mjs'
       - 'apps/studio-web/story-first-workspace.test.mjs'
       - 'apps/studio-web/story-first-reject-plan.test.mjs'
       - 'apps/studio-api/scripted-short-scene-directions.*'
       - 'apps/studio-api/idea-timed-script.mjs'
+      - 'services/pipeline-runner/app.py'
+      - 'services/pipeline-runner/tests/test_studio_video_recovery_lookup.py'
       - 'services/pipeline-runner/its1/**'
       - 'services/pipeline-runner/stages/its1.py'
       - 'services/pipeline-runner/tests/test_its1_timed_script.py'
@@ -43,6 +46,8 @@ jobs:
           node --check apps/studio-api/worker-functions-02.mjs
           node --check apps/studio-api/worker-functions-03.mjs
           node --check apps/studio-api/story-first-ai-video-unbilled-reconciliation.mjs
+          node --check apps/studio-api/story-first-video-recovery.mjs
+          node --check apps/studio-api/story-first-video-recovery-route.mjs
           node --check apps/studio-api/worker.js
           node --check apps/studio-web/assets/story-first-workspace.js
           node --check apps/studio-web/assets/app-item4-1008.js
@@ -58,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
-          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_its1_timed_script.py
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_its1_timed_script.py services/pipeline-runner/tests/test_studio_video_recovery_lookup.py
       - name: Story-first and existing scripted-short regressions
         run: |
-          node --test             apps/studio-api/story-first-ai-video-unbilled-reconciliation.test.mjs             apps/studio-web/story-first-ai-video-ui.test.mjs             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/story-first-production-atomicity.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-api/scripted-short-scene-directions.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/story-first-reject-plan.test.mjs             apps/studio-web/story-first-scene-icons.test.mjs             apps/studio-web/story-first-scene-card-design.test.mjs             apps/studio-web/story-first-scene-collapse.test.mjs             apps/studio-web/story-first-save-receipt.test.mjs             apps/studio-web/story-first-library-select.test.mjs             apps/studio-web/story-first-library-preview.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs
+          node --test             apps/studio-api/story-first-video-recovery.test.mjs             apps/studio-api/story-first-ai-video-unbilled-reconciliation.test.mjs             apps/studio-web/story-first-ai-video-ui.test.mjs             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/story-first-production-atomicity.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-api/scripted-short-scene-directions.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/story-first-reject-plan.test.mjs             apps/studio-web/story-first-scene-icons.test.mjs             apps/studio-web/story-first-scene-card-design.test.mjs             apps/studio-web/story-first-scene-collapse.test.mjs             apps/studio-web/story-first-save-receipt.test.mjs             apps/studio-web/story-first-library-select.test.mjs             apps/studio-web/story-first-library-preview.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs

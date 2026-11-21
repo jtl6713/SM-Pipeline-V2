@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from publish_queue import (
     apply_publish_queue_fields,
     fb_resolved_publish_mode,
+    fb_action_due_now,
     ttd0_asset_route_ready,
     youtube_action_due_now,
 )
@@ -88,3 +89,82 @@ def test_other_multi_image_formats_keep_slideshow_fallback():
     native_lowercase = {"platform_output_type": "Facebook Photo Set",
                         "studio_output_type": "Multi-Image Post", "image_count": 4}
     assert fb_resolved_publish_mode(native_lowercase) == "Multi-Photo Collage"
+
+
+def test_facebook_retry_prohibition_never_means_due_now():
+    fields = {
+        "Platform": "Facebook",
+        "Platform_Output_Type": "Facebook Reel",
+        "FB_Resolved_Publish_Mode": "Slideshow Reel",
+        "Auto_Publish_Enabled": True,
+        "Publish_Status": "Failed",
+        "FB_Publish_Status": "Retry Pending",
+        "Publish_Retry_Eligible": False,
+        "Publish_Next_Retry_At": "2099-01-01T00:00:00Z",
+    }
+    assert fb_action_due_now(fields, NOW) == 0
+    fields["Publish_Next_Retry_At"] = None
+    assert fb_action_due_now(fields, NOW) == 0
+    fields["Publish_Retry_Eligible"] = "false"
+    assert fb_action_due_now(fields, NOW) == 0
+    fields.pop("Publish_Retry_Eligible")
+    assert fb_action_due_now(fields, NOW) == 1  # Absent flag; other publisher guards still apply.
+    fields["Publish_Next_Retry_At"] = "2099-01-01T00:00:00Z"
+    assert fb_action_due_now(fields, NOW) == 0
+    fields["Publish_Retry_Eligible"] = True
+    fields["Publish_Next_Retry_At"] = "2026-11-12T17:00:00Z"
+    assert fb_action_due_now(fields, NOW) == 1
+
+
+def test_youtube_retry_prohibition_prevents_reupload_due_now():
+    fields = {
+        "Platform": "YouTube",
+        "Auto_Publish_Enabled": True,
+        "Publish_Status": "Failed",
+        "YouTube_Stage": "YT1",
+        "Publish_Retry_Eligible": False,
+        "Publish_Next_Retry_At": None,
+    }
+    assert youtube_action_due_now(fields, NOW) == 0
+    fields["Publish_Retry_Eligible"] = True
+    assert youtube_action_due_now(fields, NOW) == 1
+    fields["Publish_Next_Retry_At"] = "2099-01-01T00:00:00Z"
+    assert youtube_action_due_now(fields, NOW) == 0
+
+
+def test_fresh_facebook_first_dispatch_with_no_retry_allowed():
+    fields = {
+        "Platform": "Facebook", "Platform_Output_Type": "Facebook Reel",
+        "FB_Resolved_Publish_Mode": "Slideshow Reel",
+        "Publish_Status": "Ready to Schedule",
+        "Auto_Publish_Enabled": True,
+        "Do_Not_Publish": False,
+        "Publish_Retry_Eligible": False,
+        "Publish_Attempt_Count": 0,
+        "Studio_Publish_Dispatch_Count": 0,
+        "Publish_Next_Retry_At": None,
+    }
+    assert fb_action_due_now(fields, NOW) == 1
+    fields["Studio_Publish_Dispatch_Count"] = 1
+    assert fb_action_due_now(fields, NOW) == 0
+    fields["Studio_Publish_Dispatch_Count"] = 0
+    fields["Last_Publish_Attempt_At"] = "2026-11-12T17:30:00Z"
+    assert fb_action_due_now(fields, NOW) == 0
+    fields.pop("Last_Publish_Attempt_At")
+    fields["Publish_Next_Retry_At"] = "2099-01-01T00:00:00Z"
+    assert fb_action_due_now(fields, NOW) == 0
+
+
+def test_fresh_youtube_first_dispatch_with_no_retry_allowed():
+    fields = {
+        "Platform": "YouTube",
+        "Auto_Publish_Enabled": True,
+        "Publish_Status": "Ready to Publish",
+        "YouTube_Stage": "YT1",
+        "Publish_Retry_Eligible": False,
+        "Publish_Attempt_Count": 0,
+        "Studio_Publish_Dispatch_Count": 0,
+    }
+    assert youtube_action_due_now(fields, NOW) == 1
+    fields["YouTube_Upload_Job_ID"] = "prior-uploader-job"
+    assert youtube_action_due_now(fields, NOW) == 0

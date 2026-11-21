@@ -112,3 +112,18 @@ test("getOrCreate returns verified storyboard asset IDs after successful handoff
   assert.match(body, /storyboard_asset_ids: approvedStory\.ids/);
   assert.match(body, /storyboard_asset_count: approvedStory\.ids\.length/);
 });
+
+test("both original AI-video registration paths assign a Production-compatible video role", () => {
+  const recovery = readFileSync(new URL("./story-first-video-recovery-route.mjs", import.meta.url), "utf8");
+  const acceptSource = readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const acceptStart = acceptSource.indexOf('if (videoAction === "decline" || videoAction === "accept")');
+  const acceptEnd = acceptSource.indexOf('if (action.startsWith("preview/"))', acceptStart);
+  assert.ok(acceptStart > 0 && acceptEnd > acceptStart, "original AI video acceptance route missing");
+  const accept = acceptSource.slice(acceptStart, acceptEnd);
+  for (const [name, source] of [["recovery",recovery],["normal acceptance",accept]]) {
+    assert.match(source, /Asset_Role:\s*"Raw Footage"/, name + " must register production-eligible original MP4");
+    assert.match(source, /Capture_Source:\s*"AI Generated"/, name + " must preserve synthetic provenance");
+    assert.match(source, /Raw_Source_Eligibility:\s*"Not Applicable"/, name + " must preserve source classification");
+    assert.match(source, /Rights_Status:\s*"Licensed"/, name + " must preserve licensed-rights gate");
+  }
+});

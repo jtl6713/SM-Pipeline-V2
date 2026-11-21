@@ -25,7 +25,7 @@ class AirtableClient:
         """Hard-stop any legacy Airtable transport caller."""
         raise RuntimeError(f"Airtable HTTP access retired: {method} {table_id}")
 
-    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
+    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
         from supabase_pipeline import mirror_airtable_records
 
         result = mirror_airtable_records(self._settings, table_id, records, partial=partial)
@@ -108,7 +108,9 @@ class AirtableClient:
             )
             return {"id": record_id, "fields": fields}
         if self._legacy_export(table_id):
-            self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            result = self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            if not isinstance(result, dict) or not result.get("ok") or result.get("count") != 1:
+                raise RuntimeError(f"Supabase update failed for {table_id} {record_id}; refusing success echo")
             logger.info(
                 "Airtable archive kept the Supabase commit and did not export %s %s",
                 table_id,
@@ -309,10 +311,12 @@ class AirtableClient:
             if not body["records"]:
                 continue
             if legacy:
-                self._mirror(table_id, [
+                mirrored = self._mirror(table_id, [
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
                 ], partial=True)
+                if not isinstance(mirrored, dict) or not mirrored.get("ok") or mirrored.get("count") != len(chunk):
+                    raise RuntimeError(f"Supabase batch update failed for {table_id}; refusing success echo")
                 logger.info("Airtable archive kept the Supabase batch and did not export %s", table_id)
                 updated.extend(
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}

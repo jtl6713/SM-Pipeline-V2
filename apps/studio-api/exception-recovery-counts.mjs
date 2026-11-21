@@ -4,6 +4,7 @@
  * An unavailable/incomplete scan must never become a zero count.
  */
 import {homeApprovedExceptionKind,homeIsUnpublishedFailure,homeOutputContribution} from "./profile-summary-classification.mjs";
+import {classifyOverdueProviderEvidence} from "./overdue-provider-evidence.mjs";
 const bool=v=>v===true;
 const mappedProfile=row=>Array.isArray(row?.fields?.Content_Profile) ? String(row.fields.Content_Profile[0]||"") : "";
 const blank=()=>({outputs:0,approved_past_due:0,approved_missing_date:0,failed:0,manual_action_required:0,held_deferred:0});
@@ -16,6 +17,11 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
   const exceptionItems=[];
   let unverifiedRemoteIds=0;
   const overdueRecoveryLanes={};
+  const overdueProviderEvidenceLanes={};
+  // Keep every unverified approved/overdue outcome visible, independently of
+  // Home's smaller Past Due and Failed buckets. A misleading Published label,
+  // manual handoff or intentional hold can otherwise disappear from drilldown.
+  const overdueProviderEvidenceCases=[];
   for(const row of rawRows) {
     if(!/^rec[A-Za-z0-9]{14}$/.test(String(row?.id||"")))throw new Error("Bad output identity in canonical census");
     if(seen.has(row.id))throw new Error("Repeated output record in canonical census");
@@ -40,6 +46,33 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
       if(held)counter.held_deferred++;
     }
     const fields=row.fields||{};
+    // Audit the complete approved-overdue population. Home deliberately
+    // excludes some publish failures from its Past Due counter, but those
+    // records still require a provider-side reconciliation, never a replay.
+    const due=Date.parse(String(fields.Scheduled_Post_Date||""));
+    const unverifiedOverdue=fields.Review_Status==="Approved"
+      && fields.Output_Status==="Approved for Publishing"
+      && Number.isFinite(due) && due<atMs
+      && !fields.Published_At && !fields.Platform_Post_URL && !fields.Manual_Published_URL;
+    const providerEvidence=unverifiedOverdue?classifyOverdueProviderEvidence(fields):null;
+    if(providerEvidence) {
+      overdueProviderEvidenceLanes[providerEvidence.lane]
+        =(overdueProviderEvidenceLanes[providerEvidence.lane]||0)+1;
+      overdueProviderEvidenceCases.push({
+        record_id:row.id,
+        output_id:String(fields.Output_ID||mapped.output_id||"")||null,
+        profile_id:profile==="unassigned"?null:profile,
+        platform,
+        output_type:String(mapped.output_type||fields.Studio_Output_Type||fields.Platform_Output_Type||"")||null,
+        scheduled_at:fields.Scheduled_Post_Date,
+        publish_status:String(fields.Publish_Status||"")||null,
+        held:held,
+        auto_publish_enabled:fields.Auto_Publish_Enabled===true,
+        publish_retry_eligible:fields.Publish_Retry_Eligible===true,
+        provider_reconciliation:providerEvidence,
+        actions_enabled:false,
+      });
+    }
     const remoteId=fields.Platform_Post_ID||fields.Platform_Media_ID||fields.YouTube_Video_ID||"";
     const savedReceipt=Boolean(fields.Published_At||fields.Platform_Post_URL||fields.Manual_Published_URL);
     const remoteUnverified=Boolean(remoteId&&!savedReceipt);
@@ -77,6 +110,7 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
       minutes_past_due:kind==="approved_past_due"&&fields.Scheduled_Post_Date
         ?Math.max(0,Math.floor((atMs-Date.parse(fields.Scheduled_Post_Date))/60000)):null,
       held,remote_identity_exists:Boolean(remoteId),public_receipt_recorded:savedReceipt,
+      provider_reconciliation:providerEvidence,
       recovery_lane:recoveryLane,status_only_verification_candidate:recoveryLane==="verify_existing_post_status_only",
       signature:kind==="approved_past_due"?"QA-PUBLISH-001":failed?"HOME-FAILED":held?"INTENTIONAL-HOLD":"REMOTE-ID-UNVERIFIED",
       diagnosis:failed?"Failed publication or production requires Quality Agent inspection."
@@ -116,6 +150,16 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     exception_items_truncated:exceptionItems.length>EXCEPTION_CENSUS_MAX_CASES,
     unverified_remote_ids:unverifiedRemoteIds,
     overdue_recovery_lanes:overdueRecoveryLanes,
+    overdue_provider_evidence_lanes:overdueProviderEvidenceLanes,
+    // Separate output-by-output audit from Home exception pagination. In
+    // particular, a contradictory "Published" label does not mean a receipt.
+    overdue_provider_evidence_count:overdueProviderEvidenceCases.length,
+    overdue_provider_evidence_cases:overdueProviderEvidenceCases.sort((a,b)=>
+      Date.parse(a.scheduled_at)-Date.parse(b.scheduled_at)
+      ||Number(a.output_id||0)-Number(b.output_id||0)
+      ||a.record_id.localeCompare(b.record_id)
+    ).slice(0,EXCEPTION_CENSUS_MAX_CASES),
+    overdue_provider_evidence_cases_truncated:overdueProviderEvidenceCases.length>EXCEPTION_CENSUS_MAX_CASES,
     snapshot_parity_with_home_widget:"not_proven_without_matching_generation",
     read_only:true,
   };

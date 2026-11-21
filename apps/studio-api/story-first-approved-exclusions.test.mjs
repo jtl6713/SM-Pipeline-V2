@@ -131,3 +131,25 @@ test("automatic matching remains strict for Watermarked/Branded alone", () => {
     null,
   );
 });
+
+test("approved AI video master is accepted by Production role gate while automatic matching stays strict", () => {
+  const recovered = asset({
+    "Asset Name": "New York City Then and Now Scene 4 416472",
+    Media_Class: "Video",
+    MIME_Type: "video/mp4",
+    Capture_Source: "AI Generated",
+    Rights_Status: "Licensed",
+    Asset_Role: "Raw Footage",
+    Raw_Source_Eligibility: "Not Applicable",
+    Classification_Status: "Processing",
+    File_Size_Bytes: 12500000,
+  });
+  assert.equal(reject(recovered, { allowVideo: true, approvedStoryboard: true }), null);
+  assert.match(reject(recovered, { allowVideo: true }) || "", /eligible Raw Footage/i);
+  assert.match(reject(asset({ ...recovered.fields, Asset_Role: "Other" }), {
+    allowVideo: true, approvedStoryboard: true,
+  }) || "", /not Raw Footage/i);
+  assert.match(reject(asset({ ...recovered.fields, Do_Not_Use: true }), {
+    allowVideo: true, approvedStoryboard: true,
+  }) || "", /Do Not Use/i);
+});

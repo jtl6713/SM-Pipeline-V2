@@ -1,0 +1,152 @@
+name: Issue 2464 original 24 Instagram child container GET-only
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1'
+      - '.github/workflows/issue2464-original-24-ig-children-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1'
+      - '.github/workflows/issue2464-original-24-ig-children-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2464-original-24-ig-children-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Prove numeric order of hashtable-backed original slides
+        shell: pwsh
+        run: |
+          $sample=@(@{output=8128;order=4},@{output=8128;order=2},@{output=8128;order=1},@{output=8128;order=3})
+          $ordered=@($sample | Where-Object { [int]$_['output'] -eq 8128 } | ForEach-Object { [int]$_['order'] } | Sort-Object)
+          if(($ordered -join ',') -ne '1,2,3,4'){throw 'numeric_gallery_order_contract_failed'}
+          $source=Get-Content 'repair/scripts/issue2464-original-24-ig-children-getonly.ps1' -Raw
+          if(-not $source.Contains('ForEach-Object { [int]$_[''order''] } | Sort-Object')){throw 'live_numeric_gallery_guard_missing'}
+          Write-Output 'original_24_numeric_gallery_order=PASS'
+      - name: Fail closed on unexpected audit mutation or scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2464-original-24-ig-children-getonly.ps1').read_text()
+          for must in ['8128','8138','8357','8417','expected_children=24','actual_original_children',
+                       'read_only=$true','provider_writes=0','output_writes=0','publish_calls=0',
+                       'airtable_operations=0','do_not_publish','auto_publish_enabled','publish_retry_eligible',
+                       'original_slide_or_child_identity_drift','original_gallery_order_changed',
+                       'parent_receipt_reconciled=$false','any_rearm_authorized=$false',
+                       'GraphRead $child.container_id $token', 'if($script:providerGets -gt 26)']:
+              assert must in s, f'missing required guard: {must}'
+          for banned in ['-Method Post','-Method Patch','-Method Delete','-Method Put',
+                         'api.airtable.com','AIRTABLE_PAT','/media_publish',
+                         'Write-Host $key','Write-Output $key','-X POST']:
+              assert banned not in s, f'unsafe operation: {banned}'
+          assert s.count('-Method Get')>=3
+          assert 'ISSUE2464_ORIGINAL_CHILD_GET_AUDIT=' in s
+          print('issue2464_original_24_get_only_static_gate=PASS')
+          PY
+  live-readonly-audit:
+    if: github.event_name != 'pull_request'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Ops admission token without logging secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/issue2464-ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/issue2464-ops-catalog.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "ISSUE2464_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'No approved Ops credential; never bypass audit protection'; exit 1
+      - name: Pin original GET-only script to immutable exact commit bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          p=pathlib.Path('repair/scripts/issue2464-original-24-ig-children-getonly.ps1')
+          sha=hashlib.sha256(p.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(x in '0123456789abcdef' for x in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{p.as_posix()}'
+          cmd=(
+              "$ErrorActionPreference='Stop';"
+              f"$url='{url}';"
+              "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+              "$digest=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+              f"if($digest -ne '{sha}'){{throw 'pinned_source_hash_mismatch'}};"
+              "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/issue2464-child-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          print('immutable_main_source_pin=PASS')
+          PY
+      - name: Run exact 24 original child Graph GET audit on protected Ops host
+        shell: bash
+        run: |
+          set -euo pipefail
+          admitted=false
+          for admission in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2464-child-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE2464_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue2464-child-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true;break;fi
+            if [[ "$code" != 409 ]]; then echo "Ops rejected audit ($code); no replay";exit 2;fi
+            sleep 12
+          done
+          if [[ "$admitted" != true ]]; then echo 'Ops still busy; audit not run';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/issue2464-child-start.json)
+          for attempt in $(seq 1 320); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $ISSUE2464_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue2464-child-status.json
+            state=$(jq -r '.job.status // empty' /tmp/issue2464-child-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/issue2464-child-status.json \
+                | grep '^ISSUE2464_ORIGINAL_CHILD_GET_AUDIT=' | tail -1 \
+                | sed 's/^ISSUE2464_ORIGINAL_CHILD_GET_AUDIT=//' > /tmp/issue2464-original-24-ig-children.json
+              jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .expected_children==24 and .actual_original_children==24 and .provider_get_calls<=26 and (.children|length)==24 and (.owner_scopes|length)==2 and .parent_receipt_reconciled==false and .any_rearm_authorized==false' /tmp/issue2464-original-24-ig-children.json >/dev/null
+              jq -c '{version,checked_at,provider_get_calls,owner_scopes,source_gallery_checks,children,read_only,provider_writes,output_writes,any_rearm_authorized}' /tmp/issue2464-original-24-ig-children.json
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Read-only child audit failed, no provider or state write performed'
+              jq -r '.job.log // ""' /tmp/issue2464-child-status.json | tail -n 12 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|ACCESS_TOKEN' | tail -n 8 || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo 'Read-only child audit incomplete, holds remain';exit 4
+      - name: Preserve read-only evidence for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2464-original-24-ig-child-owner-get
+          path: /tmp/issue2464-original-24-ig-children.json
+          retention-days: 30
+          if-no-files-found: warn
