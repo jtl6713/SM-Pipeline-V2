@@ -7,6 +7,7 @@ import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verificati
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -4997,13 +4998,18 @@ export async function syncProductionRequestOutputs(request, env, url, authorizat
     || prevPlatforms.some((value, index) => value !== nextPlatforms[index]);
   let updatedParent = parent;
   if (platformsChanged || destinationsChanged) {
-    updatedParent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
+    // Phase6 writes return a sparse PATCH echo, not the complete request.
+    // Re-read the authorized record before calculating source counts or
+    // synchronizing output destinations. Otherwise six masters become 0 and
+    // item4ReconcilePlanWithEnabledOutputs falls back to one source.
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
       method: "PATCH",
       body: JSON.stringify({
         fields: { Target_Platforms: targetPlatforms, Updated_At: now },
         typecast: false,
       }),
     });
+    updatedParent = await loadAuthorizedProductionRequest(env, parent.id, authorization);
   }
   updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, planItems);
   if (destinationsChanged) {
@@ -9200,11 +9206,30 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
   // The selected Production Request Outputs are the sole authority for output
   // destinations. Rebuild the plan from that exact set: the previous add-only
   // reconciliation retained deleted formats and left Platforms/Frames misleading.
+  // A Phase6 PATCH echo only contains changed fields. Never interpret its
+  // missing master list or output plan as proof of a one-source request.
+  if (studioPhase6WriteSource(env) === "supabase" &&
+      (!record?.fields ||
+       !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Master_Assets_JSON") ||
+       !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Output_Plan_JSON"))) {
+    if (!record?.id) throw new HttpError(409, "Production Request identity is missing; no output plan was changed.");
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id);
+    if (!record?.fields ||
+        !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Master_Assets_JSON") ||
+        !Object.prototype.hasOwnProperty.call(record.fields, "Studio_Output_Plan_JSON")) {
+      throw new HttpError(503, "The complete source inventory could not be verified; no output plan was changed.");
+    }
+  }
   const assets = item4AssetManifest(record);
-  const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
+  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const sourceProof = existingPlan?.items?.length
+    ? reconcileApprovedStoryFirstSourcePlan(f(record, "Production_Notes"), assets, existingPlan)
+    : { kind: "not_story" };
+  if (sourceProof.kind === "invalid")
+    throw new HttpError(409, sourceProof.reason + "; no output plan was changed.");
+  const photoCount = sourceProof.count || item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
   const hasVideo = item4PlanHasVideo(record, assets);
   const mappingIndex = await item4MappingIndex(env);
-  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const previousItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
   const items = [];
   const seen = new Set();
@@ -9234,10 +9259,13 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
   const needsReview = items.some((item) => !item.aspect_ratio);
   const expectedStatus = needsReview ? "Needs Review" : "Ready";
   const storedStatus = String(f(record, "Studio_Output_Plan_Status") || "");
-  if (sameKeys && storedStatus === expectedStatus) return record;
+  const countMetadataAccurate = Number(existingPlan?.source_asset_count) === photoCount
+    && existingPlan?.photo_count_kind === item4PhotoCountKind(photoCount)
+    && previousItems.every((item) => Number(item?.source_asset_count) === photoCount);
+  if (sameKeys && storedStatus === expectedStatus && countMetadataAccurate) return record;
 
   const previousRatios = item4RequiredRatios(existingPlan).join("|");
-  const plan = {
+  let plan = {
     ...(existingPlan && typeof existingPlan === "object" ? existingPlan : {}),
     schema_version: "item4.output-plan.1",
     generated_at: new Date().toISOString(),
@@ -9246,6 +9274,12 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
     photo_count_kind: item4PhotoCountKind(photoCount),
     items,
   };
+  const storyIntegrity = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (storyIntegrity.kind === "invalid")
+    throw new HttpError(409, storyIntegrity.reason + "; no output plan was changed.");
+  if (storyIntegrity.kind === "repair") plan = storyIntegrity.plan;
   const nextRatios = item4RequiredRatios(plan).join("|");
   const fields = {
     Target_Platforms: [...new Set(items.map((item) => item.platform))],
@@ -9258,7 +9292,9 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
     fields.Studio_Variant_Updated_At = null;
     fields.Studio_Variant_Error = null;
   }
-  return item4UpdateRequestState(env, record.id, fields);
+  await item4UpdateRequestState(env, record.id, fields);
+  // Never propagate a sparse Phase6 mutation echo to queue relinking or UI.
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id);
 }
 /*__STUDIO_WORKER_END:item4ReconcilePlanWithEnabledOutputs__*/
 
@@ -9539,7 +9575,16 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   if (!plannedItems.length) {
     throw new HttpError(409, "No supported platform output destinations in plan. Choose Instagram, Facebook, TikTok or YouTube.");
   }
-  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
+  let plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
+  const approvedSourceProof = reconcileApprovedStoryFirstSourcePlan(
+    f(record, "Production_Notes"), assets, plan,
+  );
+  if (approvedSourceProof.kind === "invalid")
+    throw new HttpError(409, approvedSourceProof.reason + "; no output plan was changed.");
+  if (approvedSourceProof.kind === "repair") {
+    plan = approvedSourceProof.plan;
+    plannedItems = plan.items;
+  }
   needsReview = plannedItems.some((item) => !item.aspect_ratio);
 
   if (payload.check_fbs1 === true && !payload.skip_fbs1_guard && plannedItems.some(item =>
