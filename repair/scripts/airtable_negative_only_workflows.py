@@ -90,8 +90,41 @@ OTHER_EXACT_POWERSHELL_GUARDS = {
         "foreach($forbidden in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','__AIRT_HOST__','/media_publish','/media?','airtable.com/v0/')){",
         "if($s.Contains($forbidden)){throw ('write_or_unscoped_provider_call_forbidden: '+$forbidden)}",
     ),
+    ".github/workflows/ig-story-1868-2859-exact-owner-getonly.yml": (
+        "foreach($bad in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd',"
+        "'__AIRT_HOST__','/media_publish','/media?','airtable.com/v0/','Invoke-Expression')){",
+        "if($s.Contains($bad)){throw ('prohibited_provider_or_source_mutation: '+$bad)}",
+    ),
 
 }
+
+
+# Exact source-only forbidden-token checks merged after the retirement branch.
+# This is not a file/path allowlist: every token occurrence must be structurally
+# accounted for and the matching statement must fail closed.
+EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS = {
+    ".github/workflows/issue2374-seven-original-ig-preview.yml": (
+        "assert required in script, required",
+        "for forbidden in ('SUPABASE_SERVICE_ROLE_KEY','__AIRT_HOST__',",
+        "assert forbidden not in script", 3, 1,
+    ),
+    ".github/workflows/issue2374-supabase-worker-release-contract.yml": (
+        "forbidden=[",
+        "'/api/admin/qa/', '/qa-catalog', '/qa-runs', '__AIRT_HOST__',",
+        "for item in forbidden: assert item not in w, item", 5, 1,
+    ),
+    ".github/workflows/issue2464-five-ambiguous-ap3c-owner-audit.yml": (
+        "\"Invoke-Sqlcmd\", \"/media_publish\", \"AIRTABLE_PAT\",",
+        "\"__AIRT_HOST__\", \"Write-Host $key\", \"Write-Output $key\"]:",
+        "assert bad not in s, \"unsafe provider write or secret exposure\"", 1, 2,
+    ),
+    ".github/workflows/issue2464-original-24-ig-children-audit.yml": (
+        "for banned in ['-Method Post','-Method Patch','-Method Delete','-Method Put',",
+        "'__AIRT_HOST__','AIRTABLE_PAT','/media_publish',",
+        "assert banned not in s, f'unsafe operation: {banned}'", 2, 1,
+    ),
+}
+
 
 
 def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
@@ -163,6 +196,26 @@ def permitted_negative_reference_locations(root: Path) -> set[tuple[str, int]]:
             and matches[0] + 1 < len(lines)
             and lines[matches[0] + 1].strip() == _expand_guard(guard)):
             safe.add((filename, matches[0]))
+    for filename, (previous, marker, rejecting, offset, expected_hits) in (
+        EXTRA_PINNED_PYTHON_NEGATIVE_GUARDS.items()
+    ):
+        file = root / filename
+        if not file.exists():
+            continue
+        lines = file.read_text(encoding="utf-8").splitlines()
+        hits = [i for i, line in enumerate(lines)
+                if AIRT_HOST in line or "AIRTABLE_PAT" in line
+                or "AIRTABLE_TOKEN" in line]
+        candidates = [i for i, line in enumerate(lines)
+                      if line.strip() == _expand_guard(marker)]
+        if (len(hits) != expected_hits or len(candidates) != 1):
+            continue
+        i = candidates[0]
+        if (i < 1 or hits[-1] != i or i + offset >= len(lines)
+            or lines[i - 1].strip() != _expand_guard(previous)
+            or lines[i + offset].strip() != rejecting):
+            continue
+        safe.update((filename, index) for index in hits)
     # The merged, GET-only production identity audit reports presence of a
     # legacy credential binding by *name*; this is not an egress credential use.
     # Permit exactly one fixed expression, not the entire workflow.
