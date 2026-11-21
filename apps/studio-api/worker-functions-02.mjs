@@ -6865,6 +6865,30 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
   const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()
     .sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
+  // Never render a cached crop manifest after the owner-selected master set changes.
+  // Count-only validation allowed older or foreign images to be assigned to a new request.
+  const orderedMasters = masters.slice().sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
+  // Legacy migrated requests can have no mirrored masters even when their
+  // authoritative variant package already exists. Preserve that legacy route,
+  // but never tolerate disagreement when an explicit master set is present.
+  const exactMasters = orderedMasters.length === 0 || (
+    sourceRowsAll.length === orderedMasters.length
+    && sourceRowsAll.every((source, index) => {
+      const master = orderedMasters[index];
+      return Boolean(String(master?.id || "").trim())
+        && String(source?.id || "").trim() === String(master?.id || "").trim()
+        && String(source?.google_drive_file_id || "").trim() === String(master?.google_drive_file_id || "").trim()
+        && String(source?.media_asset_record_id || "").trim() === String(master?.media_asset_record_id || "").trim()
+        && Boolean(String(master?.google_drive_file_id || "").trim())
+        && Boolean(String(master?.media_asset_record_id || "").trim());
+    })
+  );
+  if (!exactMasters) {
+    console.warn("Studio exact source blocked: manifest differs from ordered master authority", {
+      production_request: requestRecord.id, platform, output_type: outputType,
+    });
+    return null;
+  }
   const storyTeaser = String(outputType || "").trim() === "Story";
   const sourceRows = storyTeaser ? sourceRowsAll.slice(0, 1) : sourceRowsAll;
   if (!storyTeaser && sourceRows.length < expected) return null;
@@ -10872,6 +10896,25 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       continue;
     }
     const sourcePackage=item4StudioSourcePackageForOutput(requestRecord,outputRow,effective,parent);
+    if (!sourcePackage && item4AssetManifest(requestRecord).length > 0) {
+      // Exact owner media is a hard prerequisite, not permission to fall back
+      // to an unrelated library/AI selection and then mark the output reviewable.
+      const issue = "Exact owner-selected source images are not ready or do not match the current master manifest. No Platform Output was created or scheduled.";
+      blocked++;
+      await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{
+        method:"PATCH",
+        body:JSON.stringify({fields:{
+          Content_Item:[parent.id],
+          Pipeline_Family:route?.pipeline_family||null,
+          Pipeline_Route_Status:"Blocked",
+          Pipeline_Route_Notes:issue,
+          Routed_At:null,
+          Updated_At:new Date().toISOString(),
+        },typecast:false}),
+      });
+      workItems.push({production_request_output_record_id:outputRow.id,routed:false,issues:[issue]});
+      continue;
+    }
     let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
     let atomicSeedSchedule = null;
     let atomicSeedVacate = false;

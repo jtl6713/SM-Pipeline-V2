@@ -10653,6 +10653,9 @@ export async function studioContinuationLoadContext(env, po, cache) {
 export async function studioContinuationStampPackage(env, po, context) {
   const { outputRow, requestRecord, parent, effective } = context;
   const sourcePackage = item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parent);
+  if (!sourcePackage && item4AssetManifest(requestRecord).length > 0) {
+    throw new HttpError(409, "Owner-selected source media is incomplete or changed. Waiting for current authoritative crops instead of stamping fallback images.");
+  }
   const nativePhoto = studioOutputIsNativePhotoRoute(
     effective.platform,
     effective.output_type,
@@ -10982,14 +10985,31 @@ export async function studioContinuationInspectOutput(env, po, cache) {
     context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
   );
   let hasClips = Boolean(sourcePackage?.clips?.length);
-  const alreadyExact = /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
+  const matchesCurrentMasterSelection = (() => {
+    if (sourcePackage?.status !== "Ready") return false;
+    const current = item4ParseJson(sourcePackage.selected_assets_json, null);
+    const saved = item4ParseJson(f(po, "Selected_Assets_JSON"), null);
+    const currentClips = Array.isArray(current?.selected_clips) ? current.selected_clips : [];
+    const savedClips = Array.isArray(saved?.selected_clips) ? saved.selected_clips : [];
+    if (!currentClips.length || currentClips.length !== savedClips.length) return false;
+    return currentClips.every((clip, index) => {
+      const prior = savedClips[index];
+      const sourceId = String(clip?.source_asset_id || "").trim();
+      return Boolean(sourceId)
+        && sourceId === String(prior?.source_asset_id || "").trim()
+        && String(clip?.media_asset_record_id || "").trim() === String(prior?.media_asset_record_id || "").trim()
+        && String(clip?.url || clip?.src || "").trim() === String(prior?.url || prior?.src || "").trim();
+    });
+  })();
+  const alreadyExact = matchesCurrentMasterSelection
+    && /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
     && String(f(po, "Asset_Selection_Status") || "") === "Selected"
     && String(f(po, "Composition_ID") || "") === "ChicagoShiningPhotoSequence";
   const readyForRender = /ready for render/i.test(renderStatus)
     && String(f(po, "Composition_ID") || "").trim()
     && String(f(po, "Render_Clip_List_JSON") || "").trim();
 
-  if (readyForRender && hasClips && !studioOutputWrongVideoSelectorPath(po)) {
+  if (readyForRender && hasClips && matchesCurrentMasterSelection && !studioOutputWrongVideoSelectorPath(po)) {
     if (studioPhotoSequenceNeedsContainHeal(po)) {
       await studioContinuationStampPackage(env, po, context);
       return { action: "prep_render", reason: "contain_stamp_heal" };
