@@ -130,3 +130,27 @@ jobs:
           done
           echo "Ops diagnostic timed out"
           exit 4
+
+      - name: Probe 10685 photo URLs and both cover variants without changing any data
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          for url in \
+            "https://media.chicagoshining.com/publish/platform-output-unknown/cover.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/0.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/1.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/2.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/3.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/4.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/5.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/6.jpg" \
+            "https://media.chicagoshining.com/studio/previews/lettered/rec4E9TMeiRXb4M6B/7.jpg" \
+            "https://media.chicagoshining.com/publish/platform-output-10683/cover.jpg" \
+            "https://media.chicagoshining.com/publish/platform-output-10685/cover.jpg"
+          do
+            result=$(curl -sS --max-time 25 --location --output "/tmp/10685_asset_$n" --write-out "%{http_code} %{content_type} %{size_download}" "$url" || echo network_error)
+            echo "TT10685_ASSET_$n=$result"
+            if file --mime-type "/tmp/10685_asset_$n" | grep -q "image/"; then sha256sum "/tmp/10685_asset_$n" | sed "s|/tmp/10685_asset_$n|asset_$n|"; fi
+            n=$((n+1))
+          done
