@@ -20,7 +20,20 @@ from qa_ledger_backfill_preflight import load_rows, reconcile, source_inventory
 
 PROJECT_RE = re.compile(r"^[a-z0-9]{20}$")
 TABLES = ("studio_qa_runs", "studio_qa_events")
-SELECT = "run_id,legacy_record_id,legacy_source_fields,legacy_row_sha256"
+# Fetch all canonical operational fields, not just the archived provenance.
+# A target row can have intact legacy JSON but corrupted canonical QA columns.
+SELECT_BY_TABLE = {
+    "studio_qa_runs": (
+        "run_id,catalog_revision,environment,deployment,created_by,"
+        "created_at_utc,status,idempotency_key,payload_hash,"
+        "legacy_record_id,legacy_source_fields,legacy_row_sha256"
+    ),
+    "studio_qa_events": (
+        "run_id,execution_id,test_id,event_kind,actor_id,recorded_at_utc,"
+        "payload_json,idempotency_key,payload_hash,"
+        "legacy_record_id,legacy_source_fields,legacy_row_sha256"
+    ),
+}
 MAX_RECORDS = 10000
 
 
@@ -50,7 +63,7 @@ def fetch_rows(
         if limit < 1:
             raise ValueError("QA target has more rows than approved frozen source")
         query = urlencode({
-            "select": SELECT,
+            "select": SELECT_BY_TABLE[table],
             "order": "legacy_record_id.asc.nullslast",
             "limit": str(limit),
             "offset": str(offset),
