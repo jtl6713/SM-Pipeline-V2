@@ -197,4 +197,9 @@ test("Factory source always uses independent exact Supabase rework query and no 
   assert.match(worker, /review_package_ready: mediaRework \? false : reviewVisibility\.visible/);
   assert.match(client, /if \(card\?\.protected_media_rework === true\) return false;/);
   assert.match(client, /Creative repair:/);
+  assert.match(client, /if \(card\.protected_media_rework === true\) \{/);
+  assert.match(client, /Original held source image/);
+  assert.match(client, /Original media needs reconstruction/);
+  assert.match(client, /never send a video request or a stale Airtable GET/);
+
 });
