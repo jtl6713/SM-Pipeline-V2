@@ -16,7 +16,7 @@ const recent = minutes => new Date(Date.now()-minutes*60_000).toISOString();
 function fixture({
   state="accepting", ageMinutes=90, acceptingAgeMinutes=ageMinutes,
   driveFiles=[], catalog=[], runnerStatus="processing",
-  headValid=true, asyncStatus=202,
+  headValid=true, asyncStatus=202, driveReplyStatus=200, driveComplete=true,
 }={}) {
   let job={run_id:RUN,idea_id:ID,profile_id:PROFILE,scene_number:4,
     attempt:1,state,approved_at:recent(ageMinutes),scene_visual:"West 28th Street",
@@ -42,7 +42,6 @@ function fixture({
       return {records:[{id:"reca1234567890ab1"}]};
     },
     saveSelectedScene:async id=>{selected=id;},
-    googleAccessToken:async()=> "test-token",
     watermarkRequired:false,rightsVerified:true,HttpError,
   };
   env.STUDIO_MEDIA={
@@ -53,9 +52,10 @@ function fixture({
   globalThis.fetch=async (url,options={})=>{
     const u=String(url);
     if(u.includes("api.elevenlabs.io")){paid++;throw new Error("paid video call prohibited");}
-    if(u.includes("googleapis.com/drive/v3/files?")){
+    if(u.includes("/jobs/studio-asset-library/recovery-lookup?")){
       driveSearches++;
-      return {ok:true,status:200,json:async()=>({files, nextPageToken:null})};
+      return {ok:driveReplyStatus===200,status:driveReplyStatus,
+        json:async()=>({ok:true,complete:driveComplete,files, nextPageToken:null})};
     }
     if(u.endsWith("/jobs/studio-asset-library") && options.method==="POST"){
       uploads++;
@@ -164,6 +164,28 @@ test("ambiguous upload POST is never submitted again",async()=>{
     assert.equal(again.state,"recovery_upload_started");
     assert.equal(fx.stats().uploads,1);
   }finally{fx.restore();}
+});
+
+test("Runner lookup not yet deployed never uploads or generates another paid video",async()=>{
+  const fx=fixture({driveReplyStatus:404});
+  try {
+    await assert.rejects(()=>recoverOriginalStoryVideo(fx.context),e=>
+      e.status===503 && /Runner needs|Pipeline Runner needs/.test(e.message));
+    assert.equal(fx.stats().uploads,0);
+    assert.equal(fx.stats().paid,0);
+  }finally{fx.restore();}
+});
+
+test("failed or incomplete Runner Drive verification never permits an upload",async()=>{
+  for(const options of [{driveReplyStatus:401},{driveReplyStatus:503},{driveComplete:false}]){
+    const fx=fixture(options);
+    try {
+      await assert.rejects(()=>recoverOriginalStoryVideo(fx.context),e=>e.status===503);
+      assert.equal(fx.stats().uploads,0);
+      assert.equal(fx.stats().creates,0);
+      assert.equal(fx.stats().paid,0);
+    }finally{fx.restore();}
+  }
 });
 
 test("two Drive copies with same original filename block registration",async()=>{
