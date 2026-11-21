@@ -675,8 +675,8 @@ jobs:
             # proven empty-media failures can enter only as an all-or-none
             # exact additional 10-card group after separate guarded rework.
             and ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_Preflight_Repair_20261120")]|length)==82
-            and (([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|.output_id]|sort)==[]
-              or ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|.output_id]|sort)==[10546,10564,10598,10759,10766,10792,10793,10800,10802,10818])
+            and (([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|(.output_id|tonumber)]|sort)==[]
+              or ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")|(.output_id|tonumber)]|sort)==[10546,10564,10598,10759,10766,10792,10793,10800,10802,10818])
             and ([.lanes.manual[]|select(.protected_media_rework==true)]|length)==
               (82 + ([.lanes.manual[]|select(.recovery_hold_marker=="Studio_Overdue_UnsafeGallery_Hold_20261121")]|length))
             and ([.lanes.manual[]|select(.protected_media_rework==true
