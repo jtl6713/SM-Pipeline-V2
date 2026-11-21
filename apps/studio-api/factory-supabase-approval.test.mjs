@@ -186,3 +186,31 @@ test("single-profile Factory pilot cannot approve a Carousel after preflight", a
   );
   assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });
+
+test("Supabase Factory reports only genuinely reached live stages", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)]);
+  const seen = [];
+  const approved = await factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "factory_live_stages_20261120",
+    verifyImages: async readiness => readiness,
+    onStage: async phase => {
+      seen.push({ phase, writes: mock.calls.filter(call => call.method === "PATCH").length });
+    },
+  });
+  assert.match(approved.message, /Ready to Schedule/);
+  assert.deepEqual(seen.map(row => row.phase), ["validating", "approving", "verifying"]);
+  assert.deepEqual(seen.map(row => row.writes), [0, 0, 1]);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 1);
+});
+
+test("Supabase Factory never reports Approving or Verifying when creative validation fails", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)]);
+  const stages = [];
+  await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "factory_live_no_unsafe_write_20261120",
+    verifyImages: async readiness => ({ ...readiness, readiness: "BLOCKED" }),
+    onStage: async phase => stages.push(phase),
+  }), /public review media could not be verified/);
+  assert.deepEqual(stages, ["validating"]);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});

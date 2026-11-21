@@ -20,3 +20,29 @@ test("Factory active approval progress refresh is bounded, transparent, and uses
   assert.doesNotMatch(factory, /"Live · batches needing action"/);
   assert.match(html, /activity=global-parent-child-v6-freshness/);
 });
+
+test("Factory active approvals show actual stages, output identity, elapsed and retry health", async () => {
+  const factory = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
+  const html = await readFile(path.join(here, "index.html"), "utf8");
+  const css = await readFile(path.join(here, "assets/factory-live-approval-progress.css"), "utf8");
+  for (const name of [
+    "Queued", "Validating", "Approving", "Verifying", "Completed", "Failed",
+    "Last update", "Elapsed", "Recovery attempt", "Waiting to retry",
+    "No recent progress; recovery may be required",
+  ]) assert.ok(factory.includes(name), "missing live stage or health: " + name);
+  assert.match(factory, /function factoryLiveCurrent\(/);
+  assert.match(factory, /function factoryLiveSummaryHtml\(/);
+  assert.match(factory, /factoryLiveItemHtml\(item\)/);
+  assert.match(factory, /factoryLiveSummaryHtml\(items\.filter/);
+  assert.match(factory, /hasPendingWork \? 3000 : 15000/);
+  assert.match(factory, /function factoryBatchMergeExactActivity\(/);
+  assert.match(factory, /request_id: row\.request_id/);
+  assert.match(factory, /lastBatchFullFetchMs/);
+  assert.match(factory, /< 18000 && !force/);
+  assert.match(factory, /\.slice\(0, 4\)/);
+  assert.match(factory, /Exact Factory progress is unavailable; retaining prior snapshot/);
+  assert.match(factory, /!Number\(totals\.active\) && !Number\(totals\.pending\)/);
+  assert.match(html, /factory-live-approval-progress\.css/);
+  assert.match(html, /live=five-stages-20261120/);
+  assert.match(css, /@media \(max-width: 600px\)/);
+});

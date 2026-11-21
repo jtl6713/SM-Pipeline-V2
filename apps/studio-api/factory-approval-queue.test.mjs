@@ -8,6 +8,7 @@ import {
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
   factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
+  factoryBatchItemProgress,
   factoryBatchReconcileSupabaseApprovalReceipts,
 } from "./factory-approval-queue.mjs";
 
@@ -762,4 +763,66 @@ test("Supabase receipt repair ignores fresh R2 jobs and never changes terminal f
   });
   assert.equal(read, 0);
   assert.equal(failed.items[0].status, "failed");
+});
+
+test("Factory live stages are durable during processing and terminally reconciled", async () => {
+  const bucket = new FakeR2();
+  const id = "factory_live_stages_20261120";
+  const ids = records.slice(0, 2);
+  await factoryBatchEnqueue(bucket, { profileId, requestId: id, records: ids });
+  const snapshots = [];
+  const result = await factoryBatchDrain(bucket, {
+    profileId, requestId: id,
+    approve: async (recordId, job, checkpoint) => {
+      for (const phase of ["validating", "approving", "verifying"]) {
+        await checkpoint(phase);
+        const live = await factoryBatchRead(bucket, profileId, id);
+        const current = live.items.find(row => row.id === recordId);
+        assert.equal(current.status, "processing");
+        assert.equal(factoryBatchItemProgress(current).phase, phase);
+        assert.equal(typeof current.stage_started_at, "string");
+        assert.equal(typeof current.last_progress_at, "string");
+        assert.equal(current.total_attempts, 1);
+        snapshots.push(phase);
+      }
+      return { id: recordId };
+    },
+  });
+  assert.equal(result.processed, 2);
+  assert.deepEqual(snapshots, [
+    "validating", "approving", "verifying", "validating", "approving", "verifying",
+  ]);
+  assert.equal(result.status, undefined);
+  const final = await factoryBatchRead(bucket, profileId, id);
+  assert.equal(final.status, "completed");
+  for (const item of final.items) {
+    assert.equal(factoryBatchItemProgress(item).phase, "completed");
+    assert.equal(item.status, "approved");
+    assert.ok(Date.parse(item.completed_at));
+    assert.ok(Date.parse(item.last_progress_at));
+  }
+});
+
+test("Factory live stage never invents progress for legacy items, failed or waiting retries", async () => {
+  const now = Date.now();
+  assert.equal(factoryBatchItemProgress({status:"processing"}).phase, "processing");
+  assert.equal(factoryBatchItemProgress({status:"pending",next_attempt_ms:now+30000}).phase, "queued");
+  assert.equal(factoryBatchItemProgress({status:"failed"}).phase, "failed");
+  assert.equal(factoryBatchItemProgress({status:"already_satisfied"}).phase, "completed");
+  const bucket = new FakeR2();
+  const requestId = "factory_live_stage_failed_20261120";
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId, records:[records[0]],
+  });
+  await factoryBatchDrain(bucket, {
+    profileId, requestId,
+    approve: async (recordId, job, checkpoint) => {
+      await checkpoint("validating");
+      throw Error("Invalid permission - permanent failure");
+    },
+  });
+  const final = await factoryBatchRead(bucket, profileId, requestId);
+  assert.equal(factoryBatchItemProgress(final.items[0]).phase, "failed");
+  assert.ok(Date.parse(final.items[0].last_progress_at));
+  assert.equal(final.items[0].status, "failed");
 });

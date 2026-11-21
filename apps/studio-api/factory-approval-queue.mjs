@@ -58,6 +58,34 @@ export function factoryBatchNeedsAttention(job) {
     (job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item)) ||
     !["completed", "failed"].includes(job.status);
 }
+/** Public, bounded progress projection shared by single and global R2 batches.
+ * Unknown legacy checkpoints remain "Processing"; never invent an active phase. */
+export function factoryBatchItemProgress(item) {
+  const status = String(item?.status || "pending");
+  const phase = status === "failed" ? "failed"
+    : ["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(status) ? "completed"
+    : status === "pending" ? "queued"
+    : ["validating","approving","verifying"].includes(item?.processing_stage)
+      ? item.processing_stage : "processing";
+  const events = Array.isArray(item?.timeline) ? item.timeline : [];
+  const attemptStarted = item?.attempt_started_at ||
+    [...events].reverse().find(row => row.state === "processing")?.at || null;
+  const lastProgress = item?.last_progress_at || events.at(-1)?.at || null;
+  const completedAt = item?.completed_at ||
+    (phase === "completed" || phase === "failed" ? events.at(-1)?.at || null : null);
+  return {
+    phase,
+    attempt_started_at: attemptStarted,
+    stage_started_at: item?.stage_started_at || attemptStarted,
+    last_progress_at: lastProgress,
+    completed_at: completedAt,
+    next_attempt_ms: Number(item?.next_attempt_ms || 0),
+    total_attempts: Number(item?.total_attempts || item?.attempts || 0),
+    auto_retry_count: Number(item?.auto_retry_count || 0),
+    manual_retry_count: Number(item?.manual_retry_count || 0),
+  };
+}
+
 export function factoryBatchSummary(job) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
   const counts = factoryBatchCounts(job);
@@ -77,6 +105,7 @@ export function factoryBatchSummary(job) {
       failure_history: item.failure_history || [],
       removed_original_error: item.removed_original_error || null,
       previous_failure_error: item.previous_failure_error || null,
+      ...factoryBatchItemProgress(item),
       timing: factoryApprovalItemTiming(item),
     })),
   };
@@ -371,7 +400,9 @@ export async function factoryBatchDrain(bucket, options) {
       job = await cas(bucket, key, value => ({
         ...value, status: "running", updated_at: stamp,
         items: value.items.map(row => row.id === item.id
-          ? { ...row, status: "processing", attempts: (row.attempts || 0) + 1,
+          ? { ...row, status: "processing", processing_stage: "processing",
+            attempt_started_at: stamp, stage_started_at: stamp, last_progress_at: stamp,
+            completed_at: null, attempts: (row.attempts || 0) + 1,
             total_attempts: (row.total_attempts || row.attempts || 0) + 1, error: null,
             timeline: [...(row.timeline || []), {
               state: "processing", at: stamp,
@@ -383,9 +414,27 @@ export async function factoryBatchDrain(bucket, options) {
       processed++;
       const attempt = (item.total_attempts || item.attempts || 0) + 1;
       const events = [];
-      const checkpoint = state => {
+      const checkpoint = async state => {
         if (typeof state !== "string" || !/^[a-z_]{3,64}$/.test(state) || events.length >= 64) return;
-        events.push({ state, at: new Date(now()).toISOString(), attempt });
+        const at = new Date(now()).toISOString();
+        events.push({ state, at, attempt });
+        // Only actual observed phases are published live. Persist through
+        // bounded R2 CAS so a slow provider/readback appears during the await.
+        // Diagnostics must never become a prerequisite for approval writes.
+        if (!["validating", "approving", "verifying"].includes(state)) return;
+        try {
+          await cas(bucket, key, value => {
+            const current = value.items.find(row => row.id === item.id);
+            if (current?.status !== "processing" || Number(current.total_attempts) !== attempt) return null;
+            return { ...value, updated_at: at, items: value.items.map(row => row.id === item.id
+              ? { ...row, processing_stage: state, stage_started_at: at, last_progress_at: at,
+                  timeline: [...(row.timeline || []), { state, at, attempt }].slice(-180) }
+              : row) };
+          });
+        } catch (error) {
+          console.warn("Factory live phase checkpoint unavailable", requestId,
+            String(error?.message || error).slice(0, 100));
+        }
       };
       let outcome;
       try {
@@ -412,6 +461,10 @@ export async function factoryBatchDrain(bucket, options) {
           ...value, updated_at: completedAt,
           items: value.items.map(row => row.id === item.id ? {
             ...row, ...outcome,
+            processing_stage: outcome.status === "pending" ? "queued" :
+              outcome.status === "failed" ? "failed" : "completed",
+            stage_started_at: completedAt, last_progress_at: completedAt,
+            completed_at: outcome.status === "pending" ? null : completedAt,
             timeline: [...(row.timeline || []), ...events, {
               state: outcome.status, at: completedAt, attempt,
             }].slice(-180),

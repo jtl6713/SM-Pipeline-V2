@@ -55,6 +55,7 @@
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
     lastBatchFetchMs: 0,
+    lastBatchFullFetchMs: 0,
     retryBatchNotice: null,
     lastBatchSuccessMs: 0,
     batchActivityError: "",
@@ -885,6 +886,71 @@
     }
   }
 
+  function factoryLiveElapsed(since, now = Date.now()) {
+    const start = Date.parse(String(since || ""));
+    if (!Number.isFinite(start)) return "unknown";
+    const seconds = Math.floor(Math.max(0, now - start) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+  }
+
+  function factoryLivePhaseLabel(item, now = Date.now()) {
+    const phase = String(item?.phase || (
+      item?.status === "pending" ? "queued" :
+      item?.status === "failed" ? "failed" :
+      ["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(item?.status) ? "completed" : "processing"
+    ));
+    if (phase === "queued" && Number(item?.next_attempt_ms || 0) > now) return "Waiting to retry";
+    if (item?.status === "skipped_removed") return "Completed (removed)";
+    if (item?.status === "already_satisfied") return "Completed (already approved)";
+    if (item?.status === "superseded_duplicate") return "Completed (other batch owns approval)";
+    return ({
+      queued: "Queued", validating: "Validating", approving: "Approving",
+      verifying: "Verifying", completed: "Completed", failed: "Failed",
+      processing: "Processing",
+    })[phase] || "Processing";
+  }
+
+  function factoryLiveCurrent(items) {
+    const candidates = Array.isArray(items) ? items : [];
+    const running = candidates.find(item => item.status === "processing");
+    if (running) return { item: running, isCurrent: true };
+    const pending = candidates.find(item => item.status === "pending");
+    return pending ? { item: pending, isCurrent: false } : null;
+  }
+
+  function factoryLiveItemHtml(item, compact = false, now = Date.now()) {
+    const phase = factoryLivePhaseLabel(item, now);
+    const running = item?.status === "processing";
+    const nextRetry = Number(item?.next_attempt_ms || 0);
+    const last = item?.last_progress_at || null;
+    const lastMs = Date.parse(String(last || ""));
+    const hasLast = Number.isFinite(lastMs);
+    const latest = hasLast ? `Last update ${factoryLiveElapsed(last, now)} ago` : "Update time unavailable";
+    const elapsed = running && item?.attempt_started_at
+      ? ` · Elapsed ${factoryLiveElapsed(item.attempt_started_at, now)}` : "";
+    const retry = item?.status === "pending" && nextRetry > now
+      ? ` · Retry in ${factoryLiveElapsed(new Date(now - (nextRetry - now)).toISOString(), now)}` : "";
+    const attempts = Number(item?.total_attempts || 0);
+    const recovery = attempts > 1 && ["processing", "pending"].includes(item?.status)
+      ? ` · Recovery attempt ${attempts}` : "";
+    const slow = running && hasLast && now - lastMs > 60000
+      ? " · No recent progress; recovery may be required" : "";
+    return `<span class="factory-live-phase">${esc(phase)}</span>` +
+      `<small class="factory-live-meta">${esc(latest + elapsed + retry + recovery + slow)}</small>`;
+  }
+
+  function factoryLiveSummaryHtml(items, now = Date.now()) {
+    const selected = factoryLiveCurrent(items);
+    if (!selected) return '<span class="factory-live-idle">No output currently processing</span>';
+    const { item, isCurrent } = selected;
+    const title = item?.output_id ? `Output #${item.output_id}` : "Selected output";
+    return `<div class="factory-batch-live-summary">` +
+      `<strong>${isCurrent ? "Current" : "Next"}: ${esc(title)}</strong>` +
+      factoryLiveItemHtml(item, true, now) + `</div>`;
+  }
+
   function renderFactoryBatchActivity(batch) {
     if (batch?.view === "completed") state.completedBatch = batch;
     else state.batch = batch || null;
@@ -953,10 +1019,12 @@
       overall.className = "factory-batch-overall-progress";
       summary.insertAdjacentElement("afterend", overall);
     }
-    overall.hidden = !batches.length || (!state.completedOpen && !Number(totals.active));
+    overall.hidden = !batches.length || (!state.completedOpen &&
+      !Number(totals.active) && !Number(totals.pending));
     overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : "Overall active approval progress"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
       <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
-      <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>`;
+      <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>
+      ${factoryLiveSummaryHtml(batches.flatMap(row => row.items || []))}`;
     if (updated && state.completedOpen) updated.textContent =
       state.completedLoading ? "Loading completed batches…" : "Loaded only on request";
     else updateFactoryBatchFreshness();
@@ -990,6 +1058,7 @@
           <span class="factory-batch-recent-result">
             <strong>${esc(stateLabel)}</strong><span>${Number(row.failed_count)||0} failed</span>
           </span>
+          ${factoryLiveSummaryHtml(row.items || [])}
           <span class="factory-batch-progress-caption">${completed} of ${Number(row.total)||0} processed · ${percent}%</span>
           <progress class="factory-batch-row-progress" max="${Number(row.total)||1}" value="${Math.min(Math.max(0,completed),Number(row.total)||1)}" aria-label="${esc(label)} processing progress">${percent}%</progress>
         </button>`;
@@ -1017,6 +1086,7 @@
         <span>${esc(["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" : child.failed_count ? "Needs attention" : "Completed")}</span>
         <progress max="${Number(child.total)||1}" value="${done}">${percent}%</progress>
         <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
+        ${factoryLiveSummaryHtml(items.filter(item => item.profile_id === child.profile_id))}
       </section>`;
     }).join("")}</div>` : "";
     const retryNotice = state.retryBatchNotice?.job_id === latest?.job_id ? state.retryBatchNotice : null;
@@ -1035,7 +1105,7 @@
       ${childrenHtml}
       <ul class="factory-batch-item-list">${items.map(item =>
         `<li><strong>${esc(item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Output")}</strong>
-        <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.profile_id ? factoryProfileLabel(item.profile_id)+" · " : "")}${esc(item.status || "pending")}</span>
+        <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.profile_id ? factoryProfileLabel(item.profile_id)+" · " : "")}${factoryLiveItemHtml(item)}</span>
         ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
       <details class="factory-batch-technical"><summary>Technical reference</summary>
       <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
@@ -1439,10 +1509,33 @@
     finally { factoryPolicyRequest = null; }
   }
 
+  function factoryBatchMergeExactActivity(previous, refreshed) {
+    const byId = new Map(refreshed.map(row => [row.request_id, row]));
+    const batches = (previous?.batches || []).map(row => byId.get(row.request_id) || row);
+    const sum = field => batches.reduce((total, row) => total + Math.max(0, Number(row[field]) || 0), 0);
+    const totals = {
+      ...previous.totals,
+      batches: batches.length,
+      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status) ||
+        Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length,
+      completed: batches.filter(row => row.status === "completed" && !row.failed_count).length,
+      failed_batches: batches.filter(row => Number(row.failed_count || 0) > 0).length,
+      approved: sum("approved_count"), pending: sum("pending_count"), failed: sum("failed_count"),
+      findings: batches.reduce((total, row) => total + (row.quality_signals || []).length, 0),
+    };
+    return {
+      ...previous, ...(batches[0] || {}), batches, totals,
+      quality_signals: batches.flatMap(row => row.quality_signals || []),
+    };
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
-    const minInterval = Number(state.batch?.totals?.active || 0) ? 3000 : 15000;
+    const hasPendingWork = Number(state.batch?.totals?.pending || 0) > 0 ||
+      (state.batch?.batches || []).some(row => Number(row.pending_count || 0) > 0 ||
+        ["queued", "running", "enqueuing"].includes(row.status));
+    const minInterval = hasPendingWork ? 3000 : 15000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
     const params = new URLSearchParams({ scope: "all" });
     params.set("view", "active");
@@ -1450,11 +1543,41 @@
     state.batchActivityLoading = true;
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
-      // Activity is time-sensitive: fail promptly rather than locking out several
-      // scheduled polls behind the default 35-second Factory request timeout.
-      const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
-        cache: "no-store", timeoutMs: 12000,
-      });
+      // Frequent full-history scans can exceed the 12-second poll budget.
+      // Once discovered, re-read at most four exact global groups from R2
+      // every 3 seconds; run the complete active discovery at least every 18s.
+      // No POST, approval, scheduling, publishing, or claim mutation occurs.
+      const fastGroups = state.batch?.filter_profile_id === (factoryProfileId() || null)
+        ? (state.batch?.batches || []).filter(row => row.group && row.request_id &&
+            (Number(row.pending_count || 0) > 0 || ["queued","running","enqueuing"].includes(row.status)))
+          .slice(0, 4)
+        : [];
+      const useExact = fastGroups.length > 0 && state.lastBatchFullFetchMs &&
+        now - state.lastBatchFullFetchMs < 18000 && !force;
+      let fetched;
+      if (useExact) {
+        const updates = await Promise.all(fastGroups.map(async row => {
+          const params = new URLSearchParams({
+            scope: "all", request_id: row.request_id, fresh: String(now),
+          });
+          const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, {
+            cache: "no-store", timeoutMs: 12000,
+          });
+          if (value?.ok !== true || value.batches?.length !== 1 ||
+              value.batches[0]?.request_id !== row.request_id) {
+            throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
+          }
+          return value.batches[0];
+        }));
+        fetched = factoryBatchMergeExactActivity(state.batch, updates);
+      } else {
+        fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
+          cache: "no-store", timeoutMs: 12000,
+        });
+        if (fetched?.ok !== false && Array.isArray(fetched?.batches)) {
+          state.lastBatchFullFetchMs = Date.now();
+        }
+      }
       if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
         throw new Error("Approval activity response was incomplete");
       }
