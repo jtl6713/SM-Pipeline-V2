@@ -88,3 +88,11 @@ The canonical Studio API deployment is now gated on `SUPABASE_SERVICE_ROLE_KEY` 
 - Removed the historical encrypted Airtable PAT envelope files, marker and verification workflow from this PR branch. Git history can retain prior encrypted blobs. No live token was revoked; after production validation and observed zero Airtable API egress, revoke it at the provider and remove Cloudflare, runner and GitHub secrets.
 - CI and targeted tests now prevent restoring the tracked credential envelope and check that six Airtable IDs are not required by the production deployment core.
 - The branch is **preparatory**, not proof of any live production migration, token revocation or zero-egress quiet window. Leave the PR draft and unmerged until the latest checks and production gates pass.
+
+### Additional encrypted-PAT workflow audit (continuation)
+The static credential-restoration guard revealed **14 distinct historical GitHub Actions workflows** that still decrypted the encrypted Airtable PAT, even though the November audit had retired the direct-URL callers. All 14 workflow entrypoints are retired from this PR branch:
+- Historical AP0 proof and Item 9/11/12/14/16/19/21 demonstration workflows: their matching direct-Airtable proof scripts were already fail-closed; new evidence must use Supabase-only tests or Admin QA Test Center.
+- `diagnose-post-insights-profiles.yml`: its Python executable was already retired; `post-insights-public-health.yml` provides credential-free public service health, and `apps/studio-api/post-insights-supabase-regression.test.mjs` tests authoritative Post Insights reads. These do not claim full private four-profile production parity.
+- `qa-ap1c-7856-7043-stage-restart.yml` and `repair-make-admin-module19-v2.yml`: one-off production/Make repair entrypoints must not be executed with a reconstructed Airtable token. No unattended replacement is enabled; any future required operation needs a separately reviewed Supabase-native, idempotent, non-publishing implementation.
+
+The CI guard must scan for executable credential-envelope references before claiming zero dormant PAT-decryption workflows. The repository cleanup is not token revocation, Git history erasure, or live zero-egress certification.

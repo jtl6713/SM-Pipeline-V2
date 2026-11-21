@@ -20,6 +20,20 @@ const retired = [
   ".github/workflows/enable-studio-write-sor.yml",
   ".github/workflows/apply-repair-lease-table-id.yml",
   "repair/tools/patch_repair_lease_table_id.py",
+  ".github/workflows/diagnose-post-insights-profiles.yml",
+  ".github/workflows/prove-ap0-failure-preservation.yml",
+  ".github/workflows/prove-ap0-revision-restage-v2.yml",
+  ".github/workflows/prove-ap0-revision-restage-v3.yml",
+  ".github/workflows/prove-ap0-revision-restage-v4.yml",
+  ".github/workflows/prove-item11-youtube-oauth.yml",
+  ".github/workflows/prove-item12-r2-lifecycle.yml",
+  ".github/workflows/prove-item14-instagram-carousel.yml",
+  ".github/workflows/prove-item16-tiktok-draft.yml",
+  ".github/workflows/prove-item19-webhook-map.yml",
+  ".github/workflows/prove-item21-change-control.yml",
+  ".github/workflows/prove-item9-native-covers.yml",
+  ".github/workflows/qa-ap1c-7856-7043-stage-restart.yml",
+  ".github/workflows/repair-make-admin-module19-v2.yml",
 ];
 
 test("legacy Airtable-era deployment and config entrypoints remain retired", () => {
@@ -47,4 +61,15 @@ test("Factory HTTP check is hermetic and does not claim deployed staging accepta
   assert.match(workflow, /DEPLOYED_STAGING_HTTP=NOT_TESTED/);
   assert.match(workflow, /LIVE_ZERO_AIRTABLE_EGRESS=NOT_VERIFIED/);
   assert.doesNotMatch(workflow, /STAGING_AIRTABLE_API_TOKEN/);
+});
+
+test("post-insights diagnostics retain a safe Supabase/public-health successor", () => {
+  const health = readFileSync(
+    new URL("../../.github/workflows/post-insights-public-health.yml", import.meta.url), "utf8");
+  const regression = readFileSync(
+    new URL("./post-insights-supabase-regression.test.mjs", import.meta.url), "utf8");
+  assert.match(health, /scripts\/post-insights-public-health\.py/);
+  assert.match(health, /workflow_dispatch/);
+  assert.doesNotMatch(health, /AIRTABLE_PAT|credential-envelope|api\.airtable\.com/);
+  assert.match(regression, /Supabase/);
 });
