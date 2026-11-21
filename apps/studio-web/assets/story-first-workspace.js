@@ -583,6 +583,11 @@
       accepted: "Video accepted", declined: "Video declined",
       failed: "Generation failed", accepting: "Registration not confirmed — needs recovery",
       submission_uncertain: "Submission uncertain — administrator review required",
+      recovering: "Checking original paid video",
+      recovery_upload_started: "Original Drive ingest receipt uncertain",
+      recovery_polling: "Transferring original clip to Drive",
+      recovery_registering: "Verifying original Asset Manager registration",
+      recovery_needs_review: "Original video needs registration review",
     };
     return labels[job?.state || "none"] || "Video status: " + String(job?.state || "unknown");
   }
@@ -595,11 +600,16 @@
       pending: "Queued at ElevenLabs · awaiting generation",
       generating: "Generating video at ElevenLabs",
       accepting: "Registration has not completed — preserve original video",
+      recovering: "Checking exact existing video and registration",
+      recovery_upload_started: "Original Drive request submitted — checking receipt",
+      recovery_polling: "Original video ingest submitted once",
+      recovery_registering: "Original file found — confirming registration",
+      recovery_needs_review: "Registration requires evidence review",
       awaiting_review: "Complete · your video is ready to review",
       registered: "Registered · finalize your media selection",
     }[job?.state];
     if (!stage) return;
-    const active = ["submitting", "pending", "generating"].includes(job.state);
+    const active = ["submitting", "pending", "generating", "recovery_polling"].includes(job.state);
     const progress = node("div","story-first-video-progress" + (active ? " is-active" : " is-complete"));
     progress.setAttribute("role","status");
     progress.setAttribute("aria-live","polite");
@@ -612,9 +622,10 @@
         (["pending", "generating"].includes(job.state)
           ? "Checking this existing job automatically about every 15 seconds. No repeat generation or charge."
           : "Acceptance registration is not automatically retried. Refresh Video Status; if it remains here, an administrator must reconcile the original clip. Do not regenerate.")));
-    } else if (job.state === "accepting") {
+    } else if (["accepting", "recovering", "recovery_upload_started",
+      "recovery_registering", "recovery_needs_review"].includes(job.state)) {
       progress.appendChild(node("span","story-first-video-progress-note",
-        "This is not an active generation or automatic registration poll. Refresh reads the stored status only; preserve this video for administrator recovery without another ElevenLabs charge."));
+        "Use Recover Existing Video below to verify and resume the original clip. This never requests a second ElevenLabs generation."));
     } else if (job.state === "awaiting_review") {
       progress.appendChild(node("span","story-first-video-progress-note",
         "Generation finished. Play the preview and Accept or Decline; nothing publishes automatically."));
@@ -640,6 +651,14 @@
           // A status lookup failure must not retry paid generation.
           report("Scene " + (index + 1) + " video status unavailable: " + error.message, true);
         });
+      }, 15000);
+    } else if (["recovery_polling", "recovery_registering"].includes(result.state)
+      && current.videoRecoveryConsent?.[videoSceneIdentity(index)]?.run_id === result.run_id) {
+      // The operator approved this exact original run. Keep checking its one
+      // durable runner job while this page remains open; never retry its POST.
+      current.videoTimers[index] = setTimeout(() => {
+        recoverExistingSceneVideo(index, true).catch(error =>
+          report("Scene " + (index + 1) + " existing-video recovery: " + error.message, true));
       }, 15000);
     } else if (!auto) {
       report("Scene " + (index + 1) + ": " + videoJobLabel(result));
@@ -955,6 +974,69 @@
       catch (statusError) { console.warn("Could not refresh original video job after accept failure", statusError); }
       throw error;
     } finally { current.busy = false; }
+  }
+  async function recoverExistingSceneVideo(index, auto = false) {
+    if (current.busy || current.videoRequestBusy) return;
+    const video = current.videoJobs[index], scene = current.story?.scenes?.[index];
+    if (!video?.run_id || !video.recoverable || !scene)
+      throw new Error("Refresh Video Status to locate the original paid clip first.");
+    const profile = assertProfile();
+    const identity = videoSceneIdentity(index);
+    current.videoRecoveryConsent ||= {};
+    const prior = current.videoRecoveryConsent[identity];
+    let mediaOverride = prior?.run_id === video.run_id && prior.media_override === true;
+    let audioAcknowledged = prior?.run_id === video.run_id && prior.audio_acknowledged === true;
+    if (auto) {
+      // Never auto-submit an upload unless a human accepted this exact run in
+      // the current session. The server also enforces its durable no-retry CAS.
+      if (prior?.run_id !== video.run_id) return;
+    } else {
+      if (scene.media === "still") {
+        mediaOverride = confirm("This scene requests a STILL. Recover the previously accepted VIDEO clip instead?");
+        if (!mediaOverride) return;
+      } else if (!confirm("Recover and select the EXISTING paid ElevenLabs clip? Studio checks R2, Drive and Asset Manager before any transfer. No second ElevenLabs generation or charge.")) return;
+      if (video.generate_audio) {
+        audioAcknowledged = confirm("This clip contains generated audio. Confirm you will review its soundtrack against narration and music.");
+        if (!audioAcknowledged) return;
+      }
+      current.videoRecoveryConsent[identity] = {
+        run_id:video.run_id, media_override:mediaOverride, audio_acknowledged:audioAcknowledged,
+      };
+    }
+    const originalIdea = current.record.id;
+    current.busy = true;
+    report("Scene " + (index + 1) + ": reconciling the original MP4 and Drive registration. No new ElevenLabs request.");
+    try {
+      const result = await call(sceneUrl(index, "video/recover") + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify({
+          content_profile_id:profile,
+          expected_run_id:video.run_id,
+          media_override:mediaOverride,
+          audio_mix_acknowledged:audioAcknowledged,
+        }),
+        timeoutMs: 45000,
+      });
+      if (current.record?.id !== originalIdea) return;
+      if (result.paid_generation_submitted !== false)
+        throw new Error("Recovery did not confirm the no-generation guarantee. Refresh status.");
+      if (result.state === "accepted") {
+        delete current.videoRecoveryConsent?.[identity];
+        await reloadIdea();
+        await checkSceneVideo(index, true);
+        report("Scene " + (index + 1) + ": Original video recovered and selected in Asset Manager. No new ElevenLabs charge.");
+      } else {
+        await checkSceneVideo(index, true);
+        report(result.message || ("Scene " + (index + 1) + ": " + videoJobLabel(result)));
+      }
+    } catch (error) {
+      try { await checkSceneVideo(index, true); } catch {}
+      throw error;
+    } finally {
+      current.busy = false;
+      // Status refresh re-renders while the request lock is held. Unlock the
+      // recovery action before leaving so a later manual retry stays usable.
+      render();
+    }
   }
   function keyTerms(value) {
     return [...new Set(String(value || "").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/)
@@ -1425,9 +1507,20 @@
           }
           // Render progress NEXT TO the scene's status control, not in the
           // distant page-level notice. It follows every read-only poll state.
-          if (videoJob.state === "accepting") {
+          if (videoJob.recoverable) {
+            if (videoJob.preview_url) {
+              const original = node("video", "story-first-generated-preview");
+              original.src = root + videoJob.preview_url;
+              original.controls = true; original.playsInline = true;
+              original.preload = "metadata";
+              original.setAttribute("aria-label", "Original already-paid video clip");
+              actions.appendChild(original);
+            }
             actions.appendChild(node("p", "form-message",
-              "The original generated video is preserved, but its Drive/Asset Manager registration may be incomplete. Refresh Video Status. If this persists, an administrator must reconcile this job before retrying acceptance. Do not generate a second video."));
+              "The original paid video remains in Studio. Recover Existing Video checks for its exact Drive file and Asset Manager record before resuming registration. No new ElevenLabs charge."));
+            const recovery = button("Recover Existing Video", "primary-button", () =>
+              recoverExistingSceneVideo(index).catch(e => report(e.message, true)), actions);
+            recovery.disabled = current.busy || current.videoRequestBusy || !videoJob.run_id;
           } else if (videoJob.state === "accepted") {
             actions.appendChild(node("p", "form-message",
               "The video job says accepted, but the scene has not confirmed its selection. Refresh the saved storyboard and reconcile the existing asset; do not regenerate."));
