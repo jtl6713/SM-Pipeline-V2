@@ -14551,7 +14551,7 @@ export async function studioProfileCreativeGuidance(request, env, url, authoriza
   try { version = String(JSON.parse(raw)?.revision || "0"); } catch { /* old/missing setting */ }
   const previous = parseCreativeGuidance(raw);
   if (request.method === "GET") {
-    const resolved = resolveCreativeGuidance({ saved: previous, profile: profile.fields || {} });
+    const resolved = resolveCreativeGuidance({ saved: previous, profile: profile.fields || {}, savedRowExists: Boolean(stored?.id) });
     const globalPrompt = parseOwnerGenerationGuidance(f(ownerStored, "Setting_Value"));
     const profileWide = resolved.creative.shared_direction;
     return respond(request, env, {
