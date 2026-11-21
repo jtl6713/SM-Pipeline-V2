@@ -21,14 +21,14 @@ function Supa([string]$path) {
   return Invoke-RestMethod ($su+$path) -Headers $headers -Method Get -TimeoutSec 45
 }
 $utc=[DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
-$cols='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,scheduled_post_date,published_at,platform_post_url,output_title,output_caption,final_file_url,studio_preview_url,do_not_publish,auto_publish_enabled,publish_retry_eligible,error_messages'
+$cols='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,scheduled_post_date,published_at,platform_post_url,test_run_id,output_title,output_caption,final_file_url,studio_preview_url,do_not_publish,auto_publish_enabled,publish_retry_eligible,error_messages'
 $source=@(Supa ('/rest/v1/platform_outputs?select='+$cols+'&review_status=eq.Approved&output_status=eq.Approved%20for%20Publishing&scheduled_post_date=lt.'+$utc+'&published_at=is.null&limit=800'))
 if($source.Count -eq 1 -and $source[0] -is [array]){$source=@($source[0])}
 if($source.Count -ge 800){throw 'overdue_cohort_pagination_incomplete'}
 $targets=@($source|Where-Object {
   $_.platform -in @('YouTube','TikTok') -and
   -not [string]$_.published_at -and -not [string]$_.platform_post_url -and
-  -not [string]$_.error_messages.Test_Run_ID
+  -not [string]$_.test_run_id
 })
 $targetNumbers=@($targets|ForEach-Object{[int]$_.output_number}|Sort-Object -Unique)
 if($targets.Count -ne 21 -or $targetNumbers.Count -ne 21){throw 'cohort_changed_requires_new_admission'}
