@@ -64,7 +64,7 @@ try {
     $x=$s.payload
     if([string]$x.source -ne 'pipeline' -or [string]$x.Active -ne 'True'){continue}
     $k=[string]$x.Setting_Name
-    if($k -match '^(NYC_)?(META_GRAPH_API_VERSION|FACEBOOK_GRAPH_API_VERSION|FACEBOOK_PAGE_ID|FACEBOOK_PAGE_ACCESS_TOKEN|INSTAGRAM_BUSINESS_ACCOUNT_ID|META_GRAPH_API_ACCESS_TOKEN|TIKTOK_HANDLE|TIKTOK_WORKER_BASE_URL|YOUTUBE_CHANNEL_ID|YOUTUBE_UPLOAD_SERVICE_URL)$'){
+    if($k -match '^(NYC_)?(META_GRAPH_API_VERSION|FACEBOOK_GRAPH_API_VERSION|FACEBOOK_PAGE_ID|FACEBOOK_PAGE_ACCESS_TOKEN|INSTAGRAM_BUSINESS_ACCOUNT_ID|META_GRAPH_API_ACCESS_TOKEN|TIKTOK_HANDLE|TIKTOK_WORKER_BASE_URL|YOUTUBE_CHANNEL_ID|YOUTUBE_UPLOAD_SERVICE_URL|YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET)$'){
       if($v.ContainsKey($k)){throw 'duplicated_active_provider_setting'}
       $v[$k]=[string]$x.Setting_Value
     }
@@ -99,7 +99,7 @@ try {
     $identity=Graph ('https://graph.facebook.com/'+$vers+'/'+$page+'?fields=id') $ft
     if($identity.ok -and [string]$identity.data.id -eq $page){
       $list=Scan ('https://graph.facebook.com/'+$vers+'/'+$page+'/scheduled_posts?fields=id,scheduled_publish_time,message,created_time&limit=100') $ft 6
-      $match=@($list.rows|Where-Object {([string]$_.message) -match '(Then and Now|Past and present collide|BrooklynBridge)'})
+      $match=@($list.rows|Where-Object {([string]$_.message) -match '(?i)Past and present collide in NYC|New York City: Then and Now'})
       $r.facebook=@{account_verified=$true;scheduled_posts_pages=$list.pages;scheduled_posts_scan_complete=$list.ok;scanned=$list.total;matching_scheduled_count=$match.Count;reason=$list.reason;remote_schedule_clear_for_story_or_reel=$false}
     }else{$r.facebook=@{account_verified=$false;reason='page_identity_unavailable'}}
   }else{$r.facebook=@{account_verified=$false;reason='page_scope_unavailable'}}
@@ -108,8 +108,8 @@ try {
     $identity=Graph ('https://graph.facebook.com/'+$vers+'/'+$ig+'?fields=id,username') $it
     if($identity.ok -and [string]$identity.data.id -eq $ig){
       $list=Scan ('https://graph.facebook.com/'+$vers+'/'+$ig+'/media?fields=id,caption,media_type,timestamp,permalink&limit=100') $it 3
-      $matches=@($list.rows|Where-Object {([string]$_.caption) -match '(Then and Now|Past and present collide|BrooklynBridge)'})
-      $r.instagram=@{account_verified=$true;published_media_pages=$list.pages;published_media_scan_complete=$list.ok;matching_published_count=$matches.Count;reason=$list.reason;unpublished_queue_exposed_by_api=$false}
+      $matches=@($list.rows|Where-Object {([string]$_.caption) -match '(?i)Past and present collide in NYC|New York City: Then and Now'})
+      $r.instagram=@{account_verified=$true;published_media_pages=$list.pages;published_media_scan_complete=$list.ok;matching_published_count=$matches.Count;exact_caption_matches=@($matches|Select-Object -First 12 | ForEach-Object { @{id=[string]$_.id;posted_at=$_.timestamp;media_type=$_.media_type} });reason=$list.reason;unpublished_queue_exposed_by_api=$false}
     }else{$r.instagram=@{account_verified=$false;reason='ig_identity_unavailable';unpublished_queue_exposed_by_api=$false}}
   }else{$r.instagram=@{account_verified=$false;reason='ig_scope_unavailable';unpublished_queue_exposed_by_api=$false}}
   try{
@@ -117,13 +117,28 @@ try {
     $r.tiktok=@{status_endpoint_ok=($t.ok -eq $true);authorized=($t.authorized -eq $true);account_match=(([string]$t.creator_username).TrimStart('@').ToLowerInvariant() -eq ([string]$v['NYC_TIKTOK_HANDLE']).TrimStart('@').ToLowerInvariant());draft_queue_exposed=$false;reason='status_only_no_owned_draft_inventory'}
   }catch{$r.tiktok=@{status_endpoint_ok=$false;draft_queue_exposed=$false;reason='tiktok_status_unavailable'}}
   $channel=[string]$v['NYC_YOUTUBE_CHANNEL_ID']
-  $serviceSecret=E 'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET'
-  if($channel -match '^UC[A-Za-z0-9_-]{22}$' -and $serviceSecret.Length -ge 16){
+  $serviceSecret=[string]$v['NYC_YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']
+  if(-not $serviceSecret){$serviceSecret=[string]$v['YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']}
+  if(-not $serviceSecret){$serviceSecret=E 'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET'}
+  $base=([string]$v['NYC_YOUTUBE_UPLOAD_SERVICE_URL']).TrimEnd('/')
+  if($channel -match '^UC[A-Za-z0-9_-]{22}
+  $r.graph_gets=$script:getCount
+  # Meta's Instagram Graph and TikTok account status APIs cannot prove absence
+  # of drafts/scheduled content. Never assert no duplicate solely on this audit.
+  $r.remote_queue_exhaustively_verified=$false
+  $r.safe_to_release_automatically=$false
+}catch{
+  $r.error_category=([string]$_.Exception.Message -replace '[^a-zA-Z0-9_-]','_').Substring(0,[Math]::Min(90,([string]$_.Exception.Message).Length))
+}finally{
+  Write-Output ('NYC2489_PROVIDER_QUEUE_AUDIT='+($r|ConvertTo-Json -Depth 10 -Compress))
+}
+ -and $serviceSecret.Length -ge 16 -and $base -eq 'https://youtube-upload-nyc.chicagoshining.com'){
     try{
-      $service='http://127.0.0.1:3340/youtube/channel/uploads?expected_channel_id='+$channel
-      $inv=Invoke-RestMethod $service -Headers @{'x-sm-pipeline-key'=$serviceSecret} -Method Get -TimeoutSec 75
-      $hits=@($inv.videos|Where-Object {([string]$_.title+' '+[string]$_.description_excerpt) -match '(Then and Now|Past and present collide|BrooklynBridge)'})
-      $r.youtube=@{owner_verified=([string]$inv.channel_id -eq $channel);complete=($inv.complete -eq $true);scan_pages=$inv.playlist_pages_scanned;videos_seen=$inv.video_ids_seen;matching_owned_uploads=$hits.Count;possible_scheduled_matches=@($hits|ForEach-Object{@{privacy_status=$_.privacy_status;duration=$_.duration}});reason='owner_upload_inventory'}
+      $service=$base+'/youtube/channel/uploads?expected_channel_id='+$channel
+      $inv=Invoke-RestMethod $service -Headers @{'x-sm-pipeline-key'=$serviceSecret;Accept='application/json'} -Method Get -TimeoutSec 100
+      if($inv.read_only -ne $true -or [int]$inv.provider_media_writes -ne 0 -or [int]$inv.output_writes -ne 0 -or [string]$inv.channel_id -ne $channel){throw 'uploader_owner_or_read_only_contract_unverified'}
+      $hits=@($inv.videos|Where-Object {([string]$_.title+' '+[string]$_.description_excerpt) -match '(?i)Past and present collide in NYC|New York City: Then and Now'})
+      $r.youtube=@{owner_verified=$true;complete=($inv.complete -eq $true);scan_pages=$inv.playlist_pages_scanned;videos_seen=$inv.video_ids_seen;matching_owned_uploads=$hits.Count;possible_scheduled_matches=@($hits|Select-Object -First 15|ForEach-Object{@{id=$_.id;privacy_status=$_.privacy_status;duration=$_.duration;published_at=$_.published_at}});reason='owner_upload_inventory'}
     }catch{$r.youtube=@{owner_verified=$false;complete=$false;reason='youtube_uploader_inventory_unavailable'}}
   }else{$r.youtube=@{owner_verified=$false;complete=$false;reason='youtube_uploader_scope_unavailable'}}
   $r.graph_gets=$script:getCount
