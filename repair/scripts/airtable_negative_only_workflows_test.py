@@ -121,6 +121,33 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
                 self.write(name, guard.replace("throw 'unsafe_operation", "Write-Host 'unsafe_operation"))
                 self.assertEqual(len(unexpected_references(self.root, ("AIRTABLE_PAT",))), 1)
 
+    def test_future_unknown_workflow_static_forbidden_guard_only(self):
+        name = "future-verified-static-provider-audit.yml"
+        guard = (
+            "foreach($bad in @('api.airtable.com','AIRTABLE_PAT','-Method Delete')){\n"
+            "if($src.Contains($bad)){throw 'unsafe_operation_prohibited'}\n"
+        )
+        self.write(name, guard)
+        self.assertEqual(unexpected_references(self.root, ("AIRTABLE_PAT", "api.airtable.com")), [])
+        self.write(name, guard + "curl https://api.airtable.com/v0/data\n")
+        self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
+
+    def test_unknown_workflow_no_throw_does_not_qualify(self):
+        name = "future-unguarded-script.yml"
+        self.write(name, (
+            "foreach($bad in @('api.airtable.com','AIRTABLE_PAT')){\n"
+            "if($src.Contains($bad)){Write-Host 'ignore'}\n"
+        ))
+        self.assertEqual(len(unexpected_references(self.root, ("AIRTABLE_PAT",))), 1)
+
+    def test_unknown_workflow_interpolated_statement_does_not_qualify(self):
+        name = "future-malformed-script.yml"
+        self.write(name, (
+            "foreach($bad in @('api.airtable.com',$(curl https://api.airtable.com))){\n"
+            "if($src.Contains($bad)){throw 'bad'}\n"
+        ))
+        self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://api.airtable.com/v0/foo\n")
         self.assertEqual(len(unexpected_references(self.root, ("api.airtable.com",))), 1)
