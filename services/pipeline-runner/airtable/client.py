@@ -31,6 +31,7 @@ class AirtableClient:
         result = mirror_airtable_records(self._settings, table_id, records, partial=partial)
         if not isinstance(result, dict) or result.get("ok") is not True or result.get("count") != len(records):
             raise RuntimeError(f"Supabase mutation not confirmed for {table_id}")
+        return result
 
     def _legacy_export(self, table_id: str) -> bool:
         from supabase_pipeline import legacy_export_enabled
