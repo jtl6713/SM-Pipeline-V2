@@ -14756,7 +14756,6 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
         audioMixAcknowledged: body.audio_mix_acknowledged === true,
         mediaOverride: body.media_override === true, jobKey, mediaKey,
         readJob, writeJob, lookupCatalog, createMedia, saveSelectedScene,
-        googleAccessToken: () => item4GoogleAccessToken(env),
         watermarkRequired: studioProfileRequiresChicagoWatermark(profile),
         rightsVerified: String(env.STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED || "").toLowerCase() === "true",
         HttpError,
