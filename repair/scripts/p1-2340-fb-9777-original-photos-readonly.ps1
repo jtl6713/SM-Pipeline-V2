@@ -23,7 +23,7 @@ try {
   if($o.airtable_record_id -ne 'recmd8mSZlqbRBh8K' -or $o.platform -ne 'Facebook' -or $o.platform_output_type -ne 'Facebook Photo Set' -or $o.publish_status -ne 'Ready to Schedule' -or $o.image_count -ne 8 -or $o.do_not_publish -ne $false -or $o.auto_publish_enabled -ne $false -or $o.platform_post_url -or $o.published_at){throw 'output_state_changed'}
   $p=Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o.content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 20
   if(@($p).Count -ne 1 -or $p[0].market_name -ne 'Miami'){throw 'profile_mismatch'}
-  $slides=Invoke-RestMethod ($url+'/rest/v1/carousel_slides?select=airtable_record_id,current_order,deleted_from_carousel,fields&limit=200') -Headers $h -Method Get -TimeoutSec 30
+  $slides=Invoke-RestMethod ($url+'/rest/v1/carousel_slides?fields->>PO_Output_ID=eq.%5B9777%5D&select=airtable_record_id,current_order,deleted_from_carousel,fields&limit=20') -Headers $h -Method Get -TimeoutSec 30
   $owned=@($slides|Where-Object { @($_.fields.'Platform Output') -contains $o.airtable_record_id }|Sort-Object current_order)
   if($owned.Count -ne 8){throw 'ordered_slide_count_mismatch'}
   $ids=@();$n=0
