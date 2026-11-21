@@ -7,6 +7,7 @@ import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
   protectedMediaReworkSummary,
+  protectedMediaReworkPreviewGallery,
 } from "./factory-protected-media-rework.mjs";
 import {
   classifyFactoryLane,
@@ -113,6 +114,62 @@ test("after shaping, only the same exact DNP/Changes Requested record is retaine
   assert.match(summary.next_step, /Factory approval/);
 });
 
+
+test("verified original Instagram 4:5 previews expose a bounded ordered read-only gallery", () => {
+  const base = shaped();
+  const folder = `https://media.chicagoshining.com/studio/previews/lettered/${RECORD}/`;
+  const urls = Array.from({ length: 4 }, (_, i) => `${folder}${i}.jpg`);
+  const sourceProof = {
+    source_class: "original_output_preview_folder",
+    original_slide_records_present: false,
+    original_factory_approved_slide_identity_proven: false,
+    ap0c_instagram_public_asset_staging_done: false,
+    fresh_factory_creative_review_required: true,
+    expected_image_count: 4,
+    verified_4x5_image_count: 4,
+    candidate_original_image_urls: urls,
+  };
+  const record = {
+    ...base,
+    fields: { ...base.fields, Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121: sourceProof },
+  };
+  assert.deepEqual(protectedMediaReworkPreviewGallery(record), urls);
+  assert.deepEqual(protectedMediaReworkSummary(record).preview_gallery_urls, urls);
+  const deny = [
+    { verified_4x5_image_count: 3 },
+    { expected_image_count: 8 },
+    { candidate_original_image_urls: [...urls.slice(0, 3), "https://evil.example/3.jpg"] },
+    { candidate_original_image_urls: [...urls].reverse() },
+    { candidate_original_image_urls: [urls[0], urls[1], urls[1], urls[3]] },
+    { ap0c_instagram_public_asset_staging_done: true },
+    { original_factory_approved_slide_identity_proven: true },
+    { fresh_factory_creative_review_required: false },
+  ];
+  for (const change of deny) {
+    const invalid = {
+      ...record,
+      fields: {
+        ...record.fields,
+        Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121: { ...sourceProof, ...change },
+      },
+    };
+    assert.deepEqual(protectedMediaReworkPreviewGallery(invalid), [], JSON.stringify(change));
+  }
+  assert.deepEqual(protectedMediaReworkPreviewGallery({
+    ...record, fields: { ...record.fields, Do_Not_Publish: false },
+  }), []);
+  assert.deepEqual(protectedMediaReworkPreviewGallery({
+    ...base,
+    fields: {
+      ...base.fields,
+      Studio_Recovery_IG_Original_Preview_Gallery_Needs_Rebuild_20261121: {
+        verified_complete_gallery: false,
+        verified_original_index0_height: 1920,
+      },
+    },
+  }), []);
+});
+
 test("six original-image candidate galleries remain repair-only, never Final Approved", () => {
   const standard = shaped();
   const source = {
@@ -199,6 +256,9 @@ test("Factory source always uses independent exact Supabase rework query and no 
   assert.match(client, /Creative repair:/);
   assert.match(client, /if \(card\.protected_media_rework === true\) \{/);
   assert.match(client, /Original held source image/);
+  assert.match(worker, /recovery_gallery_images: mediaRework\\?\\.preview_gallery_urls/);
+  assert.match(client, /factoryRecoveryGalleryControls/);
+  assert.match(client, /Source image/);
   assert.match(client, /Original media needs reconstruction/);
   assert.match(client, /never send a video request or a stale Airtable GET/);
 
