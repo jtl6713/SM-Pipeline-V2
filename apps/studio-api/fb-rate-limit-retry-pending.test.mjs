@@ -72,3 +72,24 @@ test("FBS3_RATE_LIMIT stage also paints Retry Pending", () => {
   });
   assert.equal(state, "Retry Pending");
 });
+
+test("TTD0 asset mismatch held for repair is not incorrectly shown as another timed retry", () => {
+  const held = {
+    fields: {
+      Platform: "TikTok",
+      Output_Status: "Approved for Publishing",
+      Review_Status: "Approved",
+      Publish_Status: "Ready to Publish",
+      TikTok_Draft_Status: "Retry Pending",
+      Publish_Error_Stage: "TTD0_ASSETS",
+      Publish_Error_Message: "TTD0 aggregated 0 ready 9:16 slide(s); expected 4.",
+      Publish_Retry_Eligible: false,
+      Do_Not_Publish: true,
+      Auto_Publish_Enabled: false,
+    },
+  };
+  assert.equal(normalizedOutputState(held), "Needs Asset Repair");
+  assert.equal(normalizedOutputState({
+    fields: { ...held.fields, Publish_Retry_Eligible: true },
+  }), "Retry Pending");
+});
