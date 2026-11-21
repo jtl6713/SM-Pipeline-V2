@@ -420,6 +420,8 @@ def test_partial_supabase_output_patch_does_not_claim_full_airtable_snapshot(mon
         seen.append((method, url, json))
         if "studio_side_effect_outbox" in url:
             return Response('{"code":"PGRST205"}', status_code=404)
+        if method == "GET" and "platform_outputs" in url and "error_messages" in url:
+            return Response([{"error_messages": {}}])
         return Response("")
     monkeypatch.setattr(requests, "request", fake_request)
     row = _client(studio_write_source="supabase").update_record(

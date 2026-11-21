@@ -54,6 +54,8 @@ def test_output_update_uses_supabase_patch_without_legacy_record_enrichment(monk
         seen.append((method, url, json))
         if "studio_side_effect_outbox" in url:
             return Response('{"code":"PGRST205"}', status_code=404)
+        if method == "GET" and "platform_outputs" in url and "error_messages" in url:
+            return Response([{"error_messages": {}}])
         return Response("")
     monkeypatch.setattr(requests, "patch", deny_airtable)
     monkeypatch.setattr(requests, "request", fake_request)
