@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPS_A: $\{{ secrets.OPS_DASHBOARD_TOKEN }}
-      OPS_B: $\{{ secrets.DASHBOARD_TOKEN }}
-      OPS_C: $\{{ secrets.OPS_TOKEN }}
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify PowerShell syntax and reject provider writes
