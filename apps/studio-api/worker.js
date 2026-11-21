@@ -5695,97 +5695,17 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     body = archiveRecords.length === 1 && !raw.includes('"records"')
       ? archiveRecords[0]
       : { records: archiveRecords };
-  } else if (
-    // Quiet-window closeout: under STUDIO_WRITE_SOURCE=supabase the Airtable
-    // archive is frozen. Side/SoR reads already ran above. Any remaining GET
-    // (review jobs, gallery, settings miss, Phase 6 miss, etc.) must not
-    // touch Airtable — record miss → 404, list/view → empty page.
-    // Phase 6 keep their own write-source gate when Output SoR is still airtable.
-    method === "GET"
-    && (
-      studioWriteSource(env) === "supabase"
-      || (
-        studioPhase6WriteSource(env) === "supabase"
-        && Boolean(phase6TableKind(env, tableId))
-      )
-    )
-  ) {
-    const tableKind = studioAirtableEgressTableKind(env, tableId);
-    if (studioAirtableRecordIdPath(pathOrParams)) {
-      console.info("supabase SoR record miss; skipping Airtable archive GET", {
-        table_kind: tableKind,
-        side_read_attempted: sideReadAttempted,
-      });
-      throw new HttpError(404, "NOT_FOUND");
-    }
-    console.info("supabase SoR list miss; skipping Airtable archive GET", {
-      table_kind: tableKind,
-      side_read_attempted: sideReadAttempted,
-    });
-    body = { records: [] };
-  } else if (
-    // Residual Worker PATCH (~5–10/hr at 6 AM CT) was review/gallery/other
-    // mutations that never set archiveRecords and fell through to Airtable.
-    // Under write SoR, skip the archive WRITE and return a local echo so
-    // callers soft-continue without egress.
-    method !== "GET"
-    && studioWriteSource(env) === "supabase"
-  ) {
-    const tableKind = studioAirtableEgressTableKind(env, tableId);
-    // Phase 6 request/media/queue must not soft-echo a missed Supabase commit.
-    // Echoing empty Platform Variant creates made Prepare flip Preparing → None.
-    if (phase6TableKind(env, tableId)) {
-      console.warn("supabase Phase 6 mutation miss; refusing soft echo", {
-        table_kind: tableKind,
-        method,
-      });
-      throw new HttpError(
-        503,
-        `Studio could not save ${tableKind || "Phase 6"} changes. Try again in a moment.`
-      );
-    }
-    // An unsaved Content Item or Platform Output must never be reported as a
-    // successful POST/PATCH. The prior echo had no durable record identity:
-    // I3 marked the Idea Promoted, but I4/Factory could never find its parent.
-    // Callers that already performed their own guarded Supabase commit opt
-    // out explicitly with skipSupabaseWriteThrough.
-    if (studioAirtableOutputOrContentTable(env, tableId)
-        && options?.skipSupabaseWriteThrough !== true) {
-      console.warn("supabase output/content mutation did not commit", { table_kind: tableKind, method });
-      throw new HttpError(
-        503,
-        `Studio ${tableKind || "content/output"} ${method} was not saved to Supabase; no status advanced.`,
-      );
-    }
-    console.info("supabase SoR mutation miss; skipping Airtable archive WRITE", {
-      table_kind: tableKind,
-      method,
-    });
-    const raw = String(options?.body || "");
-    let parsed = {};
-    try { parsed = raw ? JSON.parse(raw) : {}; } catch { parsed = {}; }
-    if (Array.isArray(parsed?.records)) {
-      body = { records: parsed.records };
-    } else {
-      const recordId = studioAirtableRecordIdPath(pathOrParams);
-      if (recordId && parsed && typeof parsed === "object" && parsed.fields) {
-        body = {
-          id: recordId,
-          fields: parsed.fields,
-          createdTime: new Date().toISOString(),
-        };
-      } else if (recordId && method === "DELETE") {
-        body = { id: recordId, deleted: true };
-      } else {
-        body = parsed && typeof parsed === "object" ? parsed : {};
-      }
-    }
-    airtableCommitted = false;
   } else {
-    // Do not make an Airtable HTTP request on an unhandled table/mutation.
-    // Missing canonical rows fail explicitly instead of silently advancing
-    // scheduled, approved, or publish statuses.
-    throw new HttpError(503, "Canonical Supabase record or write unavailable; no legacy archive fallback.");
+    // Never fabricate an empty list, record deletion, or successful write when
+    // no verified canonical Supabase result was returned.
+    const table_kind = studioAirtableEgressTableKind(env, tableId);
+    console.warn("supabase_only_crud_uncommitted", { table_kind, method });
+    throw new HttpError(
+      503,
+      method === "GET"
+        ? "Canonical Supabase read unavailable; no legacy archive fallback."
+        : "Canonical Supabase write uncommitted; no legacy archive fallback.",
+    );
   }
   // Queue the summary change BEFORE optional Supabase mirror calls so a
   // slow/broken mirror never prevents Home's near-real-time invalidation.
