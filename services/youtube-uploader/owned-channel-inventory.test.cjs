@@ -41,7 +41,7 @@ function fake({ ownedChannel = channel, returnedChannel = channel, pages = 1, mi
   return {
     requests,
     run: (id = channel, maxPages = 10) =>
-      vm.runInNewContext(helper + ";ownedChannelUploadInventory(expected, pageLimit)", { ...context, expected: id, pageLimit }),
+      vm.runInNewContext(helper + ";ownedChannelUploadInventory(expected, pageLimit)", { ...context, expected: id, pageLimit: maxPages }),
   };
 }
 
