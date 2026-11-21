@@ -44,6 +44,18 @@ jobs:
             exit 1
           fi
           echo 'PASS: no direct Airtable endpoints in audited maintenance scripts'
+      - name: Inventory any remaining hardcoded Airtable API references in source
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="api." && host+="airtable.com"
+          git grep -l -F "$host" -- '*.js' '*.mjs' '*.py' '*.sh' '*.ps1' '*.ts' \
+            ':!*.test.*' ':!docs/**' ':!repair/archive/**' \
+            ':!services/pipeline-runner/airtable/egress_monitor.py' \
+            ':!repair/scripts/airtable_standalone_egress.py' \
+            > /tmp/remaining-airtable-source-paths.txt || true
+          echo "remaining_direct_url_source_files=$(wc -l </tmp/remaining-airtable-source-paths.txt)"
+          cat /tmp/remaining-airtable-source-paths.txt
       - name: Syntax-check modified Worker modules and run no-egress guard
         run: |
           node --check apps/studio-api/worker.js
