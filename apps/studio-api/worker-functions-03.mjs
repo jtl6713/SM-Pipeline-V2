@@ -2135,42 +2135,6 @@ export async function buildPipelineOutputsPayload(env, profile, { limit, reviewO
   };
   let records;
   if (reviewOnly) {
-    // P1 #2340: Home Past Due and Failed must never fall back to Airtable.
-    // This candidate census is complete and uses the SAME Home classifier
-    // as the dashboard, not a broad scheduled-date SQL as a publish selector.
-    if (!manualFocused) {
-      if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
-        throw new HttpError(503, "Supabase Home exception drill-down unavailable");
-      const rows = await listSupabaseFocusedExceptionOutputs(env, {
-        profileAirtableId: profile.id,
-        mode: focusedMode,
-        nowIso: new Date(observedAt).toISOString(),
-      });
-      const mapped = rows.map((record) => {
-        const output = mapOutput(record, null, null, null);
-        return {
-          ...output,
-          home_exception_kind: homeApprovedExceptionKind(output, observedAt),
-          home_failed: homeIsUnpublishedFailure(output),
-        };
-      });
-      const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
-        focusedMode === "failed" ? row.home_failed
-          : focusedMode === "approved_exceptions" ? Boolean(row.home_exception_kind)
-          : row.home_exception_kind === focusedMode
-      ));
-      return respond(request, env, {
-        ok: true,
-        records: matched,
-        count: matched.length,
-        profile: mapStudioContentProfile(profile),
-        read_source: "supabase",
-        complete: true,
-        scanned_at: new Date(observedAt).toISOString(),
-        mode: focusedMode,
-        publish_actions_enabled: false,
-      });
-    }
     const profileFormula = contentProfileFilterFormula(profile);
     const reviewFormula = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent"),{Review_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")';
     records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -2666,6 +2630,42 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
         complete: rows.length < 200,
         scanned_at: new Date(observedAt).toISOString(),
         mode: focusedMode,
+      });
+    }
+    // P1 #2340: Home Past Due and Failed must never fall back to Airtable.
+    // This candidate census is complete and uses the SAME Home classifier
+    // as the dashboard, not a broad scheduled-date SQL as a publish selector.
+    if (!manualFocused) {
+      if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env))
+        throw new HttpError(503, "Supabase Home exception drill-down unavailable");
+      const rows = await listSupabaseFocusedExceptionOutputs(env, {
+        profileAirtableId: profile.id,
+        mode: focusedMode,
+        nowIso: new Date(observedAt).toISOString(),
+      });
+      const mapped = rows.map((record) => {
+        const output = mapOutput(record, null, null, null);
+        return {
+          ...output,
+          home_exception_kind: homeApprovedExceptionKind(output, observedAt),
+          home_failed: homeIsUnpublishedFailure(output),
+        };
+      });
+      const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
+        focusedMode === "failed" ? row.home_failed
+          : focusedMode === "approved_exceptions" ? Boolean(row.home_exception_kind)
+          : row.home_exception_kind === focusedMode
+      ));
+      return respond(request, env, {
+        ok: true,
+        records: matched,
+        count: matched.length,
+        profile: mapStudioContentProfile(profile),
+        read_source: "supabase",
+        complete: true,
+        scanned_at: new Date(observedAt).toISOString(),
+        mode: focusedMode,
+        publish_actions_enabled: false,
       });
     }
     const profileFormula = contentProfileFilterFormula(profile);
