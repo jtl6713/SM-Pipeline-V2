@@ -2050,11 +2050,37 @@ export async function listSupabasePipelineContentPage(env, {
     }
   }
   if (createdFrom && createdTo && createdFrom > createdTo) throw new Error("Creation date range is reversed");
+  // Resolve the profile's market to its IANA zone; never treat local calendar
+  // days as UTC days (DST boundaries can have 23 or 25 hours).
+  const profileRows = await supabaseRest(env,
+    `content_profiles?id=eq.${profileId}&select=profile_name,market_name&limit=1`);
+  const market = String(profileRows?.[0]?.market_name || profileRows?.[0]?.profile_name || "").toLowerCase();
+  const zone = /los angeles|\\bla\\b/.test(market) ? "America/Los_Angeles"
+    : /chicago/.test(market) ? "America/Chicago"
+    : /miami|new york|nyc/.test(market) ? "America/New_York" : null;
+  if (!zone) throw new Error("Pipeline profile timezone unavailable");
+  const localMidnightUtc = (day) => {
+    const target = Date.parse(day + "T00:00:00Z");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    let utc = target;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(utc))
+        .filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
+      const observed = Date.UTC(parts.year, parts.month - 1, parts.day,
+        parts.hour, parts.minute, parts.second);
+      utc += target - observed;
+    }
+    return new Date(utc).toISOString();
+  };
   let filter = `content_profile_id=eq.${profileId}`;
-  if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(createdFrom + "T00:00:00Z")}`;
+  if (createdFrom) filter += `&created_at=gte.${encodeURIComponent(localMidnightUtc(createdFrom))}`;
   if (createdTo) {
-    const exclusive = new Date(Date.parse(createdTo + "T00:00:00Z") + 86400000).toISOString();
-    filter += `&created_at=lt.${encodeURIComponent(exclusive)}`;
+    const nextDay = new Date(Date.parse(createdTo + "T00:00:00Z") + 86400000)
+      .toISOString().slice(0, 10);
+    filter += `&created_at=lt.${encodeURIComponent(localMidnightUtc(nextDay))}`;
   }
   const contents = await supabaseRest(env,
     `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at`
