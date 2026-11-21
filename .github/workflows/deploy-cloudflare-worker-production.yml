@@ -38,6 +38,7 @@ on:
     paths:
       - 'deploy/cloudflare-worker-production.txt'
       - 'deploy/issue2532-owner-global-prompt.txt'
+      - 'deploy/issue2532-worker-retry.txt'
       - 'deploy/nyc2489-audio-worker-release.txt'
 
 permissions:

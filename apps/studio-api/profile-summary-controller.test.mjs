@@ -68,11 +68,18 @@ test("POST/PATCH notifications are scoped to confirmed authoritative output/idea
 test("confirmed Supabase mutation notifies summary; uncommitted CRUD fails before notification", () => {
   const worker = raw("worker.js");
   const gateway = worker.slice(worker.indexOf("async function airtableFetch("), worker.indexOf("\n}\n", worker.indexOf("async function airtableFetch(")) + 2);
-  const uncommitted = gateway.indexOf("supabase_only_crud_uncommitted");
+  // The active Supabase-write branch refuses uncommitted Output/Content
+  // writes before summary notification. The older archive HTTP branch is
+  // covered separately by the migration/retirement suite; it must not be
+  // reached by authoritative Supabase writes.
+  const uncommitted = gateway.indexOf("supabase output/content mutation did not commit");
   const notify = gateway.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
-  assert.ok(uncommitted >= 0 && notify > uncommitted);
-  assert.match(gateway, /throw new HttpError\(/);
-  assert.doesNotMatch(gateway, /await fetch\(endpoint/);
+  const guard = gateway.indexOf('method !== "GET"');
+  const outputGuard = gateway.indexOf("if (studioAirtableOutputOrContentTable(env, tableId)");
+  assert.ok(guard >= 0 && outputGuard > guard && uncommitted > outputGuard);
+  assert.ok(notify > uncommitted, "uncommitted mutation failure precedes notification");
+  assert.match(gateway.slice(uncommitted, notify), /throw new HttpError\(\s*503/);
+  assert.match(gateway.slice(guard, outputGuard), /studioWriteSource\(env\) === "supabase"/);
 });
 
 test("reconciliation fences updates and never publishes staged partial totals", () => {
