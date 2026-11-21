@@ -1161,7 +1161,10 @@ export async function loadFactoryIdeaCandidates(env) {
         };
       });
     } catch (error) {
-      console.warn("supabase factory idea candidates failed; falling back to Airtable", error);
+      // Production runs on Supabase-only authority. An unavailable ideas pack
+      // must NEVER cause an Airtable list as an implicit fallback.
+      console.warn("Supabase Factory idea candidates unavailable; legacy fallback forbidden", String(error?.message || error));
+      return [];
     }
   }
   if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
