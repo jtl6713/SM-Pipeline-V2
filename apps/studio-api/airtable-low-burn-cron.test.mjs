@@ -68,7 +68,7 @@ test("Idea harvest and five-minute photo-ready resume start independently of coo
   const cooldown = scheduled.indexOf("const coolMs = airtableCooldownWaitMs();", factoryStart);
   assert.ok(cronStart >= 0 && ideaStart > cronStart);
   assert.ok(factoryStart > ideaStart && cooldown > factoryStart);
-  const independent = scheduled.slice(ideaStart, factoryStart);
+  const independent = scheduled.slice(ideaStart, scheduled.indexOf("Independent Idea pull failed", ideaStart));
   assert.match(independent, /ctx\.waitUntil\(\(async \(\) => \{/);
   assert.match(independent, /atHour = cadence\.heavy && Number\(cadence\.minute\) === 0/);
   assert.match(independent, /resume_only: !atHour/);
