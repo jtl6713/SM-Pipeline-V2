@@ -262,7 +262,7 @@ test("Factory source always uses independent exact Supabase rework query and no 
   assert.match(client, /Creative repair:/);
   assert.match(client, /if \(card\.protected_media_rework === true\) \{/);
   assert.match(client, /Original held source image/);
-  assert.match(worker, /recovery_gallery_images: mediaRework\\?\\.preview_gallery_urls/);
+  assert.ok(worker.includes("recovery_gallery_images: mediaRework?.preview_gallery_urls"));
   assert.match(client, /factoryRecoveryGalleryControls/);
   assert.match(client, /Source image/);
   assert.match(client, /Original media needs reconstruction/);
