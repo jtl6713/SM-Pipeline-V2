@@ -3513,6 +3513,7 @@ export async function listSupabaseDeskHealOutputs(env, {
   kind,
   limit = 30,
   sortDirection = "desc",
+  offset = 0,
   nowMs = undefined,
   requireAutoPublish = undefined,
   cutoffIso = "",
@@ -3526,8 +3527,10 @@ export async function listSupabaseDeskHealOutputs(env, {
   // Ready for Delivery drafts (4121/5602/3971 behind 4988/5031/10457).
   // TTD2 must fair-queue by Last_Checked (nulls first). output_number.desc
   // kept pulsing the same high-ID Processing rows and never reached 4121.
+  // Publisher fairness: process the oldest due slot first. Descending date
+  // allowed newer content to jump ahead and left older approved outputs stuck.
   const order = kind === "fresh_publish_ready"
-    ? `order=scheduled_post_date.desc.nullslast`
+    ? `order=scheduled_post_date.asc.nullslast,output_number.asc`
     : (kind === "ttd0_ready" || kind === "ttd1_ready")
     ? `order=scheduled_post_date.${direction}.nullslast`
     : kind === "overdue_scheduled"
@@ -3555,9 +3558,13 @@ export async function listSupabaseDeskHealOutputs(env, {
     }
     return matches.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
   }
+  // Only the first-publish selector opts into bounded pagination, so held or
+  // media-incomplete older candidates cannot monopolize every future cron tick.
+  const freshOffset = kind === "fresh_publish_ready"
+    ? `&offset=${Math.max(0, Math.min(480, Math.trunc(Number(offset) || 0)))}` : "";
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}`,
+    `platform_outputs?${deskHealOutputFilter(kind, filterOptions)}&select=${select}&${order}&limit=${capped}${freshOffset}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)

@@ -51,3 +51,42 @@ test("Supabase has only one initial publish cron owner, including scheduled due"
   assert.match(filter, /Ready%20to%20Schedule/);
   assert.match(filter, /Ready%20to%20Publish/);
 });
+
+
+test("approval future-hold never stamps a publishing attempt", () => {
+  const source = fs.readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const begin = source.indexOf("export async function studioDispatchApprovedPublishAndSchedule(");
+  const end = source.indexOf("/*__STUDIO_WORKER_END:studioDispatchApprovedPublishAndSchedule__*/", begin);
+  assert.ok(begin > 0 && end > begin);
+  const body = source.slice(begin, end);
+  const hold = body.slice(0, body.indexOf("const plan = studioPublishDispatchTarget"));
+  assert.match(hold, /return \{ ok: true, skipped: "scheduled-hold"/);
+  assert.doesNotMatch(hold, /studioStampPublishDispatch\(/,
+    "no attempt counter write is allowed before the scheduled due time");
+  const stamp = source.slice(
+    source.indexOf("export async function studioStampPublishDispatch("),
+    source.indexOf("/*__STUDIO_WORKER_END:studioStampPublishDispatch__*/")
+  );
+  assert.match(stamp, /scheduled-hold/);
+  assert.ok(stamp.indexOf("scheduled-hold") < stamp.indexOf("publishDispatchAttemptStampFields"),
+    "held-only receipts must be filtered BEFORE attempt counting");
+});
+
+test("Supabase fresh publisher processes oldest due first and paginates blocked media candidates", () => {
+  const reader = fs.readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const begin = reader.indexOf("export async function listSupabaseDeskHealOutputs(");
+  const section = reader.slice(begin, reader.indexOf("export function deskRequestFilter(", begin));
+  assert.match(section, /order=scheduled_post_date\.asc\.nullslast,output_number\.asc/);
+  assert.match(section, /offset=\$\{Math\.max\(0, Math\.min\(480/);
+  const impl = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const start = impl.indexOf("export async function studioReconcileApprovedPublishes(env, options = {})");
+  const end = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileApprovedPublishes__*/", start);
+  const flow = impl.slice(start, end);
+  assert.match(flow, /offset < 480/);
+  assert.match(flow, /offset \+= pageSize/);
+  assert.match(flow, /assessFreshSupabasePublish\(candidate,/);
+  assert.match(flow, /readSupabaseShapedOutput\(env, row\.id\)/,
+    "the second preflight after locking must remain authoritative");
+  assert.ok(flow.indexOf("env.STUDIO_MEDIA.put(key") < flow.indexOf("studioDispatchApprovedPublishNow(env, current)"),
+    "durable one-shot fence must remain ahead of every provider action");
+});
