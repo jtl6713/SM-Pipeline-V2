@@ -111,10 +111,16 @@ test("falsely healthy assertion never passes and automated Pass needs independen
   await assert.rejects(()=>h.call("POST","runs/"+id+"/approvals",
     {testId:"QA-DIAG-001",executionId:passed.event.payload.executionId,
     decision:"Approved",client_request_id:"ui-self-approve01"}),/Independent reviewer required/);
-  await h.call("POST","runs/"+id+"/approvals",{
+  const reviewed=await (await h.call("POST","runs/"+id+"/approvals",{
     testId:"QA-DIAG-001",executionId:passed.event.payload.executionId,
     decision:"Approved",client_request_id:"ui-review-approve01"
-  },"recADMIN00000002");
+  },"recADMIN00000002")).json();
+  // Observation and review are separate ledger events; the review payload
+  // refers to the observed execution, but its own execution ID is distinct.
+  assert.equal(reviewed.event.payload.executionId,passed.event.payload.executionId);
+  assert.notEqual(reviewed.event.executionId,passed.event.executionId);
+  const eventRows=h.rows.get(QA_EVENTS_TABLE);
+  assert.equal(new Set(eventRows.map(x=>x.fields["Execution ID"])).size,eventRows.length);
   g=(await (await h.call("GET","runs/"+id+"/gate")).json()).gate;
   assert.ok(g.passed.includes("QA-DIAG-001"));
   assert.ok(!g.pendingHuman.includes("QA-DIAG-001"));
