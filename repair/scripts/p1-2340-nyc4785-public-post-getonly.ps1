@@ -70,23 +70,13 @@ try {
  $author=([string]$embed.author_unique_id).TrimStart('@').ToLowerInvariant()
  $authorFromUrl=''
  $rawAuthorUrl=[string]$embed.author_url
- # TikTok oEmbed author links can include tracking query fragments; compare
- # *only* the exact official host + decoded @handle path, never loose contains.
+ # TikTok oEmbed author links can have query parameters. Validate exact HTTPS
+ # official host and canonical /@handle path to avoid accepting other users.
  if($rawAuthorUrl){
    $authorUri=$null
    if([Uri]::TryCreate($rawAuthorUrl,[UriKind]::Absolute,[ref]$authorUri) -and
       $authorUri.Scheme -eq 'https' -and $authorUri.Host -eq 'www.tiktok.com' -and
-      $authorUri.AbsolutePath -match '^/@([A-Za-z0-9._]{2,40})/?
- $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
- $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
- $r.stage='completed'
-}catch{
- $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')
- $message=[string]$_.Exception.Message
- $r.reason=if($known -contains $message){$message}else{'public_provider_get_unavailable_no_retry'}
-}
-Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
-){
+      $authorUri.AbsolutePath -match '^/@([A-Za-z0-9._]{2,40})/?$'){
      $authorFromUrl=$Matches[1].ToLowerInvariant()
    }
  }
@@ -94,29 +84,8 @@ Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
  $r.oembed_public_post_id=$returned
  $r.oembed_owner_verified=($author -eq $expected -and
     (-not $authorFromUrl -or $authorFromUrl -eq $expected))
- # Emit public, validated username only; never log token or external auth URL.
- $r.oembed_author_handle=if($author -match '^[a-z0-9._]{2,40}
- $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
- $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
- $r.stage='completed'
-}catch{
- $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')
- $message=[string]$_.Exception.Message
- $r.reason=if($known -contains $message){$message}else{'public_provider_get_unavailable_no_retry'}
-}
-Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
-){$author}else{'unavailable'}
- $r.oembed_author_url_handle=if($authorFromUrl -match '^[a-z0-9._]{2,40}
- $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
- $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
- $r.stage='completed'
-}catch{
- $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')
- $message=[string]$_.Exception.Message
- $r.reason=if($known -contains $message){$message}else{'public_provider_get_unavailable_no_retry'}
-}
-Write-Output ('P1_NYC4785_PUBLIC_PROOF='+($r|ConvertTo-Json -Depth 5 -Compress))
-){$authorFromUrl}else{'unavailable'}
+ $r.oembed_author_handle=if($author -match '^[a-z0-9._]{2,40}$'){$author}else{'unavailable'}
+ $r.oembed_author_url_handle=if($authorFromUrl -match '^[a-z0-9._]{2,40}$'){$authorFromUrl}else{'unavailable'}
  $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
  $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
  $r.stage='completed'
