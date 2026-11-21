@@ -15,7 +15,7 @@ def manifest(location="Echo-Park"):
             "url": f"https://media.chicagoshining.com/studio/previews/lettered/{OUTPUT_REC}/{i-1}.jpg",
             "assetName": f"{location}-{i}__4x5__fill-crop-v2.jpg",
             "googleDriveFileId": f"1SampleDriveImageFileNumber{i:02d}abcdefgh",
-            "mediaAssetRecordId": f"recSampleAsset{i:02d}AB",
+            "mediaAssetRecordId": f"recSampleAsset{i:02d}A",
         }
         for i in range(1, 5)
     ]
