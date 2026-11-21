@@ -35,6 +35,12 @@ jobs:
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
+      - name: Verify owner-global guidance reaches Python generators #2532
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_owner_generation_guidance.py services/pipeline-runner/tests/test_profile_creative_prompt_integration.py
+
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
