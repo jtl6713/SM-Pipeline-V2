@@ -1,0 +1,125 @@
+name: Exact LA Miami Instagram Story original Meta receipts GET-only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ig-story-1868-2859-exact-owner-getonly.yml'
+      - 'repair/scripts/ig-story-1868-2859-exact-owner-getonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ig-story-1868-2859-exact-owner-getonly.yml'
+      - 'repair/scripts/ig-story-1868-2859-exact-owner-getonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: ig-story-1868-2859-exact-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell syntax and provider mutation exclusion
+        shell: pwsh
+        run: |
+          $f='repair/scripts/ig-story-1868-2859-exact-owner-getonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recyS0BqWsDYjYQTU','recsS0EQuhCTgDe2e','18137012170781129','18111262559246476','IG_STORY_1868_2859_EXACT_GETONLY=','source_writes=0','provider_writes=0')) {
+            if(-not $s.Contains($required)){throw ('required_guard_missing: '+$required)}
+          }
+          foreach($bad in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','api.airtable.com','/media_publish','/media?','airtable.com/v0/','Invoke-Expression')){
+            if($s.Contains($bad)){throw ('prohibited_provider_or_source_mutation: '+$bad)}
+          }
+          if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_PROFILE_variable_prohibited'}
+          Write-Output 'IG_STORY_1868_2859_READONLY_STATIC_PASS'
+  authenticated-original-receipts:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate protected Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ig-1868-2859-auth.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ig-1868-2859-auth.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "STORY_OPS=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops credential unavailable; source and provider unchanged'; exit 1
+      - name: Pin the exact audited script bytes to this merged commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          file=pathlib.Path('repair/scripts/ig-story-1868-2859-exact-owner-getonly.ps1')
+          digest=hashlib.sha256(file.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(c in '0123456789abcdef' for c in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{file.as_posix()}'
+          command=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$sha=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($sha -ne '{digest}'){{throw 'immutable_script_hash_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/ig-1868-2859-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+      - name: Verify exact account owned original LA and Miami Story IDs, no POST
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for n in $(seq 1 15); do
+            code=$(curl -sS --max-time 30 -o /tmp/ig-1868-2859-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $STORY_OPS" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/ig-1868-2859-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then accepted=true; break; fi
+            if [[ "$code" != 409 ]]; then echo "Ops read-only job rejected (HTTP $code)";exit 2;fi
+            sleep 6
+          done
+          if [[ "$accepted" != true ]]; then echo 'Ops busy; provider not queried'; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/ig-1868-2859-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $STORY_OPS" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ig-1868-2859-status.json
+            status=$(jq -r '.job.status // empty' /tmp/ig-1868-2859-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/ig-1868-2859-status.json | grep '^IG_STORY_1868_2859_EXACT_GETONLY=' | tail -1 | sed 's/^[^=]*=//' > /tmp/ig-1868-2859-evidence.json
+              jq -e '.provider_writes==0 and .source_writes==0 and .airtable_ops==0 and .provider_gets>=6' /tmp/ig-1868-2859-evidence.json >/dev/null
+              jq -c '{state,stage,reason,results,provider_gets,provider_writes,source_writes,airtable_ops}' /tmp/ig-1868-2859-evidence.json
+              jq -e '.state=="read_only_verified" and (.results|length)==2 and (.results|all(.verified==true and .scan_complete==true))' /tmp/ig-1868-2859-evidence.json >/dev/null
+              echo 'IG_STORY_1868_2859_EXACT_OWNER_RECEIPTS=PASS'
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              echo 'Original Meta receipt GET-only audit failed closed; no publishing or source changes'
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Meta GET-only receipt audit incomplete; no publishing or source changes';exit 4
+      - name: Preserve sanitized exact-provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ig-story-1868-2859-original-provider-receipts
+          path: /tmp/ig-1868-2859-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
