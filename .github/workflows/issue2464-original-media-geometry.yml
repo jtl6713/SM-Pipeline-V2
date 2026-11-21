@@ -1,0 +1,53 @@
+name: Issue 2464 exact original media geometry GET-only
+on:
+  pull_request:
+    paths:
+      - repair/scripts/issue2464-public-gallery-geometry.py
+      - .github/workflows/issue2464-original-media-geometry.yml
+  push:
+    branches: [main]
+    paths:
+      - repair/scripts/issue2464-public-gallery-geometry.py
+      - .github/workflows/issue2464-original-media-geometry.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2464-original-media-geometry
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check exact read-only script
+        run: |
+          python -m py_compile repair/scripts/issue2464-public-gallery-geometry.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2464-public-gallery-geometry.py').read_text()
+          for k in ['9941','10015','8221','7894','10802','studio/previews','source_writes','provider_writes','aspect_9x16','aspect_4x5']:
+              assert k in s,k
+          for banned in ['requests.post(', 'requests.patch(', 'urlopen(req, data=', 'execute_sql(', 'media_publish','psycopg2','subprocess.run','subprocess.Popen']:
+              assert banned not in s,banned
+          print('issue2464_original_public_geometry_static=PASS')
+          PY
+  media-gets:
+    if: github.event_name != 'pull_request'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check Pillow==11.3.0
+      - name: Inspect exact original public media (GET only)
+        run: python repair/scripts/issue2464-public-gallery-geometry.py
+      - name: Preserve original media proof for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2464-public-original-media-geometry
+          path: /tmp/issue2464-gallery-geometry.json
+          retention-days: 30
+          if-no-files-found: warn
