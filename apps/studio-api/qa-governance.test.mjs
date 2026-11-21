@@ -5,7 +5,7 @@ const actor={id:"admin1",permissions:["qa:write"]},run={runId:"r",status:"Open"}
 test("authorization denies missing permission",()=>assert.throws(()=>requireQaPermission({id:"x",permissions:[]}),/denied/));
 test("run captures trusted UTC and deployments",()=>{let r=beginQaRun({actor,id:"r",catalogRevision:"1",deployment:{worker:"w",ui:"u",runner:"r"},environment:"qa",now:clock});assert.equal(r.createdAtUtc,"2026-10-31T12:00:00.000Z");});
 test("run rejects missing deployment",()=>assert.throws(()=>beginQaRun({actor,id:"r",catalogRevision:"1",deployment:{ui:"u"},environment:"qa"})));
-test("events declare Airtable write authority",()=>{let e=appendQaEvent({actor,run,testId:"t",operation:"ManualResult",key:"key-12345",now:clock});assert.equal(e.writeAuthority,"Airtable");assert.equal(e.appendOnly,true);});
+test("events declare Supabase write authority",()=>{let e=appendQaEvent({actor,run,testId:"t",operation:"ManualResult",key:"key-12345",now:clock});assert.equal(e.writeAuthority,"Supabase");assert.equal(e.appendOnly,true);});
 test("reject destructive operation",()=>assert.throws(()=>appendQaEvent({actor,run,testId:"t",operation:"Delete",key:"key-12345"}),/denied/));
 test("reject event on closed run",()=>assert.throws(()=>appendQaEvent({actor,run:{...run,status:"Closed"},testId:"t",operation:"ManualResult",key:"key-12345"}),/closed/));
 test("waiver needs additional permission",()=>assert.throws(()=>appendQaEvent({actor,run,testId:"t",operation:"Waiver",key:"key-12345"}),/denied/));
