@@ -26,7 +26,12 @@ create table public.studio_qa_runs (
   legacy_row_sha256 text,
   inserted_at_utc timestamptz not null default now(),
   constraint studio_qa_run_id_format check (run_id ~ '^qa-[0-9a-f-]{36}$'),
-  constraint studio_qa_run_environment check (environment in ('production','staging','development')),
+  -- This installation has one live target: production. Historic imported QA
+  -- runs retain their original environment label as immutable provenance.
+  constraint studio_qa_run_environment check (
+    (legacy_record_id is null and environment = 'production')
+    or (legacy_record_id is not null and environment in ('production','staging','development'))
+  ),
   constraint studio_qa_run_status check (
     (legacy_record_id is null and status = 'Open')
     or (legacy_record_id is not null and length(btrim(status)) between 1 and 120)
