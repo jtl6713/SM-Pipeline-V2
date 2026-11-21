@@ -1,0 +1,117 @@
+name: P1 2340 NYC 2627 ambiguous original Story GET-only receipt audit
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p1-2340-nyc2627-story-getonly.yml'
+      - 'repair/scripts/p1-2340-nyc2627-story-getonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p1-2340-nyc2627-story-getonly.yml'
+      - 'repair/scripts/p1-2340-nyc2627-story-getonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: p1-2340-nyc2627-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse script and require no mutation capability
+        shell: pwsh
+        run: |
+          $f='repair/scripts/p1-2340-nyc2627-story-getonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($required in @('vkwvscgisqsbuwagdvtb','P1_2340_2627_OWNED_STORY_GETONLY=','quality_agent_recovery_events','18134595583783117','ambiguous_publish_fence_not_verified','provider_writes=0','source_writes=0','untrusted_meta_pagination','read_only_evidence')){
+            if(-not $s.Contains($required)){throw ('missing_exact_protection: '+$required)}
+          }
+          foreach($forbidden in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','api.airtable.com','/media_publish','/media?','airtable.com/v0/')){
+            if($s.Contains($forbidden)){throw ('write_or_unscoped_provider_call_forbidden: '+$forbidden)}
+          }
+          Write-Output 'P1_2340_2627_STRICT_READONLY_STATIC_PASS'
+  audited-original-status:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing protected Ops endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C";do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/p1-2627-auth.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-2627-auth.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "P1_2627_OPS=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops credential unavailable';exit 1
+      - name: Pin audit PowerShell bytes to merged immutable commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,json,pathlib
+          file=pathlib.Path('repair/scripts/p1-2340-nyc2627-story-getonly.ps1')
+          sha=hashlib.sha256(file.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(c in '0123456789abcdef' for c in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{file.as_posix()}'
+          command=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($hash -ne '{sha}'){{throw 'immutable_source_hash_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/p1-2627-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+      - name: Authenticated original owner history GET only; never replay provider publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for n in $(seq 1 20);do
+            code=$(curl -sS --max-time 30 -o /tmp/p1-2627-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $P1_2627_OPS" -H 'Content-Type: application/json' --data-binary @/tmp/p1-2627-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops audit not accepted ($code)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$accepted" != true ]];then echo 'Ops busy; no GET-only audit launched';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-2627-start.json)
+          for n in $(seq 1 180);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_2627_OPS" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-2627-job.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-2627-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/p1-2627-job.json | grep '^P1_2340_2627_OWNED_STORY_GETONLY=' | tail -1 | sed 's/^P1_2340_2627_OWNED_STORY_GETONLY=//' > /tmp/p1-2627-evidence.json
+              jq -e '.output==2627 and .provider_writes==0 and .source_writes==0 and .airtable_ops==0' /tmp/p1-2627-evidence.json >/dev/null
+              jq -c '{output,state,reason,publish_fence_reserved,account_owned,replacement_container_status,recent_stories_checked,candidate_count,candidates,scan_complete,provider_gets,provider_writes,source_writes}' /tmp/p1-2627-evidence.json
+              jq -e '.state=="read_only_evidence" and .publish_fence_reserved==true and .account_owned==true' /tmp/p1-2627-evidence.json >/dev/null || exit 3
+              echo 'P1_2340_2627_OWNER_GET_ONLY_AUDIT=PASS';exit 0
+            elif [[ "$status" == failed ]];then echo 'GET-only audit failed closed; no publication calls';exit 3;fi
+            sleep 4
+          done
+          echo 'GET-only audit inconclusive; no publication calls';exit 4
+      - name: Save sanitized audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-2340-nyc2627-owned-story-getonly
+          path: /tmp/p1-2627-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
