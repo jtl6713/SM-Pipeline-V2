@@ -26,6 +26,14 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
+      - name: Verify owner-global prompt editor #2532
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-web/assets/profile-admin-creative.js
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
+
       - name: Checkout
         uses: actions/checkout@v6
 
