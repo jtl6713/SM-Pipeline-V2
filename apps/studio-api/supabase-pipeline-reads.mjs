@@ -3560,6 +3560,18 @@ export async function readSupabaseShapedOutput(env, airtableId) {
 }
 
 /**
+ * Exact Supabase Content Item read for P1 #2340 owner-chain verification.
+ * This returns a compatibility-shaped record; its profile link comes from
+ * the canonical content_profiles foreign key, never an Airtable lookup.
+ * An absent or broken relationship is NOT a negative provider receipt.
+ */
+export async function readSupabaseShapedContentItem(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !studioSupabaseConfigured(env)) return null;
+  return readContentRow(env, id);
+}
+
+/**
  * Read the exact Platform Outputs belonging to one Content Item using the
  * Supabase content_item_id foreign key. The former Airtable reciprocal
  * "Platform Outputs" array is not maintained by Supabase SoR.

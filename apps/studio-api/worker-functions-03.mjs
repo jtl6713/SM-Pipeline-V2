@@ -12096,7 +12096,7 @@ export function studioProfileDestinationFieldValue(profile, settingName) {
 }
 /*__STUDIO_WORKER_END:studioProfileDestinationFieldValue__*/
 
-export async function studioActivePipelineSettings(env, names, contextRecord) {
+export async function studioActivePipelineSettings(env, names, contextRecord, options = {}) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
   const profile = await studioPipelineSettingsProfileRecord(env, contextRecord);
@@ -12118,6 +12118,11 @@ export async function studioActivePipelineSettings(env, names, contextRecord) {
     rows = await listSupabasePipelineSettingsByNames(env, uniqueFetch, {
       limit: Math.max(40, uniqueFetch.length + 10),
     }).catch(() => null);
+  }
+  if (options.requireSupabase === true &&
+      (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) ||
+       !Array.isArray(rows))) {
+    throw new Error("Supabase profile-scoped Pipeline Settings unavailable");
   }
   if (!Array.isArray(rows)) {
     rows = await listRecords(env, "Pipeline Settings", {

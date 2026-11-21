@@ -133,6 +133,8 @@ import {
   readSupabasePipelineSetting,
   listSupabasePipelineSettingsByNames,
   readSupabaseShapedOutput,
+  readSupabaseShapedContentItem,
+  readSupabaseContentProfile,
   studioUpsertSettingOnSupabase,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
@@ -10721,35 +10723,43 @@ function exceptionRecoveryRecordIdFromPath(pathname, suffix) {
   if (!RECOVERY_RECORD_ID.test(String(id || ""))) throw new HttpError(400, "Invalid output record ID");
   return id;
 }
-async function exceptionRecoveryReadProvider(env, row) {
+async function exceptionRecoveryReadProvider(env, row, verifiedProfile = null) {
   const platform = String(f(row, "Platform") || "");
   let names = [];
   if (platform === "Facebook" || platform === "Instagram")
     names = ["FACEBOOK_PAGE_ACCESS_TOKEN","FACEBOOK_GRAPH_API_VERSION"];
   else if (platform === "YouTube") names = ["YOUTUBE_API_KEY"];
-  const settings = names.length ? await studioActivePipelineSettings(env,names,row).catch(()=>({})) : {};
+  const strict = Boolean(verifiedProfile);
+  const settings = names.length
+    ? await studioActivePipelineSettings(env,names,verifiedProfile || row,
+      {requireSupabase:strict}).catch(()=>({})) : {};
   return verifyExistingProviderReceipt(row,{settings:{
     ...settings,
-    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
-    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN ||
+      (strict ? "" : env.FACEBOOK_PAGE_ACCESS_TOKEN),
+    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY ||
+      (strict ? "" : env.YOUTUBE_API_KEY),
   }});
 }
 /**
- * Resolve the authoritative Airtable identity chain, never the
- * Platform Output.Content_Profile lookup label:
- * Platform Output.Content_Item -> Content Item.Content_Profile -> Profile.
- * Every read of an output for the autonomous status-only reconciler uses this.
+ * Resolve the authoritative Supabase owner chain, never the legacy
+ * display-only Content_Profile lookup: Output -> Content Item -> Profile.
+ * Missing/mismatched identities fail closed before any provider GET.
  */
 async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId);
+  // P1 #2340: this owner chain is required before any profile-scoped provider
+  // GET. Airtable is no longer an authority; missing Supabase data fails closed.
+  if(studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+    throw new Error("supabase_recovery_owner_chain_required");
+  const row=await readSupabaseShapedOutput(env,recordId);
   if(!row?.id||row.id!==recordId)throw new Error("authoritative_recovery_output_unavailable");
   const contentId=contentIdForRecoveryOutput(row);
   if(!contentId)throw new Error("recovery_content_link_missing_or_ambiguous");
-  const content=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId);
+  const content=await readSupabaseShapedContentItem(env,contentId);
   const links=content?.fields?.Content_Profile;
   if(!Array.isArray(links)||links.length!==1||!RECOVERY_RECORD_ID.test(String(links[0]||"")))
     throw new Error("recovery_profile_link_missing_or_ambiguous");
-  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,links[0]);
+  const profile=await readSupabaseContentProfile(env,links[0]);
   const chain=verifyRecoveryProfileChain(row,content,profile);
   if(!chain.ok)throw new Error(chain.reason||"authoritative_profile_link_unverified");
   return {row:withVerifiedRecoveryProfile(row,chain),profile,profile_id:chain.profile_id};
@@ -10774,7 +10784,8 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
     let scoped;
     try {
       scoped=await studioActivePipelineSettings(env,
-        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile);
+        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile,
+        {requireSupabase:true});
     } catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_instagram_settings_unavailable"};}
     const direct=String(f(source.profile,"Instagram_Business_Account_ID")||"").trim();
     if(direct && direct!==String(scoped.INSTAGRAM_BUSINESS_ACCOUNT_ID||"").trim())
@@ -10787,18 +10798,18 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   let settings;
   try {
     settings=await studioActivePipelineSettings(env,
-      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
+      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile,
+      {requireSupabase:true});
   }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
   // The deployment may keep the uploader authentication key in the existing
   // global Pipeline Setting rather than a Worker binding. This key is only
   // transport authentication: destination URL and channel remain scoped.
-  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET && !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET) {
-    const keys=await listRecords(env,"Pipeline Settings",{limit:2,
-      filterFormula:'AND({Active}=1,{Setting_Name}="YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET")'});
-    if(keys.length!==1 || !String(f(keys[0],"Setting_Value")||"").trim())
-      return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_service_auth_missing"};
-    settings={...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:String(f(keys[0],"Setting_Value")).trim()};
-  }
+  // Do not retrieve uploader credentials from legacy Airtable Pipeline Settings.
+  // Supabase-scoped settings or an existing Worker secret are the only inputs.
+  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET &&
+     !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,
+      evidence:"profile_service_auth_missing"};
   const channel=verifiedRecoveryChannelId(source.profile,settings);
   if(!channel.ok)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
@@ -10837,6 +10848,11 @@ async function appendPublicationRecoveryAudit(env,event) {
     throw new Error("audit_append_readback_failed");
 }
 export async function studioPublicationRecoveryCron(env) {
+  // Do not run a legacy Airtable discovery/PATCH reconciler after the
+  // canonical write source has moved to Supabase. Explicitly fail closed.
+  if (studioWriteSource(env) === "supabase")
+    return {ok:false,disabled:true,reason:"legacy_airtable_recovery_writer_disabled",
+      read_only:true};
   return runPublicationRecovery(env,{
     discover:async options=>{
       const page=await listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{...options,limit:100});
@@ -10871,11 +10887,12 @@ export async function getStudioPublicationRecoveryHistory(request,env) {
 /** Provider GET only. No persisted publication change from this endpoint. */
 export async function getStudioExceptionRecoveryReceipt(request, env) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  const source=await exceptionRecoveryReadVerifiedOutput(env,id);
+  const row=source.row;
   if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
   const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
     ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
-    :await exceptionRecoveryReadProvider(env,row);
+    :await exceptionRecoveryReadProvider(env,row,source.profile);
   let verification=null;
   if(new URL(request.url).searchParams.get("authenticated")==="1") {
     const after=(await exceptionRecoveryReadVerifiedOutput(env,id)).row;
