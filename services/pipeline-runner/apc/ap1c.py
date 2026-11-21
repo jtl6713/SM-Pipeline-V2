@@ -236,6 +236,21 @@ def process_request(
         output["fields"]["Image_Count"] = len(slides)
         result["children_capped"] = True
         result["expected_child_count"] = len(slides)
+    # Even an apparently correct N-of-N view can repeat slide numbers.
+    # Never infer which approved image is the intended winner or send Graph
+    # children in an ambiguous order; preserve all existing slide variants.
+    if ap1c_duplicate_slide_order(slides):
+        _reset_parent(
+            client, output,
+            "QA-IG-AP1C-DUPLICATE-SLIDE-SETS: selected slide order has duplicates. "
+            "Choose the canonical approved gallery before any Graph create.",
+            park_for_quality=True,
+        )
+        return {
+            "processed": True, "needs_children": False,
+            "new_children": 0, "retry_authorized": False,
+            "reason": "duplicate_slide_sets", **result,
+        }
     force_fresh_children = _requires_fresh_children_after_expired_parent(output)
     unstaged = ap1c_unstaged_asset_reason(slides, force_fresh_children=force_fresh_children)
     if unstaged:
