@@ -125,8 +125,17 @@ foreach($x in $t){
   $post=[string]$posted.id
   if($post -notmatch '^\d{12,30}$'){throw 'public_media_id_absent'}
   $row.public_media=$post
-  $proof=GraphGet $post 'id,permalink,timestamp,media_type' $account.headers
-  if([string]$proof.id -ne $post -or [string]$proof.media_type -notin @('VIDEO','IMAGE','CAROUSEL_ALBUM')){throw 'published_media_not_verified'}
+  # The Meta publish POST already returned the real post ID. If its GET edge
+  # is briefly eventual-consistent, retry READ ONLY; never resend media_publish.
+  $proof=$null
+  for($verify=0;$verify -lt 6;$verify++){
+    try{
+      $candidate=GraphGet $post 'id,permalink,timestamp,media_type' $account.headers
+      if([string]$candidate.id -eq $post){$proof=$candidate;break}
+    }catch{}
+    Start-Sleep -Seconds 5
+  }
+  if($null -eq $proof -or [string]$proof.id -ne $post -or [string]$proof.media_type -notin @('VIDEO','IMAGE','CAROUSEL_ALBUM')){throw 'published_media_not_verified'}
   $perma=[string]$proof.permalink
   if($perma -and $perma -notmatch '^https://(www\.)?instagram\.com/'){throw 'public_permalink_not_verified'}
   $bag['P1_2340_Story_Original_Expired_Container_ID']=$x.old
