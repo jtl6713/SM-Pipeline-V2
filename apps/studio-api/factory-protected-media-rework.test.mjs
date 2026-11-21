@@ -285,16 +285,22 @@ test("new proven same-day gallery holds require the same full rework safety gate
   const evidence = {
     issue: 2374, output_number: 10802,
     reason: "fb0_assets_zero_of_four_ready_prior_failed_attempt_no_original_slide_package",
+    source_slide_count: 0,
     provider_calls_performed: 0, no_provider_retry_authorized: true,
     reconstruction_and_fresh_approval_required: true,
+    original_approval_and_errors_preserved: true,
+    historical_schedule_preserved: true,
   };
   const oldMarker = "Studio_Overdue_Preflight_Repair_20261120";
   const newMarker = "Studio_Overdue_UnsafeGallery_Hold_20261121";
   const source = typed({
+    airtable_record_id: "recr4kD97CT3X2JLX",
+    output_number: 10802,
     error_messages: { [newMarker]: evidence },
   });
   const out = shaped({
-    fields: {...shaped().fields, [oldMarker]: undefined, [newMarker]: evidence},
+    id: "recr4kD97CT3X2JLX",
+    fields: {...shaped().fields, Output_ID: 10802, [oldMarker]: undefined, [newMarker]: evidence},
   });
   assert.equal(protectedMediaReworkSourceRow(source), true);
   assert.equal(protectedMediaReworkShapedRecord(out), true);
@@ -317,6 +323,11 @@ test("new proven same-day gallery holds require the same full rework safety gate
   ]) {
     assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,...mismatch}}),false,JSON.stringify(mismatch));
   }
+  assert.equal(protectedMediaReworkSourceRow({...source,output_number:9999}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,airtable_record_id:RECORD}),false);
+  assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,Output_ID:9999}}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:{...evidence,source_slide_count:4}}}),false);
+  assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:{...evidence,provider_calls_performed:1}}}),false);
   assert.equal(protectedMediaReworkSourceRow({...source,error_messages:{[newMarker]:"forged"}}),false);
   assert.equal(protectedMediaReworkShapedRecord({...out,fields:{...out.fields,[newMarker]:"forged"}}),false);
 });
@@ -342,11 +353,22 @@ test("protected Factory cards distinguish original 82 from newly fenced gallery 
   const oldMarker = "Studio_Overdue_Preflight_Repair_20261120";
   const newMarker = "Studio_Overdue_UnsafeGallery_Hold_20261121";
   assert.equal(protectedMediaReworkSummary(shaped()).marker, oldMarker);
-  const fresh = shaped({fields:{
-    ...shaped().fields,
-    [oldMarker]:null,
-    [newMarker]:{reason:"missing original slide package"},
-  }});
+  const fresh = shaped({
+    id:"recYnHtxkSljy762z",
+    fields:{
+      ...shaped().fields,
+      Output_ID:10793,
+      [oldMarker]:null,
+      [newMarker]:{
+        output_number:10793,reason:"missing original slide package",
+        source_slide_count:0,no_provider_retry_authorized:true,
+        reconstruction_and_fresh_approval_required:true,
+        original_approval_and_errors_preserved:true,
+        historical_schedule_preserved:true,
+        provider_calls_performed:0,
+      },
+    },
+  });
   assert.equal(protectedMediaReworkSummary(fresh).marker,newMarker);
   const card = factoryCardFromRow({
     kind:"output",id:RECORD,protected_media_rework:true,
