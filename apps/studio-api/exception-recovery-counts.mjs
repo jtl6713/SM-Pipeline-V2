@@ -18,6 +18,10 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
   let unverifiedRemoteIds=0;
   const overdueRecoveryLanes={};
   const overdueProviderEvidenceLanes={};
+  // Keep every unverified approved/overdue outcome visible, independently of
+  // Home's smaller Past Due and Failed buckets. A misleading Published label,
+  // manual handoff or intentional hold can otherwise disappear from drilldown.
+  const overdueProviderEvidenceCases=[];
   for(const row of rawRows) {
     if(!/^rec[A-Za-z0-9]{14}$/.test(String(row?.id||"")))throw new Error("Bad output identity in canonical census");
     if(seen.has(row.id))throw new Error("Repeated output record in canonical census");
@@ -54,6 +58,20 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     if(providerEvidence) {
       overdueProviderEvidenceLanes[providerEvidence.lane]
         =(overdueProviderEvidenceLanes[providerEvidence.lane]||0)+1;
+      overdueProviderEvidenceCases.push({
+        record_id:row.id,
+        output_id:String(fields.Output_ID||mapped.output_id||"")||null,
+        profile_id:profile==="unassigned"?null:profile,
+        platform,
+        output_type:String(mapped.output_type||fields.Studio_Output_Type||fields.Platform_Output_Type||"")||null,
+        scheduled_at:fields.Scheduled_Post_Date,
+        publish_status:String(fields.Publish_Status||"")||null,
+        held:held,
+        auto_publish_enabled:fields.Auto_Publish_Enabled===true,
+        publish_retry_eligible:fields.Publish_Retry_Eligible===true,
+        provider_reconciliation:providerEvidence,
+        actions_enabled:false,
+      });
     }
     const remoteId=fields.Platform_Post_ID||fields.Platform_Media_ID||fields.YouTube_Video_ID||"";
     const savedReceipt=Boolean(fields.Published_At||fields.Platform_Post_URL||fields.Manual_Published_URL);
@@ -133,6 +151,15 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     unverified_remote_ids:unverifiedRemoteIds,
     overdue_recovery_lanes:overdueRecoveryLanes,
     overdue_provider_evidence_lanes:overdueProviderEvidenceLanes,
+    // Separate output-by-output audit from Home exception pagination. In
+    // particular, a contradictory "Published" label does not mean a receipt.
+    overdue_provider_evidence_count:overdueProviderEvidenceCases.length,
+    overdue_provider_evidence_cases:overdueProviderEvidenceCases.sort((a,b)=>
+      Date.parse(a.scheduled_at)-Date.parse(b.scheduled_at)
+      ||Number(a.output_id||0)-Number(b.output_id||0)
+      ||a.record_id.localeCompare(b.record_id)
+    ).slice(0,EXCEPTION_CENSUS_MAX_CASES),
+    overdue_provider_evidence_cases_truncated:overdueProviderEvidenceCases.length>EXCEPTION_CENSUS_MAX_CASES,
     snapshot_parity_with_home_widget:"not_proven_without_matching_generation",
     read_only:true,
   };
