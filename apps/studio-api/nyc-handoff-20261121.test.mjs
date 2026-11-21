@@ -82,7 +82,13 @@ test("last-two v3 recovery is exact, one-shot, and never repeats verified owner 
  assert.match(body,/const lastTwo = \["recF11iJFCPcRbGsk", "recNHXsBTfgfuagts"\]/);
  assert.match(body,/NYC_20261121_EXACT_HANDOFF\.find/);
  assert.match(body,/final-two-v3/);
- assert.match(body,/v3_already_attempted/);
+ assert.match(body,/v4_already_attempted/);
+ assert.match(body,/v3_outcome_not_exact_not_found/);
+ assert.match(body,/licensed_music_asset_failed_preflight/);
+ assert.match(body,/original_missing_music_id/);
+ assert.match(body,/music_id: musicId/);
+ assert.match(body,/v3Previous\?\.status !== "failed_no_auto_retry"/);
+ assert.match(body,/String\(v3Previous\?\.error \|\| ""\) !== "NOT_FOUND"/);
  assert.match(body,/prior_verified_fanout_needs_investigation/);
  assert.match(body,/prior_v2_verified_fanout_needs_investigation/);
  assert.match(body,/exactNycHandoffPreflight/);

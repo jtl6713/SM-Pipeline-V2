@@ -11227,8 +11227,21 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
   if (!target) return { skipped: "unrecognized_incident_request" };
   const firstAttemptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
   const priorVersionKey = `studio/recovery/nyc-20261121/sparse-patch-v2/${target.request}.json`;
-  const receiptKey = `studio/recovery/nyc-20261121/final-two-v3/${target.request}.json`;
-  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v3_already_attempted" };
+  const failedV3Key = `studio/recovery/nyc-20261121/final-two-v3/${target.request}.json`;
+  const receiptKey = `studio/recovery/nyc-20261121/licensed-music-v4/${target.request}.json`;
+  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v4_already_attempted" };
+  // No replay of a previously successful or uncertain attempt. EXACT v3
+  // must have failed before outputs on the proven missing music-record GET.
+  const v3Object = await env.STUDIO_MEDIA.get(failedV3Key);
+  if (!v3Object) return { request: target.request, skipped: "v3_missing_no_retry" };
+  let v3Previous;
+  try { v3Previous = JSON.parse(await v3Object.text()); }
+  catch { return { request: target.request, skipped: "v3_unreadable_no_retry" }; }
+  if (v3Previous?.status !== "failed_no_auto_retry"
+      || String(v3Previous?.error || "") !== "NOT_FOUND"
+      || v3Previous?.request !== target.request
+      || Number(v3Previous?.expected) !== target.expected)
+    return { request: target.request, skipped: "v3_outcome_not_exact_not_found" };
   // Preserve all prior receipts. If an earlier receipt claimed verified
   // outputs, a subsequent zero-output count would be a destructive anomaly,
   // not permission to regenerate; hold for investigation.
@@ -11268,6 +11281,26 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
   }
   const reason = exactNycHandoffPreflight({ target, request: requestRecord, idea, parent, rows });
   if (reason) return { request: target.request, skipped: reason };
+  // The original selected music recB16KVhLkAsh7rj was absent from the
+  // authoritative Supabase media catalog. The two exact PRs were patched
+  // transactionally to this existing Adobe Stock licensed, unrestricted
+  // soundtrack while preserving the original music ID and source photos in
+  // an incident audit. Never run if the operator changed the selection.
+  const musicId = "rectuNg9zTiPiF81G";
+  const selected = f(requestRecord, "Selected_Music_Asset");
+  if (!Array.isArray(selected) || selected.length !== 1 || selected[0] !== musicId)
+    return { request: target.request, skipped: "licensed_music_selection_changed" };
+  let music;
+  try { music = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, musicId); }
+  catch { return { request: target.request, skipped: "licensed_music_asset_read_unavailable" }; }
+  if (String(f(music, "Media_Class") || "") !== "Audio"
+      || String(f(music, "Asset_Role") || "") !== "Music"
+      || String(f(music, "Asset_Status") || "") !== "Available"
+      || String(f(music, "Rights_Status") || "") !== "Licensed"
+      || Boolean(f(music, "Do_Not_Use"))
+      || !String(f(music, "Google Drive File ID") || "").trim()
+      || (Array.isArray(f(music, "Content_Profile")) && f(music, "Content_Profile").length))
+    return { request: target.request, skipped: "licensed_music_asset_failed_preflight" };
   // A partially committed fanout can have real Platform Outputs even when
   // Phase-6 PRO FKs are hollow. Checking only the PRO link would duplicate
   // those real outputs. Verify the ORIGINAL parent UUID's complete PO inventory.
@@ -11282,10 +11315,12 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
       existing_count: existingOutputs.length };
   }
   const started = new Date().toISOString();
-  const receipt = { schema: "studio.nyc-20261121-final-two-v3.1", request: target.request,
+  const receipt = { schema: "studio.nyc-20261121-licensed-music-v4.1", request: target.request,
     idea: target.idea, content: target.content, expected: target.expected, started_at: started,
     previous_receipt_status: earlierStatus, previous_receipt_error: earlierError,
-    v2_receipt_status: v2Status, publish_actions: 0, schedule_actions: 0, status: "attempted" };
+    v2_receipt_status: v2Status, v3_receipt_status: v3Previous.status, v3_error: v3Previous.error,
+    original_missing_music_id: "recB16KVhLkAsh7rj", music_id: musicId,
+    licensed_music_verified: true, publish_actions: 0, schedule_actions: 0, status: "attempted" };
   // R2 durable receipt precedes side effects. A failure here means NO mutation.
   await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
     httpMetadata: { contentType: "application/json" },
