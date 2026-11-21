@@ -11218,8 +11218,24 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
     return { skipped: "authority_unavailable" };
   const target = selectExactNycHandoffSlot(scheduledAtMs);
   if (!target) return { skipped: "outside_incident_window" };
-  const receiptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
-  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "already_attempted" };
+  const firstAttemptKey = `studio/recovery/nyc-20261121/exact/${target.request}.json`;
+  const receiptKey = `studio/recovery/nyc-20261121/sparse-patch-v2/${target.request}.json`;
+  if (await env.STUDIO_MEDIA.get(receiptKey)) return { request: target.request, skipped: "v2_already_attempted" };
+  // Prior terminal receipts remain immutable. Only the exact confirmed
+  // sparse Content PATCH failure is eligible for ONE repair-version retry.
+  // NOT_FOUND and ambiguous partial output cases remain held for diagnosis.
+  const originalObject = await env.STUDIO_MEDIA.get(firstAttemptKey);
+  if (originalObject) {
+    let previous;
+    try { previous = JSON.parse(await originalObject.text()); }
+    catch { return { request: target.request, skipped: "unreadable_first_receipt" }; }
+    if (previous?.status !== "failed_no_auto_retry") {
+      return { request: target.request, skipped: "previous_outcome_not_retryable" };
+    }
+    if (String(previous?.error || "") !== "Studio content PATCH was not saved to Supabase; no status advanced.") {
+      return { request: target.request, skipped: "previous_failure_not_content_sparse_patch" };
+    }
+  }
 
   // Each ID is from one of the two original NYC batches. An unrelated
   // request, revision, source identity or partial fanout is never recovered.
@@ -11250,7 +11266,7 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
       existing_count: existingOutputs.length };
   }
   const started = new Date().toISOString();
-  const receipt = { schema: "studio.nyc-20261121-handoff-once.1", request: target.request,
+  const receipt = { schema: "studio.nyc-20261121-sparse-content-recovery-v2.1", request: target.request,
     idea: target.idea, content: target.content, expected: target.expected, started_at: started,
     publish_actions: 0, schedule_actions: 0, status: "attempted" };
   // R2 durable receipt precedes side effects. A failure here means NO mutation.
