@@ -3,6 +3,7 @@ import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-pack
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { heldRetryPendingDisposition } from "./held-retry-pending-disposition.mjs";
+import { metaAutoPublishDisabledState } from "./meta-auto-publish-status.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -2333,6 +2334,12 @@ export function normalizedOutputState(record) {
 
   // Meta action throttling is a timed automatic retry, not a terminal failure.
   if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
+
+  // Facebook/Instagram disabling of the publisher is an internal configuration
+  // or provider-reconciliation issue, NOT proof that the owner must post manually.
+  // Keep genuine manual methods and fallback paths in their original classification.
+  const metaDisabledState = metaAutoPublishDisabledState(fields);
+  if (metaDisabledState) return metaDisabledState;
 
   // Auto-publish was never turned on and nothing has been sent. That is a manual
   // handoff, not a late or failed job.
