@@ -80,6 +80,7 @@ foreach($x in $t){
     $bag['P1_2340_Story_Replacement_Create_Fence']=$ek
     $updated=Invoke-RestMethod ($su+'/rest/v1/platform_outputs?output_number=eq.'+$x.n+'&airtable_record_id=eq.'+$x.rid+'&publish_status=eq.Failed&updated_at=eq.'+[uri]::EscapeDataString([string]$o.updated_at)) -Headers ($h+@{Prefer='return=representation'}) -Method Patch -ContentType 'application/json' -Body (@{error_messages=$bag}|ConvertTo-Json -Compress -Depth 75) -TimeoutSec 30
     if(@($updated).Count -ne 1){throw 'new_container_not_saved_no_publish'}
+  }
   $row.state='poll_original_replacement'
   $ready=$false;$readErrors=0
   for($i=0;$i -lt 12;$i++){
