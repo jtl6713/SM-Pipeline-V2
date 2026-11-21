@@ -49,6 +49,19 @@ jobs:
             exit 1
           fi
           echo 'PASS: encrypted credential envelope is retired'
+      - name: Inventory residual Airtable PAT references without exposing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          pat="AIR"; pat+="TABLE_PAT"
+          token="AIR"; token+="TABLE_TOKEN"
+          {
+            git grep -l -F "$pat" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' || true
+            git grep -l -F "$token" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' || true
+          } | sort -u > /tmp/legacy-pat-workflows.txt
+          echo "legacy_pat_workflow_file_count=$(wc -l </tmp/legacy-pat-workflows.txt)"
+          cat /tmp/legacy-pat-workflows.txt
+          echo 'These references must be classified before revoking live provider credentials.'
       - name: Block direct Airtable HTTP in executable maintenance and runner bootstrap scripts
         shell: bash
         run: |
