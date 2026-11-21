@@ -143,3 +143,61 @@ The live production QA tables remain absent pending independently verified
 backup/rollback and migration authorization. No six-hour Airtable quiet-window
 certification can start until the separate production cutover and its final
 source export have completed.
+
+
+## Single live production environment and verified backup receipts
+
+**This installation has one runtime environment, production.**
+The currently connected Supabase project `vkwvscgisqsbuwagdvtb` is the
+**live production project**, regardless of its legacy `-dev` display name.
+Do NOT create another project or a preview/staging branch. The historical QA
+run's `development` string is **source provenance**, not a live target.
+The proposed SQL now enforces `environment='production'` on all **new**
+native QA runs while permitting imported historical labels.
+
+### Backup evidence before any schema mutation
+
+An offline-reviewed, GET-only operator helper is staged as
+`repair/scripts/qa_production_backup_inventory.py`. It uses the official
+[Supabase Management API backup list](https://supabase.com/docs/reference/api/v1-list-all-backups)
+to inspect backup receipt timestamps for **this exact production project**.
+It requires a private Management API access token scoped for `backups_read`;
+this is **not** the Supabase database service-role key. A missing token,
+incorrect project, malformed inventory, failed or stale backup fails closed.
+No token is recorded, and the tool makes only a single HTTP GET.
+
+A positive receipt demonstrates only that Supabase *reported* a completed
+backup; the script ALWAYS reports `restore_test_verified:false`,
+`rollback_approved:false`, `schema_apply_authorized:false` and
+`worker_deploy_authorized:false`. It is **not** evidence of a successful
+restore. If the token is unavailable, an authorized reviewer can inspect
+the existing production project under Supabase **Database > Backups** and
+record a private, timestamped receipt and maintenance approval. Never
+pretend that automatic backups are present merely because the project
+is healthy or because Supabase advertises backup support.
+
+### In-place reversible rollout without a second environment
+
+1. Prove a recent production backup exists and document the recovery window,
+   data-loss exposure and the exact production Worker version/binding snapshot.
+2. Confirm the reviewed additive schema is isolated to
+   `public.studio_qa_runs`, `public.studio_qa_events` and the immutable event
+   trigger function. Ensure protected QA RLS/service-role grants are correct.
+3. Freeze the exact complete Airtable QA source export (currently one run
+   and one event), independently count/hash it, then run a separately approved
+   append-only import and private full Supabase readback. Do not apply a
+   destructive schema conversion to any existing production table.
+4. Run authenticated QA read/list/replay/idempotency/human approval tests with
+   provider publishing disabled. The real Worker release gate remains blocked
+   until evidence has been independently reviewed.
+5. Deploy the new Worker with its existing exact binding contract and
+   **retain the prior production Worker deployment as the application rollback
+   point**. On a failed canary, restore that prior Worker deployment and halt;
+   do not drop the new QA tables, delete imported records, or delete Airtable
+   credentials during rollback. Imported history is immutable.
+6. Only after the new application is healthy and past rollout changes end,
+   start the six-hour all-source zero Airtable egress observation. Any Airtable
+   source export or credential use resets the quiet-window eligibility.
+
+This note is planning only. It does not claim that a backup was listed,
+that rollback was proven, or that a live migration was performed.
