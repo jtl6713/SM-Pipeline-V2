@@ -1057,7 +1057,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
     for (const outputCall of outputCalls) {
       assert.equal(outputCall.prefer, "count=none");
       assert.match(outputCall.href, /content_profile_id=eq\./);
-      assert.match(outputCall.href, /do_not_publish=eq\.false/);
+      assert.match(outputCall.href, /or=\(do_not_publish\.eq\.false,publish_status\.eq\.Failed,output_status\.eq\.Failed,render_status\.eq\.Failed\)/);
       assert.match(outputCall.href, /output_status\.is\.null/);
       assert.match(outputCall.href, /output_status\.neq\.Published/);
       assert.match(outputCall.href, /output_status\.neq\.Cancelled/);
