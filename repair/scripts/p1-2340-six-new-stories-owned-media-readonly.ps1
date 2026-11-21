@@ -130,7 +130,7 @@ try {
     $rr=[ordered]@{
       output=$t.n;market=$t.profile;account_owned=$true;stories_scanned=@($a.stories).Count;
       story_scan_complete=[bool]$a.scan_complete;timed_video_candidates=$within.Count;
-      compared=0;matching_original_story_ids=@();exact_video_verified=$false;
+      compared=0;matching_original_story_ids=@();frame_metrics=@();exact_video_verified=$false;
       conclusion='not_started'
     }
     if(-not $a.scan_complete){
@@ -157,13 +157,17 @@ try {
           $dl=(Get-Item $dst).Length
           if($dl -lt 100000 -or $dl -gt 104857600){throw 'remote_video_size_untrusted'}
           $match=$true
+          $metrics=@()
           foreach($sec in @(1,3)){
             $x=BytesAt $src $sec (Join-Path $tmp ($t.n+'-orig-'+$sec+'.raw'))
             $y=BytesAt $dst $sec (Join-Path $tmp ($t.n+'-'+$story.id+'-'+$sec+'.raw'))
             [double]$diff=0
             for($i=0;$i -lt 7168;$i++){$diff += [math]::Abs([int]$x[$i]-[int]$y[$i])}
-            if($diff/(7168*255.0) -gt 0.16){$match=$false}
+            $mae=[math]::Round($diff/(7168*255.0),5)
+            $metrics+=@{second=$sec;normalized_mae=$mae}
+            if($mae -gt 0.05){$match=$false}
           }
+          $rr.frame_metrics+=@{story_id=$story.id;frames=$metrics}
           $rr.compared++
           if($match){$rr.matching_original_story_ids+=($story.id)}
         }
