@@ -16,6 +16,6 @@ test("date, group size and paging controls are wired", () => {
  assert.ok(ui.includes("has_more: false"));
 });
 test("legacy rolling seven-day grid hidden without removing publishing safeguards", () => {
- assert.match(html, /#pipelineScheduleOverview\\{display:none!important\\}/);
+ assert.ok(html.includes("#pipelineScheduleOverview{display:none!important}"));
  assert.ok(!ui.includes("publish-now"));
 });
