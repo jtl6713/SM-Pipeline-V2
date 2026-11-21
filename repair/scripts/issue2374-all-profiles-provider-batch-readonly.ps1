@@ -81,6 +81,24 @@ function Norm([string]$txt){
   if(-not $txt){return ''}
   return ([regex]::Replace(($txt -replace '\u200B','' -replace '\u00a0',' ').ToLowerInvariant(),'\s+',' ').Trim())
 }
+# Caption similarity across a Reel and a Story proves neither story delivery
+# nor carousel publication. Only the SAME provider-native format can advance
+# to even a candidate receipt, and every candidate still needs final GET proof.
+function SameProviderFormat([string]$outputType,$remotePost){
+  $edge=[string]$remotePost.edge
+  $url=[string]$remotePost.url
+  $kind=[string]$remotePost.kind
+  $product=[string]$remotePost.product
+  switch($outputType){
+    'Instagram Story' {return ($edge -eq 'stories' -and $product -eq 'STORY')}
+    'Instagram Carousel' {return ($edge -eq 'media' -and $kind -eq 'CAROUSEL_ALBUM' -and $url -match '/p/')}
+    'Instagram Reel' {return ($edge -eq 'media' -and $kind -eq 'VIDEO' -and ($product -eq 'REELS' -or $url -match '/reel/'))}
+    'Facebook Story' {return ($edge -eq 'stories')}
+    'Facebook Reel' {return ($edge -eq 'video_reels')}
+    'Facebook Photo Set' {return ($edge -eq 'published_posts')}
+    default {return $false}
+  }
+}
 $remote=@{};$coverage=@()
 foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
   $pr=$prefixes[$city]
@@ -119,6 +137,7 @@ foreach($city in @('Chicago','Los Angeles','Miami','New York City')){
             url=[string]$m.permalink
             timestamp=[string]$(if($m.timestamp){$m.timestamp}elseif($m.created_time){$m.created_time}else{$m.updated_time})
             kind=[string]$m.media_type
+            product=[string]$m.media_product_type
             edge=$edge
           }
         }
@@ -142,13 +161,17 @@ foreach($o in $targets){
   $needles=@()
   if($body.Length -ge 85){$needles+= $body.Substring(0,[Math]::Min(115,$body.Length))}
   if($expected.Length -ge 85){$needles+= $expected.Substring(0,[Math]::Min(115,$expected.Length))}
-  $candidates=@()
+  $candidates=@();$wrongFormat=0
   if($remote.ContainsKey($scope) -and $needles.Count -gt 0){
     foreach($m in @($remote[$scope])){
       if(-not $m.text -or $m.text.Length -lt 85){continue}
       $match=($m.text -eq $body -or $m.text -eq $expected)
       if(-not $match){foreach($needle in $needles){if($m.text.StartsWith($needle)){$match=$true;break}}}
-      if($match){$candidates+=@{remote_id=$m.id;permalink=$m.url;timestamp=$m.timestamp;edge=$m.edge;media_type=$m.kind}}
+      if($match){
+        if(SameProviderFormat ([string]$o.platform_output_type) $m){
+          $candidates+=@{remote_id=$m.id;permalink=$m.url;timestamp=$m.timestamp;edge=$m.edge;media_type=$m.kind}
+        }else{$wrongFormat++}
+      }
     }
   }
   # A remote post can occur on multiple Facebook edges. De-duplicate IDs.
@@ -168,7 +191,7 @@ foreach($o in $targets){
   $results+=@{
     output=[int]$o.output_number;profile=$city;platform=[string]$o.platform
     type=[string]$o.platform_output_type;status=$status
-    candidate_count=$uniq.Count;candidates=$uniq
+    candidate_count=$uniq.Count;candidates=$uniq;cross_format_caption_hits=$wrongFormat
     held=($o.do_not_publish -eq $true);retry_enabled=($o.publish_retry_eligible -eq $true)
   }
 }
@@ -181,6 +204,7 @@ foreach($r in $unique){
 }
 $counts=@{}
 foreach($r in $results){if(-not $counts.ContainsKey($r.status)){$counts[$r.status]=0};$counts[$r.status]++}
+$crossFormat=@($results|Where-Object{$_.cross_format_caption_hits -gt 0}|ForEach-Object{@{output=$_.output;profile=$_.profile;platform=$_.platform;type=$_.type;other_format_caption_hits=$_.cross_format_caption_hits}})
 $public=@($results|Where-Object{$_.candidate_count -gt 0}|ForEach-Object{
   @{output=$_.output;profile=$_.profile;platform=$_.platform;type=$_.type;status=$_.status;candidates=$_.candidates}
 })
@@ -189,8 +213,8 @@ $report=@{
   source='production_supabase';read_only=$true;output_writes=0;provider_writes=0;publish_calls=0
   scan_at=$utc;targets=$targets.Count;graph_get_calls=$script:graphCalls
   provider_coverage=$coverage;counts=$counts
-  provider_candidates=$public;all_output_dispositions=@($results|ForEach-Object{
-    @{output=$_.output;profile=$_.profile;platform=$_.platform;type=$_.type;status=$_.status;candidate_count=$_.candidate_count;held=$_.held}
+  provider_candidates=$public;cross_format_caption_reuse=$crossFormat;all_output_dispositions=@($results|ForEach-Object{
+    @{output=$_.output;profile=$_.profile;platform=$_.platform;type=$_.type;status=$_.status;candidate_count=$_.candidate_count;cross_format_caption_hits=$_.cross_format_caption_hits;held=$_.held}
   })
 }
 # Do not print source captions, tokens, raw settings, worker auth or API URLs.
