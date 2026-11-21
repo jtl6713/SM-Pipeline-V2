@@ -58,11 +58,11 @@ export function evaluateAssertion(testId,observation) {
       reason:"Validated versioned QA case schema and uniqueness",evidence:observation};
   }
   if(definition.kind==="canonical-qa-run") {
-    if(observation.source!=="Airtable" || !observation.expectedRunId || !observation.recordId ||
+    if(observation.source!=="Supabase" || !observation.expectedRunId || !observation.recordId ||
        typeof observation.runId!=="string" || typeof observation.createdAtUtc!=="string")
       return {status:"Blocked",reason:"Canonical QA run evidence missing",evidence:observation};
     return {status:observation.runId===observation.expectedRunId?"Pass":"Fail",
-      reason:"Observed exact QA run in canonical Airtable",evidence:observation};
+      reason:"Observed exact QA run in canonical Supabase",evidence:observation};
   }
   if(definition.kind==="mirror-parity") {
     if(!Array.isArray(observation.comparisons)||!observation.comparisons.length||observation.comparisons.length>definition.maxObservations) return {status:"Blocked",reason:"Missing or out-of-budget comparisons",evidence:observation};
