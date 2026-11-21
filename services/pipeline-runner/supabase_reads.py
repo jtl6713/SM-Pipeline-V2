@@ -416,13 +416,14 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     fields.update(shaped["fields"])
     shaped = {"id": record_id, "fields": fields}
     if table_id == PLATFORM_OUTPUTS_TABLE:
-        # TikTok TTD1 requires a descriptive title before creating a remote
-        # draft. Factory outputs can have a blank typed output_title while
-        # their authoritative parent Content Item has the correct title.
-        # Derive it from the Supabase FK join without querying Airtable or
-        # weakening the numeric Output_ID guard.
+        # TikTok TTD1 and YouTube YT0 require an output title. Factory
+        # outputs may have a blank typed output_title even when the exact
+        # linked authoritative Content Item has its approved title. Derive
+        # the read-side title from the Supabase FK join only. Never override
+        # a nonblank output title, change the write authority, or infer from
+        # unrelated sibling outputs.
         if (
-            str(shaped["fields"].get("Platform") or "").strip().casefold() == "tiktok"
+            str(shaped["fields"].get("Platform") or "").strip().casefold() in {"tiktok", "youtube"}
             and not str(shaped["fields"].get("Output_Title") or "").strip()
         ):
             parent = row.get("content_items")
