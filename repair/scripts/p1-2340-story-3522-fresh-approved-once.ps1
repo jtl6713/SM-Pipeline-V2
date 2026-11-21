@@ -16,8 +16,12 @@ try {
  $o=$a[0];$e=$o.error_messages
  $asset=[string]$o.publish_asset_url
  if($o.airtable_record_id -ne $rid -or $o.platform -ne 'Instagram' -or $o.platform_output_type -ne 'Instagram Story' -or $o.review_status -ne 'Approved' -or $o.output_status -ne 'Approved for Publishing' -or $o.publish_status -ne 'Failed' -or $o.publish_method -ne 'Automated' -or $o.do_not_publish -ne $true -or $o.auto_publish_enabled -ne $false -or $o.publish_retry_eligible -ne $false -or $o.published_at -or $o.platform_post_url -or [string]$e.'IG_Story_Container_ID' -ne $old -or [string]$e.'IG_Story_Status' -ne 'Failed' -or [string]$e.'IG_Story_Post_ID' -or [string]$e.'Backlog_20261120_IG_Story_Provider_Status' -ne 'EXPIRED' -or $asset -ne 'https://media.chicagoshining.com/studio/previews/reco2Iix0eaXJHMGD/current.mp4'){throw 'approved_replacement_preflight_failed'}
- $oldHold=[string]$e.'Studio_Overdue_Failed_IG_Story_Fence_20261120'
- if(-not $oldHold -or $oldHold -notmatch '"previous_do_not_publish": false' -or $oldHold -notmatch '"previous_auto_publish_enabled": true'){throw 'original_hold_origin_unconfirmed'}
+ $oldHold=$e.'Studio_Overdue_Failed_IG_Story_Fence_20261120'
+ if($null -eq $oldHold -or $oldHold.previous_do_not_publish -ne $false -or
+    $oldHold.previous_auto_publish_enabled -ne $true -or
+    [string]$oldHold.provider_container_preserved -ne $old){
+    throw 'original_hold_origin_unconfirmed'
+ }
  $profile=Invoke-RestMethod ($url+'/rest/v1/content_profiles?id=eq.'+$o.content_profile_id+'&select=market_name&limit=2') -Headers $h -Method Get -TimeoutSec 20
  if(@($profile).Count -ne 1 -or [string]$profile[0].market_name -ne 'Chicago'){throw 'profile_mismatch'}
  $head=Invoke-WebRequest $asset -Method Head -UseBasicParsing -TimeoutSec 35
