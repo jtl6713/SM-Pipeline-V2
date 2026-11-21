@@ -52,17 +52,28 @@ export function protectedMediaReworkSummary(record) {
   if (!protectedMediaReworkShapedRecord(record)) return null;
   const fields = record.fields;
   const evidence = fields[PROTECTED_MEDIA_REWORK_MARKER];
+  const previewSequence = isObject(
+    fields.Studio_Recovery_IG_Original_Preview_Gallery_Verified_20261121
+  );
+  const incompleteOriginal = isObject(
+    fields.Studio_Recovery_IG_Original_Preview_Gallery_Needs_Rebuild_20261121
+  );
   const verifiedSource = Boolean(
     isObject(fields.Studio_Recovery_Source_Gallery_Verified_20261121)
       || isObject(fields.Studio_Recovery_IG_Source_Gallery_Verified_20261121)
+      || previewSequence
   );
   return {
     media_rework: true,
     source_inventory_verified: verifiedSource,
     stage: String(evidence.stage || "Creative package repair").slice(0, 100),
-    next_step: verifiedSource
-      ? "Existing source images verified. Complete platform staging, inspect preview and request fresh Factory approval."
-      : "Rebuild or reconcile the original media package, inspect preview and request fresh Factory approval.",
+    next_step: previewSequence
+      ? "Original public preview sequence verified, but no Final Approved slide records. Reconstruct the exact creative gallery and stage only after fresh Factory review."
+      : incompleteOriginal
+        ? "Original source folder incomplete or wrong aspect. Rebuild the 4:5 gallery and obtain fresh Factory approval."
+        : verifiedSource
+          ? "Existing source images verified. Complete platform staging, inspect preview and request fresh Factory approval."
+          : "Rebuild or reconcile the original media package, inspect preview and request fresh Factory approval.",
     can_approve: false,
     can_retry: false,
     can_publish: false,
