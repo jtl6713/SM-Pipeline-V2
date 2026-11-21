@@ -1,5 +1,6 @@
 # #2340: independent public owner verification of NYC #4785 manual TikTok post.
-# Only source, creator identity and public oEmbed GET; never re-init/re-publish.
+# Source, creator identity, public oEmbed GET and exact owned TikTok Display API video query.
+# The Display API uses HTTP POST for a read-only video lookup; no media create or publish.
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $r=[ordered]@{
@@ -7,7 +8,7 @@ $r=[ordered]@{
  source_manual_completed=$false;original_draft_changed=$false
  source_public_post_id='';oembed_public_post_id='';oembed_owner_verified=$false
  provider_public_receipt_verified=$false;exact_approved_media_match_verified=$false
- provider_gets=0;provider_writes=0;output_writes=0;airtable_operations=0
+ provider_gets=0;display_api_query_calls=0;owned_video_owned=$false;owned_video_id='';provider_writes=0;output_writes=0;airtable_operations=0
  reason='not_started';stage='preflight'
 }
 try {
@@ -48,7 +49,7 @@ try {
   $x=$item.payload
   if([string]$x.source -ne 'pipeline' -or [string]$x.Active -ne 'True'){continue}
   $n=[string]$x.Setting_Name
-  if(@('NYC_TIKTOK_HANDLE','NYC_TIKTOK_WORKER_BASE_URL') -contains $n){
+  if(@('NYC_TIKTOK_HANDLE','NYC_TIKTOK_WORKER_BASE_URL','NYC_TIKTOK_PIPELINE_SECRET') -contains $n){
     if($cfg.ContainsKey($n)){throw 'duplicate_active_credential_config'}
     $cfg[$n]=[string]$x.Setting_Value
   }
@@ -86,8 +87,22 @@ try {
     (-not $authorFromUrl -or $authorFromUrl -eq $expected))
  $r.oembed_author_handle=if($author -match '^[a-z0-9._]{2,40}$'){$author}else{'unavailable'}
  $r.oembed_author_url_handle=if($authorFromUrl -match '^[a-z0-9._]{2,40}$'){$authorFromUrl}else{'unavailable'}
- $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.oembed_owner_verified)
- $r.reason=if($r.provider_public_receipt_verified){'existing_manual_public_post_id_and_creator_verified_media_match_not_proven'}else{'public_id_or_creator_not_correlated_no_retry'}
+ # oEmbed often omits author fields; require authenticated original-account
+ # TikTok Display API exact-video ownership instead of trusting public embeds.
+ if($returned -ne $postId){throw 'public_link_video_id_mismatch'}
+ $ownerSecret=[string]$cfg.NYC_TIKTOK_PIPELINE_SECRET
+ if(-not $ownerSecret){throw 'owned_video_secret_missing'}
+ $r.stage='exact-owned-video-analytics-query'
+ $r.display_api_query_calls=1
+ $payload=@{video_ids=@($postId)}|ConvertTo-Json -Compress -Depth 4
+ $owned=Invoke-RestMethod ($base+'/tiktok/analytics/videos') -Method Post -Headers @{'X-Pipeline-Secret'=$ownerSecret} -ContentType 'application/json' -Body $payload -TimeoutSec 45
+ if($owned.ok -ne $true -or $owned.source -ne 'tiktok-display-api'){throw 'owned_video_provider_unavailable'}
+ $videos=@($owned.videos)
+ if($videos.Count -ne 1 -or [string]$videos[0].id -ne $postId){throw 'exact_owned_public_video_not_returned'}
+ $r.owned_video_owned=$true
+ $r.owned_video_id=[string]$videos[0].id
+ $r.provider_public_receipt_verified=($returned -eq $postId -and $r.owner_verified -and $r.owned_video_owned)
+ $r.reason=if($r.provider_public_receipt_verified){'original_manual_public_post_id_exact_tiktok_owned_account_verified_media_fingerprint_unverified'}else{'owned_video_identity_not_verified_no_retry'}
  $r.stage='completed'
 }catch{
  $known=@('source_not_supabase','runner_config_unavailable','wrong_source_project','original_output_missing_or_duplicate','source_manual_receipt_drift','profile_mismatch','duplicate_active_credential_config','configured_tiktok_owner_mismatch','creator_oauth_owner_not_verified')

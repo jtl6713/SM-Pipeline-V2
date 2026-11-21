@@ -1,4 +1,4 @@
-name: P1 2340 NYC4785 manually published public post owner GET audit
+name: P1 2340 NYC4785 manually published exact TikTok owned-video proof
 on:
   pull_request:
     paths:
@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify exact original manual post and GET-only parser constraints
+      - name: Verify exact original manual post and sole TikTok read-only Display API query
         shell: pwsh
         run: |
           $file='repair/scripts/p1-2340-nyc4785-public-post-getonly.ps1'
@@ -28,14 +28,14 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
           $src=Get-Content -Raw $file
-          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','oembed_author_handle','oembed_author_url_handle','authorUri.Host','public-saved-url-oembed-get','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recDpfbqDdQjCAgNo','7710614609517923615','nyshining8','oembed','oembed_author_handle','oembed_author_url_handle','authorUri.Host','public-saved-url-oembed-get','exact-owned-video-analytics-query','NYC_TIKTOK_PIPELINE_SECRET','video_ids','tiktok-display-api','owned_video_owned','display_api_query_calls','provider_writes=0','output_writes=0','provider_gets=0','airtable_operations=0')){
             if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
           }
-          if($src.Contains('-Method Post') -or $src.Contains('Invoke-RestMethod -Method Post')){throw 'no_provider_post_allowed'}
+          if(([regex]::Matches($src,'-Method Post')).Count -ne 1 -or -not $src.Contains('/tiktok/analytics/videos')){throw 'not_exactly_one_allowed_readonly_video_query'}
           foreach($bad in @('/tiktok/draft/photo/init','/tiktok/draft/video/init','/tiktok/publish-private','/media_publish','-Method Patch','-Method Put','-Method Delete','api.airtable.com','Write-Output $secret','Write-Host $secret')){
             if($src.Contains($bad)){throw 'media_publish_or_unsafe_operation_prohibited'}
           }
-          Write-Output 'NYC4785_PUBLIC_OWNER_GET_ONLY_STATIC_PASS'
+          Write-Output 'NYC4785_PUBLIC_OWNED_VIDEO_READONLY_QUERY_STATIC_PASS'
   live-status-fetch:
     if: github.event_name == 'push'
     needs: static-safety
@@ -61,7 +61,7 @@ jobs:
             fi
           done
           echo 'Ops authentication unavailable; no TikTok action';exit 1
-      - name: Verify saved manual public post by account status and TikTok oEmbed GET
+      - name: Verify saved public post with TikTok Display API exact-owned video query
         shell: bash
         run: |
           set -euo pipefail
@@ -89,8 +89,8 @@ jobs:
             status=$(jq -r '.job.status // empty' /tmp/p1-4785-job.json)
             if [[ "$status" == ok ]]; then
               jq -r '.job.log // ""' /tmp/p1-4785-job.json | grep '^P1_NYC4785_PUBLIC_PROOF=' | tail -1 | sed 's/^P1_NYC4785_PUBLIC_PROOF=//' > /tmp/p1-4785-evidence.json
-              jq -e '.output==4785 and .profile=="New York City" and .read_only==true and .provider_gets<=2 and .provider_writes==0 and .output_writes==0 and .airtable_operations==0 and .exact_approved_media_match_verified==false' /tmp/p1-4785-evidence.json >/dev/null
-              jq -c '{output,profile,source_manual_completed,original_draft_changed,source_public_post_id,oembed_public_post_id,oembed_author_handle,oembed_author_url_handle,owner_verified,oembed_owner_verified,provider_public_receipt_verified,exact_approved_media_match_verified,reason,provider_gets,provider_writes,output_writes}' /tmp/p1-4785-evidence.json
+              jq -e '.output==4785 and .profile=="New York City" and .read_only==true and .provider_gets<=2 and .display_api_query_calls<=1 and .provider_writes==0 and .output_writes==0 and .airtable_operations==0 and .exact_approved_media_match_verified==false' /tmp/p1-4785-evidence.json >/dev/null
+              jq -c '{output,profile,source_manual_completed,original_draft_changed,source_public_post_id,oembed_public_post_id,oembed_author_handle,oembed_author_url_handle,owner_verified,oembed_owner_verified,display_api_query_calls,owned_video_owned,owned_video_id,provider_public_receipt_verified,exact_approved_media_match_verified,reason,provider_gets,provider_writes,output_writes}' /tmp/p1-4785-evidence.json
               if ! jq -e '.provider_public_receipt_verified==true' /tmp/p1-4785-evidence.json >/dev/null;then
                 echo 'Public post owner unverified; no retry authorized';exit 3
               fi
