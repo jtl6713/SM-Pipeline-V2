@@ -66,4 +66,68 @@ $report.pages+=@{name=$pair[0];listed=($page.Count -eq 1);create_content=($page.
 }
 }else{$report.user_state=if($m.code -eq 190){'expired_or_invalid'}else{'rejected'};$report.accounts_http=$m.status;$report.accounts_code=$m.code}
 }else{$report.user_state='missing'}
+
+# P1 #2340 positive-match-only inventory. GET /{page}/video_reels is NOT a
+# readable Graph edge; probe supported Page feed/published_posts only.
+# These edges may omit Reels, so absence is always inconclusive. A zero-match
+# or partial list NEVER proves non-delivery or permits a publish retry.
+$report.history_status='not_authorized';$report.history_probes=@()
+if($report.user_state -eq 'valid_user_identity' -and $report.accounts_complete -eq $true -and $report.scopes['pages_read_engagement'] -eq $true){
+ $targets=@(
+  @{n=4907;market='Chicago';page='FACEBOOK_PAGE_ID'},
+  @{n=5355;market='Los Angeles';page='LA_FACEBOOK_PAGE_ID'},
+  @{n=6256;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
+  @{n=6076;market='Miami';page='MIAMI_FACEBOOK_PAGE_ID'},
+  @{n=5915;market='New York City';page='NYC_FACEBOOK_PAGE_ID'}
+ )
+ $nums='(4907,5355,6256,6076,5915)'
+ $outputs=@(Invoke-RestMethod ($url+'/rest/v1/platform_outputs?select=output_number,platform,content_profile_id,output_title,output_caption&output_number=in.'+$nums+'&limit=10') -Headers $headers -Method Get -TimeoutSec 30)
+ $profiles=@(Invoke-RestMethod ($url+'/rest/v1/content_profiles?select=id,market_name&limit=10') -Headers $headers -Method Get -TimeoutSec 30)
+ if($outputs.Count -eq 1 -and $outputs[0] -is [array]){$outputs=@($outputs[0])}
+ if($profiles.Count -eq 1 -and $profiles[0] -is [array]){$profiles=@($profiles[0])}
+ if($outputs.Count -ne 5 -or $profiles.Count -ne 4){throw 'facebook_history_source_incomplete'}
+ function Norm([string]$s){return ([regex]::Replace($s.ToLowerInvariant(),'[^\p{L}\p{Nd}]+',' ')).Trim()}
+ $report.history_status='positive_matches_only_no_negative_proof'
+ foreach($t in $targets){
+  $o=@($outputs|Where-Object{[int]$_.output_number -eq [int]$t.n})
+  if($o.Count -ne 1 -or [string]$o[0].platform -ne 'Facebook'){throw 'history_target_identity_mismatch'}
+  $p=@($profiles|Where-Object{[string]$_.id -eq [string]$o[0].content_profile_id})
+  if($p.Count -ne 1 -or [string]$p[0].market_name -ne [string]$t.market){throw 'history_target_owner_mismatch'}
+  $pid=[string]$values[[string]$t.page]
+  if($pid -notmatch '^\d{6,30}
+){throw 'history_page_id_unavailable'}
+  $needles=@()
+  foreach($value in @([string]$o[0].output_title,[string]$o[0].output_caption)){
+   $v=Norm $value;if($v.Length -ge 35){$needles+= $v.Substring(0,[Math]::Min(75,$v.Length))}
+  }
+  foreach($edge in @('feed','published_posts')){
+   $fields='id,message,created_time'
+   $probe=@{output_number=[int]$t.n;market=$t.market;edge=$edge;pages_scanned=0;rows_scanned=0;complete=$false;http_status=0;error_code=0;candidates=@();conclusion='inconclusive'}
+   $after=''
+   for($pg=0;$pg -lt 2;$pg++){
+    $path='/'+$pid+'/'+$edge+'?fields='+$fields+'&limit=100'
+    if($after){$path+='&after='+[uri]::EscapeDataString($after)}
+    $r=G $path
+    $probe.http_status=$r.status;$probe.error_code=$r.code
+    if($r.ok -ne $true -or $null -eq $r.body.data){break}
+    $probe.pages_scanned++
+    foreach($entry in @($r.body.data)){
+     $probe.rows_scanned++
+     $hay=Norm ([string]$entry.title+' '+[string]$entry.description+' '+[string]$entry.message)
+     foreach($needle in $needles){
+      if($hay.Contains($needle)){
+       $probe.candidates+=@{provider_id=[string]$entry.id;created_time=[string]$entry.created_time;match_kind='text_candidate_unverified'}
+       break
+      }
+     }
+    }
+    if(-not $r.body.paging.next){$probe.complete=$true;break}
+    $after=[string]$r.body.paging.cursors.after
+    if(-not $after){break}
+   }
+   $report.history_probes+=$probe
+  }
+ }
+}
+
 Write-Output ('P1_META_AUDIT='+($report|ConvertTo-Json -Compress -Depth 6))
