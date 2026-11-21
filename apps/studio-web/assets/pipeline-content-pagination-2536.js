@@ -22,8 +22,11 @@
       // The legacy core loops over history pages; each UI page must contain
       // only the selected content groups, never append all subsequent pages.
       const page = { ...data, has_more: false, next_offset: null };
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      headers.delete("content-encoding");
       return new Response(JSON.stringify(page), { status: response.status,
-        statusText: response.statusText, headers: new Headers(response.headers) });
+        statusText: response.statusText, headers });
     } finally { state.busy = false; update(); }
   };
   function update() {
