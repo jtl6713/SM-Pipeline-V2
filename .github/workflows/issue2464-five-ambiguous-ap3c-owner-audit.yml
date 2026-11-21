@@ -1,0 +1,160 @@
+name: Issue 2464 Five Ambiguous AP3C Carousel Owner Media GET
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2464-five-ambiguous-ap3c-owner-getonly.ps1'
+      - '.github/workflows/issue2464-five-ambiguous-ap3c-owner-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2464-five-ambiguous-ap3c-owner-getonly.ps1'
+      - '.github/workflows/issue2464-five-ambiguous-ap3c-owner-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2464-meta-ig-owner-exact-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell script and fail on syntax errors
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue2464-five-ambiguous-ap3c-owner-getonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Require bounded provider GET, source-only reads, no status writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('repair/scripts/issue2464-five-ambiguous-ap3c-owner-getonly.ps1').read_text()
+          # PowerShell's automatic $Matches variable becomes an integer-key
+          # dictionary after -match; ConvertTo-Json then fails at the end.
+          assert re.search(r'\\$matches\\b', s, flags=re.IGNORECASE) is None
+          assert '$candidateResults=@()' in s
+          assert "ISSUE2464_IG_AP3C_OWNER_AUDIT=" in s
+          assert "output_writes=0" in s and "provider_writes=0" in s
+          assert "publish_calls=0" in s and "airtable_operations=0" in s
+          assert "$script:providerGets -gt 14" in s
+          assert "graph.facebook.com" in s and "SUPABASE_SERVICE_ROLE_KEY" in s
+          assert "production_identity_mismatch" in s
+          for label in ["recAlU4bLFmWDBV4H", "recHQwaHW6hO38tct", "recl1JDd3hoyCOQLM", "recSiZREAQuoicqm7", "recHS9wbhrIEiwNsM", "exact_held_ap3c_output_identity_drift", "historical_500_ambiguous_source_drift"]:
+              assert label in s, "guarded output identity/fence missing"
+          for label in ["7894,8128,8138,8357,8417", "New York City",
+                        "Miami", "historical_500_ambiguous_source_drift", "media_read_authorized",
+                        "account_identity_confirmed", "owner_oauth_401_reauthorization_needed", "CAROUSEL_ALBUM", "original_asset_proven"]:
+              assert label in s, "critical per-owner identity gate missing"
+          assert "'https://vkwvscgisqsbuwagdvtb.supabase.co'" in s
+          for bad in ["-Method Post", "-Method Patch", "-Method Put", "-Method Delete",
+                      "Invoke-Sqlcmd", "/media_publish", "AIRTABLE_PAT",
+                      "api.airtable.com", "Write-Host $key", "Write-Output $key"]:
+              assert bad not in s, "unsafe provider write or secret exposure"
+          print("issue2464_oauth_static_gate=GET_ONLY")
+          PY
+  live-readonly-audit:
+    if: github.event_name != 'pull_request'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate Ops without revealing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/issue2464-ops-check.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/issue2464-ops-check.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "ISSUE2464_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable';exit 1
+      - name: Build SHA256 pinned immutable GET-only source loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          path=pathlib.Path('repair/scripts/issue2464-five-ambiguous-ap3c-owner-getonly.ps1')
+          sha=hashlib.sha256(path.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(x in '0123456789abcdef' for x in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{path.as_posix()}'
+          cmd=(
+              "$ErrorActionPreference='Stop';"
+              f"$url='{url}';"
+              "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+              "$digest=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+              f"if($digest -ne '{sha}'){{throw 'pinned_source_hash_mismatch'}};"
+              "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/issue2464-ops-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          print('immutable_main_source_hash_guard=PASS')
+          PY
+      - name: Execute exact five-output owned Instagram carousel media GET inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only HTTP 409 (Ops admitted ZERO job, another protected recovery
+          # currently owns the shell) may be retried. Never resubmit a 200/202
+          # accepted job; this is a read-only audit but other jobs may publish.
+          admitted=false
+          for admission in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2464-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE2464_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue2464-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true; break; fi
+            if [[ "$code" != 409 ]]; then
+              echo "Ops audit rejected ($code), no replay or provider action";exit 2
+            fi
+            echo "Ops shell busy: waiting for owner job without bypassing its lock"
+            sleep 12
+          done
+          if [[ "$admitted" != true ]]; then
+            echo 'Ops remained occupied; audit not executed, no retry/publish permitted';exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/issue2464-ops-start.json)
+          for attempt in $(seq 1 320); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $ISSUE2464_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue2464-ops-status.json
+            state=$(jq -r '.job.status // empty' /tmp/issue2464-ops-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/issue2464-ops-status.json \
+                | grep '^ISSUE2464_IG_AP3C_OWNER_AUDIT=' | tail -1 \
+                | sed 's/^ISSUE2464_IG_AP3C_OWNER_AUDIT=//' > /tmp/issue2464-ig-owner-oauth.json
+              jq -e '.read_only==true and .provider_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .exact_target_count==5 and .provider_get_calls<=14 and (.bounded_media_inventory|length)==2 and (.matched_output_candidates|length)==5 and (.targets|length)==5 and (.owner_scopes|length)==2' /tmp/issue2464-ig-owner-oauth.json >/dev/null
+              jq -c '{version,exact_target_count,provider_get_calls,owner_scopes,bounded_media_inventory,matched_output_candidates,candidate_count,provider_writes,output_writes,airtable_operations}' /tmp/issue2464-ig-owner-oauth.json
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
+              jq -r '.job.log // ""' /tmp/issue2464-ops-status.json | tail -n 12 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|ACCESS_TOKEN' | tail -n 8 || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo 'Provider-history audit incomplete or timed out; no negative-delivery claims';exit 4
+      - name: Retain per-output sanitized evidence for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2464-nyc-miami-ig-owner-oauth
+          path: /tmp/issue2464-ig-owner-oauth.json
+          retention-days: 30
+          if-no-files-found: warn
