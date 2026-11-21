@@ -26,7 +26,6 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
 import { loadOwnerGenerationForProfile } from "./owner-generation-supabase.mjs";
-import { effectiveGenerationPrompt } from "./owner-generation-guidance.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioFactoryOpsReadSource,
@@ -12835,10 +12834,8 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeF
         ...parseCreativeGuidance(f(setting, "Setting_Value")),
         owner_global_direction: global.prompt || "",
       };
-      creativeGuidance.shared_direction = effectiveGenerationPrompt({
-        ownerGlobal: global.prompt,
-        profileWide: creativeGuidance.shared_direction,
-      });
+      // Python prompt construction applies owner_global_direction before the
+      // profile-wide and narration-specific layers; do not concatenate twice.
     } catch (error) {
       console.warn("Supabase generation guidance read failed; using script defaults", profileId, error);
     }
