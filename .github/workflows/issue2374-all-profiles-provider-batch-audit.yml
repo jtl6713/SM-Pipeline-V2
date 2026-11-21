@@ -101,12 +101,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          code=$(curl -sS --max-time 30 -o /tmp/issue2374-ops-start.json -w '%{http_code}' \
-            -X POST 'https://ops.chicagoshining.com/api/shell' \
-            -H "Authorization: Bearer $ISSUE2374_OPS_TOKEN" -H 'Content-Type: application/json' \
-            --data-binary @/tmp/issue2374-ops-request.json || true)
-          if [[ "$code" != 200 && "$code" != 202 ]]; then
-            echo "Ops batch refused ($code); zero provider or output writes authorized";exit 2
+          # Only HTTP 409 (Ops admitted ZERO job, another protected recovery
+          # currently owns the shell) may be retried. Never resubmit a 200/202
+          # accepted job; this is a read-only audit but other jobs may publish.
+          admitted=false
+          for admission in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2374-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE2374_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue2374-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true; break; fi
+            if [[ "$code" != 409 ]]; then
+              echo "Ops audit rejected ($code), no replay or provider action";exit 2
+            fi
+            echo "Ops shell busy: waiting for owner job without bypassing its lock"
+            sleep 12
+          done
+          if [[ "$admitted" != true ]]; then
+            echo 'Ops remained occupied; audit not executed, no retry/publish permitted';exit 2
           fi
           job=$(jq -er '.job.id // .jobId' /tmp/issue2374-ops-start.json)
           for attempt in $(seq 1 320); do
