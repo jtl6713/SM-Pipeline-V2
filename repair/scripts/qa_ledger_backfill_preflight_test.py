@@ -32,12 +32,28 @@ def fixtures():
         "legacy_source_fields": run_fields,
         "legacy_row_sha256": sha256(run_fields),
         "run_id": RUN_ID,
+        "catalog_revision": run_fields["Catalog Revision"],
+        "environment": run_fields["Environment"],
+        "deployment": {"worker": "w", "ui": "u", "runner": "r"},
+        "created_by": run_fields["Created By"],
+        "created_at_utc": run_fields["Created At UTC"],
+        "status": run_fields["Status"],
+        "idempotency_key": run_fields["Idempotency Key"],
+        "payload_hash": run_fields["Payload Hash"],
     }]
     targets_e = [{
         "legacy_record_id": events[0]["id"],
         "legacy_source_fields": event_fields,
         "legacy_row_sha256": sha256(event_fields),
         "run_id": RUN_ID,
+        "execution_id": event_fields["Execution ID"],
+        "test_id": event_fields["Test ID"],
+        "event_kind": event_fields["Event Kind"],
+        "actor_id": event_fields["Actor ID"],
+        "recorded_at_utc": event_fields["Recorded At UTC"],
+        "payload_json": {"decision": "Incomplete"},
+        "idempotency_key": event_fields["Idempotency Key"],
+        "payload_hash": event_fields["Payload Hash"],
     }]
     return runs, events, targets_r, targets_e
 
@@ -49,6 +65,45 @@ class QaHistoryReconciliationTest(unittest.TestCase):
         self.assertEqual(result["blockers"], [])
         self.assertFalse(result["release_authorized"])
         self.assertTrue(result["read_only"])
+
+    def test_canonical_operational_drift_blocks_even_with_unchanged_legacy_hash(self):
+        # The preserved legacy JSON/hash can be completely valid while the
+        # columns actually consumed by QA are missing or tampered.
+        for kind, column, altered in (
+            ("runs", "status", "Open"),
+            ("runs", "deployment", {"worker": "unverified"}),
+            ("runs", "created_by", "different-tester"),
+            ("runs", "created_at_utc", "2026-11-07T05:50:33Z"),
+            ("events", "execution_id", "qaex-99999999-9999-4999-8999-999999999999"),
+            ("events", "test_id", "QA-OTHER"),
+            ("events", "event_kind", "HumanApproval"),
+            ("events", "actor_id", "different-tester"),
+            ("events", "recorded_at_utc", "2026-11-07T05:50:53Z"),
+            ("events", "payload_json", {"decision": "Approved"}),
+            ("events", "idempotency_key", "other-key"),
+            ("events", "payload_hash", "different-legacy-hash"),
+        ):
+            runs, events, target_r, target_e = fixtures()
+            target = target_r if kind == "runs" else target_e
+            target[0][column] = altered
+            result = reconcile(runs, events, target_r, target_e, 1, 1)
+            self.assertFalse(result["history_parity_verified"], (kind, column))
+            self.assertTrue(any("canonical columns diverge" in x
+                                for x in result["blockers"]), (kind, column))
+
+    def test_equivalent_utc_timestamp_and_json_object_order_are_accepted(self):
+        runs, events, target_r, target_e = fixtures()
+        target_r[0]["created_at_utc"] = "2026-11-06T05:50:33+00:00"
+        target_r[0]["deployment"] = {"runner": "r", "ui": "u", "worker": "w"}
+        target_e[0]["recorded_at_utc"] = "2026-11-06T05:50:53+00:00"
+        self.assertTrue(reconcile(runs, events, target_r, target_e, 1, 1)
+                        ["history_parity_verified"])
+
+    def test_missing_canonical_column_blocks_partial_select(self):
+        runs, events, target_r, target_e = fixtures()
+        del target_e[0]["execution_id"]
+        outcome = reconcile(runs, events, target_r, target_e, 1, 1)
+        self.assertFalse(outcome["history_parity_verified"])
 
     def test_no_target_snapshot_blocks_even_when_source_is_complete(self):
         runs, events, _, _ = fixtures()
