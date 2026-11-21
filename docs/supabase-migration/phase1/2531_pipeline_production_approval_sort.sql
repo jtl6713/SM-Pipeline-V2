@@ -5,7 +5,7 @@ alter table public.platform_outputs add column if not exists production_approved
 create or replace function public.pipeline_production_approved_stamp(raw text)
 returns timestamptz language plpgsql immutable as $$
 begin
-  if raw is null or raw !~ '^\\d{4}-\\d{2}-\\d{2}T' then return null; end if;
+  if raw is null or raw !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then return null; end if;
   return raw::timestamptz;
 exception when others then return null;
 end $$;
