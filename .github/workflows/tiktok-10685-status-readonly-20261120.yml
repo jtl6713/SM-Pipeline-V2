@@ -40,6 +40,7 @@ jobs:
           $ErrorActionPreference="Stop"
           $health=Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
           if ($health.ok -ne $true -or $health.studio_write_source -ne "supabase" -or $health.studio_runner_output_read_source -ne "supabase" -or $health.supabase_pipeline_writes -ne $true) { throw "runner_supabase_authority_not_verified" }
+          $env:PORT="3350"  # Ops shell clears inherited PORT; runner config requires a numeric value.
           $runtime=Join-Path (Get-Location) "Services\pipeline-runner\service"
           if (-not (Test-Path (Join-Path $runtime ".env")) -or -not (Test-Path (Join-Path $runtime "config.py"))) { throw "runner_local_runtime_not_found" }
           $diagnostic=@'
