@@ -32,14 +32,20 @@ export function overdueSkipReceiptFields({ note, retryEligible, retryAt, errorSt
  * Count ambiguous exceptions conservatively; this helper only excludes a
  * concrete, explicit skipped/held receipt.
  */
+/** A future scheduled hold is not a remote provider dispatch. */
+export function preDispatchScheduledHold(note) {
+  const message = String(note || "").trim();
+  return /^(?:(?:overdue-rescue|reconcile):\s*)*held until\b/i.test(message)
+    || /^(?:(?:overdue-rescue|reconcile):\s*)*skipped:\s*scheduled-hold(?:\s|$)/i.test(message);
+}
+
 export function publishDispatchAttemptStampFields({ note, priorCount = 0, nowIso = new Date().toISOString() } = {}) {
   const message = String(note || "").trim();
   // Only proven *pre-dispatch* refusals are safe to exempt. Unknown skipped
   // outcomes might have reached a remote provider and must retain the budget.
   const skippedReason = /(?:^|\s)skipped:\s*([a-z0-9_-]+)/i.exec(message)?.[1]?.toLowerCase() || "";
   const noProviderCall = ["scheduled-hold", "no-dispatch", "missing-ai-caption"].includes(skippedReason);
-  const held = /^(?:(?:overdue-rescue|reconcile):\s*)*held until\b/i.test(message);
-  if (noProviderCall || held) return {};
+  if (noProviderCall || preDispatchScheduledHold(message)) return {};
   return {
     Studio_Publish_Dispatch_At: nowIso,
     Studio_Publish_Dispatch_Count: Math.max(0, Number(priorCount) || 0) + 1,
