@@ -35,7 +35,7 @@ try {
  $r.old_confirmed_expired=$true
  # Reserve one immutable create operation before touching the provider.
  $ek='P1-2340:3522:approved-expired-story-replacement-create-v1'
- $eventId='recP12340IGSR3522AA'
+ $eventId='recP12340IGS3522A'
  $event=@(@{airtable_record_id=$eventId;event_key=$ek;outcome='approved_fresh_story_create_reserved';output_record_id=$rid;output_number=$n;fields=@{Event_Key=$ek;Output_ID=$n;Outcome='approved_fresh_story_create_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
  $saved=Invoke-RestMethod ($url+'/rest/v1/quality_agent_recovery_events') -Headers ($h+@{Prefer='return=representation'}) -Method Post -ContentType 'application/json' -Body $event -TimeoutSec 25
  if(@($saved).Count -ne 1 -or [string]$saved[0].event_key -ne $ek){throw 'one_time_fence_failed'}
@@ -64,7 +64,7 @@ try {
  }
  if(-not $ready){throw 'new_container_not_finished_no_publish'}
  $pubek='P1-2340:3522:approved-expired-story-replacement-publish-v1'
- $pubeid='recP12340IGSR3522PP'
+ $pubeid='recP12340PUB3522A'
  $pe=@(@{airtable_record_id=$pubeid;event_key=$pubek;outcome='approved_fresh_story_publish_reserved';output_record_id=$rid;output_number=$n;fields=@{Event_Key=$pubek;Output_ID=$n;Outcome='approved_fresh_story_publish_reserved';Verified_At=[DateTime]::UtcNow.ToString('o')}})|ConvertTo-Json -Compress -Depth 6
  $pubf=Invoke-RestMethod ($url+'/rest/v1/quality_agent_recovery_events') -Headers ($h+@{Prefer='return=representation'}) -Method Post -ContentType 'application/json' -Body $pe -TimeoutSec 25
  if(@($pubf).Count -ne 1){throw 'publish_unique_fence_failed'}
@@ -84,6 +84,9 @@ try {
  $after['IG_Story_Published_At']=[DateTime]::UtcNow.ToString('o')
  $after['IG_Story_Status']='Published'
  $after['P1_2340_3522_Original_Expired_Container_ID']=$old
+ $after['IG_Story_Container_ID']=$new
+ $after['Platform_Media_ID']=$post
+ $after['IG_Story_Error_Message']=''
  $final=@{publish_status='Published';output_status='Published';published_at=[DateTime]::UtcNow.ToString('o');publish_retry_eligible=$false;error_messages=$after}
  if($permalink){$final.platform_post_url=$permalink}
  $finalRows=Invoke-RestMethod ($url+'/rest/v1/platform_outputs?output_number=eq.3522&airtable_record_id=eq.'+$rid+'&publish_status=eq.Failed') -Method Patch -Headers ($h+@{Prefer='return=representation'}) -ContentType 'application/json' -Body ($final|ConvertTo-Json -Compress -Depth 75) -TimeoutSec 30
