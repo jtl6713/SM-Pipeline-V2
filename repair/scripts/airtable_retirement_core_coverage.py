@@ -72,8 +72,12 @@ def verified_hour(source, payload, hour, artifact_ref):
         try:
             event_hour = utc(event.get("hour_utc"))
             count = event.get("attempts")
-            if type(count) is not int or count < 0:
-                raise ValueError("invalid attempt count")
+            if event_hour.minute or event_hour.second or event_hour.microsecond:
+                raise ValueError("request counter timestamp not aligned to UTC hour")
+            if type(count) is not int or count <= 0:
+                raise ValueError("invalid or fabricated attempt count")
+            if event.get("method") not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                raise ValueError("unknown request method")
             if event_hour == hour:
                 attempts += count
         except (TypeError, ValueError) as error:
