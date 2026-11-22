@@ -279,6 +279,10 @@ def is_retryable_master_error(exc: Exception) -> bool:
     return status in {404, 408, 429, 500, 502, 503, 504}
 
 
+class TransferClaimConflict(RuntimeError):
+    """A different actor already transitioned the same canonical transfer."""
+
+
 def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> None:
     attempts = int(fields.get("Attempt_Count") or 0) + 1
     patch = {
@@ -287,6 +291,38 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
         "Error_Message": None,
         "Last_Attempt_At": _now_iso(),
     }
+    if governor.enabled():
+        # Critical: local locks do not protect concurrent writers on other
+        # hosts. Conditional PATCH is atomic at the *canonical* Supabase row.
+        # No second unconditional queue upsert is allowed after this CAS.
+        from supabase_pipeline import _rest
+
+        expected = str(fields.get("Transfer_Status") or "")
+        if expected not in {"Pending", "Drive Uploaded"}:
+            raise TransferClaimConflict("transfer is not in a claimable status")
+        if not str(record_id).startswith("rec"):
+            raise RuntimeError("transfer claim has no canonical record identity")
+        settings = getattr(client, "_settings", None)
+        if not isinstance(settings, dict):
+            raise RuntimeError("Supabase settings required for atomic transfer claim")
+        rows = _rest(
+            settings,
+            f"studio_media_transfer_queue?airtable_record_id=eq.{record_id}"
+            f"&status=eq.{expected}&select=airtable_record_id",
+            "PATCH",
+            {
+                "status": "Processing",
+                "attempt_count": attempts,
+                "error_message": None,
+                "last_attempt_at": patch["Last_Attempt_At"],
+            },
+            prefer="return=representation",
+        )
+        if rows == []:
+            raise TransferClaimConflict("canonical transfer state changed before claim")
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("airtable_record_id") != record_id:
+            raise RuntimeError("atomic transfer claim could not be verified")
+        return
     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id, patch)
 
 
@@ -641,6 +677,10 @@ def _process_variant_pending(
     if not folder_id or not source_drive_id or not ratio:
         raise RuntimeError("Platform variant row is missing folder, source drive id, or aspect ratio")
 
+    if governor.enabled():
+        # A reused/cached asset still needs a canonical claim before writing
+        # Ready, otherwise it can race a concurrent crop worker.
+        _claim_row(client, record_id, fields)
     if _row_has_authority(fields):
         client.update_record(
             MEDIA_TRANSFER_QUEUE_TABLE,
@@ -660,7 +700,8 @@ def _process_variant_pending(
     cached = _find_persistent_variant(client, row)
     if cached:
         return _apply_cached_variant(client, row, cached)
-    _claim_row(client, record_id, fields)
+    if not governor.enabled():
+        _claim_row(client, record_id, fields)
     source_bytes, _ = drive.download_file(source_drive_id)
     source_ext = str(fields.get("Source_Extension") or "")
     source_bytes = rasterize_still_bytes(
@@ -707,6 +748,11 @@ def process_variant_group(
         if not folder_id or not ratio:
             raise RuntimeError("Platform variant row is missing folder or aspect ratio")
         if _row_has_authority(fields):
+            if governor.enabled():
+                try:
+                    _claim_row(client, row["id"], fields)
+                except TransferClaimConflict:
+                    continue
             patch = {"Transfer_Status": "Ready", "Error_Message": None}
             if airtable_lock:
                 with airtable_lock:
@@ -723,12 +769,16 @@ def process_variant_group(
                 "ratio": ratio,
             })
             continue
-        pending_rows.append(row)
-        if airtable_lock:
-            with airtable_lock:
+        try:
+            if airtable_lock:
+                with airtable_lock:
+                    _claim_row(client, row["id"], fields)
+            else:
                 _claim_row(client, row["id"], fields)
-        else:
-            _claim_row(client, row["id"], fields)
+        except TransferClaimConflict:
+            # Another owner won the canonical claim. Do not crop or fail it.
+            continue
+        pending_rows.append(row)
 
     # Persistent cross-batch lookup before any source download or variant call.
     still_pending = []
@@ -959,7 +1009,10 @@ def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
             preview = str(fields.get("Preview_Status") or "")
             if status not in {"Pending", "Drive Uploaded"} and not (status == "Ready" and preview == "Pending"):
                 return {"processed": False, "reason": "no_longer_eligible", "queue_record_id": row["id"]}
-            return _process_queue_row_unlocked(client, current)
+            try:
+                return _process_queue_row_unlocked(client, current)
+            except TransferClaimConflict:
+                return {"processed": False, "reason": "claimed_elsewhere", "queue_record_id": row["id"]}
     return _process_queue_row_unlocked(client, row)
 
 
