@@ -156,6 +156,145 @@ def _shaped(row: dict, columns: dict[str, str], requested: list[str] | None) -> 
     return {"id": record_id, "fields": fields}
 
 
+
+# I1 title originality requires the *complete* 365-day candidate + content
+# history. The legacy REGEX_MATCH/CREATED_TIME formula cannot be translated by
+# the general PostgREST formula mapper. A partial first page is NOT evidence
+# that a title is unique. This narrow, exact-shape adapter scans all canonical
+# rows with keyset-stable ascending pagination, then applies the same
+# normalized-prefix test as the legacy formula.
+def _i1_title_formula_prefix(table_id: str, formula: str | None) -> tuple[str, str] | None:
+    import re
+
+    if table_id == SOURCE_CANDIDATES_TABLE:
+        field, test_clause = "Candidate_Title", "{Test_Run_ID}=BLANK(),"
+    elif table_id == CONTENT_ITEMS_TABLE:
+        field, test_clause = "Content_Title", ""
+    else:
+        return None
+    lead = (
+        f'AND({test_clause}IS_AFTER(CREATED_TIME(),DATEADD(TODAY(),-365,"days")),'
+        f'REGEX_MATCH(REGEX_REPLACE(LOWER({{{field}}}&""),"[^a-z0-9]",""),"^'
+    )
+    expression = str(formula or "").strip()
+    if not expression.startswith(lead) or not expression.endswith('"))'):
+        return None
+    prefix = expression[len(lead):-3]
+    if not re.fullmatch(r"[a-z0-9]{1,8}", prefix):
+        return None
+    return field, prefix
+
+
+def _i1_title_page_scan(
+    settings: dict, table: str, column: str, cutoff: str, *,
+    since_updated: str | None = None,
+    exclude_test_runs: bool = False,
+) -> list[dict]:
+    """Return every matching row, or raise. Never truncate a uniqueness scan."""
+    page_size = 500
+    max_pages = 100  # Fail closed rather than treating an excessive scan as complete.
+    rows: list[dict] = []
+    for page in range(max_pages):
+        params = (
+            f"{table}?select=airtable_record_id,{column}"
+            f"&created_at=gte.{quote(cutoff, safe=':-T')}"
+        )
+        if since_updated:
+            params += f"&updated_at=gte.{quote(since_updated, safe=':-T')}"
+        if exclude_test_runs:
+            # Airtable BLANK matches null/missing and empty Test_Run_ID.
+            params += "&or=(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.)"
+        # created_at is immutable; updated_at allows a bounded fresh delta.
+        sort = "updated_at" if since_updated else "created_at"
+        params += (
+            f"&order={sort}.asc,airtable_record_id.asc"
+            f"&limit={page_size}&offset={page * page_size}"
+        )
+        try:
+            payload = _rest(settings, params, "GET")
+        except Exception as error:
+            raise RuntimeError(
+                f"Incomplete canonical Supabase I1 title history ({table} page {page}); "
+                "refusing duplicate-risk generation"
+            ) from error
+        if not isinstance(payload, list) or len(payload) > page_size or any(
+            not isinstance(row, dict)
+            or not isinstance(row.get("airtable_record_id"), str)
+            or not isinstance(row.get(column), str)
+            for row in payload
+        ):
+            raise RuntimeError(
+                f"Invalid canonical Supabase I1 title history ({table} page {page}); "
+                "refusing duplicate-risk generation"
+            )
+        rows.extend(payload)
+        if len(payload) < page_size:
+            return rows
+    raise RuntimeError(
+        f"Canonical Supabase I1 title history exceeded {max_pages * page_size} "
+        f"rows for {table}; refusing duplicate-risk generation"
+    )
+
+
+def try_list_i1_title_history(
+    settings: dict | None, table_id: str, formula: str | None, *,
+    max_records: int, fields: list[str] | None,
+    cache: dict | None = None,
+) -> list[dict] | None:
+    """Exact I1 history formula, complete paginated Supabase read, no archive.
+
+    The per-client cache is a snapshot only: each subsequent query rereads
+    rows created or edited since the snapshot began, so new titles from another
+    profile cannot be silently missed during a long generation run.
+    """
+    from datetime import datetime, timedelta, timezone
+    import re
+
+    match = _i1_title_formula_prefix(table_id, formula)
+    if not match:
+        return None
+    field, prefix = match
+    if fields != [field] or max_records != 1001:
+        return None
+    if runner_table_read_source(settings, table_id) != "supabase":
+        raise RuntimeError("Canonical Supabase I1 title history unavailable; no Airtable fallback")
+    table = _supabase_table(table_id)
+    column = "candidate_title" if table_id == SOURCE_CANDIDATES_TABLE else "content_title"
+    # Conservatively include an extra day for Airtable TODAY() timezone edges.
+    started = datetime.now(timezone.utc)
+    cutoff = (started.date() - timedelta(days=366)).isoformat() + "T00:00:00Z"
+    key = (table_id, cutoff)
+    entry = cache.get(key) if cache is not None else None
+    if entry is None:
+        history = _i1_title_page_scan(
+            settings or {}, table, column, cutoff,
+            exclude_test_runs=(table_id == SOURCE_CANDIDATES_TABLE),
+        )
+        if cache is not None:
+            cache[key] = (started, history)
+    else:
+        snapshot_started, history = entry
+        # Fresh delta includes new rows and renamed titles; never reuse the
+        # cached snapshot alone to assert uniqueness across concurrent runs.
+        delta_start = (snapshot_started - timedelta(seconds=2)).isoformat()
+        recent = _i1_title_page_scan(
+            settings or {}, table, column, cutoff,
+            since_updated=delta_start,
+            exclude_test_runs=(table_id == SOURCE_CANDIDATES_TABLE),
+        )
+        combined = {row["airtable_record_id"]: row for row in history}
+        combined.update({row["airtable_record_id"]: row for row in recent})
+        history = list(combined.values())
+    matches = []
+    for row in history:
+        raw = re.sub(r"[^a-z0-9]", "", row[column].lower())
+        if raw.startswith(prefix):
+            matches.append({"id": row["airtable_record_id"], "fields": {field: row[column]}})
+            if len(matches) >= max_records:
+                break
+    return matches
+
+
 def try_list_supabase_records(
     settings: dict | None,
     table_id: str,
