@@ -4362,7 +4362,7 @@ export async function classifyAllLibraryAssets(request, env, url, authorization,
     throw new HttpError(503, "Recovery classification remains paused");
   }
   const recoveryLimit = 5;
-  const recoveryFilter = `OR(${LIBRARY_CLASSIFY_PENDING_FORMULA},AND(${ASSET_LIBRARY_LIST_FORMULA},{Content_Profile}!=BLANK(),{Classification_Status}='Processing'))`;
+  const recoveryFilter = `AND(OR(${LIBRARY_CLASSIFY_PENDING_FORMULA},AND(${ASSET_LIBRARY_LIST_FORMULA},{Content_Profile}!=BLANK(),{Classification_Status}='Processing')),OR({Media_Class}='Image',{Media_Class}='Graphic'))`;
   const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: recovery ? 20 : LIBRARY_CLASSIFY_ALL_LIMIT,
     sortField: "Added_At",
