@@ -1,0 +1,139 @@
+name: Issue 2371 NYC8 Shared Small Watermark Bottom Right
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2371-shared-small-watermark-r2-stage.py'
+      - '.github/workflows/issue2371-shared-small-watermark-r2-stage.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2371-shared-small-watermark-r2-stage.py'
+      - '.github/workflows/issue2371-shared-small-watermark-r2-stage.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2371-nyc8-shared-small-bottom-right-r2-stage
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify shared-mark staging script is read-only except immutable R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/issue2371-shared-small-watermark-r2-stage.py
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('repair/scripts/issue2371-shared-small-watermark-r2-stage.py').read_text()
+          for marker in ['STORIES = {','OUTPUTS = {','WATERMARK_SHA256=',
+              'WATERMARK_POSITION="bottom-right"','EXPECTED_ACTIVE_SLIDES=40',
+              'len(receipts)!=24','cdn_verified','_confirm(url,sha)',
+              'auto_publish_enabled','do_not_publish','publish_status',
+              '"provider_writes":0','"database_writes":0','"airtable_reads":0',
+              'R2UploadClient','GoogleDriveClient','NYC_GALLERY_SHARED_WM_STAGE']:
+              assert marker in text,marker
+          for forbidden in ['api.airtable.com','graph.facebook.com','requests.post(',
+              'requests.patch(','requests.delete(','requests.put(']:
+              assert forbidden not in text,forbidden
+          print('NYC8_SHARED_WATERMARK_STATIC_SAFE')
+          PY
+  stage-owned-media:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing Ops runner without exposing credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C";do
+            [[ -n "$candidate" ]] || continue
+            http=$(curl -sS --max-time 20 -o /tmp/nyc8-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/nyc8-ops-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "NYC8_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Shared small watermark staging blocked: Ops unavailable; no media state changed'; exit 1
+      - name: Build pinned SHA256 source execution request for original owner runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          src=pathlib.Path('repair/scripts/issue2371-shared-small-watermark-r2-stage.py')
+          expected=hashlib.sha256(src.read_bytes()).hexdigest()
+          sha=os.environ['GITHUB_SHA']
+          assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{src.as_posix()}'
+          command=(
+              "$ErrorActionPreference='Stop';"
+              "$py=Get-Command python -ErrorAction SilentlyContinue;"
+              "if(-not $py){throw 'ops_python_missing'};"
+              "$tmp=Join-Path $env:TEMP 'nyc8-owned-gallery-stage.py';"
+              f"$srcUrl='{url}';"
+              "Invoke-WebRequest -Uri $srcUrl -Method Get -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+              "$actual=(Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant();"
+              f"if($actual -ne '{expected}'){{throw 'exact_stage_source_checksum_mismatch'}};"
+              "try{& python $tmp;"
+              "if($LASTEXITCODE -ne 0){throw ('nyc_gallery_python_stage_exit_'+$LASTEXITCODE)}}"
+              "finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}"
+          )
+          pathlib.Path('/tmp/nyc8-ops-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          print('IMMUTABLE_NYC8_STAGE_SOURCE_PINNED')
+          PY
+      - name: Stage 24 shared-small branded NYC images to R2 without output writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for slot in $(seq 1 32);do
+            code=$(curl -sS --max-time 30 -o /tmp/nyc8-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $NYC8_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/nyc8-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "R2 owner runner returned $code";exit 2;fi
+            sleep 12
+          done
+          [[ "$accepted" == true ]] || { echo 'Ops shell busy; no second stage scheduled';exit 2; }
+          job=$(jq -er '.job.id // .jobId' /tmp/nyc8-ops-start.json)
+          for tick in $(seq 1 480);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $NYC8_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/nyc8-ops-job.json
+            status=$(jq -r '.job.status // empty' /tmp/nyc8-ops-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/nyc8-ops-job.json | grep '^NYC_GALLERY_SHARED_WM_STAGE=' | tail -1 \
+                | sed 's/^NYC_GALLERY_SHARED_WM_STAGE=//' > /tmp/nyc8-gallery-watermark-stage.json
+              jq -e '.verified==true and .unique_assets==24 and .watermark_drive_id=="1WQyd5W1__HkaEkWyC38IMErW8702Rd4u" and .position=="bottom-right" and .source_writes==0 and .provider_writes==0 and .database_writes==0 and .airtable_reads==0 and .factory_approvals==0 and (.assets|length)==24 and all(.assets[]; .cdn_verified==true and .geometry=="1080x1350" and .watermark_position=="bottom-right")' /tmp/nyc8-gallery-watermark-stage.json >/dev/null
+              jq -c '{verified,unique_assets,source_writes,provider_writes,watermark_drive_id,position,assets:[.assets[]|{content,index,base_url,url,sha256,geometry,cdn_verified}]}' /tmp/nyc8-gallery-watermark-stage.json
+              exit 0
+            elif [[ "$status" == failed ]];then
+              echo 'Shared small watermark R2 stage failed; no automatic source/approval/provider changes'
+              jq -r '.job.log // ""' /tmp/nyc8-ops-job.json | tail -n 23 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g' \
+                | grep -Ev 'Authorization:|Bearer |SUPABASE_SERVICE_ROLE_KEY|R2_UPLOAD_WORKER_SECRET|GOOGLE_REFRESH_TOKEN' || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'R2 staging job incomplete; do not set public statuses Ready'; exit 4
+      - name: Preserve exact public CDN hash and ownership receipts for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2371-nyc8-shared-small-bottom-right-r2-stage
+          path: /tmp/nyc8-gallery-watermark-stage.json
+          retention-days: 30
+          if-no-files-found: warn
