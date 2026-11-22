@@ -20,6 +20,8 @@ from typing import Callable, Iterator
 
 logger = logging.getLogger("pipeline-runner.workload-governor")
 DISPATCH_INTERVAL = 2.0
+MAX_REQUEUE_DELAY_SECONDS = 15 * 60
+MAX_CONSECUTIVE_YIELDS = 8
 HEARTBEAT_INTERVAL = 30.0
 LEASE_SECONDS = 20 * 60
 DEFAULT_MAX_JOBS = 2
@@ -63,13 +65,14 @@ def max_db_writes() -> int:
 
 def database_path() -> Path:
     configured = os.getenv("STUDIO_GOVERNOR_DB_PATH", "").strip()
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_absolute():
-            raise ValueError("STUDIO_GOVERNOR_DB_PATH must be absolute")
-        return path
-    root = Path(os.getenv("PROGRAMDATA") or tempfile.gettempdir())
-    return root / "SM-Pipeline-V2" / "studio-workload.sqlite3"
+    if not configured:
+        # Never silently create a production queue under a volatile TEMP folder.
+        # Starting the governor requires a deliberate, persistent host path.
+        raise RuntimeError("STUDIO_GOVERNOR_DB_PATH must be configured before enabling the governor")
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        raise ValueError("STUDIO_GOVERNOR_DB_PATH must be absolute")
+    return path
 
 
 _schema_lock = threading.Lock()
@@ -90,8 +93,15 @@ def _connect() -> Iterator[sqlite3.Connection]:
                     init.execute("PRAGMA journal_mode=WAL")
                     init.execute("""CREATE TABLE IF NOT EXISTS producer_jobs (
                         request_id TEXT PRIMARY KEY, state TEXT NOT NULL,
-                        token TEXT, lease_until REAL, enqueued_at REAL NOT NULL
+                        token TEXT, lease_until REAL, enqueued_at REAL NOT NULL,
+                        available_at REAL NOT NULL DEFAULT 0,
+                        consecutive_yields INTEGER NOT NULL DEFAULT 0
                     )""")
+                    existing = {row[1] for row in init.execute("PRAGMA table_info(producer_jobs)")}
+                    if "available_at" not in existing:
+                        init.execute("ALTER TABLE producer_jobs ADD COLUMN available_at REAL NOT NULL DEFAULT 0")
+                    if "consecutive_yields" not in existing:
+                        init.execute("ALTER TABLE producer_jobs ADD COLUMN consecutive_yields INTEGER NOT NULL DEFAULT 0")
                     init.execute("""CREATE TABLE IF NOT EXISTS resource_leases (
                         scope TEXT NOT NULL, lease_key TEXT NOT NULL,
                         token TEXT NOT NULL, lease_until REAL NOT NULL,
@@ -123,9 +133,10 @@ def enqueue(request_id: str) -> bool:
     """Durably queue exactly once. Return True only for a new entry."""
     with _connect() as db:
         _transaction(db)
+        now = time.time()
         created = db.execute(
-            "INSERT OR IGNORE INTO producer_jobs(request_id,state,enqueued_at) VALUES(?,'queued',?)",
-            (request_id, time.time()),
+            "INSERT OR IGNORE INTO producer_jobs(request_id,state,enqueued_at,available_at) VALUES(?,'queued',?,?)",
+            (request_id, now, now),
         ).rowcount
         db.commit()
     return bool(created)
@@ -169,8 +180,9 @@ def claim_next() -> tuple[str, str] | None:
         _transaction(db)
         now = time.time()
         db.execute("""UPDATE producer_jobs
-            SET state='queued', token=NULL, lease_until=NULL
-            WHERE state='running' AND lease_until < ?""", (now,))
+            SET state='queued', token=NULL, lease_until=NULL,
+                available_at=CASE WHEN available_at>? THEN available_at ELSE ? END
+            WHERE state='running' AND lease_until < ?""", (now + 30, now + 30, now))
         if circuit_open(db):
             db.commit()
             return None
@@ -183,7 +195,8 @@ def claim_next() -> tuple[str, str] | None:
             db.commit()
             return None
         row = db.execute(
-            "SELECT request_id FROM producer_jobs WHERE state='queued' ORDER BY enqueued_at, request_id LIMIT 1"
+            "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? ORDER BY enqueued_at, request_id LIMIT 1"
+            , (now,)
         ).fetchone()
         if not row:
             db.commit()
@@ -213,13 +226,28 @@ def job_valid(request_id: str, token: str) -> bool:
     return bool(row and row[0] == "running" and row[1] == token and row[2] > time.time())
 
 
-def finish_job(request_id: str, token: str, *, requeue: bool = False) -> None:
+def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed: bool = False) -> None:
+    """Yielded jobs are delayed and eventually parked for explicit review.
+
+    A parked job is retained (never discarded) and can be resumed through
+    a specifically authorized admission, but cannot pound Supabase forever.
+    """
     with _connect() as db:
         _transaction(db)
         if requeue:
-            db.execute("""UPDATE producer_jobs
-                SET state='queued',token=NULL,lease_until=NULL
-                WHERE request_id=? AND token=?""", (request_id, token))
+            row = db.execute(
+                "SELECT consecutive_yields FROM producer_jobs WHERE request_id=? AND token=?",
+                (request_id, token),
+            ).fetchone()
+            if row:
+                streak = 1 if progressed else int(row[0]) + 1
+                parked = streak >= MAX_CONSECUTIVE_YIELDS
+                delay = min(MAX_REQUEUE_DELAY_SECONDS, 30 * (2 ** min(streak - 1, 5)))
+                db.execute("""UPDATE producer_jobs SET state=?,token=NULL,lease_until=NULL,
+                    available_at=?,consecutive_yields=? WHERE request_id=? AND token=?""",
+                    ("paused" if parked else "queued", time.time() + delay, streak, request_id, token))
+                if parked:
+                    logger.error("producer request=%s paused after repeated no-progress yields", request_id)
         else:
             deleted = db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
             if deleted.rowcount:
