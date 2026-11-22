@@ -32,6 +32,7 @@
     expandedReviewGroup: null,
     needsEyesPage: 0,
     needsEyesSearch: "",
+    metaRecoveryOnly: false,
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
     submissionIntentIds: new Set(),
@@ -3667,7 +3668,9 @@
       needs_eyes: filtered(visibleNeedsEyes).length,
       manual: filtered(manualCards).length,
     };
-    renderSummary(summary);
+    // #2563: show the exact Meta repair inventory on the first Factory screen,
+    // not beneath the long Producer Progress and approval-activity sections.
+    // This is a view-only filter, never an approval or publishing action.
     // #2563: keep Studio-owned blocked repairs visible even while the Repair
     // accordion is collapsed. The user should not have to hunt for 118 holds.
     const metaRepairs = filtered(manualCards).filter(card => card.meta_repair_required === true);
@@ -3675,24 +3678,38 @@
     const missingCount = metaRepairs.filter(card => (card.meta_repair_missing_assets || []).length > 0).length;
     const needsUserCount = metaRepairs.filter(card => card.meta_repair_user_action_required === true).length;
     const providerCount = metaRepairs.filter(card => /Meta publication verification|Meta dispatch preflight/.test(String(card.meta_repair_reason || ""))).length;
+    const fbCount = metaRepairs.filter(card => card.platform === "Facebook").length;
+    const igCount = metaRepairs.filter(card => card.platform === "Instagram").length;
+    if (!metaCount) state.metaRecoveryOnly = false;
+    if (state.metaRecoveryOnly) summary.manual = metaCount;
+    renderSummary(summary);
     const factoryRoot = $("page-factory");
-    const bands = factoryRoot?.querySelector(".factory-band")?.parentElement;
-    if (bands) {
+    const statusBar = $("factoryDeskStatus");
+    const fallbackLanes = factoryRoot?.querySelector(".factory-lanes");
+    if (statusBar || fallbackLanes) {
       let notice = $("factoryMetaRepairNotice");
       if (!notice) {
         notice = document.createElement("section");
         notice.id = "factoryMetaRepairNotice";
         notice.className = "factory-meta-repair-notice";
         notice.setAttribute("role", "status");
-        bands.prepend(notice);
       }
+      // The old insertion point was inside .factory-lanes, far below
+      // Producer Change Request Progress, activity and several toolbars.
+      // Move an existing notice as well as newly created ones.
+      if (statusBar) statusBar.insertAdjacentElement("afterend", notice);
+      else fallbackLanes.prepend(notice);
       notice.hidden = metaCount === 0;
       if (metaCount) {
-        notice.innerHTML = `<span><strong>${metaCount} Instagram/Facebook outputs blocked from publishing.</strong>
-          <span>${missingCount} with confirmed missing/incomplete-media evidence · ${providerCount} awaiting provider checks · ${needsUserCount} requiring your action.</span>
-          <small>Unverified media is not automatically a missing asset. Each Repair card shows the evidence, who owns the fix, and the next step. No output will silently be considered approved.</small></span>
-          <button type="button" class="secondary-button">View affected outputs</button>`;
+        notice.innerHTML = `<div class="factory-meta-repair-copy">
+            <strong>${metaCount} Instagram/Facebook outputs awaiting repair — not Producer change requests</strong>
+            <span>${fbCount} Facebook · ${igCount} Instagram · ${missingCount} with missing-media evidence · ${providerCount} requiring provider verification</span>
+            <small>These outputs are in Repair → Needs Attention, not the Producer Change Request Progress panel. ${needsUserCount} currently require your action; the remaining recovery work is Studio-owned.</small>
+          </div>
+          <button type="button" class="secondary-button">${state.metaRecoveryOnly ? "Show all Repair items" : "View affected outputs"} (${metaCount})</button>`;
         notice.querySelector("button")?.addEventListener("click", () => {
+          state.metaRecoveryOnly = !state.metaRecoveryOnly;
+          renderDesk(state.desk);
           const band = $("factoryBandBodyManual")?.closest(".factory-band");
           if (band?.classList.contains("is-collapsed")) {
             band.querySelector("[data-factory-band-toggle]")?.click();
@@ -3707,7 +3724,9 @@
     renderLane("factoryLaneAutoHigh", filtered(desk.lanes?.auto_high), "Nothing in active produce/render right now.", { lane: "auto_high" });
     renderLane("factoryLaneNeedsEyes", filtered(visibleNeedsEyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
     renderLane("factoryLaneNeedsAssets", filtered(desk.lanes?.needs_assets), "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
-    renderLane("factoryLaneManual", filtered(manualCards), "No outputs need remediation.", { lane: "manual" });
+    renderLane("factoryLaneManual", filtered(state.metaRecoveryOnly
+      ? manualCards.filter(card => card.meta_repair_required === true)
+      : manualCards), "No outputs need remediation.", { lane: "manual" });
     renderLane(
       "factoryNeedsAssetsCandidates",
       filtered(desk.needs_assets_candidates),
