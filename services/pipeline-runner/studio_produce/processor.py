@@ -7,6 +7,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
+from studio_produce import workload_governor as governor
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
 from studio_produce.job import derive_route, is_finished_route, job_is_terminal, new_job, next_step, utc_now, with_step
 from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step, render_progress_detail
@@ -88,6 +89,10 @@ def resume_job(production_request_record_id: str) -> dict[str, Any]:
 
 
 def _launch(request_id: str) -> bool:
+    if governor.enabled():
+        created = governor.enqueue(request_id)
+        governor.ensure_dispatcher(_run_governed)
+        return created
     with _LOCK:
         if request_id in _RUNNING:
             return False
@@ -95,6 +100,31 @@ def _launch(request_id: str) -> bool:
     thread = threading.Thread(target=_run_safe, args=(request_id,), daemon=True, name=f"studio-produce-{request_id}")
     thread.start()
     return True
+
+
+def _run_governed(request_id: str, token: str) -> None:
+    """Lease-guarded job; transient DB errors return work to the durable queue."""
+    requeue = False
+    try:
+        with governor.job_heartbeat(request_id, token) as stopped:
+            outcome = _run(request_id, lease_token=token, heartbeat_stopped=stopped)
+            requeue = outcome == "yielded"
+    except Exception as error:
+        if governor.is_database_overload(error):
+            logger.warning("studio producer requeued on database outage request=%s", request_id)
+            governor.trip_database_circuit()
+            requeue = True
+        else:
+            logger.exception("studio governed producer crashed request=%s", request_id)
+            try:
+                client = AirtableClient()
+                request = load_request(client, request_id)
+                write_job(client, request_id, with_step(read_job(request), "blocked", error="Studio production job crashed"))
+            except Exception:
+                logger.exception("unable to persist governed producer failure; retaining job request=%s", request_id)
+                requeue = True
+    finally:
+        governor.finish_job(request_id, token, requeue=requeue)
 
 
 def _run_safe(request_id: str) -> None:
@@ -114,13 +144,21 @@ def _run_safe(request_id: str) -> None:
             _RUNNING.discard(request_id)
 
 
-def _run(request_id: str) -> None:
+def _run(
+    request_id: str, *, lease_token: str | None = None, heartbeat_stopped: threading.Event | None = None,
+) -> str | None:
     client = AirtableClient()
     started = time.monotonic()
     for _ in range(MAX_LOOPS):
+        if lease_token and (
+            (heartbeat_stopped is not None and heartbeat_stopped.is_set())
+            or not governor.job_valid(request_id, lease_token)
+            or governor.circuit_open()
+        ):
+            return "yielded"
         if time.monotonic() - started >= MAX_WALL_SECONDS:
             logger.info("studio produce yielding request=%s after wall clock", request_id)
-            return
+            return "yielded"
         request = load_request(client, request_id)
         parent = load_parent(client, request)
         outputs = load_outputs(client, request_id, parent)
@@ -189,3 +227,8 @@ def _run(request_id: str) -> None:
         write_job(client, request_id, next_job)
         if nxt in TERMINAL_STEPS:
             return
+    return "yielded"
+
+# Restore queued work when the Windows runner restarts (no provider publishing).
+if governor.enabled():
+    governor.ensure_dispatcher(_run_governed)
