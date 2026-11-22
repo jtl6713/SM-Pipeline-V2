@@ -261,7 +261,29 @@ def _rest(settings: dict, path: str, method: str, body: Any = None, *, prefer: s
 
     scope = "supabase_read" if method.upper() in {"GET", "HEAD"} else "supabase_write"
     limit = governor.max_db_reads() if scope == "supabase_read" else governor.max_db_writes()
-    with governor.resource_slot(scope, limit=limit, allow_during_circuit=(scope == "supabase_read")):
+    scoped_a3_id = governor.a3_scoped_record_id()
+    allow_a3_write = (
+        governor.enabled()
+        and governor.admission_paused()
+        and bool(scoped_a3_id)
+        and method.upper() == "PATCH"
+        and path == f"media_assets?airtable_record_id=eq.{scoped_a3_id}"
+        and isinstance(body, dict)
+        and bool(body)
+        and set(body).issubset({"metadata", "media_class", "asset_role"})
+        and "metadata" in body
+        and isinstance(body["metadata"], dict)
+        and "classification_status" in body["metadata"]
+        and body["metadata"]["classification_status"] in {
+            "Processing", "Classified", "Classification Error", "Needs Classification"
+        }
+    )
+    if scope == "supabase_write" and scoped_a3_id and not allow_a3_write:
+        raise governor.AdmissionDeferred("A3 scoped write cannot mutate other resource or metadata")
+    with governor.resource_slot(
+        scope, limit=limit, allow_during_circuit=(scope == "supabase_read"),
+        allow_during_recovery=allow_a3_write,
+    ):
         started = time.monotonic()
         try:
             response = requests.request(
