@@ -42,16 +42,22 @@ function output(id, number, state = "Ready for Review") {
     studio_preview_url: CDN + "studio/previews/lettered/1.jpg",
     thumbnail_url: CDN + "studio/previews/thumbnails/1.jpg",
     selected_clip_count: 2,
-    selected_assets: { selected_clips: [
-      { url: CDN + "studio/previews/lettered/1.jpg" },
-      { url: CDN + "studio/previews/lettered/2.jpg" },
-    ] },
+    selected_assets: { selected_clips: [1, 2].map(n => ({
+      order: n, url: CDN + "studio/previews/lettered/" + n + ".jpg",
+      googleDriveFileId: "google_drive_variant_id_" + n + "_123456",
+      mediaAssetRecordId: "rec" + String(n).padStart(14, "A"),
+    })) },
+    render_clip_list: [1, 2].map(n => ({
+      order: n, url: CDN + "studio/previews/lettered/" + n + ".jpg",
+      googleDriveFileId: "google_drive_variant_id_" + n + "_123456",
+      mediaAssetRecordId: "rec" + String(n).padStart(14, "A"),
+    })),
     error_messages: {}, auto_publish_enabled: false, scheduled_post_date: null,
     studio_scheduled_at: null, youtube_scheduled_publish_at: null, published_at: null,
     updated_at: ISO,
   };
 }
-function mockSupabase(t, seed, { timeZone = "America/Chicago" } = {}) {
+function mockSupabase(t, seed, { timeZone = "America/Chicago", missingSlides = false } = {}) {
   const rows = seed.map(row => structuredClone(row)), calls = [];
   const savedFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = savedFetch; });
@@ -90,6 +96,28 @@ function mockSupabase(t, seed, { timeZone = "America/Chicago" } = {}) {
       }
       const ids = String(u.searchParams.get("airtable_record_id")).match(/^in\.\((.*)\)$/)?.[1].split(",") || [];
       return Response.json(rows.filter(x => ids.includes(x.airtable_record_id)));
+    }
+    if (u.pathname.endsWith("/carousel_slides")) {
+      if (missingSlides) return Response.json([]);
+      const selectedNumber = Number(
+        String(u.searchParams.get("fields->PO_Output_ID") || "").match(/\[(\d+)\]/)?.[1] || 0);
+      const row = rows.find(item => item.output_number === selectedNumber);
+      return Response.json(row ? row.selected_assets.selected_clips.map((clip, i) => ({
+        airtable_record_id: "native-test-slide-" + selectedNumber + "-" + i,
+        current_order: i + 1, deleted_from_carousel: false,
+        fields: {
+          "Platform Output": [row.airtable_record_id],
+          PO_Output_ID: [row.output_number],
+          "Slide Number": i + 1,
+          "Final Image URL": clip.url,
+          "Asset_4x5_Public_URL": clip.url,
+          "Asset_Family_Key": clip.mediaAssetRecordId,
+          "Google Drive File ID": clip.googleDriveFileId,
+          "Asset_4x5_Public_Status": "Ready",
+          "Shared_Asset_Approved": true,
+          "Approved For Final": true,
+        },
+      })) : []);
     }
     if (u.pathname.endsWith("/content_items")) {
       return Response.json([{ id: CONTENT_UUID, airtable_record_id: CONTENT_ID, content_profile_id: PROFILE_UUID }]);
@@ -271,5 +299,22 @@ test("explicit manual method cannot be silently converted to automatic publicati
   await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
     requestId: "manual-method-held", verifyImages: async readiness => readiness,
   }), /explicitly configured for manual publishing/);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});
+
+
+test("issue #2294: Factory preflight and final approval both reject missing 8-image native slide packages", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)], { missingSlides: true });
+  await assert.rejects(
+    factorySupabaseGroupPreflight(env, [IDS[0]], policy),
+    /native_gallery_slide_count_mismatch/,
+  );
+  await assert.rejects(
+    factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+      requestId: "issue2294-no-slides",
+      verifyImages: async readiness => readiness,
+    }),
+    /native_gallery_slide_count_mismatch/,
+  );
   assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });

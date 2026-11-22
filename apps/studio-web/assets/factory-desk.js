@@ -674,6 +674,12 @@
       });
       if (epoch !== factoryGalleryPreviewEpoch) return;
       const slides = data?.slides;
+      const draftOnly = data?.provisional === true
+        && data?.source === "unverified-selected-source-images"
+        && data?.do_not_publish === true && data?.publication_authorized === false;
+      if (data?.provisional && !draftOnly) {
+        throw new Error("Untrusted candidate gallery cannot be shown");
+      }
       const trustedImage = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
       if (data?.output_id !== id || !Array.isArray(slides) || slides.length < 2
           || slides.length > 10 || data.count !== slides.length
@@ -698,17 +704,30 @@
       next.className = "secondary-button";
       next.textContent = "Next image";
       controls.append(back, counter, next);
+      if (draftOnly) {
+        const hold = document.createElement("p");
+        hold.setAttribute("role", "alert");
+        hold.style.cssText = "flex-basis:100%;width:100%;font-weight:700;color:#9a6000;text-align:center";
+        hold.textContent = "Unverified source images only — native carousel slides missing. Do not approve or publish.";
+        controls.appendChild(hold);
+      }
       dialog.appendChild(controls);
       let index = 0;
       const show = (nextIndex) => {
         index = nextIndex;
         image.src = slides[index].image_url;
-        image.alt = `Verified native gallery slide ${index + 1} of ${slides.length}`;
+        image.alt = draftOnly
+          ? `UNVERIFIED selected source image ${index + 1} of ${slides.length}`
+          : `Verified native gallery slide ${index + 1} of ${slides.length}`;
         image.hidden = false;
-        counter.textContent = `${index + 1} / ${slides.length} slides · review only`;
+        counter.textContent = draftOnly
+          ? `${index + 1} / ${slides.length} source images · NOT approved`
+          : `${index + 1} / ${slides.length} native slides · review only`;
         back.disabled = index === 0;
         next.disabled = index === slides.length - 1;
-        setStatus(`Viewing native slide ${index + 1} of ${slides.length} · ${cardLabel(card)}`);
+        setStatus(draftOnly
+          ? `UNVERIFIED source preview only — missing linked slides · ${cardLabel(card)}`
+          : `Viewing native slide ${index + 1} of ${slides.length} · ${cardLabel(card)}`, draftOnly);
       };
       image.onerror = () => setStatus(
         `Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);

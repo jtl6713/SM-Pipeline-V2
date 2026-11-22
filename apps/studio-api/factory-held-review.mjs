@@ -6,6 +6,7 @@
 import { supabaseRest } from "./supabase-pipeline-reads.mjs";
 import { factorySupabaseApprovalRows } from "./factory-supabase-approval.mjs";
 import { evaluateReviewPackage, verifyReviewImages } from "./review-package-readiness.mjs";
+import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 
 const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const livePublish = /^(scheduled|publishing|published|uploading|platform processing|draft delivered)$/i;
@@ -53,6 +54,10 @@ export async function factoryHeldReviewDecision(env, id, actor, decision, note =
   if (blocker) throw Error("Held review blocked: " + blocker);
   if (decision === "reject" && !String(note || "").trim()) throw Error("Rejection requires a reason");
   if (decision === "approve") {
+    // Creative-only approval is still a real Factory acceptance. Never accept
+    // a multi-image package whose exact canonical slides are absent, unlinked,
+    // out of order, or not finally reviewed. Publishing hold is unchanged.
+    await assertSupabaseNativeGalleryPublicationPackage(env, row);
     const ready = evaluateReviewPackage(entry.record);
     if (ready.readiness !== "READY") throw Error("Review media incomplete: " +
       ((ready.missing_requirements || []).join(", ") || ready.reason));
