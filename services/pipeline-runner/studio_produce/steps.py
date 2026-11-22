@@ -205,6 +205,12 @@ def run_voiceover_p2(client: AirtableClient, ctx: dict[str, Any]) -> dict[str, A
     refreshed = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
     ctx["parent"] = refreshed
     if not field_str(refreshed, "Voiceover_URL"):
+        # P2 found an existing same-script TTS lease. This is a deliberate
+        # duplicate-generation fence, not a production error. Retain the audio
+        # step and wait for the first owner to save or expire its lease.
+        # Never clear the claim or burn the Studio self-heal retry budget.
+        if result.get("reason") == "voiceover_already_in_flight":
+            raise StepWait("Waiting for existing voiceover lease")
         if result.get("processed"):
             raise StepWait("Waiting for voiceover")
         raise StepBlocked(result.get("reason") or "P2 did not generate voiceover")
@@ -807,6 +813,11 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     still_voice = want_voice and not field_str(refreshed, "Voiceover_URL")
     still_thumb = want_thumb and not is_designed_cover_url(field_str(refreshed, "Thumbnail_URL"))
     if still_voice:
+        # A fresh TTS claim is expected while another P2 instance is creating
+        # the exact narration. Retrying through the wait path preserves the
+        # 20-minute lease and avoids 5 false Blocked/Needs Attention cycles.
+        if result.get("reason") == "voiceover_already_in_flight":
+            raise StepWait("Waiting for existing voiceover lease")
         if result.get("processed"):
             raise StepWait("Waiting for voiceover")
         raise StepBlocked(result.get("reason") or "P2 did not generate voiceover")
