@@ -60,7 +60,7 @@ def start_library_ingest_job(
                         and existing.get("status") in {"processing", "ok"}):
                     return str(existing["job_id"])
         from studio_produce import workload_governor as governor
-        if governor.enabled() and governor.admission_paused():
+        if governor.enabled():
             waiting = sum(1 for job in _JOBS.values() if job.get("status") == "processing")
             if waiting >= _RECOVERY_MAX_PENDING:
                 raise RuntimeError("library_ingest_capacity")
@@ -83,7 +83,7 @@ def start_library_ingest_job(
             # Studio production and all other mutating runner routes stay paused.
             claim = (
                 governor.resource_slot("library_image_upload", limit=1, allow_during_recovery=True)
-                if governor.enabled() and governor.admission_paused()
+                if governor.enabled()
                 else nullcontext()
             )
             with claim:
