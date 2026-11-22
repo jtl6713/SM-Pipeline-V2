@@ -774,6 +774,7 @@ import {
   promoteProductionRequestViaI3I4,
   studioNyc20261121HandoffCron,
   studioRecoverFreeSkylineFerryFanoutCron,
+  studioResumeFreeSkylineHeldProduceCron,
   promoteIdeaViaI3I4,
   ideaPhotoListeningSessionRoute,
   getAuthorizedIdeaRoute,
@@ -1410,7 +1411,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1014-ferry-held-v2-2593",
+          version: "0.10.1015-ferry-held-resume-2593",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4494,6 +4495,15 @@ export default {
         })
         .catch((error) => console.error("issue2593 ferry fanout failed closed", String(error?.message || error))));
     }
+    // Issue #2593: after Runner music-view fix, resume only the already-
+    // recovered C2239's exact, no-publish-held Studio Produce job once.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil(studioResumeFreeSkylineHeldProduceCron(env)
+        .then((result) => {
+          if (result && !result.skipped) console.info("issue2593 ferry held production resume", result);
+        })
+        .catch((error) => console.error("issue2593 ferry production resume failed closed", String(error?.message || error))));
+    }
     // Incident 2026-11-21: bounded, exact NYC I4 fanout recovery.
     // The recovered parents already exist; one request/one minute, never
     // schedule or publish, durable one-attempt R2 receipt per request.
@@ -7282,6 +7292,7 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:studioNyc20261121HandoffCron__*/
 /*__STUDIO_WORKER_EXTRACT:studioRecoverFreeSkylineFerryFanoutCron__*/
+/*__STUDIO_WORKER_EXTRACT:studioResumeFreeSkylineHeldProduceCron__*/
 /*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
 // Clearing that id made the next P2 pulse buy the same sentence again
