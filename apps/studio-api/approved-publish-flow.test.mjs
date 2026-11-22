@@ -72,3 +72,57 @@ test("due Ready to Schedule records share the same fenced first-publish admissio
   row.fields.Studio_Publish_Dispatch_Count = 8;
   assert.equal(check(row).reason, "previous_attempt_requires_provider_reconciliation");
 });
+
+const reconciledEarlyHold = () => {
+  const record = fresh();
+  record.fields.Publish_Status = "Ready to Schedule";
+  record.fields.Studio_Publish_Dispatch_Count = 1;
+  record.fields.Studio_Publish_Dispatch_At = "2026-11-18T10:30:00Z";
+  record.fields.Studio_Early_Hold_Recovery_Proof = "issue-2340-scheduled-hold-v1";
+  record.fields.Studio_Early_Hold_Original_Dispatch_At = record.fields.Studio_Publish_Dispatch_At;
+  record.fields.Studio_Early_Hold_Original_Scheduled_At = record.fields.Scheduled_Post_Date;
+  return record;
+};
+
+test("historical approval-time scheduled hold with exact per-record proof uses one-shot initial publisher", () => {
+  assert.deepEqual(check(reconciledEarlyHold()), {
+    eligible: true, reason: "audited_pre_schedule_hold_first_publish",
+  });
+});
+
+test("synthetic historical hold requires exact immutable timestamp/slot identity", () => {
+  for (const [key, value] of [
+    ["Studio_Early_Hold_Recovery_Proof", ""],
+    ["Studio_Early_Hold_Original_Dispatch_At", "2026-11-17T10:30:00Z"],
+    ["Studio_Early_Hold_Original_Scheduled_At", "2026-11-20T17:30:00Z"],
+    ["Studio_Publish_Dispatch_Count", 2],
+    ["Publish_Attempt_Count", 1],
+    ["Studio_Publish_Dispatch_At", "2026-11-20T18:31:00Z"],
+    ["Publish_Started_At", "2026-11-18T10:31:00Z"],
+    ["Last_Publish_Attempt_At", "2026-11-18T10:31:00Z"],
+    ["Platform_Post_ID", "123_456"],
+    ["IG_Story_Container_ID", "123456789"],
+    ["Platform_Media_ID", "123456789"],
+    ["Do_Not_Publish", true],
+    ["Publish_Status", "Failed"],
+    ["Review_Status", "Changes Requested"],
+    ["Output_Caption", ""],
+  ]) {
+    const record = reconciledEarlyHold();
+    record.fields[key] = value;
+    assert.equal(check(record).eligible, false, key);
+  }
+});
+
+test("historical single hold proof never overrides a 2099 cooldown or an active owner", () => {
+  let record = reconciledEarlyHold();
+  record.fields.Publish_Next_Retry_At = "2099-01-01T00:00:00Z";
+  assert.equal(check(record).reason, "retry_cooldown");
+  record = reconciledEarlyHold();
+  record.fields.Publish_Locked_By = "provider_upload";
+  record.fields.Publish_Locked_At = "2026-11-20T18:59:00Z";
+  assert.equal(check(record).reason, "active_publish_lock");
+  record = reconciledEarlyHold();
+  record.fields.Scheduled_Post_Date = "2026-11-22T18:30:00Z";
+  assert.equal(check(record).eligible, false, "slot changes invalidate recovery proof");
+});

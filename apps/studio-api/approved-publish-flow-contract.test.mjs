@@ -12,6 +12,10 @@ test("fresh publish selector gets only due approved never-dispatched Supabase ou
     "publish_next_retry_at.lte.",
     "scheduled_post_date.lte.", "platform.eq.TikTok",
   ]) assert.ok(query.includes(fragment), fragment);
+  assert.match(query, /Studio_Early_Hold_Recovery_Proof\.eq\.issue-2340-scheduled-hold-v1/,
+    "only the per-record audited single historical scheduled-hold may bypass the old dispatch stamp");
+  assert.match(query, /Studio_Publish_Dispatch_Count\.eq\.1/,
+    "multi-dispatch rows remain in provider-reconciliation, never the fresh lane");
   assert.ok(!query.includes("publish_retry_eligible="), "fresh first posts may prohibit retry");
   assert.ok(query.includes("2026-11-20T19%3A15%3A00"), "TikTok lead cannot be widened");
 });
