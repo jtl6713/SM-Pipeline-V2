@@ -9,7 +9,7 @@ const row=()=>({
   id:"f1cf1255-0c34-487c-a938-cb2ddb9f9070",
   airtable_record_id:REC,output_number:11125,content_profile_id:uuid,
   output_title:"Example held output",platform:"Facebook",
-  output_status:"Approved for Publishing",publish_status:"Ready to Publish",
+  output_status:"Approved for Publishing",review_status:"Approved",publish_status:"Ready to Publish",
   do_not_publish:true,auto_publish_enabled:true,updated_at:"2026-11-22T16:00:00Z",
   publish_hold_set_at:"2026-11-22T15:50:00Z",
   publish_hold_reason:null,error_messages:{},
@@ -58,6 +58,8 @@ test("protected review, factory, legal, tests, dispatch and published receipts c
     assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false);
   }
   assert.equal(classifyAdminPublishingHold({...row(),test_run_id:"test"}).releasable,false);
+  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,false);
+  assert.equal(classifyAdminPublishingHold({...row(),output_status:"In Production"}).releasable,false);
   assert.equal(classifyAdminPublishingHold({...row(),published_at:"2026-11-22"}).releasable,false);
 });
 test("GET scopes the list to membership and exposes reasons and release eligibility",async()=>{
