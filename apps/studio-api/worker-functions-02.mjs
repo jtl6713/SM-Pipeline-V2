@@ -808,6 +808,19 @@ export async function studioHealEscalatedProduce(env, options = {}) {
         pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "no_outputs" });
         continue;
       }
+      // Recreated held output cards can still lack licensed music. Do not
+      // reopen the renderer simply because the reverse parent link now exists.
+      // Await explicit media repair; the DNP/no-schedule holds remain intact.
+      const live = await listSupabaseContentPlatformOutputs(env, contentId, { limit: 60 }).catch(() => null);
+      if (!Array.isArray(live)) {
+        pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "output_readback_unavailable" });
+        continue;
+      }
+      if (live.some(output => f(output,"Do_Not_Publish") === true
+          && String(f(output,"Render_Status") || "") === "Blocked")) {
+        pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "held_media_not_ready" });
+        continue;
+      }
     }
     const heal = studioProduceHealState(job);
     const nextJob = {
@@ -5656,7 +5669,7 @@ export function outputWorkItemIssues(outputRow, route, effective) {
 }
 /*__STUDIO_WORKER_END:outputWorkItemIssues__*/
 
-export async function buildOutputWorkItemEffective(env, outputRow, requestRecord, parentContentItem, profileDefaults) {
+export async function buildOutputWorkItemEffective(env, outputRow, requestRecord, parentContentItem, profileDefaults, options = {}) {
   const route = studioOutputRouteSpec(outputRow);
 
   const videoMode = outputEffectiveChoice(
@@ -5835,7 +5848,15 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
       effective.video_duration_seconds = Math.max(effective.video_duration_seconds, speechCoverage);
     }
   }
-  effective.music = await resolveStudioRenderMusic(env, outputRow, requestRecord, effective);
+  try {
+    effective.music = await resolveStudioRenderMusic(env, outputRow, requestRecord, effective);
+  } catch (error) {
+    // Recover missing Platform Output identities without falsely approving or
+    // rendering a silent video. Only the explicitly held recovery may defer media.
+    if (options.recoveryHold !== true) throw error;
+    effective.music = emptyStudioMusic();
+    effective.recovery_media_issue = "Music catalog inaccessible. Select licensed music before rendering.";
+  }
   const ezOrigin = String(f(requestRecord, "Production_Notes") || "").includes("origin=ez-button");
   if (ezOrigin) {
     const thumbnailOverride = String(f(outputRow, "Thumbnail_Mode_Override") || "Inherit").trim() || "Inherit";
@@ -5848,16 +5869,21 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
   // Requesting music must never silently fall back to a silent render.
   if (effective.background_music_mode === "Yes" && !String(effective.music?.url || "").trim()) {
-    effective.issues.push("Background music requested but no approved catalog URL is available.");
-  }
-  if (effective.background_music_mode === "Yes"
+    if (options.recoveryHold === true) effective.recovery_media_issue =
+      "Music required; select a verified licensed track before rendering.";
+    else effective.issues.push("Background music requested but no approved catalog URL is available.");
+  } else if (effective.background_music_mode === "Yes"
       && Number(effective.music?.duration_seconds || 0) < Number(effective.video_duration_seconds || 0)) {
-    effective.issues.push("Music source is shorter than the video or its duration cannot be verified.");
+    if (options.recoveryHold === true) effective.recovery_media_issue =
+      "Music duration not verified; repair before rendering.";
+    else effective.issues.push("Music source is shorter than the video or its duration cannot be verified.");
   }
   if (effective.voiceover_mode === "Yes"
       && String(f(parentContentItem, "Voiceover_Status") || "").trim() === "Generated"
       && !String(f(parentContentItem, "Voiceover_URL") || "").trim()) {
-    effective.issues.push("Voiceover marked Generated without a retrievable URL.");
+    if (options.recoveryHold === true) effective.recovery_media_issue =
+      [effective.recovery_media_issue,"Voiceover URL missing; repair before rendering."].filter(Boolean).join(" ");
+    else effective.issues.push("Voiceover marked Generated without a retrievable URL.");
   }
   return effective;
 }
@@ -7533,6 +7559,10 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     // but source relevance and publish readiness are still unverified.
     // Last-write precedence deliberately overrides any original plan schedule.
     ...(options.recoveryHold === true ? {
+      ...(effective.recovery_media_issue ? {
+        Render_Status: "Blocked",
+        Asset_Selection_Notes: effective.recovery_media_issue,
+      } : {}),
       Do_Not_Publish: true,
       Auto_Publish_Enabled: false,
       Output_Status: "In Production",
@@ -11019,7 +11049,7 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
   const workItems=[]; let routed=0,blocked=0;
   for(const outputRow of batch){
-    const effective=await buildOutputWorkItemEffective(env,outputRow,requestRecord,parent,profileDefaults);
+    const effective=await buildOutputWorkItemEffective(env,outputRow,requestRecord,parent,profileDefaults,{recoveryHold:options.recoveryHold===true});
     const route=effective.route;
     if(effective.issues.length){
       blocked++;
@@ -11735,6 +11765,147 @@ export async function studioResumeFreeSkylineHeldProduceCron(env) {
   }
 }
 /*__STUDIO_WORKER_END:studioResumeFreeSkylineHeldProduceCron__*/
+
+
+/**
+ * Missing-fanout repair for ALL profiles. The legacy escalation watchdog
+ * skips when PO count is zero, guaranteeing a UI dead end. This repair verifies
+ * the original Idea/PR/Content/plan ownership and reuses standard I3/I4
+ * creation. Recover only output identities; retain no-publish, no-schedule,
+ * pending-review until normal media QA explicitly releases the output.
+ */
+export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
+    return { skipped:"authority_unavailable" };
+  const formula = "AND({Test_Run_ID}=BLANK(),{Request_Status}!=\"Cancelled\",{Studio_Production_Job_JSON}!=\"\",OR(FIND('\"step\":\"escalated\"',{Studio_Production_Job_JSON}),FIND('\"step\": \"escalated\"',{Studio_Production_Job_JSON})))";
+  let candidates;
+  try {
+    candidates = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit:100,sortField:"Updated_At",sortDirection:"desc",filterFormula:formula,
+    });
+  } catch(error) {
+    return {skipped:"candidate_query_unavailable",error:String(error?.message||error).slice(0,120)};
+  }
+  const eligible = (candidates || []).filter(row => {
+    const job = parseStudioProductionJob(row);
+    return String(job?.step || "") === "escalated"
+      && String(job?.error || "") === "No Platform Outputs found for this Production Request"
+      && String(f(row,"Request_Status") || "") === "Submitted"
+      && String(f(row,"Production_Notes") || "").includes("origin=autonomous")
+      && !String(f(row,"Test_Run_ID") || "").trim();
+  }).reverse();
+  for (const sampled of eligible) {
+    const receiptKey = "studio/recovery/empty-output-fanout-v1/" + sampled.id + ".json";
+    if (await env.STUDIO_MEDIA.get(receiptKey)) continue;
+    let requestRecord,idea,parent,rows,outputs,ideaId,contentId;
+    try {
+      requestRecord=await airtableFetch(env,PRODUCTION_REQUEST_TABLE,sampled.id);
+      ideaId=studioFirstLinkedId(f(requestRecord,"Idea_Candidate"));
+      contentId=studioFirstLinkedId(f(requestRecord,"Promoted_Content_Item"))
+        || studioFirstLinkedId(f(requestRecord,"Content Items"));
+      if (!ideaId || !contentId) continue;
+      [idea,parent,rows,outputs]=await Promise.all([
+        airtableFetch(env,env.AIRTABLE_IDEA_TABLE_ID,ideaId),
+        airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId),
+        outputRowsForProductionRequest(env,sampled.id),
+        listSupabaseContentPlatformOutputs(env,contentId,{limit:60}),
+      ]);
+    } catch(error) {
+      console.warn("Empty-output preflight unavailable",sampled.id,String(error?.message||error).slice(0,150));
+      continue;
+    }
+    const job=parseStudioProductionJob(requestRecord);
+    const plan=item4ParseJson(f(requestRecord,"Studio_Output_Plan_JSON"),null);
+    const key=(p,t)=>String(p||"").trim()+"::"+String(t||"").trim();
+    const planned=new Set((Array.isArray(plan?.items)?plan.items:[]).map(item=>key(item.platform,item.output_type)));
+    const selected=new Set(rows.map(row=>key(f(row,"Platform"),f(row,"Output_Type"))));
+    const owners=arrayOrEmpty(f(parent,"Production_Request"));
+    const assets=item4ParseJson(f(requestRecord,"Studio_Master_Assets_JSON"),[]);
+    const valid=String(f(requestRecord,"Request_Status")||"")==="Submitted"
+      && String(job?.step||"")==="escalated"
+      && String(job?.error||"")==="No Platform Outputs found for this Production Request"
+      && String(f(requestRecord,"Production_Notes")||"").includes("origin=autonomous")
+      && !productionRequestRevisionOpen(requestRecord)
+      && !String(f(requestRecord,"Test_Run_ID")||"").trim()
+      && String(f(requestRecord,"Studio_Master_Asset_Status")||"")==="Ready"
+      && String(f(requestRecord,"Studio_Output_Plan_Status")||"")==="Ready"
+      && String(f(requestRecord,"Studio_Variant_Status")||"")==="Ready"
+      && Array.isArray(assets) && assets.length>0
+      && String(f(idea,"Candidate_Status")||"")==="Promoted"
+      && String(f(idea,"Promoted_Content_Record_ID")||"")===contentId
+      && owners.length===1 && owners[0]===sampled.id
+      && String(f(parent,"Content_Status")||"")!=="Archived"
+      && Array.isArray(outputs) && outputs.length===0
+      && Array.isArray(rows) && rows.length>0 && rows.length<=12
+      && rows.every(row=>f(row,"Enabled")===true
+        && !Boolean(f(row,"Platform_Output_Exists"))
+        && arrayOrEmpty(f(row,"Platform_Output")).length===0)
+      && plan?.schema_version==="item4.output-plan.1"
+      && Array.isArray(plan.items) && plan.items.length===rows.length
+      && planned.size===rows.length && selected.size===rows.length
+      && [...planned].every(item=>selected.has(item));
+    if(!valid)continue;
+    const start={schema:"studio.empty-output-fanout.1",request:sampled.id,idea:ideaId,
+      content:contentId,expected:rows.length,status:"attempted",
+      started_at:new Date().toISOString(),publish_actions:0,schedule_actions:0,
+      publication_authorized:false};
+    const claimed=await env.STUDIO_MEDIA.put(receiptKey,JSON.stringify(start),{
+      onlyIf:new Headers({"If-None-Match":"*"}),
+      httpMetadata:{contentType:"application/json"},
+    });
+    if(!claimed)return {request:sampled.id,skipped:"concurrent_claim"};
+    try{
+      const result=await finalizeProductionRequestPromotion(env,sampled.id,idea,ctx,{
+        recoveryHold:true,skipDirectiveSync:true,
+      });
+      const [real,links]=await Promise.all([
+        listSupabaseContentPlatformOutputs(env,contentId,{limit:60}),
+        outputRowsForProductionRequest(env,sampled.id),
+      ]);
+      const actual=new Set(real.map(row=>key(f(row,"Platform"),f(row,"Studio_Output_Type"))));
+      const verified=!result?.supersededByRequestId
+        && String(f(result?.requestRecord,"Request_Status")||"")==="Promoted"
+        && real.length===rows.length && links.length===rows.length
+        && Number(result?.outputFanout?.routed_count)===rows.length
+        && Number(result?.outputFanout?.blocked_count||0)===0
+        && links.every(row=>Boolean(f(row,"Platform_Output_Exists")))
+        && actual.size===planned.size && [...planned].every(item=>actual.has(item))
+        && real.every(row=>f(row,"Do_Not_Publish")===true
+          && f(row,"Auto_Publish_Enabled")!==true
+          && !f(row,"Scheduled_Post_Date") && !f(row,"Studio_Scheduled_At")
+          && !f(row,"YouTube_Scheduled_Publish_At"));
+      const needsMedia=real.some(row=>String(f(row,"Render_Status")||"")==="Blocked");
+      let resumed=false,resumeReason=null;
+      if(verified&&!needsMedia){
+        try {
+          const response=await enqueueStudioProductionJob(env,sampled.id,{resume:true});
+          resumed=response?.accepted===true||response?.ok===true;
+          if(!resumed)resumeReason=String(response?.reason||response?.skipped||"not_accepted").slice(0,160);
+        } catch(error){resumeReason=String(error?.message||error).slice(0,160);}
+      }
+      const done={...start,finished_at:new Date().toISOString(),
+        routed:Number(result?.outputFanout?.routed_count||0),outputs:real.length,
+        verified,needs_media:needsMedia,resumed,resume_reason:resumeReason,
+        status:!verified?"needs_investigation":needsMedia?"held_media_selection_required":
+          resumed?"verified_held_outputs_resumed":"verified_held_outputs_resume_pending"};
+      await env.STUDIO_MEDIA.put(receiptKey,JSON.stringify(done),{
+        httpMetadata:{contentType:"application/json"},
+      });
+      console.info("empty output recovery",done);
+      return {request:sampled.id,...done};
+    } catch(error){
+      const failed={...start,status:"failed_no_auto_retry",finished_at:new Date().toISOString(),
+        error:String(error?.message||error).slice(0,240)};
+      await env.STUDIO_MEDIA.put(receiptKey,JSON.stringify(failed),{
+        httpMetadata:{contentType:"application/json"},
+      }).catch(()=>{});
+      console.error("empty output recovery failed",failed);
+      return failed;
+    }
+  }
+  return {skipped:"no_eligible_unattempted",scanned:(candidates||[]).length};
+}
+/*__STUDIO_WORKER_END:studioRecoverEmptyPlatformOutputCron__*/
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null, options = {}) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
