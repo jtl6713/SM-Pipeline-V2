@@ -7769,7 +7769,7 @@ export function translateProductionRequestFormula(formula) {
     return `${REQUEST_TEST_RUN_QUIET}&${REQUEST_ACTIVE}&request_status=in.(Draft,Ready,Submitted)`
       + `&publish_status->>Studio_Master_Asset_Status=eq.Ready`
       + `&publish_status->Studio_Master_Asset_Count=eq.1`
-      + `&production_notes.ilike.*ez-input=vibe-cut*`;
+      + `&production_notes=ilike.*ez-input=vibe-cut*`;
   }
   if (cleaned === "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')"
     || cleaned === 'AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled")') {
