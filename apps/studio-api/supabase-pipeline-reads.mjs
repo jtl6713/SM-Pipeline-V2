@@ -2570,13 +2570,21 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
       const manifest = render[index];
       const originalSource = String(manifest?.googleDriveFileId || "").trim();
       const sourceFamily = String(manifest?.mediaAssetRecordId || "").trim();
+      // Source candidates staged for a human inspection do not acquire
+      // fabricated HTTP, geometry, copyright or watermark verification.
+      // Existing verified drafts still require their complete byte evidence.
+      const verifiedEvidence = /^[a-f0-9]{64}$/.test(String(marker?.public_sha256 || ""))
+        && marker?.verified_dimensions === "1080x1350"
+        && marker?.image_http_verified === true && marker?.image_geometry_verified === true;
+      const unverifiedEvidence = marker?.image_http_verified === false
+        && marker?.image_geometry_verified === false
+        && marker?.rights_status === "Unverified"
+        && !marker?.public_sha256 && !marker?.verified_dimensions;
       if (slides[index].airtable_record_id !==
           "sb-native:2294:" + parent.output_number + ":" + String(index + 1).padStart(2, "0")
           || Number(marker?.output_number) !== parent.output_number ||
           Number(marker?.slide_order) !== index + 1 ||
-          !/^[a-f0-9]{64}$/.test(String(marker?.public_sha256 || "")) ||
-          marker?.verified_dimensions !== "1080x1350" ||
-          marker?.image_http_verified !== true || marker?.image_geometry_verified !== true ||
+          (!verifiedEvidence && !unverifiedEvidence) ||
           marker?.final_creative_approved !== false || marker?.publishing_authorized !== false ||
           fields["Approved For Final"] !== false ||
           fields.Shared_Asset_Approved !== false ||
@@ -2592,12 +2600,18 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
         throw new Error("Draft native gallery source identity, order or pending approval changed");
       }
     }
+    const allByteVerified = slides.every(slide =>
+      slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.image_http_verified === true
+      && slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.image_geometry_verified === true);
     return {
       output_id: id, output_number: parent.output_number,
       do_not_publish: true, count: result.length, slides: result,
       source: "unverified-native-draft-slides",
       provisional: true, publication_authorized: false,
-      warning: "Linked native draft slides await creative approval. Do not approve, schedule or publish.",
+      candidate_bytes_verified: allByteVerified,
+      warning: allByteVerified
+        ? "Linked native draft slides await creative approval. Do not approve, schedule or publish."
+        : "Unverified source candidates for visual inspection only. Image/branding/rights approval and publishing are blocked.",
     };
   }
   return {
