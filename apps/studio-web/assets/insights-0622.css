@@ -702,7 +702,8 @@
   background: #f5fbfa;
 }
 
-.insights-connection.needs_authorization {
+.insights-connection.needs_authorization,
+.insights-connection.needs_developer_approval {
   border-color: #e7cf92;
   background: #fffaf0;
 }
@@ -739,7 +740,8 @@
   color: #176a63;
 }
 
-.insights-connection.needs_authorization .insights-connection-head span {
+.insights-connection.needs_authorization .insights-connection-head span,
+.insights-connection.needs_developer_approval .insights-connection-head span {
   background: #f6e7b9;
   color: #755f19;
 }
