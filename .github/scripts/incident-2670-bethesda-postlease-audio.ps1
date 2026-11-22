@@ -50,8 +50,8 @@ if ($links.Count -ne 6 -or @($links | Where-Object {$_.platform_output_id}).Coun
 Write-Output 'bethesda_exact_postlease_preflight=PASS'
 $body=@{production_request_record_id=$rid;resume=$true} | ConvertTo-Json -Compress
 $answer=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/jobs/studio-produce/resume' -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 30
-if (-not $answer.ok -or -not $answer.accepted -or $answer.production_request_record_id -ne $rid -or $answer.already_running) {throw 'exact_producer_resume_not_newly_accepted'}
-Write-Output 'bethesda_one_time_resume=ACCEPTED'
+if (-not $answer.ok -or -not $answer.accepted -or $answer.production_request_record_id -ne $rid) {throw 'exact_producer_resume_not_accepted'}
+if ($answer.already_running) {Write-Output 'bethesda_one_time_resume=IDEMPOTENT_ALREADY_ADMITTED'} else {Write-Output 'bethesda_one_time_resume=ACCEPTED'}
 Start-Sleep -Seconds 12
 $after=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $headers -TimeoutSec 20
 $health2=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
