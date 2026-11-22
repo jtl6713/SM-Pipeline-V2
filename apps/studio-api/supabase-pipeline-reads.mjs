@@ -3217,13 +3217,18 @@ export function deskHealOutputFilter(kind, options = {}) {
     return tiktokReconcileOutputFilter(kind, options);
   }
   if (kind === "fresh_publish_ready") {
-    // Supabase SoR initial-publication lane. Never replay an existing
-    // dispatch, remote upload or explicit retry hold through this selector.
-    // Continuations and old Past Due/Failed rows require provider receipts.
+    // Supabase SoR initial-publication lane. Keep historical attempts blocked
+    // except explicitly audited, single approval-time scheduled-hold markers.
+    // The per-output second preflight validates original timestamps, current
+    // approved state, zero native attempts and absence of provider identity.
+    // The R2 one-shot fence still prevents a second external create.
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
     const due = encodeDeskFilterValue(new Date(nowMs).toISOString());
     const tiktokLead = encodeDeskFilterValue(new Date(nowMs + 15 * 60000).toISOString());
-    const neverDispatched = "or=(error_messages->>Studio_Publish_Dispatch_Count.is.null,error_messages->>Studio_Publish_Dispatch_Count.eq.0)";
+    const auditedEarlyHold = "and(error_messages->>Studio_Publish_Dispatch_Count.eq.1,"
+      + "error_messages->>Studio_Early_Hold_Recovery_Proof.eq.issue-2340-scheduled-hold-v1)";
+    const neverDispatched = "or=(error_messages->>Studio_Publish_Dispatch_Count.is.null,"
+      + "error_messages->>Studio_Publish_Dispatch_Count.eq.0," + auditedEarlyHold + ")";
     // A never-attempted approved row may have retry=false; the per-record
     // preflight rejects any prior remote attempt or ID. Honor cooldowns.
     const retryDue = `or=(publish_next_retry_at.is.null,publish_next_retry_at.lte.${due})`;
