@@ -11,7 +11,7 @@ export const PREFLIGHT_KEY = "SM_Scheduling_Approval_Preflight_v1";
 const CDN = "https://media.chicagoshining.com/";
 const recId = /^rec[A-Za-z0-9]{14}$/;
 const supportedRender = new Set(["Rendered", "Native Photo Route"]);
-const safeStatus = new Set(["", "Not Ready"]);
+const safeStatus = new Set(["", "Not Ready", "Ready to Publish"]);
 const safeReview = new Set(["", "Review Sent", "Pending Review", "Pending"]);
 const str = value => String(value ?? "").trim();
 const truthy = value => value === true || value === 1 || str(value).toLowerCase() === "true";
@@ -37,16 +37,26 @@ export function assessSchedulingPreflight(row, { allowVerifiedCompactNative = fa
   if (!supportedRender.has(str(row.render_status))) return fail("render_incomplete");
   if (!safeReview.has(str(row.review_status)) ||
       !safeStatus.has(str(row.publish_status))) return fail("review_or_publication_state");
-  if (row.published_at || row.scheduled_post_date || row.studio_scheduled_at ||
+  // Legacy NYC producer plans can prefill a proposed Scheduled_Post_Date
+  // before the creative exists or the human has approved. A proposed date is
+  // NOT permission to post. Technical verification may proceed, but may NEVER
+  // change that date, Review_Status, Auto_Publish_Enabled or Publish_Status.
+  // An actual Studio/YouTube scheduled stamp or provider operation still blocks.
+  if (row.published_at || row.studio_scheduled_at ||
       row.youtube_scheduled_publish_at || row.platform_post_url || row.platform_post_id)
     return fail("existing_schedule_or_provider_operation");
+  if (row.scheduled_post_date &&
+      !Number.isFinite(Date.parse(str(row.scheduled_post_date))))
+    return fail("invalid_provisional_scheduled_date");
   const bag = row.error_messages && typeof row.error_messages === "object"
     && !Array.isArray(row.error_messages) ? row.error_messages : {};
   if ([
     "Publish_Locked_At", "Publish_Started_At", "Studio_Publish_Dispatch_At",
     "Platform_Post_ID", "Platform_Media_ID", "Factory_Review_Handoff_Safety_Hold_At",
     "Studio_Render_Review_Hold_Active",
-  ].some(key => truthy(bag[key]) || str(bag[key])))
+  ].some(key => truthy(bag[key]) || str(bag[key])) ||
+      ["Studio_Publish_Dispatch_Count", "Publish_Attempt_Count", "Studio_Publish_Attempt_Count"]
+        .some(key => Number(bag[key] || 0) > 0))
     return fail("historical_provider_or_review_hold");
   if (!str(row.output_caption)) return fail("caption_missing");
   const preview = str(row.studio_preview_url);
