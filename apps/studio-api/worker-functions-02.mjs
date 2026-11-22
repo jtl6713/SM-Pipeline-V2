@@ -12760,6 +12760,15 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
   const summary = String(f(record, "Idea_Summary") || "").trim();
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
 
+  // #2647: Novel ideas are valuable before footage exists, but missing
+  // source media must never bypass the I3/I4 handoff gate. Operators can
+  // create/edit a Production Draft and attach media first; attaching verified
+  // assets transitions the Idea into the normal photo-wait workflow.
+  if (String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Needs new media") {
+    throw new HttpError(409,
+      "This idea needs new photos or clips before promotion. Open Add media / pre-production, attach the required assets, then continue.");
+  }
+
   const input = cleanPromotionPayload(payload);
   const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
   if (ideaPhotoWaitApplies(input) || waitingAlready || payload?.photo_wait === true) {
