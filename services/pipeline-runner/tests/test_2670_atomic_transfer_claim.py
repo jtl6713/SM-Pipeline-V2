@@ -79,3 +79,37 @@ def test_raced_queue_row_does_not_invoke_media_processing(monkeypatch, tmp_path)
     assert outcome == {
         "processed": False, "reason": "claimed_elsewhere", "queue_record_id": "recTransfer4",
     }
+
+
+def test_governed_stale_reclaim_waits_beyond_lease_age(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    import time
+    class QueueClient:
+        def list_records(self, *_args, **_kwargs):
+            return [{"id": "recStaleProcessing", "fields": {
+                "Transfer_Status": "Processing", "Asset_Kind": "Platform Variant",
+                "Attempt_Count": 1,
+            }}]
+        def update_record(self, *_args, **_kwargs):
+            raise AssertionError("do not reclaim a possibly live crop after 90s")
+
+    monkeypatch.setattr(item4, "_row_stamp_ms", lambda _row: int((time.time() - 15 * 60) * 1000))
+    monkeypatch.setattr(gov, "resource_active", lambda *_: False)
+    assert item4.requeue_stale_processing(QueueClient()) == 0
+
+
+def test_deferred_media_slot_is_not_recorded_as_failed_transfer(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    class QueueClient:
+        def update_record(self, *_args, **_kwargs):
+            raise AssertionError("no failure state on governor admission deferral")
+
+    monkeypatch.setattr(item4, "AirtableClient", QueueClient)
+    monkeypatch.setattr(item4, "requeue_stale_processing", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(item4, "select_next_row", lambda *_args, **_kwargs: {
+        "id": "recWaiting", "fields": {"Transfer_Status": "Pending"},
+    })
+    monkeypatch.setattr(item4, "process_queue_row", lambda *_args: (
+        (_ for _ in ()).throw(gov.AdmissionDeferred("test capacity"))
+    ))
+    assert item4.process_one() == {"processed": False, "reason": "governor_admission_deferred"}
