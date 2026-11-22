@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   control:
+    # Retired: Make was decommissioned. Historical E2E control must never run.
+    # Do not restore this job to audit Make or Airtable retirement.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
