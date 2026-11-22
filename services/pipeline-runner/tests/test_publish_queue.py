@@ -170,6 +170,45 @@ def test_fresh_youtube_first_dispatch_with_no_retry_allowed():
     assert youtube_action_due_now(fields, NOW) == 0
 
 
+
+def test_fbs3_supabase_view_accepts_existing_public_mp4_fallback_issue2464():
+    """The first FBS3 Ready branch must not omit the approved public MP4 fallback.
+
+    Original overdue #2457/#2463/#2762/#4018 have a ready media CDN MP4 in
+    Publish_Asset_URL and Video Ready, but no FB_Slideshow_Public_URL. The
+    actual FBS3 publisher already supports Publish_Asset_URL, so the source
+    selector must include those records without rewriting their media.
+    """
+    from airtable.constants import PLATFORM_OUTPUTS_TABLE
+    from fbs3.eligibility import create_eligibility_reason
+    from supabase_views import _VIEWS, view_to_postgrest_filter
+
+    view = "FBS3 — Ready to Publish Slideshow Reel"
+    root = _VIEWS[view]
+    assert root["op"] == "or"
+    ready = root["args"][0]
+    public_url = next(node for node in ready["args"] if node.get("op") == "or")
+    assert {node.get("field") for node in public_url["args"]} == {
+        "FB_Slideshow_Public_URL", "Publish_Asset_URL"
+    }
+    translated = view_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, view, now=NOW)
+    assert translated is not None
+    assert "publish_asset_url" in translated
+    assert "FB_Slideshow_Public_URL" not in translated or "publish_asset_url" in translated
+
+    record = {
+        "id": "recCarouselFbs31",
+        "fields": {
+            "FB_Slideshow_Status": "Video Ready",
+            "Publish_Asset_URL": "https://media.chicagoshining.com/publishing/approved.mp4",
+            "FB_Slideshow_Public_URL": "",
+            "Publish_Error_Stage": "",
+        },
+    }
+    assert create_eligibility_reason(record) is None
+
+
+
 def test_fb0_supabase_snapshot_uses_real_automated_publish_method_and_excludes_scheduled():
     """Issue #2556: zero of 3333 FB rows had the retired Image_Publish_Mode key.
 
