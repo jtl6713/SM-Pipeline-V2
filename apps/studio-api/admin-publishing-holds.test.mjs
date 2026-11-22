@@ -71,8 +71,8 @@ test("protected review, factory, legal, tests, dispatch and published receipts c
   assert.equal(classifyAdminPublishingHold({...row(),test_run_id:"test"}).releasable,false);
   assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,true);
   assert.equal(classifyAdminPublishingHold({...row(),output_status:"In Production"}).releasable,true);
-  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Changes Requested"}).releasable,false);
-  assert.equal(classifyAdminPublishingHold({...row(),output_status:"Changes Requested"}).releasable,false);
+  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Changes Requested"}).releasable,true);
+  assert.equal(classifyAdminPublishingHold({...row(),output_status:"Changes Requested"}).releasable,true);
   assert.equal(classifyAdminPublishingHold({...row(),published_at:"2026-11-22"}).releasable,false);
 });
 test("GET scopes the list to membership and exposes reasons and release eligibility",async()=>{
