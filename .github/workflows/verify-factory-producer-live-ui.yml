@@ -71,3 +71,51 @@ jobs:
           if(!factory.includes('band.classList.remove("is-collapsed")')) throw Error('Producer button does not open Needs eyes');
           console.log('producer_live_ui=PASS verified Factory entry, JS revision action and submission receipt');
           NODE
+- name: Issue 2593 read-only Production request and exact Output navigation smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s /tmp/producer-live-index.html
+          APP_URL=$(node - <<'NODE'
+          const fs = require('fs');
+          const html = fs.readFileSync('/tmp/producer-live-index.html', 'utf8');
+          for (const marker of [
+            'id="productionRequestWorkspace"',
+            'id="productionRequestList"',
+            'id="productionRequestStatus"',
+            'id="productionRequestMessage"',
+          ]) if (!html.includes(marker)) throw Error('Production workspace missing '+marker);
+          const version = (html.match(/UI build ([0-9]+\.[0-9]+\.[0-9]+)/)||[])[1];
+          if (!version) throw Error('Live Studio UI build is unknown');
+          const m = html.match(/\/assets\/app-item4-1008\.js\?v=[A-Za-z0-9.-]+/);
+          if (!m || !m[0].includes('v='+version+'-')) throw Error('Production JS cache key does not match live build');
+          process.stdout.write(m[0]);
+          NODE
+          )
+          curl --fail --silent --show-error --location \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "https://studio.chicagoshining.com$APP_URL" \
+            -o /tmp/issue2593-live-production.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const app = fs.readFileSync('/tmp/issue2593-live-production.js', 'utf8');
+          const factory = fs.readFileSync('/tmp/producer-live-factory.js', 'utf8');
+          for (const marker of [
+            'window.StudioOpenProductionRequestById',
+            'window.StudioOpenPipelineOutputById',
+            'fetchFullProductionRequest(id)',
+            'productionRequest: record',
+            'storyFirstReady(idea)',
+          ]) if (!app.includes(marker)) throw Error('Live Production JS lost exact navigation '+marker);
+          for (const marker of [
+            'FactoryOpenTargets?.resolve',
+            'StudioOpenProductionRequestById',
+            'StudioOpenPipelineOutputById',
+            'factoryProducerOpen',
+          ]) if (!factory.includes(marker)) throw Error('Live Factory JS lost exact navigation '+marker);
+          if (factory.includes('!card.content_id && card.idea_id')) {
+            throw Error('Factory reverted to Idea fallback for promoted Production');
+          }
+          console.log('issue2593_live_production_factory_entrypoint=PASS navigation_and_assets=true; actual_per_output_cards_require_authenticated_client_session');
+          NODE
