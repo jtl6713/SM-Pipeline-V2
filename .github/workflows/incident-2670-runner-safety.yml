@@ -34,4 +34,4 @@ jobs:
           STUDIO_WORKLOAD_GOVERNOR_ENABLED: "false"
           STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: "false"
         run: |
-          python -m pytest -q tests/test_2670_recovery_read_only.py tests/test_2670_recovery_image_upload.py tests/test_2670_workload_governor.py tests/test_2670_atomic_transfer_claim.py tests/test_upsert_variant_queue_batch.py tests/test_item4_variant_batch.py
+          python -m pytest -q tests/test_2670_recovery_read_only.py tests/test_2670_recovery_image_upload.py tests/test_2670_recovery_a3.py tests/test_2670_workload_governor.py tests/test_2670_atomic_transfer_claim.py tests/test_upsert_variant_queue_batch.py tests/test_item4_variant_batch.py
