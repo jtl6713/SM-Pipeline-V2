@@ -75,9 +75,14 @@ test("exact R2 receipts add rehydrated original groups and cleanly remove comple
     items:batch.items.map(item=>({...item,status:"approved"})),
   }));
   const exact = poll.exact(state,completed);
-  assert.equal(exact.batches.length,3, "completed groups leave Active status");
+  assert.equal(exact.batches.length,7, "show exact terminal success once before Activity cleanup");
   assert.equal(exact.totals.pending,60);
+  assert.equal(exact.totals.approved,80, "terminal receipts must paint completed progress");
   assert.equal(exact.totals.active,3);
+  const cleaned = display.discovered(exact, {
+    ok:true,view:"active",filter_profile_id:null,batches:groups.slice(4),totals:{},
+  });
+  assert.equal(cleaned.batches.length,3, "next complete Active discovery removes terminal groups");
   assert.equal(state.batches.length,7, "no source mutation");
 });
 
