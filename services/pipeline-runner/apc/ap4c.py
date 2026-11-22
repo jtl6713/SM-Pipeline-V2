@@ -27,6 +27,7 @@ from asset.helpers import parse_int
 from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
+from apc.native_gallery_guard import inspect_instagram_native_v2_package
 
 
 def _expired_media_error(payload: Any) -> bool:
@@ -120,6 +121,16 @@ def process_request(
         return {"processed": False, "reason": reason, **result}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
+
+    # #2294: prevent both child-container creation and final media_publish
+    # attempts before the exact V2 canonical, approved, 4:5 media is verified.
+    # Pure Supabase read; do not increment attempts, lock, or make Graph calls.
+    preflight_reason = inspect_instagram_native_v2_package(client, output)
+    if preflight_reason:
+        return {
+            "processed": False, "reason": preflight_reason,
+            "native_gallery_preflight_only": True, **result,
+        }
 
     now = iso_utc()
     client.update_record(
