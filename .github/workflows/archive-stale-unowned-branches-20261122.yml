@@ -1,0 +1,61 @@
+name: Archive stale unowned branches (2026-11-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/branch-cleanup-20261122.txt'
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: exact-branch-cleanup-20261122
+  cancel-in-progress: false
+
+jobs:
+  archive-stale-only:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout protected main with push token
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Check exact immutable cleanup manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/branch_cleanup_20261122.py
+          python3 - <<'PY'
+          import json
+          d=json.load(open('repair/branch_cleanup_20261122_manifest.json'))
+          assert d['repository']=='jtl6713/SM-Pipeline-V2'
+          assert d['schema']=='archive-reviewed-stale-branches-20261122.v1'
+          assert len(d['candidates'])==30
+          assert len(d['protected_open_pr_heads'])==10
+          assert len(set(item['branch'] for item in d['candidates']))==30
+          assert not set(item['branch'] for item in d['candidates']) & set(d['protected_open_pr_heads'])
+          print('MANIFEST_PRECHECK_PASS candidates=30 open_pr_heads_preserved=10')
+          PY
+
+      - name: Archive every inactive exact HEAD as tag, then lease-guarded branch deletion
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 repair/scripts/branch_cleanup_20261122.py
+
+      - name: Preserve sanitized deletion and archive audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-branch-cleanup-20261122
+          path: branch-cleanup-20261122-report.json
+          if-no-files-found: ignore
+          retention-days: 30

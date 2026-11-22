@@ -1,0 +1,139 @@
+{
+  "schema": "archive-reviewed-stale-branches-20261122.v1",
+  "repository": "jtl6713/SM-Pipeline-V2",
+  "source_main_sha": "2db60512f9618c99ee37cd1943b972ec16d1fae0",
+  "protected_open_pr_heads": [
+    "deploy/2489-nyc-audio-protected-release-v2",
+    "fix/2374-ten-safe-original-gallery-review-20261121",
+    "fix/2574-runner-watermark-p2-supabase-filters",
+    "fix/factory-incident-creative-review-20261120",
+    "fix/factory-record-id-rejection-recovery-20261118",
+    "fix/flatiron-source-authority-gates-20261117",
+    "fix/issue2464-ap1c-sparse-lock-clears",
+    "fix/issue2464-fbs3-publish-asset-view",
+    "fix/qa-missing-platform-outputs-20261117",
+    "fix/tiktok-oauth-analytics-scope-gate-20261121"
+  ],
+  "candidates": [
+    {
+      "branch": "deploy/2489-nyc-vo-music-protected-release",
+      "sha": "15e179ac65ab00205bb8372df138a31648fef386"
+    },
+    {
+      "branch": "deploy/meta-manual-status-fix-2614-20261121",
+      "sha": "aaedc5a9753ad3e40c3fa8d8fc20657b6df960f6"
+    },
+    {
+      "branch": "diagnostic/vibe-2184-live-ffmpeg-process",
+      "sha": "002184a09acecd13bcbee0f7af909823d12a7989"
+    },
+    {
+      "branch": "diagnostic/vibe-2212-exact-render-status",
+      "sha": "71aaccade817942767c54935b74fe2a209a62f4e"
+    },
+    {
+      "branch": "diagnostics/2618-miami-r4-admission-20261122",
+      "sha": "b8e50392a35d08d09acf41431ac35b2f92700637"
+    },
+    {
+      "branch": "feat/production-to-scheduling-approval-2618",
+      "sha": "a8b81f74eb55c07b3284287cb202f74810c530ec"
+    },
+    {
+      "branch": "fix/2340-audited-early-hold-recovery-v1",
+      "sha": "e601faf96d3f8c10e34f08ccedefe06ec6a2b63b"
+    },
+    {
+      "branch": "fix/2340-ig-carousel-typed-status-queue-v1",
+      "sha": "7823f7c794e42c173069ca0e70455cf1cad33e4b"
+    },
+    {
+      "branch": "fix/2374-no-premature-publish-dispatch-receipts",
+      "sha": "7e4d595725321f4357dad7aacab8bedd4d2e685d"
+    },
+    {
+      "branch": "fix/2374-verified-source-gallery-review",
+      "sha": "58f978c1be6188478779712688c6f54d4f17ee19"
+    },
+    {
+      "branch": "fix/2464-supabase-authoritative-write-failclosed",
+      "sha": "2f34173717544ea45ff027bff94e91c2a6def4b0"
+    },
+    {
+      "branch": "fix/2556-publish-facebook-10738",
+      "sha": "5a955b21f1cca35793e0e0cc86d1b6a52bc67032"
+    },
+    {
+      "branch": "fix/chicago-production-revision-visibility-20261118",
+      "sha": "cffc8fcd5c874d92fd8b9fd29cf2b05a824a8c1e"
+    },
+    {
+      "branch": "fix/compact-dashboard-tables-20261117",
+      "sha": "d14a50331a009c55317fa724b3686a1155339c1b"
+    },
+    {
+      "branch": "fix/meta-auto-publish-manual-status-20261121",
+      "sha": "a0b78e1e76a6197760b803c38b2b8da7940a50b1"
+    },
+    {
+      "branch": "fix/miami-fb0-preflight-10638-10671-10694",
+      "sha": "d30ff60fc30d1e71cd96fc9f5046bc169d9d0326"
+    },
+    {
+      "branch": "fix/vibe-bridge-full-request-reload-2184",
+      "sha": "e3a3ed39a1f1a41bac3279b649f5fe1fe4e8a628"
+    },
+    {
+      "branch": "fix/vibe-worker-verification-500-retry",
+      "sha": "3b3bfe8a8663434081442ae7591dc0ce58898a37"
+    },
+    {
+      "branch": "ops/ig-stories-1868-2859-recovery-20261120",
+      "sha": "4340bf4d5a30f1355fcf373417cc87bbc0aa81b9"
+    },
+    {
+      "branch": "ops/issue2593-exact-held-producer-resume-20261122",
+      "sha": "c1896e57489b7270c54c06e162b613c7022be7dc"
+    },
+    {
+      "branch": "ops/tiktok-10685-readonly-20261120",
+      "sha": "546cc29ebefed62ea44e92e43fb6bee84c0b7c38"
+    },
+    {
+      "branch": "ops/verify-home-after-fb-story-recovery-20261120",
+      "sha": "291570aab1c5bae802fa5b295dd59f0bdb890951"
+    },
+    {
+      "branch": "recovery/issue2464-execute-exact-stage-canaries",
+      "sha": "c3ec1ca926c54214e38c7d9e0201f2570a5f7c5a"
+    },
+    {
+      "branch": "recovery/p1-2340-2627-actual-story-receipt-get",
+      "sha": "b94bf3f3632c2dbce7f464cce7cfafe7f0bb324a"
+    },
+    {
+      "branch": "release/2340-fb3-early-hold-worker",
+      "sha": "f6a75274e5ab47c70c6c5727b09194b362adaef2"
+    },
+    {
+      "branch": "release/2340-independent-carousel-light-worker",
+      "sha": "fff32c10c9a1bfab391bbc29d0480743d4380b30"
+    },
+    {
+      "branch": "release/2374-factory-protected-media-workflow-gated",
+      "sha": "cb760a767c0f35f7008933e1188341c81b442c06"
+    },
+    {
+      "branch": "release/studio-0-6-984-flatiron-revision",
+      "sha": "6d325302ed6fecb497855c40455bc5107f45773b"
+    },
+    {
+      "branch": "repair/miami-fb-photo-10643-preflight",
+      "sha": "ab18989e107997cbae471acd362951741b352bd1"
+    },
+    {
+      "branch": "verify/i1-nyc-10-production-2637-20261122",
+      "sha": "6368eb65a6e7436e30fcc8d1b3472fd59b2b8a63"
+    }
+  ]
+}
