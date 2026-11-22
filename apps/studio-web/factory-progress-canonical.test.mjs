@@ -133,3 +133,15 @@ test("production Factory rendering and refresh are actually wired to exact-first
   assert.match(source, /request_id: row\.request_id, fresh: String\(now\)/);
   assert.match(source, /value\.batches\[0\]\?\.request_id !== row\.request_id/);
 });
+
+test("ordinary active and completed snapshots do not require a Factory profile filter", () => {
+  // Completed/history rendering may be invoked in isolated contexts without
+  // Factory profile controls. Never evaluate the profile filter for envelopes.
+  const normalizeWithoutProfile = extractFactoryHelpers(
+    "  function factoryBatchActivityEnvelope(", "  function renderFactoryBatchActivity(",
+    "factoryBatchActivityEnvelope")();
+  for (const view of ["active", "completed"]) {
+    const snapshot = { view, batches: [], totals: { batches: 0 } };
+    assert.equal(normalizeWithoutProfile(snapshot), snapshot);
+  }
+});
