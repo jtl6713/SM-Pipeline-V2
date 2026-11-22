@@ -1,0 +1,705 @@
+{
+  "schema": "SM_pipeline_issue_2294_candidate_cdn_audit_v1",
+  "authority": "production_supabase_readback_2026-11-22",
+  "read_only": true,
+  "do_not_approve": true,
+  "release_to_publish_authorized": false,
+  "record_count": 12,
+  "candidate_slide_count": 82,
+  "entries": [
+    {
+      "output_number": 10853,
+      "output_record_id": "rectw2pvgnBzK3wCN",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 4,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rectw2pvgnBzK3wCN/0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recnst4prHy1HUh7g",
+          "source_variant_drive_id": "13ELDNOxKJRIV4h45u3myz1AHXnpDqwj9"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rectw2pvgnBzK3wCN/1.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recLhJF8zmAY0IkPk",
+          "source_variant_drive_id": "1e8W8DswoaFkzk2KcX8YYz8nC5pTlVSkN"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rectw2pvgnBzK3wCN/2.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recoDssVW0y21WUq9",
+          "source_variant_drive_id": "1DaKqoiZAj0MTX9Yh5lt39aZoEIca161m"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rectw2pvgnBzK3wCN/3.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rectDmfNkFY1TZ1kS",
+          "source_variant_drive_id": "1XStiVgZ6SXzqnqmSJ_yqQ5fO_v_83xF9"
+        }
+      ]
+    },
+    {
+      "output_number": 10854,
+      "output_record_id": "recJ8jTynJDxsN0hl",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 4,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recJ8jTynJDxsN0hl/0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recnst4prHy1HUh7g",
+          "source_variant_drive_id": "13ELDNOxKJRIV4h45u3myz1AHXnpDqwj9"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recJ8jTynJDxsN0hl/1.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recLhJF8zmAY0IkPk",
+          "source_variant_drive_id": "1e8W8DswoaFkzk2KcX8YYz8nC5pTlVSkN"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recJ8jTynJDxsN0hl/2.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recoDssVW0y21WUq9",
+          "source_variant_drive_id": "1DaKqoiZAj0MTX9Yh5lt39aZoEIca161m"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recJ8jTynJDxsN0hl/3.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rectDmfNkFY1TZ1kS",
+          "source_variant_drive_id": "1XStiVgZ6SXzqnqmSJ_yqQ5fO_v_83xF9"
+        }
+      ]
+    },
+    {
+      "output_number": 10992,
+      "output_record_id": "rec1p9SOjrpxtpQkV",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 8,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec05Z83pXSEf3IEi",
+          "source_variant_drive_id": "1bqoDR0KxkWWF-guVW3-TKIplXaRQIVvp"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/1.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recGUfybolgFKnFtJ",
+          "source_variant_drive_id": "1lxB097YI1XGrIyRc6WMmvXUSfcLrvLDC"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/2.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recqVw4ijxhQvuTrD",
+          "source_variant_drive_id": "1baSPF4K_w1MDbslhVWs_J6P-4GcALbLd"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/3.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recIdbxeyZ4zCKIbb",
+          "source_variant_drive_id": "1Eew54hh8INb8kdG4UvDX6FAoIJ0Wir8d"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/4.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recSgCYKW45suuyCA",
+          "source_variant_drive_id": "1rd36nSkaCHZNcHmVACR0UWu3AKJOjsD5"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/5.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec7vsPGEByklbig1",
+          "source_variant_drive_id": "1Hk90dJU8Y_4nvwU7gUToV3HeOJduPjZU"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/6.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recLCeoAMCJKbwRrx",
+          "source_variant_drive_id": "1WrdOmQxv-wwzjME_35KuQeV8dJkgBmHg"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/7.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recnDqkyqghKRxJX0",
+          "source_variant_drive_id": "1meFTsZooiJQlIm4t2iFHPCwZoSzN6hMY"
+        }
+      ]
+    },
+    {
+      "output_number": 10993,
+      "output_record_id": "recX9tOrTfQldqs32",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 8,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-38e491c8b141472aa8-4x5-1bqoDR0KxkWWF-guVW3-TKIplXaRQIVvp.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec05Z83pXSEf3IEi",
+          "source_variant_drive_id": "1bqoDR0KxkWWF-guVW3-TKIplXaRQIVvp"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-289c1eb0b3e0422f8e-4x5-1lxB097YI1XGrIyRc6WMmvXUSfcLrvLDC.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recGUfybolgFKnFtJ",
+          "source_variant_drive_id": "1lxB097YI1XGrIyRc6WMmvXUSfcLrvLDC"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-103028a9b8464ef7bb-4x5-1baSPF4K_w1MDbslhVWs_J6P-4GcALbLd.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recqVw4ijxhQvuTrD",
+          "source_variant_drive_id": "1baSPF4K_w1MDbslhVWs_J6P-4GcALbLd"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-d98aedc7b7be4bc7a2-4x5-1Eew54hh8INb8kdG4UvDX6FAoIJ0Wir8d.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recIdbxeyZ4zCKIbb",
+          "source_variant_drive_id": "1Eew54hh8INb8kdG4UvDX6FAoIJ0Wir8d"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-af0700090afe446987-4x5-1rd36nSkaCHZNcHmVACR0UWu3AKJOjsD5.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recSgCYKW45suuyCA",
+          "source_variant_drive_id": "1rd36nSkaCHZNcHmVACR0UWu3AKJOjsD5"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-9a5b43b58e974cf7bc-4x5-1Hk90dJU8Y_4nvwU7gUToV3HeOJduPjZU.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec7vsPGEByklbig1",
+          "source_variant_drive_id": "1Hk90dJU8Y_4nvwU7gUToV3HeOJduPjZU"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-76503eda44b54d36ab-4x5-1WrdOmQxv-wwzjME_35KuQeV8dJkgBmHg.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recLCeoAMCJKbwRrx",
+          "source_variant_drive_id": "1WrdOmQxv-wwzjME_35KuQeV8dJkgBmHg"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-dc48e072183c42b98c-4x5-1meFTsZooiJQlIm4t2iFHPCwZoSzN6hMY.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recnDqkyqghKRxJX0",
+          "source_variant_drive_id": "1meFTsZooiJQlIm4t2iFHPCwZoSzN6hMY"
+        }
+      ]
+    },
+    {
+      "output_number": 11033,
+      "output_record_id": "recBlShZbe7cqtGAG",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 8,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-396a2be46668421fb2-4x5-1z4NSGkGFgekwELOvQDB-a2iySIovK5p0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec53N2w0BB6xWwM1",
+          "source_variant_drive_id": "1z4NSGkGFgekwELOvQDB-a2iySIovK5p0"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-1d8a76f079d745adaa-4x5-1SS7UMVYKOyuk6y4vWvXde6F_D5EK6QGr.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recHMKbjcjwf7hrLW",
+          "source_variant_drive_id": "1SS7UMVYKOyuk6y4vWvXde6F_D5EK6QGr"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-0750cce889c34f8eb0-4x5-1A6C5K8uplG3_TpaACHyMOgIx0iZbwWpm.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recfEqcUaeH8OSKNN",
+          "source_variant_drive_id": "1A6C5K8uplG3_TpaACHyMOgIx0iZbwWpm"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-17cb97482041423197-4x5-19piDuEfB78hmqa3UCHaOqMSgYdaBHU4v.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recc3aUmVsJ2azXSV",
+          "source_variant_drive_id": "19piDuEfB78hmqa3UCHaOqMSgYdaBHU4v"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-532d5cd6c6974bbaa5-4x5-1_jzMJrhxjTUwb9EJVgPRQ3HH_3fU6q15.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recp8fTdeKHVZGHYc",
+          "source_variant_drive_id": "1_jzMJrhxjTUwb9EJVgPRQ3HH_3fU6q15"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-6095202459734a01af-4x5-1GX7GEI7tqHQfKWdFZ2W3tfnYs8S1Fh_7.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recJ9uGPBSaTAQxux",
+          "source_variant_drive_id": "1GX7GEI7tqHQfKWdFZ2W3tfnYs8S1Fh_7"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-c561244432fe42f7b2-4x5-1X2H4oDuqB9PZWWq_kMS36hiJ_EgZfvSq.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recoP4hzoapMZyA6a",
+          "source_variant_drive_id": "1X2H4oDuqB9PZWWq_kMS36hiJ_EgZfvSq"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-1692e55fadcb47a6a4-4x5-1KfF7hnsUNsgQ6QlSsyMWysqvFP0pFlWY.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recXpMZ9APuThWWiA",
+          "source_variant_drive_id": "1KfF7hnsUNsgQ6QlSsyMWysqvFP0pFlWY"
+        }
+      ]
+    },
+    {
+      "output_number": 11034,
+      "output_record_id": "recHmu20eEQmX4JLq",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 8,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-396a2be46668421fb2-4x5-1z4NSGkGFgekwELOvQDB-a2iySIovK5p0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec53N2w0BB6xWwM1",
+          "source_variant_drive_id": "1z4NSGkGFgekwELOvQDB-a2iySIovK5p0"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-1d8a76f079d745adaa-4x5-1SS7UMVYKOyuk6y4vWvXde6F_D5EK6QGr.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recHMKbjcjwf7hrLW",
+          "source_variant_drive_id": "1SS7UMVYKOyuk6y4vWvXde6F_D5EK6QGr"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-0750cce889c34f8eb0-4x5-1A6C5K8uplG3_TpaACHyMOgIx0iZbwWpm.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recfEqcUaeH8OSKNN",
+          "source_variant_drive_id": "1A6C5K8uplG3_TpaACHyMOgIx0iZbwWpm"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-17cb97482041423197-4x5-19piDuEfB78hmqa3UCHaOqMSgYdaBHU4v.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recc3aUmVsJ2azXSV",
+          "source_variant_drive_id": "19piDuEfB78hmqa3UCHaOqMSgYdaBHU4v"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-532d5cd6c6974bbaa5-4x5-1_jzMJrhxjTUwb9EJVgPRQ3HH_3fU6q15.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recp8fTdeKHVZGHYc",
+          "source_variant_drive_id": "1_jzMJrhxjTUwb9EJVgPRQ3HH_3fU6q15"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-6095202459734a01af-4x5-1GX7GEI7tqHQfKWdFZ2W3tfnYs8S1Fh_7.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recJ9uGPBSaTAQxux",
+          "source_variant_drive_id": "1GX7GEI7tqHQfKWdFZ2W3tfnYs8S1Fh_7"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-c561244432fe42f7b2-4x5-1X2H4oDuqB9PZWWq_kMS36hiJ_EgZfvSq.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recoP4hzoapMZyA6a",
+          "source_variant_drive_id": "1X2H4oDuqB9PZWWq_kMS36hiJ_EgZfvSq"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recWwDHWDqLCt5R9x/ITEM4-VARIANT-fill-crop-v2-recWwDHWDqLCt5R9x-1692e55fadcb47a6a4-4x5-1KfF7hnsUNsgQ6QlSsyMWysqvFP0pFlWY.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recXpMZ9APuThWWiA",
+          "source_variant_drive_id": "1KfF7hnsUNsgQ6QlSsyMWysqvFP0pFlWY"
+        }
+      ]
+    },
+    {
+      "output_number": 11129,
+      "output_record_id": "recbzkRN1wyWoBjOn",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 4,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-c31a8d8fefdf4c009a-4x5-1qbgsvOpI7Aa2tPCWlLsbO6DhA0VGo_v_.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recVL46KTaLLefNzd",
+          "source_variant_drive_id": "1qbgsvOpI7Aa2tPCWlLsbO6DhA0VGo_v_"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-3866c8d92f40490a8f-4x5-1LYVbAKzjxxvivK8r2KBMROj5OoTlxC_Q.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recKXCA3HhCBGy8sG",
+          "source_variant_drive_id": "1LYVbAKzjxxvivK8r2KBMROj5OoTlxC_Q"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-b5039713594d46088c-4x5-1-SNItjpvpaxc-0Gku8fosse5kzPaaGLW.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rechIUjyDSQe5iTcs",
+          "source_variant_drive_id": "1-SNItjpvpaxc-0Gku8fosse5kzPaaGLW"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-ab57c9208ab94abbaa-4x5-1x0MbrCCs6CFHMLp7QZA3geZDChaziJn4.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recKMZATlnh6hECie",
+          "source_variant_drive_id": "1x0MbrCCs6CFHMLp7QZA3geZDChaziJn4"
+        }
+      ]
+    },
+    {
+      "output_number": 11130,
+      "output_record_id": "recpycdsTXLBTD5s6",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 4,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-c31a8d8fefdf4c009a-4x5-1qbgsvOpI7Aa2tPCWlLsbO6DhA0VGo_v_.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recVL46KTaLLefNzd",
+          "source_variant_drive_id": "1qbgsvOpI7Aa2tPCWlLsbO6DhA0VGo_v_"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-3866c8d92f40490a8f-4x5-1LYVbAKzjxxvivK8r2KBMROj5OoTlxC_Q.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recKXCA3HhCBGy8sG",
+          "source_variant_drive_id": "1LYVbAKzjxxvivK8r2KBMROj5OoTlxC_Q"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-b5039713594d46088c-4x5-1-SNItjpvpaxc-0Gku8fosse5kzPaaGLW.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rechIUjyDSQe5iTcs",
+          "source_variant_drive_id": "1-SNItjpvpaxc-0Gku8fosse5kzPaaGLW"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recxNDEk6mcEpTniI/ITEM4-VARIANT-fill-crop-v2-recxNDEk6mcEpTniI-ab57c9208ab94abbaa-4x5-1x0MbrCCs6CFHMLp7QZA3geZDChaziJn4.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recKMZATlnh6hECie",
+          "source_variant_drive_id": "1x0MbrCCs6CFHMLp7QZA3geZDChaziJn4"
+        }
+      ]
+    },
+    {
+      "output_number": 11131,
+      "output_record_id": "rec9hMlB2fBjbdHED",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 7,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-8aee95cc59954920b6-4x5-1zETtUW4wNE6FyKrsDMdTsBKtn2cc4Ark.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recM2oArntPKcH2No",
+          "source_variant_drive_id": "1zETtUW4wNE6FyKrsDMdTsBKtn2cc4Ark"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-d9e437cf346c47ccac-4x5-1rtzGiR7Rzmgwb8X7020ipJP6HoC2-EMZ.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec9duFTwk2GuG3fo",
+          "source_variant_drive_id": "1rtzGiR7Rzmgwb8X7020ipJP6HoC2-EMZ"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-5e70d618ff2a475dae-4x5-1LzMsdU4YDjNlo5Z8xr2BqZykXGIB6nrl.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recuMoRDCBjpmjiq2",
+          "source_variant_drive_id": "1LzMsdU4YDjNlo5Z8xr2BqZykXGIB6nrl"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-9920f10ac72b45399f-4x5-104-XnZYxFd7CK4PdHR8cIqDTIt60LyHR.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recjUE1xP1ndnpVvK",
+          "source_variant_drive_id": "104-XnZYxFd7CK4PdHR8cIqDTIt60LyHR"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-fae583b71c1d4478a8-4x5-1JUXQaNspTrpwYzeN1z28s4WYG5p0GHFk.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recJ4hvwkV4A0qw71",
+          "source_variant_drive_id": "1JUXQaNspTrpwYzeN1z28s4WYG5p0GHFk"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-a4591aa930ec414798-4x5-105e8oCqxd1VZI_YX0GxbVmTztV2OLbFz.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recogo0aLeLoiPuEr",
+          "source_variant_drive_id": "105e8oCqxd1VZI_YX0GxbVmTztV2OLbFz"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/recz8SWukECicus9f/ITEM4-VARIANT-fill-crop-v2-recz8SWukECicus9f-09174cfc090d4a1b90-4x5-1x9_9z38pOQbxIpP6TUyZEK0PWUhhLuX0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec3UrPOWLAzyMGvp",
+          "source_variant_drive_id": "1x9_9z38pOQbxIpP6TUyZEK0PWUhhLuX0"
+        }
+      ]
+    },
+    {
+      "output_number": 11132,
+      "output_record_id": "rec7ZBwpvup8CDp7x",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 7,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/0.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recM2oArntPKcH2No",
+          "source_variant_drive_id": "1zETtUW4wNE6FyKrsDMdTsBKtn2cc4Ark"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/1.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec9duFTwk2GuG3fo",
+          "source_variant_drive_id": "1rtzGiR7Rzmgwb8X7020ipJP6HoC2-EMZ"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/2.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recuMoRDCBjpmjiq2",
+          "source_variant_drive_id": "1LzMsdU4YDjNlo5Z8xr2BqZykXGIB6nrl"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/3.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recjUE1xP1ndnpVvK",
+          "source_variant_drive_id": "104-XnZYxFd7CK4PdHR8cIqDTIt60LyHR"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/4.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recJ4hvwkV4A0qw71",
+          "source_variant_drive_id": "1JUXQaNspTrpwYzeN1z28s4WYG5p0GHFk"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/5.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "recogo0aLeLoiPuEr",
+          "source_variant_drive_id": "105e8oCqxd1VZI_YX0GxbVmTztV2OLbFz"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec7ZBwpvup8CDp7x/6.jpg",
+          "declared_aspect": "4:5",
+          "media_asset_id": "rec3UrPOWLAzyMGvp",
+          "source_variant_drive_id": "1x9_9z38pOQbxIpP6TUyZEK0PWUhhLuX0"
+        }
+      ]
+    },
+    {
+      "output_number": 11136,
+      "output_record_id": "recxl6v6xS9hJGuh3",
+      "output_type": "Instagram Carousel",
+      "candidate_slide_count": 10,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e2c09aa82ac0455387-9x16-1Gd1nwktM_moJUVYT9WViSkl2Lazyju9K.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recM2oArntPKcH2No",
+          "source_variant_drive_id": "1Gd1nwktM_moJUVYT9WViSkl2Lazyju9K"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-db5e81b908c34757be-9x16-1zjxJBTG7IxzIMKryFTV9XvXofdTSsC2H.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "rec9duFTwk2GuG3fo",
+          "source_variant_drive_id": "1zjxJBTG7IxzIMKryFTV9XvXofdTSsC2H"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-1ab19a67cd694f7da9-9x16-1gW-rDf3IWd5-buOD0kPBrCRfrZsl235C.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recuMoRDCBjpmjiq2",
+          "source_variant_drive_id": "1gW-rDf3IWd5-buOD0kPBrCRfrZsl235C"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-db7e6a8bbab14c2d91-9x16-1s8izc8MdTo37bEuZRuUVYTmiOEQkCfOE.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recjUE1xP1ndnpVvK",
+          "source_variant_drive_id": "1s8izc8MdTo37bEuZRuUVYTmiOEQkCfOE"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e5a3d94b8aa74238b3-9x16-1seuCTleY_EZXzipckOPifItSJ0Kf6ZvF.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recJ4hvwkV4A0qw71",
+          "source_variant_drive_id": "1seuCTleY_EZXzipckOPifItSJ0Kf6ZvF"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-17e6f1b37f4444efb4-9x16-1MVgY2uWr--fWzYC-i65W4kFPtQG-ilOJ.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recogo0aLeLoiPuEr",
+          "source_variant_drive_id": "1MVgY2uWr--fWzYC-i65W4kFPtQG-ilOJ"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-1f021bb89edd494cb3-9x16-1Nr5e11RGQh8dAU3zXnJ01OSqugde-hFF.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "rec3UrPOWLAzyMGvp",
+          "source_variant_drive_id": "1Nr5e11RGQh8dAU3zXnJ01OSqugde-hFF"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-edef1edbd80949e0b6-9x16-1kKACMniExXyNJ7wRJgDlBauhJsvGtIuh.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recaiAdkTLya1mrUK",
+          "source_variant_drive_id": "1kKACMniExXyNJ7wRJgDlBauhJsvGtIuh"
+        },
+        {
+          "slide": 9,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-683b970adcf74c909f-9x16-1azBvKYPb8P44p9ugq0fW12cAB0TZDhyM.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recy9mElPal9fiT6u",
+          "source_variant_drive_id": "1azBvKYPb8P44p9ugq0fW12cAB0TZDhyM"
+        },
+        {
+          "slide": 10,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e617edf737ad4f9283-9x16-1bhdfGwhHMpTXYZfLWKDmjyA-Rpt1I9l9.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recJDVHO5Nvm3EG2j",
+          "source_variant_drive_id": "1bhdfGwhHMpTXYZfLWKDmjyA-Rpt1I9l9"
+        }
+      ]
+    },
+    {
+      "output_number": 11137,
+      "output_record_id": "recg1e2fiwy8wnPpG",
+      "output_type": "Facebook Photo Set",
+      "candidate_slide_count": 10,
+      "do_not_publish": true,
+      "publication_authorized": false,
+      "slide_candidates": [
+        {
+          "slide": 1,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e2c09aa82ac0455387-9x16-1Gd1nwktM_moJUVYT9WViSkl2Lazyju9K.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recM2oArntPKcH2No",
+          "source_variant_drive_id": "1Gd1nwktM_moJUVYT9WViSkl2Lazyju9K"
+        },
+        {
+          "slide": 2,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-db5e81b908c34757be-9x16-1zjxJBTG7IxzIMKryFTV9XvXofdTSsC2H.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "rec9duFTwk2GuG3fo",
+          "source_variant_drive_id": "1zjxJBTG7IxzIMKryFTV9XvXofdTSsC2H"
+        },
+        {
+          "slide": 3,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-1ab19a67cd694f7da9-9x16-1gW-rDf3IWd5-buOD0kPBrCRfrZsl235C.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recuMoRDCBjpmjiq2",
+          "source_variant_drive_id": "1gW-rDf3IWd5-buOD0kPBrCRfrZsl235C"
+        },
+        {
+          "slide": 4,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-db7e6a8bbab14c2d91-9x16-1s8izc8MdTo37bEuZRuUVYTmiOEQkCfOE.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recjUE1xP1ndnpVvK",
+          "source_variant_drive_id": "1s8izc8MdTo37bEuZRuUVYTmiOEQkCfOE"
+        },
+        {
+          "slide": 5,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e5a3d94b8aa74238b3-9x16-1seuCTleY_EZXzipckOPifItSJ0Kf6ZvF.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recJ4hvwkV4A0qw71",
+          "source_variant_drive_id": "1seuCTleY_EZXzipckOPifItSJ0Kf6ZvF"
+        },
+        {
+          "slide": 6,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-17e6f1b37f4444efb4-9x16-1MVgY2uWr--fWzYC-i65W4kFPtQG-ilOJ.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recogo0aLeLoiPuEr",
+          "source_variant_drive_id": "1MVgY2uWr--fWzYC-i65W4kFPtQG-ilOJ"
+        },
+        {
+          "slide": 7,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-1f021bb89edd494cb3-9x16-1Nr5e11RGQh8dAU3zXnJ01OSqugde-hFF.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "rec3UrPOWLAzyMGvp",
+          "source_variant_drive_id": "1Nr5e11RGQh8dAU3zXnJ01OSqugde-hFF"
+        },
+        {
+          "slide": 8,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-edef1edbd80949e0b6-9x16-1kKACMniExXyNJ7wRJgDlBauhJsvGtIuh.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recaiAdkTLya1mrUK",
+          "source_variant_drive_id": "1kKACMniExXyNJ7wRJgDlBauhJsvGtIuh"
+        },
+        {
+          "slide": 9,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-683b970adcf74c909f-9x16-1azBvKYPb8P44p9ugq0fW12cAB0TZDhyM.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recy9mElPal9fiT6u",
+          "source_variant_drive_id": "1azBvKYPb8P44p9ugq0fW12cAB0TZDhyM"
+        },
+        {
+          "slide": 10,
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/item4/rec0O5XzQeBUHYDBG/ITEM4-VARIANT-fill-crop-v2-rec0O5XzQeBUHYDBG-e617edf737ad4f9283-9x16-1bhdfGwhHMpTXYZfLWKDmjyA-Rpt1I9l9.jpg",
+          "declared_aspect": "9:16",
+          "media_asset_id": "recJDVHO5Nvm3EG2j",
+          "source_variant_drive_id": "1bhdfGwhHMpTXYZfLWKDmjyA-Rpt1I9l9"
+        }
+      ]
+    }
+  ]
+}
