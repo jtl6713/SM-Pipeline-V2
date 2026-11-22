@@ -29,7 +29,7 @@ const dispatchKeys = [
 // convenience checkbox. This is deliberately fail-closed: a stale marker must
 // be reconciled by the original workflow rather than overridden here.
 const holdEvidenceKey = key =>
-  /(^|_)(hold|fence)(_|$)|unsafe.?gallery|copyright|legal.?block|rights.?block|false_changes_requested_recovery/i.test(key);
+  /(^|_)(hold|held|fence)(_|$)|unsafe.?gallery|copyright|legal.?block|rights.?block|false_changes_requested_recovery/i.test(key);
 const activeEvidence = value => {
   if (value == null || value === false || value === 0) return false;
   const text=str(value).toLowerCase();
