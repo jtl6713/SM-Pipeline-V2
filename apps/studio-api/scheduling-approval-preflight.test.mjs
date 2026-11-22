@@ -212,3 +212,52 @@ test("#2618: NYC provisional schedule is technically verified, not approved or p
   }}),false);
   assert.equal(verifiedSchedulingPreflight({...verified,studio_scheduled_at:stamp}),false);
 });
+
+test("#2618: provisional date stays unchanged after actual Supabase CAS PATCH and media verification",async t=>{
+  const proposed="2026-12-13T19:05:00+00:00";
+  const row=output({
+    platform:"Instagram",studio_output_type:"Reel",review_status:"Review Sent",
+    scheduled_post_date:proposed,publish_status:null,auto_publish_enabled:null,
+  });
+  const before=globalThis.fetch;
+  t.after(()=>{globalThis.fetch=before;});
+  let patches=0,reads=0;
+  globalThis.fetch=async (raw,init={})=>{
+    const uri=new URL(raw);
+    assert.equal(uri.origin,BASE);
+    if((init.method||"GET")==="GET" && uri.pathname.endsWith("/content_items")) {
+      return Response.json([{id:row.content_item_id,airtable_record_id:"recContent1234567"}]);
+    }
+    if((init.method||"GET")==="GET") {
+      reads++;
+      assert.equal(uri.pathname,"/rest/v1/platform_outputs");
+      assert.match(uri.searchParams.get("order")||"",/^created_at\.(asc|desc)\.nullslast$/);
+      return Response.json([row]);
+    }
+    patches++;
+    assert.equal(uri.searchParams.get("scheduled_post_date"),"eq."+proposed);
+    assert.equal(uri.searchParams.get("updated_at"),"eq."+stamp);
+    assert.equal(uri.searchParams.get("review_status"),"eq.Review Sent");
+    assert.equal(uri.searchParams.get("publish_status"),"is.null");
+    assert.equal(uri.searchParams.get("studio_scheduled_at"),"is.null");
+    assert.equal(uri.searchParams.get("published_at"),"is.null");
+    const body=JSON.parse(init.body);
+    assert.deepEqual(Object.keys(body).sort(),["error_messages","updated_at"]);
+    assert.equal(body.error_messages[PREFLIGHT_KEY].scheduling_authorized,false);
+    assert.equal(body.error_messages[PREFLIGHT_KEY].publishing_authorized,false);
+    Object.assign(row,body);
+    return Response.json([row]);
+  };
+  const result=await sweepSchedulingApprovalPreflight(
+    {SUPABASE_URL:BASE,SUPABASE_SERVICE_ROLE_KEY:"test"},
+    {limit:4,fetchImpl:mediaFetch,clock:()=>new Date("2026-11-22T05:25:00Z")}
+  );
+  assert.equal(result.verified,1);
+  assert.equal(patches,1,"dual scan must not double-write the same record");
+  assert.equal(reads,2,"both FIFO and newest windows are sampled");
+  assert.equal(row.scheduled_post_date,proposed,"provisional date is untouched");
+  assert.equal(row.review_status,"Review Sent");
+  assert.equal(row.publish_status,null);
+  assert.equal(row.auto_publish_enabled,null);
+  assert.equal(verifiedSchedulingPreflight(row),true);
+});
