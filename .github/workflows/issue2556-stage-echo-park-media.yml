@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          encoded=$(base64 -w0 repair/scripts/issue2556_stage_fb10738_assets.py)
+          expected_sha=$(sha256sum repair/scripts/issue2556_stage_fb10738_assets.py | awk '{print $1}')
           cat >/tmp/fb10738-asset-stage.ps1 <<'PS'
           $ErrorActionPreference='Stop'
           $runner=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
@@ -53,7 +53,9 @@ jobs:
           $py=Get-Command python -ErrorAction SilentlyContinue
           if (-not $py) { throw 'fb10738_python_not_available_on_ops' }
           $script=Join-Path $env:TEMP 'fb10738-asset-stage-exact.py'
-          [System.IO.File]::WriteAllBytes($script,[Convert]::FromBase64String('__EMBED_PYTHON__'))
+          $source='https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/abe524ef191d978e1e6638f8ea36724232f077dc/repair/scripts/issue2556_stage_fb10738_assets.py'
+          Invoke-WebRequest -Uri $source -OutFile $script -UseBasicParsing -TimeoutSec 55
+          if ((Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant() -ne '__EXPECTED_SHA__') { throw 'fb10738_exact_script_checksum_mismatch' }
           try {
             & python $script
             if ($LASTEXITCODE -ne 0) { throw ('fb10738_asset_stage_exit_'+$LASTEXITCODE) }
@@ -61,17 +63,21 @@ jobs:
             Remove-Item $script -Force -ErrorAction SilentlyContinue
           }
           PS
-          python3 - "$encoded" <<'PY'
+          python3 - "$expected_sha" <<'PY'
           import pathlib,sys
           p=pathlib.Path('/tmp/fb10738-asset-stage.ps1')
-          p.write_text(p.read_text().replace('__EMBED_PYTHON__',sys.argv[1]))
+          p.write_text(p.read_text().replace('__EXPECTED_SHA__',sys.argv[1]))
           PY
           python3 - <<'PY'
           import json,pathlib
           pathlib.Path('/tmp/fb10738-asset-stage.json').write_text(json.dumps({'command':pathlib.Path('/tmp/fb10738-asset-stage.ps1').read_text(),'confirm':True}))
           PY
           http=$(curl -sS --max-time 45 -o /tmp/fb10738-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/fb10738-asset-stage.json || true)
-          if [[ "$http" != 200 && "$http" != 202 ]]; then echo "fb10738_ops_shell_http=$http"; exit 2; fi
+          if [[ "$http" != 200 && "$http" != 202 ]]; then
+            echo "fb10738_ops_shell_http=$http"
+            jq -r '.error.code // .error.message // .message // .error // empty' /tmp/fb10738-start.json | head -c 180 || true
+            exit 2
+          fi
           job=$(jq -er '.job.id // .jobId' /tmp/fb10738-start.json)
           for n in $(seq 1 180); do
             curl -fsS --max-time 35 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/fb10738-status.json
