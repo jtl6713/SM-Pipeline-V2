@@ -258,6 +258,16 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1) -> Iterator[None
                        (scope, lease_key, token))
 
 
+def resource_active(scope: str, key: str) -> bool:
+    if not enabled():
+        return False
+    with _connect() as db:
+        row = db.execute("""SELECT 1 FROM resource_leases
+            WHERE scope=? AND lease_key=? AND lease_until>?""",
+            (scope, key, time.time())).fetchone()
+    return bool(row)
+
+
 def snapshot() -> dict[str, object]:
     if not enabled():
         return {"enabled": False}
