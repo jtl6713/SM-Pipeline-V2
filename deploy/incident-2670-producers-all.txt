@@ -4,3 +4,5 @@ Execution via .github/workflows/incident-2670-producers-all.yml only after #2718
 Verification retry after first Ops preflight stopped safely without mutation. This retry emits only sanitized PowerShell error tokens if another fail-closed guard fires. All prior recovery/publishing protections still required.
 
 Third fail-closed preflight: the first two did not restart or mutate the runner. Print only a bounded failure suffix from the Windows diagnostic log to identify the failing guard; preserve all checks.
+
+Fourth guarded rollout: previous Windows failure was producer_canary_has_not_progressed because terminal blocked Draft resets percent to 5 even after 8/8 4:5 crops and previews Ready. Exact typed variant status/plan_ready_count now authoritative for producer admission. All publisher and governor guards retained.
