@@ -113,8 +113,8 @@ export async function handleAdminPublishingHolds({request,url,env,authorization,
     const subset=chosen?profiles.filter(row=>row.airtable_record_id===chosen):profiles;
     const outputId=str(url.searchParams.get("output_id"));
     if (outputId && !REC.test(outputId) && !/^\d{1,10}$/.test(outputId)) return err(400,"Invalid output identifier");
-    const filters="&content_profile_id=in.("+subset.map(p=>p.id).join(",")+")"+
-      (outputId?(REC.test(outputId)?"&airtable_record_id=eq."+outputId:"&output_number=eq."+outputId):"&do_not_publish=eq.true");
+    const filters="&content_profile_id=in.("+subset.map(p=>p.id).join(",")+")&do_not_publish=eq.true"+
+      (outputId?(REC.test(outputId)?"&airtable_record_id=eq."+outputId:"&output_number=eq."+outputId):"");
     const rows=await ops.supabaseRest(env,"platform_outputs?select="+outSelect+
       filters+"&order=created_at.desc&limit=101&offset="+page);
     if (!Array.isArray(rows)) return err(503,"Hold inventory unavailable");
