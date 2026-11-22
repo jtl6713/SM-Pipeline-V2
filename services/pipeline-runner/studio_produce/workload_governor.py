@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -29,6 +30,10 @@ DEFAULT_RATIO_WORKERS = 2
 
 _dispatch_lock = threading.Lock()
 _dispatch_started = False
+
+# Context is only entered by the authenticated A3 recovery worker while it
+# holds a single-image governor lease. No other producer gets write access.
+_A3_METADATA_WRITES = ContextVar("incident_2670_a3_metadata_writes", default=False)
 
 
 class AdmissionDeferred(RuntimeError):
@@ -332,6 +337,25 @@ def job_heartbeat(request_id: str, token: str) -> Iterator[threading.Event]:
 
 
 @contextmanager
+def image_classification_recovery_window() -> Iterator[None]:
+    """Allow A3's own metadata writes only within a globally serialized lease.
+
+    In recovery, only this server-owned context can permit Supabase writes.
+    All other stages, dispatchers, worker hosts and provider publishers remain
+    blocked by the independent HTTP gate and/or normal database circuit.
+    """
+    if not enabled() or not admission_paused():
+        yield
+        return
+    with resource_slot("library_image_classify", limit=1, allow_during_recovery=True):
+        token = _A3_METADATA_WRITES.set(True)
+        try:
+            yield
+        finally:
+            _A3_METADATA_WRITES.reset(token)
+
+
+@contextmanager
 def resource_slot(
     scope: str, *, key: str = "", limit: int = 1,
     allow_during_circuit: bool = False, allow_during_recovery: bool = False,
@@ -343,6 +367,7 @@ def resource_slot(
     recovery_read_allowed = (
         (scope == "supabase_read" and allow_during_circuit)
         or (scope in {"library_image_upload", "library_image_classify"} and allow_during_recovery)
+        or (scope == "supabase_write" and _A3_METADATA_WRITES.get())
     )
     if admission_paused() and not recovery_read_allowed:
         raise AdmissionDeferred("runner recovery read-only: resource admission paused")

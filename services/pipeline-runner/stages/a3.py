@@ -44,9 +44,8 @@ def _run_background(kwargs: dict) -> None:
             with _BACKGROUND_LOCK:
                 _ACTIVE_IDS = list(normalize_record_ids(kwargs.get("record_ids")))
             claim = (
-                workload_governor.resource_slot(
-                    "library_image_classify", limit=1, allow_during_recovery=True,
-                ) if workload_governor.enabled() and workload_governor.admission_paused()
+                workload_governor.image_classification_recovery_window()
+                if workload_governor.enabled() and workload_governor.admission_paused()
                 else nullcontext()
             )
             with claim:

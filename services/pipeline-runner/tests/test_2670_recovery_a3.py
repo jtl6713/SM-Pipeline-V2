@@ -131,3 +131,37 @@ def test_background_a3_holds_single_governor_lease_while_classifying(monkeypatch
         "trigger_a4":False,"drain":False,"wait_for_next":False,
     })
     assert seen == ["acquired",("classified",["recBethesda111"],False),"released"]
+
+
+
+def test_supabase_write_only_inside_leased_a3_recovery_window(recovery_client):
+    from studio_produce import workload_governor as governor
+    assert governor.enabled() is True
+    assert governor.admission_paused() is True
+    with pytest.raises(governor.AdmissionDeferred, match="read-only"):
+        with governor.resource_slot("supabase_write",limit=2):
+            raise AssertionError("unscoped Supabase write admitted")
+    with governor.image_classification_recovery_window():
+        with governor.resource_slot("supabase_write",limit=2):
+            pass
+        with pytest.raises(governor.AdmissionDeferred):
+            with governor.resource_slot("photo_group",limit=2):
+                raise AssertionError("photo group may not run within A3")
+        with pytest.raises(governor.AdmissionDeferred):
+            with governor.resource_slot("transfer",limit=1):
+                raise AssertionError("media transfer may not run within A3")
+    with pytest.raises(governor.AdmissionDeferred):
+        with governor.resource_slot("supabase_write",limit=2):
+            raise AssertionError("Supabase write permitted after A3 finished")
+
+
+def test_scoped_a3_recovery_writes_still_honor_database_circuit(recovery_client, monkeypatch):
+    from studio_produce import workload_governor as governor
+    monkeypatch.setattr(governor, "circuit_open", lambda _db=None: True)
+    # Force the capacity deadline to elapse without a real 60-second sleep.
+    clock = iter((0.0, 61.0))
+    monkeypatch.setattr(governor.time, "monotonic", lambda: next(clock, 61.0))
+    with pytest.raises(governor.AdmissionDeferred):
+        with governor.image_classification_recovery_window():
+            with governor.resource_slot("supabase_write",limit=2):
+                raise AssertionError("database circuit ignored")
