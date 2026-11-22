@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
-import tempfile
 import threading
 import time
 import uuid
@@ -30,6 +29,10 @@ DEFAULT_RATIO_WORKERS = 2
 
 _dispatch_lock = threading.Lock()
 _dispatch_started = False
+
+
+class AdmissionDeferred(RuntimeError):
+    """A non-destructive admission timeout: keep work queued, never mark failed."""
 
 
 def enabled() -> bool:
@@ -308,6 +311,8 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
         return
     token = uuid.uuid4().hex
     lease_key = key or token
+    wait_seconds = 30.0 if scope.startswith("supabase_") else 60.0
+    deadline = time.monotonic() + wait_seconds
     while True:
         with _connect() as db:
             _transaction(db)
@@ -322,7 +327,9 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
             db.commit()
         if claimed:
             break
-        time.sleep(DISPATCH_INTERVAL)
+        if time.monotonic() >= deadline:
+            raise AdmissionDeferred(f"{scope} admission deferred; capacity or database health unavailable")
+        time.sleep(min(DISPATCH_INTERVAL, max(0.0, deadline - time.monotonic())))
     stopped = threading.Event()
     def _renew() -> bool:
         with _connect() as db:
