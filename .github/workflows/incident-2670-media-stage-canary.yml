@@ -1,0 +1,86 @@
+name: Incident 2670 - Nonpublishing R2 stage live dry run
+# One-time authenticated dry-run only; no provider publication or output mutation.
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-media-stage-canary.txt']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-media-stage-canary
+  cancel-in-progress: false
+jobs:
+  r2-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Confirm deployed scope and provider fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/health.json
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_producer_only_enabled==true and .recovery_producer_scope=="all_governed_requests" and .workload_governor_enabled==true and (.recovery_nonpublishing_media_stages|index("r2")!=null) and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/health.json >/dev/null
+          echo 'read_only_r2_public_preflight=PASS'
+      - name: Run one authenticated R2 dry run against exact existing output
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then TOKEN="$candidate"; break; fi
+          done
+          test -n "$TOKEN" || { echo 'ops_auth_unavailable'; exit 1; }
+          cat >/tmp/one-r2.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $path='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          $line=Get-Content -LiteralPath $path | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='} | Select-Object -Last 1
+          if (-not $line) {throw 'runner_secret_missing'}
+          $secret=([string]$line -split '=',2)[1].Trim().Trim('"').Trim("'")
+          $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if (-not $h.ok -or -not $h.recovery_read_only -or $h.recovery_producer_scope -ne 'all_governed_requests' -or $h.recovery_nonpublishing_media_stages -notcontains 'r2') {throw 'live_r2_gate_not_deployed'}
+          $payload=@{output_record_id='recbL59HXWyw8EJ8p';extra=@{dry_run=$true;max_runs=1}} | ConvertTo-Json -Depth 5 -Compress
+          $result=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/stages/r2' -Headers @{'X-Pipeline-Secret'=$secret} -ContentType 'application/json' -Body $payload -TimeoutSec 70
+          if ($result.stage -ne 'r2' -or $result.status -notin @('ok','skipped')) {throw 'r2_dry_run_invalid_result'}
+          $after=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if (-not $after.ok -or -not $after.recovery_read_only -or $after.recovery_producer_scope -ne 'all_governed_requests') {throw 'provider_fence_changed'}
+          Write-Output 'r2_nonpublishing_dry_run=PASS'
+          Write-Output 'native_provider_fence=RETAINED'
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/one-r2.json').write_text(json.dumps({'command':Path('/tmp/one-r2.ps1').read_text(),'confirm':True}))
+          PY
+          code=''
+          for n in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/launch.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/one-r2.json || true)
+            if [[ "$code" == 202 ]]; then break; fi
+            if [[ "$code" != 409 ]]; then echo "ops_shell_http=$code"; exit 1; fi
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || exit 1
+          job=$(jq -r '.job.id // empty' /tmp/launch.json)
+          test -n "$job"
+          for n in $(seq 1 80); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status // empty' /tmp/status.json)
+            if [[ "$state" == ok ]]; then
+              jq -e '.job.log|contains("r2_nonpublishing_dry_run=PASS") and contains("native_provider_fence=RETAINED")' /tmp/status.json >/dev/null
+              echo 'r2_exact_dryrun=PASS; publisher_fence_still_on'
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'r2_exact_dryrun=FAILED'
+              jq -r '.job.log // ""' /tmp/status.json | tail -c 750 | cut -c1-750 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'r2_exact_dryrun=TIMED_OUT'; exit 1
