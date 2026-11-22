@@ -1,5 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
-import test, { mock } from "node:test";
+import test, { mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -6705,3 +6705,7 @@ test("Master Original queue write-through retains R2 locator without copying vid
     globalThis.fetch = prior;
   }
 });
+
+// Each unit test simulates its own Supabase request outcomes; a 5xx in one
+// test must not leave the process-local protective circuit open for the next.
+afterEach(() => resetSupabaseCircuitForTests());
