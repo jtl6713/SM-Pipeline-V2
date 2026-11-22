@@ -531,6 +531,54 @@ def test_partial_ttd1_output_mirror_merges_publish_id_into_bag(monkeypatch):
     assert "Publish_Error_Message" not in body["error_messages"]
 
 
+
+def test_ap1c_success_clears_sparse_locks_without_erasing_child_receipts(monkeypatch):
+    """#2464: AP1C unlock_fields() None must remove stale Supabase lock bag keys."""
+    from apc.common import unlock_fields
+
+    seen = []
+    original_bag = {
+        "Publish_Locked_At": "2026-11-21T21:01:14Z",
+        "Publish_Started_At": "2026-11-21T21:01:14Z",
+        "Publish_Locked_By": "AP1C",
+        "IG_Carousel_Children_JSON": '{"created_count":4,"verified_at":"2026-11-21T21:01:38Z"}',
+        "IG_Carousel_Last_Completed_Stage": "AP1C",
+        "Output_Notes": "approved media: unchanged",
+    }
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if method == "GET" and "select=error_messages" in url:
+            return Response([{"error_messages": original_bag}])
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        "recCarouselAp1c1",
+        {
+            **unlock_fields(),
+            "IG_Carousel_Status": "Children Processing",
+            "IG_Carousel_Children_JSON": original_bag["IG_Carousel_Children_JSON"],
+            "IG_Carousel_Last_Completed_Stage": "AP1C",
+        },
+    )
+    assert record["id"] == "recCarouselAp1c1"
+    patches = [x for x in seen if x[0] == "PATCH" and "platform_outputs" in x[1]]
+    assert len(patches) == 1
+    body = patches[0][2]
+    assert body["ig_carousel_status"] == "Children Processing"
+    bag = body["error_messages"]
+    assert "Publish_Locked_At" not in bag
+    assert "Publish_Started_At" not in bag
+    assert "Publish_Locked_By" not in bag
+    assert bag["IG_Carousel_Children_JSON"] == original_bag["IG_Carousel_Children_JSON"]
+    assert bag["IG_Carousel_Last_Completed_Stage"] == "AP1C"
+    assert bag["Output_Notes"] == "approved media: unchanged"
+
+
 def test_supabase_side_table_failure_is_explicit_and_never_uses_airtable(monkeypatch):
     from airtable.constants import CAROUSEL_SLIDES_TABLE
     monkeypatch.setattr(requests, "patch", lambda *_a, **_k: (_ for _ in ()).throw(
