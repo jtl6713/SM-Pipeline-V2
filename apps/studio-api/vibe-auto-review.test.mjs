@@ -146,7 +146,7 @@ test("cron grants planning priority only to verified Vibe sources and preserves 
     source.indexOf("export { studioReadyProductionCronResume };"));
   assert.match(cron, /priorityVibeIdeaIds/);
   assert.match(cron, /filter\(readyProductionVerifiedVibeDraft\)/);
-  assert.match(cron, /priorityIdeaIds: priorityVibeIdeaIds/);
+  assert.match(cron, /priorityIdeaIds: \\[\\.\\.\\.new Set\\(\\[\\.\\.\\.priorityVibeIdeaIds, \\.\\.\\.overdueReadyIds\\]\\)\\]/);
   assert.match(cron, /final_approval: "human_only"/);
   assert.doesNotMatch(cron, /approveOutputRecordForPublishing/);
 });
