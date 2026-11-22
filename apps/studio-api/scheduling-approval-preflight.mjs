@@ -54,25 +54,28 @@ export function assessSchedulingPreflight(row) {
   if (!preview.startsWith(CDN) || !cover.startsWith(CDN))
     return fail("public_preview_or_cover_missing");
   const native = row.render_status === "Native Photo Route";
+  const media = [{ url: preview, kind: native ? "image" : "video" },
+    { url: cover, kind: "image" }];
   if (native) {
     const count = Number(row.selected_clip_count);
     if (!Number.isSafeInteger(count) || count < 1)
       return fail("native_selected_count_missing");
+    // Never infer that a photo set passed from its cover alone. Verify the
+    // complete selected set and every actual image URL, in source order.
     const manifest = row.selected_assets;
-    if (manifest && typeof manifest === "object" &&
-        Array.isArray(manifest.selected_clips) &&
-        (manifest.selected_clips.length !== count ||
-         manifest.selected_clips.some(clip =>
-           !str(clip?.url || clip?.src).startsWith(CDN))))
+    const clips = manifest && typeof manifest === "object" && !Array.isArray(manifest)
+      ? manifest.selected_clips : null;
+    if (!Array.isArray(clips) || clips.length !== count ||
+        clips.some(clip => !str(clip?.url || clip?.src).startsWith(CDN)))
       return fail("native_photo_manifest_mismatch");
+    for (const clip of clips) media.push({ url: str(clip.url || clip.src), kind: "image" });
   } else if (!str(row.final_file_url)) {
     return fail("render_final_file_missing");
   }
   return {
     ready: true, reason: "technical_media_preflight_pending",
     signature: schedulingPreflightSignature(row),
-    media: [{ url: preview, kind: native ? "image" : "video" },
-      { url: cover, kind: "image" }],
+    media: [...new Map(media.map(asset => [asset.url, asset])).values()],
   };
 }
 
@@ -141,6 +144,14 @@ export async function sweepSchedulingApprovalPreflight(env, {
     if (!eligibility.ready) { report.skipped++; continue; }
     if (verifiedSchedulingPreflight(row)) { report.skipped++; continue; }
     report.eligible++;
+    // Verify ownership at its authoritative linked Content Item. The output
+    // UUIDs merely being present is not proof they refer to the same profile.
+    const parents = await supabaseRest(env, "content_items?id=eq." +
+      encodeURIComponent(row.content_item_id) +
+      "&content_profile_id=eq." + encodeURIComponent(row.content_profile_id) +
+      "&select=id,airtable_record_id&limit=1");
+    if (!Array.isArray(parents) || parents.length !== 1 ||
+        !parents[0]?.airtable_record_id) { report.unavailable++; continue; }
     const media = await probeSchedulingMedia(eligibility, fetchImpl);
     if (!media.ok) { report.unavailable++; continue; }
     const stamp = clock().toISOString();
