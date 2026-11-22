@@ -1,3 +1,4 @@
+import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
 import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
@@ -1501,6 +1502,8 @@ export async function studioReconcileFacebookPhotos(env, options = {}) {
 /*__STUDIO_WORKER_END:studioReconcileFacebookPhotos__*/
 
 export async function studioReconcileInstagramCarousels(env, options = {}) {
+  // Never consult a frozen Airtable archive to run a provider stage.
+  if (studioWriteSource(env) !== "supabase") return [];
   if (pipelineStageBackend(env, "AP0C").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
@@ -1525,7 +1528,7 @@ export async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap0c",
       pulse: studioPulseAp0c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Carousel",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({IG_Carousel_Status}="Ready for Asset Prep",AND({IG_Carousel_Status}="Retry Pending",{Publish_Retry_Eligible}=1)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Carousel",{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Publish_Status}="Ready to Publish",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",IS_BEFORE({Scheduled_Post_Date},NOW()),OR({IG_Carousel_Status}="Ready for Asset Prep",AND({IG_Carousel_Status}="Retry Pending",{Publish_Retry_Eligible}=1)))',
     },
     {
       stage: "ap1c",
@@ -1557,6 +1560,13 @@ export async function studioReconcileInstagramCarousels(env, options = {}) {
       continue;
     }
     for (const row of rows) {
+      // A newly discovered historical stage is not authorization to create a
+      // new Meta object. Old outputs require precise gallery provenance.
+      const admission = carouselCronCandidateAdmission(row, scan.stage);
+      if (!admission.eligible) {
+        results.push({ id: row.id, stage: scan.stage, skipped: admission.reason });
+        continue;
+      }
       try {
         const pulsed = await scan.pulse(env, row);
         results.push({ id: row.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
