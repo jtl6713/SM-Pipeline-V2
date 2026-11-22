@@ -40,7 +40,8 @@ test("Factory active approvals show actual stages, output identity, elapsed and 
   assert.match(factory, /lastBatchFullFetchMs/);
   assert.match(factory, /force \|\| !lastFullFetchMs \|\| now - lastFullFetchMs < 18000/);
   assert.match(factory, /factoryBatchPollWithFallback\(/);
-  assert.match(factory, /\.slice\(0, 4\)/);
+  assert.match(factory, /factoryBatchPollWindow\(\[\.\.\.knownGroups, \.\.\.remembered\]/);
+  assert.match(factory, /const fastGroups = window\.groups/);
   assert.match(factory, /Exact Factory progress is unavailable; retaining prior snapshot/);
   assert.match(factory, /!Number\(totals\.active\) && !Number\(totals\.pending\)/);
   assert.match(html, /factory-live-approval-progress\.css/);
