@@ -354,3 +354,33 @@ def test_issue2464_ttd0_original_9x16_ready_formula_is_translatable():
         url = attach_formula_filter("carousel_slides?select=*", translated)
         assert "Asset_9x16_Public_Status" in url
         assert "Asset_9x16_Public_URL" in url
+
+
+def test_issue2593_media_view_filter_is_not_double_wrapped_in_runner_queries():
+    """C2239 music catalog broke when and=(...) was embedded as a second and leaf."""
+    from airtable.constants import MEDIA_ASSETS_TABLE
+    from supabase_views import view_to_postgrest_filter
+    from urllib.parse import parse_qs, urlsplit
+
+    for view in (
+        "R2 - Available Classified Music Assets",
+        "R2 - Available Classified Video Assets",
+        "C6 - Active Small Branding Watermark",
+    ):
+        expression = view_to_postgrest_filter(MEDIA_ASSETS_TABLE, view)
+        assert expression and expression.startswith("and=(")
+        url = attach_formula_filter("media_assets?select=*&limit=20", expression)
+        assert "&and=(and=" not in url, url
+        assert "&and=%28and" not in url, url
+        params = parse_qs(urlsplit("https://db.example/" + url).query)
+        assert len(params["and"]) == 1
+        assert params["and"][0].startswith("(")
+        assert "asset_role.eq." in params["and"][0]
+
+    # Old formula translators yield unprefixed logical expressions and must
+    # retain their existing structural wrapping (unrelated publishing paths).
+    existing = attach_formula_filter("platform_outputs?select=*", "and(platform.eq.Facebook,do_not_publish.eq.false)")
+    assert "&and=(" in existing
+    assert "&and=(and=" not in existing
+    inline = attach_formula_filter("media_assets?select=*", "or=(asset_role.eq.Music,asset_role.eq.Logo)")
+    assert "&or=(" in inline and "&and=(or=" not in inline

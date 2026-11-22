@@ -613,6 +613,13 @@ def attach_formula_filter(path: str, formula_filter: str | None) -> str:
     # PostgREST `and=(...)` query param. Keep structural chars; encode values
     # already handled inside each predicate.
     safe = "(),.=*_->>%"
+    # Snapshotted Media Assets views already use a PostgREST query expression
+    # (e.g. and=(media_class.eq.Audio,...)). Wrapping it as an *inner* predicate
+    # produced &and=(and=(...)), which PostgREST rejects. The Studio Produce
+    # music fallback then blocked at stamp despite a populated Supabase catalog.
+    # Preserve only known logical operators; quote nested literal characters.
+    if formula_filter.startswith(("and=(", "or=(")) and formula_filter.endswith(")"):
+        return f"{path}&{formula_filter[:4]}{quote(formula_filter[4:], safe=safe)}"
     if formula_filter.startswith("and(") and formula_filter.endswith(")"):
         return f"{path}&and={quote(formula_filter[3:], safe=safe)}"
     return f"{path}&and=({quote(formula_filter, safe=safe)})"
