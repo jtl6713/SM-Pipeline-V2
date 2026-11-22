@@ -154,11 +154,19 @@ export async function sweepSchedulingApprovalPreflight(env, {
   const report = { scanned: 0, eligible: 0, verified: 0, skipped: 0, races: 0, unavailable: 0 };
   if (!studioSupabaseConfigured(env)) return { ...report, reason: "supabase_unavailable" };
   const max = Math.max(1, Math.min(8, Number(limit) || 4));
-  const rows = await supabaseRest(env,
-    "platform_outputs?output_status=eq.Ready%20for%20Review&do_not_publish=eq.false" +
-    "&published_at=is.null&select=" + SELECT +
-    "&order=created_at.asc.nullslast&limit=100");
-  if (!Array.isArray(rows)) throw Error("Scheduling approval Supabase scan unavailable");
+  // Both oldest and newest bounded windows are required: once the RFR count
+  // exceeds 100, the FIFO-only scan can permanently miss freshly rendered
+  // NYC entries even though their complete public media is reviewable.
+  const preflightScan = "platform_outputs?output_status=eq.Ready%20for%20Review&do_not_publish=eq.false" +
+    "&published_at=is.null&select=" + SELECT;
+  const [oldestRows, newestRows] = await Promise.all([
+    supabaseRest(env, preflightScan + "&order=created_at.asc.nullslast&limit=100"),
+    supabaseRest(env, preflightScan + "&order=created_at.desc.nullslast&limit=100"),
+  ]);
+  if (!Array.isArray(oldestRows) || !Array.isArray(newestRows))
+    throw Error("Scheduling approval Supabase scan unavailable");
+  const rows = [...new Map([...oldestRows, ...newestRows]
+    .filter(row => row?.id).map(row => [row.id, row])).values()];
   report.scanned = rows.length;
   for (const row of rows) {
     if (report.eligible >= max) break;
@@ -196,7 +204,12 @@ export async function sweepSchedulingApprovalPreflight(env, {
       + "&updated_at=eq." + encodeURIComponent(row.updated_at)
       + "&output_status=eq.Ready%20for%20Review"
       + "&do_not_publish=eq.false&published_at=is.null"
-      + "&scheduled_post_date=is.null"
+      // A proposed date is permitted, but only when it is EXACTLY the same
+      // unapproved date read before the media probe. A concurrent change
+      // invalidates the CAS; we never clear or overwrite the user's date.
+      + "&" + (row.scheduled_post_date == null
+        ? "scheduled_post_date=is.null"
+        : "scheduled_post_date=eq." + encodeURIComponent(str(row.scheduled_post_date)))
       + "&studio_scheduled_at=is.null"
       + "&" + (row.review_status == null ? "review_status=is.null" :
         "review_status=eq." + encodeURIComponent(row.review_status))
