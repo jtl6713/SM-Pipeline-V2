@@ -168,3 +168,41 @@ def test_fresh_youtube_first_dispatch_with_no_retry_allowed():
     assert youtube_action_due_now(fields, NOW) == 1
     fields["YouTube_Upload_Job_ID"] = "prior-uploader-job"
     assert youtube_action_due_now(fields, NOW) == 0
+
+
+def test_fb0_supabase_snapshot_uses_real_automated_publish_method_and_excludes_scheduled():
+    """Issue #2556: zero of 3333 FB rows had the retired Image_Publish_Mode key.
+
+    FB0 must select due, approved native Facebook Photo Sets via actual typed
+    Supabase columns, never omit all rows or pull future-scheduled approvals.
+    """
+    from airtable.constants import PLATFORM_OUTPUTS_TABLE
+    from supabase_views import _VIEWS, view_to_postgrest_filter
+
+    name = "FB0 — Ready for 4x5 Asset Preparation"
+    tree = _VIEWS[name]
+    assert tree["op"] == "and"
+    gates = [node for node in tree["args"] if node.get("field")]
+    assert not any(node["field"] == "Image_Publish_Mode" for node in gates)
+    assert any(node["field"] == "Publish_Method" and node.get("value") == ["Automated"]
+               for node in gates)
+    assert any(node["field"] == "Publish_Status" and node.get("value") == ["Ready to Publish"]
+               for node in gates)
+    raw = view_to_postgrest_filter(PLATFORM_OUTPUTS_TABLE, name, now=NOW)
+    assert raw is not None
+    assert "publish_method.eq.Automated" in raw
+    assert "publish_status.eq.Ready to Publish" in raw
+    assert "Image_Publish_Mode" not in raw
+
+    fields = {
+        "Platform": "Facebook", "Platform_Output_Type": "Facebook Photo Set",
+        "Studio_Output_Type": "Multi-Image Post",
+        "Publish_Method": "Automated", "Publish_Status": "Ready to Publish",
+        "FB_Publish_Status": "Ready for Assets", "Auto_Publish_Enabled": True,
+        "Image_Output_Selected": True, "Image_Count": 4, "Assets_Ready_Count": 4,
+        "Do_Not_Publish": False, "Publish_Retry_Eligible": True,
+        "Publish_Next_Retry_At": "2026-11-12T17:00:00Z",
+    }
+    assert fb_action_due_now(fields, NOW) == 1
+    fields["Publish_Next_Retry_At"] = "2026-11-12T19:00:00Z"
+    assert fb_action_due_now(fields, NOW) == 0
