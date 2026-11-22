@@ -72,35 +72,48 @@ def database_path() -> Path:
     return root / "SM-Pipeline-V2" / "studio-workload.sqlite3"
 
 
+_schema_lock = threading.Lock()
+_initialized_paths: set[str] = set()
+
+
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     path = database_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(path), timeout=5, isolation_level=None)
-    db.execute("PRAGMA busy_timeout=5000")
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""CREATE TABLE IF NOT EXISTS producer_jobs (
-        request_id TEXT PRIMARY KEY, state TEXT NOT NULL,
-        token TEXT, lease_until REAL, enqueued_at REAL NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS resource_leases (
-        scope TEXT NOT NULL, lease_key TEXT NOT NULL,
-        token TEXT NOT NULL, lease_until REAL NOT NULL,
-        PRIMARY KEY (scope, lease_key)
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS governor_control (
-        name TEXT PRIMARY KEY, until_at REAL NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS request_metrics (
-        minute INTEGER NOT NULL, operation TEXT NOT NULL,
-        total INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (minute, operation)
-    )""")
+    identity = str(path)
+    if identity not in _initialized_paths:
+        with _schema_lock:
+            if identity not in _initialized_paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                init = sqlite3.connect(identity, timeout=5, isolation_level=None)
+                try:
+                    init.execute("PRAGMA busy_timeout=5000")
+                    init.execute("PRAGMA journal_mode=WAL")
+                    init.execute("""CREATE TABLE IF NOT EXISTS producer_jobs (
+                        request_id TEXT PRIMARY KEY, state TEXT NOT NULL,
+                        token TEXT, lease_until REAL, enqueued_at REAL NOT NULL
+                    )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS resource_leases (
+                        scope TEXT NOT NULL, lease_key TEXT NOT NULL,
+                        token TEXT NOT NULL, lease_until REAL NOT NULL,
+                        PRIMARY KEY (scope, lease_key)
+                    )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS governor_control (
+                        name TEXT PRIMARY KEY, until_at REAL NOT NULL
+                    )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS request_metrics (
+                        minute INTEGER NOT NULL, operation TEXT NOT NULL,
+                        total INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (minute, operation)
+                    )""")
+                    _initialized_paths.add(identity)
+                finally:
+                    init.close()
+    db = sqlite3.connect(identity, timeout=5, isolation_level=None)
     try:
+        db.execute("PRAGMA busy_timeout=5000")
         yield db
     finally:
         db.close()
-
 
 def _transaction(db: sqlite3.Connection) -> None:
     db.execute("BEGIN IMMEDIATE")
