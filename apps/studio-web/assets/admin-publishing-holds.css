@@ -1,0 +1,17 @@
+/* #2735 Publishing hold control: no destructive action until verified server confirmation. */
+#adminPublishHoldsPanel{margin-top:1.25rem}
+.admin-hold-toolbar{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:1rem 0}
+.admin-hold-toolbar label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.admin-hold-toolbar select,.admin-hold-toolbar input{min-height:38px;max-width:260px}
+.admin-hold-table-wrap{overflow-x:auto;width:100%}
+.admin-hold-table{border-collapse:collapse;width:100%;font-size:13px}
+.admin-hold-table th,.admin-hold-table td{padding:12px 9px;border-bottom:1px solid var(--line,#dadfe4);text-align:left;vertical-align:top}
+.admin-hold-table th{font-weight:700}
+.admin-hold-table td:nth-child(3){min-width:220px}
+.admin-hold-table td:nth-child(4){min-width:210px}
+.admin-publish-hold-toggle{display:flex;align-items:center;gap:6px;font-weight:650}
+.admin-publish-hold-toggle input{width:18px;height:18px;accent-color:var(--accent,#1684b6)}
+.admin-hold-blocked{color:var(--danger,#b34747);font-size:12px;max-width:250px}
+#adminPublishHoldsHistory{margin-top:1rem;padding:1rem;border-top:1px solid var(--line,#ddd);overflow-wrap:anywhere}
+#adminPublishHoldsHistory li{margin-bottom:8px}
+@media(max-width:640px){.admin-hold-table{font-size:12px}.admin-hold-table th,.admin-hold-table td{padding:8px 6px}}
