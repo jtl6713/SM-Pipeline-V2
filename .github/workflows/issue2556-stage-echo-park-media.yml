@@ -53,7 +53,7 @@ jobs:
           $py=Get-Command python -ErrorAction SilentlyContinue
           if (-not $py) { throw 'fb10738_python_not_available_on_ops' }
           $script=Join-Path $env:TEMP 'fb10738-asset-stage-exact.py'
-          $source='https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/abe524ef191d978e1e6638f8ea36724232f077dc/repair/scripts/issue2556_stage_fb10738_assets.py'
+          $source='https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/ad6bb071415fe22c3adb7353768ae66729940c4d/repair/scripts/issue2556_stage_fb10738_assets.py'
           Invoke-WebRequest -Uri $source -OutFile $script -UseBasicParsing -TimeoutSec 55
           if ((Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant() -ne '__EXPECTED_SHA__') { throw 'fb10738_exact_script_checksum_mismatch' }
           try {
