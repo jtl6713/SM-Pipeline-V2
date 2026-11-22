@@ -72,4 +72,13 @@ test("#2647 new media capture plan survives into editable Production Draft", () 
   assert.match(creation, /Studio_Master_Asset_Status: "None"/);
   assert.match(creation, /Studio_Item4_State: "Draft"/);
   assert.doesNotMatch(creation, /Status:\s*"Approved"/);
+  const promotion = production.slice(
+    production.indexOf("export async function promoteIdeaViaI3I4("),
+    production.indexOf("/*__STUDIO_WORKER_END:promoteIdeaViaI3I4__*/")
+  );
+  assert.match(promotion, /Studio_Photo_Wait_Status/);
+  assert.match(promotion, /=== "Needs new media"/);
+  assert.match(promotion, /throw new HttpError\(409/);
+  assert.match(promotion, /attach the required assets, then continue/);
+
 });
