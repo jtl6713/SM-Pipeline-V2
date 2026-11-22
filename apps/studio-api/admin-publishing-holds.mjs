@@ -39,7 +39,7 @@ const markerKeys = extras => Object.keys(extras).filter(key =>
   holdEvidenceKey(key) && activeEvidence(extras[key]));
 const attemptKeys = extras => Object.entries(extras).some(([key,value]) =>
   (/(^|_)(attempt|dispatch|retry)_count$/i.test(key) && Number(value)>0) ||
-  (/((^|_)last_attempt_at$|^publish_started_at$|^publish_locked_at$|_dispatch_at$)/i.test(key) &&
+  (/((^|_)(last_)?(publish_)?attempt_at$|^publish_started_at$|^publish_locked_at$|_dispatch_at$)/i.test(key) &&
     activeEvidence(value)) ||
   (/(_container_id$|_media_id$|_post_id$|^youtube_video_id$)/i.test(key) && activeEvidence(value))
 );
