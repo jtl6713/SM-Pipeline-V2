@@ -67,6 +67,36 @@
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
   const FACTORY_SUBMISSION_ERROR_KEY = "studio.factory.submission-error.v1";
   const FACTORY_PENDING_MISSING_GRACE_MS = 90 * 1000;
+  // Exact original-request receipts for large submissions. A successful POST
+  // accepts a *group*, not the entire selection; global history scans can time
+  // out, so keep a bounded browser-side GET-only recovery index across reloads.
+  const FACTORY_RECENT_GROUPS_KEY = "studio.factory.accepted-group-requests.v1";
+  function recentFactoryGroupRequests(now = Date.now()) {
+    try {
+      const rows = JSON.parse(localStorage.getItem(FACTORY_RECENT_GROUPS_KEY) || "[]");
+      return (Array.isArray(rows) ? rows : []).filter(row =>
+        /^[A-Za-z0-9_-]{12,128}$/.test(String(row?.request_id || "")) &&
+        Number(row.saved_ms) > 0 && now - Number(row.saved_ms) < 48 * 60 * 60 * 1000 &&
+        now >= Number(row.saved_ms) - 60 * 1000
+      ).slice(0, 24);
+    } catch { return []; }
+  }
+  function rememberFactoryGroupRequest(batch) {
+    const request_id = String(batch?.request_id || "");
+    if (!batch?.group || !/^[A-Za-z0-9_-]{12,128}$/.test(request_id)) return;
+    const profiles = [...new Set((batch.profile_ids || (batch.items || []).map(item => item.profile_id))
+      .map(String).filter(id => /^rec[A-Za-z0-9]+$/.test(id)))];
+    const previous = recentFactoryGroupRequests();
+    const rows = [{ request_id, profiles, saved_ms: Date.now() },
+      ...previous.filter(row => row.request_id !== request_id)].slice(0, 24);
+    try { localStorage.setItem(FACTORY_RECENT_GROUPS_KEY, JSON.stringify(rows)); } catch {}
+  }
+  function forgetFactoryGroupRequests(requestIds) {
+    if (!requestIds?.length) return;
+    const remove = new Set(requestIds.map(String));
+    try { localStorage.setItem(FACTORY_RECENT_GROUPS_KEY, JSON.stringify(
+      recentFactoryGroupRequests().filter(row => !remove.has(row.request_id)))); } catch {}
+  }
   // Reuse the one global missing-asset image; do not borrow another profile's media.
   const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
   document.addEventListener("error", (event) => {
@@ -1098,6 +1128,47 @@
     };
   }
 
+  function factoryBatchActiveRow(row) {
+    return ["queued", "running", "enqueuing"].includes(String(row?.status || "")) ||
+      Number(row?.pending_count || 0) > 0 || Number(row?.failed_count || 0) > 0;
+  }
+  function factoryBatchRecountActive(activity, rows) {
+    const batches = rows.slice(0, 40);
+    const sum = key => batches.reduce((total, row) => total + Number(row?.[key] || 0), 0);
+    return {
+      ...activity, batches, totals: {
+        ...(activity?.totals || {}), batches: batches.length,
+        active: batches.filter(factoryBatchActiveRow).length,
+        approved: sum("approved_count"), pending: sum("pending_count"),
+        failed: sum("failed_count"),
+      },
+    };
+  }
+  // Each accepted POST is one sub-batch. Replacing Activity with its bare group
+  // hid earlier accepted groups for selections >20, even while Supabase
+  // committed those approvals. Accumulate identity-unique original groups.
+  function factoryBatchMergeAcceptedActivity(previous, accepted) {
+    const envelope = factoryBatchActivityEnvelope(accepted);
+    if (!accepted?.group || !Array.isArray(envelope?.batches)) return envelope;
+    const prior = previous?.filter_profile_id === envelope.filter_profile_id
+      ? (previous.batches || []) : [];
+    const rows = [accepted, ...prior.filter(row =>
+      row?.request_id !== accepted.request_id && row?.job_id !== accepted.job_id)];
+    return factoryBatchRecountActive({ ...previous, ...envelope }, rows);
+  }
+  // A bounded R2 discovery result is not proof a previously accepted group
+  // disappeared; retain its last verified state until exact-ID GET confirms
+  // terminal completion. This projection never retries POST or alters R2.
+  function factoryBatchMergeDiscoveredActivity(previous, fetched) {
+    if (!Array.isArray(fetched?.batches) || fetched?.view !== "active" ||
+        previous?.filter_profile_id !== fetched.filter_profile_id) return fetched;
+    const known = new Set(fetched.batches.map(row => String(row.request_id || row.job_id || "")));
+    const pending = (previous.batches || []).filter(row =>
+      row?.group && row?.request_id && factoryBatchActiveRow(row) &&
+      !known.has(String(row.request_id)));
+    return factoryBatchRecountActive(fetched, [...fetched.batches, ...pending]);
+  }
+
   function renderFactoryBatchActivity(batch) {
     const snapshot = factoryBatchActivityEnvelope(batch);
     if (snapshot?.view === "completed") state.completedBatch = snapshot;
@@ -1673,21 +1744,28 @@
 
   function factoryBatchMergeExactActivity(previous, refreshed) {
     const byId = new Map(refreshed.map(row => [row.request_id, row]));
-    const batches = (previous?.batches || []).map(row => byId.get(row.request_id) || row);
-    const sum = field => batches.reduce((total, row) => total + Math.max(0, Number(row[field]) || 0), 0);
-    const totals = {
-      ...previous.totals,
-      batches: batches.length,
-      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status) ||
-        Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length,
-      completed: batches.filter(row => row.status === "completed" && !row.failed_count).length,
-      failed_batches: batches.filter(row => Number(row.failed_count || 0) > 0).length,
-      approved: sum("approved_count"), pending: sum("pending_count"), failed: sum("failed_count"),
-      findings: batches.reduce((total, row) => total + (row.quality_signals || []).length, 0),
+    const prior = previous?.batches || [];
+    const known = new Set(prior.map(row => row.request_id));
+    const batches = [...prior.map(row => byId.get(row.request_id) || row),
+      ...refreshed.filter(row => !known.has(row.request_id))]
+      .filter(factoryBatchActiveRow);
+    const base = previous || {
+      ok: true, scope: "all", view: "active", filter_profile_id: factoryProfileId() || null,
+      totals: {}, batches: [],
     };
-    return {
-      ...previous, ...(batches[0] || {}), batches, totals,
+    return factoryBatchRecountActive({
+      ...base, ...(batches[0] || {}),
       quality_signals: batches.flatMap(row => row.quality_signals || []),
+    }, batches);
+  }
+  // Fairly poll all accepted groups, four exact read-only GETs per refresh.
+  // Without rotation, >80 outputs could strand later groups indefinitely.
+  function factoryBatchPollWindow(groups, cursor = 0, limit = 4) {
+    if (!groups.length) return { groups: [], next: 0 };
+    const start = Math.max(0, Number(cursor) || 0) % groups.length;
+    return {
+      groups: [...groups.slice(start), ...groups.slice(0, start)].slice(0, limit),
+      next: (start + Math.min(groups.length, limit)) % groups.length,
     };
   }
 
@@ -1725,11 +1803,20 @@
       // Once discovered, re-read at most four exact global groups from R2
       // every 3 seconds; run the complete active discovery at least every 18s.
       // No POST, approval, scheduling, publishing, or claim mutation occurs.
-      const fastGroups = state.batch?.filter_profile_id === (factoryProfileId() || null)
+      const filterId = factoryProfileId() || null;
+      const knownGroups = state.batch?.filter_profile_id === filterId
         ? (state.batch?.batches || []).filter(row => row.group && row.request_id &&
-            (Number(row.pending_count || 0) > 0 || ["queued","running","enqueuing"].includes(row.status)))
-          .slice(0, 4)
-        : [];
+            factoryBatchActiveRow(row)) : [];
+      const knownIds = new Set(knownGroups.map(row => row.request_id));
+      // After reload there may be no state.batch yet. An accepted group is
+      // recoverable from the same original R2 request without re-submitting.
+      const remembered = recentFactoryGroupRequests().filter(row =>
+        (!filterId || row.profiles.includes(filterId)) && !knownIds.has(row.request_id))
+        .map(row => ({ group: true, request_id: row.request_id }));
+      const window = factoryBatchPollWindow([...knownGroups, ...remembered],
+        state.batchPollCursor || 0, 4);
+      const fastGroups = window.groups;
+      state.batchPollCursor = window.next;
       // A just-accepted group has not had a successful global discovery yet.
       // Exact original-request polling must work immediately and during full
       // active-history timeouts. It is always GET-only and identity checked.
@@ -1749,6 +1836,11 @@
           }
           return value.batches[0];
         }));
+        // Only a verified terminal clean group is forgotten. Failed groups
+        // remain visible for explicit exception handling.
+        forgetFactoryGroupRequests(updates.filter(row => row.status === "completed" &&
+          !Number(row.pending_count || 0) && !Number(row.failed_count || 0))
+          .map(row => row.request_id));
         return factoryBatchMergeExactActivity(state.batch, updates);
       };
       const readFull = async () => {
@@ -1759,7 +1851,7 @@
           throw new Error("Approval activity response was incomplete");
         }
         state.lastBatchFullFetchMs = Date.now();
-        return value;
+        return factoryBatchMergeDiscoveredActivity(state.batch, value);
       };
       const fetched = await factoryBatchPollWithFallback({
         preferExact, hasKnownGroups: fastGroups.length > 0, readExact, readFull,
@@ -1905,7 +1997,8 @@
         try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({
           job_id: batch.job_id, profile_id: "global",
         })); } catch {}
-        renderFactoryBatchActivity(batch);
+        rememberFactoryGroupRequest(batch);
+        renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
         setStatus(batch.duplicate_prevented
           ? `These outputs were already submitted. Original batch restored; no duplicate created. ${acceptedOutputs} of ${ready.length} reconciled.`
           : batch.recovered_after_error
