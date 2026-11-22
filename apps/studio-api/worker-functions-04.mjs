@@ -101,6 +101,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
@@ -18498,9 +18499,15 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     if (exactRequest) {
       if (!/^[A-Za-z0-9_-]{12,128}$/.test(exactRequest)) throw new HttpError(400, "Invalid Factory batch ID");
       const group = await factoryApprovalGroupStatus(env.STUDIO_MEDIA, exactRequest);
+      // Read-only canonical receipts may be ahead of R2's asynchronously
+      // reconciled child ledger. Keep both sets separate for GUI presentation.
+      const observed = group && studioSupabaseConfigured(env)
+        ? await studioReadCoalesce("factory-progress:" + exactRequest, 10000,
+          () => factoryObservedApprovalProgress(env, group))
+        : null;
       return respond(request, env, {
         ok: true, scope: "all", exact_request_id: exactRequest,
-        batches: group ? [group] : [],
+        batches: group ? [{ ...group, progress_verification: observed }] : [],
       });
     }
     // The Quality Agent is a read-only monitor, not a second Factory activity
@@ -18624,6 +18631,23 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
       ? factoryBatchNeedsAttention(job) : !factoryBatchNeedsAttention(job))
       .sort((a,b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || ""));
     const batches = visible.slice(offset, offset + limit);
+    // Verify only a bounded number of visible active groups. The read never
+    // changes their R2 ledgers or replays canonical approvals; a failed lookup
+    // stays explicitly unavailable instead of inventing an all-clear.
+    const observedGroups = view === "active"
+      ? batches.filter(job => job.group && job.request_id).slice(0, 4)
+      : [];
+    const observedEntries = studioSupabaseConfigured(env)
+      ? await Promise.all(observedGroups.map(async group => [
+        group.request_id,
+        await studioReadCoalesce("factory-progress:" + group.request_id, 10000,
+          () => factoryObservedApprovalProgress(env, group)),
+      ]))
+      : [];
+    const observedByRequest = new Map(observedEntries);
+    const progressBatches = batches.map(job => observedByRequest.has(job.request_id)
+      ? { ...job, progress_verification: observedByRequest.get(job.request_id) }
+      : job);
     const hasMore = visible.length > offset + limit ||
       history.has_more || groupHistory.has_more;
     const qualitySignals = batches.flatMap(job => (job.quality_signals || [])
@@ -18643,7 +18667,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
       ...(batches[0] || factoryBatchSummary(null)),
       scope: "all", view, offset, page_limit: limit, has_more: hasMore,
       filter_profile_id: factoryProfile || null,
-      batches, totals, quality_signals: qualitySignals,
+      batches: progressBatches, totals, quality_signals: qualitySignals,
       history_complete: history.complete && groupHistory.complete,
       history_scanned: history.scanned + groupHistory.scanned,
       approvals_enabled: factoryBatchRolloutPolicy(env).enabled || factoryGlobalPolicy(env).enabled,
