@@ -10,10 +10,20 @@ from io import BytesIO
 import json
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from issue2294_protected_candidate_cdn_readonly import safe_url
+def safe_url(value: str) -> bool:
+    try:
+        p = urlsplit(value)
+    except (ValueError, TypeError):
+        return False
+    return (p.scheme == "https" and p.netloc == "media.chicagoshining.com"
+            and p.path.startswith("/studio/previews/")
+            and p.path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+            and not p.query and not p.fragment and not p.username and not p.password
+            and ".." not in p.path and "\\\\" not in p.path)
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "repair/manifests/issue2294-protected-candidate-gallery-cdn-20261122.json"
