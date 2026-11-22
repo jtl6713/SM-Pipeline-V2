@@ -17,8 +17,11 @@ from i1.openai_ideas import generate_ideas
 from i1.durable_jobs import enqueue as enqueue_i1_durable, enabled as i1_durable_enabled, start_consumer as start_i1_consumer, status as i1_job_status, resume_confirmed_shortfall as resume_verified_i1_shortfall, TerminalBatchMismatch
 from carousel.image_gen import build_c2_prompt, generate_carousel_png
 from studio_music.processor import ingest_studio_music, trash_studio_music
-from airtable.egress_monitor import install_airtable_egress_monitor, read_airtable_egress
+from airtable.egress_monitor import install_airtable_egress_monitor, read_airtable_egress, start_runner_collector_heartbeat
 install_airtable_egress_monitor()
+# The same durable SQLite store receives positive process liveness even when
+# the external GitHub hourly schedule is delayed or skipped. No network egress.
+start_runner_collector_heartbeat()
 from airtable.client import AirtableClient
 from item4.clip_poster import ensure_request_clip_posters
 from item4.settings import pipeline_settings
