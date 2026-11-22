@@ -2187,26 +2187,6 @@ export function studioMixRerenderInProgress(record) {
 }
 /*__STUDIO_WORKER_END:studioMixRerenderInProgress__*/
 
-export function isActualPublishRetryPending(record) {
-  const fields = record?.fields || {};
-  const text = (key) => String(fields[key] ?? "").trim();
-  const eligible = fields.Publish_Retry_Eligible === true
-    || fields.Publish_Retry_Eligible === 1
-    || text("Publish_Retry_Eligible").toLowerCase() === "true";
-  // Retry eligibility is only a capability, not evidence that work was
-  // attempted or scheduled. A held, disabled or published record is not retrying.
-  if (!eligible || fields.Do_Not_Publish === true || fields.Auto_Publish_Enabled === false
-    || text("Published_At") || text("Platform_Post_URL") || text("Manual_Published_URL")) return false;
-  const retryTime = Date.parse(text("Publish_Next_Retry_At") || text("IG_Carousel_Next_Retry_At"));
-  if (!Number.isFinite(retryTime)) return false;
-  return Number(fields.Studio_Publish_Dispatch_Count || 0) > 0
-    || Boolean(text("Last_Publish_Attempt_At") || text("Studio_Publish_Dispatch_At")
-      || text("Publish_Error_Stage") || text("Publish_Error_Message")
-      || text("IG_Carousel_Error_Message") || text("FB_Slideshow_Error_Message")
-      || text("YouTube_Error_Message"));
-}
-/*__STUDIO_WORKER_END:isActualPublishRetryPending__*/
-
 export function normalizedOutputState(record) {
   const fields = record?.fields || {};
   const text = (name) => String(fields[name] || "").trim();
@@ -2218,7 +2198,22 @@ export function normalizedOutputState(record) {
   if (studioMixRerenderInProgress(record)) return "Rerendering";
 
   const retryablePublish = Boolean(fields.Publish_Retry_Eligible);
-  const actualPublishRetry = isActualPublishRetryPending(record);
+  // A retryable flag is eligibility, not proof of a retry. Keep this check
+  // local: Studio's Worker split harness extracts this function in isolation.
+  const actualPublishRetry = (() => {
+    const eligible = fields.Publish_Retry_Eligible === true
+      || fields.Publish_Retry_Eligible === 1
+      || text("Publish_Retry_Eligible").toLowerCase() === "true";
+    if (!eligible || fields.Do_Not_Publish === true || fields.Auto_Publish_Enabled === false
+        || text("Published_At") || text("Platform_Post_URL") || text("Manual_Published_URL")) return false;
+    const retryTime = Date.parse(text("Publish_Next_Retry_At") || text("IG_Carousel_Next_Retry_At"));
+    if (!Number.isFinite(retryTime)) return false;
+    return Number(fields.Studio_Publish_Dispatch_Count || 0) > 0
+      || Boolean(text("Last_Publish_Attempt_At") || text("Studio_Publish_Dispatch_At")
+        || text("Publish_Error_Stage") || text("Publish_Error_Message")
+        || text("IG_Carousel_Error_Message") || text("FB_Slideshow_Error_Message")
+        || text("YouTube_Error_Message"));
+  })();
   const youtubeVideoReady = Boolean(text("YouTube_Video_ID"))
     && (has("YouTube_Upload_Status", "uploaded") || has("YouTube_Processing_Status", "succeeded"));
   const thumbnailOnlyError = /thumb/i.test(text("Publish_Error_Stage") + " " + text("YouTube_Error_Message") + " " + text("Publish_Error_Message"));
@@ -2840,7 +2835,7 @@ export function outputProgressPercent(record, state, job = null) {
 export function platformPublishStatus(record) {
   const platform = String(f(record, "Platform") || "").toLowerCase();
   const safeLabel = (value) => {
-    if (String(value || "").trim() !== "Retry Pending" || isActualPublishRetryPending(record)) {
+    if (String(value || "").trim() !== "Retry Pending" || normalizedOutputState(record) === "Retry Pending") {
       return value;
     }
     const fallback = String(f(record, "Publish_Status") || "").trim();
@@ -2941,7 +2936,7 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     aspect_ratio: f(record, "Aspect_Ratio"),
     output_status: f(record, "Output_Status"),
     studio_state: studioState,
-    publish_retry_pending_confirmed: isActualPublishRetryPending(record),
+    publish_retry_pending_confirmed: studioState === "Retry Pending",
     meta_repair_required: Boolean(metaRepair),
     meta_repair_reason: metaRepair?.category || null,
     meta_repair_next_step: metaRepair?.next_step || null,
