@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -769,7 +770,18 @@ def _mirror_queue(settings: dict, record: dict) -> None:
         logger.warning("supabase transfer target write-through failed for %s: %s", record.get("id"), error)
 
 
+# The Phase 5 outbox has no deployed consumer (incident #2670). It is disabled
+# by default; enable explicitly only after a consumer and table are verified.
+# A missing-table failure disables further attempts until this process restarts.
+_OUTBOX_TABLE_MISSING = False
+
+
 def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> None:
+    global _OUTBOX_TABLE_MISSING
+    if os.getenv("STUDIO_SIDE_EFFECT_OUTBOX_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
+        return
+    if _OUTBOX_TABLE_MISSING:
+        return
     fields = record.get("fields") or {}
     if kind == "output":
         payload = {
@@ -813,6 +825,8 @@ def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> N
         }])
     except Exception as error:
         if _outbox_missing(error):
+            _OUTBOX_TABLE_MISSING = True
+            logger.warning("supabase optional outbox unavailable; suppressing further attempts")
             return
         logger.warning("supabase outbox insert failed for %s: %s", record.get("id"), error)
 
