@@ -1,0 +1,57 @@
+name: Verify NYC8 Live Factory Read Only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue2371-nyc8-live-factory-readonly.yml']
+  pull_request:
+    paths: ['.github/workflows/issue2371-nyc8-live-factory-readonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  factory-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Live Factory browser asset and exact eight read-only cards
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET"
+          url="https://studio.chicagoshining.com"
+          code=$(curl -sS -L --max-time 40 -o /tmp/index.html -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "$url/")
+          if [[ "$code" != 200 ]];then echo "::error::Factory page unavailable HTTP $code";exit 2;fi
+          grep -q 'id="factoryBandBodyNeedsEyes"' /tmp/index.html
+          asset=$(grep -oE '/assets/factory-desk\.js\?[^" ]+' /tmp/index.html|head -1)
+          test -n "$asset"
+          curl -fsSL --max-time 40 -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "$url$asset" -o /tmp/factory.js
+          grep -q 'Approve review (publish held)' /tmp/factory.js
+          code=$(curl -sS -L --max-time 110 -o /tmp/desk.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'Accept: application/json' "$url/api/factory/desk?nyc8_read_only=$GITHUB_SHA")
+          echo "LIVE_FACTORY_HTTP=$code"
+          if [[ "$code" != 200 ]];then echo "::error::Service identity cannot read live Factory desk; no user-session impersonation attempted";exit 3;fi
+          node - <<'NODE'
+          const fs=require('fs'),d=JSON.parse(fs.readFileSync('/tmp/desk.json','utf8')),lane=d?.lanes?.needs_eyes;
+          if(!Array.isArray(lane))throw Error('LIVE_NEEDS_EYES_ARRAY_MISSING');
+          const expected=[10855,10856,10863,10864,10867,10869,10870,10875];
+          const rows=expected.map(n=>{
+            const match=lane.filter(c=>Number(c?.output_id)===n),c=match[0];
+            return {n,count:match.length,held:c?.do_not_publish===true,auto:c?.auto_publish_enabled===true,can_preview:c?.can_preview===true,readiness:c?.review_package_ready!==false,status:c?.output_status,review:c?.review_status};
+          });
+          const report={type:'live_factory_nyc8_read_only',lane:'needs_eyes',rows};
+          fs.writeFileSync('/tmp/nyc8-factory-report.json',JSON.stringify(report,null,2));
+          console.log('LIVE_FACTORY_NYC8='+JSON.stringify(report));
+          if(rows.some(r=>r.count!==1||!r.held||r.auto||!r.can_preview||!r.readiness||r.status!=='Ready for Review'||r.review!=='Review Sent'))
+            throw Error('LIVE_FACTORY_EXACT_EIGHT_NOT_ALL_ACTIONABLE');
+          console.log('LIVE_NYC8_FACTORY_HELD_CARDS=PASS');
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nyc8-live-factory-readonly
+          path: /tmp/nyc8-factory-report.json
+          retention-days: 14
+          if-no-files-found: warn
