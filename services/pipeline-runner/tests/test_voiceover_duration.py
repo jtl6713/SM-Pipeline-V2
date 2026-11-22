@@ -235,8 +235,8 @@ def test_bethesda_2303_echoed_ai_rewrite_falls_back_to_measured_nonfactual_narra
     assert seconds >= MIN_VOICEOVER_SECONDS
 
 
-def test_bethesda_2303_empty_rewrite_still_fails_closed(monkeypatch):
-    """Never save a short clip when the LLM returns no usable text."""
+def test_bethesda_2303_empty_rewrite_falls_back_but_still_requires_measured_audio(monkeypatch):
+    """An empty LLM response must not block P2 or bypass the 4-second floor."""
     from types import SimpleNamespace
 
     import pytest
@@ -252,5 +252,20 @@ def test_bethesda_2303_empty_rewrite_still_fails_closed(monkeypatch):
             ok=True, json=lambda: {"output_text": ""}
         ),
     )
-    with pytest.raises(VoiceoverTooShort, match="returned no spoken words"):
-        lengthen_voiceover_script("Short line.", measured_seconds=2.090)
+    from p2.voiceover_floor import speak_until_minimum
+
+    revised = lengthen_voiceover_script("Short line.", measured_seconds=2.136)
+    assert revised.startswith("Short line.")
+    assert len(revised.split()) > 9
+
+    # Even with a usable fallback script, speech that remains under 4 seconds
+    # must still fail closed and never reach the save path.
+    with pytest.raises(VoiceoverTooShort, match="Not saved"):
+        speak_until_minimum(
+            "Short line.",
+            synthesize=lambda script: script.encode(),
+            normalize=lambda raw: ({"normalized": True}, raw),
+            probe=lambda _raw: 2.136,
+            lengthen=lengthen_voiceover_script,
+            attempts=2,
+        )
