@@ -123,11 +123,20 @@ def test_background_a3_holds_single_governor_lease_while_classifying(monkeypatch
         finally:
             seen.append("released")
     monkeypatch.setattr(a3_stage.workload_governor,"resource_slot",lease)
+    @contextmanager
+    def image_scope(record_id):
+        assert record_id == "recBethesda111"
+        seen.append("scope-enter")
+        try:
+            yield
+        finally:
+            seen.append("scope-exit")
+    monkeypatch.setattr(a3_stage.workload_governor,"a3_classification_scope",image_scope)
     monkeypatch.setattr(a3_stage,"process_request",lambda **k: (
         seen.append(("classified",k.get("record_ids"),k.get("trigger_a4")))
         or {"classified_count":1}))
     a3_stage._run_background({
         "record_ids":["recBethesda111"],
-        "trigger_a4":False,"drain":False,"wait_for_next":False,
+        "trigger_a4":False,"drain":False,"wait_for_next":False,"max_records":1,
     })
-    assert seen == ["acquired",("classified",["recBethesda111"],False),"released"]
+    assert seen == ["acquired","scope-enter",("classified",["recBethesda111"],False),"scope-exit","released"]
