@@ -132,7 +132,7 @@ CONTENT_PATCH_COLUMNS = {
     "Primary_Location": "primary_location",
     "Voiceover_Status": "voiceover_status",
     "Thumbnail_URL": "thumbnail_url",
-    "Created_At": "created_at",
+    # Created_At is write-once: never patch an existing content timestamp.
 }
 
 
@@ -455,7 +455,10 @@ def _content_row(record: dict, profile_uuid: str) -> dict:
         "primary_location": fields.get("Primary_Location") or None,
         "voiceover_status": _select(fields.get("Voiceover_Status")),
         "thumbnail_url": fields.get("Thumbnail_URL") or None,
-        "created_at": fields.get("Created_At") or record.get("createdTime") or None,
+        # Omit unknown creation time rather than sending explicit JSON null;
+        # the database owns the timestamp default and keeps it immutable.
+        **({"created_at": fields.get("Created_At") or record.get("createdTime")}
+           if fields.get("Created_At") or record.get("createdTime") else {}),
         "extras": _projection_bag(_pack(fields, TYPED_CONTENT), links, complete=complete),
     }
 
