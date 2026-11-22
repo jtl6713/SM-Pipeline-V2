@@ -11625,6 +11625,22 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null, options = {}) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
+  // Only exact held recovery retries canonical reads. Normal promotion
+  // retains its existing behavior; retries never repeat writes.
+  const canonicalRead = async (label, read) => {
+    if (options.recoveryHold !== true) return read();
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { return await read(); }
+      catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+      }
+    }
+    const wrapped = new Error("recovery_" + label + ": " + String(lastError?.message || lastError));
+    wrapped.recoveryStage = label;
+    throw wrapped;
+  };
   const promotionStartedAt = Date.now();
   const promotionTrace = (stage, extra = {}) => console.info("studio_production_promotion_stage", {
     request_id: requestRecordId,
@@ -11638,7 +11654,9 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
   // request may finish later, but it must not overwrite directives or fan out
   // another complete set of Platform Outputs for the same Content Item.
   if (contentItemId) {
-    const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
+    const parent = options.recoveryHold === true
+      ? await canonicalRead("owner_content", () => airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId))
+      : await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
     const incumbentRequestId = promotedContentOwner(
       requestRecordId,
       parent ? f(parent, "Production_Request") : []
@@ -11693,7 +11711,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     }
   }
 
-  let requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecordId);
+  let requestRecord = await canonicalRead("request", () => airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecordId));
   let directiveBridge = null;
   let outputFanout = null;
 
