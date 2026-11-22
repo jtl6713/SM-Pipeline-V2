@@ -1,0 +1,99 @@
+name: Incident 2670 - Restore all governed studio producers
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-producers-all.txt']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-all-producers
+  cancel-in-progress: false
+jobs:
+  admit-producers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify recovery fence before controlled producer expansion
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/prehealth.json
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_producer_only_enabled==true and .recovery_producer_scope=="exact_request" and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/prehealth.json >/dev/null
+          echo 'producer_rollout_public_preflight=PASS'
+      - name: Advance only runner producer target after canary and governor verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then TOKEN="$candidate"; break; fi
+          done
+          test -n "$TOKEN" || { echo 'ops_auth_unavailable'; exit 1; }
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          script = Path('.github/scripts/incident-2670-enable-all-producers.ps1').read_text(encoding='utf-8')
+          Path('/tmp/producer-stage.json').write_text(json.dumps({'command':script,'confirm':True}))
+          PY
+          code=''
+          for i in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/stage.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/producer-stage.json || true)
+            if [[ "$code" == 202 ]]; then break; fi
+            if [[ "$code" != 409 ]]; then echo "ops_stage_http=$code"; exit 1; fi
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || exit 1
+          job=$(jq -r '.job.id // empty' /tmp/stage.json)
+          test -n "$job"
+          staged=false
+          for i in $(seq 1 80); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/stage-status.json
+            state=$(jq -r '.job.status // empty' /tmp/stage-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -e '.job.log|contains("governed_producer_scope=ALL_CONFIGURED")' /tmp/stage-status.json >/dev/null
+              staged=true; break
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'producer_scope_preflight_or_write_failed'
+              jq -r '.job.log // ""' /tmp/stage-status.json | grep -Ei 'throw|failed|mismatch|error' | tail -5 | cut -c1-180 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          [[ "$staged" == true ]] || exit 1
+          echo 'producer_target_all_staged=PASS'
+          code=''
+          for i in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/restart.json -w '%{http_code}' -X POST "$BASE/api/run" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+            if [[ "$code" == 202 ]]; then break; fi
+            if [[ "$code" != 409 ]]; then echo "runner_restart_http=$code"; exit 1; fi
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || exit 1
+          job=$(jq -r '.job.id // empty' /tmp/restart.json)
+          test -n "$job"
+          restarted=false
+          for i in $(seq 1 80); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/restart-status.json
+            state=$(jq -r '.job.status // empty' /tmp/restart-status.json)
+            if [[ "$state" == ok ]]; then restarted=true; break; fi
+            if [[ "$state" == failed ]]; then echo 'runner_restart_failed'; exit 1; fi
+            sleep 3
+          done
+          [[ "$restarted" == true ]] || exit 1
+          verified=false
+          for i in $(seq 1 12); do
+            curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/posthealth.json || true
+            if jq -e '.ok==true and .recovery_read_only==true and .recovery_producer_only_enabled==true and .recovery_producer_scope=="all_governed_requests" and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/posthealth.json >/dev/null 2>&1; then verified=true; break; fi
+            sleep 3
+          done
+          [[ "$verified" == true ]] || { echo 'producer_scope_postrestart_validation_failed'; exit 1; }
+          echo 'all_governed_producers=ENABLED; publishing_recovery_fence=STILL_ON'
