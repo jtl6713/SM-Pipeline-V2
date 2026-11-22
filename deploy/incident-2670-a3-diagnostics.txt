@@ -1,1 +1,3 @@
 One-time read-only Windows A3 runner log check after accepted but uncompleted Bethesda Terrace classification; no mutations or restarts.
+
+Follow-up: read Python stderr log instead of stdout; exact Bethesda A3 classification still Processing. Diagnostic-only; no service or asset mutation.

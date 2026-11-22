@@ -28,11 +28,11 @@ jobs:
           test -n "$selected"
           cat > /tmp/runner-a3-diagnostics.ps1 <<'PS'
           $ErrorActionPreference='Stop'
-          $p='D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\hidden-pipeline-runner.out.log'
+          $p='D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\hidden-pipeline-runner.err.log'
           if (!(Test-Path -LiteralPath $p)) { throw 'runner_log_not_found' }
-          $lines=Get-Content -LiteralPath $p -Tail 300
+          $lines=Get-Content -LiteralPath $p -Tail 420
           $found=@($lines | Select-String -Pattern 'a3|classif|Traceback|Exception|ERROR|Supabase|OperationalError|AttributeError|HTTPError' -Context 2,6)
-          $safe=@($found | Select-Object -Last 14 | ForEach-Object {
+          $safe=@($found | Select-Object -Last 25 | ForEach-Object {
             $_.ToString() -replace '(?i)sk-[a-z0-9_-]{12,}','[REDACTED]' -replace '(?i)Bearer\s+[^\s]+','Bearer [REDACTED]' -replace '(?i)(secret|token|password)[=:]\s*[^\s]{8,}','$1=[REDACTED]'
           })
           Write-Output 'a3_runner_log_found=true'
