@@ -4581,9 +4581,33 @@ export function contentTimestampUpsertGroups(rows) {
   return [withTime, withoutTime].filter(group => group.length);
 }
 
+/**
+ * PostgREST bulk inserts require a common column set. The generic
+ * homogenizeUpsertRows helper fills missing keys with null. That is NOT
+ * permitted for production_request_outputs.effective_resolution (JSONB
+ * NOT NULL DEFAULT '{}') and can also erase sparse operator overrides.
+ *
+ * Preserve each row's actual key set instead. The DB can apply its defaults
+ * for omitted columns, and a batch containing Reel + Story overrides
+ * cannot inject a null effective_resolution into the Reel.
+ */
+export function homogeneousDensifiedOutputUpsertGroups(rows = []) {
+  const groups = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const key = JSON.stringify(Object.keys(row).sort());
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.values()];
+}
+
 async function upsertChunk(env, table, rows) {
   if (!rows.length) return;
-  const groups = table === "content_items" ? contentTimestampUpsertGroups(rows) : [rows];
+  const groups = table === "content_items"
+    ? contentTimestampUpsertGroups(rows)
+    : (table === "production_request_outputs"
+      ? homogeneousDensifiedOutputUpsertGroups(rows) : [rows]);
   for (const group of groups) {
     const body = homogenizeUpsertRows(group).map((row) => stripNullBytesDeep(row));
     await supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
