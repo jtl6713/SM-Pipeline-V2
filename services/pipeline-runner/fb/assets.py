@@ -16,7 +16,7 @@ from fb.constants import (
     MODE_SLIDESHOW,
     PHOTO_STATUS_READY,
 )
-from render.fields import field, field_str, json_text
+from render.fields import field, field_str, json_text, parse_json_field
 
 
 def _ci(value: Any) -> str:
@@ -89,6 +89,73 @@ def recover_approved_photo_count(slides: list[dict[str, Any]], *, max_photos: in
             # Already-created provider objects need reconciliation, not re-arming.
             return None
     return count if seen == set(range(1, count + 1)) else None
+
+
+def native_photo_preflight_reason(output: dict[str, Any], slides: list[dict[str, Any]]) -> str | None:
+    """#2294: fail closed BEFORE FB0 attempt/lock for native multi-image posts.
+
+    Requires canonical final-approved ordered Supabase slides matching BOTH
+    immutable selected and render manifests. A valid source image alone never
+    becomes a publish-ready Carousel Slide. No writes or provider calls.
+    """
+    if field_str(output, "Platform_Output_Type") != "Facebook Photo Set":
+        return None
+    output_id = str(output.get("id") or "").strip()
+    output_number = parse_int(field(output, "Output_ID"), None)
+    if not re.fullmatch(r"rec[A-Za-z0-9]{14}", output_id) or not output_number:
+        return "native_gallery_output_identity_invalid"
+    selected = parse_json_field(field(output, "Selected_Assets_JSON"))
+    selected = selected.get("selected_clips") if isinstance(selected, dict) else None
+    render = parse_json_field(field(output, "Render_Clip_List_JSON"))
+    expected = parse_int(field(output, "Selected_Clip_Count"), None)
+    if (not isinstance(selected, list) or not isinstance(render, list)
+            or not expected or expected < 2 or expected > 10
+            or len(selected) != expected or len(render) != expected):
+        return "native_gallery_selected_render_manifest_missing_or_inconsistent"
+    if len(slides) != expected:
+        return "native_gallery_canonical_slide_count_mismatch"
+    used_urls: set[str] = set()
+    used_sources: set[str] = set()
+    for i, (candidate, rendered, slide) in enumerate(zip(selected, render, slides), start=1):
+        if not isinstance(candidate, dict) or not isinstance(rendered, dict):
+            return "native_gallery_manifest_entry_invalid"
+        source_url = str(candidate.get("url") or candidate.get("src") or "").strip()
+        render_url = str(rendered.get("url") or rendered.get("src") or "").strip()
+        source_file = str(candidate.get("googleDriveFileId") or candidate.get("google_drive_file_id") or "").strip()
+        asset_family = str(candidate.get("mediaAssetRecordId") or candidate.get("media_asset_record_id") or "").strip()
+        fields = slide.get("fields") or {}
+        linked = fields.get("Platform Output")
+        linked_numbers = fields.get("PO_Output_ID")
+        if (not isinstance(linked, list) or linked != [output_id]
+                or linked_numbers != [output_number]
+                or parse_int(fields.get("Current Order"), None) != i
+                or parse_int(fields.get("Slide Number"), None) != i
+                or fields.get("Deleted From Carousel") is True):
+            return "native_gallery_slide_identity_or_order_invalid"
+        if (parse_int(candidate.get("order"), None) != i
+                or parse_int(rendered.get("order"), None) != i
+                or not source_url.startswith("https://media.chicagoshining.com/")
+                or source_url != render_url
+                or source_url in used_urls
+                or source_url != str(fields.get("Asset_4x5_Public_URL") or "").strip()
+                or str(fields.get("Asset_4x5_Public_Status") or "").casefold() != "ready"):
+            return "native_gallery_public_media_or_manifest_mismatch"
+        used_urls.add(source_url)
+        stored_source = str(fields.get("Google Drive File ID") or "").strip()
+        if (not source_file or source_file in used_sources
+                or stored_source != source_file
+                or not re.fullmatch(r"rec[A-Za-z0-9]{14}", asset_family)
+                or str(fields.get("Asset_Family_Key") or "").strip() != asset_family):
+            return "native_gallery_original_source_provenance_invalid"
+        used_sources.add(source_file)
+        if (fields.get("Shared_Asset_Approved") is not True
+                or fields.get("Approved For Final") is not True
+                or str(fields.get("Review Status") or "").strip() != "Final Approved"):
+            return "native_gallery_final_creative_approval_missing"
+        if fields.get("FB_Photo_ID"):
+            # Existing remote objects require reconciliation, not re-creation.
+            return "native_gallery_existing_provider_media_requires_reconciliation"
+    return None
 
 
 def ready_photo_formula(
