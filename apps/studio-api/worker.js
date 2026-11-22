@@ -7265,6 +7265,7 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:assertProductionRequestFanoutComplete__*/
 /*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:studioNyc20261121HandoffCron__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverFreeSkylineFerryFanoutCron__*/
 /*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
 // Clearing that id made the next P2 pulse buy the same sentence again
