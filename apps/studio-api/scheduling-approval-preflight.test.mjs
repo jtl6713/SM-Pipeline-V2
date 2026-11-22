@@ -85,6 +85,8 @@ test("#2618: native photo set requires real count and consistent source URLs", (
     selected_assets:{selected_clips:[{url:CDN+"source-a.png"},{url:CDN+"source-b.png"}]},
   });
   assert.equal(assessSchedulingPreflight(row).ready,true);
+  assert.equal(assessSchedulingPreflight(row).media.length,4,"all native source bytes are required");
+  assert.equal(assessSchedulingPreflight({...row,selected_assets:null}).reason,"native_photo_manifest_mismatch");
   assert.equal(assessSchedulingPreflight({...row,selected_clip_count:3}).reason,"native_photo_manifest_mismatch");
   assert.equal(assessSchedulingPreflight({...row,selected_assets:{selected_clips:[{url:"https://unknown.example/photo.png"},{url:CDN+"source-b.png"}]}}).reason,"native_photo_manifest_mismatch");
 });
@@ -107,6 +109,11 @@ test("#2618: live cron preparation writes only technical receipt; no approval, s
   globalThis.fetch=async (raw,init={})=>{
     const uri=new URL(raw);assert.equal(uri.origin,BASE);
     calls.push({url:uri,init});
+    if((init.method||"GET")==="GET" && uri.pathname.endsWith("/content_items")) {
+      assert.equal(uri.searchParams.get("id"),"eq."+row.content_item_id);
+      assert.equal(uri.searchParams.get("content_profile_id"),"eq."+row.content_profile_id);
+      return Response.json([{id:row.content_item_id,airtable_record_id:"recContent1234567"}]);
+    }
     if((init.method||"GET")==="GET") return Response.json([row]);
     assert.equal(init.method,"PATCH");
     assert.equal(uri.pathname,"/rest/v1/platform_outputs");
