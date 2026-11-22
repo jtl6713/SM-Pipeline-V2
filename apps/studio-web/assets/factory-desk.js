@@ -539,7 +539,7 @@
   function canDelete(card, { candidate = false } = {}) {
     // Recovery Source approved media is intentionally preserved. A generic
     // Delete button in Repair must not destroy the only source of the package.
-    if (card?.protected_media_rework === true) return false;
+    if (card?.protected_media_rework === true || card?.meta_repair_required === true) return false;
     if (candidate) return false;
     if (card?.kind === "idea") return true;
     if (card?.kind === "output") return true;
@@ -2178,7 +2178,9 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.protected_media_rework === true
+    const stateLabel = card.meta_repair_required === true
+      ? "Studio repair required · Publishing held"
+      : card.protected_media_rework === true
       ? (card.recovery_source_inventory_verified === true
         ? "Source verified · Needs creative review"
         : "Media repair · Source unresolved")
@@ -2196,6 +2198,11 @@
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${card.meta_repair_required === true
+          ? `<span class="factory-batch-unavailable factory-meta-repair" role="status"><strong>Studio repair required · ${esc(card.meta_repair_reason || "Recovery")}</strong> · Publishing held<br>
+              ${esc(card.meta_repair_next_step || "Studio must diagnose and repair this output.")}
+              <small>${card.meta_repair_user_action_required === true ? "Your action is required; inspect the exact output." : "No action from you yet — Studio owns the repair."} · Tracked in issue #2563</small></span>`
+          : ""}
         ${card.protected_media_rework === true
           ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Rebuild/stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
           : ""}
@@ -3660,6 +3667,34 @@
       manual: filtered(manualCards).length,
     };
     renderSummary(summary);
+    // #2563: keep Studio-owned blocked repairs visible even while the Repair
+    // accordion is collapsed. The user should not have to hunt for 118 holds.
+    const metaCount = filtered(manualCards).filter(card => card.meta_repair_required === true).length;
+    const factoryRoot = $("page-factory");
+    const bands = factoryRoot?.querySelector(".factory-band")?.parentElement;
+    if (bands) {
+      let notice = $("factoryMetaRepairNotice");
+      if (!notice) {
+        notice = document.createElement("section");
+        notice.id = "factoryMetaRepairNotice";
+        notice.className = "factory-meta-repair-notice";
+        notice.setAttribute("role", "status");
+        bands.prepend(notice);
+      }
+      notice.hidden = metaCount === 0;
+      if (metaCount) {
+        notice.innerHTML = `<span><strong>${metaCount} Instagram/Facebook output${metaCount === 1 ? "" : "s"} require Studio repair.</strong>
+          Their publishing is held. Studio must verify media and provider outcomes; no action from you yet.</span>
+          <button type="button" class="secondary-button">View in Repair</button>`;
+        notice.querySelector("button")?.addEventListener("click", () => {
+          const band = $("factoryBandBodyManual")?.closest(".factory-band");
+          if (band?.classList.contains("is-collapsed")) {
+            band.querySelector("[data-factory-band-toggle]")?.click();
+          }
+          band?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        });
+      }
+    }
     const visibleNote = $("factoryProfileScopeNote");
     if (visibleNote) visibleNote.textContent = factoryProfileId()
       ? "Filtered counts show visible queue rows." : "Global counts from the Factory queue.";

@@ -34,6 +34,10 @@ import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
 } from "./factory-protected-media-rework.mjs";
+import {
+  metaReviewRecoverySourceRow,
+  metaReviewRecoveryShapedRecord,
+} from "./meta-review-recovery-attention.mjs";
 
 export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
   "GET /api/outputs",
@@ -2066,8 +2070,27 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
     open = (openRaw || []).filter((row) => !String(row?.test_run_id || "").trim());
   }
 
+  // #2563: Pipeline also excludes held outputs from its normal open-output
+  // scan. Resolve the exact still-held, audited Meta repairs independently;
+  // a hidden/unavailable recovery set is an error, not "no work".
+  let heldMetaRepairs = [];
+  if (!reviewOnly) {
+    const recoveryRows = await supabaseRestAll(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.true`
+        + `&or=(platform.eq.Facebook,platform.eq.Instagram)`
+        + `&error_messages->>SM_False_Changes_Requested_Recovery_2563=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 200, maxRows: 2000 },
+    );
+    if (recoveryRows.length >= 2000) {
+      throw Error("Meta repair inventory exceeded Pipeline recovery scan bound");
+    }
+    heldMetaRepairs = recoveryRows.filter(metaReviewRecoverySourceRow);
+  }
+
   const byId = new Map();
-  for (const row of [...(newest || []), ...(open || [])]) {
+  for (const row of [...(newest || []), ...(open || []), ...heldMetaRepairs]) {
     if (!row?.airtable_record_id) continue;
     byId.set(row.airtable_record_id, flattenOutputRow(row));
   }
@@ -4282,7 +4305,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Changes Requested. Without this, protected recovery media vanishes from
   // Factory even when its source images have been restored.
   let mediaReworkScanWarning = null;
-  const [outputRows, reviewReadyRows, originalHeldReworkRows, newHeldReworkRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  const [outputRows, reviewReadyRows, originalHeldReworkRows, newHeldReworkRows, metaHeldRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
@@ -4323,6 +4346,22 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
       console.warn("Supabase Factory new protected media scan failed", String(error?.message || error));
       return [];
     }),
+    // #2563: independent marker-scoped recovery lane. Do NOT use the old
+    // "Changes Requested" review status or DNP=false as a discovery filter.
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.true&or=(platform.eq.Facebook,platform.eq.Instagram)`
+        + `&error_messages->>SM_False_Changes_Requested_Recovery_2563=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 200, maxRows: 2000 },
+    ).then(rows => {
+      if (rows.length >= 2000) throw Error("Meta recovery scan exceeded full-inventory bound");
+      return rows;
+    }).catch(error => {
+      mediaReworkScanWarning = "Meta recovery inventory unavailable; unresolved held outputs must not be treated as cleared";
+      console.warn("Supabase Factory Meta recovery scan failed", String(error?.message || error));
+      return [];
+    }),
     supabaseRest(
       env,
       `production_requests?request_status=neq.Cancelled&select=${REQUEST_SELECT}`
@@ -4343,9 +4382,10 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const outputById = new Map();
   const heldReworkRows = [...(originalHeldReworkRows || []), ...(newHeldReworkRows || [])];
   const protectedReworkRows = (heldReworkRows || []).filter(protectedMediaReworkSourceRow);
+  const metaRecoveredRows = (metaHeldRows || []).filter(metaReviewRecoverySourceRow);
   // Only canonical, still-held, unpublished records with an explicit exact
   // source marker qualify. Never show test, scheduled or published candidates.
-  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows]) {
+  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows, ...metaRecoveredRows]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
   const rawShapedOutputs = [...outputById.values()]
@@ -4367,14 +4407,15 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
   const reviewOutputs = shapedOutputs.filter((row) =>
-    matchesOpsQueueReviewFormula(row.fields) || protectedMediaReworkShapedRecord(row));
+    matchesOpsQueueReviewFormula(row.fields) || protectedMediaReworkShapedRecord(row)
+    || metaReviewRecoveryShapedRecord(row));
   const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
   // Factory reviews can outlive the recent Production Request window. Resolve
   // their parent from Supabase by the durable promoted-content key; do not
   // require the parent to remain an active request/production job.
   // These parents enrich review cards only, not the active production lane.
-  const reviewContentIds = [...new Set((reviewReadyRows || [])
+  const reviewContentIds = [...new Set([...(reviewReadyRows || []), ...metaRecoveredRows]
     .map((row) => String(
       row?.content_items?.airtable_record_id
       || row?.error_messages?.Content_Item?.[0]
@@ -4466,6 +4507,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     reviewOutputs,
     mediaReworkScanWarning,
     protectedMediaReworkCount: protectedReworkRows.length,
+    metaReviewRecoveryCount: metaRecoveredRows.length,
     activeHolds,
     requests,
     reviewParentRequests: [...reviewParentByContent.values()],

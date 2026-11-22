@@ -1,4 +1,5 @@
 import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
+import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
@@ -12009,6 +12010,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     const contentNumber = content ? f(content, "Content_ID") : null;
     const readiness = evaluateReviewPackage(record);
     const mediaRework = protectedMediaReworkSummary(record);
+    const metaRepair = metaReviewRecoverySummary(record);
     // Recovery previews are display-only; do not pass an MP4 into an <img>.
     const sourcePreview = String(f(record, "Studio_Preview_URL") || "").trim();
     const mediaReworkThumbnail = mediaRework &&
@@ -12054,6 +12056,11 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
       protected_media_rework: Boolean(mediaRework),
+      meta_repair_required: Boolean(metaRepair),
+      meta_repair_reason: metaRepair?.category || null,
+      meta_repair_next_step: metaRepair?.next_step || null,
+      meta_repair_user_action_required: metaRepair?.user_action_required === true,
+      meta_repair_issue: metaRepair?.issue || null,
       recovery_hold_marker: mediaRework?.marker || null,
       recovery_source_inventory_verified: mediaRework?.source_inventory_verified || false,
       recovery_original_image_previews: mediaRework?.original_image_previews || [],
@@ -12084,9 +12091,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
-      stuck_kind: stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null,
-      stuck_class: stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null,
-      produce_error: stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
+      stuck_kind: metaRepair ? "meta_repair_required" : (stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null),
+      stuck_class: metaRepair ? "recovery" : (stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null),
+      produce_error: metaRepair?.next_step || stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
         || inheritedParentStuck?.error || mapped.remotion_error_message || null,
       lane: queueLaneForStudioState(studioState, {
         producePaused,
@@ -12103,7 +12110,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       // This is metadata validation; the approval route probes actual CDN bytes.
       // Never let recovered source images turn a Changes Requested item into
       // a Factory Approve candidate. It belongs in manual creative repair.
-      review_package_ready: mediaRework ? false : reviewVisibility.visible,
+      review_package_ready: (mediaRework || metaRepair) ? false : reviewVisibility.visible,
       review_package_held_preview_only: reviewVisibility.held_preview_only,
       review_package_readiness: readiness.readiness,
       review_package_missing: readiness.missing_requirements,
