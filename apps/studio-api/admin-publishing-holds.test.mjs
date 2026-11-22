@@ -66,7 +66,7 @@ test("protected review, factory, legal, tests, dispatch and published receipts c
     {IG_Carousel_Retry_Count:2},
     {Last_Publish_Attempt_At:"2026-11-21T10:00:00Z"}
   ]){
-    assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false);
+    assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false,JSON.stringify(extras));
   }
   assert.equal(classifyAdminPublishingHold({...row(),test_run_id:"test"}).releasable,false);
   assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,false);
