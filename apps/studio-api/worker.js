@@ -47,6 +47,7 @@ import { readProducerThread, appendProducerThreadMessage, producerConversationHi
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { sweepPreFactoryReady, PRE_FACTORY_READY_FORMULA } from "./pre-factory-ready-recovery.mjs";
+import { sweepSchedulingApprovalPreflight } from "./scheduling-approval-preflight.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
 import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
@@ -4691,6 +4692,14 @@ export default {
     } else {
       console.warn("R4_QUEUE_ADMIT_INDEPENDENT airtable_cooldown");
     }
+    // Independently prepare real finished media for the user's last approval
+    // decision. Technical QA probes actual CDN bytes, stores only a readback
+    // receipt, and never sets Approved, schedules, or publishes.
+    ctx.waitUntil(sweepSchedulingApprovalPreflight(env, { limit: 4 })
+      .then(result => console.info("SCHEDULING_APPROVAL_TECHNICAL_PREFLIGHT", JSON.stringify(result)))
+      .catch(error => console.warn("SCHEDULING_APPROVAL_TECHNICAL_PREFLIGHT unavailable",
+        error instanceof Error ? error.message : String(error))));
+
     // Production approval recovery must not sit behind dozens of unrelated
     // awaited publish/Factory jobs. Schedule one independent bounded sweep,
     // before the main cron workload, or stalled Submitted requests never move.
