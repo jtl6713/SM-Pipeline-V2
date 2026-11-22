@@ -868,3 +868,135 @@
 .factory-meta-repair-notice .secondary-button { max-width: 100%; white-space: normal; }
 .factory-meta-repair { display: block; white-space: normal; line-height: 1.45; }
 .factory-meta-repair small { display: block; margin-top: 4px; }
+
+/* FACTORY_REPAIR_ROWS_2563 — protected IG/FB rows must be readable and actionable.
+   The legacy Repair lane used 28px rows/20px action pills and clipped the
+   diagnosis. Do not make the operator infer a hidden Open action. */
+#page-factory .factory-band-manual .factory-lane-list {
+  max-height:min(74vh,800px);
+  overflow-x:hidden;
+  overflow-y:auto;
+  scrollbar-gutter:stable;
+}
+#page-factory .factory-band-manual .factory-cols,
+#page-factory .factory-band-manual .factory-line {
+  grid-template-columns:28px minmax(245px,2fr) minmax(115px,.8fr)
+    minmax(92px,.6fr) minmax(95px,.7fr) minmax(155px,1fr)
+    minmax(148px,.95fr);
+  column-gap:12px;
+}
+#page-factory .factory-band-manual .factory-line {
+  box-sizing:border-box;
+  height:auto;
+  min-height:92px;
+  padding:12px;
+  row-gap:8px;
+  align-items:start;
+  font-size:.82rem;
+  line-height:1.4;
+}
+#page-factory .factory-band-manual .factory-line > * { min-width:0; }
+#page-factory .factory-band-manual .factory-line-title {
+  display:grid;
+  gap:3px;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+}
+#page-factory .factory-band-manual .factory-line-title .factory-output-number {
+  display:block;
+  font-size:.75rem;
+  font-weight:600;
+  color:#56677b;
+}
+#page-factory .factory-band-manual .factory-line-cell {
+  display:block;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+}
+#page-factory .factory-band-manual .factory-line-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:flex-start;
+  justify-content:flex-start;
+}
+#page-factory .factory-band-manual .factory-line-actions > button {
+  box-sizing:border-box;
+  height:auto;
+  min-height:36px;
+  max-width:100%;
+  padding:7px 11px;
+  border-radius:7px;
+  white-space:normal;
+  line-height:1.25;
+  font-size:.76rem;
+}
+#page-factory .factory-repair-title-link {
+  display:block;
+  width:100%;
+  padding:0;
+  margin:0;
+  border:0;
+  background:transparent;
+  color:#064b9a;
+  font:inherit;
+  font-weight:800;
+  line-height:1.35;
+  text-align:left;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  overflow-wrap:anywhere;
+  cursor:pointer;
+}
+#page-factory .factory-repair-title-link:hover { color:#003770; }
+#page-factory .factory-repair-title-link:focus-visible {
+  outline:3px solid #175cd3;
+  outline-offset:3px;
+}
+@media (max-width:1200px) and (min-width:761px) {
+  #page-factory .factory-band-manual .factory-cols { display:none; }
+  #page-factory .factory-band-manual .factory-line {
+    grid-template-columns:30px minmax(0,1fr) minmax(0,1fr);
+  }
+  #page-factory .factory-band-manual .factory-line > :nth-child(1) { grid-column:1;grid-row:1; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(2) { grid-column:2/-1;grid-row:1; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(3) { grid-column:2;grid-row:2; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(4) { grid-column:3;grid-row:2; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(5) { grid-column:2;grid-row:3; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(6) { grid-column:3;grid-row:3; }
+  #page-factory .factory-band-manual .factory-line-actions { grid-column:2/-1;grid-row:4; }
+}
+@media (max-width:760px) {
+  #page-factory .factory-band-manual .factory-cols { display:none; }
+  #page-factory .factory-band-manual .factory-lane-list {
+    max-height:none;overflow:visible;scrollbar-gutter:auto;
+  }
+  #page-factory .factory-band-manual .factory-line {
+    grid-template-columns:32px minmax(0,1fr);
+    grid-template-rows:none;
+    grid-auto-rows:auto;
+    min-height:0;
+    gap:7px 10px;
+    padding:12px;
+  }
+  #page-factory .factory-band-manual .factory-line > :nth-child(1) { grid-column:1;grid-row:1; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(2) { grid-column:2;grid-row:1; }
+  #page-factory .factory-band-manual .factory-line > :nth-child(3),
+  #page-factory .factory-band-manual .factory-line > :nth-child(4),
+  #page-factory .factory-band-manual .factory-line > :nth-child(5),
+  #page-factory .factory-band-manual .factory-line > :nth-child(6) {
+    grid-column:2;grid-row:auto;
+  }
+  #page-factory .factory-band-manual .factory-line .factory-line-cell { display:block; }
+  #page-factory .factory-band-manual .factory-line-actions {
+    grid-column:1/-1;grid-row:auto;
+    display:flex;flex-wrap:wrap;width:100%;gap:8px;
+  }
+  #page-factory .factory-band-manual .factory-line-actions > button {
+    flex:1 1 130px;min-height:42px;
+  }
+}
