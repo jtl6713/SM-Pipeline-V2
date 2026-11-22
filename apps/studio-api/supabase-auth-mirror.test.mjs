@@ -346,3 +346,44 @@ test("syncAuthTablesToSupabase skips when auth tables are absent", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("optional auth column failures are cached by table, not retried for each login", async () => {
+  let optionalFailures = 0;
+  const paths = [];
+  const rest = async (_env, path) => {
+    paths.push(path);
+    if (/user_key,extras|membership_key,is_default,extras|organization_key,extras|brand_key,extras/.test(path)) {
+      optionalFailures += 1;
+      throw new Error("Could not find the 'extras' column in the schema cache");
+    }
+    if (path.startsWith("studio_users?")) return [{
+      id: "uuid-user", airtable_record_id: "recUser1",
+      email: "test@example.com", display_name: "Test", user_status: "Active", active: true,
+    }];
+    if (path.startsWith("studio_memberships?")) return [{
+      id: "uuid-member", airtable_record_id: "recMember1",
+      user_id: "uuid-user", organization_id: "uuid-org",
+      role: "Owner", membership_status: "Active", active: true,
+    }];
+    if (path.startsWith("organizations?")) return [{
+      id: "uuid-org", airtable_record_id: "recOrg1", name: "Chicago Shining",
+    }];
+    if (path.startsWith("brands?")) return [{
+      id: "uuid-brand", airtable_record_id: "recBrand1", name: "Chicago",
+    }];
+    return [];
+  };
+  const env = { SUPABASE_URL: "https://auth-cache-test.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" };
+  for (let i = 0; i < 3; i += 1) {
+    const result = await loadAuthorizationFromSupabase(
+      env, "test@example.com", { email: "test@example.com" },
+      { supabaseRest: rest, rolePermissions: { Owner: { tenant_admin: true } } },
+    );
+    assert.equal(result.authorized, true);
+    assert.equal(result.role, "Owner");
+    assert.equal(result.brand?.record_id, "recBrand1");
+  }
+  assert.equal(optionalFailures, 4, "only the first request probes four unsupported columns");
+  assert.equal(paths.filter((path) => path.includes("studio_users?")).length, 4,
+    "one speculative auth SELECT plus three successful core SELECTs");
+});
