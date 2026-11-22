@@ -102,6 +102,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
@@ -13255,6 +13256,25 @@ async function factoryReleaseOutputForApproval(env, id, actor) {
     const readiness = evaluateReviewPackage(current);
     const eligibility = factoryApprovalHoldReleaseEligibility(current, readiness);
     if (!eligibility.eligible) throw new HttpError(409, eligibility.reason);
+    // #2294: "Release for Approval" is itself a publication-hold mutation.
+    // Never clear DNP on a multi-image output based only on Selected_Assets /
+    // render clips. Resolve its exact Supabase-native package and require
+    // final-approved linked slides BEFORE any legacy-shim/Supabase patch.
+    let canonical;
+    try {
+      canonical = (await factorySupabaseApprovalRows(env, [id])).get(id)?.row;
+      if (!canonical || canonical.airtable_record_id !== id ||
+          canonical.do_not_publish !== true ||
+          canonical.output_status !== "Ready for Review" ||
+          canonical.scheduled_post_date || canonical.studio_scheduled_at ||
+          canonical.published_at || canonical.platform_post_url) {
+        throw Error("Supabase release identity or publication hold drift");
+      }
+      await assertSupabaseNativeGalleryPublicationPackage(env, canonical);
+    } catch (error) {
+      throw new HttpError(409, "Cannot release for approval: "
+        + String(error?.message || error) + ". No hold released.");
+    }
     const verified = await verifyReviewImages(readiness);
     if (verified.readiness !== "READY") {
       throw new HttpError(409, "Cannot release for formal review: "
