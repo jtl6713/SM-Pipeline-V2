@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 import requests
+print('recovery_preflight_python_entry=STARTED',flush=True)
 from dotenv import load_dotenv
 
 ROOT=Path(r"D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner")
