@@ -64,7 +64,8 @@ def database_path() -> Path:
     return root / "SM-Pipeline-V2" / "studio-workload.sqlite3"
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     path = database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(path), timeout=5, isolation_level=None)
@@ -82,7 +83,10 @@ def _connect() -> sqlite3.Connection:
     db.execute("""CREATE TABLE IF NOT EXISTS governor_control (
         name TEXT PRIMARY KEY, until_at REAL NOT NULL
     )""")
-    return db
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def _transaction(db: sqlite3.Connection) -> None:
@@ -126,7 +130,7 @@ def is_database_overload(error: BaseException) -> bool:
     return any(s in message for s in (
         "connection terminated due to connection timeout", "postgrest",
         "supabase connection", "http 522", "status 522", "pgrst",
-        "database connection", "too many connections",
+        "database connection", "too many connections", "database is locked", "disk i/o error",
     ))
 
 
