@@ -129,10 +129,22 @@ def _read_idea_history(settings: dict, profile_uuid: str) -> list[dict]:
     return rows
 
 
+def _read_content_history(settings: dict, profile_uuid: str) -> list[dict]:
+    """Promoted/published Content Items are part of the editorial coverage slate."""
+    since = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+    return _request(
+        settings,
+        "content_items?select=content_title,primary_location,content_status,created_at"
+        "&content_profile_id=eq." + quote(profile_uuid, safe="")
+        + "&created_at=gte." + quote(since, safe=":-T+")
+        + "&order=created_at.desc&limit=" + str(MAX_IDEA_HISTORY),
+    )
+
+
 def load_sourcing_context(settings: dict, profile_id: str, mode: str) -> dict:
     mode = sourcing_mode(mode)
     context = {
-        "mode": mode, "available": False, "assets": [], "recent": [],
+        "mode": mode, "available": False, "assets": [], "recent": [], "published": [],
         "location_counts": {}, "overused": [], "locations": [],
     }
     if not settings:
@@ -143,6 +155,7 @@ def load_sourcing_context(settings: dict, profile_id: str, mode: str) -> dict:
         uuid = _read_profile_uuid(settings, profile_id)
         context["assets"] = _read_source_media(settings, profile_id)
         context["recent"] = _read_idea_history(settings, uuid)
+        context["published"] = _read_content_history(settings, uuid)
         context["available"] = True
     except Exception as error:
         context["inventory_error"] = type(error).__name__
@@ -154,20 +167,26 @@ def load_sourcing_context(settings: dict, profile_id: str, mode: str) -> dict:
         key = asset["key"]
         asset_locations.setdefault(key, asset["location"].split(",")[0])
         asset_counts[key] += 1
-    historic = Counter()
-    for row in context["recent"]:
-        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-        location = topic_key(payload.get("Primary_Location", ""))
-        title = " ".join(_tokens(row.get("candidate_title", "")))
-        # Prefer a named primary location, but catch legacy rows missing one.
-        for key in asset_locations:
-            phrase = asset_locations[key].lower()
-            if (
-                (location and location == key)
-                or (key == "vizcaya" and "vizcaya" in title.split())
-                or (phrase and phrase in title)
-            ):
-                historic[key] += 1
+    candidate_history = Counter()
+    content_history = Counter()
+    # Count separate recent Ideas and promoted Content Items, taking the max
+    # per location so a published Idea does not automatically count twice.
+    for rows, tally in ((context["recent"], candidate_history),
+                        (context["published"], content_history)):
+        for row in rows:
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            location = topic_key(row.get("primary_location") or payload.get("Primary_Location", ""))
+            title = " ".join(_tokens(row.get("candidate_title") or row.get("content_title") or ""))
+            for key in asset_locations:
+                phrase = asset_locations[key].lower()
+                if (
+                    (location and location == key)
+                    or (key == "vizcaya" and "vizcaya" in title.split())
+                    or (phrase and phrase in title)
+                ):
+                    tally[key] += 1
+    historic = Counter({key: max(candidate_history[key], content_history[key])
+                        for key in asset_locations})
     context["location_counts"] = dict(historic)
     context["overused"] = [
         asset_locations[key] for key, count in historic.most_common()
