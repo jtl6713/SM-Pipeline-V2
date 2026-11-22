@@ -78,7 +78,7 @@ async function allowedProfiles(env,authorization,ops) {
   if (!UUID.test(str(orgId))) return [];
   const profiles=await ops.supabaseRest(env,
     "content_profiles?organization_id=eq."+encodeURIComponent(orgId)+
-    "&active=eq.true&select=id,airtable_record_id,profile_name,market_name&limit=101");
+    "&select=id,airtable_record_id,profile_name,market_name&limit=101");
   if (!Array.isArray(profiles) || profiles.length>100)
     throw Error("Authorized profile inventory incomplete; refusing to list or mutate holds");
   return profiles.filter(row=>UUID.test(str(row.id))&&REC.test(str(row.airtable_record_id)));
@@ -106,7 +106,7 @@ export async function handleAdminPublishingHolds({request,url,env,authorization,
         "&select=operation,reason,source,actor,occurred_at&order=occurred_at.desc&limit=50");
       return json({ok:true,output_id:historyId,events:history||[]});
     }
-    if (!allowed.size) return json({ok:true,records:[],profiles:[],has_more:false});
+    if (!allowed.size) return err(409,"No authorized Content Profiles could be resolved in Supabase; not reporting an empty hold list");
     const page=Math.min(1000,Math.max(0,Number.parseInt(url.searchParams.get("offset")||"0",10)||0));
     const chosen=str(url.searchParams.get("profile_id"));
     if (chosen && !profiles.some(row=>row.airtable_record_id===chosen)) return err(403,"Profile not authorized");
