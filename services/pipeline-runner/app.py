@@ -29,6 +29,7 @@ from item4.sources import download_via_media_bridge, is_studio_master_key
 from integrations.google_drive import GoogleDriveClient
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
+from studio_produce import workload_governor
 from studio_compress.processor import start_job as start_studio_compress
 from ttd.client import TikTokDraftClient, load_tiktok_settings
 from rendering_review.http import create_rendering_review_producer_blueprint
@@ -165,6 +166,25 @@ def durable_airtable_egress():
     return jsonify(result), 200 if result.get("ok") else 503
 
 
+@app.get("/admin/workload")
+def workload_diagnostics():
+    """Local-only authenticated runner workload diagnostics (never mutate jobs)."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"ok": False, "error": "runner_auth_unconfigured"}), 503
+    denied, code = _require_loopback()
+    if denied is not None:
+        return denied, code
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    try:
+        snapshot = workload_governor.snapshot()
+    except (OSError, RuntimeError, ValueError) as error:
+        logger.warning("governor diagnostics unavailable: %s", type(error).__name__)
+        return jsonify({"ok": False, "error": "governor_diagnostics_unavailable"}), 503
+    return jsonify({"ok": True, **snapshot}), 200
+
+
 @app.get("/health")
 def health():
     from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
@@ -201,6 +221,7 @@ def health():
             "ig_publish_lease_protocol_version": 1,
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
             "recovery_read_only": recovery_read_only(),
+            "workload_governor_enabled": workload_governor.enabled(),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),

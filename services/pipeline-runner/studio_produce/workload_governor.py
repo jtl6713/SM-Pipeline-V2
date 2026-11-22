@@ -39,6 +39,17 @@ def enabled() -> bool:
     return os.getenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "").strip().lower() in {"1", "true", "yes"}
 
 
+def admission_paused() -> bool:
+    """Recovery mode must not admit heavy work, even from persisted leases.
+
+    This checks the same deployment-level gate as Flask, but also protects the
+    autonomous Python dispatcher which operates outside HTTP request handling.
+    """
+    return os.getenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "").strip().lower() in {
+        "1", "true", "yes",
+    }
+
+
 def max_jobs() -> int:
     return _limit("STUDIO_MAX_PRODUCER_JOBS", DEFAULT_MAX_JOBS, 1, 8)
 
@@ -195,8 +206,15 @@ def is_database_overload(error: BaseException) -> bool:
 
 def claim_next() -> tuple[str, str] | None:
     """Atomic FIFO claim and cross-process concurrency check."""
+    # The HTTP recovery gate does not protect the autonomous dispatcher.
+    # Do not read/recover/release any claims while startup is in read-only mode.
+    if admission_paused():
+        return None
     with _connect() as db:
         _transaction(db)
+        if admission_paused():
+            db.commit()
+            return None
         now = time.time()
         db.execute("""UPDATE producer_jobs
             SET state=CASE WHEN consecutive_yields+1>=? THEN 'paused' ELSE 'queued' END,
@@ -319,6 +337,8 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
     if not enabled():
         yield
         return
+    if admission_paused() and not (scope == "supabase_read" and allow_during_circuit):
+        raise AdmissionDeferred("runner recovery read-only: resource admission paused")
     token = uuid.uuid4().hex
     lease_key = key or token
     wait_seconds = 30.0 if scope.startswith("supabase_") else 60.0
@@ -328,7 +348,11 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
             _transaction(db)
             db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (time.time(),))
             active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
-            if (allow_during_circuit or not circuit_open(db)) and active < limit:
+            if (
+                (not admission_paused() or (scope == "supabase_read" and allow_during_circuit))
+                and (allow_during_circuit or not circuit_open(db))
+                and active < limit
+            ):
                 claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
                     (scope,lease_key,token,lease_until) VALUES(?,?,?,?)""",
                     (scope, lease_key, token, time.time() + LEASE_SECONDS)).rowcount
@@ -395,7 +419,7 @@ def record_db_request(method: str, *, failed: bool, latency_ms: float = 0) -> No
 
 def snapshot() -> dict[str, object]:
     if not enabled():
-        return {"enabled": False}
+        return {"enabled": False, "recovery_read_only": admission_paused(), "admission_paused": admission_paused()}
     with _connect() as db:
         counts = db.execute("SELECT state,COUNT(*) FROM producer_jobs GROUP BY state").fetchall()
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
@@ -415,7 +439,10 @@ def snapshot() -> dict[str, object]:
             for operation, total, failed, total_ms, max_ms in rows
         }
         return {
-            "enabled": True, "scope": "single_windows_host", "active_jobs": queued.get("running", 0),
+            "enabled": True, "scope": "single_windows_host",
+            "recovery_read_only": admission_paused(),
+            "admission_paused": admission_paused() or circuit_open(db),
+            "active_jobs": queued.get("running", 0),
             "queued_jobs": queued.get("queued", 0), "paused_jobs": queued.get("paused", 0),
             "active_photo_groups": groups,
             "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),
@@ -433,6 +460,11 @@ def ensure_dispatcher(worker: Callable[[str, str], None]) -> None:
     # Never start a thread that logs storage errors every two seconds forever.
     with _connect() as db:
         db.execute("SELECT 1")
+    # Deliberate staging mode: initialize durable store for diagnostics but
+    # start NO background dispatcher until recovery mode is removed and the
+    # service restarted. Even an old queue must not auto-resume during recovery.
+    if admission_paused():
+        return
     with _dispatch_lock:
         if _dispatch_started:
             return

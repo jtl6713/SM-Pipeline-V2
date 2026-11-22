@@ -11,6 +11,7 @@ def isolated_governor(tmp_path, monkeypatch):
     monkeypatch.setenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "true")
     monkeypatch.setenv("STUDIO_GOVERNOR_DB_PATH", str(tmp_path / "governor.sqlite3"))
     monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "2")
+    monkeypatch.delenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", raising=False)
     monkeypatch.setattr(gov, "DISPATCH_INTERVAL", 0.01)
     return gov
 
@@ -178,3 +179,46 @@ def test_governed_outage_retains_job_without_marking_blocked(isolated_governor, 
     assert g.snapshot()["queued_jobs"] == 1
     assert g.snapshot()["active_jobs"] == 0
     assert g.snapshot()["database_circuit_open"] is True
+
+
+
+def test_read_only_mode_preserves_queued_jobs_without_dispatch(isolated_governor, monkeypatch):
+    g = isolated_governor
+    assert g.enqueue("recHeld") is True
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "true")
+    assert g.claim_next() is None
+    snapshot = g.snapshot()
+    assert snapshot["enabled"] and snapshot["recovery_read_only"]
+    assert snapshot["admission_paused"] is True
+    assert snapshot["queued_jobs"] == 1
+    assert snapshot["active_jobs"] == 0
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "false")
+    claimed = g.claim_next()
+    assert claimed and claimed[0] == "recHeld"
+
+
+def test_read_only_mode_blocks_media_and_write_slots_but_preserves_bounded_reads(
+    isolated_governor, monkeypatch,
+):
+    g = isolated_governor
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "true")
+    for resource in ("photo_group", "transfer", "supabase_write"):
+        with pytest.raises(g.AdmissionDeferred, match="read-only"):
+            with g.resource_slot(resource, limit=2):
+                raise AssertionError("resource unexpectedly admitted")
+    with g.resource_slot("supabase_read", limit=2, allow_during_circuit=True):
+        pass
+    assert g.snapshot()["active_photo_groups"] == 0
+
+
+def test_read_only_mode_initializes_store_without_starting_dispatcher(
+    isolated_governor, monkeypatch,
+):
+    g = isolated_governor
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "1")
+    monkeypatch.setattr(g, "_dispatch_started", False)
+    called = []
+    g.ensure_dispatcher(lambda *_args: called.append("started"))
+    assert g.snapshot()["enabled"] is True
+    assert g._dispatch_started is False
+    assert called == []
