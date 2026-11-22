@@ -736,7 +736,7 @@
       },
       {
         "op": "isAnyOf",
-        "field": "Image_Publish_Mode",
+        "field": "Publish_Method",
         "type": "singleSelect",
         "value": [
           "Automated"
@@ -755,11 +755,11 @@
         "value": false
       },
       {
-        "op": "isNoneOf",
+        "op": "isAnyOf",
         "field": "Publish_Status",
         "type": "singleSelect",
         "value": [
-          "Published"
+          "Ready to Publish"
         ]
       },
       {
