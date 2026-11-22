@@ -4758,6 +4758,26 @@ export default {
         results,
       })))
       .catch((error) => console.warn("TTD draft cron unavailable", error)));
+    // #2340: canonical Instagram carousel stages need their own light-cron
+    // owner. The shared heavy maintenance sweep can be skipped by a stale
+    // Airtable cooldown or time out after many earlier jobs, leaving an
+    // approved due carousel permanently at Ready for Asset Prep. Dispatch
+    // once per five-minute tick, including heavy ticks, with one candidate
+    // per stage and the exact per-original historical-provider audit gate.
+    // The AP0C–AP5C Python preflights continue to own media/provider locks.
+    if (studioWriteSource(env) === "supabase") {
+      ctx.waitUntil(studioReconcileInstagramCarousels(env, { limit: 1 })
+        .then((results) => console.info("Independent Supabase carousel light-cron", JSON.stringify({
+          checked: results.length, heavy: cadence.heavy,
+          by_stage: results.reduce((acc, row) => {
+            const key = row.stage || "unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {}),
+          results,
+        })))
+        .catch((error) => console.warn("Independent Supabase carousel light-cron failed", String(error?.message || error))));
+    }
     // Processing without TikTok_Draft_Publish_ID is invisible to TTD2 light
     // polls and TTD1 Ready-for-Delivery discovery. Fire on every tick (not
     // only light): heavy's late await often starves past the waitUntil budget.
@@ -5292,11 +5312,8 @@ export default {
       } catch (error) {
         console.warn("tiktok draft reconcile cron failed", error);
       }
-      try {
-        await studioReconcileInstagramCarousels(env);
-      } catch (error) {
-        console.warn("instagram carousel reconcile cron failed", error);
-      }
+      // #2340: carousel stages are now owned once by the independent
+      // Supabase five-minute waitUntil above; never dispatch twice per tick.
       // Existing Story polling runs independently on light ticks so the
       // long heavy maintenance sweep cannot strand due containers.
       // Existing Instagram Reel media-ID continuation runs independently on light cron.
