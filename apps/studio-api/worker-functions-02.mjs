@@ -808,6 +808,19 @@ export async function studioHealEscalatedProduce(env, options = {}) {
         pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "no_outputs" });
         continue;
       }
+      // Recreated held output cards can still lack licensed music. Do not
+      // reopen the renderer simply because the reverse parent link now exists.
+      // Await explicit media repair; the DNP/no-schedule holds remain intact.
+      const live = await listSupabaseContentPlatformOutputs(env, contentId, { limit: 60 }).catch(() => null);
+      if (!Array.isArray(live)) {
+        pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "output_readback_unavailable" });
+        continue;
+      }
+      if (live.some(output => f(output,"Do_Not_Publish") === true
+          && String(f(output,"Render_Status") || "") === "Blocked")) {
+        pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "held_media_not_ready" });
+        continue;
+      }
     }
     const heal = studioProduceHealState(job);
     const nextJob = {
