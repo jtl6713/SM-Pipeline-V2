@@ -1,2 +1,4 @@
 Incident #2670 guarded production restoration across Chicago, NYC, LA, Miami.
 Execution via .github/workflows/incident-2670-producers-all.yml only after #2718 is merged and exact Bethesda canary is idle. This stages PIPELINE_RUNNER_RECOVERY_PRODUCER_TARGET=ALL with max_jobs=1; preserves PIPELINE_RUNNER_RECOVERY_READ_ONLY=true, all DNP flags, provider attempt idempotency, disabled I1/native-gallery background consumers, Supabase-only authority and zero Airtable. Fail closed if governor has active/queued/paused work or database circuit open.
+
+Verification retry after first Ops preflight stopped safely without mutation. This retry emits only sanitized PowerShell error tokens if another fail-closed guard fires. All prior recovery/publishing protections still required.
