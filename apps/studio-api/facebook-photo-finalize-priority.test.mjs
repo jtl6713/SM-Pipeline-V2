@@ -37,6 +37,31 @@ test("only evidence-positive already-posted Facebook candidates can finalize", (
   for (const bad of reject) assert.equal(fb3FinalizeEligible(row(9,bad), now), false, JSON.stringify(bad));
 });
 
+test("a saved FB2 post with an ownerless aged lock can reach GET-only FB3 finalization", () => {
+  const oldOrphan = "2026-10-22T13:49:00Z";
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Publish_Locked_By: "", Publish_Locked_At: oldOrphan,
+  }), now), true, "orphan timestamp more than ten minutes old must not strand an existing parent post");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Publish_Locked_By: "", Publish_Locked_At: "2026-10-22T13:55:00Z",
+  }), now), false, "do not race an in-progress FB2 write");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Publish_Locked_By: "FB2", Publish_Locked_At: oldOrphan,
+  }), now), false, "never supersede a named stage owner");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Publish_Locked_At: "not-a-timestamp",
+  }), now), false, "malformed lock evidence must fail closed");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Publish_Locked_At: "2026-10-22T14:10:00Z",
+  }), now), false, "future lock evidence must fail closed");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    Platform_Post_ID: "", Publish_Locked_At: oldOrphan,
+  }), now), false, "orphan recovery cannot create a new provider post");
+  assert.equal(fb3FinalizeEligible(row(17, {
+    FB_Publish_Status: "Ready for Assets", Publish_Locked_At: oldOrphan,
+  }), now), false, "orphan recovery only reconciles already-saved provider posts");
+});
+
 test("rotate across four-item windows without resetting attempts or blocking later posts", () => {
   const rows = Array.from({length:13}, (_,i)=>row(i+1));
   const first = selectFb3FinalizeBatch(rows, {limit:4,nowMs:0});
