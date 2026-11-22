@@ -120,3 +120,41 @@ def test_letter_jpeg_bytes_paints_lower_third():
     top = out.getpixel((540, 80))
     assert bottom != top
     assert bottom[0] < 80
+
+
+
+def test_issue2371_shared_small_watermark_is_not_double_branded_or_relettered():
+    # These exact R2 derivatives already have the owner-approved shared mark
+    # visibly composited bottom-right, 1080x1350, verified CDN SHA.
+    for content in (2221, 2222, 2223, 2226, 2230):
+        for index in (1, 4):
+            path = (
+                "https://media.chicagoshining.com/studio/previews/repairs/"
+                f"issue2371/nyc-{content}/shared-small-bottom-right/"
+                f"slide-{index:02d}-0123456789abcdef.jpg"
+            )
+            assert already_branded_url(path)
+            clips = [{
+                "url": path, "watermarked": True,
+                "lettered": False, "overlay": {"enabled": False},
+                "caption": "Gantry Plaza Sunset: Queens Skyline Views",
+                "source": "verified_shared_small_bottom_right_4x5_r2",
+            }]
+            assert branding_jobs_for_clips(clips, {"fields": {}}, "Gantry Plaza") == []
+
+    # Unrelated image links cannot falsely bypass mandatory watermarking.
+    for candidate in (
+        "https://untrusted.example/studio/previews/repairs/issue2371/"
+            "nyc-2222/shared-small-bottom-right/slide-01-0123456789abcdef.jpg",
+        "https://media.chicagoshining.com/studio/previews/repairs/issue2371/"
+            "nyc-1234/shared-small-bottom-right/slide-01-0123456789abcdef.jpg",
+        "https://media.chicagoshining.com/studio/previews/repairs/issue2371/"
+            "nyc-2222/shared-small-bottom-right/slide-01-bad.jpg",
+        "https://media.chicagoshining.com/studio/previews/repairs/issue2371/"
+            "nyc-2222/slide-01-0123456789abcdef.jpg",
+    ):
+        assert not already_branded_url(candidate)
+        assert len(branding_jobs_for_clips(
+            [{"url": candidate, "overlay": {"enabled": False}}],
+            {"fields": {}}, "",
+        )) == 1
