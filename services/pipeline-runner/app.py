@@ -120,6 +120,50 @@ def recovery_producer_only_allowed() -> bool:
     return target == "ALL" or record_id == target
 
 
+RECOVERY_MEDIA_STAGES = frozenset({"smv1", "r2", "r3", "r4", "r5"})
+
+
+def recovery_nonpublishing_media_allowed(stage_name: str) -> bool:
+    """Exact-ID nonpublishing media work only; every publisher remains fenced."""
+    if (
+        stage_name not in RECOVERY_MEDIA_STAGES
+        or not recovery_image_upload_allowed()
+        or not workload_governor.producer_only_recovery_enabled()
+        or workload_governor.producer_only_recovery_target() != "ALL"
+    ):
+        return False
+    if request.content_length is not None and request.content_length > 4096:
+        return False
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) - {
+        "output_record_id", "platform_output_id", "production_request_record_id",
+        "test_run_id", "extra",
+    }:
+        return False
+    extra = payload.get("extra") or {}
+    if not isinstance(extra, dict) or set(extra) - {"max_runs", "photo_workers", "dry_run"}:
+        return False
+    if "max_runs" in extra and (type(extra["max_runs"]) is not int or extra["max_runs"] != 1):
+        return False
+    if "photo_workers" in extra and (stage_name != "smv1" or type(extra["photo_workers"]) is not int or extra["photo_workers"] != 1):
+        return False
+    if "dry_run" in extra and type(extra["dry_run"]) is not bool:
+        return False
+    if payload.get("test_run_id") and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(payload["test_run_id"])):
+        return False
+    field_name = "production_request_record_id" if stage_name == "smv1" else "output_record_id"
+    record_id = payload.get(field_name) if stage_name == "smv1" else (payload.get("output_record_id") or payload.get("platform_output_id"))
+    if not isinstance(record_id, str) or not re.fullmatch(r"rec[A-Za-z0-9]{6,}", record_id):
+        return False
+    if stage_name != "smv1" and payload.get("production_request_record_id"):
+        return False
+    if stage_name == "smv1" and (payload.get("output_record_id") or payload.get("platform_output_id")):
+        return False
+    if payload.get("output_record_id") and payload.get("platform_output_id") and payload["output_record_id"] != payload["platform_output_id"]:
+        return False
+    return True
+
+
 def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, tuple | None]:
     """Constrain A3 to an existing, profiled Supabase image; never launch A4.
 
@@ -194,10 +238,14 @@ def _recovery_read_only_gate():
         if (request.method.upper() == "POST"
                 and request.path in {"/jobs/studio-produce", "/jobs/studio-produce/resume"}
                 and recovery_producer_only_allowed()):
-            # Governor enforces cross-process 1-job cap. Every other mutating
-            # route, including stages and all native publisher entrypoints,
-            # remains fenced by the read-only middleware.
+            # Governor enforces cross-process 1-job cap.
             return None
+        if request.method.upper() == "POST":
+            stage = request.path.removeprefix("/stages/") if request.path.startswith("/stages/") else ""
+            if stage in RECOVERY_MEDIA_STAGES and recovery_nonpublishing_media_allowed(stage):
+                # The handler holds a cross-process single-slot lease. No provider,
+                # native gallery, idea, or unscoped worker routes are reopened.
+                return None
         response = jsonify({
             "ok": False,
             "error": "runner_recovery_read_only",
@@ -330,6 +378,13 @@ def health():
             "recovery_a3_metadata_write_scoped": recovery_image_classification_allowed(),
             "workload_governor_enabled": workload_governor.enabled(),
             "recovery_producer_only_enabled": workload_governor.producer_only_recovery_enabled(),
+            "recovery_nonpublishing_media_stages": (
+                sorted(RECOVERY_MEDIA_STAGES)
+                if workload_governor.producer_only_recovery_enabled()
+                and workload_governor.producer_only_recovery_target() == "ALL"
+                and recovery_image_upload_allowed()
+                else []
+            ),
             "recovery_producer_scope": (
                 "all_governed_requests" if workload_governor.producer_only_recovery_target() == "ALL"
                 else "exact_request" if workload_governor.producer_only_recovery_enabled()
@@ -544,16 +599,32 @@ def run_stage(stage_name: str):
     if error_response is not None:
         return error_response, status
 
+    recovery_media = False
     if recovery_read_only():
-        if stage_name != "a3" or not recovery_image_classification_allowed():
+        if stage_name == "a3" and recovery_image_classification_allowed():
+            body, denied = _validate_recovery_a3(request.get_json(silent=True) or {})
+            if denied is not None:
+                return denied
+        elif recovery_nonpublishing_media_allowed(stage_name):
+            recovery_media = True
+            body = StageRequest.from_dict(request.get_json(silent=True))
+            # Exact request, one poll/crop/asset action per admission.
+            body.extra["max_runs"] = 1
+            if stage_name == "smv1":
+                body.extra["photo_workers"] = 1
+        else:
             return jsonify({"error": "runner_recovery_read_only"}), 503
-        body, denied = _validate_recovery_a3(request.get_json(silent=True) or {})
-        if denied is not None:
-            return denied
     else:
         body = StageRequest.from_dict(request.get_json(silent=True))
     handler = get_handler(stage_name)
-    result = handler(body)
+    if recovery_media:
+        try:
+            with workload_governor.resource_slot("recovery_media_stage", limit=1):
+                result = handler(body)
+        except workload_governor.AdmissionDeferred:
+            return jsonify({"error": "recovery_media_capacity_deferred"}), 503
+    else:
+        result = handler(body)
 
     status_code = 200
     if result.status == "not_implemented":
