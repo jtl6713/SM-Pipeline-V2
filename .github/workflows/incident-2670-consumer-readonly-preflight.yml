@@ -44,17 +44,19 @@ jobs:
           import json
           from pathlib import Path
           script=Path('.github/scripts/incident-2670-consumer-and-meta-readonly.py').read_text(encoding='utf-8')
-          command=r'''$ErrorActionPreference='Stop'
-          $path=Join-Path $env:TEMP ('incident2670-readonly-'+[guid]::NewGuid().ToString('N')+'.py')
-          try {
-            $payload=@'
-          '''+script+'''\n'@
-            [IO.File]::WriteAllText($path,$payload,(New-Object System.Text.UTF8Encoding($false)))
-            & python $path
-            if ($LASTEXITCODE -ne 0) {throw 'incident2670_readonly_probe_failed'}
-          } finally {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-          }'''
+          import base64
+          encoded=base64.b64encode(script.encode('utf-8')).decode('ascii')
+          command=(
+            "$ErrorActionPreference='Stop'\n"
+            "$path=Join-Path $env:TEMP ('incident2670-readonly-'+[guid]::NewGuid().ToString('N')+'.py')\n"
+            "try {\n"
+            "  [IO.File]::WriteAllBytes($path,[Convert]::FromBase64String('"+encoded+"'))\n"
+            "  & python $path\n"
+            "  if ($LASTEXITCODE -ne 0) {throw 'incident2670_readonly_probe_failed'}\n"
+            "} finally {\n"
+            "  Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue\n"
+            "}\n"
+          )
           Path('/tmp/incident2670-readonly.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           code=''
@@ -76,6 +78,7 @@ jobs:
               exit 0
             elif [[ "$status" == failed ]]; then
               jq -r '.job.log // ""' /tmp/result.json | grep '^recovery_preflight_' || true
+              jq -r '.job.log // ""' /tmp/result.json | python -c 'import sys; data=sys.stdin.read(); terms=("ParserError","ModuleNotFoundError","ImportError","SyntaxError","Traceback","CommandNotFoundException","FileNotFoundException","RuntimeError"); print("incident2670_error_category="+next((x for x in terms if x in data),"UNCLASSIFIED"))'
               echo 'incident2670_consumer_preflight=FAILED_NO_ENABLEMENT'
               exit 1
             fi
