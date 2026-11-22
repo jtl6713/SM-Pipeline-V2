@@ -1,5 +1,8 @@
 name: Issue 2556 exact replacement image HTTP preflight
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2556-candidate-url-preflight.yml'
   push:
     branches: [main]
     paths:
