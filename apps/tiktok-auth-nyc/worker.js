@@ -23,7 +23,7 @@
  *   is retained without changing the TTD1 request contract.
  */
 
-const WORKER_VERSION = "v5.1-tiktok-caption-diagnostics";
+const WORKER_VERSION = "v5.2-tiktok-analytics-scope-gate";
 const PIPELINE_SECRET_SHA256 = "206163e803094104e8de49871a138636b2978653a9935feea94f85e2454d666e";
 
 const REDIRECT_URI =
