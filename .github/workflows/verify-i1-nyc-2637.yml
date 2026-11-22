@@ -1,0 +1,179 @@
+name: Verify NYC I1 Ten Ideas #2637
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/verify-i1-nyc-2637.txt']
+permissions:
+  contents: read
+concurrency:
+  group: verify-i1-nyc-2637
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-i1-2637-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify Supabase runner and no retired Airtable egress
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 'https://pipeline.chicagoshining.com/health' -o /tmp/runner.json
+          jq -e '.ok==true and .studio_write_source=="supabase" and .studio_runner_content_read_source=="supabase" and .airtable_activity.ok==true and .airtable_activity.any_read==false and .airtable_activity.any_write==false' /tmp/runner.json >/dev/null
+      - name: Capture live production Worker identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/worker-before.txt
+      - name: Build one-time authenticated service-binding bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import secrets, json
+          token=secrets.token_urlsafe(36)
+          Path('/tmp/token').write_text(token)
+          js=r'''export default {
+            async fetch(request, env) {
+              const u=new URL(request.url), root=__ROOT__;
+              const send=(obj,status=200)=>Response.json(obj,{status,headers:{"Cache-Control":"no-store"}});
+              async function studio(path,method="GET",payload=null) {
+                const headers=new Headers({
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Accept":"application/json"
+                });
+                if(payload!==null) headers.set("Content-Type","application/json");
+                const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+path,{
+                  method,headers,body:payload===null?undefined:JSON.stringify(payload)}));
+                let body={};
+                try {body=JSON.parse(await r.text());} catch {body={error:"non_json_response"};}
+                return {status:r.status,body};
+              }
+              if(u.pathname===root+"/ready") return send({ok:true});
+              if(u.pathname===root+"/run" && request.method==="POST") {
+                // Only one real POST, only after the failed user's exact batch
+                // is independently confirmed terminal with zero ideas.
+                const old=await studio("/api/ideas/generate/recHH59CdC3Cz0rsn");
+                if(old.status!==200||!old.body.ok||
+                   old.body.batch?.status!=="Failed"||
+                   old.body.batch?.generated_count!==0||
+                   old.body.batch?.requested_count!==10)
+                  return send({ok:false,reason:"original_batch_preflight_mismatch"},409);
+                const r=await studio("/api/ideas/generate","POST",{
+                  count:10,quality:"Highest Quality",content_profile_id:"recgtK8Z7eNADNtVy"});
+                const b=r.body||{},id=String(b.batch_record_id||"");
+                return send({
+                  ok:r.status===202&&b.accepted===true&&/^rec[A-Za-z0-9]{14}$/.test(id),
+                  http_status:r.status,batch_record_id:id,
+                  dispatch_unconfirmed:b.dispatch_unconfirmed===true,
+                  backend:b.backend||null,error:b.error||(!b.ok?b.message:null)
+                },r.status===202?200:r.status);
+              }
+              if(u.pathname===root+"/status"&&request.method==="GET") {
+                const id=String(u.searchParams.get("batch")||"");
+                if(!/^rec[A-Za-z0-9]{14}$/.test(id)) return send({ok:false},400);
+                const r=await studio("/api/ideas/generate/"+id);
+                const b=r.body?.batch||{};
+                return send({ok:r.status===200&&r.body?.ok===true,
+                  batch_record_id:id,status:b.status||null,
+                  requested_count:b.requested_count??null,
+                  generated_count:b.generated_count??null,
+                  quality:b.quality||null,error:b.error||null,
+                  batch_id:b.batch_id||null},r.status===200?200:r.status);
+              }
+              return new Response("Not found",{status:404});
+            }
+          }'''.replace("__ROOT__",json.dumps("/"+token))
+          Path('/tmp/bridge.js').write_text(js)
+          PY
+          node --check /tmp/bridge.js
+          cat >/tmp/metadata.json <<'EOF'
+          {"main_module":"worker.js","compatibility_date":"2026-08-02",
+           "bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+      - name: Upload temporary bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'worker.js=@/tmp/bridge.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/enable.json
+          jq -e '.success==true' /tmp/enable.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          jq -er '.result.subdomain' /tmp/subdomain.json >/tmp/subdomain.txt
+      - name: Submit once and poll the same NYC 10-idea batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain.txt).workers.dev/$(cat /tmp/token)"
+          ready=000
+          for i in $(seq 1 12); do
+            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
+            [[ "$ready" == "200" ]] && break
+            sleep 3
+          done
+          test "$ready" = "200"
+          # Never repeat this POST, including on uncertain timeouts.
+          code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' -X POST "$URL/run" || true)
+          echo "one_shot_start_http=$code"
+          test "$code" = "200"
+          jq -e '.ok==true and .http_status==202 and .dispatch_unconfirmed==false' /tmp/start.json >/dev/null
+          BATCH=$(jq -er '.batch_record_id' /tmp/start.json)
+          echo "batch_record_id=$BATCH"
+          complete=false
+          for i in $(seq 1 95); do
+            status=$(curl -sS --max-time 20 -o /tmp/status.json -w '%{http_code}' "$URL/status?batch=$BATCH" || true)
+            if [[ "$status" == "200" ]] && jq -e '.ok==true' /tmp/status.json >/dev/null; then
+              state=$(jq -r '.status' /tmp/status.json)
+              count=$(jq -r '.generated_count' /tmp/status.json)
+              echo "poll=$i status=$state verified=$count/10"
+              if [[ "$state" == "Failed" ]]; then
+                echo "::error::Batch failed; do not resubmit; reconcile exact batch ID."
+                jq . /tmp/status.json
+                exit 1
+              fi
+              if [[ "$state" == "Complete" ]]; then
+                jq -e '.requested_count==10 and .generated_count==10 and .quality=="Highest Quality"' /tmp/status.json >/dev/null
+                complete=true
+                break
+              fi
+            fi
+            sleep 7
+          done
+          test "$complete" = true
+          echo "nyc_i1_10_highest_quality_complete=PASS"
+      - name: Preserve sanitized batch receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i1-nyc-2637-one-shot-receipt
+          path: |
+            /tmp/start.json
+            /tmp/status.json
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Remove temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+      - name: Confirm original Studio Worker unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" -o /tmp/after.json
+          test "$(cat /tmp/worker-before.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)"
