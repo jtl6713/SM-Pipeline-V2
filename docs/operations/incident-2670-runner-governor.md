@@ -37,12 +37,18 @@ After this guard is merged and reviewed, the Windows operator should:
    Verify the path does **not** already hold queued jobs; never overwrite
    existing durable governor state.
 3. Configure `STUDIO_GOVERNOR_DB_PATH` and
-   `STUDIO_WORKLOAD_GOVERNOR_ENABLED=true`; set limits to
-   2 production jobs / 4 photo groups / 2 ratio workers per group /
-   6 in-flight reads / 3 in-flight writes.
-4. Re-run the read-only Ops `PLAN deploy` and compare its commit to GitHub
-   before choosing `DEPLOY Pipeline Runner`. Deployment automatically
-   restarts the service and preserves the live `.env`.
+   `STUDIO_WORKLOAD_GOVERNOR_ENABLED=true`; initially stage even tighter
+   canary limits: **1 producer / 2 photo groups / 1 ratio worker per group /
+   4 in-flight reads / 2 in-flight writes**. Increase toward the intended
+   2 / 4 / 2 / 6 / 3 only after sustained load measurements.
+4. **Do not merge the guarded app.py change before the host configuration
+   is staged**: `.github/workflows/deploy-pipeline-runner-via-ops.yml`
+   includes `services/pipeline-runner/app.py` in its main-push triggers and
+   can deploy automatically after merge. Once the live `.env` is staged and
+   all CI checks are green, intentionally merge and verify the GitHub deploy
+   workflow status; use the local Ops `PLAN deploy` to confirm the exact
+   target commit and only manually deploy if auto deployment did not succeed.
+   Deployment restarts the service and preserves the live `.env`.
 5. Verify loopback `GET /health` reports
    `recovery_read_only=true`, `workload_governor_enabled=true`,
    `i1_durable_jobs=false`; then call the loopback-only authenticated
