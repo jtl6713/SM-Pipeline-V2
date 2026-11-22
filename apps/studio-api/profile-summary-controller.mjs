@@ -42,6 +42,12 @@ export function studioProfileSummaryStatus(env) {
   return summaryRequest(env, "/status");
 }
 
+// Positive collection proof is written by the existing Worker cron only.
+// Export/read calls do not create collector coverage or invent quiet hours.
+export function recordStudioAirtableCollectorHeartbeat(env) {
+  return summaryRequest(env, "/egress-heartbeat", {});
+}
+
 // Non-authoritative metrics only: a telemetry fault never blocks a live Airtable call.
 export async function recordStudioAirtableEgress(env, event) {
   if (!profileSummaryStub(env)) return { skipped: true };
