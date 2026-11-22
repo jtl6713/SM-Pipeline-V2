@@ -1,0 +1,62 @@
+name: Final archive-only reviewed branch closeout (2026-11-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/branch-cleanup-final-20261122.txt'
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: exact-branch-cleanup-final-20261122
+  cancel-in-progress: false
+
+jobs:
+  closeout:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Verify exact final archival manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/branch_cleanup_20261122.py
+          python3 - <<'PY'
+          import json
+          m=json.load(open('repair/branch_cleanup_20261122_final_manifest.json'))
+          assert m['schema']=='archive-reviewed-stale-branches-20261122.v2'
+          assert m['repository']=='jtl6713/SM-Pipeline-V2'
+          assert len(m['candidates'])==11
+          assert len(set(x['branch'] for x in m['candidates']))==11
+          assert m['protected_open_pr_heads']==[]
+          print('FINAL_MANIFEST_PASS stale_closed_pr_branches=11')
+          PY
+
+      - name: Archive every inactive exact head and delete with SHA lease only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_CLEANUP_MANIFEST: repair/branch_cleanup_20261122_final_manifest.json
+          BRANCH_CLEANUP_TAG_PREFIX: archive/final-20261122/
+          BRANCH_CLEANUP_REPORT: branch-cleanup-final-20261122-report.json
+        run: |
+          set -euo pipefail
+          python3 repair/scripts/branch_cleanup_20261122.py
+
+      - name: Save final verified audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-cleanup-final-20261122
+          path: branch-cleanup-final-20261122-report.json
+          if-no-files-found: ignore
+          retention-days: 30
