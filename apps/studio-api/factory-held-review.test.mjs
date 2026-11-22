@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { heldReviewEligibility, factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import { readFileSync } from "node:fs";
 
 const id = "rec227PMjt8S8GPUh";
 const valid = {
@@ -37,4 +38,21 @@ test("unresolved safety incident permits creative-only decision, never publishin
     ...incident.error_messages,
     SM_Factory_Held_Review_Receipt:{decision:"approve"},
   }}),/already been recorded/);
+});
+
+
+test("#2294: Factory Release for Approval validates exact canonical gallery before DNP-changing PATCH",()=>{
+  const worker=readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+  const start=worker.indexOf("async function factoryReleaseOutputForApproval");
+  const end=worker.indexOf("export async function mutateFactoryDesk",start);
+  assert.ok(start>0 && end>start);
+  const method=worker.slice(start,end);
+  const selection=method.indexOf("factorySupabaseApprovalRows(env, [id])");
+  const galleryGate=method.indexOf("await assertSupabaseNativeGalleryPublicationPackage(env, canonical)");
+  const patch=method.indexOf('method: "PATCH"');
+  assert.ok(selection>0 && galleryGate>selection && patch>galleryGate,
+    "exact Supabase package check must precede any hold release");
+  assert.match(method,/canonical\.do_not_publish !== true/);
+  assert.match(method,/canonical\.published_at \|\| canonical\.platform_post_url/);
+  assert.match(method,/No hold released/);
 });
