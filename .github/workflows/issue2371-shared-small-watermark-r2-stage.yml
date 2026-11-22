@@ -35,7 +35,7 @@ jobs:
               '"provider_writes":0','"database_writes":0','"airtable_reads":0',
               'R2UploadClient','GoogleDriveClient','NYC_GALLERY_SHARED_WM_STAGE']:
               assert marker in text,marker
-          for forbidden in ['api.airtable.com','graph.facebook.com','requests.post(',
+          for forbidden in ['api.'+'airtable.com','graph.facebook.com','requests.post(',
               'requests.patch(','requests.delete(','requests.put(']:
               assert forbidden not in text,forbidden
           print('NYC8_SHARED_WATERMARK_STATIC_SAFE')

@@ -164,17 +164,26 @@ def _preflight():
         for j,((asset_id,drive_id,name,raw),clip,sel) in enumerate(zip(story,clips,selected),1):
             url=clip.get("src")
             expected_prefix=f"https://media.chicagoshining.com/studio/previews/repairs/issue2371/nyc-{content}/slide-{j:02d}-"
+            # #10867 retained preexisting lettered parent clips (0.jpg..3.jpg)
+            # while its four native Factory slides already carry the verified owned
+            # corrected original 4:5 assets. Treat only that exact known mismatch
+            # as stale parent metadata; use the authoritative native slide URLs.
+            legacy_lettered=(n==10867 and
+                url==f"https://media.chicagoshining.com/studio/previews/lettered/rec61JeXiA6Aai1Kk/{j-1}.jpg"
+                and clip.get("watermarked") is True)
+            normal=(isinstance(url,str) and url.startswith(expected_prefix)
+                    and url.endswith(".jpg") and clip.get("watermarked") is False)
             if (clip.get("mediaAssetRecordId")!=asset_id or clip.get("googleDriveFileId")!=drive_id
                or clip.get("assetName")!=name or clip.get("url")!=url
-               or not isinstance(url,str) or not url.startswith(expected_prefix)
-               or not url.endswith(".jpg") or clip.get("watermarked") is not False
+               or not (normal or legacy_lettered)
                or sel.get("src")!=url or sel.get("url")!=url):
                 raise RuntimeError(f"base_image_reference_changed_{n}_{j}")
             key=(content,j)
-            if key in source_by_story and source_by_story[key]!=url:
+            base_url=None if legacy_lettered else url
+            if key in source_by_story and source_by_story[key]!=base_url:
                 raise RuntimeError("crosspost_gallery_source_mismatch_"+str(key))
-            source_by_story[key]=url
-            slide_refs[(n,j)]=url
+            source_by_story[key]=base_url
+            slide_refs[(n,j)]=base_url
     if len(source_by_story)!=24 or len(slide_refs)!=40:
         raise RuntimeError("unexpected_original_gallery_image_counts")
     slides=_get("carousel_slides",{
@@ -189,6 +198,16 @@ def _preflight():
         target=fields.get("PO_Output_ID") or []
         if len(target)!=1: raise RuntimeError("slide_parent_shape_invalid")
         n=int(target[0]); j=row["current_order"]; key=(n,j)
+        if n==10867 and key in slide_refs and slide_refs[key] is None:
+            canonical=fields.get("Asset_4x5_Public_URL")
+            prefix=f"https://media.chicagoshining.com/studio/previews/repairs/issue2371/nyc-2222/slide-{j:02d}-"
+            if (not isinstance(canonical,str) or not canonical.startswith(prefix)
+                or not canonical.endswith(".jpg") or
+                fields.get("Current Image URL")!=canonical or
+                fields.get("Final Image URL")!=canonical):
+                raise RuntimeError(f"gantry_original_factory_slide_missing_{n}_{j}")
+            slide_refs[key]=canonical
+            source_by_story[(2222,j)]=canonical
         if (key in seen or key not in slide_refs or
             row["deleted_from_carousel"] is not False or
             fields.get("Platform Output")!=[OUTPUTS[n][0]] or
