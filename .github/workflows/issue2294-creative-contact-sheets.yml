@@ -1,0 +1,66 @@
+name: Issue 2294 Unverified Creative Review Contact Sheets
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2294_creative_contact_sheets.py'
+      - '.github/workflows/issue2294-creative-contact-sheets.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2294_creative_contact_sheets.py'
+      - '.github/workflows/issue2294-creative-contact-sheets.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2294-readonly-contact-sheets
+  cancel-in-progress: false
+jobs:
+  visual-review-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fail closed on unsafe operations
+        run: |
+          python -m py_compile repair/scripts/issue2294_creative_contact_sheets.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2294_creative_contact_sheets.py').read_text()
+          for bad in ('AIR'+'TABLE_PAT','SUPABASE_SERVICE_ROLE_KEY','graph.facebook.com',
+                      'requests.post(', 'requests.patch(', 'requests.put(',
+                      'requests.delete(', 'execute_sql(', 'media_publish(',
+                      'subprocess.', 'psycopg2'):
+            assert bad not in s, bad
+          assert 'method="GET"' in s and 'publication_authorized":False' in s
+          assert 'CREATIVE_CONTACT_SHEETS_COMPLETE' in s
+          PY
+      - name: Install pinned image decoder
+        run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Render original CDN bytes to unverified contact sheets
+        run: python repair/scripts/issue2294_creative_contact_sheets.py
+      - name: Assert all 82 images and zero approval implications
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('/tmp/issue2294-creative-contact-sheets')
+          r=json.loads((root/'review-evidence.json').read_text())
+          assert r['read_only'] and r['output_count']==12 and r['slide_count']==82
+          assert r['database_writes']==r['provider_calls']==r['approval_calls']==r['hold_releases']==0
+          assert r['human_creative_approval'] is False
+          assert len(list(root.glob('output-*-UNVERIFIED-review.jpg')))==12
+          assert all(not o['publication_authorized'] and o['review_required'] for o in r['outputs'])
+          print('ISSUE2294_CREATIVE_REVIEW_PACKAGE=12_CONTACT_SHEETS_82_IMAGES_UNVERIFIED')
+          PY
+      - name: Preserve exact image contact sheets and SHA receipts for creative review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2294-unverified-creative-contact-sheets
+          path: /tmp/issue2294-creative-contact-sheets/
+          retention-days: 30
+          if-no-files-found: warn
