@@ -67,12 +67,21 @@ function asRow(row,profiles) {
   };
 }
 async function allowedProfiles(env,authorization,ops) {
-  const authorized = await ops.authorizedProfiles(env,authorization);
-  const ids=[...new Set((authorized||[]).map(x=>str(x.id)).filter(x=>REC.test(x)))];
-  if (!ids.length) return [];
-  const rows=await ops.supabaseRest(env,
-    "content_profiles?select=id,airtable_record_id,profile_name,market_name&airtable_record_id=in.("+ids.join(",")+")");
-  return (Array.isArray(rows)?rows:[]).filter(row=>UUID.test(str(row.id))&&ids.includes(row.airtable_record_id));
+  // Fail closed on the actual organization's canonical Supabase UUID; never
+  // fall back to a legacy Airtable profile listing or cross-tenant scan.
+  const orgRecordId=str(authorization?.organization?.record_id);
+  if (!REC.test(orgRecordId)) return [];
+  const orgs=await ops.supabaseRest(env,
+    "organizations?airtable_record_id=eq."+encodeURIComponent(orgRecordId)+
+    "&select=id&limit=1");
+  const orgId=Array.isArray(orgs)?orgs[0]?.id:null;
+  if (!UUID.test(str(orgId))) return [];
+  const profiles=await ops.supabaseRest(env,
+    "content_profiles?organization_id=eq."+encodeURIComponent(orgId)+
+    "&active=eq.true&select=id,airtable_record_id,profile_name,market_name&limit=101");
+  if (!Array.isArray(profiles) || profiles.length>100)
+    throw Error("Authorized profile inventory incomplete; refusing to list or mutate holds");
+  return profiles.filter(row=>UUID.test(str(row.id))&&REC.test(str(row.airtable_record_id)));
 }
 async function readOne(env,id,ops) {
   const rows=await ops.supabaseRest(env,
@@ -81,7 +90,7 @@ async function readOne(env,id,ops) {
 }
 export async function handleAdminPublishingHolds({request,url,env,authorization,ops}) {
   if (!authorization?.permissions?.tenant_admin) return err(403,"Studio administrator permission required");
-  if (typeof ops?.supabaseRest!=="function" || typeof ops?.authorizedProfiles!=="function" ||
+  if (typeof ops?.supabaseRest!=="function" ||
       typeof ops?.withOutputLock!=="function") return err(503,"Publishing hold service unavailable");
   const profiles=await allowedProfiles(env,authorization,ops);
   const allowed=new Set(profiles.map(row=>row.id));
@@ -103,9 +112,9 @@ export async function handleAdminPublishingHolds({request,url,env,authorization,
     if (chosen && !profiles.some(row=>row.airtable_record_id===chosen)) return err(403,"Profile not authorized");
     const subset=chosen?profiles.filter(row=>row.airtable_record_id===chosen):profiles;
     const outputId=str(url.searchParams.get("output_id"));
-    if (outputId && !REC.test(outputId)) return err(400,"Invalid output identifier");
+    if (outputId && !REC.test(outputId) && !/^\d{1,10}$/.test(outputId)) return err(400,"Invalid output identifier");
     const filters="&content_profile_id=in.("+subset.map(p=>p.id).join(",")+")"+
-      (outputId?"&airtable_record_id=eq."+outputId:"&do_not_publish=eq.true");
+      (outputId?(REC.test(outputId)?"&airtable_record_id=eq."+outputId:"&output_number=eq."+outputId):"&do_not_publish=eq.true");
     const rows=await ops.supabaseRest(env,"platform_outputs?select="+outSelect+
       filters+"&order=created_at.desc&limit=101&offset="+page);
     if (!Array.isArray(rows)) return err(503,"Hold inventory unavailable");
