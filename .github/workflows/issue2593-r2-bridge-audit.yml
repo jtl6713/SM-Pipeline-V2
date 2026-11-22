@@ -1,3 +1,4 @@
+# Single-execution diagnostic: GET one R2 receipt; always delete isolated helper.
 name: Issue 2593 temporary read-only R2 binding audit
 on:
   push:
