@@ -1,0 +1,98 @@
+name: Issue 2556 exact Facebook 10738 asset staging
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2556-stage-echo-park-media.yml'
+      - 'repair/scripts/issue2556_stage_fb10738_assets.py'
+permissions:
+  contents: read
+concurrency:
+  group: issue2556-fb10738-asset-stage
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/2556-stage-echo-park-media'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate source script before remote execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/issue2556_stage_fb10738_assets.py
+          grep -q 'PASS_4_OF_4_NO_DB_OR_META_WRITES' repair/scripts/issue2556_stage_fb10738_assets.py
+          echo "fb10738_staging_source=SYNTAX_OK"
+      - name: Authenticate approved Ops API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "fb10738_ops_auth=UNAVAILABLE"; exit 1
+      - name: Stage all four branded assets in Drive and R2 without changing publishing state
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha=$(sha256sum repair/scripts/issue2556_stage_fb10738_assets.py | awk '{print $1}')
+          cat >/tmp/fb10738-asset-stage.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $runner=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path $runner)) { throw 'fb10738_runner_env_missing' }
+          $py=Get-Command python -ErrorAction SilentlyContinue
+          if (-not $py) { throw 'fb10738_python_not_available_on_ops' }
+          $script=Join-Path $env:TEMP 'fb10738-asset-stage-exact.py'
+          $source='https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/c9eb9ae2769efd5bfd99e8c1f3328f7a49071336/repair/scripts/issue2556_stage_fb10738_assets.py'
+          Invoke-WebRequest -Uri $source -OutFile $script -UseBasicParsing -TimeoutSec 55
+          if ((Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant() -ne '__EXPECTED_SHA__') { throw 'fb10738_exact_script_checksum_mismatch' }
+          try {
+            & python $script
+            if ($LASTEXITCODE -ne 0) { throw ('fb10738_asset_stage_exit_'+$LASTEXITCODE) }
+          } finally {
+            Remove-Item $script -Force -ErrorAction SilentlyContinue
+          }
+          PS
+          python3 - "$expected_sha" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path('/tmp/fb10738-asset-stage.ps1')
+          p.write_text(p.read_text().replace('__EXPECTED_SHA__',sys.argv[1]))
+          PY
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/fb10738-asset-stage.json').write_text(json.dumps({'command':pathlib.Path('/tmp/fb10738-asset-stage.ps1').read_text(),'confirm':True}))
+          PY
+          http=$(curl -sS --max-time 45 -o /tmp/fb10738-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/fb10738-asset-stage.json || true)
+          if [[ "$http" != 200 && "$http" != 202 ]]; then
+            echo "fb10738_ops_shell_http=$http"
+            jq -r '.error.code // .error.message // .message // .error // empty' /tmp/fb10738-start.json | head -c 180 || true
+            exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/fb10738-start.json)
+          for n in $(seq 1 180); do
+            curl -fsS --max-time 35 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/fb10738-status.json
+            status=$(jq -r '.job.status // empty' /tmp/fb10738-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/fb10738-status.json > /tmp/fb10738-asset-receipt.log
+              grep '^fb10738_staged_asset=' /tmp/fb10738-asset-receipt.log || true
+              grep -q '^fb10738_stage_media=PASS_4_OF_4_NO_DB_OR_META_WRITES' /tmp/fb10738-asset-receipt.log
+              test "$(grep -c '^fb10738_staged_asset=' /tmp/fb10738-asset-receipt.log)" = 4
+              echo "fb10738_asset_stage=PASS"
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/fb10738-status.json | tail -45 | sed -E 's/(Bearer |apikey=|SUPABASE_SERVICE_ROLE_KEY=)[A-Za-z0-9_.-]+/\1***REDACTED***/g' || true
+              echo "fb10738_asset_stage=FAILED"; exit 3
+            fi
+            sleep 5
+          done
+          echo "fb10738_asset_stage=UNCONFIRMED"; exit 4
