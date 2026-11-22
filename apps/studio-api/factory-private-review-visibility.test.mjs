@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import { OPS_QUEUE_REVIEW_FORMULA } from "./ops-queue.mjs";
 import { evaluateReviewPackage, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility, formalFactoryApprovalReady, safeReviewPromotion } from "./review-package-readiness.mjs";
 import { partitionFactoryLanes } from "./factory-desk.mjs";
-import { matchesOpsQueueReviewFormula } from "./supabase-pipeline-reads.mjs";
+import { matchesOpsQueueReviewFormula, listSupabaseFactoryDeskPack } from "./supabase-pipeline-reads.mjs";
 
 const media = "https://media.chicagoshining.com/";
 const publishedMedia = "https://drive.google.com/file/d/factory-private-test/view";
@@ -240,4 +240,102 @@ test("NYC #2371: eight held review outputs remain visible even after older Facto
   const unheldAccepted = { ...cards[2], do_not_publish: false };
   assert.equal(run([unheldAccepted], submitted).length, 0, "historical accepted unheld work remains suppressed");
   assert.equal(run([cards[0]], new Set()).length, 1, "no accepted fence does not hide pending held review");
+});
+
+
+test("#2294: six protected draft galleries enter Needs Eyes for human inspection without any approval eligibility", () => {
+  const outputs = [
+    [10853, "rectw2pvgnBzK3wCN", 4],
+    [10854, "recJ8jTynJDxsN0hl", 4],
+    [10992, "rec1p9SOjrpxtpQkV", 8],
+    [10993, "recX9tOrTfQldqs32", 8],
+    [11033, "recBlShZbe7cqtGAG", 8],
+    [11034, "recHmu20eEQmX4JLq", 8],
+  ];
+  const rows = outputs.map(([number,id,slides]) => ({
+    kind: "output", id, output_id: number, selected_clip_count: slides,
+    studio_output_type: "Carousel", studio_state: "Unverified gallery candidates · Visual review only · Publishing held",
+    candidate_gallery_review: true, review_package_ready: false,
+    output_status: "Ready for Review", review_status: null,
+    render_status: "Native Photo Route", publish_status: "Not Ready",
+    do_not_publish: true, auto_publish_enabled: false,
+    thumbnail_url: media + "studio/previews/cover.jpg",
+  }));
+  const desk = partitionFactoryLanes(rows);
+  assert.equal(desk.summary.needs_eyes, 6);
+  assert.deepEqual(desk.lanes.needs_eyes.map(r=>r.output_id), outputs.map(x=>x[0]));
+  assert.ok(desk.lanes.needs_eyes.every(r =>
+    r.do_not_publish && !r.auto_publish_enabled && r.review_package_ready === false
+    && r.candidate_gallery_review && r.can_approve === false));
+  for (const patch of [
+    {do_not_publish:false}, {auto_publish_enabled:true},
+    {render_status:"Waiting in Render Queue"}, {scheduled_post_date:"2026-12-01T00:00:00Z"},
+    {review_status:"Approved"}, {published_at:"2026-11-22T12:00:00Z"},
+    {output_status:"Published"}, {candidate_gallery_review:false},
+  ]) {
+    const actual = partitionFactoryLanes([{...rows[0],...patch}]);
+    assert.equal(actual.summary.needs_eyes, 0, JSON.stringify(patch));
+  }
+});
+
+
+test("#2294: actual Supabase Factory pack discovers all six exact unapproved draft inventories", async () => {
+  const pairs = [
+    [10853, "rectw2pvgnBzK3wCN",4], [10854, "recJ8jTynJDxsN0hl",4],
+    [10992, "rec1p9SOjrpxtpQkV",8], [10993, "recX9tOrTfQldqs32",8],
+    [11033, "recBlShZbe7cqtGAG",8], [11034, "recHmu20eEQmX4JLq",8],
+  ];
+  const parents=pairs.map(([num,id,count]) => ({
+    airtable_record_id:id,output_number:num,selected_clip_count:count,
+    output_status:"Ready for Review",render_status:"Native Photo Route",
+    review_status:null,publish_status:"Not Ready",do_not_publish:true,
+    auto_publish_enabled:false,test_run_id:null,
+    studio_output_type:"Carousel",platform_output_type:"Instagram Carousel",
+    platform:num===10853||num===10993||num===11034?"Facebook":"Instagram",
+    thumbnail_url:media+"studio/previews/cover.jpg",
+    studio_preview_url:media+"studio/previews/example.jpg",error_messages:{},
+  }));
+  const slides=pairs.flatMap(([num,id,count])=>Array.from({length:count},(_,i)=>({
+    airtable_record_id:"sb-native:2294:"+num+":"+String(i+1).padStart(2,"0"),
+    current_order:i+1,deleted_from_carousel:false,
+    fields:{
+      PO_Output_ID:[num],"Platform Output":[id],
+      "Review Status":"Pending Review",
+      "Approved For Final":false,Shared_Asset_Approved:false,
+      "Final Image URL":media+"studio/previews/lettered/"+id+"/"+i+".jpg",
+      "Asset_4x5_Public_URL":media+"studio/previews/lettered/"+id+"/"+i+".jpg",
+      SM_Native_Gallery_Draft_Repair_2294:{
+        output_number:num,slide_order:i+1,
+        publishing_authorized:false,final_creative_approved:false,
+      },
+    },
+  })));
+  const original=globalThis.fetch;
+  const paths=[];
+  globalThis.fetch=async url=>{
+    const href=String(url), u=new URL(href);
+    paths.push(u.pathname+u.search);
+    const result=u.pathname.endsWith("/carousel_slides")?slides:
+      u.pathname.endsWith("/platform_outputs")&&
+        String(u.searchParams.get("or")||"").includes("output_status.eq.Ready for Review")
+      ?parents:[];
+    return {ok:true,text:async()=>JSON.stringify(result)};
+  };
+  try {
+    const pack=await listSupabaseFactoryDeskPack({
+      SUPABASE_URL:"https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY:"unit-test-only",
+    });
+    assert.ok(paths.some(p=>p.includes("carousel_slides?airtable_record_id=like.sb-native%3A2294%3A*")),
+      "Factory must query its own exact protected Supabase draft slides");
+    const review=pack.reviewOutputs.filter(row=>pairs.some(([num])=>row.fields.Output_ID===num));
+    assert.equal(review.length,6,"every complete held gallery reaches independent review lane");
+    for(const row of review){
+      assert.equal(row.fields.SM_Factory_Native_Gallery_Candidate_Review_2294,true,row.id);
+      assert.equal(row.fields["Carousel Slides"].length,row.fields.Selected_Clip_Count,row.id);
+      assert.equal(row.fields.Do_Not_Publish,true,row.id);
+      assert.equal(row.fields.Auto_Publish_Enabled,false,row.id);
+    }
+  }finally{
+    globalThis.fetch=original;
+  }
 });

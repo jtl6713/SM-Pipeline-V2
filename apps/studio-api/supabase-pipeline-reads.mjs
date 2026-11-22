@@ -2570,13 +2570,21 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
       const manifest = render[index];
       const originalSource = String(manifest?.googleDriveFileId || "").trim();
       const sourceFamily = String(manifest?.mediaAssetRecordId || "").trim();
+      // Source candidates staged for a human inspection do not acquire
+      // fabricated HTTP, geometry, copyright or watermark verification.
+      // Existing verified drafts still require their complete byte evidence.
+      const verifiedEvidence = /^[a-f0-9]{64}$/.test(String(marker?.public_sha256 || ""))
+        && marker?.verified_dimensions === "1080x1350"
+        && marker?.image_http_verified === true && marker?.image_geometry_verified === true;
+      const unverifiedEvidence = marker?.image_http_verified === false
+        && marker?.image_geometry_verified === false
+        && marker?.rights_status === "Unverified"
+        && !marker?.public_sha256 && !marker?.verified_dimensions;
       if (slides[index].airtable_record_id !==
           "sb-native:2294:" + parent.output_number + ":" + String(index + 1).padStart(2, "0")
           || Number(marker?.output_number) !== parent.output_number ||
           Number(marker?.slide_order) !== index + 1 ||
-          !/^[a-f0-9]{64}$/.test(String(marker?.public_sha256 || "")) ||
-          marker?.verified_dimensions !== "1080x1350" ||
-          marker?.image_http_verified !== true || marker?.image_geometry_verified !== true ||
+          (!verifiedEvidence && !unverifiedEvidence) ||
           marker?.final_creative_approved !== false || marker?.publishing_authorized !== false ||
           fields["Approved For Final"] !== false ||
           fields.Shared_Asset_Approved !== false ||
@@ -2592,12 +2600,18 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
         throw new Error("Draft native gallery source identity, order or pending approval changed");
       }
     }
+    const allByteVerified = slides.every(slide =>
+      slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.image_http_verified === true
+      && slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.image_geometry_verified === true);
     return {
       output_id: id, output_number: parent.output_number,
       do_not_publish: true, count: result.length, slides: result,
       source: "unverified-native-draft-slides",
       provisional: true, publication_authorized: false,
-      warning: "Linked native draft slides await creative approval. Do not approve, schedule or publish.",
+      candidate_bytes_verified: allByteVerified,
+      warning: allByteVerified
+        ? "Linked native draft slides await creative approval. Do not approve, schedule or publish."
+        : "Unverified source candidates for visual inspection only. Image/branding/rights approval and publishing are blocked.",
     };
   }
   return {
@@ -4598,6 +4612,68 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).catch(() => []),
   ]);
 
+  // #2294: unapproved, publication-held native source candidates must be
+  // visible for a human's *visual inspection*, even before their publication
+  // package passes caption, watermark and rights checks. Recognize only a
+  // complete, exact Supabase-native draft slide inventory; never infer that
+  // a Ready for Review output is automatically a creative candidate.
+  const candidateGalleryByOutputId = new Map();
+  try {
+    const staged = await supabaseRest(env,
+      "carousel_slides?airtable_record_id=like.sb-native%3A2294%3A*"
+      + "&deleted_from_carousel=eq.false"
+      + "&select=airtable_record_id,current_order,fields"
+      + "&order=airtable_record_id.asc&limit=120");
+    const grouped = new Map();
+    for (const slide of staged || []) {
+      const fields = slide?.fields || {};
+      const marker = fields.SM_Native_Gallery_Draft_Repair_2294;
+      const number = Number(fields.PO_Output_ID?.[0]);
+      const parentId = String(fields["Platform Output"]?.[0] || "");
+      const order = Number(slide?.current_order);
+      const img = String(fields["Final Image URL"] || "");
+      if (!Number.isSafeInteger(number) || number <= 0 ||
+          !/^rec[A-Za-z0-9]{14}$/.test(parentId)) continue;
+      const key = parentId + ":" + number;
+      if (!grouped.has(key)) grouped.set(key, []);
+      const valid = marker?.publishing_authorized === false
+        && marker?.final_creative_approved === false
+        && marker?.output_number === number
+        && marker?.slide_order === order
+        && Number.isSafeInteger(order) && order >= 1 && order <= 10
+        && slide.airtable_record_id === "sb-native:2294:" + number + ":" + String(order).padStart(2, "0")
+        && fields["Approved For Final"] === false
+        && fields.Shared_Asset_Approved === false
+        && fields["Review Status"] === "Pending Review"
+        && fields.Asset_4x5_Public_URL === img
+        && /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i.test(img);
+      grouped.get(key).push({ order, id: slide.airtable_record_id, valid });
+    }
+    for (const parent of reviewReadyRows || []) {
+      const number = Number(parent?.output_number);
+      const id = String(parent?.airtable_record_id || "");
+      const slides = grouped.get(id + ":" + number) || [];
+      const count = Number(parent?.selected_clip_count);
+      if (parent?.do_not_publish !== true || parent?.auto_publish_enabled !== false
+          || parent?.test_run_id || parent?.scheduled_post_date || parent?.studio_scheduled_at
+          || parent?.youtube_scheduled_publish_at || parent?.published_at || parent?.platform_post_url
+          || parent?.output_status !== "Ready for Review"
+          || !["", "Review Sent", "Pending Review", "Pending"].includes(String(parent?.review_status || ""))
+          || parent?.render_status !== "Native Photo Route"
+          || !["", "Not Ready"].includes(String(parent?.publish_status || ""))
+          || !Number.isSafeInteger(count) || count < 2 || count > 10
+          || slides.length !== count) continue;
+      slides.sort((a, b) => a.order - b.order);
+      if (slides.some((slide, index) => !slide.valid || slide.order !== index + 1)) continue;
+      candidateGalleryByOutputId.set(id, slides.map((slide) => slide.id));
+    }
+  } catch (error) {
+    const note = "Issue 2294 candidate gallery scan unavailable; no unverified creative review was advertised";
+    mediaReworkScanWarning = mediaReworkScanWarning
+      ? mediaReworkScanWarning + " · " + note : note;
+    console.warn("Factory held gallery candidate read unavailable", String(error?.message || error));
+  }
+
   // Merge by authoritative output identity, retaining the independent
   // review-ready scan even when its records predate the newest-output sample.
   const outputById = new Map();
@@ -4612,7 +4688,17 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const rawShapedOutputs = [...outputById.values()]
     .map(flattenOutputRow)
     .filter((row) => !String(row.test_run_id || "").trim())
-    .map(airtableShapedOutputFromSupabase);
+    .map((row) => {
+      const shaped = airtableShapedOutputFromSupabase(row);
+      const slideIds = candidateGalleryByOutputId.get(row.airtable_record_id);
+      if (slideIds?.length) {
+        shaped.fields.SM_Factory_Native_Gallery_Candidate_Review_2294 = true;
+        // Display-only projection: never writes an approval or a linked
+        // publication slide. It lets Factory preview the exact draft set.
+        shaped.fields["Carousel Slides"] = slideIds;
+      }
+      return shaped;
+    });
   // Number-keyed DELETE when ban-listed ghosts appear in the Factory pack
   // (before strip removes them from the returned lanes).
   if (rawShapedOutputs.some((row) => deletedDuplicateOutputNumberSet.has(Number(row?.fields?.Output_ID || 0)))) {
