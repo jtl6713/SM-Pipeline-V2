@@ -59,6 +59,7 @@ import {
   reconcileStudioProfileSummary,
   studioProfileSummaryStatus,
   recordStudioAirtableEgress,
+  recordStudioAirtableCollectorHeartbeat,
   studioAirtableEgressWindow,
 } from "./profile-summary-controller.mjs";
 export { StudioProfileSummary } from "./profile-summary-do.mjs";
@@ -4486,6 +4487,19 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Airtable-retirement evidence: the existing every-minute cron writes
+    // one positive durable heartbeat at five-minute cadence. This is
+    // independent of GitHub's best-effort hourly schedule and never invokes
+    // a publishing or Airtable operation. Failure leaves the hour unverified.
+    const collectorCron = String(event?.cron || "").trim();
+    const scheduledAt = Number(event?.scheduledTime);
+    const collectorMinute = new Date(Number.isFinite(scheduledAt) &&
+      scheduledAt > 1e12 ? scheduledAt : Date.now()).getUTCMinutes();
+    if (collectorCron === "* * * * *" && collectorMinute % 5 === 0) {
+      ctx.waitUntil(recordStudioAirtableCollectorHeartbeat(env).catch(error =>
+        console.warn("airtable_retirement_collector_heartbeat_unavailable",
+          String(error?.message || error))));
+    }
     // Recover user-visible dead-end Production requests, across all profiles.
     // At most one confirmed zero-output plan per minute; seed only held rows.
     if (String(event?.cron || "").trim() === "* * * * *") {

@@ -6,6 +6,7 @@ on:
       - '.github/workflows/verify-supabase-production-readonly.yml'
       - 'repair/scripts/production_supabase_identity_audit*.py'
       - 'repair/scripts/airtable_retirement_evidence_gate*.py'
+      - 'repair/scripts/airtable_retirement_core_coverage*.py'
       - 'docs/supabase-migration/phase7/media_atomic_upsert_readonly_preflight.sql'
   workflow_dispatch:
     inputs:
@@ -39,7 +40,8 @@ jobs:
         run: |
           python -m unittest discover -s repair/scripts -p 'production_supabase_identity_audit_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_retirement_evidence_gate_test.py' -v
-          python -m py_compile repair/scripts/production_supabase_identity_audit.py repair/scripts/airtable_retirement_evidence_gate.py
+          python -m unittest discover -s repair/scripts -p 'airtable_retirement_core_coverage_test.py' -v
+          python -m py_compile repair/scripts/production_supabase_identity_audit.py repair/scripts/airtable_retirement_evidence_gate.py repair/scripts/airtable_retirement_core_coverage.py
   audit:
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.confirm == 'AUDIT-SUPABASE-PRODUCTION' }}
     runs-on: ubuntu-latest

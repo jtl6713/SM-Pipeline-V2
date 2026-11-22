@@ -64,6 +64,7 @@ export class StudioProfileSummary {
     this.state.blockConcurrencyWhile(async () => {
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS airtable_egress_hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS airtable_egress_collector_ticks (hour_utc TEXT PRIMARY KEY, first_at TEXT NOT NULL, last_at TEXT NOT NULL, samples INTEGER NOT NULL DEFAULT 0)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, city_label TEXT NOT NULL, counters TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, event_at INTEGER NOT NULL DEFAULT 0)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS ledger (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, approved_future_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
       const ledgerColumns = records(this.sql, "PRAGMA table_info(ledger)").map((col) => col.name);
@@ -167,6 +168,17 @@ export class StudioProfileSummary {
   async fetch(request) {
     try {
       const url = new URL(request.url);
+      if (request.method === "POST" && url.pathname === "/egress-heartbeat") {
+        // An internal scheduled Worker invocation, not an audit GET, records
+        // positive hourly liveness. No gap is ever filled retroactively.
+        const now = new Date().toISOString();
+        const hour = now.slice(0, 13) + ":00:00Z";
+        this.sql.exec(
+          "INSERT INTO airtable_egress_collector_ticks (hour_utc,first_at,last_at,samples) VALUES (?,?,?,1) ON CONFLICT(hour_utc) DO UPDATE SET last_at=excluded.last_at,samples=samples+1",
+          hour, now, now
+        );
+        return json({ok:true,hour_utc:hour});
+      }
       if (request.method === "POST" && url.pathname === "/egress") {
         const input = await request.json();
         const source = code(input.source), method = code(input.method).toUpperCase();
@@ -183,8 +195,13 @@ export class StudioProfileSummary {
       if (request.method === "GET" && url.pathname === "/egress") {
         const hours = Math.min(72,Math.max(1, Number(url.searchParams.get("hours")) || 48));
         const since = new Date(Date.now()-hours*3600000).toISOString().slice(0,13)+":00:00Z";
-        return json({ok:true, source:"profile_summary_durable_object", hourly:records(this.sql,
-          "SELECT hour_utc,source,method,status_class,attempts FROM airtable_egress_hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class",since)});
+        return json({ok:true, source:"profile_summary_durable_object",
+          exported_at_utc:new Date().toISOString(),
+          hourly:records(this.sql,
+            "SELECT hour_utc,source,method,status_class,attempts FROM airtable_egress_hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class",since),
+          collector_coverage:records(this.sql,
+            "SELECT hour_utc,first_at,last_at,samples FROM airtable_egress_collector_ticks WHERE hour_utc>=? ORDER BY hour_utc",since)
+        });
       }
       if (request.method === "GET" && url.pathname === "/status") {
         return json({
