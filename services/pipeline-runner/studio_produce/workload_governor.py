@@ -30,6 +30,28 @@ DEFAULT_RATIO_WORKERS = 2
 _dispatch_lock = threading.Lock()
 _dispatch_started = False
 
+# Private thread-local capability for a single verified Media Asset. The
+# caller must hold the durable A3 lease and must not launch A4/publish.
+_a3_scoped = threading.local()
+
+
+def a3_scoped_record_id() -> str:
+    return str(getattr(_a3_scoped, "record_id", "") or "")
+
+
+@contextmanager
+def a3_classification_scope(record_id: str) -> Iterator[None]:
+    if not enabled() or not admission_paused() or a3_scoped_record_id():
+        raise AdmissionDeferred("A3 scoped write requires isolated recovery governor")
+    if not record_id.startswith("rec") or len(record_id) < 9:
+        raise AdmissionDeferred("A3 scoped write requires one valid media record")
+    _a3_scoped.record_id = record_id
+    try:
+        yield
+    finally:
+        _a3_scoped.record_id = ""
+
+
 
 class AdmissionDeferred(RuntimeError):
     """A non-destructive admission timeout: keep work queued, never mark failed."""
@@ -343,6 +365,7 @@ def resource_slot(
     recovery_read_allowed = (
         (scope == "supabase_read" and allow_during_circuit)
         or (scope in {"library_image_upload", "library_image_classify"} and allow_during_recovery)
+        or (scope == "supabase_write" and allow_during_recovery and bool(a3_scoped_record_id()))
     )
     if admission_paused() and not recovery_read_allowed:
         raise AdmissionDeferred("runner recovery read-only: resource admission paused")
