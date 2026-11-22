@@ -73,3 +73,17 @@ test("accept only the owner-confirmed shared small watermark for NYC and other p
   // Still fail closed for ambiguous competing small marks, even if shared is valid.
   assert.equal(check({assets:[shared,asset(driveId,profile)]}).supported,false);
 });
+
+
+test("the canonical shared watermark is eligible for multiple distinct profiles",()=>{
+  const shared={
+    id:"recTnq3abS2rcsTzK",
+    fields:{Content_Profile:["recT2rbKX3MF7cVFU"],
+      "Asset Name":"ChicagoShining_Watermark_Small.png",
+      Asset_Role:"Watermark",Asset_Status:"Available",Rights_Status:"Owned",
+      Active:true,Do_Not_Use:false,MIME_Type:"image/png",
+      "Google Drive File ID":driveId},
+  };
+  assert.deepEqual(check({profileId:profile,assets:[shared]}),{supported:true,reason:null});
+  assert.deepEqual(check({profileId:other,assets:[shared]}),{supported:true,reason:null});
+});
