@@ -3817,11 +3817,17 @@ export default {
             headers: { "X-Pipeline-Secret": sharedSecret, "Accept": "application/json" },
           });
           const report = await upstream.json();
-          if (!upstream.ok || report?.ok !== true || !Array.isArray(report.hourly)) {
-            return respond(request, env, { ok: false, reason: "runner_metrics_unavailable" }, 503);
+          if (!upstream.ok || report?.ok !== true || !Array.isArray(report.hourly)
+              || !Array.isArray(report.collector_coverage)
+              || typeof report?.collector_heartbeat?.observed_at !== "string") {
+            // The old runner payload lacks positive liveness evidence.
+            // Fail closed; an empty request list must never imply six quiet hours.
+            return respond(request, env, { ok: false, reason: "runner_metrics_coverage_unavailable" }, 503);
           }
           return respond(request, env, {
             ok: true, source: "pipeline_runner_sqlite", hourly: report.hourly,
+            collector_coverage: report.collector_coverage,
+            collector_heartbeat: report.collector_heartbeat,
             activity: report.activity || null,
           });
         } catch (error) {
