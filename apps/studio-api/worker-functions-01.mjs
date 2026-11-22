@@ -2350,7 +2350,7 @@ export function normalizedOutputState(record) {
     text("Platform").toLowerCase() === "tiktok"
     && text("TikTok_Draft_Status") === "Retry Pending"
     && text("Publish_Error_Stage") === "TTD0_ASSETS"
-    && fields.Publish_Retry_Eligible === false
+    && !actualPublishRetry
   ) return "Needs Asset Repair";
 
   // Meta action throttling is a timed automatic retry, not a terminal failure.
