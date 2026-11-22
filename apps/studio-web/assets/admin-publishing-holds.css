@@ -12,6 +12,12 @@
 .admin-publish-hold-toggle{display:flex;align-items:center;gap:6px;font-weight:650}
 .admin-publish-hold-toggle input{width:18px;height:18px;accent-color:var(--accent,#1684b6)}
 .admin-hold-blocked{color:var(--danger,#b34747);font-size:12px;max-width:250px}
-#adminPublishHoldsHistory{margin-top:1rem;padding:1rem;border-top:1px solid var(--line,#ddd);overflow-wrap:anywhere}
-#adminPublishHoldsHistory li{margin-bottom:8px}
+.admin-hold-history-row[hidden]{display:none!important}
+.admin-hold-history-row td{padding:0 9px 14px!important}
+.admin-hold-history-content{margin:0 0 6px 0;padding:12px 15px;background:var(--surface-2,#f6f8fb);border:1px solid var(--line,#dadfe4);border-radius:7px;overflow-wrap:anywhere}
+.admin-hold-history-content p{margin:6px 0;font-weight:400}
+.admin-hold-history-content li{margin-bottom:8px}
+.admin-hold-pending{font-size:12px;max-width:270px;color:var(--muted,#66768b)}
+.admin-hold-history-content .error-text{color:var(--danger,#a72f36)}
+.admin-hold-table .secondary-button[aria-expanded="true"]{font-weight:700}
 @media(max-width:640px){.admin-hold-table{font-size:12px}.admin-hold-table th,.admin-hold-table td{padding:8px 6px}}
