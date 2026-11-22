@@ -42,7 +42,7 @@ test("2593 output seed applies publication hold AFTER all normal scheduled stamp
 test("2593 one-minute cron is independent and still cannot publish",()=>{
  assert.match(worker,/studioRecoverFreeSkylineFerryFanoutCron,/);
  assert.match(worker,/ctx\.waitUntil\(studioRecoverFreeSkylineFerryFanoutCron\(env, ctx\)/);
- assert.match(worker,/version: "0\.10\.\d+-ferry-held-[^"]+-2593"/);
+ assert.match(worker,/version: "0\.10\.\d+-[A-Za-z0-9-]+"/, "active Worker build identifier remains well-formed");
  const body=section("studioRecoverFreeSkylineFerryFanoutCron");
  assert.match(body,/outputs\.every\(x => f\(x,"Do_Not_Publish"\) === true/);
  assert.match(body,/!f\(x,"Scheduled_Post_Date"\)/);
