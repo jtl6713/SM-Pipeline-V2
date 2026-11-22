@@ -79,7 +79,7 @@
       }
     ]
   },
-  "TTD3 \u2014 Ready for Handoff Email": {
+  "TTD3 — Ready for Handoff Email": {
     "op": "and",
     "args": [
       {
@@ -95,7 +95,7 @@
         "field": "TikTok_Draft_Status",
         "type": "singleSelect",
         "value": [
-          "Draft Delivered \u2014 Manual Action Required"
+          "Draft Delivered — Manual Action Required"
         ]
       },
       {
@@ -489,7 +489,7 @@
       }
     ]
   },
-  "TTD0 \u2014 Ready for Draft Asset Preparation": {
+  "TTD0 — Ready for Draft Asset Preparation": {
     "op": "and",
     "args": [
       {
@@ -559,7 +559,7 @@
       }
     ]
   },
-  "TTD1 \u2014 Ready for Draft Initialization": {
+  "TTD1 — Ready for Draft Initialization": {
     "op": "and",
     "args": [
       {
@@ -624,7 +624,7 @@
       }
     ]
   },
-  "TTD2 \u2014 Draft Processing": {
+  "TTD2 — Draft Processing": {
     "op": "and",
     "args": [
       {
@@ -667,7 +667,7 @@
       }
     ]
   },
-  "TTD \u2014 Retry Eligible": {
+  "TTD — Retry Eligible": {
     "op": "and",
     "args": [
       {
@@ -717,7 +717,7 @@
       }
     ]
   },
-  "FB0 \u2014 Ready for 4x5 Asset Preparation": {
+  "FB0 — Ready for 4x5 Asset Preparation": {
     "op": "and",
     "args": [
       {
@@ -823,7 +823,7 @@
       }
     ]
   },
-  "FB1 \u2014 Ready to Create Photo Objects": {
+  "FB1 — Ready to Create Photo Objects": {
     "op": "and",
     "args": [
       {
@@ -890,7 +890,7 @@
       }
     ]
   },
-  "FB2 \u2014 Ready to Publish Multi-Photo": {
+  "FB2 — Ready to Publish Multi-Photo": {
     "op": "and",
     "args": [
       {
@@ -944,7 +944,7 @@
       }
     ]
   },
-  "FB2R \u2014 Reconcile Ambiguous Publish": {
+  "FB2R — Reconcile Ambiguous Publish": {
     "op": "and",
     "args": [
       {
@@ -987,7 +987,7 @@
       }
     ]
   },
-  "FB3 \u2014 Ready to Finalize": {
+  "FB3 — Ready to Finalize": {
     "op": "and",
     "args": [
       {
@@ -1030,7 +1030,7 @@
       }
     ]
   },
-  "FBS1 \u2014 Ready to Start Slideshow Render": {
+  "FBS1 — Ready to Start Slideshow Render": {
     "op": "or",
     "args": [
       {
@@ -1110,7 +1110,7 @@
       }
     ]
   },
-  "FBS2 \u2014 Slideshow Renders to Poll": {
+  "FBS2 — Slideshow Renders to Poll": {
     "op": "or",
     "args": [
       {
@@ -1190,7 +1190,7 @@
       }
     ]
   },
-  "FBS3 \u2014 Ready to Publish Slideshow Reel": {
+  "FBS3 — Ready to Publish Slideshow Reel": {
     "op": "or",
     "args": [
       {
@@ -1213,9 +1213,19 @@
             ]
           },
           {
-            "op": "isNotEmpty",
-            "field": "FB_Slideshow_Public_URL",
-            "type": "url"
+            "op": "or",
+            "args": [
+              {
+                "op": "isNotEmpty",
+                "field": "FB_Slideshow_Public_URL",
+                "type": "url"
+              },
+              {
+                "op": "isNotEmpty",
+                "field": "Publish_Asset_URL",
+                "type": "url"
+              }
+            ]
           },
           {
             "op": "isEmpty",
@@ -1275,7 +1285,7 @@
       }
     ]
   },
-  "FBS4 \u2014 Slideshow Reels to Poll": {
+  "FBS4 — Slideshow Reels to Poll": {
     "op": "or",
     "args": [
       {
@@ -1558,7 +1568,7 @@
       }
     ]
   },
-  "FB \u2014 Retry Eligible": {
+  "FB — Retry Eligible": {
     "op": "and",
     "args": [
       {
