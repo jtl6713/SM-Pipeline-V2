@@ -50,7 +50,19 @@ def _run_background(kwargs: dict) -> None:
                 else nullcontext()
             )
             with claim:
-                result = process_request(**kwargs)
+                if workload_governor.enabled() and workload_governor.admission_paused():
+                    ids = normalize_record_ids(kwargs.get("record_ids"))
+                    if (len(ids) != 1 or kwargs.get("trigger_a4") is not False
+                            or kwargs.get("drain") is not False
+                            or kwargs.get("wait_for_next") is not False
+                            or kwargs.get("max_records") != 1):
+                        raise workload_governor.AdmissionDeferred(
+                            "A3 recovery forbids batch, draining and downstream stages"
+                        )
+                    with workload_governor.a3_classification_scope(ids[0]):
+                        result = process_request(**kwargs)
+                else:
+                    result = process_request(**kwargs)
             logger.info(
                 "A3 background classify finished classified=%s passes=%s",
                 result.get("classified_count"),
