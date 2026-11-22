@@ -12039,6 +12039,16 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     const readiness = evaluateReviewPackage(record);
     const mediaRework = protectedMediaReworkSummary(record);
     const metaRepair = metaReviewRecoverySummary(record);
+    // #2294: an exact pending draft-slide inventory can be offered for
+    // inspection while its formal media/package review remains incomplete.
+    // Never convert this inspection-only marker into approval readiness.
+    const candidateGalleryReview = f(record, "SM_Factory_Native_Gallery_Candidate_Review_2294") === true
+      && f(record, "Do_Not_Publish") === true
+      && f(record, "Auto_Publish_Enabled") !== true
+      && f(record, "Output_Status") === "Ready for Review"
+      && f(record, "Render_Status") === "Native Photo Route"
+      && !f(record, "Scheduled_Post_Date") && !f(record, "Studio_Scheduled_At")
+      && !f(record, "Published_At") && !f(record, "Platform_Post_URL");
     // Recovery previews are display-only; do not pass an MP4 into an <img>.
     const sourcePreview = String(f(record, "Studio_Preview_URL") || "").trim();
     const mediaReworkThumbnail = mediaRework &&
@@ -12105,7 +12115,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platform: mapped.platform,
       format: mapped.format || null,
       studio_output_type: mapped.studio_output_type || mapped.format,
-      studio_state: schedulingTechnicalReady
+      studio_state: candidateGalleryReview
+        ? "Unverified gallery candidates · Visual review only · Publishing held"
+        : schedulingTechnicalReady
         ? "Scheduling approval ready · Media verified"
         : studioState,
       scheduling_approval_ready: schedulingTechnicalReady === true,
@@ -12174,15 +12186,19 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
+      candidate_gallery_review: candidateGalleryReview,
       // One shared review-package validator governs Factory counts/eligibility.
       // This is metadata validation; the approval route probes actual CDN bytes.
       // Never let recovered source images turn a Changes Requested item into
       // a Factory Approve candidate. It belongs in manual creative repair.
-      review_package_ready: (mediaRework || metaRepair) ? false : reviewVisibility.visible,
-      review_package_held_preview_only: reviewVisibility.held_preview_only,
+      review_package_ready: (mediaRework || metaRepair || candidateGalleryReview) ? false : reviewVisibility.visible,
+      review_package_held_preview_only: reviewVisibility.held_preview_only || candidateGalleryReview,
       review_package_readiness: readiness.readiness,
-      review_package_missing: readiness.missing_requirements,
-      review_package_reason: readiness.reason,
+      review_package_missing: candidateGalleryReview
+        ? ["Source artwork awaits human review, branding/rights verification and final creative approval"]
+        : readiness.missing_requirements,
+      review_package_reason: candidateGalleryReview
+        ? "unverified_native_candidate_visual_review_only" : readiness.reason,
       updated_at: outputUpdatedAt,
     };
     outputRow.e2e = buildOpsE2eStages({
