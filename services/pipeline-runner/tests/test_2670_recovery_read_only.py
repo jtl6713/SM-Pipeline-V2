@@ -39,3 +39,26 @@ def test_recovery_gate_is_explicit_opt_in(monkeypatch):
     assert runner_app.recovery_read_only() is False
     monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "false")
     assert runner_app.recovery_read_only() is False
+
+
+
+def test_workload_diagnostics_require_loopback_and_shared_secret(monkeypatch):
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "true")
+    monkeypatch.setitem(runner_app.settings, "pipeline_runner_shared_secret", "local-test-secret")
+    monkeypatch.setattr(runner_app.workload_governor, "snapshot", lambda: {
+        "enabled": True, "recovery_read_only": True,
+        "admission_paused": True, "active_jobs": 0, "queued_jobs": 0,
+    })
+    client = runner_app.app.test_client()
+    unauth = client.get("/admin/workload")
+    assert unauth.status_code == 401
+    public = client.get("/admin/workload", headers={
+        "X-Pipeline-Secret": "local-test-secret",
+        "CF-Connecting-IP": "192.0.2.2",
+    })
+    assert public.status_code == 403
+    local = client.get("/admin/workload", headers={"X-Pipeline-Secret": "local-test-secret"})
+    assert local.status_code == 200
+    assert local.json["ok"] is True
+    assert local.json["admission_paused"] is True
+    assert local.json["active_jobs"] == 0
