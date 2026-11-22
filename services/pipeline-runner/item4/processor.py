@@ -229,6 +229,11 @@ def requeue_stale_processing(
         # Reclaiming them after 90s uploads duplicate Drive originals.
         recovery_age = (45 * 60 * 1000 if str(fields.get("Asset_Kind") or "") == "Master Original"
                         else STALE_PROCESSING_MS)
+        if governor.enabled():
+            # Never roll a potentially in-flight variant back to Pending on the
+            # old 90-second timer. A crashed worker's durable resource lease
+            # may take 20 minutes to expire. Allow a further recovery margin.
+            recovery_age = max(recovery_age, 45 * 60 * 1000)
         if stamp and (now_ms - stamp) < recovery_age:
             continue
         attempts = int(fields.get("Attempt_Count") or 0)
