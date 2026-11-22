@@ -285,13 +285,17 @@
     target.innerHTML = order.map((key) => {
       const item = connections[key] || {};
       const status = String(item.status || "error");
-      const label = status === "connected" ? "Connected" : status === "needs_authorization" ? "Needs authorization" : "Error";
+      const label = status === "connected" ? "Connected" : status === "needs_developer_approval"
+        ? "Developer approval needed" : status === "needs_authorization" ? "Needs authorization" : "Error";
       const account = item.account_name || item.account_id || "Account not confirmed";
       const sync = item.last_successful_sync ? "Last sync " + dateTimeLabel(item.last_successful_sync) : "No successful analytics sync yet";
-      const error = item.last_error || item.error || "";
+      // Current account-health errors outrank historical per-output sync failures.
+      const error = item.error || item.last_error || "";
       const reconnect = status !== "connected" && item.reconnect_url
         ? "<a class='secondary-button insights-reconnect' target='_blank' rel='noopener' href='" + esc(item.reconnect_url) + "'>Reconnect</a>"
-        : (status === "needs_authorization" ? "<span class='insights-action-note'>Authorization required</span>" : "");
+        : (status === "needs_developer_approval"
+          ? "<span class='insights-action-note'>Approve video.list in TikTok Developer Portal before reconnecting</span>"
+          : status === "needs_authorization" ? "<span class='insights-action-note'>Authorization required</span>" : "");
       return "<article class='insights-connection " + esc(status) + "'>" +
         "<div class='insights-connection-head'><strong>" + esc(item.platform || key) + "</strong><span>" + esc(label) + "</span></div>" +
         "<div class='insights-connection-account'>" + esc(account) + "</div>" +
