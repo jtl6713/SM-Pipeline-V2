@@ -343,7 +343,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1052-factory-exact-poll-2622";
+  const BUILD_ID = "item4-0.6.1053-idea-asset-sourcing-2647";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3209,6 +3209,7 @@
     if (ideaGenerationInFlight) return;
     const count = Number($("ideaGenerateCount")?.value ?? "");
     const quality = String($("ideaGenerateQuality")?.value || "Highest Quality");
+    const sourcingMode = String($("ideaGenerateSourcing")?.value || "balanced");
     const button = $("ideaGenerateSubmit");
     if (!Number.isInteger(count) || count < 1 || count > 10) {
       setIdeaGenerateMessage("Enter a whole number from 1 to 10.", "error-text");
@@ -3225,7 +3226,7 @@
       // Keep this short so mobile Safari does not surface "Fetch is aborted".
       const result = await api("/api/ideas/generate", {
         method: "POST",
-        body: JSON.stringify({ count, quality }),
+        body: JSON.stringify({ count, quality, asset_sourcing_mode: sourcingMode }),
         timeoutMs: 45000,
         // POST admission can commit a batch before a mobile timeout; do not
         // automatically repeat a non-idempotent create on uncertainty.
@@ -17417,12 +17418,17 @@ function timedScriptAssetLabel(asset, index) {
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
     const timeline = !r.is_on_hold && (!ideaIsPromoted(r) || ideaDraftNeedsTimeline(r))
-      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaTimelineRowButtonLabel(r)}</button>`
+      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${r.asset_readiness === "Needs new media" ? "Add media / pre-production" : ideaTimelineRowButtonLabel(r)}</button>`
       : "";
     const numericIdeaId = Number(r?.candidate_id);
     const ideaIdPrefix = Number.isSafeInteger(numericIdeaId) && numericIdeaId > 0 ? `${numericIdeaId} – ` : "";
     const title = `${ideaIdPrefix}${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
+    const checklist = Array.isArray(r.required_asset_checklist) ? r.required_asset_checklist.filter(Boolean).slice(0, 3) : [];
+    const sourceLabel = { existing: "Existing assets first", balanced: "Balanced mix", explore: "Explore new topics" }[r.asset_sourcing_mode] || "";
+    const assetPlan = r.asset_readiness
+      ? `<div class="subtle">Asset plan: ${escapeHtml(r.asset_readiness)}${sourceLabel ? " · " + escapeHtml(sourceLabel) : ""}${checklist.length ? " · Capture: " + escapeHtml(checklist.join("; ")) : ""}</div>`
+      : "";
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div>${assetPlan}</td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
   }
 
   function upsertIdeaInCache(record) {

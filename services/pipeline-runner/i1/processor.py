@@ -11,6 +11,10 @@ from airtable.constants import CONTENT_PROFILES_TABLE, CONTENT_ITEMS_TABLE, SOUR
 from carousel.timeutil import chicago_now
 from i1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i1.openai_ideas import generate_ideas
+from i1.asset_sourcing import (
+    sourcing_mode, load_sourcing_context, sourcing_prompt,
+    idea_sourcing_fields, overused_topic,
+)
 from idea.chain import trigger_next
 from idea.constants import DEFAULT_CONTENT_PROFILE_ID
 from idea.mapping import parse_int
@@ -57,6 +61,7 @@ def _candidate_fields(
     profile_id: str,
     batch_id: str | None,
     test_run_id: str | None,
+    sourcing_context: dict | None = None,
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "Batch_Date": chicago_now().strftime("%Y-%m-%d"),
@@ -76,6 +81,14 @@ def _candidate_fields(
         "Content_Profile": [profile_id],
         **_auto_photo_listen_fields(idea),
     }
+    if sourcing_context is not None:
+        fields.update(idea_sourcing_fields(idea, sourcing_context))
+        # Explore-mode ideas without media must remain deliberate pre-production
+        # capture tasks, never auto-listen and auto-promote unrelated images.
+        if (sourcing_context.get("mode") == "explore"
+                and fields.get("Asset_Readiness") == "Needs new media"
+                and "Studio_Photo_Wait_Status" in fields):
+            fields["Studio_Photo_Wait_Status"] = "Needs new media"
     score = parse_int(idea.get("priority_score"))
     if score is not None:
         fields["Priority_Score"] = score
@@ -156,6 +169,7 @@ def process_request(
     batch_record_id: str | None = None,
     requested_count: int | None = None,
     quality: str | None = None,
+    asset_sourcing_mode: str | None = None,
     test_run_id: str | None = None,
     dry_run: bool = False,
     trigger_i2: bool = True,
@@ -180,6 +194,8 @@ def process_request(
     quality_mode = (quality or field_str(profile, "Manual_Idea_Quality_Override") or "Balanced").strip()
     preview["requested_count"] = remaining
     preview["quality"] = quality_mode
+    selected_sourcing = sourcing_mode(asset_sourcing_mode)
+    preview["asset_sourcing_mode"] = selected_sourcing
     if remaining < 1:
         return {"processed": False, "reason": "no_remaining_slots", **preview}
 
@@ -187,6 +203,10 @@ def process_request(
     # Ask for bounded alternatives, but save at most the requested shortfall.
     pool_size = min(20, max(remaining + 4, (remaining * 3 + 1) // 2))
     prompt = build_i1_prompt(profile, remaining_slots=pool_size, quality=quality_mode)
+    sourcing_context = load_sourcing_context(
+        getattr(client, "_settings", {}), preview["profile_record_id"], selected_sourcing,
+    ) if not dry_run else {"mode": selected_sourcing, "available": False, "assets": [], "overused": []}
+    prompt += sourcing_prompt(sourcing_context)
     # Apply owner/global and this profile's every-generation guidance to all
     # I1 paths, including durable retries. The reader uses Supabase settings
     # whenever Studio's Supabase authority is enabled; it never changes output.
@@ -263,6 +283,9 @@ def process_request(
             if not title:
                 invalid_idea_entries += 1
                 continue
+            if overused_topic(idea, sourcing_context):
+                skipped_duplicate_titles.append(title)
+                continue
             title_key = _title_key(title)
             if (title_key in seen_titles or
                     any(_titles_equivalent(title, old) for old in avoided) or
@@ -279,6 +302,7 @@ def process_request(
                             profile_id=profile["id"],
                             batch_id=batch_record_id,
                             test_run_id=test_run_id,
+                            sourcing_context=sourcing_context,
                         )
                     ],
                     typecast=True,

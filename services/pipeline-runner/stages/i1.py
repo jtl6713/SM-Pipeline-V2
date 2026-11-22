@@ -18,6 +18,7 @@ def run(request: StageRequest):
             "batch_record_id": str(extra.get("batch_record_id") or extra.get("batch_id") or "").strip() or None,
             "requested_count": extra.get("requested_count") or extra.get("count"),
             "quality": extra.get("quality"),
+            "asset_sourcing_mode": extra.get("asset_sourcing_mode") or "balanced",
             "test_run_id": (request.test_run_id or extra.get("test_run_id") or "").strip() or None,
             "dry_run": bool(extra.get("dry_run")),
             "trigger_i2": extra.get("trigger_i2") is not False,
