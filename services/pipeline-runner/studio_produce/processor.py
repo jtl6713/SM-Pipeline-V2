@@ -34,6 +34,13 @@ def start_job(
         # No canonical write is permitted before the durable producer claim.
         # This read-only preflight preserves the existing terminal rejection.
         governor.database_path()
+        if governor.circuit_open():
+            created = _launch(request_id, resume=resume)
+            return {
+                "accepted": True, "already_running": not created,
+                "queued": True, "deferred_due_to_database_circuit": True,
+                "job": {}, "production_request_record_id": request_id,
+            }
         request = load_request(AirtableClient(), request_id)
         job = read_job(request)
         fields = request.get("fields") or {}
@@ -156,6 +163,10 @@ def _run_governed(request_id: str, token: str) -> None:
         else:
             logger.exception("studio governed producer crashed request=%s", request_id)
             try:
+                if not governor.job_valid(request_id, token):
+                    # Another owner may already have reclaimed this lease.
+                    # Never write its job state from the stale worker.
+                    return
                 client = AirtableClient()
                 request = load_request(client, request_id)
                 write_job(client, request_id, with_step(read_job(request), "blocked", error="Studio production job crashed"))
@@ -233,6 +244,10 @@ def _run(
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         except Exception as exc:
+            if governor.enabled() and governor.is_database_overload(exc):
+                # Do not persist a terminal Blocked status on a 522/timeout.
+                # Leave the job claimed until the governed worker safely requeues.
+                raise
             from studio_produce.steps import _is_transient_render_error
 
             if step == "render" and _is_transient_render_error(exc):
