@@ -23,7 +23,8 @@ create index if not exists idx_platform_output_hold_events_record
   on public.platform_output_hold_events (output_record_id,occurred_at desc);
 alter table public.platform_output_hold_events enable row level security;
 revoke all on public.platform_output_hold_events from public, anon, authenticated;
-grant select on public.platform_output_hold_events to service_role;
+grant select, insert on public.platform_output_hold_events to service_role;
+grant usage, select on sequence public.platform_output_hold_events_id_seq to service_role;
 
 create or replace function public.stamp_platform_output_publish_hold()
 returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
@@ -55,9 +56,13 @@ begin
         else 'System hold: creator did not provide a detailed reason'
       end
     );
-    new.publish_hold_source := coalesce(nullif(btrim(new.publish_hold_source),''),
+    new.publish_hold_source := coalesce(
+       case when tg_op = 'INSERT' or new.publish_hold_source is distinct from old.publish_hold_source
+         then nullif(btrim(new.publish_hold_source),'') end,
        nullif(btrim(new.error_messages->>'Publish_Hold_Source'),''),'pipeline');
-    new.publish_hold_actor := coalesce(nullif(btrim(new.publish_hold_actor),''),'system');
+    new.publish_hold_actor := coalesce(
+       case when tg_op = 'INSERT' or new.publish_hold_actor is distinct from old.publish_hold_actor
+         then nullif(btrim(new.publish_hold_actor),'') end,'system');
     new.publish_hold_set_at := clock_timestamp();
     new.publish_hold_released_at := null;
     new.publish_hold_release_note := null;
