@@ -43,7 +43,8 @@ test("genuine bounded rate-limit retry remains Retry Pending",()=>{
   const fields={Platform:"Facebook",Output_Status:"Approved for Publishing",
     Publish_Status:"Failed",FB_Publish_Status:"Retry Pending",
     Publish_Error_Stage:"FBS3_RATE_LIMIT",Publish_Error_Message:"Graph rate limit 368",
-    Publish_Retry_Eligible:true};
+    Publish_Retry_Eligible:true,Publish_Next_Retry_At:"2099-01-11T18:00:00Z",
+    Last_Publish_Attempt_At:"2026-11-22T06:25:00Z"};
   assert.equal(heldRetryPendingDisposition({fields}),null);
   assert.equal(normalizedOutputState({fields}),"Retry Pending");
 });
