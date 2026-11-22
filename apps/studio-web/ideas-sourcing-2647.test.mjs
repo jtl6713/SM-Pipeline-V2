@@ -7,6 +7,7 @@ const html = read("./index.html");
 const app = read("./assets/app-item4-1008.js");
 const api = read("../studio-api/worker-functions-04.mjs");
 const maps = read("../studio-api/worker-functions-01.mjs");
+const production = read("../studio-api/worker-functions-02.mjs");
 const runner = read("../../services/pipeline-runner/i1/durable_jobs.py");
 
 test("#2647 manual sourcing has exactly three distinct choices with Balanced default", () => {
@@ -58,4 +59,17 @@ test("#2647 new-media ideas display a user action, not a false ready-to-render c
   assert.match(map, /asset_readiness:/);
   assert.match(map, /required_asset_checklist:/);
   assert.match(map, /suggested_library_asset_ids:/);
+});
+
+test("#2647 new media capture plan survives into editable Production Draft", () => {
+  const creation = production.slice(
+    production.indexOf("export async function createDraftForIdea("),
+    production.indexOf("/*__STUDIO_WORKER_END:createDraftForIdea__*/")
+  );
+  assert.match(creation, /Required_Asset_Checklist/);
+  assert.match(creation, /Asset_Readiness/);
+  assert.match(creation, /Media to capture\/upload before production:/);
+  assert.match(creation, /Studio_Master_Asset_Status: "None"/);
+  assert.match(creation, /Studio_Item4_State: "Draft"/);
+  assert.doesNotMatch(creation, /Status:\s*"Approved"/);
 });
