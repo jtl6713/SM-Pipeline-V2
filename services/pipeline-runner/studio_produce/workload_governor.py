@@ -342,7 +342,7 @@ def resource_slot(
         return
     recovery_read_allowed = (
         (scope == "supabase_read" and allow_during_circuit)
-        or (scope == "library_image_upload" and allow_during_recovery)
+        or (scope in {"library_image_upload", "library_image_classify"} and allow_during_recovery)
     )
     if admission_paused() and not recovery_read_allowed:
         raise AdmissionDeferred("runner recovery read-only: resource admission paused")
