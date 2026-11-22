@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -44,15 +45,31 @@ def enabled() -> bool:
     return os.getenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "").strip().lower() in {"1", "true", "yes"}
 
 
-def admission_paused() -> bool:
-    """Recovery mode must not admit heavy work, even from persisted leases.
-
-    This checks the same deployment-level gate as Flask, but also protects the
-    autonomous Python dispatcher which operates outside HTTP request handling.
-    """
+def recovery_read_only_active() -> bool:
     return os.getenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "").strip().lower() in {
         "1", "true", "yes",
     }
+
+
+def producer_only_recovery_target() -> str:
+    """An explicit single request, or ALL after the bounded canary succeeds."""
+    return os.getenv("PIPELINE_RUNNER_RECOVERY_PRODUCER_TARGET", "").strip()
+
+
+def producer_only_recovery_enabled() -> bool:
+    """Keep the publisher HTTP fence while admitting governed Studio producers."""
+    target = producer_only_recovery_target()
+    allowed_target = target == "ALL" or bool(re.fullmatch(r"rec[A-Za-z0-9]{6,}", target))
+    return (
+        enabled() and recovery_read_only_active() and allowed_target
+        and os.getenv("PIPELINE_RUNNER_RECOVERY_PRODUCER_ONLY", "").strip().lower()
+        in {"1", "true", "yes"}
+    )
+
+
+def admission_paused() -> bool:
+    """Outage fence remains for all jobs unless a scoped producer canary is enabled."""
+    return recovery_read_only_active() and not producer_only_recovery_enabled()
 
 
 def max_jobs() -> int:
@@ -238,10 +255,18 @@ def claim_next() -> tuple[str, str] | None:
         if active >= allowed:
             db.commit()
             return None
-        row = db.execute(
-            "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? ORDER BY enqueued_at, request_id LIMIT 1"
-            , (now,)
-        ).fetchone()
+        target = producer_only_recovery_target() if producer_only_recovery_enabled() else "ALL"
+        if target == "ALL":
+            row = db.execute(
+                "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? "
+                "ORDER BY enqueued_at, request_id LIMIT 1", (now,)
+            ).fetchone()
+        else:
+            # Never drain unrelated persisted requests during an exact-ID canary.
+            row = db.execute(
+                "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? "
+                "AND request_id=? ORDER BY enqueued_at, request_id LIMIT 1", (now, target)
+            ).fetchone()
         if not row:
             db.commit()
             return None
@@ -344,7 +369,7 @@ def image_classification_recovery_window() -> Iterator[None]:
     All other stages, dispatchers, worker hosts and provider publishers remain
     blocked by the independent HTTP gate and/or normal database circuit.
     """
-    if not enabled() or not admission_paused():
+    if not enabled() or not (admission_paused() or producer_only_recovery_enabled()):
         yield
         return
     with resource_slot("library_image_classify", limit=1, allow_during_recovery=True):

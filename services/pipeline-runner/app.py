@@ -106,6 +106,20 @@ def recovery_image_classification_allowed() -> bool:
     return recovery_image_upload_allowed()
 
 
+def recovery_producer_only_allowed() -> bool:
+    """An authenticated, exact-ID producer ingress without publisher unpause."""
+    if not (recovery_image_upload_allowed() and workload_governor.producer_only_recovery_enabled()):
+        return False
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return False
+    record_id = str(payload.get("production_request_record_id") or payload.get("record_id") or "").strip()
+    if not re.fullmatch(r"rec[A-Za-z0-9]{6,}", record_id):
+        return False
+    target = workload_governor.producer_only_recovery_target()
+    return target == "ALL" or record_id == target
+
+
 def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, tuple | None]:
     """Constrain A3 to an existing, profiled Supabase image; never launch A4.
 
@@ -176,6 +190,13 @@ def _recovery_read_only_gate():
             # type, and uses a single durable governor resource slot.
             if request.content_length is not None and request.content_length > 26 * 1024 * 1024:
                 return jsonify({"error": "photo_upload_body_too_large"}), 413
+            return None
+        if (request.method.upper() == "POST"
+                and request.path in {"/jobs/studio-produce", "/jobs/studio-produce/resume"}
+                and recovery_producer_only_allowed()):
+            # Governor enforces cross-process 1-job cap. Every other mutating
+            # route, including stages and all native publisher entrypoints,
+            # remains fenced by the read-only middleware.
             return None
         response = jsonify({
             "ok": False,
@@ -308,6 +329,12 @@ def health():
             "recovery_image_classification_enabled": recovery_image_classification_allowed(),
             "recovery_a3_metadata_write_scoped": recovery_image_classification_allowed(),
             "workload_governor_enabled": workload_governor.enabled(),
+            "recovery_producer_only_enabled": workload_governor.producer_only_recovery_enabled(),
+            "recovery_producer_scope": (
+                "all_governed_requests" if workload_governor.producer_only_recovery_target() == "ALL"
+                else "exact_request" if workload_governor.producer_only_recovery_enabled()
+                else "disabled"
+            ),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
