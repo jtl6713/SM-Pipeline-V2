@@ -17,6 +17,19 @@ SOURCES = (
     "studio_worker", "pipeline_runner", "standalone_scripts",
     "github_actions", "make_scenarios", "external_integrations",
 )
+# Worker and runner must always supply measured hourly observations.
+# Disabled/absent one-off and third-party sources can be attested by complete
+# provider audit evidence rather than fabricating hourly zero-count collectors.
+# This is an evidence *shape* allowance, never an authorization to revoke PATs.
+INACTIVE_ELIGIBLE_SOURCES = frozenset({
+    "standalone_scripts", "github_actions", "make_scenarios",
+    "external_integrations",
+})
+INACTIVE_PROOF_FIELDS = (
+    "inventory_before_artifact_ref", "inventory_after_artifact_ref",
+    "full_window_audit_artifact_ref", "independent_reviewer",
+)
+
 PROOFS = (
     "production_identity", "production_schema", "worker_bindings",
     "runner_environment", "external_integrations", "nonpublishing_canary",
@@ -89,11 +102,33 @@ def evidence_shape(manifest, *, now=None):
     if set(sources) != set(SOURCES):
         problems.append("missing or unexpected independently monitored sources")
 
+    independently_inactive = []
+    metered = []
     for source in SOURCES:
         samples = sources.get(source)
-        if not isinstance(samples, list):
-            problems.append(f"{source}: no hourly collector evidence")
+        if isinstance(samples, dict) and samples.get("mode") == "verified_inactive":
+            if source not in INACTIVE_ELIGIBLE_SOURCES:
+                problems.append(f"{source}: active core runtime may not be declared inactive")
+                continue
+            try:
+                absent_since = utc(samples.get("inactive_since_utc"))
+                verified_through = utc(samples.get("verified_through_utc"))
+                if start is None or end is None or absent_since > start or verified_through < end:
+                    raise ValueError("inactivity evidence does not cover the full quiet window")
+            except (TypeError, ValueError) as error:
+                problems.append(f"{source}: invalid inactive-source period: {error}")
+            for field in INACTIVE_PROOF_FIELDS:
+                value = samples.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    problems.append(f"{source}: missing independent inactive-source proof: {field}")
+            if samples.get("verified_inactive") is not True:
+                problems.append(f"{source}: inactive-source verification not attested")
+            independently_inactive.append(source)
             continue
+        if not isinstance(samples, list):
+            problems.append(f"{source}: no hourly collector evidence or valid disabled-source proof")
+            continue
+        metered.append(source)
         if not hours or len(samples) != len(hours):
             problems.append(f"{source}: incomplete hourly collector coverage")
             continue
@@ -126,6 +161,8 @@ def evidence_shape(manifest, *, now=None):
         "manual_verification_required": True,
         "source_count_required": len(SOURCES),
         "complete_hours_required": max(len(hours), 6),
+        "metered_sources": sorted(metered),
+        "verified_inactive_sources": sorted(independently_inactive),
         "blockers": sorted(set(problems)),
     }
 
