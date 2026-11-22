@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { OPS_QUEUE_REVIEW_FORMULA } from "./ops-queue.mjs";
 import { evaluateReviewPackage, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility, formalFactoryApprovalReady, safeReviewPromotion } from "./review-package-readiness.mjs";
 import { partitionFactoryLanes } from "./factory-desk.mjs";
@@ -182,4 +183,61 @@ test("Supabase Factory pack retains held output through BOTH the query and post-
     Output_Status: "Ready for Review", Review_Status: "",
     Publish_Status: "Publishing", Do_Not_Publish: true,
   }), true);
+});
+
+
+test("NYC #2371: eight held review outputs remain visible even after older Factory approval or recovery fences", () => {
+  const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
+  const extract = (name) => {
+    const start = ui.indexOf(`  function ${name}(`);
+    assert.ok(start >= 0, `Missing client function ${name}`);
+    const end = ui.indexOf("\n  }", start);
+    assert.ok(end > start, `Unterminated client function ${name}`);
+    return ui.slice(start, end + 4);
+  };
+  const code = [
+    extract("canReviewHeldOutput"),
+    extract("canRejectHeldOutput"),
+    extract("factoryHasHumanReviewAction"),
+    extract("factoryVisibleNeedsEyes"),
+    "factoryVisibleNeedsEyes(cards)",
+  ].join("\n");
+  const ids = [
+    ["recO494MDnQ1Tk51b", 10855],
+    ["recWIWOrdflmqyxKW", 10856],
+    ["recVoFLCOAGHNIkD3", 10863],
+    ["rechOtaxHOwY18A8F", 10864],
+    ["rec61JeXiA6Aai1Kk", 10867],
+    ["recttY0sPY2RGkcaq", 10869],
+    ["recUIDBjcY6RgSy0n", 10870],
+    ["recWq5HIxBT8BCtme", 10875],
+  ];
+  const cards = ids.map(([id, output_id]) => ({
+    id, output_id, kind: "output", profile_id: "recgtK8Z7eNADNtVy",
+    studio_output_type: "Carousel", output_status: "Ready for Review",
+    review_status: "Review Sent", render_status: "Native Photo Route",
+    publish_status: "Not Ready", do_not_publish: true, auto_publish_enabled: false,
+    review_package_ready: true, thumbnail_url: media + "studio/previews/example/slide-01.jpg",
+    scheduled_post_date: null, studio_scheduled_at: null, published_at: null,
+    platform_post_url: null,
+  }));
+  // Simulate the real regression: IDs remain in 48-hour accepted store and
+  // completed Activity after a previous batch, but the server has restored
+  // a held Ready-for-Review state. They must remain inspectable, not published.
+  const submitted = new Set(ids.map(([id]) => id));
+  const run = (input, accepted) => runInNewContext(code, {
+    cards: input,
+    factorySubmittedApprovalIds: () => accepted,
+    canReviewActions: () => false,
+  });
+  const visible = run(cards, submitted);
+  assert.deepEqual(Array.from(visible, row => row.output_id), ids.map(([, number]) => number));
+  assert.ok(visible.every(row => row.do_not_publish === true && row.auto_publish_enabled === false));
+  const posted = { ...cards[0], publish_status: "Published", published_at: "2026-11-22T06:00:00Z" };
+  assert.equal(run([posted], submitted).length, 0, "published work must never reopen");
+  const scheduled = { ...cards[1], studio_scheduled_at: "2026-12-01T12:00:00Z" };
+  assert.equal(run([scheduled], submitted).length, 0, "scheduled output must not appear for held approval");
+  const unheldAccepted = { ...cards[2], do_not_publish: false };
+  assert.equal(run([unheldAccepted], submitted).length, 0, "historical accepted unheld work remains suppressed");
+  assert.equal(run([cards[0]], new Set()).length, 1, "no accepted fence does not hide pending held review");
 });
