@@ -158,6 +158,9 @@ def test_supabase_write_only_inside_leased_a3_recovery_window(recovery_client):
 def test_scoped_a3_recovery_writes_still_honor_database_circuit(recovery_client, monkeypatch):
     from studio_produce import workload_governor as governor
     monkeypatch.setattr(governor, "circuit_open", lambda _db=None: True)
+    # Force the capacity deadline to elapse without a real 60-second sleep.
+    clock = iter((0.0, 61.0))
+    monkeypatch.setattr(governor.time, "monotonic", lambda: next(clock, 61.0))
     with pytest.raises(governor.AdmissionDeferred):
         with governor.image_classification_recovery_window():
             with governor.resource_slot("supabase_write",limit=2):
