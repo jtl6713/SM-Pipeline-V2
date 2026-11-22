@@ -1274,3 +1274,97 @@ def test_caption_narration_fallback_does_not_invent_activities():
 
     copy = "A walk along the East River offers wide skyline views at golden hour."
     assert voiceover_from_existing_caption({"fields": {"Caption": copy}}) == copy
+
+
+def test_bethesda_2303_active_voiceover_lease_is_wait_not_failure(monkeypatch):
+    """P2's valid duplicate-TTS fence must not exhaust producer auto-heals."""
+    import pytest
+    from studio_produce.steps import StepBlocked, StepWait, run_voiceover_p2, step_audio
+    import p2.processor
+
+    class Client:
+        def __init__(self):
+            self.parent = {
+                "id": "rectA2pBh8C7GDNql",
+                "fields": {
+                    "Content_Status": "Ready for Voiceover",
+                    "Voiceover_Status": "Ready",
+                    "Script_Status": "Generated",
+                    "Voiceover_Script": "Look up—Central Park’s hidden craft.",
+                    "Voiceover_URL": "",
+                    "Thumbnail_Status": "Not Needed",
+                },
+            }
+            self.writes = []
+
+        def get_record(self, _table, _id):
+            return self.parent
+
+        def update_record(self, _table, _id, fields, typecast=False):
+            self.writes.append(fields)
+            self.parent["fields"].update(fields)
+            return self.parent
+
+    client = Client()
+    request = {"fields": {"Voiceover_Mode": "Yes", "Thumbnail_Mode": "No"}}
+    ctx = {
+        "request": request, "parent": client.parent,
+        "outputs": [], "job": {"route": "uploaded:photo_sequence"},
+    }
+    reasons = []
+
+    def p2_claim(**_kwargs):
+        reasons.append("claimed")
+        return {"processed": False, "reason": "voiceover_already_in_flight", "skipped_tts": True}
+
+    monkeypatch.setattr(p2.processor, "process_request", p2_claim)
+    with pytest.raises(StepWait, match="existing voiceover lease"):
+        step_audio(client, ctx)
+    with pytest.raises(StepWait, match="existing voiceover lease"):
+        run_voiceover_p2(client, ctx)
+    assert reasons == ["claimed", "claimed"]
+    assert not client.writes, "Waiting must not reset the voiceover claim or existing media"
+
+    def p2_failed(**_kwargs):
+        return {"processed": False, "reason": "voiceover_drive_reuse_failed"}
+
+    monkeypatch.setattr(p2.processor, "process_request", p2_failed)
+    with pytest.raises(StepBlocked, match="voiceover_drive_reuse_failed"):
+        step_audio(client, ctx)
+    with pytest.raises(StepBlocked, match="voiceover_drive_reuse_failed"):
+        run_voiceover_p2(client, ctx)
+
+
+def test_bethesda_2303_audio_resumes_when_original_voiceover_exists(monkeypatch):
+    import p2.processor
+    from studio_produce.steps import step_audio
+
+    parent = {
+        "id": "rectA2pBh8C7GDNql",
+        "fields": {
+            "Content_Status": "Ready for Voiceover",
+            "Voiceover_Status": "Ready",
+            "Script_Status": "Generated",
+            "Voiceover_Script": "Look up—Central Park’s hidden craft.",
+            "Voiceover_URL": "",
+            "Thumbnail_Status": "Not Needed",
+        },
+    }
+
+    class Client:
+        def get_record(self, _table, _id):
+            return parent
+
+        def update_record(self, *_args, **_kwargs):
+            raise AssertionError("No destructive voiceover lease resets")
+
+    def finished(**_kwargs):
+        parent["fields"]["Voiceover_URL"] = "https://drive.google.com/uc?id=already-generated"
+        return {"processed": True, "reason": "voiceover_already_saved", "skipped_tts": True}
+
+    monkeypatch.setattr(p2.processor, "process_request", finished)
+    request = {"fields": {"Voiceover_Mode": "Yes", "Thumbnail_Mode": "No"}}
+    assert step_audio(Client(), {
+        "request": request, "parent": parent,
+        "outputs": [], "job": {"route": "uploaded:photo_sequence"},
+    }) == "images"
