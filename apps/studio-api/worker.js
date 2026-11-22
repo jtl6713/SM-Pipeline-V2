@@ -49,6 +49,7 @@ import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { sweepPreFactoryReady, PRE_FACTORY_READY_FORMULA } from "./pre-factory-ready-recovery.mjs";
 import { sweepSchedulingApprovalPreflight } from "./scheduling-approval-preflight.mjs";
 import { sweepR4TypedMetadataRecovery } from "./r4-typed-metadata-recovery.mjs";
+import { r4CronAdmissionAllowed } from "./r4-queue-admission.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
 import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
@@ -4690,7 +4691,12 @@ export default {
     // Render admission must not wait for the multi-minute Factory and publish
     // maintenance chain. One bounded, independent admission on the five-minute
     // cron; never approvals, scheduling, or public publishing.
-    if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+    if (r4CronAdmissionAllowed({
+      writeSource: studioWriteSource(env),
+      supabaseConfigured: studioSupabaseConfigured(env),
+      airtableCooldownMs: airtableCooldownWaitMs(),
+      failFastMs: AIRTABLE_SLOT_FAIL_FAST_MS,
+    })) {
       ctx.waitUntil(studioAdmitRenderQueue(env, { limit: 80 })
         .then((result) => console.info("R4_QUEUE_ADMIT_INDEPENDENT", JSON.stringify({
           admitted: result?.admitted === true,

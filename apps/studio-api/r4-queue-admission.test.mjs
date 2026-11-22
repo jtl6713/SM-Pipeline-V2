@@ -106,3 +106,22 @@ test("#2618 Worker R4 uses profile fairness only after exact real job receipt", 
   assert.doesNotMatch(body.slice(0,body.indexOf("if (r4StartConfirmed(started))")),
     /env\.STUDIO_MEDIA\.put\(profileCursorKey/);
 });
+
+test("#2618 Supabase R4 admission is independent of retired Airtable cooldown, while legacy remains fenced", async () => {
+  const { r4CronAdmissionAllowed } = await import("./r4-queue-admission.mjs");
+  assert.equal(r4CronAdmissionAllowed({writeSource:"supabase",supabaseConfigured:true,airtableCooldownMs:900000,failFastMs:1500}),true);
+  assert.equal(r4CronAdmissionAllowed({writeSource:"supabase",supabaseConfigured:false,airtableCooldownMs:900000,failFastMs:1500}),false);
+  assert.equal(r4CronAdmissionAllowed({writeSource:"airtable",supabaseConfigured:true,airtableCooldownMs:900000,failFastMs:1500}),false);
+  assert.equal(r4CronAdmissionAllowed({writeSource:"airtable",supabaseConfigured:false,airtableCooldownMs:1500,failFastMs:1500}),true);
+  assert.equal(r4CronAdmissionAllowed({writeSource:"airtable",airtableCooldownMs:Infinity,failFastMs:1500}),false);
+  const {readFileSync} = await import("node:fs");
+  const worker = readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  const r4Start = worker.indexOf("// Render admission must not wait");
+  const r4End = worker.indexOf("// Independently prepare real finished media",r4Start);
+  const body = worker.slice(r4Start,r4End);
+  assert.match(body,/r4CronAdmissionAllowed\(\{/);
+  assert.match(body,/writeSource: studioWriteSource\(env\)/);
+  assert.match(body,/supabaseConfigured: studioSupabaseConfigured\(env\)/);
+  assert.match(body,/studioAdmitRenderQueue\(env, \{ limit: 80 \}\)/);
+  assert.doesNotMatch(body,/if \(airtableCooldownWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\)/);
+});
