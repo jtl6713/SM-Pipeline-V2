@@ -71,7 +71,7 @@ jobs:
           if(!factory.includes('band.classList.remove("is-collapsed")')) throw Error('Producer button does not open Needs eyes');
           console.log('producer_live_ui=PASS verified Factory entry, JS revision action and submission receipt');
           NODE
-- name: Issue 2593 read-only Production request and exact Output navigation smoke
+      - name: Issue 2593 read-only Production request and exact Output navigation smoke
         shell: bash
         run: |
           set -euo pipefail
