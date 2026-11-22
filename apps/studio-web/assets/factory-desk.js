@@ -987,6 +987,7 @@
       ["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(item?.status) ? "completed" : "processing"
     ));
     if (phase === "queued" && Number(item?.next_attempt_ms || 0) > now) return "Waiting to retry";
+    if (item?.canonical_confirmed) return "Approved · ledger syncing";
     if (item?.status === "skipped_removed") return "Completed (removed)";
     if (item?.status === "already_satisfied") return "Completed (already approved)";
     if (item?.status === "superseded_duplicate") return "Completed (other batch owns approval)";
@@ -1022,8 +1023,9 @@
       ? ` · Recovery attempt ${attempts}` : "";
     const slow = running && hasLast && now - lastMs > 60000
       ? " · No recent progress; recovery may be required" : "";
+    const canonical = item?.canonical_confirmed ? " · Confirmed in Supabase" : "";
     return `<span class="factory-live-phase">${esc(phase)}</span>` +
-      `<small class="factory-live-meta">${esc(latest + elapsed + retry + recovery + slow)}</small>`;
+      `<small class="factory-live-meta">${esc(latest + elapsed + retry + recovery + slow + canonical)}</small>`;
   }
 
   function factoryLiveSummaryHtml(items, now = Date.now()) {
@@ -1034,6 +1036,44 @@
     return `<div class="factory-batch-live-summary">` +
       `<strong>${isCurrent ? "Current" : "Next"}: ${esc(title)}</strong>` +
       factoryLiveItemHtml(item, true, now) + `</div>`;
+  }
+
+  // Display-only projection: R2 bookkeeping can be behind the exact original
+  // Supabase approval receipt. Never mutate the server job or trigger a retry.
+  function factoryBatchDisplayCounts(items) {
+    const approved = items.filter(item => item.status === "approved").length;
+    const skipped = items.filter(item => [
+      "already_satisfied", "skipped_removed", "superseded_duplicate",
+    ].includes(item.status)).length;
+    const failed = items.filter(item => item.status === "failed").length;
+    return {
+      approved_count: approved, skipped_count: skipped, failed_count: failed,
+      pending_count: Math.max(0, items.length - approved - skipped - failed),
+      done_count: approved + skipped + failed,
+    };
+  }
+
+  function factoryBatchDisplayRow(row) {
+    const proof = row?.progress_verification;
+    const original = Array.isArray(row?.items) ? row.items : [];
+    if (!row?.group || proof?.status !== "verified" ||
+        original.length !== Number(row.total)) return row;
+    const confirmed = new Set(proof.approved_item_ids || []);
+    let awaitingLedger = 0;
+    const items = original.map(item => {
+      if (!confirmed.has(item.id) || item.status === "approved") return item;
+      awaitingLedger++;
+      return { ...item, status: "approved", phase: "completed", canonical_confirmed: true };
+    });
+    if (!awaitingLedger) return row;
+    const counts = factoryBatchDisplayCounts(items);
+    const children = (row.children || []).map(child => {
+      const subset = items.filter(item => item.profile_id === child.profile_id);
+      if (subset.length !== Number(child.total)) return child;
+      return { ...child, ...factoryBatchDisplayCounts(subset),
+        progress_lag: subset.filter(item => item.canonical_confirmed).length };
+    });
+    return { ...row, items, children, ...counts, progress_lag: awaitingLedger };
   }
 
   function renderFactoryBatchActivity(batch) {
@@ -1058,16 +1098,22 @@
     // Activity is split into active and completed snapshots. Always render the
     // selected snapshot: using 'batch.batches' here silently replaced completed
     // history with the (often empty) active list.
-    const batches = Array.isArray(viewed?.batches) ? viewed.batches :
-      (viewed?.job_id ? [viewed] : []);
-    const totals = viewed?.totals || {
+    const batches = (Array.isArray(viewed?.batches) ? viewed.batches :
+      (viewed?.job_id ? [viewed] : [])).map(factoryBatchDisplayRow);
+    // The old metric read state.batch.totals.batches even when an active row
+    // was on screen; always derive every number from the SAME visible snapshot.
+    const totals = {
       batches: batches.length,
-      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
+      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status) ||
+        Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length,
       approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
       pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
-    if (count) count.textContent = String(state.batch?.totals?.batches || 0);
+    if (count) count.textContent = String(state.completedOpen
+      ? ((state.batch?.batches || []).filter(row => ["queued","running","enqueuing"].includes(row.status) ||
+          Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length)
+      : totals.active);
     if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
     if (toggle) {
       toggle.hidden = state.completedOpen;
@@ -1087,7 +1133,12 @@
       page.hidden = !state.completedOpen || !viewed || !(state.completedOffset > 0 || viewed.has_more);
       page.textContent = "Page " + (1 + Math.floor(state.completedOffset / 20));
     }
-    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
+    const ledgerLag = batches.reduce((sum, row) => sum + Number(row.progress_lag || 0), 0);
+    const verificationUnavailable = batches.some(row => row.group &&
+      row.progress_verification?.status === "unavailable");
+    summary.textContent = `${totals.active} active · ${totals.approved} approved · ${totals.pending} pending · ${totals.failed} failed`
+      + (ledgerLag ? ` · ${ledgerLag} verified approval(s) syncing to Activity` : "")
+      + (verificationUnavailable ? " · Supabase verification unavailable; ledger-only view" : "");
     // Aggregate the selected batch snapshot, not the profile's output queue.
     // Failed/skipped outputs count as processed, never as successfully approved.
     const aggregateTotal = batches.reduce((sum, row) => sum + Math.max(0, Number(row.total) || 0), 0);
@@ -1128,7 +1179,8 @@
         const label = row.group ? `Global approval · ${groupLabel}`
           : item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
         const active = ["running", "queued", "enqueuing"].includes(row.status);
-        const stateLabel = active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
+        const stateLabel = row.progress_lag ? "Syncing approvals" :
+          active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
         const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
         const percent = row.total ? Math.round(100 * completed / row.total) : 0;
         const picked = state.batchDetailsOpen && latest?.job_id === row.job_id;
@@ -1168,7 +1220,9 @@
       const percent = child.total ? Math.round(100*done/child.total) : 0;
       return `<section class="factory-batch-child">
         <strong>${esc(factoryProfileLabel(child.profile_id))}</strong>
-        <span>${esc(["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" : child.failed_count ? "Needs attention" : "Completed")}</span>
+        <span>${esc(child.progress_lag ? "Syncing approvals" :
+          ["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" :
+          child.failed_count ? "Needs attention" : "Completed")}</span>
         <progress max="${Number(child.total)||1}" value="${done}">${percent}%</progress>
         <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
         ${factoryLiveSummaryHtml(items.filter(item => item.profile_id === child.profile_id))}
