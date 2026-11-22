@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count
+from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count, recover_missing_photo_slides
 from fb.common import append_note, preview, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     DEFAULT_IMAGE_STAGE_MAX_RETRIES,
@@ -92,6 +92,21 @@ def process_request(
     requested = parse_int(field(output, "Image_Count"), None)
     expected = min(requested, max_photos) if requested is not None else None
     slideshow_route = is_slideshow_route(output)
+    # A Facebook Photo Set remains a native multi-photo post. Previously a
+    # missing resolved mode defaulted any Image_Count > 1 to a slideshow Reel.
+    if (
+        field_str(output, "Platform_Output_Type") == "Facebook Photo Set"
+        and field_str(output, "Studio_Output_Type") == "Multi-Image Post"
+        and not field_str(output, "FB_Resolved_Publish_Mode")
+    ):
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE, record_id,
+            {"FB_Resolved_Publish_Mode": "Multi-Photo Collage"},
+            typecast=True,
+        )
+        output.setdefault("fields", {})["FB_Resolved_Publish_Mode"] = "Multi-Photo Collage"
+        slideshow_route = False
+        result["photo_publish_mode_repaired"] = True
     if requested is not None and requested > max_photos:
         normalize = {
             "Image_Count": expected,
@@ -105,6 +120,17 @@ def process_request(
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, normalize, typecast=True)
 
     slides = list_ready_slides(client, field_str(output, "Output_ID"), output_record_id=record_id, max_photos=max(2, max_photos * 2))
+    missing_slide_recovery = {}
+    if not slides and expected is not None and expected > 0:
+        # Only approved, exact-source, HTTP-verified 4:5 manifest entries are
+        # eligible; a different named location or missing pixels remains held.
+        missing_slide_recovery = recover_missing_photo_slides(client, output, expected)
+        result["missing_slide_recovery"] = missing_slide_recovery
+        if missing_slide_recovery.get("created"):
+            slides = list_ready_slides(
+                client, field_str(output, "Output_ID"),
+                output_record_id=record_id, max_photos=max(2, max_photos * 2),
+            )
     # A published photo set must not be stranded because its parent Image_Count
     # was omitted at Supabase output creation. Recover only when every ordered,
     # approved public slide can be verified and no provider objects exist.
@@ -179,7 +205,7 @@ def process_request(
                 "FB_Publish_Status": STATUS_MANUAL_FALLBACK if exhausted else STATUS_RETRY,
                 "FB_Slideshow_Status": SLIDESHOW_STATUS_RETRY,
                 "Publish_Error_Stage": "FB0_ASSETS",
-                "Publish_Error_Message": f"FB0 found {actual} ready shared 4:5 assets; expected {expected}.",
+                "Publish_Error_Message": f"FB0 found {actual} ready shared 4:5 assets; expected {expected}. Manifest repair: {missing_slide_recovery.get('reason', 'not_applicable')}.",
                 "Publish_Next_Retry_At": None if exhausted else retry_at(RETRY_MINUTES),
                 "Publish_Retry_Eligible": not exhausted,
                 "Manual_Fallback_Required": exhausted,

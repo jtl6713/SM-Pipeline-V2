@@ -58,7 +58,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_owner_generation_guidance.py services/pipeline-runner/tests/test_profile_creative_prompt_integration.py
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py \
+            services/pipeline-runner/tests/test_fb0_limits.py \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
             services/pipeline-runner/tests/test_i1_partial_creation.py \

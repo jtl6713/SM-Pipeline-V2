@@ -46,5 +46,9 @@ test("only the header-selected profile card is visible and admin lists existing 
   assert.match(html, /id="operationsCreativeReferences"/);
   assert.match(client, /data\.templates/);
   assert.match(client, /data\.references/);
-  assert.match(client, /Saved profile-specific instructions to Airtable/);
+  assert.match(client, /Saved profile-specific instructions in Supabase/);
+  assert.match(html, /id="operationsOwnerPromptForm"/);
+  assert.match(html, /id="operationsCreativeEffectivePreview"/);
+  assert.match(client, /\/api\/operations\/owner-global-creative/);
+  assert.doesNotMatch(client, /Saved profile-specific instructions to Airtable/);
 });

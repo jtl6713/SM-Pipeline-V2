@@ -261,6 +261,155 @@ def package_revision(slides: list[dict[str, Any]]) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+
+def _named_place(value: str) -> str:
+    """Conservative location-cue check; a mismatch is a hold, never an approval."""
+    text = re.sub(r"[^a-zA-Z ]+", " ", str(value or "")).lower()
+    match = re.search(
+        r"\b([a-z]+(?:\s+[a-z]+){0,2}\s+"
+        r"(?:park|beach|lake|pier|museum|stadium|bridge))\b", text,
+    )
+    return " ".join(match.group(1).split()) if match else ""
+
+
+def _manifest_location_mismatch(output: dict[str, Any], clips: list[dict[str, Any]]) -> bool:
+    title_place = _named_place(field_str(output, "Output_Title"))
+    if not title_place:
+        return False
+    context = re.sub(
+        r"[^a-zA-Z ]+", " ",
+        field_str(output, "Output_Title") + " " + field_str(output, "Output_Caption"),
+    ).lower()
+    for clip in clips:
+        source_place = _named_place(str(clip.get("assetName") or clip.get("asset_name") or ""))
+        if source_place and source_place != title_place and source_place not in context:
+            return True
+    return False
+
+
+def verify_public_4x5_image(url: str) -> bool:
+    """Verify retrievable image bytes and dimensions, not merely a URL string."""
+    from io import BytesIO
+
+    import requests
+    from PIL import Image
+
+    try:
+        response = requests.get(url, timeout=(5, 20), stream=True)
+        response.raise_for_status()
+        mime = response.headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
+        if mime not in {"image/jpeg", "image/png", "image/webp"}:
+            return False
+        size = 0
+        blocks = []
+        for block in response.iter_content(chunk_size=65536):
+            size += len(block)
+            if size > 15 * 1024 * 1024:
+                return False
+            blocks.append(block)
+        if size < 1024:
+            return False
+        with Image.open(BytesIO(b"".join(blocks))) as image:
+            width, height = image.size
+            if width < 640 or height < 800 or abs(width / height - 0.8) > 0.025:
+                return False
+            image.verify()
+        return True
+    except (requests.RequestException, OSError, ValueError):
+        return False
+
+
+def recover_missing_photo_slides(
+    client: AirtableClient,
+    output: dict[str, Any],
+    expected: int,
+    *,
+    verify_url=None,
+) -> dict[str, Any]:
+    """Backfill a totally absent approved photo-set link, never fake asset readiness.
+
+    The selected clip manifest is *not* equivalent to provider-ready Carousel
+    Slides. Only a complete, ordered, approved, accessible 4:5 set can become
+    linked slide records. Any existing slide (even unready) or ambiguous media
+    requires the upstream media repair path, not a duplicate record set.
+    """
+    record_id = str(output.get("id") or "").strip()
+    output_number = field_str(output, "Output_ID")
+    if (
+        not re.fullmatch(r"rec[A-Za-z0-9]{14}", record_id)
+        or not re.fullmatch(r"[0-9]+", output_number)
+        or not 1 <= expected <= DEFAULT_MAX_PHOTOS
+        or _ci(field_str(output, "Platform_Output_Type")) != "facebook photo set"
+        or _ci(field_str(output, "Review_Status")) != "approved"
+        or field_str(output, "Platform_Post_ID")
+        or field_str(output, "FB_Photo_IDs_JSON")
+    ):
+        return {"created": 0, "reason": "not_eligible_for_manifest_recovery"}
+
+    owner = _slide_owner_clause(output_number, output_record_id=record_id)
+    existing = client.list_records(CAROUSEL_SLIDES_TABLE, formula=owner, max_records=DEFAULT_MAX_PHOTOS * 2 + 1)
+    existing = [row for row in existing if field(row, "Platform Output") == [record_id]]
+    if existing:
+        return {"created": 0, "reason": "linked_slides_already_exist"}
+
+    raw = field(output, "Render_Clip_List_JSON")
+    try:
+        clips = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        clips = None
+    if not isinstance(clips, list) or len(clips) != expected:
+        return {"created": 0, "reason": "approved_manifest_missing_or_incomplete"}
+    if _manifest_location_mismatch(output, clips):
+        return {"created": 0, "reason": "source_location_mismatch"}
+
+    urls: set[str] = set()
+    drive_ids: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for i, clip in enumerate(clips, 1):
+        if not isinstance(clip, dict) or parse_int(clip.get("order"), 0) != i:
+            return {"created": 0, "reason": "approved_manifest_order_invalid"}
+        url = str(clip.get("url") or clip.get("src") or "").strip()
+        drive_id = str(clip.get("googleDriveFileId") or clip.get("google_drive_file_id") or "").strip()
+        family = str(clip.get("mediaAssetRecordId") or "").strip()
+        exact = f"https://media.chicagoshining.com/studio/previews/lettered/{record_id}/{i-1}.jpg"
+        if (url != exact or url in urls or drive_id in drive_ids
+                or not re.fullmatch(r"[A-Za-z0-9_-]{15,}", drive_id)
+                or not re.fullmatch(r"rec[A-Za-z0-9]{14}", family)):
+            return {"created": 0, "reason": "approved_manifest_source_invalid"}
+        urls.add(url)
+        drive_ids.add(drive_id)
+        rows.append({
+            "Slide Name": f"Facebook {output_number} slide {i}",
+            "Slide Number": i,
+            "Current Order": i,
+            "Platform Output": [record_id],
+            "PO_Output_ID": [int(output_number)],
+            "Asset_4x5_File_URL": f"https://drive.google.com/file/d/{drive_id}/view",
+            "Google Drive File ID": drive_id,
+            "Asset_Family_Key": family,
+            "Review Status": "Final Approved",
+            "Shared_Asset_Approved": True,
+            "Asset_4x5_Public_Status": "Ready",
+            "Asset_4x5_Public_URL": url,
+            "Current Image URL": url,
+            "Final Image URL": url,
+            "Watermarked Image URL": url,
+            "Deleted From Carousel": False,
+        })
+    verifier = verify_url or verify_public_4x5_image
+    if not all(verifier(url) for url in urls):
+        return {"created": 0, "reason": "public_4x5_image_preflight_failed"}
+
+    created = client.create_records(CAROUSEL_SLIDES_TABLE, rows, typecast=True)
+    if len(created) != expected:
+        raise RuntimeError("FB0 missing-slide recovery not fully committed")
+    confirmed = list_ready_slides(
+        client, output_number, output_record_id=record_id, max_photos=DEFAULT_MAX_PHOTOS,
+    )
+    if len(confirmed) != expected:
+        raise RuntimeError("FB0 missing-slide recovery could not verify the canonical linked set")
+    return {"created": len(confirmed), "reason": "recovered_verified_manifest"}
+
 def photo_urls(slides: list[dict[str, Any]]) -> list[str]:
     return [url for url in (field_str(slide, "Asset_4x5_Public_URL") for slide in slides) if url]
 

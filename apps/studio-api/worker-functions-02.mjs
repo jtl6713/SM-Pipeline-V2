@@ -25,6 +25,7 @@ import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
+import { loadOwnerGenerationForProfile } from "./owner-generation-supabase.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioFactoryOpsReadSource,
@@ -8031,8 +8032,9 @@ export function studioInsightsLearnedTable(env) {
 /*__STUDIO_WORKER_END:studioInsightsLearnedTable__*/
 
 export function studioInsightsDbEnabled(env) {
-  // Pipeline Settings are Supabase-backed; an Airtable token is never a fallback.
-  return studioWriteSource(env) === "supabase";
+  // Learned models can live in Pipeline Settings under write SoR without PAT.
+  if (studioWriteSource(env) === "supabase") return true;
+  return Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID);
 }
 /*__STUDIO_WORKER_END:studioInsightsDbEnabled__*/
 
@@ -12821,11 +12823,21 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeF
   const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
   let creativeGuidance = {};
   if (profileId && /^rec[A-Za-z0-9]{14}$/.test(profileId)) {
+    // Global and profile directions are read from Supabase only. A profile
+    // whose brand cannot be matched uniquely gets no other owner's text.
     try {
-      const setting = await studioSettingsByName(env, creativeSettingName(profileId));
-      creativeGuidance = parseCreativeGuidance(f(setting, "Setting_Value"));
+      const [global, setting] = await Promise.all([
+        loadOwnerGenerationForProfile(env, profileId),
+        studioSettingsByName(env, creativeSettingName(profileId)),
+      ]);
+      creativeGuidance = {
+        ...parseCreativeGuidance(f(setting, "Setting_Value")),
+        owner_global_direction: global.prompt || "",
+      };
+      // Python prompt construction applies owner_global_direction before the
+      // profile-wide and narration-specific layers; do not concatenate twice.
     } catch (error) {
-      console.warn("creative guidance read failed; using script defaults", profileId, error);
+      console.warn("Supabase generation guidance read failed; using script defaults", profileId, error);
     }
   }
   const compact = (catalog || []).map((row) => ({

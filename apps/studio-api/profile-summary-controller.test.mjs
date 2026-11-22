@@ -68,11 +68,20 @@ test("POST/PATCH notifications are scoped to confirmed authoritative output/idea
 test("confirmed Supabase mutation notifies summary; uncommitted CRUD fails before notification", () => {
   const worker = raw("worker.js");
   const gateway = worker.slice(worker.indexOf("async function airtableFetch("), worker.indexOf("\n}\n", worker.indexOf("async function airtableFetch(")) + 2);
-  const uncommitted = gateway.indexOf("supabase_only_crud_uncommitted");
+  // Only an actual successful canonical Supabase commit may return a
+  // mutation representation. Uncommitted reads/writes must fail closed before
+  // Home/profile-summary invalidation and must not fabricate list/deletes.
+  const committed = gateway.indexOf("studioSupabaseCommitOutputContentFirst(");
+  const archive = gateway.indexOf("else if (archiveRecords) {");
+  const uncommitted = gateway.indexOf('console.warn("supabase_only_crud_uncommitted"');
+  const throwAt = gateway.indexOf("throw new HttpError(", uncommitted);
   const notify = gateway.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
-  assert.ok(uncommitted >= 0 && notify > uncommitted);
-  assert.match(gateway, /throw new HttpError\(/);
-  assert.doesNotMatch(gateway, /await fetch\(endpoint/);
+  assert.ok(committed >= 0 && archive > committed && uncommitted > archive
+    && throwAt > uncommitted && notify > throwAt,
+    "real Supabase commit precedes archived result; missing commit throws before notification");
+  assert.match(gateway.slice(throwAt, notify), /503/);
+  assert.doesNotMatch(gateway, /api\.airtable\.com|await airtableRequestSlot\(/);
+  assert.doesNotMatch(gateway, /body = \{ records: \[\] \}|deleted: true/);
 });
 
 test("reconciliation fences updates and never publishes staged partial totals", () => {

@@ -941,6 +941,7 @@ import {
   getStudioOperationsProfiles,
   patchStudioOperationsProfile,
   studioProfileCreativeGuidance,
+  studioOwnerGlobalGenerationGuidance,
   studioHealAutonomousRevisionLock,
   studioHealPromotedOrphanIdeas,
   studioReadyProductionCronResume,
@@ -1062,6 +1063,7 @@ export default {
       const isReadyProductionDiagnosticRoute = url.pathname === "/api/admin/ready-production-diagnostic";
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsCreativeRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
+      const isOperationsGlobalCreativeRoute = url.pathname === "/api/operations/owner-global-creative";
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
@@ -1671,8 +1673,7 @@ export default {
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
-          airtable_configured: false,
-          supabase_configured: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
+          airtable_configured: Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID),
           access_identity_present: Boolean(accessIdentity(request).email || accessIdentity(request).jwt_present),
           r2_configured: Boolean(env.STUDIO_MEDIA),
           music_preview_source: "google_drive",
@@ -2332,7 +2333,7 @@ export default {
       if (isQaRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "POST") assertWriteRequest(request, env);
-        return await handleQaApi({request,url,env,authorization,respond});
+        return await handleQaApi({request,url,env,authorization,airtableFetch,respond});
       }
 
       // An approved held revision can be reopened for creative redo without
@@ -3471,6 +3472,13 @@ export default {
           return await mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isOperationsGlobalCreativeRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "PATCH") assertWriteRequest(request, env);
+        if (!["GET", "PATCH"].includes(request.method)) throw new HttpError(405, "Method not allowed");
+        return studioOwnerGlobalGenerationGuidance(request, env, authorization);
       }
 
       if (isOperationsCreativeRoute) {
@@ -5650,7 +5658,9 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     }
   }
   let sideRead = null;
+  let sideReadAttempted = false;
   if (method === "GET" && studioWriteSource(env) === "supabase") {
+    sideReadAttempted = true;
     sideRead = await studioSideTableRead(env, tableId, pathOrParams).catch((error) => {
       console.warn("supabase side-table read failed; Airtable remains required", error);
       return null;
@@ -5673,7 +5683,10 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     else if (phase6Create && phase6Minted.length) archiveRecords = phase6Minted;
     else if (sideArchive) archiveRecords = sideArchive;
   }
+  // Supabase is now the only persistence authority. Legacy URL/credential
+  // construction must not exist, even as an exceptional transport fallback.
   let body = {};
+  let airtableCommitted = false;
   if (sideRead) {
     body = sideRead;
   } else if (archiveRecords) {
@@ -5683,13 +5696,15 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       ? archiveRecords[0]
       : { records: archiveRecords };
   } else {
-    // Airtable is retired. A Supabase miss must be visible to the caller:
-    // never return an empty list, fake record, or successful delete.
-    const tableKind = studioAirtableEgressTableKind(env, tableId);
-    console.error("supabase_only_crud_uncommitted", { table_kind: tableKind, method });
+    // Never fabricate an empty list, record deletion, or successful write when
+    // no verified canonical Supabase result was returned.
+    const table_kind = studioAirtableEgressTableKind(env, tableId);
+    console.warn("supabase_only_crud_uncommitted", { table_kind, method });
     throw new HttpError(
       503,
-      `Supabase ${method === "GET" ? "read" : "mutation"} unavailable for ${tableKind}; no record was ${method === "GET" ? "read" : "saved"}.`
+      method === "GET"
+        ? "Canonical Supabase read unavailable; no legacy archive fallback."
+        : "Canonical Supabase write uncommitted; no legacy archive fallback.",
     );
   }
   // Queue the summary change BEFORE optional Supabase mirror calls so a
@@ -5700,6 +5715,36 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   if (method !== "GET") {
     await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
+    });
+  }
+  if (mintedCreates.length && airtableCommitted) {
+    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
+    try {
+      if (airtableRecords.length) {
+        await studioSupabaseCommitOutputContentFirst(env, tableId, airtableRecords, { create: true });
+      }
+      await releaseMintedAirtableIds(env, tableId, mintedCreates.map((row) => row.id));
+    } catch (error) {
+      console.warn("supabase minted create adoption failed", tableId, error);
+    }
+  }
+  if (phase6Minted.length && airtableCommitted) {
+    const airtableRecords = Array.isArray(body?.records) ? body.records : (body?.id ? [body] : []);
+    try {
+      if (airtableRecords.length) {
+        const identity = await adoptMintedPhase6MediaIds(env, tableId, phase6Minted, airtableRecords);
+        if (identity?.ok === false) throw new Error("phase6 media identity adoption failed: " + identity.reason);
+        const adopted = await studioSupabaseCommitPhase6First(env, tableId, airtableRecords, { create: true });
+        if (!adopted?.ok) throw new Error("phase6 create adoption missing identity");
+      }
+      await releaseMintedAirtableIds(env, tableId, phase6Minted.map((row) => row.id));
+    } catch (error) {
+      console.warn("supabase phase6 minted create adoption failed", tableId, error);
+    }
+  }
+  if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
+    await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
+      console.warn("supabase airtable write-through failed", tableId, error);
     });
   }
   return body;
@@ -8608,6 +8653,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:getStudioOperationsProfiles__*/
 /*__STUDIO_WORKER_EXTRACT:patchStudioOperationsProfile__*/
 /*__STUDIO_WORKER_EXTRACT:studioProfileCreativeGuidance__*/
+/*__STUDIO_WORKER_EXTRACT:studioOwnerGlobalGenerationGuidance__*/
 /*__STUDIO_WORKER_EXTRACT:studioInternalJsonRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioSaveAutonomousLastRun__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousLastRun__*/

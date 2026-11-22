@@ -1,4 +1,4 @@
-/* Profile-scoped creative direction editor. No global/localStorage settings. */
+/* Owner-global and profile-scoped generation editor; authoritative Supabase settings. */
 (() => {
   const $ = (id) => document.getElementById(id);
   const profileSelect = $("studioProfileSelect");
@@ -13,6 +13,29 @@
   let loadedProfile = "";
   let requestSerial = 0;
   let pending = false;
+  let canEdit = false;
+  let savedCreative = null;
+  let ownerPromptForPreview = "";
+  const currentCreative = () => Object.fromEntries(fields.map((key) => [key, controls[key].value.trim()]));
+  function refreshSaveState() {
+    save.disabled = pending || !canEdit || !loadedProfile || loadedProfile !== profileSelect.value ||
+      !savedCreative || fields.every((key) => currentCreative()[key] === savedCreative[key]);
+  }
+  function refreshEffectivePreview() {
+    const preview = $("operationsCreativeEffectivePreview");
+    if (!preview) return;
+    const layers = [
+      ["Owner-wide guidance · All owned profiles", ownerPromptForPreview],
+      ["Selected profile · Every generation", controls.shared_direction?.value || ""],
+    ].filter(([, value]) => value.trim());
+    preview.textContent = layers.length
+      ? layers.map(([label, value]) => "[" + label + "]\n" + value.trim()).join("\n\n")
+      : "No global or profile-wide instructions saved. Generation-type and item-specific prompts still apply.";
+  }
+  fields.forEach((key) => controls[key]?.addEventListener("input", () => {
+    refreshSaveState();
+    refreshEffectivePreview();
+  }));
   const cardsHost = $("operationsProfiles");
 
   // The older Operations renderer still fetches all profiles to populate
@@ -45,6 +68,7 @@
   function disable(value) {
     for (const control of Object.values(controls)) control.disabled = value;
     save.disabled = value;
+    if (!value) refreshSaveState();
     reload.disabled = value;
   }
   async function call(path, options = {}) {
@@ -66,6 +90,8 @@
     const serial = ++requestSerial;
     loadedProfile = "";
     revision = "0";
+    canEdit = false;
+    savedCreative = null;
     disable(true);
     if (!/^rec[A-Za-z0-9]{14}$/.test(id)) {
       status("Select a Content Profile in the header to edit its creative instructions.");
@@ -86,8 +112,8 @@
         if (source) {
           const item = data.sources?.[key] || {};
           source.textContent = item.inherited
-            ? "Existing Airtable guidance: " + (item.label || "no value yet") + ". Editing creates a copy for this profile."
-            : "Saved in Airtable: " + (item.label || "Profile-specific creative guidance") + ".";
+            ? "Inherited guidance: " + (item.label || "no value yet") + ". Save creates this profile’s override in Supabase."
+            : "Saved in Supabase: " + (item.label || "Profile-specific creative guidance") + ".";
         }
       });
       const referenceHost = $("operationsCreativeReferences");
@@ -115,8 +141,15 @@
           ["User Prompt Template", ref.user_prompt_template],
         ]));
       }
-      disable(!data.can_edit);
-      status("Loaded existing Airtable prompts and profile overrides. Save creates a selected-profile version; shared Brand, Persona and P1/P2 templates remain unchanged.");
+      canEdit = Boolean(data.can_edit);
+      savedCreative = currentCreative();
+      ownerPromptForPreview = String(data.owner_global?.prompt || "");
+      refreshEffectivePreview();
+      disable(!canEdit);
+      refreshSaveState();
+      status(canEdit
+        ? "Loaded profile instructions. Edit a field to enable Save; shared Brand, Persona and P1/P2 templates remain unchanged."
+        : "This profile is currently read-only according to the server. Save is unavailable until your editing permission or the server configuration is corrected.", !canEdit);
     } catch (error) {
       if (serial !== requestSerial) return;
       status(error.message || String(error), true);
@@ -125,7 +158,7 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = loadedProfile;
-    if (pending || !id || id !== profileSelect.value) return;
+    if (pending || !canEdit || !id || id !== profileSelect.value || save.disabled) return;
     const serial = ++requestSerial;
     const creative = Object.fromEntries(fields.map((key) => [key, controls[key].value]));
     pending = true;
@@ -137,17 +170,21 @@
       });
       if (serial !== requestSerial || profileSelect.value !== id) return;
       revision = String(data.revision || revision);
+      savedCreative = Object.fromEntries(fields.map((key) => [key, String(data.creative?.[key] || "").trim()]));
       fields.forEach((key) => {
         controls[key].value = data.creative?.[key] || "";
         const source = $("operationsCreativeSource_" + key);
-        if (source) source.textContent = "Saved in Airtable: selected profile creative guidance override.";
+        if (source) source.textContent = "Saved in Supabase: selected profile creative guidance override.";
       });
-      status("Saved profile-specific instructions to Airtable for " + ($("operationsCreativeProfile").textContent || "this profile") + ". Shared prompts were not changed.");
+      status("Saved profile-specific instructions in Supabase for " + ($("operationsCreativeProfile").textContent || "this profile") + ". Other profiles were not changed.");
     } catch (error) {
-      if (serial === requestSerial) status(error.message || String(error), true);
+      if (serial === requestSerial) status("Save failed; your edits are still in the form. " + (error.message || String(error)), true);
     } finally {
       pending = false;
-      if (serial === requestSerial && profileSelect.value === id) disable(false);
+      if (serial === requestSerial && profileSelect.value === id) {
+        disable(!canEdit);
+        refreshSaveState();
+      }
     }
   });
   reload.addEventListener("click", load);
@@ -156,6 +193,81 @@
   new MutationObserver(() => {
     if (profileSelect.value !== (loadedProfile || "") && !pending) load();
   }).observe(profileSelect, { childList: true });
+  const ownerForm = $("operationsOwnerPromptForm");
+  const ownerInput = $("operationsOwnerPrompt");
+  const ownerSave = $("operationsOwnerPromptSave");
+  const ownerReload = $("operationsOwnerPromptReload");
+  const ownerStatus = $("operationsOwnerPromptStatus");
+  let ownerRevision = null;
+  let ownerLoadedValue = "";
+  let ownerPending = false;
+  let ownerSerial = 0;
+  function refreshOwnerSave() {
+    if (!ownerSave) return;
+    ownerSave.disabled = ownerPending || ownerRevision === null || !ownerInput ||
+      ownerInput.value.trim() === ownerLoadedValue;
+  }
+  function setOwnerStatus(text, error = false) {
+    if (!ownerStatus) return;
+    ownerStatus.textContent = text;
+    ownerStatus.classList.toggle("error-text", Boolean(error));
+  }
+  async function loadOwnerPrompt() {
+    if (!ownerInput) return;
+    const serial = ++ownerSerial;
+    ownerRevision = null;
+    ownerSave.disabled = true;
+    ownerReload.disabled = true;
+    setOwnerStatus("Loading organization-wide instructions…");
+    try {
+      const result = await call("/api/operations/owner-global-creative");
+      if (serial !== ownerSerial) return;
+      ownerRevision = String(result.revision || "0");
+      ownerInput.value = String(result.prompt || "");
+      ownerLoadedValue = ownerInput.value.trim();
+      ownerPromptForPreview = ownerLoadedValue;
+      setOwnerStatus("Loaded from Supabase. These instructions apply to future generations for all owned profiles.");
+      refreshEffectivePreview();
+      refreshOwnerSave();
+    } catch (error) {
+      if (serial === ownerSerial) setOwnerStatus(error.message || String(error), true);
+    } finally {
+      if (serial === ownerSerial) ownerReload.disabled = false;
+    }
+  }
+  ownerInput?.addEventListener("input", refreshOwnerSave);
+  ownerReload?.addEventListener("click", () => {
+    if (ownerInput.value.trim() !== ownerLoadedValue && !confirm("Discard unsaved global prompt edits?")) return;
+    loadOwnerPrompt();
+  });
+  ownerForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (ownerPending || ownerRevision === null || ownerSave.disabled) return;
+    const serial = ++ownerSerial;
+    const previousRevision = ownerRevision;
+    const prompt = ownerInput.value;
+    ownerPending = true;
+    refreshOwnerSave();
+    setOwnerStatus("Saving global prompt…");
+    try {
+      const result = await call("/api/operations/owner-global-creative", {
+        method: "PATCH", body: JSON.stringify({ revision: previousRevision, prompt }),
+      });
+      if (serial !== ownerSerial) return;
+      ownerRevision = String(result.revision);
+      ownerLoadedValue = String(result.prompt || "");
+      // Preserve any edits made while the save request was in flight.
+      if (ownerInput.value === prompt) ownerInput.value = ownerLoadedValue;
+      ownerPromptForPreview = ownerLoadedValue;
+      refreshEffectivePreview();
+      setOwnerStatus("Global prompt saved and verified in Supabase. Applies to future generation only.");
+    } catch (error) {
+      if (serial === ownerSerial) setOwnerStatus("Save failed; your instructions remain in the editor. " + (error.message || error), true);
+    } finally {
+      ownerPending = false;
+      refreshOwnerSave();
+    }
+  });
   // The preexisting tab switcher may not know this new tab. Ensure switching
   // to Global Admin works while preserving its existing scheduling handlers.
   const globalTab = $("operationsTabGlobal");
@@ -164,6 +276,7 @@
     .filter((tab) => tab !== globalTab);
   if (globalTab && globalPanel) {
     globalTab.addEventListener("click", () => {
+      if (ownerRevision === null) loadOwnerPrompt();
       document.querySelectorAll("#operationsControlView .ops-tab-panel").forEach((panel) => { panel.hidden = panel !== globalPanel; });
       document.querySelectorAll("#operationsControlView .ops-card-tab").forEach((tab) => {
         const active = tab === globalTab;
