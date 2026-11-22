@@ -85,7 +85,7 @@ test("#10992: exact held, eight-image source manifest is PREVIEW ONLY, with no f
   const p = row();
   const assets = Array.from({length: 8}, (_, i) => ({
     airtable_record_id: family(i + 1), active: true, do_not_use: false,
-    asset_status: "Available", asset_name: "Owner source",
+    asset_status: "Available", asset_name: "Owner source", metadata: { rights_status: "Owned" },
   }));
   await mockedPreview(p, assets, async (env, calls) => {
     const preview = await readSupabaseFactoryGallerySlides(env, outputId);
@@ -102,10 +102,16 @@ test("#10992: exact held, eight-image source manifest is PREVIEW ONLY, with no f
 test("#10992: no draft preview when held source asset is disabled, foreign, or already scheduled", async () => {
   const p = row(), assets = Array.from({length: 8}, (_, i) => ({
     airtable_record_id: family(i + 1), active: true, do_not_use: false, asset_status: "Available",
+    metadata: { rights_status: "Owned" },
   }));
   const badAssets = assets.map(x => ({...x}));
   badAssets[2].do_not_use = true;
   await mockedPreview(p, badAssets, async env => {
+    await assert.rejects(readSupabaseFactoryGallerySlides(env, outputId), /disabled/);
+  });
+  const noRights = assets.map(x => ({...x, metadata: {...x.metadata}}));
+  noRights[4].metadata.rights_status = "Unknown";
+  await mockedPreview(p, noRights, async env => {
     await assert.rejects(readSupabaseFactoryGallerySlides(env, outputId), /disabled/);
   });
   await mockedPreview({...p,scheduled_post_date: "2026-12-10T12:00:00Z"}, assets, async env => {
