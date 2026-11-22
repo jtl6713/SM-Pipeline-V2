@@ -35,4 +35,5 @@ def test_explicit_opt_in_keeps_supported_outbox(monkeypatch):
     monkeypatch.setattr(pipeline, "_rest", lambda *args, **kwargs: calls.append((args, kwargs)))
     pipeline._enqueue_outbox({}, "request", {"id": "rec123", "fields": {}}, "PATCH")
     assert len(calls) == 1
-    assert calls[0][0][1] == "studio_side_effect_outbox"\n    assert calls[0][0][2] == "POST"
+    assert calls[0][0][1] == "studio_side_effect_outbox"
+    assert calls[0][0][2] == "POST"
