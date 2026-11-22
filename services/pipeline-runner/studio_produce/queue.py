@@ -88,6 +88,36 @@ def master_transfer_id(request_id: str, asset_id: str) -> str:
     return f"ITEM4-MASTER-{request_id}-{asset_id}"
 
 
+_QUEUE_LIFECYCLE_FIELDS = frozenset({"Transfer_Status", "Preview_Status"})
+
+
+def _queue_compare_value(value: Any) -> Any:
+    """Normalize sparse Supabase/Airtable linked values and empty optional fields."""
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, dict) and "id" in value:
+        return str(value["id"])
+    if isinstance(value, list):
+        return tuple(_queue_compare_value(item) for item in value)
+    return value
+
+
+def _pending_metadata_patch(current: dict[str, Any], desired: dict[str, Any]) -> dict[str, Any]:
+    """Update only real metadata changes; never modify a transfer lifecycle here.
+
+    Queue claims and error recovery are handled elsewhere and must not be
+    implicitly converted to Pending by a production-plan refresh.
+    """
+    if field_str(current, "Transfer_Status") != "Pending":
+        return {}
+    actual = current.get("fields") or {}
+    return {
+        key: value for key, value in desired.items()
+        if key not in _QUEUE_LIFECYCLE_FIELDS
+        and _queue_compare_value(actual.get(key)) != _queue_compare_value(value)
+    }
+
+
 def upsert_master_queue(client: AirtableClient, request_id: str, assets: list[dict[str, Any]], *, test_run_id: str = "") -> int:
     folder = pipeline_setting(client, "STUDIO_MASTER_DRIVE_FOLDER_ID")
     if not folder:
@@ -129,8 +159,9 @@ def upsert_master_queue(client: AirtableClient, request_id: str, assets: list[di
         current = existing.get(transfer_id)
         if current:
             status = field_str(current, "Transfer_Status")
-            if status not in {"Ready", "Drive Uploaded", "Processing"}:
-                client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, current["id"], fields, typecast=True)
+            patch = _pending_metadata_patch(current, fields)
+            if patch:
+                client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, current["id"], patch, typecast=True)
                 created += 1
             continue
         client.create_records(MEDIA_TRANSFER_QUEUE_TABLE, [fields], typecast=True)
@@ -198,8 +229,9 @@ def upsert_variant_queue(
             current = existing.get(transfer_id)
             if current:
                 status = field_str(current, "Transfer_Status")
-                if status not in {"Ready", "Drive Uploaded", "Processing"}:
-                    updates.append({"id": current["id"], "fields": fields})
+                patch = _pending_metadata_patch(current, fields)
+                if patch:
+                    updates.append({"id": current["id"], "fields": patch})
                 continue
             creates.append(fields)
     keep = set()
@@ -212,7 +244,7 @@ def upsert_variant_queue(
         if transfer_id in keep:
             continue
         status = field_str(row, "Transfer_Status")
-        if status not in {"Pending", "Processing"}:
+        if status != "Pending":
             continue
         drops.append(
             {
