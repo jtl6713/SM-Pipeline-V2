@@ -5,3 +5,5 @@ Graph GET-only Meta account checks for approved Miami/LA/NYC outputs.
 NO publishing, rights or hold mutation, consumer activation, or Airtable operations.
 
 Retry after verified probe-host packaging failure; no producer or provider writes in either run.
+
+Invoke installed runner virtualenv Python for correct read-only Supabase and Graph SDK dependencies.
