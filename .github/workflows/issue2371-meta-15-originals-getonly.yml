@@ -1,0 +1,127 @@
+name: Issue 2371 15 Meta Originals GET Only
+on:
+  push:
+    branches: [main]
+    paths: ['repair/scripts/issue2371-meta-15-originals-readonly.ps1', '.github/workflows/issue2371-meta-15-originals-getonly.yml']
+  pull_request:
+    paths: ['repair/scripts/issue2371-meta-15-originals-readonly.ps1', '.github/workflows/issue2371-meta-15-originals-getonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2371-exact-meta15-readonly
+  cancel-in-progress: false
+jobs:
+  source-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell and verify output-scoped read-only source
+        shell: pwsh
+        run: |
+          $file='repair/scripts/issue2371-meta-15-originals-readonly.ps1'
+          $t=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$t,[ref]$errors) | Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $file
+          foreach($required in @('P1_META15_AUDIT=','vkwvscgisqsbuwagdvtb','GraphGet','negative_delivery_proven=$false','safe_to_retry=$false')){
+            if(-not $s.Contains($required)){throw ('read_only_contract_missing_'+$required)}
+          }
+      - name: Reject provider writes, output mutation and token exposure
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue2371-meta-15-originals-readonly.ps1').read_text()
+          for bad in ['-Method Post','-Method Patch','-Method Put','-Method Delete','Invoke-Sqlcmd','/media_publish','api.airtable.com','AIRTABLE_PAT','Write-Host $token','Write-Output $token']:
+              assert bad not in s, f'unsafe operation {bad}'
+          for rid in ['5348|','5672|','5678|','5860|','5866|','5969|','6001|','6069|','6255|','8803|','9777|','10152|','10638|','10671|','10694|']:
+              assert rid in s, f'missing exact target {rid}'
+          print('META15_GET_ONLY_STATIC_PASS')
+          PY
+  protected-meta-audit:
+    if: github.event_name != 'pull_request'
+    needs: source-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing protected Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for token in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$token" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/meta15-catalog.json -w '%{http_code}' -H "Authorization: Bearer $token" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/meta15-catalog.json >/dev/null; then
+              echo "::add-mask::$token"
+              echo "META15_OPS_TOKEN=$token" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'No approved Ops access, no provider operation';exit 1
+      - name: Pin exact immutable SHA256 PowerShell source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,hashlib,json,os
+          f=pathlib.Path('repair/scripts/issue2371-meta-15-originals-readonly.ps1')
+          digest=hashlib.sha256(f.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(c in '0123456789abcdef' for c in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{f.as_posix()}'
+          cmd=("$ErrorActionPreference='Stop';"+f"$url='{url}';"+
+               "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"+
+               "$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"+
+               f"if($hash -ne '{digest}'){{throw 'immutable_source_hash_mismatch'}};"+
+               "& ([ScriptBlock]::Create($src))")
+          pathlib.Path('/tmp/meta15-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          print('META15_SOURCE_SHA256_PINNED')
+          PY
+      - name: Run only authenticated Meta GET and original source reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for attempt in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/meta15-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $META15_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/meta15-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then accepted=true;break;fi
+            if [[ "$code" != 409 ]]; then echo "Audit admission failed: $code";exit 2;fi
+            sleep 12
+          done
+          [[ "$accepted" == true ]] || { echo 'Ops busy; no Meta GET';exit 2; }
+          job=$(jq -er '.job.id // .jobId' /tmp/meta15-start.json)
+          for tick in $(seq 1 290); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $META15_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/meta15-status.json
+            state=$(jq -r '.job.status // empty' /tmp/meta15-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/meta15-status.json | grep '^P1_META15_AUDIT=' | tail -1 | sed 's/^P1_META15_AUDIT=//' > /tmp/meta15-evidence.json
+              jq -e '.read_only==true and .targets==15 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .graph_get_calls<=100 and (.results|length)==15 and (.provider_coverage|length)==4' /tmp/meta15-evidence.json >/dev/null
+              jq -c '{version,targets,graph_get_calls,provider_coverage,results:[.results[]|{output,market,kind,owner_identity_verified,candidate_count,same_format_caption_candidates,saved_page_photo_count,saved_page_photos_owner_verified,safe_to_retry,conclusive_nonpublication}],provider_writes,output_writes}' /tmp/meta15-evidence.json
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Protected GET failed, no provider retry or output mutation'
+              jq -r '.job.log // ""' /tmp/meta15-status.json | tail -n 8 | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g' | grep -Ev 'ACCESS_TOKEN|Authorization:|Bearer |SUPABASE_SERVICE_ROLE_KEY' || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo 'GET timeout, cannot infer provider non-delivery';exit 4
+      - name: Preserve sanitized original receipt evidence for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2371-meta15-original-provider-getonly
+          path: /tmp/meta15-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
