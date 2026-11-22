@@ -53,6 +53,14 @@ def _limit(name: str, default: int, low: int, high: int) -> int:
         return default
 
 
+def max_db_reads() -> int:
+    return _limit("STUDIO_MAX_DB_READS", 6, 1, 32)
+
+
+def max_db_writes() -> int:
+    return _limit("STUDIO_MAX_DB_WRITES", 3, 1, 16)
+
+
 def database_path() -> Path:
     configured = os.getenv("STUDIO_GOVERNOR_DB_PATH", "").strip()
     if configured:
@@ -82,6 +90,11 @@ def _connect() -> Iterator[sqlite3.Connection]:
     )""")
     db.execute("""CREATE TABLE IF NOT EXISTS governor_control (
         name TEXT PRIMARY KEY, until_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS request_metrics (
+        minute INTEGER NOT NULL, operation TEXT NOT NULL,
+        total INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (minute, operation)
     )""")
     try:
         yield db
@@ -127,6 +140,9 @@ def trip_database_circuit(*, cooldown_seconds: float = 90) -> None:
 
 def is_database_overload(error: BaseException) -> bool:
     message = str(error).lower()
+    if "supabase" in message and any(code in message for code in
+        (" 429", " 500", " 502", " 503", " 504", " 522", "timeout", "timed out")):
+        return True
     return any(s in message for s in (
         "connection terminated due to connection timeout", "postgrest",
         "supabase connection", "http 522", "status 522", "pgrst",
@@ -268,6 +284,21 @@ def resource_active(scope: str, key: str) -> bool:
     return bool(row)
 
 
+def record_db_request(method: str, *, failed: bool) -> None:
+    if not enabled():
+        return
+    minute = int(time.time() // 60)
+    operation = "read" if method.upper() in {"GET", "HEAD"} else "write"
+    with _connect() as db:
+        db.execute("""INSERT INTO request_metrics(minute,operation,total,failures)
+            VALUES(?,?,1,?)
+            ON CONFLICT(minute,operation) DO UPDATE SET
+            total=total+1, failures=failures+excluded.failures""",
+            (minute, operation, int(failed)))
+        # Keep only 30 minutes of local counters (no request payloads or IDs).
+        db.execute("DELETE FROM request_metrics WHERE minute<?", (minute - 30,))
+
+
 def snapshot() -> dict[str, object]:
     if not enabled():
         return {"enabled": False}
@@ -276,11 +307,17 @@ def snapshot() -> dict[str, object]:
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope='photo_group' AND lease_until>?""", (time.time(),)).fetchone()[0]
         queued = dict(counts)
+        rows = db.execute("""SELECT operation,SUM(total),SUM(failures) FROM request_metrics
+            WHERE minute>=? GROUP BY operation""", (int(time.time() // 60)-1,)).fetchall()
+        traffic = {operation: {"requests_last_two_minutes": total, "failures_last_two_minutes": failed}
+                   for operation, total, failed in rows}
         return {
             "enabled": True, "scope": "single_windows_host", "active_jobs": queued.get("running", 0),
             "queued_jobs": queued.get("queued", 0), "active_photo_groups": groups,
             "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),
             "max_ratio_workers": max_ratio_workers(), "database_circuit_open": circuit_open(db),
+            "max_db_reads": max_db_reads(), "max_db_writes": max_db_writes(),
+            "supabase_request_metrics": traffic,
         }
 
 
