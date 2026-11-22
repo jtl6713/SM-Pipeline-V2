@@ -11,7 +11,7 @@ test("2593 final job resume has exact blocked-error, output and hold preconditio
  assert.ok(a>0&&b>a,"extractable isolated recovery helper is present");
  const body=code.slice(a,b);
  for(const id of ["reczvqjo1xs2jYXn0","recbxdvQZTDm61Ctq"]) assert.ok(body.includes(id));
- assert.match(body,/String\(job\?\.step \|\| ""\) !== "blocked"/);
+ assert.match(body,/\["blocked","escalated"\]\.includes\(String\(job\?\.step \|\| ""\)\)/);
  assert.match(body,/tblSITCujCsJTNcDe/);
  assert.match(body,/expected_two_output_links_missing/);
  assert.match(body,/output_identity_or_link_mismatch/);
