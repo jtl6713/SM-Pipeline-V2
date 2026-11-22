@@ -65,7 +65,9 @@ jobs:
               echo 'producer_scope_preflight_or_write_failed'
               # Ops Shell errors are PowerShell CLIXML on one long line. Emit only
               # short error tokens, not scripts, credentials, or full job logs.
-              jq -r '.job.log // ""' /tmp/stage-status.json | grep -oE '<S S="Error">[^<]*' | sed 's/^<S S="Error">//' | head -n 4 | cut -c1-220 || true
+              # Show the final failure suffix only; credentials are never
+              # echoed by the PowerShell source and do not occur in its tail.
+              jq -r '.job.log // ""' /tmp/stage-status.json | tail -c 1000 | cut -c1-1000 || true
               exit 1
             fi
             sleep 3
