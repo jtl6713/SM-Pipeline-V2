@@ -15076,7 +15076,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
       const originalUntouchedDraft = !rows.length
         && String(f(latest, "Request_Status") || "").trim() === "Draft"
         && Boolean(f(latest, "Active"))
-        && /(?:^|\\n)origin=autonomous(?:\\n|$)/i.test(String(f(latest, "Production_Notes") || ""))
+        && /(?:^|\n)origin=autonomous(?:\n|$)/i.test(String(f(latest, "Production_Notes") || ""))
         && !productionNotesRevisionOpen(f(latest, "Production_Notes"))
         && !linkedRecordIds(f(latest, "Promoted_Content_Item")).length
         && String(f(latest, "Studio_Output_Plan_Status") || "").trim() === "Ready"
