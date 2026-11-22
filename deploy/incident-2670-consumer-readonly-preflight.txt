@@ -1,0 +1,5 @@
+Incident #2670 second phase recovery preflight, Nov 22 2026.
+Read-only, exact host Windows runtime configuration, I1 persistent job spool state,
+legacy rendering-review and native-gallery job ledger mappings, and authenticated
+Graph GET-only Meta account checks for approved Miami/LA/NYC outputs.
+NO publishing, rights or hold mutation, consumer activation, or Airtable operations.
