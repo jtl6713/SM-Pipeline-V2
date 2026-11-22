@@ -1,0 +1,46 @@
+name: Issue 2294 FB0 Native Gallery Pre-Attempt Guard CI
+on:
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/fb/assets.py'
+      - 'services/pipeline-runner/fb/fb0.py'
+      - 'services/pipeline-runner/tests/test_fb0_native_gallery_preflight_2294.py'
+      - '.github/workflows/issue2294-fb0-canonical-preflight-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/pipeline-runner/fb/assets.py'
+      - 'services/pipeline-runner/fb/fb0.py'
+      - 'services/pipeline-runner/tests/test_fb0_native_gallery_preflight_2294.py'
+      - '.github/workflows/issue2294-fb0-canonical-preflight-ci.yml'
+permissions:
+  contents: read
+jobs:
+  held-photo-package-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies only
+        run: python -m pip install --disable-pip-version-check --quiet -r services/pipeline-runner/requirements.txt pytest==8.3.4
+      - name: Parse original FB0 and canonical package guard
+        run: python -m py_compile services/pipeline-runner/fb/fb0.py services/pipeline-runner/fb/assets.py services/pipeline-runner/tests/test_fb0_native_gallery_preflight_2294.py
+      - name: Prove missing-native-slide refusal before FB0 writes or attempts
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: python -m pytest -q services/pipeline-runner/tests/test_fb0_native_gallery_preflight_2294.py
+      - name: Preserve fail-closed safety intent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('services/pipeline-runner/fb/fb0.py').read_text()
+          guard=Path('services/pipeline-runner/fb/assets.py').read_text()
+          assert src.index('preflight_reason = native_photo_preflight_reason(output, ready)') < src.index('attempt = (parse_int(field(output, "Publish_Attempt_Count")')
+          assert 'Selected_Assets_JSON' in guard and 'Render_Clip_List_JSON' in guard
+          assert 'Shared_Asset_Approved' in guard and 'Approved For Final' in guard
+          assert 'FB_Photo_ID' in guard and 'native_gallery_existing_provider_media_requires_reconciliation' in guard
+          print('issue2294_fb0_before_attempt_canonical_guard=PASS')
+          PY

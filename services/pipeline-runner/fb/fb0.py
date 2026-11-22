@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count, recover_missing_photo_slides, manifest_location_mismatch
+from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count, recover_missing_photo_slides, manifest_location_mismatch, native_photo_preflight_reason
 from fb.common import append_note, preview, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     DEFAULT_IMAGE_STAGE_MAX_RETRIES,
@@ -65,6 +65,27 @@ def process_request(
         return {"processed": False, "reason": "source_location_mismatch", **result}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
+
+    # #2294: do not count a Facebook Photo Set publishing attempt, reserve a
+    # lock, or let FB0 silently mint assets when its exact, final-approved
+    # Supabase Carousel Slides package is absent. Read-only preflight first.
+    # Only V2 native photo packages carry a selected clip count or selected
+    # asset manifest. The legacy pre-V2 photo route has neither and keeps its
+    # historical approved-slide count reconciliation; never infer V2 approval
+    # from legacy source metadata. V2 with an incomplete manifest fails closed.
+    if (field_str(output, "Platform_Output_Type") == "Facebook Photo Set"
+            and (field(output, "Selected_Clip_Count") is not None
+                 or field(output, "Selected_Assets_JSON") is not None)):
+        ready = list_ready_slides(
+            client, field_str(output, "Output_ID"),
+            output_record_id=record_id, max_photos=11,
+        )
+        preflight_reason = native_photo_preflight_reason(output, ready)
+        if preflight_reason:
+            return {
+                "processed": False, "reason": preflight_reason,
+                "native_gallery_preflight_only": True, **result,
+            }
 
     now = iso_utc()
     attempt = (parse_int(field(output, "Publish_Attempt_Count"), 0) or 0) + 1
