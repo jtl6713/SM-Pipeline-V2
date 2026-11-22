@@ -1047,7 +1047,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(syncModule, /media_assets: media/);
   assert.match(syncModule, /studio_media_transfer_queue: queue/);
   assert.match(syncModule, /runner_record_projections: runnerMarkers/);
-  assert.match(worker, /Supabase .* unavailable for/);
+  assert.match(worker, /Canonical Supabase read unavailable; no legacy archive fallback/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
   assert.match(worker, /listSupabaseOverviewPack/);
@@ -4109,7 +4109,7 @@ test("Output/Content SoR record GET miss skips Airtable archive", async () => {
   assert.match(worker, /Platform Outputs/);
   assert.match(worker, /Content Items/);
   assert.match(worker, /supabase_only_crud_uncommitted/);
-  assert.match(worker, /no record was /);
+  assert.match(worker, /Canonical Supabase read unavailable; no legacy archive fallback/);
   assert.doesNotMatch(worker, /await fetch\(endpoint,/);
   assert.match(worker, /studioPhase6WriteSource\(env\) === "supabase"/);
   assert.match(worker, /studioAirtableEgressTableKind\(env, tableId\)/);
