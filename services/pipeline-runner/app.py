@@ -111,7 +111,8 @@ def _recovery_read_only_gate():
                 and recovery_image_upload_allowed()):
             # The handler still requires a runner shared secret, checks image
             # type, and uses a single durable governor resource slot.
-            request.max_content_length = 26 * 1024 * 1024
+            if request.content_length is not None and request.content_length > 26 * 1024 * 1024:
+                return jsonify({"error": "photo_upload_body_too_large"}), 413
             return None
         response = jsonify({
             "ok": False,
@@ -726,7 +727,10 @@ def run_studio_asset_library():
     # Default async: Worker→tunnel cannot hold screen+watermark+Drive in one request.
     # Pass async=0 only for local/sync diagnostics.
     async_mode = async_raw not in {"0", "false", "no", "off"}
-    content = upload.read() if upload else b""
+    # Bounded read prevents unbounded memory even for chunked requests with
+    # an absent or incorrect Content-Length header.
+    content = (upload.read(25 * 1024 * 1024 + 1) if recovery_read_only()
+               else upload.read()) if upload else b""
     if not content:
         return jsonify({"error": "file is required"}), 422
     if recovery_read_only() and len(content) > 25 * 1024 * 1024:
