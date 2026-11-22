@@ -1977,9 +1977,26 @@ export async function listSupabasePipelineContentPage(env, {
     filter += `&created_at=lt.${encodeURIComponent(localMidnightUtc(nextDay))}`;
   }
   const contents = await supabaseRest(env,
-    `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at`
+    `content_items?${filter}&select=id,airtable_record_id,content_number,content_title,created_at,production_request_id,platform_output_count`
     + `&order=content_number.desc.nullslast,id.desc&limit=${size + 1}&offset=${skip}`);
   const page = (contents || []).slice(0, size);
+  const requestIds = [...new Set(page.map(row => row.production_request_id).filter(Boolean))];
+  const requestById = new Map();
+  const planProgressByRequest = new Map();
+  if (requestIds.length) {
+    const requestRows = await supabaseRest(env,
+      `production_requests?id=in.(${requestIds.join(",")})&select=id,request_status,production_job&limit=${requestIds.length}`);
+    for (const row of requestRows || []) requestById.set(row.id, row);
+    const planRows = await supabaseRest(env,
+      `production_request_outputs?production_request_id=in.(${requestIds.join(",")})&enabled=eq.true`
+      + `&select=production_request_id,platform_output_id&limit=500`);
+    for (const row of planRows || []) {
+      const progress = planProgressByRequest.get(row.production_request_id) || { planned_count:0, created_count:0 };
+      progress.planned_count += 1;
+      if (row.platform_output_id) progress.created_count += 1;
+      planProgressByRequest.set(row.production_request_id, progress);
+    }
+  }
   const contentByAirtableId = new Map(page.filter(c => c.airtable_record_id).map(c => [
     c.airtable_record_id, { id: c.airtable_record_id, createdTime: c.created_at,
       fields: { Content_ID: c.content_number, Content_Title: c.content_title } },
@@ -1999,8 +2016,19 @@ export async function listSupabasePipelineContentPage(env, {
     records: outputs, contentByAirtableId,
     content_ids: page.map(c => c.content_number),
     // Include content without generated outputs so a 10-ID page really shows 10 groups.
-    content_groups: page.map(c => ({ id: c.airtable_record_id || c.id,
-      content_id: c.content_number, title: c.content_title, created_at: c.created_at })),
+    content_groups: page.map(c => {
+      const request = requestById.get(c.production_request_id) || null;
+      const progress = planProgressByRequest.get(c.production_request_id) || {
+        planned_count:0, created_count:Number(c.platform_output_count || 0),
+      };
+      const step = String(request?.production_job?.step || "").trim().toLowerCase();
+      const state = progress.planned_count > 0 && progress.created_count >= progress.planned_count
+        ? "Created" : ["blocked","escalated"].includes(step) ? "Blocked" : "Creating";
+      return { id: c.airtable_record_id || c.id,
+        content_id: c.content_number, title: c.content_title, created_at: c.created_at,
+        platform_output_progress: { ...progress, state, job_step:step || null,
+          error:String(request?.production_job?.error || "").trim() || null } };
+    }),
     has_more: (contents || []).length > size,
     next_offset: (contents || []).length > size ? skip + page.length : null,
     read_source: "supabase",

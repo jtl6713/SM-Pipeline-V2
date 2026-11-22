@@ -264,6 +264,8 @@
 
 /* Phase 2B 0.4.2 — per-output overrides */
 .requested-output-cards{display:grid;gap:8px;margin-top:12px}
+.requested-output-progress{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:var(--surface-soft,#f7f8fa)}
+.requested-output-progress span{color:var(--muted);font-size:.88rem;text-align:right;max-width:62ch}
 .requested-output-card{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:#fff}
 .requested-output-title{font-size:.82rem;font-weight:850;color:var(--ink)}
 .requested-output-detail{font-size:.74rem;color:var(--muted);margin-top:2px}
@@ -295,6 +297,8 @@
 }
 @media(max-width:760px){
   .requested-output-card{align-items:flex-start;flex-direction:column}
+  .requested-output-progress{flex-direction:column}
+  .requested-output-progress span{text-align:left}
   .requested-output-actions{justify-content:flex-start}
   .override-grid,.override-text-row,.effective-preview-grid{grid-template-columns:1fr}
 }

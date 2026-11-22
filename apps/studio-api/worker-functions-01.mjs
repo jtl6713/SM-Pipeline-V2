@@ -4651,6 +4651,11 @@ export function mapProductionRequestOutput(record, master = null, renderFormat =
     created_at: f(record, "Created_At"),
     updated_at: f(record, "Updated_At"),
     platform_output_links: links("Platform_Output"),
+    // Supabase is the Phase-6 authority. Its typed FK is available even when
+    // the legacy Airtable reciprocal link bag is intentionally not mirrored.
+    platform_output_exists: Boolean(
+      links("Platform_Output").length || f(record, "Platform_Output_Exists")
+    ),
   };
 
   if (master) {
