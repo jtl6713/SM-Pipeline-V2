@@ -32,12 +32,11 @@ $key = Read-Setting 'SUPABASE_SERVICE_ROLE_KEY'
 $rows = @(Invoke-RestMethod -Uri "$sb/rest/v1/production_requests?airtable_record_id=eq.recR4EQcshFZ4fNL0&select=airtable_record_id,production_job,variant_status,variant_manifest&limit=1" -Headers @{apikey=$key; Authorization="Bearer $key"} -TimeoutSec 20)
 if ($rows.Count -ne 1) { throw 'canary_request_unavailable' }
 $canary = $rows[0]
-# One 4:5 gallery must NOT be the global admission gate. The original
-# database/runner recovery was proven by an accepted 1-job canary advancing
-# beyond its prior blocked GET and successfully transferring real photos.
-# Preserve item-specific creative holds for incomplete galleries.
-if ([int]$canary.production_job.percent -lt 50) { throw 'producer_canary_has_not_progressed' }
-if (([string]$canary.production_job.error).StartsWith('Supabase record lookup unsupported or unavailable for tblBZLXPd1p2NRWRK/')) { throw 'old_queue_read_blocker_still_active' }
+# Terminal draft-state blockage resets the job percent to 5 even after
+# successfully finishing variant preparation. Use canonical asset readiness,
+# NOT the lossy last-step percentage, as independent production proof.
+if ($canary.variant_status -ne 'Ready' -or [int]$canary.variant_manifest.plan_ready_count -lt 8) { throw 'canary_4x5_package_not_verified_ready' }
+if ($canary.production_job.step -eq 'blocked' -and [string]$canary.production_job.error -ne 'No Platform Outputs found for this Production Request') { throw 'unexpected_canary_blocker' }
 
 $backup = "$path.producers-all-$(Get-Date -Format yyyyMMdd-HHmmss).bak"
 Copy-Item -LiteralPath $path -Destination $backup -ErrorAction Stop
