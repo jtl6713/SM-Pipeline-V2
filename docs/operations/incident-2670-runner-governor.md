@@ -31,8 +31,9 @@ publication hold, changes review decisions, or enables Airtable/Make.
    **3** writes simultaneously (the latter only for `supabase_pipeline._rest`).
 6. Run one nonpublishing synthetic production test and one controlled internal
    real production job without releasing holds. Check
-   authenticated runner `GET /admin/workload` for active, queued, resource and
-   two-minute REST counts, failures and circuit status.
+   the governor's local `snapshot()` diagnostics in a nonpublishing test.
+   The authenticated runner `GET /admin/workload` endpoint is held in
+   separate draft PR #2676 because editing app.py triggers auto-deployment.
 7. Restart the runner under a queued/claimed synthetic test and confirm leases
    expire/requeue without double-processing. Observe resource graphs, throughput
    and 522/5xx before opening further capacity.
@@ -75,3 +76,14 @@ publication hold, changes review decisions, or enables Airtable/Make.
   processes; at most two parallel ratios per group.
 - Validate existing Ready, Drive Uploaded, Error and Processing media records,
   unchanged identifiers, and every approval/publish hold.
+
+## Release separation (incident #2670)
+
+- Core governor PR #2674 is feature-flagged OFF by default. It must not trigger
+  a production runner release merely because its source was merged.
+- Read-only Admin diagnostics endpoint and health flag are separately staged in
+  draft PR #2676; this edits `app.py` and therefore can trigger the Windows
+  runner deployment workflow. Only release it after Supabase read/write recovery
+  and explicit operator approval.
+- Neither code merge nor enabled feature automatically authorizes the Worker,
+  provider publication, or DNP-hold release.
