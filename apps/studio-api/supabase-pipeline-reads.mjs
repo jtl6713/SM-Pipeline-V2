@@ -2394,6 +2394,63 @@ export async function syncCarouselSlideRecordsToSupabase(env, records) {
   return { ok: true, updated: rows.length };
 }
 
+/**
+ * Factory's authenticated, read-only native-photo slide inventory.
+ * Resolve the exact output through Supabase and match BOTH the output number
+ * and its original record ID. Never fall back to Airtable or to a cover URL.
+ * Return only vetted public CDN images, never source Drive IDs or slide metadata.
+ */
+export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
+  const id = String(outputRecordId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new Error("Invalid Factory gallery output ID");
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Factory gallery read is unavailable");
+  const parents = await supabaseRest(env,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}`
+    + "&select=airtable_record_id,output_number,platform_output_type,studio_output_type,do_not_publish&limit=1");
+  const parent = Array.isArray(parents) ? parents[0] : null;
+  if (!parent || !Number.isInteger(parent.output_number)) return null;
+  if (!/carousel|photo set|multi.image/i.test(
+    `${parent.platform_output_type || ""} ${parent.studio_output_type || ""}`)) {
+    return { output_id: id, output_number: parent.output_number, slides: [], reason: "not_a_native_gallery" };
+  }
+  const slides = await supabaseRest(env,
+    `carousel_slides?deleted_from_carousel=eq.false`
+    + `&fields->PO_Output_ID=cs.${encodeURIComponent(JSON.stringify([parent.output_number]))}`
+    + "&select=airtable_record_id,current_order,deleted_from_carousel,fields"
+    + "&order=current_order.asc,airtable_record_id.asc&limit=12");
+  if (!Array.isArray(slides)) throw new Error("Factory slide inventory was unavailable");
+  if (slides.length > 10) throw new Error("Factory gallery exceeds safe slide limit");
+  const seen = new Set();
+  const publicUrl = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
+  const result = slides.map((slide) => {
+    const fields = slide?.fields || {};
+    const linkedIds = fields["Platform Output"];
+    const linkedNumbers = fields.PO_Output_ID;
+    const order = Number(slide?.current_order);
+    const imageUrl = String(fields["Final Image URL"] || "").trim();
+    if (slide.deleted_from_carousel !== false
+        || !Array.isArray(linkedIds) || !linkedIds.includes(id)
+        || !Array.isArray(linkedNumbers) || !linkedNumbers.includes(parent.output_number)
+        || !Number.isInteger(order) || order < 1 || order > 10 || seen.has(order)
+        || !publicUrl.test(imageUrl)) {
+      throw new Error("Native gallery slide identity or CDN image failed verification");
+    }
+    seen.add(order);
+    return { order, image_url: imageUrl };
+  });
+  if (result.length < 2 || result.some((slide, index) => slide.order !== index + 1)) {
+    throw new Error("Native gallery has incomplete or noncontiguous slides");
+  }
+  return {
+    output_id: id,
+    output_number: parent.output_number,
+    do_not_publish: parent.do_not_publish === true,
+    count: result.length,
+    slides: result,
+    source: "supabase-native-carousel-slides",
+  };
+}
+
 export async function listSupabaseCarouselSlidesByIds(env, ids) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase carousel slide read is not configured");
   const wanted = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];

@@ -209,6 +209,7 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  readSupabaseFactoryGallerySlides,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -1048,6 +1049,7 @@ export default {
       const isProductionRequestOutputRecordRoute = /^\/api\/production-request-outputs\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isOutputPreviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isFactoryOutputPreviewRoute = /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/preview$/.test(url.pathname);
+      const isFactoryGallerySlidesRoute = /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/slides$/.test(url.pathname);
       const isReviewAttemptPreviewRoute = /^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/attempts\/[A-Za-z0-9_-]{8,120}\/preview$/.test(url.pathname);
       const isOutputScheduleGridRoute = url.pathname === "/api/outputs/schedule-grid";
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
@@ -4282,6 +4284,15 @@ export default {
 
       if (isOutputScheduleGridRoute) {
         return listOutputScheduleGrid(request, env, url, authorization);
+      }
+
+      if (isFactoryGallerySlidesRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Factory slide inventory is read-only");
+        requirePermission(authorization, "outputs_review");
+        const outputId = url.pathname.split("/")[4];
+        const inventory = await readSupabaseFactoryGallerySlides(env, outputId);
+        if (!inventory) throw new HttpError(404, "Native gallery output not found");
+        return respond(request, env, { ok: true, ...inventory });
       }
 
       if (isFactoryOutputPreviewRoute) {
