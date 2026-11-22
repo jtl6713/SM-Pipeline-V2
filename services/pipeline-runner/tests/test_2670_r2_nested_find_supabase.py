@@ -12,7 +12,9 @@ def test_exact_r2_selector_translates_all_supported_predicates():
     assert "do_not_publish" in translated
     assert "Asset_Selection_Notes" in translated
     assert "Studio exact source authority" in translated
-    assert "selected_assets_text" in translated
+    # The selector's legacy JSON field is projected from its canonical bag,
+    # not necessarily the optional typed selected_assets_text denormalization.
+    assert "Selected_Assets_JSON" in translated
     assert "render_status" in translated
 
 
