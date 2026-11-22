@@ -30,3 +30,17 @@ test("repair navigation remains read-only: no auto approval or publication on Op
   assert.match(open, /StudioOpenPipelineOutputById/);
   assert.doesNotMatch(open, /\/api\/factory\/approve|publish-now|do_not_publish\s*=\s*false/);
 });
+
+test("every Repair title opens the exact entity, including non-output requests and ideas", () => {
+  const title = js.slice(js.indexOf("const titleMarkup ="), js.indexOf("return `<div class=\"factory-line\""));
+  assert.match(title, /lane === "manual"/, "every manual repair must be linked");
+  assert.doesNotMatch(title, /lane === "manual" && card.kind === "output"/, "never restrict titles to outputs");
+  assert.match(title, /data-factory-open="\$\{esc\(card\.id\)\}"/);
+  assert.match(title, /card\.kind === "request"/);
+  assert.match(title, /card\.kind === "idea"/);
+  assert.match(title, /card\.kind === "output"/);
+  const resolver = readFileSync(new URL("./assets/factory-open-target.js", import.meta.url), "utf8");
+  assert.match(resolver, /kind === "output"/);
+  assert.match(resolver, /kind === "request"/);
+  assert.match(resolver, /kind === "idea"/);
+});
