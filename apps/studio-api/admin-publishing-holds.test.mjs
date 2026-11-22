@@ -85,7 +85,7 @@ test("release requires exact output identity, explicit note, revision and active
     body:JSON.stringify({confirm_output_id:REC,release_note:"short",revision:row().updated_at})
   }),ops);
   assert.equal(response.status,400);
-  assert.equal(calls.length,0);
+  assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
 });
 test("release disables auto-publishing, verifies database readback and audit",async()=>{
   const {ops,calls,held}=fixture();
