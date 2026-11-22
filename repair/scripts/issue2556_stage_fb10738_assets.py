@@ -33,8 +33,8 @@ LABELS = ["Echo-Park-Lake", "Angels-Point", "Baxter-Stairs", "Dodger-Stadium-Ove
 
 
 def _load_runner():
-    root = Path.cwd() / "Services" / "pipeline-runner"
-    env_file = root / "service" / ".env"
+    root = Path.cwd() / "Services" / "pipeline-runner" / "service"
+    env_file = root / ".env"
     if not root.is_dir() or not env_file.is_file():
         raise RuntimeError("runner_environment_not_found")
     load_dotenv(env_file, override=False)
