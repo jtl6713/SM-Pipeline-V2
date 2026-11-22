@@ -332,12 +332,19 @@ def job_heartbeat(request_id: str, token: str) -> Iterator[threading.Event]:
 
 
 @contextmanager
-def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_circuit: bool = False) -> Iterator[None]:
+def resource_slot(
+    scope: str, *, key: str = "", limit: int = 1,
+    allow_during_circuit: bool = False, allow_during_recovery: bool = False,
+) -> Iterator[None]:
     """Atomic, expiring single-host claims for photo-group and transfer work."""
     if not enabled():
         yield
         return
-    if admission_paused() and not (scope == "supabase_read" and allow_during_circuit):
+    recovery_read_allowed = (
+        (scope == "supabase_read" and allow_during_circuit)
+        or (scope == "library_image_upload" and allow_during_recovery)
+    )
+    if admission_paused() and not recovery_read_allowed:
         raise AdmissionDeferred("runner recovery read-only: resource admission paused")
     token = uuid.uuid4().hex
     lease_key = key or token
@@ -349,7 +356,7 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
             db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (time.time(),))
             active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
             if (
-                (not admission_paused() or (scope == "supabase_read" and allow_during_circuit))
+                (not admission_paused() or recovery_read_allowed)
                 and (allow_during_circuit or not circuit_open(db))
                 and active < limit
             ):
