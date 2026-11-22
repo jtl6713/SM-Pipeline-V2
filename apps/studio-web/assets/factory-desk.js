@@ -188,9 +188,18 @@
 
   function factoryVisibleNeedsEyes(cards) {
     const submitted = factorySubmittedApprovalIds();
-    return (cards || []).filter(card =>
-      card?.kind === "output" && !submitted.has(String(card?.id || "")) &&
-      factoryHasHumanReviewAction(card));
+    return (cards || []).filter(card => {
+      if (card?.kind !== "output") return false;
+      // Historical accepted/batch receipts and 48-hour browser fences are NOT
+      // evidence of a completed creative-only review. The authoritative Desk
+      // may have returned an output to a publication-held Ready for Review
+      // state; keep its safe held-review/rejection controls and preview visible.
+      // These actions cannot schedule/publish, and batch selection still uses
+      // the independent server/Do_Not_Publish eligibility gates.
+      const heldReview = canReviewHeldOutput(card) || canRejectHeldOutput(card);
+      if (heldReview) return true;
+      return !submitted.has(String(card.id || "")) && factoryHasHumanReviewAction(card);
+    });
   }
 
   // Only genuinely unreviewable items move to Needs Attention. Moving safe
