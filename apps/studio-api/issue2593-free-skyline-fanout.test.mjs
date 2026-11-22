@@ -35,15 +35,37 @@ test("2593 output seed applies publication hold AFTER all normal scheduled stamp
  assert.match(body,/Studio_Scheduled_At: null/);
  assert.match(body,/YouTube_Scheduled_Publish_At: null/);
  assert.match(code,/platformOutputSeedFields\(parent,requestRecord,outputRow,effective,sourcePackage,\{recoveryHold:options\.recoveryHold===true\}\)/);
- assert.match(code, /\{ routingOnly: true, recoveryHold: options\.recoveryHold === true \}/);
+ assert.match(code, /\{ routingOnly: true, recoveryHold: options\.recoveryHold === true,/);
+ assert.match(code, /skipDirectiveSync: options\.recoveryHold === true && options\.skipDirectiveSync === true/);
 });
 
 test("2593 one-minute cron is independent and still cannot publish",()=>{
  assert.match(worker,/studioRecoverFreeSkylineFerryFanoutCron,/);
  assert.match(worker,/ctx\.waitUntil\(studioRecoverFreeSkylineFerryFanoutCron\(env, ctx\)/);
- assert.match(worker,/version: "0\.10\.1013-ferry-fanout-2593"/);
+ assert.match(worker,/version: "0\.10\.1014-ferry-held-v2-2593"/);
  const body=section("studioRecoverFreeSkylineFerryFanoutCron");
  assert.match(body,/outputs\.every\(x => f\(x,"Do_Not_Publish"\) === true/);
  assert.match(body,/!f\(x,"Scheduled_Post_Date"\)/);
  assert.match(body,/failed_no_auto_retry/);
+});
+
+test("2593 v2 never repeats a prior failed mutation; only retries canonical GETs", () => {
+  const action = section("studioRecoverFreeSkylineFerryFanoutCron");
+  const finalize = section("finalizeProductionRequestPromotion");
+  const fanout = section("fanoutProductionRequestOutputsToContentItems");
+  const sideEffects = section("completeProductionRequestPromotionSideEffects");
+  assert.match(action, /free-skyline-ferry-hold-v2/);
+  assert.match(action, /studio\.issue2593\.free-skyline-held-fanout\.2/);
+  assert.match(action, /readExact\("existing_outputs"/);
+  assert.match(action, /skipDirectiveSync: true/);
+  assert.match(action, /for \(let attempt = 1; attempt <= 3; attempt\+\+\)/);
+  assert.match(finalize, /const canonicalRead = async/);
+  assert.match(finalize, /options\.recoveryHold !== true/);
+  assert.match(fanout, /const canonicalFanoutRead = async/);
+  assert.match(fanout, /canonicalFanoutRead\("destinations"/);
+  assert.match(fanout, /canonicalFanoutRead\("parent_content"/);
+  assert.match(sideEffects, /options\.recoveryHold === true && options\.skipDirectiveSync === true/);
+  assert.match(sideEffects, /recovery_fanout:/);
+  assert.match(action, /onlyIf: new Headers\(\{ "If-None-Match": "\*" \}\)/);
+  assert.match(action, /outputs\.every\(x => f\(x,"Do_Not_Publish"\) === true/);
 });

@@ -10953,6 +10953,22 @@ export function keepFinishedOutputRows(rows, record = null) {
 /*__STUDIO_WORKER_END:keepFinishedOutputRows__*/
 
 export async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId, options = {}) {
+  // Retry GET-only canonical reads on the exact held recovery path; a
+  // transient lookup 503 must not be confused with an absent linked output.
+  const canonicalFanoutRead = async (label, fetcher) => {
+    if (options.recoveryHold !== true) return fetcher();
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { return await fetcher(); }
+      catch(error) {
+        lastError = error;
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+      }
+    }
+    const wrapped = new Error("recovery_fanout_" + label + ": " + String(lastError?.message || lastError));
+    wrapped.recoveryStage = "fanout_" + label;
+    throw wrapped;
+  };
   const onlyMissing = Boolean(options.onlyMissing);
   if (String(f(requestRecord, "Request_Status") || "").trim() === "Cancelled") return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true,discarded_request:true};
   const limit = Number(options.limit);
@@ -10967,7 +10983,8 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   const batchLimit = Number.isFinite(limit) && limit > 0
     ? Math.floor(limit)
     : (finishedVideo ? azExpectedOutputCount(studioRequestNotesText(requestRecord)) : null);
-  let outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
+  let outputRows=(await canonicalFanoutRead("destinations",
+    () => outputRowsForProductionRequest(env,requestRecord.id))).filter(row=>Boolean(f(row,"Enabled")));
   if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows, requestRecord);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
@@ -10988,7 +11005,8 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       already: true,
     };
   }
-  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
+  let parent=await canonicalFanoutRead("parent_content",
+    () => airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId));
   if (String(f(parent, "Content_Status") || "").trim() === "Archived") return {enabled_output_count:outputRows.length,routed_count:0,blocked_count:candidates.length,remaining:0,work_items:[],single_parent_mode:true,discarded_archived_parent:true};
   const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
@@ -11163,24 +11181,45 @@ export async function completeProductionRequestPromotionSideEffects(env, request
   let outputFanout = options.outputFanout || null;
 
   if (!options.skipRouting) {
-    directiveBridge = await syncProductionRequestDirectivesToContentItem(
-      env,
-      current,
-      contentItemId
-    );
+    // Exact no-output recovery has a verified existing Content Item and a
+    // complete source plan. Do not re-read and restamp its directives before
+    // reconstructing the missing outputs; this was the failing read in v1.
+    if (!(options.recoveryHold === true && options.skipDirectiveSync === true)) {
+      try {
+        directiveBridge = await syncProductionRequestDirectivesToContentItem(
+          env, current, contentItemId
+        );
+      } catch (error) {
+        if (options.recoveryHold === true) {
+          const wrapped = new Error("recovery_directive_sync: " + String(error?.message || error));
+          wrapped.recoveryStage = "directive_sync";
+          throw wrapped;
+        }
+        throw error;
+      }
+    }
 
     // A Submitted approval may have already created some destinations before
     // a timeout. Do not restamp those existing outputs (or their Remotion jobs)
     // while completing the missing fanout. Explicit Factory revisions still
     // update their existing destinations through the normal full route.
-    outputFanout = await fanoutProductionRequestOutputsToContentItems(
-      env,
-      current,
-      contentItemId,
-      studioFinishedOriginKind(current) === "finished-video"
-        ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
-        : { onlyMissing: !productionRequestRevisionOpen(current), recoveryHold: options.recoveryHold === true }
-    );
+    try {
+      outputFanout = await fanoutProductionRequestOutputsToContentItems(
+        env,
+        current,
+        contentItemId,
+        studioFinishedOriginKind(current) === "finished-video"
+          ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
+          : { onlyMissing: !productionRequestRevisionOpen(current), recoveryHold: options.recoveryHold === true }
+      );
+    } catch (error) {
+      if (options.recoveryHold === true) {
+        const wrapped = new Error("recovery_fanout: " + String(error?.message || error));
+        wrapped.recoveryStage = "fanout";
+        throw wrapped;
+      }
+      throw error;
+    }
   }
 
   if (options.routingOnly) {
@@ -11492,19 +11531,37 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
   });
   if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
     return { skipped: "authority_unavailable" };
-  const receiptKey = "studio/recovery/2593/free-skyline-ferry-hold-v1/" + target.request + ".json";
+  // v1 recorded a failed canonical GET before any PO write; its receipt must
+  // remain immutable. v2 is a separately audited recovery attempt.
+  const receiptKey = "studio/recovery/2593/free-skyline-ferry-hold-v2/" + target.request + ".json";
   if (await env.STUDIO_MEDIA.get(receiptKey))
     return { request: target.request, skipped: "one_shot_receipt_exists" };
 
+  // A transient 503 on canonical Supabase GET must not permanently strand
+  // an intact request. Read only; no output writes during bounded retry.
+  const readExact = async (label, fetcher) => {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const value = await fetcher();
+        if (value == null) throw new Error("canonical record unavailable");
+        return value;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+      }
+    }
+    throw new Error("recovery_preflight_" + label + ": " + String(lastError?.message || lastError));
+  };
   let requestRecord, idea, parent, rows, originalOutputs;
   try {
     [requestRecord, idea, parent] = await Promise.all([
-      airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request),
-      airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, target.idea),
-      airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, target.content),
+      readExact("request", () => airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request)),
+      readExact("idea", () => airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, target.idea)),
+      readExact("content", () => airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, target.content)),
     ]);
-    rows = await outputRowsForProductionRequest(env, target.request);
-    originalOutputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+    rows = await readExact("destinations", () => outputRowsForProductionRequest(env, target.request));
+    originalOutputs = await readExact("existing_outputs", () => listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 }));
   } catch (error) {
     return { request: target.request, skipped: "readback_unavailable",
       error: String(error?.message || error).slice(0,160) };
@@ -11524,7 +11581,7 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
       String(f(requestRecord, "Test_Run_ID") || "").trim())
     return { request: target.request, skipped: "non_autonomous_or_test" };
 
-  const receipt = { schema:"studio.issue2593.free-skyline-held-fanout.1",
+  const receipt = { schema:"studio.issue2593.free-skyline-held-fanout.2",
     ...target, at:new Date().toISOString(), status:"attempted",
     preflight:"zero_platform_outputs_and_exact_two_enabled_destinations",
     publication_authorized:false, publish_actions:0, schedule_actions:0 };
@@ -11534,7 +11591,9 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
   });
   if (!wrote) return { request: target.request, skipped:"concurrent_receipt" };
   try {
-    const result = await finalizeProductionRequestPromotion(env, target.request, idea, ctx, { recoveryHold:true });
+    const result = await finalizeProductionRequestPromotion(env, target.request, idea, ctx, {
+      recoveryHold: true, skipDirectiveSync: true,
+    });
     const fanout = result?.outputFanout || {};
     const outputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit:60 });
     const links = await outputRowsForProductionRequest(env, target.request);
@@ -11570,7 +11629,9 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
     return finished;
   } catch(error) {
     const failed = {...receipt, status:"failed_no_auto_retry",
-      error:String(error?.message || error).slice(0,300), finished_at:new Date().toISOString()};
+      error:String(error?.message || error).slice(0,300),
+      error_stage:String(error?.recoveryStage || "finalize_or_fanout").slice(0,80),
+      finished_at:new Date().toISOString()};
     await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(failed), {
       httpMetadata:{contentType:"application/json"},
     }).catch(()=>{});
@@ -11582,6 +11643,22 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null, options = {}) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
+  // Only exact held recovery retries canonical reads. Normal promotion
+  // retains its existing behavior; retries never repeat writes.
+  const canonicalRead = async (label, read) => {
+    if (options.recoveryHold !== true) return read();
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { return await read(); }
+      catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+      }
+    }
+    const wrapped = new Error("recovery_" + label + ": " + String(lastError?.message || lastError));
+    wrapped.recoveryStage = label;
+    throw wrapped;
+  };
   const promotionStartedAt = Date.now();
   const promotionTrace = (stage, extra = {}) => console.info("studio_production_promotion_stage", {
     request_id: requestRecordId,
@@ -11595,7 +11672,9 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
   // request may finish later, but it must not overwrite directives or fan out
   // another complete set of Platform Outputs for the same Content Item.
   if (contentItemId) {
-    const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
+    const parent = options.recoveryHold === true
+      ? await canonicalRead("owner_content", () => airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId))
+      : await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
     const incumbentRequestId = promotedContentOwner(
       requestRecordId,
       parent ? f(parent, "Production_Request") : []
@@ -11650,7 +11729,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     }
   }
 
-  let requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecordId);
+  let requestRecord = await canonicalRead("request", () => airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecordId));
   let directiveBridge = null;
   let outputFanout = null;
 
@@ -11664,7 +11743,8 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
       requestRecordId,
       requestRecord,
       contentItemId,
-      { routingOnly: true, recoveryHold: options.recoveryHold === true }
+      { routingOnly: true, recoveryHold: options.recoveryHold === true,
+        skipDirectiveSync: options.recoveryHold === true && options.skipDirectiveSync === true }
     );
     requestRecord = routing.requestRecord || requestRecord;
     directiveBridge = routing.directiveBridge;
