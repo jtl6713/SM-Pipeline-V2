@@ -90,7 +90,7 @@ jobs:
               echo "fb10738_asset_stage=PASS"
               exit 0
             elif [[ "$status" == failed ]]; then
-              jq -r '.job.log // ""' /tmp/fb10738-status.json | grep '^fb10738_' | tail -20 || true
+              jq -r '.job.log // ""' /tmp/fb10738-status.json | tail -45 | sed -E 's/(Bearer |apikey=|SUPABASE_SERVICE_ROLE_KEY=)[A-Za-z0-9_.-]+/\1***REDACTED***/g' || true
               echo "fb10738_asset_stage=FAILED"; exit 3
             fi
             sleep 5
