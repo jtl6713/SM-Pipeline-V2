@@ -918,3 +918,4 @@ Deploy #2546 Studio Ideas UI 0.6.1030: single AI Idea Generation card with Quant
 2026-11-21 #2563 PR #2578: Deploy Studio UI 0.6.1038-repair-top-2563. Exact live Factory API verified 118 held Meta cards (FB62 IG56). Show first-screen repair banner immediately after Factory Desk ready, before Producer change request progress; View affected outputs filters and opens Needs Attention. UI only; no publishing or data mutations. Verify authenticated custom-domain build and JS cache.
 
 2026-11-21: #2574 Ideas status shows last autonomous handoff failures and makes countdown nonauthoritative. Trigger protected Studio Pages deployment.
+Deploy Studio Pages UI 0.6.1040: Factory Repair #2563 restores readable rows, visible exact-output Open buttons, clickable titles and 118 held Meta output navigation. No Worker/database/publish mutations.
