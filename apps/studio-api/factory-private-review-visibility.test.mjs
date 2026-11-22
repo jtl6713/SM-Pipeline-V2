@@ -241,3 +241,39 @@ test("NYC #2371: eight held review outputs remain visible even after older Facto
   assert.equal(run([unheldAccepted], submitted).length, 0, "historical accepted unheld work remains suppressed");
   assert.equal(run([cards[0]], new Set()).length, 1, "no accepted fence does not hide pending held review");
 });
+
+
+test("#2294: six protected draft galleries enter Needs Eyes for human inspection without any approval eligibility", () => {
+  const outputs = [
+    [10853, "rectw2pvgnBzK3wCN", 4],
+    [10854, "recJ8jTynJDxsN0hl", 4],
+    [10992, "rec1p9SOjrpxtpQkV", 8],
+    [10993, "recX9tOrTfQldqs32", 8],
+    [11033, "recBlShZbe7cqtGAG", 8],
+    [11034, "recHmu20eEQmX4JLq", 8],
+  ];
+  const rows = outputs.map(([number,id,slides]) => ({
+    kind: "output", id, output_id: number, selected_clip_count: slides,
+    studio_output_type: "Carousel", studio_state: "Unverified gallery candidates · Visual review only · Publishing held",
+    candidate_gallery_review: true, review_package_ready: false,
+    output_status: "Ready for Review", review_status: null,
+    render_status: "Native Photo Route", publish_status: "Not Ready",
+    do_not_publish: true, auto_publish_enabled: false,
+    thumbnail_url: media + "studio/previews/cover.jpg",
+  }));
+  const desk = partitionFactoryLanes(rows);
+  assert.equal(desk.summary.needs_eyes, 6);
+  assert.deepEqual(desk.lanes.needs_eyes.map(r=>r.output_id), outputs.map(x=>x[0]));
+  assert.ok(desk.lanes.needs_eyes.every(r =>
+    r.do_not_publish && !r.auto_publish_enabled && r.review_package_ready === false
+    && r.candidate_gallery_review && r.can_approve === false));
+  for (const patch of [
+    {do_not_publish:false}, {auto_publish_enabled:true},
+    {render_status:"Waiting in Render Queue"}, {scheduled_post_date:"2026-12-01T00:00:00Z"},
+    {review_status:"Approved"}, {published_at:"2026-11-22T12:00:00Z"},
+    {output_status:"Published"}, {candidate_gallery_review:false},
+  ]) {
+    const actual = partitionFactoryLanes([{...rows[0],...patch}]);
+    assert.equal(actual.summary.needs_eyes, 0, JSON.stringify(patch));
+  }
+});
