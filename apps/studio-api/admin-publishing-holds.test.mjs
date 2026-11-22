@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { classifyAdminPublishingHold, handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 
 const REC="recABCDEFGHIJKLMN";
-const PROFILE="recZYXWVUTSRQPON";
+const PROFILE="recZYXWVUTSRQPONM";
 const uuid="f7d5a786-fd54-4286-b22a-4c975049de60";
 const row=()=>({
   id:"f1cf1255-0c34-487c-a938-cb2ddb9f9070",
