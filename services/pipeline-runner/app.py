@@ -78,6 +78,33 @@ logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
 
 app = Flask(__name__)
+
+
+def recovery_read_only() -> bool:
+    """Emergency outage gate: keep health/read traffic, refuse mutations."""
+    return os.environ.get("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "").strip().lower() in {
+        "1", "true", "yes",
+    }
+
+
+@app.before_request
+def _recovery_read_only_gate():
+    # Installed before every blueprint; includes production, manual resume,
+    # media transfers, and publishing-related runner HTTP routes. Preserve
+    # GET /health for deploy verification and independent read-only Studio.
+    if recovery_read_only() and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        response = jsonify({
+            "ok": False,
+            "error": "runner_recovery_read_only",
+            "message": "Heavy and mutating runner operations are temporarily paused",
+        })
+        response.status_code = 503
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Retry-After"] = "120"
+        return response
+    return None
+
+
 # Model-backed proposals are explicitly disabled until Worker conversation
 # persistence and phase-1 ownership safeguards have been verified.
 app.register_blueprint(create_rendering_review_producer_blueprint(settings))
@@ -173,6 +200,7 @@ def health():
             "ig_publish_lease_required": os.environ.get("IG_PUBLISH_LEASE_REQUIRED","").strip().lower() == "true",
             "ig_publish_lease_protocol_version": 1,
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
+            "recovery_read_only": recovery_read_only(),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
