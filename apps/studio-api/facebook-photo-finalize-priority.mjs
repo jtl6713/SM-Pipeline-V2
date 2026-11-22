@@ -19,11 +19,19 @@ export function fb3FinalizeEligible(row, nowMs = Date.now()) {
       txt(row, "Test_Run_ID") ||
       field(row, "Do_Not_Publish") === true) return false;
   if (!/^\d{6,30}(?:_\d{6,30})?$/.test(txt(row, "Platform_Post_ID"))) return false;
-  // Do not race a live publisher. Stale lock recovery is owned by the
-  // existing reservation/lock healer, never this finalization function.
-  // Any extant lock is authoritative; never clear or override it here.
-  // The independent lock-recovery routine must release it first.
-  if (txt(row, "Publish_Locked_By") || txt(row, "Publish_Locked_At")) return false;
+  // Existing FB2 parent post ID is authoritative: FB3 only GETs that post.
+  // An ownerless FB2 timestamp can survive after FB2 has saved the post ID.
+  // Do not strand a successful existing post forever waiting for another
+  // healer: after ten minutes, the ownerless timestamp is an orphan and FB3
+  // may claim its own lock. Never accept a named owner, a recent timestamp,
+  // an invalid timestamp or a future timestamp. No upload/create occurs here.
+  if (txt(row, "Publish_Locked_By")) return false;
+  const lockAt = txt(row, "Publish_Locked_At");
+  if (lockAt) {
+    const ms = Date.parse(lockAt);
+    if (!Number.isFinite(nowMs) || !Number.isFinite(ms) ||
+        ms > nowMs - 10 * 60_000) return false;
+  }
   return true;
 }
 
