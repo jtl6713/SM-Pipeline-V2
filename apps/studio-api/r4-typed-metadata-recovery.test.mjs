@@ -109,3 +109,13 @@ test("stale row or an uncompleted parent prevents mutation",async t=>{
   const res=await sweepR4TypedMetadataRecovery(env,{limit:1});
   assert.equal(res.repaired,0);assert.equal(res.unavailable,1);assert.equal(patched,0);
 });
+
+test("Worker's minute cron owns the bounded Supabase-only repair independently of R4 dispatch",async()=>{
+  const { readFileSync }=await import("node:fs");
+  const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  assert.match(worker,/import \{ sweepR4TypedMetadataRecovery \} from "\.\/r4-typed-metadata-recovery\.mjs"/);
+  assert.match(worker,/collectorCron === "\* \* \* \* \*" && studioWriteSource\(env\) === "supabase"/);
+  assert.match(worker,/ctx\.waitUntil\(sweepR4TypedMetadataRecovery\(env, \{ limit: 4 \}\)/);
+  const source=readFileSync(new URL("./r4-typed-metadata-recovery.mjs",import.meta.url),"utf8");
+  assert.doesNotMatch(source,/\b(?:review_status|publish_status|scheduled_post_date|auto_publish_enabled|do_not_publish)\s*:\s*(?:"Approved"|"Ready to Schedule"|true|false)/);
+});
