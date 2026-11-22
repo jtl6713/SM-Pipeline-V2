@@ -4,6 +4,7 @@ import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs"
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
+import { PREFLIGHT_KEY, verifiedSchedulingPreflight } from "./scheduling-approval-preflight.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { item4DestinationParity } from "./item4-plan-integrity.mjs";
@@ -12032,6 +12033,34 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     const reviewVisibility = factoryReviewVisibility(
       record, readiness, studioState, outputCreativeAvailable(record),
     );
+    const schedulingTechnicalReady = reviewVisibility.visible &&
+      !mediaRework && !metaRepair && verifiedSchedulingPreflight({
+        id: record.id,
+        airtable_record_id: record.id,
+        content_item_id: contentId,
+        content_profile_id: firstOpsLinkedId(f(record, "Content_Profile")),
+        platform: f(record, "Platform"),
+        studio_output_type: f(record, "Studio_Output_Type"),
+        output_status: f(record, "Output_Status"),
+        render_status: f(record, "Render_Status"),
+        review_status: f(record, "Review_Status"),
+        publish_status: f(record, "Publish_Status"),
+        do_not_publish: f(record, "Do_Not_Publish"),
+        auto_publish_enabled: f(record, "Auto_Publish_Enabled"),
+        test_run_id: f(record, "Test_Run_ID"),
+        output_caption: f(record, "Output_Caption"),
+        studio_preview_url: f(record, "Studio_Preview_URL"),
+        thumbnail_url: f(record, "Thumbnail_URL"),
+        final_file_url: f(record, "Final_File_URL"),
+        selected_clip_count: f(record, "Selected_Clip_Count"),
+        published_at: f(record, "Published_At"),
+        scheduled_post_date: f(record, "Scheduled_Post_Date"),
+        studio_scheduled_at: f(record, "Studio_Scheduled_At"),
+        youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At"),
+        platform_post_url: f(record, "Platform_Post_URL"),
+        platform_post_id: f(record, "Platform_Post_ID"),
+        error_messages: { [PREFLIGHT_KEY]: f(record, PREFLIGHT_KEY) },
+      });
     const readinessException = reviewVisibility.incomplete;
     // Package-ready Ready for Review is the Approve gate. Do not inherit a parent
     // produce stuck_kind onto those siblings — that used to dump complete outputs
@@ -12062,7 +12091,13 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platform: mapped.platform,
       format: mapped.format || null,
       studio_output_type: mapped.studio_output_type || mapped.format,
-      studio_state: studioState,
+      studio_state: schedulingTechnicalReady
+        ? "Scheduling approval ready · Media verified"
+        : studioState,
+      scheduling_approval_ready: schedulingTechnicalReady === true,
+      scheduling_approval_requirement: schedulingTechnicalReady
+        ? "Review the completed creative and approve scheduling; nothing is authorized until you approve."
+        : null,
       output_status: mapped.output_status,
       render_status: mapped.render_status,
       remotion_job_id: mapped.remotion_job_id || null,
