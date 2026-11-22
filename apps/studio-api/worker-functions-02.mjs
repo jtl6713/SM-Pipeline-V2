@@ -10953,6 +10953,22 @@ export function keepFinishedOutputRows(rows, record = null) {
 /*__STUDIO_WORKER_END:keepFinishedOutputRows__*/
 
 export async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId, options = {}) {
+  // Retry GET-only canonical reads on the exact held recovery path; a
+  // transient lookup 503 must not be confused with an absent linked output.
+  const canonicalFanoutRead = async (label, fetcher) => {
+    if (options.recoveryHold !== true) return fetcher();
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { return await fetcher(); }
+      catch(error) {
+        lastError = error;
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+      }
+    }
+    const wrapped = new Error("recovery_fanout_" + label + ": " + String(lastError?.message || lastError));
+    wrapped.recoveryStage = "fanout_" + label;
+    throw wrapped;
+  };
   const onlyMissing = Boolean(options.onlyMissing);
   if (String(f(requestRecord, "Request_Status") || "").trim() === "Cancelled") return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true,discarded_request:true};
   const limit = Number(options.limit);
@@ -10967,7 +10983,8 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   const batchLimit = Number.isFinite(limit) && limit > 0
     ? Math.floor(limit)
     : (finishedVideo ? azExpectedOutputCount(studioRequestNotesText(requestRecord)) : null);
-  let outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
+  let outputRows=(await canonicalFanoutRead("destinations",
+    () => outputRowsForProductionRequest(env,requestRecord.id))).filter(row=>Boolean(f(row,"Enabled")));
   if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows, requestRecord);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
@@ -10988,7 +11005,8 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       already: true,
     };
   }
-  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
+  let parent=await canonicalFanoutRead("parent_content",
+    () => airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId));
   if (String(f(parent, "Content_Status") || "").trim() === "Archived") return {enabled_output_count:outputRows.length,routed_count:0,blocked_count:candidates.length,remaining:0,work_items:[],single_parent_mode:true,discarded_archived_parent:true};
   const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
