@@ -43,4 +43,10 @@ test("connection timeout and aborted request signals count as overload", () => {
   ]) {
     assert.equal(isSupabasePoolOrTimeoutError(new Error(message)), true, message);
   }
+  const timeout = new Error("The operation was aborted by a timeout");
+  timeout.name = "TimeoutError";
+  assert.equal(isSupabasePoolOrTimeoutError(timeout), true);
+  const cancelled = new Error("Caller cancelled an in-flight request");
+  cancelled.name = "AbortError";
+  assert.equal(isSupabasePoolOrTimeoutError(cancelled), false);
 });
