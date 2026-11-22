@@ -922,3 +922,4 @@ Deploy Studio Pages UI 0.6.1040: Factory Repair #2563 restores readable rows, vi
 Deploy Studio Pages UI 0.6.1041: Factory Repair title clicks work for every kind of record (production requests, ideas and outputs). Issue #2563 follow-up. UI-only; retain publish holds.
 Deploy UI 0.6.1050 Factory progress exact-request receipt verification and live 14-output three-profile GUI fix. Issue #2622; preserve R2 safety and Supabase-only approval authority.
 Deploy UI 0.6.1052: Factory approval Activity exact-first polling after bare original-request POST; global scan timeouts fall back to known durable group requests. Issue #2622 acceptance failure (#10992/#10993). Preserve Supabase/R2 approval authority and publishing holds; no approval or publishing from status GET.
+2026-11-22 Factory 0.6.1060 multi-batch issue2622 PR2661: deploy merged UI, retain every accepted original request in Status Updates, bounded exact-group GETs; no approval/publish duplicate.
