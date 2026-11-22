@@ -354,3 +354,23 @@ def test_issue2464_ttd0_original_9x16_ready_formula_is_translatable():
         url = attach_formula_filter("carousel_slides?select=*", translated)
         assert "Asset_9x16_Public_Status" in url
         assert "Asset_9x16_Public_URL" in url
+
+
+def test_p2_content_item_selection_and_recheck_formulas_stay_supabase_only():
+    from airtable.constants import CONTENT_ITEMS_TABLE
+    from p2.formulas import (
+        p2_exact_content_formula,
+        recheck_voiceover_and_thumbnail,
+        recheck_voiceover_only,
+        recheck_silent_thumbnail,
+    )
+    record_id = "rec9eOGhIbYfFf4oY"
+    for name, formula in [
+        ("exact", p2_exact_content_formula(record_id)),
+        ("voice_and_thumbnail", recheck_voiceover_and_thumbnail(record_id)),
+        ("voice_only", recheck_voiceover_only(record_id)),
+        ("silent_thumbnail", recheck_silent_thumbnail(record_id)),
+    ]:
+        translated = formula_to_postgrest_filter(CONTENT_ITEMS_TABLE, formula)
+        assert translated is not None, (name, formula)
+        assert "airtable_record_id.eq." + record_id in translated
