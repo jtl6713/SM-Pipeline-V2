@@ -78,6 +78,14 @@ async function mockedPreview(parent, assets, action) {
     throw Error("Unexpected read " + u.pathname);
   };
   try { return await action(env, calls); }
+  catch (error) {
+    // Make fixture-vs-PostgREST failures diagnosable without exposing secrets.
+    throw new Error(String(error?.message || error) + " | fixture_trace="
+      + JSON.stringify({ paths: calls.map(c => c.path), assets_returned: assets.length,
+        distinct_family_ids: new Set(assets.map(a => a.airtable_record_id)).size,
+        unavailable_assets: assets.filter(a => a.active !== true || a.do_not_use !== false
+          || a.asset_status !== "Available" || a.metadata?.rights_status !== "Owned").length }));
+  }
   finally { globalThis.fetch = prior; }
 }
 
