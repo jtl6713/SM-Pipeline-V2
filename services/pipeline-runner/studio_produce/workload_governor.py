@@ -369,7 +369,7 @@ def image_classification_recovery_window() -> Iterator[None]:
     All other stages, dispatchers, worker hosts and provider publishers remain
     blocked by the independent HTTP gate and/or normal database circuit.
     """
-    if not enabled() or not recovery_read_only_active():
+    if not enabled() or not (admission_paused() or producer_only_recovery_enabled()):
         yield
         return
     with resource_slot("library_image_classify", limit=1, allow_during_recovery=True):
