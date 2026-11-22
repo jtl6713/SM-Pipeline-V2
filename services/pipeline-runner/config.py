@@ -15,7 +15,7 @@ StageStatus = Literal["ok", "skipped", "deferred", "not_implemented", "error"]
 
 # Bump on every ship that must show through public /health. Deploy also syncs
 # this into runtime .env, but a stale pin must never win.
-PIPELINE_RUNNER_CODE_VERSION = "2026-11-21-issue2569-airtable-metrics-coverage-v1"
+PIPELINE_RUNNER_CODE_VERSION = "2026-11-22-issue2593-render-server-supabase-v1"
 
 
 def _resolve_service_version() -> str:
