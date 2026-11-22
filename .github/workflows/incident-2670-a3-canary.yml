@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/a3-runner-health.json
-          jq -e '.ok==true and .recovery_read_only==true and .recovery_image_classification_enabled==true and .workload_governor_enabled==true and .i1_durable_jobs==false' /tmp/a3-runner-health.json >/dev/null
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_image_classification_enabled==true and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/a3-runner-health.json >/dev/null
           echo "a3_runner_recovery_gates=PASS"
       - name: Request classification for exact previously uploaded Bethesda image
         shell: bash
