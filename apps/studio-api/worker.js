@@ -2402,8 +2402,7 @@ export default {
               url:new URL("/api/rendering-review/outputs/"+outputId,url),
               authorization,
               operations:{
-                authorizedProfiles:reviewAuthorizedProfiles,
-                listRecords:reviewListRecords,
+                    listRecords:reviewListRecords,
                 listRecordsPage:reviewListRecordsPage,
                 airtableFetch,
               },
