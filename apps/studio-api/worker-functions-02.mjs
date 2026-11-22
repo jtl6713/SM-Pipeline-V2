@@ -11641,6 +11641,101 @@ export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
 }
 /*__STUDIO_WORKER_END:studioRecoverFreeSkylineFerryFanoutCron__*/
 
+/**
+ * Issue #2593 final recovery stage: after the Python Runner music-view fix
+ * has deployed, resume only C2239's previously blocked Studio Produce job.
+ * The two real Platform Outputs already exist and remain publication-held.
+ * No manual status rewrite, render bypass, approval or posting occurs here.
+ */
+export async function studioResumeFreeSkylineHeldProduceCron(env) {
+  const target = {
+    request: "reczvqjo1xs2jYXn0",
+    content: "recbxdvQZTDm61Ctq",
+    expected: 2,
+  };
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
+    return { skipped: "authority_unavailable" };
+  const receiptKey = "studio/recovery/2593/ferry-held-produce-resume-after-r2-music-v1/" + target.request + ".json";
+  if (await env.STUDIO_MEDIA.get(receiptKey))
+    return { skipped: "one_shot_receipt_exists" };
+
+  let requestRecord, links, outputs;
+  try {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request);
+    const job = parseStudioProductionJob(requestRecord);
+    if (String(f(requestRecord, "Request_Status")) !== "Promoted" ||
+        studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item")) !== target.content)
+      return { skipped: "not_exact_promoted_owner" };
+    if (String(job?.step || "") !== "blocked" ||
+        !String(job?.error || "").includes("Supabase list query unsupported or unavailable for tblSITCujCsJTNcDe"))
+      return { skipped: "not_exact_previous_music_catalog_block" };
+    [links, outputs] = await Promise.all([
+      outputRowsForProductionRequest(env, target.request),
+      listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 }),
+    ]);
+  } catch (error) {
+    return { skipped: "readback_unavailable",
+      error: String(error?.message || error).slice(0,160) };
+  }
+  if (links.length !== target.expected || outputs.length !== target.expected)
+    return { skipped: "expected_two_output_links_missing" };
+  const key = (platform, type) => String(platform || "").trim() + "::" + String(type || "").trim();
+  const expected = new Set(["Instagram::Carousel", "Facebook::Multi-Image Post"]);
+  const actual = new Set(outputs.map(po=>key(f(po, "Platform"), f(po, "Studio_Output_Type"))));
+  const linked = links.every(row => {
+    const poId = studioFirstLinkedId(f(row, "Platform_Output"));
+    return Boolean(poId) && outputs.some(po =>
+      po.id === poId &&
+      key(f(row,"Platform"), f(row,"Output_Type")) === key(f(po,"Platform"), f(po,"Studio_Output_Type")));
+  });
+  if (actual.size !== target.expected || [...expected].some(x=>!actual.has(x)) || !linked)
+    return { skipped: "output_identity_or_link_mismatch" };
+  const holds = outputs.every(po =>
+    f(po, "Do_Not_Publish") === true &&
+    f(po, "Auto_Publish_Enabled") !== true &&
+    !f(po, "Scheduled_Post_Date") &&
+    !f(po, "Studio_Scheduled_At") &&
+    !f(po, "YouTube_Scheduled_Publish_At") &&
+    !f(po, "Published_At") &&
+    !f(po, "Platform_Post_URL"));
+  if (!holds) return { skipped: "publishing_hold_not_verified" };
+
+  const receipt = {
+    schema:"studio.issue2593.ferry-held-produce-resume.1",
+    request:target.request, content:target.content,
+    output_ids:outputs.map(x=>x.id), status:"attempted",
+    at:new Date().toISOString(),
+    publication_authorized:false, publish_actions:0, schedule_actions:0,
+  };
+  const acquired = await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
+    onlyIf:new Headers({"If-None-Match":"*"}),
+    httpMetadata:{contentType:"application/json"},
+  });
+  if (!acquired) return { skipped:"concurrent_receipt" };
+  try {
+    const queued = await enqueueStudioProductionJob(env, target.request, { resume:true });
+    const finished = {...receipt,
+      status:queued?.accepted===true ? "resumed" : "resume_not_accepted",
+      accepted:queued?.accepted===true,
+      reason:String(queued?.reason || "").slice(0,150),
+      finished_at:new Date().toISOString(),
+    };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(finished),{
+      httpMetadata:{contentType:"application/json"},
+    });
+    return finished;
+  } catch(error) {
+    const failed = {...receipt, status:"failed_no_auto_retry",
+      error:String(error?.message || error).slice(0,220),
+      finished_at:new Date().toISOString()};
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(failed),{
+      httpMetadata:{contentType:"application/json"},
+    }).catch(()=>{});
+    return failed;
+  }
+}
+/*__STUDIO_WORKER_END:studioResumeFreeSkylineHeldProduceCron__*/
+
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null, options = {}) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
   // Only exact held recovery retries canonical reads. Normal promotion
