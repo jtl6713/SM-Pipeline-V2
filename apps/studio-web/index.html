@@ -223,6 +223,8 @@
   <div class="idea-generate-fields">
    <label class="form-field idea-generate-top-count" for="ideaGenerateCount"><span>Quantity</span><input id="ideaGenerateCount" type="number" min="1" max="10" step="1" value="5" inputmode="numeric" required></label>
    <label class="form-field"><span>Quality</span><select id="ideaGenerateQuality"><option selected>Highest Quality</option><option>Balanced</option><option>Quantity</option></select></label>
+   <label class="form-field"><span>Asset sourcing</span><select id="ideaGenerateSourcing" aria-describedby="ideaGenerateSourcingHint"><option value="balanced" selected>Balanced mix (default)</option><option value="existing">Use existing assets first</option><option value="explore">Explore new topics</option></select></label>
+   <p class="subtle" id="ideaGenerateSourcingHint">Balanced combines existing photos with fresh topics; new-media ideas remain in pre-production until assets are added.</p>
   </div>
   <div class="idea-generate-actions"><button type="submit" class="primary-button" id="ideaGenerateSubmit">Generate Ideas</button></div>
   <div class="form-message" id="ideaGenerateMessage" aria-live="polite"></div>
