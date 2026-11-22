@@ -95,13 +95,16 @@ def _connect() -> Iterator[sqlite3.Connection]:
                         request_id TEXT PRIMARY KEY, state TEXT NOT NULL,
                         token TEXT, lease_until REAL, enqueued_at REAL NOT NULL,
                         available_at REAL NOT NULL DEFAULT 0,
-                        consecutive_yields INTEGER NOT NULL DEFAULT 0
+                        consecutive_yields INTEGER NOT NULL DEFAULT 0,
+                        resume_requested INTEGER NOT NULL DEFAULT 0
                     )""")
                     existing = {row[1] for row in init.execute("PRAGMA table_info(producer_jobs)")}
                     if "available_at" not in existing:
                         init.execute("ALTER TABLE producer_jobs ADD COLUMN available_at REAL NOT NULL DEFAULT 0")
                     if "consecutive_yields" not in existing:
                         init.execute("ALTER TABLE producer_jobs ADD COLUMN consecutive_yields INTEGER NOT NULL DEFAULT 0")
+                    if "resume_requested" not in existing:
+                        init.execute("ALTER TABLE producer_jobs ADD COLUMN resume_requested INTEGER NOT NULL DEFAULT 0")
                     init.execute("""CREATE TABLE IF NOT EXISTS resource_leases (
                         scope TEXT NOT NULL, lease_key TEXT NOT NULL,
                         token TEXT NOT NULL, lease_until REAL NOT NULL,
@@ -129,15 +132,18 @@ def _transaction(db: sqlite3.Connection) -> None:
     db.execute("BEGIN IMMEDIATE")
 
 
-def enqueue(request_id: str) -> bool:
+def enqueue(request_id: str, *, resume: bool = False) -> bool:
     """Durably queue exactly once. Return True only for a new entry."""
     with _connect() as db:
         _transaction(db)
         now = time.time()
         created = db.execute(
-            "INSERT OR IGNORE INTO producer_jobs(request_id,state,enqueued_at,available_at) VALUES(?,'queued',?,?)",
-            (request_id, now, now),
+            "INSERT OR IGNORE INTO producer_jobs(request_id,state,enqueued_at,available_at,resume_requested) VALUES(?,'queued',?,?,?)",
+            (request_id, now, now, int(resume)),
         ).rowcount
+        if not created and resume:
+            # Only affect queued work, not a worker already executing this ID.
+            db.execute("UPDATE producer_jobs SET resume_requested=1 WHERE request_id=? AND state='queued'", (request_id,))
         db.commit()
     return bool(created)
 
@@ -208,6 +214,16 @@ def claim_next() -> tuple[str, str] | None:
         )
         db.commit()
     return str(row[0]), token
+
+
+def claimed_resume_requested(request_id: str, token: str) -> bool:
+    with _connect() as db:
+        row = db.execute("""SELECT resume_requested FROM producer_jobs
+            WHERE request_id=? AND state='running' AND token=? AND lease_until>?""",
+            (request_id, token, time.time())).fetchone()
+    if row is None:
+        raise RuntimeError("producer lease not owned")
+    return bool(row[0])
 
 
 def renew_job(request_id: str, token: str) -> bool:
