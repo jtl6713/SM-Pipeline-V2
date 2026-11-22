@@ -3,6 +3,7 @@ import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-pack
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { heldRetryPendingDisposition } from "./held-retry-pending-disposition.mjs";
+import { metaAutoPublishDisabledState } from "./meta-auto-publish-status.mjs";
 import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
@@ -2333,6 +2334,13 @@ export function normalizedOutputState(record) {
   // Meta action throttling is a timed automatic retry, not a terminal failure.
   if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
 
+  // Disabling Meta auto-publish indicates an internal scheduling state, not a
+  // request for the owner to upload manually. Historical attempts still require
+  // provider verification; deliberate DNP holds remain held.
+  const metaDisabledState = typeof metaAutoPublishDisabledState === "function"
+    ? metaAutoPublishDisabledState(fields) : null;
+  if (metaDisabledState) return metaDisabledState;
+
   // Auto-publish was never turned on and nothing has been sent. That is a manual
   // handoff, not a late or failed job.
   if (fields.Auto_Publish_Enabled === false
@@ -2478,7 +2486,7 @@ export function contentLifecycleFromOutputs(outputRecords = []) {
     else if (states.some((state) => state === "Scheduled")) studioStage = "Scheduled";
     else if (states.some((state) => state === "Draft Delivered")) studioStage = "Draft Delivered";
     else studioStage = "Complete";
-  } else if (states.some((state) => ["Failed", "Manual Action Required", "Retry Pending"].includes(state))) {
+  } else if (states.some((state) => ["Failed", "Manual Action Required", "Retry Pending", "Auto Publish Disabled", "Needs Verification", "Needs Asset Repair", "Review Held"].includes(state))) {
     studioStage = "Needs Attention";
   } else if (states.some((state) => state === "Ready for Review")) {
     studioStage = "Review";
@@ -2756,6 +2764,10 @@ export function outputProgressPercent(record, state, job = null) {
     "Platform Processing": 88,
     "Draft Delivered": 92,
     "Manual Action Required": 85,
+    "Auto Publish Disabled": 85,
+    "Needs Verification": 85,
+    "Needs Asset Repair": 65,
+    "Review Held": 65,
     "Retry Pending": 60,
     Failed: 0,
     Skipped: 100,
