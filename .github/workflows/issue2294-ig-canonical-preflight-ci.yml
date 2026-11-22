@@ -1,0 +1,45 @@
+name: Issue 2294 Instagram Native Gallery Pre-Attempt Guard CI
+on:
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/apc/native_gallery_guard.py'
+      - 'services/pipeline-runner/apc/ap1c.py'
+      - 'services/pipeline-runner/apc/ap4c.py'
+      - 'services/pipeline-runner/tests/test_instagram_native_gallery_preflight_2294.py'
+      - '.github/workflows/issue2294-ig-canonical-preflight-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/pipeline-runner/apc/native_gallery_guard.py'
+      - 'services/pipeline-runner/apc/ap1c.py'
+      - 'services/pipeline-runner/apc/ap4c.py'
+      - 'services/pipeline-runner/tests/test_instagram_native_gallery_preflight_2294.py'
+      - '.github/workflows/issue2294-ig-canonical-preflight-ci.yml'
+permissions:
+  contents: read
+jobs:
+  instagram-v2-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned runner and test dependencies only
+        run: python -m pip install --disable-pip-version-check --quiet -r services/pipeline-runner/requirements.txt pytest==8.3.4
+      - name: Syntax check
+        run: python -m py_compile services/pipeline-runner/apc/native_gallery_guard.py services/pipeline-runner/apc/ap1c.py services/pipeline-runner/apc/ap4c.py services/pipeline-runner/tests/test_instagram_native_gallery_preflight_2294.py
+      - name: Test exact V2 IG canonical source package before any provider writes
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: python -m pytest -q services/pipeline-runner/tests/test_instagram_native_gallery_preflight_2294.py
+      - name: Affirm both first child and final publishing guards run before attempt counters
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for stage in ['ap1c','ap4c']:
+            s=Path('services/pipeline-runner/apc/'+stage+'.py').read_text()
+            assert s.index('preflight_reason = inspect_instagram_native_v2_package(client, output)') < s.index('"Publish_Attempt_Count": (parse_int(field(output, "Publish_Attempt_Count")')
+            print('issue2294_'+stage+'_canonical_pre_attempt_guard=PASS')
+          PY
