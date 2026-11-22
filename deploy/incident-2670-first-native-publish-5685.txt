@@ -1,0 +1,8 @@
+Incident #2670 exact one-post canary, owner-authorized Nov 22 2026.
+Exactly NYC Facebook Reel output #5685, record receunuIIdyIBwwPA.
+Live row approved, rendered, due, no historical provider IDs/attempts,
+hosted MP4. Require verified governor, source/tenant/hold/media safeguards.
+Run FBS3 dry-run, then exactly ONE native provider upload and bounded FBS4
+status polls. Confirm exact provider ID, public post URL, published_at and
+canonical Published status. Never re-upload if an outcome is ambiguous.
+No other output, hold, schedule, test or consumer settings may change.
