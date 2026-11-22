@@ -11666,7 +11666,7 @@ export async function studioResumeFreeSkylineHeldProduceCron(env) {
     if (String(f(requestRecord, "Request_Status")) !== "Promoted" ||
         studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item")) !== target.content)
       return { skipped: "not_exact_promoted_owner" };
-    if (String(job?.step || "") !== "blocked" ||
+    if (!["blocked","escalated"].includes(String(job?.step || "")) ||
         !String(job?.error || "").includes("Supabase list query unsupported or unavailable for tblSITCujCsJTNcDe"))
       return { skipped: "not_exact_previous_music_catalog_block" };
     [links, outputs] = await Promise.all([
