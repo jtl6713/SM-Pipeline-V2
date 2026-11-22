@@ -646,7 +646,81 @@
     return true;
   }
 
+  let factoryGalleryPreviewEpoch = 0;
+  function clearFactoryNativeGalleryControls() {
+    $("factoryNativeGalleryControls")?.remove();
+  }
+  function isFactoryNativeGallery(card) {
+    return /carousel|multi[\\s-]?image|photo[\\s-]?set/i.test(
+      String(card?.studio_output_type || ""));
+  }
+  // Never infer a complete gallery from its one cover. Load the exact active
+  // native Carousel Slides inventory through the authorized Supabase-only API.
+  async function showFactoryNativeGallery(card, image, dialog, epoch) {
+    try {
+      const id = String(card?.id || "");
+      if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new Error("Invalid gallery output identity");
+      const data = await fetchJson(`/api/factory/outputs/${encodeURIComponent(id)}/slides`, {
+        timeoutMs: 18000,
+      });
+      if (epoch !== factoryGalleryPreviewEpoch) return;
+      const slides = data?.slides;
+      const trustedImage = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
+      if (data?.output_id !== id || !Array.isArray(slides) || slides.length < 2
+          || slides.length > 10 || data.count !== slides.length
+          || !slides.every((slide, i) => slide.order === i + 1
+            && trustedImage.test(String(slide.image_url || "")))) {
+        throw new Error("Full verified native gallery is not available");
+      }
+      const controls = document.createElement("div");
+      controls.id = "factoryNativeGalleryControls";
+      controls.className = "factory-recovery-gallery-controls";
+      controls.setAttribute("role", "group");
+      controls.setAttribute("aria-label", "Native photo gallery slide navigation");
+      controls.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:12px 4px";
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "secondary-button";
+      back.textContent = "Previous image";
+      const counter = document.createElement("span");
+      counter.setAttribute("aria-live", "polite");
+      const next = document.createElement("button");
+      next.type = "button";
+      next.className = "secondary-button";
+      next.textContent = "Next image";
+      controls.append(back, counter, next);
+      dialog.appendChild(controls);
+      let index = 0;
+      const show = (nextIndex) => {
+        index = nextIndex;
+        image.src = slides[index].image_url;
+        image.alt = `Verified native gallery slide ${index + 1} of ${slides.length}`;
+        image.hidden = false;
+        counter.textContent = `${index + 1} / ${slides.length} slides · review only`;
+        back.disabled = index === 0;
+        next.disabled = index === slides.length - 1;
+        setStatus(`Viewing native slide ${index + 1} of ${slides.length} · ${cardLabel(card)}`);
+      };
+      image.onerror = () => setStatus(
+        `Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);
+      back.addEventListener("click", () => show(index - 1));
+      next.addEventListener("click", () => show(index + 1));
+      show(0);
+    } catch (error) {
+      if (epoch !== factoryGalleryPreviewEpoch) return;
+      setStatus(`Full gallery unavailable: ${String(error?.message || error)}. The cover alone is not approval evidence.`, true);
+      const empty = $("factoryPreviewEmpty");
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = "Cannot verify the individual native slides in Factory. Do not approve this output until the slide inventory loads.";
+      }
+      image.hidden = true;
+    }
+  }
+
   function closeFactoryPreview() {
+    factoryGalleryPreviewEpoch += 1;
+    clearFactoryNativeGalleryControls();
     clearFactoryRecoveryGalleryControls();
     const backdrop = $("factoryPreviewBackdrop");
     const video = $("factoryPreviewVideo");
@@ -660,6 +734,7 @@
       video.load();
     }
     if (image) {
+      image.onerror = null;
       image.removeAttribute("src");
       image.hidden = true;
     }
@@ -670,6 +745,8 @@
   }
 
   function openFactoryPreview(card) {
+    const galleryEpoch = ++factoryGalleryPreviewEpoch;
+    clearFactoryNativeGalleryControls();
     clearFactoryRecoveryGalleryControls();
     const backdrop = $("factoryPreviewBackdrop");
     const video = $("factoryPreviewVideo");
@@ -715,6 +792,20 @@
         setStatus(`No verified recovery preview for ${cardLabel(card)}`, true);
       }
       backdrop.hidden = false;
+      return;
+    }
+
+    if (isFactoryNativeGallery(card)) {
+      dialog.classList.remove("is-video");
+      dialog.classList.add("is-image");
+      if (thumb) {
+        image.src = thumb;
+        image.alt = "Gallery cover · loading verified individual slides";
+        image.hidden = false;
+      }
+      backdrop.hidden = false;
+      setStatus(`Loading verified native gallery slides · ${cardLabel(card)}`);
+      void showFactoryNativeGallery(card, image, dialog, galleryEpoch);
       return;
     }
 
