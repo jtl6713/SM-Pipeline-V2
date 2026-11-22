@@ -1,0 +1,84 @@
+name: Incident 2670 - Single-image A3 recovery canary
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/incident-2670-a3-canary.txt'
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-a3-canary
+  cancel-in-progress: false
+
+jobs:
+  one-image-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Verify live recovery-only, governor, and photo classification gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/a3-runner-health.json
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_image_classification_enabled==true and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/a3-runner-health.json >/dev/null
+          echo "a3_runner_recovery_gates=PASS"
+      - name: Request classification for exact previously uploaded Bethesda image
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://ops.chicagoshining.com"
+          selected=""
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-a3-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/ops-a3-catalog.json >/dev/null; then
+              selected="$candidate"
+              break
+            fi
+          done
+          test -n "$selected" || { echo 'ops_auth_unavailable'; exit 1; }
+          cat > /tmp/recovery-a3.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 15
+          if (-not ($h.ok -and $h.recovery_read_only -and $h.recovery_image_classification_enabled -and $h.workload_governor_enabled -and (-not $h.i1_durable_jobs))) { throw 'runner_recovery_gates_closed' }
+          $p='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          $line=Get-Content -LiteralPath $p | Where-Object { $_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*=' } | Select-Object -Last 1
+          if (-not $line) { throw 'runner_secret_unavailable' }
+          $secret=(($line -split '=',2)[1]).Trim().Trim('"').Trim("'")
+          if (-not $secret) { throw 'runner_secret_empty' }
+          $payload='{"extra":{"record_ids":["recUCUmpw4EftqOpQ"],"trigger_a4":false,"wait_for_next":false,"drain":false,"background":true}}'
+          $r=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/stages/a3' -Method POST -ContentType 'application/json' -Headers @{ 'X-Pipeline-Secret' = $secret } -Body $payload -TimeoutSec 25
+          if ($r.stage -ne 'a3' -or @('ok','skipped') -notcontains $r.status) { throw 'single_image_a3_not_accepted' }
+          Write-Output 'a3_canary_record=recUCUmpw4EftqOpQ'
+          Write-Output "a3_canary_accepted=$($r.status)"
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("/tmp/recovery-a3.json").write_text(json.dumps({"command":Path("/tmp/recovery-a3.ps1").read_text(),"confirm":True}),encoding="utf-8")
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-a3-created.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H "Content-Type: application/json" --data-binary @/tmp/recovery-a3.json || true)
+          [[ "$code" == "202" ]] || { echo "ops_a3_start_http=$code"; cat /tmp/ops-a3-created.json | head -c 300; exit 1; }
+          job=$(jq -r '.job.id // empty' /tmp/ops-a3-created.json)
+          test -n "$job" || { echo 'ops_a3_no_job_id'; exit 1; }
+          for n in $(seq 1 45); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/ops-a3-status.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-a3-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-a3-status.json | grep -E '^a3_canary_(record|accepted)='
+              jq -e '.job.log | contains("a3_canary_record=recUCUmpw4EftqOpQ") and (contains("a3_canary_accepted=ok") or contains("a3_canary_accepted=skipped"))' /tmp/ops-a3-status.json >/dev/null
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo 'ops_a3_job_failed'
+              jq -r '.job.log // ""' /tmp/ops-a3-status.json | tail -c 800
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'ops_a3_status_timeout'
+          exit 1
