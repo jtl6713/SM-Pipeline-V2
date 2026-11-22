@@ -299,7 +299,7 @@ def _work(job: dict) -> None:
         profile_links = fields.get("Content_Profile") or []
         if profile_id not in profile_links or int(fields.get("Requested_Count") or 0) != expected:
             raise RuntimeError("batch profile/count mismatch: refusing generation")
-        if sourcing_mode(fields.get("Asset_Sourcing_Mode", "balanced")) != job["asset_sourcing_mode"]:
+        if sourcing_mode(fields.get("Asset_Sourcing_Mode", "balanced")) != job.get("asset_sourcing_mode", "balanced"):
             raise RuntimeError("batch sourcing mode differs from immutable job admission")
         existing = _linked_idea_count(batch)
         # A completed batch is immutable; do not downgrade it to Failed even
@@ -343,7 +343,7 @@ def _work(job: dict) -> None:
             result = process_request(
                 profile_record_id=profile_id, batch_record_id=batch_id,
                 requested_count=missing, quality=job["quality"],
-                asset_sourcing_mode=job["asset_sourcing_mode"], trigger_i2=False,
+                asset_sourcing_mode=job.get("asset_sourcing_mode", "balanced"), trigger_i2=False,
                 excluded_titles=tuple(rejected_titles[-24:]),
                 exclude_titles=linked_titles,
             )
