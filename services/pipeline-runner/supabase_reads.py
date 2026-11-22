@@ -127,6 +127,8 @@ def _supabase_table(table_id: str) -> str:
         return "production_requests"
     if table_id == MEDIA_ASSETS_TABLE:
         return "media_assets"
+    if table_id == MEDIA_TRANSFER_QUEUE_TABLE:
+        return "studio_media_transfer_queue"
     if table_id == CAROUSEL_SLIDES_TABLE:
         return "carousel_slides"
     if table_id == SOURCE_CANDIDATES_TABLE:
@@ -478,6 +480,13 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
     elif table_id == MEDIA_ASSETS_TABLE:
         bag = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
         columns = _MEDIA_FIELDS
+    elif table_id == MEDIA_TRANSFER_QUEUE_TABLE:
+        # Read ONE queue row with the same authoritative densifier as its
+        # list query. A transfer in Supabase could be listed successfully but
+        # get_record failed before the crop/preview step and blocked ITEM4.
+        from queue_reads import _shape as shape_transfer_row
+
+        return shape_transfer_row(row)
     elif table_id == CAROUSEL_SLIDES_TABLE:
         bag = row.get("fields") if isinstance(row.get("fields"), dict) else {}
         columns = {}
