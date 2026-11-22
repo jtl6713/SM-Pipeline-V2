@@ -109,3 +109,20 @@ test("Factory video preview never mislabels an autoplay or stream failure as a o
   assert.doesNotMatch(preview, /showing cover for/);
   assert.doesNotMatch(preview, /video\.play\?\.\(\)\.catch\(\(\) => \{\}\)/);
 });
+
+test("#2563 held Meta recovery inventory is surfaced above unrelated Producer Change Request Progress", async () => {
+  const html = await readFile(path.join(here, "index.html"), "utf8");
+  const factory = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
+  const css = await readFile(path.join(here, "assets/factory-layout-0680.css"), "utf8");
+  assert.ok(html.indexOf('id="factoryDeskStatus"') < html.indexOf('id="factoryProducerProgress"'));
+  assert.match(factory, /statusBar\.insertAdjacentElement\("afterend", notice\)/);
+  assert.match(factory, /metaRecoveryOnly: false/);
+  assert.match(factory, /state\.metaRecoveryOnly = !state\.metaRecoveryOnly/);
+  assert.match(factory, /manualCards\.filter\(card => card\.meta_repair_required === true\)/);
+  assert.match(factory, /View affected outputs/);
+  assert.match(factory, /not Producer change requests/);
+  assert.match(factory, /fbCount.*Facebook/);
+  assert.match(factory, /igCount.*Instagram/);
+  assert.match(factory, /do_not_publish/);
+  assert.match(css, /#page-factory > \.factory-meta-repair-notice/);
+});
