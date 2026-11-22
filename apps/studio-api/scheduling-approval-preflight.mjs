@@ -26,7 +26,7 @@ export function schedulingPreflightSignature(row) {
   ]);
 }
 
-export function assessSchedulingPreflight(row) {
+export function assessSchedulingPreflight(row, { allowVerifiedCompactNative = false } = {}) {
   const fail = reason => ({ ready: false, reason });
   if (!row || !recId.test(str(row.airtable_record_id)) || !row.id ||
       !row.content_item_id || !row.content_profile_id) return fail("unverified_output_ownership");
@@ -65,10 +65,22 @@ export function assessSchedulingPreflight(row) {
     const manifest = row.selected_assets;
     const clips = manifest && typeof manifest === "object" && !Array.isArray(manifest)
       ? manifest.selected_clips : null;
-    if (!Array.isArray(clips) || clips.length !== count ||
-        clips.some(clip => !str(clip?.url || clip?.src).startsWith(CDN)))
-      return fail("native_photo_manifest_mismatch");
-    for (const clip of clips) media.push({ url: str(clip.url || clip.src), kind: "image" });
+    if (!Array.isArray(clips)) {
+      // The lean Factory GET does not download entire selected_assets JSON.
+      // It may only project a pre-existing receipt from a STRICT full-manifest
+      // byte probe, and cannot create one from this compact projection.
+      const receipt = row.error_messages?.[PREFLIGHT_KEY];
+      const confirmedEarlier = allowVerifiedCompactNative &&
+        receipt?.status === "verified" &&
+        receipt?.native_source_count === count &&
+        receipt?.signature === schedulingPreflightSignature(row);
+      if (!confirmedEarlier) return fail("native_photo_manifest_mismatch");
+    } else {
+      if (clips.length !== count ||
+          clips.some(clip => !str(clip?.url || clip?.src).startsWith(CDN)))
+        return fail("native_photo_manifest_mismatch");
+      for (const clip of clips) media.push({ url: str(clip.url || clip.src), kind: "image" });
+    }
   } else if (!str(row.final_file_url)) {
     return fail("render_final_file_missing");
   }
@@ -80,7 +92,7 @@ export function assessSchedulingPreflight(row) {
 }
 
 export function verifiedSchedulingPreflight(row) {
-  const assess = assessSchedulingPreflight(row);
+  const assess = assessSchedulingPreflight(row, { allowVerifiedCompactNative: true });
   const receipt = row?.error_messages?.[PREFLIGHT_KEY];
   return assess.ready && receipt?.status === "verified" &&
     receipt?.signature === assess.signature &&
@@ -162,6 +174,7 @@ export async function sweepSchedulingApprovalPreflight(env, {
       checked_at: stamp,
       signature: eligibility.signature,
       evidence: media.reason,
+      native_source_count: row.render_status === "Native Photo Route" ? Number(row.selected_clip_count) : null,
       scope: "technical_media_only",
       requires_human_approval: true,
       scheduling_authorized: false,
