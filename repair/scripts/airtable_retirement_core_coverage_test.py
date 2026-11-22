@@ -98,6 +98,22 @@ class CoreEvidenceTest(unittest.TestCase):
         self.worker["hourly"] = [{"hour_utc": stamp(self.start), "attempts": "0"}]
         self.assertFalse(self.run_report()["core_coverage_complete"])
 
+    def test_unaligned_request_event_cannot_be_hidden_as_zero(self):
+        self.worker["hourly"] = [{
+            "hour_utc": stamp(self.start + timedelta(minutes=35)),
+            "source": "studio_worker_gateway",
+            "method": "GET", "attempts": 1,
+        }]
+        self.assertFalse(self.run_report()["core_coverage_complete"])
+
+    def test_zero_request_row_is_not_a_valid_attempt_event(self):
+        self.runner["hourly"] = [{
+            "hour_utc": stamp(self.start),
+            "source": "pipeline_runner_http",
+            "method": "GET", "attempts": 0,
+        }]
+        self.assertFalse(self.run_report()["core_coverage_complete"])
+
     def test_future_end_rejected(self):
         future = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         result = core_coverage_report(self.worker, self.runner, stamp(self.start), stamp(future),
