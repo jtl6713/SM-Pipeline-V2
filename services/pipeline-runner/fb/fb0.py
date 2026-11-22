@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count, recover_missing_photo_slides
+from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array, recover_approved_photo_count, recover_missing_photo_slides, manifest_location_mismatch
 from fb.common import append_note, preview, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     DEFAULT_IMAGE_STAGE_MAX_RETRIES,
@@ -61,6 +61,8 @@ def process_request(
     result["eligibility_reason"] = reason
     if reason:
         return {"processed": False, "reason": reason, **result}
+    if manifest_location_mismatch(output):
+        return {"processed": False, "reason": "source_location_mismatch", **result}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
