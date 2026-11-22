@@ -1,0 +1,37 @@
+name: Incident 2670 runner safety
+
+on:
+  pull_request:
+    paths:
+      - "services/pipeline-runner/studio_produce/**"
+      - "services/pipeline-runner/item4/**"
+      - "services/pipeline-runner/supabase_pipeline.py"
+      - "services/pipeline-runner/tests/test_2670_*.py"
+      - ".github/workflows/incident-2670-runner-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-nonpublishing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runner test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -q pytest -r services/pipeline-runner/requirements.txt
+      - name: Compile affected Python without live services
+        run: |
+          python -m compileall -q services/pipeline-runner/studio_produce/workload_governor.py services/pipeline-runner/studio_produce/processor.py services/pipeline-runner/item4/processor.py services/pipeline-runner/supabase_pipeline.py
+      - name: Test durable queue, circuit and atomic media claims (NO PUBLISH)
+        working-directory: services/pipeline-runner
+        env:
+          STUDIO_WORKLOAD_GOVERNOR_ENABLED: "false"
+          STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: "false"
+        run: |
+          python -m pytest -q tests/test_2670_workload_governor.py tests/test_2670_atomic_transfer_claim.py tests/test_upsert_variant_queue_batch.py tests/test_item4_variant_batch.py

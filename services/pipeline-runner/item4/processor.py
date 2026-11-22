@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from item4.formulas import airtable_quote, smv1_exact_request_formula, smv1_pend
 from item4.media_assets import ensure_media_asset
 from item4.settings import PipelineSettings, field, pipeline_settings
 from item4.sources import resolve_master_source
+from studio_produce import workload_governor as governor
 
 
 def _now_iso() -> str:
@@ -218,12 +220,20 @@ def requeue_stale_processing(
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     requeued = 0
     for row in rows:
+        if governor.resource_active("transfer", str(row["id"])):
+            # An active worker may legitimately need more than the old 90s timeout.
+            continue
         fields = row.get("fields") or {}
         stamp = _row_stamp_ms(row)
         # Video master copies may legitimately run for tens of minutes.
         # Reclaiming them after 90s uploads duplicate Drive originals.
         recovery_age = (45 * 60 * 1000 if str(fields.get("Asset_Kind") or "") == "Master Original"
                         else STALE_PROCESSING_MS)
+        if governor.enabled():
+            # Never roll a potentially in-flight variant back to Pending on the
+            # old 90-second timer. A crashed worker's durable resource lease
+            # may take 20 minutes to expire. Allow a further recovery margin.
+            recovery_age = max(recovery_age, 45 * 60 * 1000)
         if stamp and (now_ms - stamp) < recovery_age:
             continue
         attempts = int(fields.get("Attempt_Count") or 0)
@@ -274,6 +284,10 @@ def is_retryable_master_error(exc: Exception) -> bool:
     return status in {404, 408, 429, 500, 502, 503, 504}
 
 
+class TransferClaimConflict(RuntimeError):
+    """A different actor already transitioned the same canonical transfer."""
+
+
 def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> None:
     attempts = int(fields.get("Attempt_Count") or 0) + 1
     patch = {
@@ -282,6 +296,38 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
         "Error_Message": None,
         "Last_Attempt_At": _now_iso(),
     }
+    if governor.enabled():
+        # Critical: local locks do not protect concurrent writers on other
+        # hosts. Conditional PATCH is atomic at the *canonical* Supabase row.
+        # No second unconditional queue upsert is allowed after this CAS.
+        from supabase_pipeline import _rest
+
+        expected = str(fields.get("Transfer_Status") or "")
+        if expected not in {"Pending", "Drive Uploaded"}:
+            raise TransferClaimConflict("transfer is not in a claimable status")
+        if not str(record_id).startswith("rec"):
+            raise RuntimeError("transfer claim has no canonical record identity")
+        settings = getattr(client, "_settings", None)
+        if not isinstance(settings, dict):
+            raise RuntimeError("Supabase settings required for atomic transfer claim")
+        rows = _rest(
+            settings,
+            f"studio_media_transfer_queue?airtable_record_id=eq.{record_id}"
+            f"&status=eq.{expected}&select=airtable_record_id",
+            "PATCH",
+            {
+                "status": "Processing",
+                "attempt_count": attempts,
+                "error_message": None,
+                "last_attempt_at": patch["Last_Attempt_At"],
+            },
+            prefer="return=representation",
+        )
+        if rows == []:
+            raise TransferClaimConflict("canonical transfer state changed before claim")
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("airtable_record_id") != record_id:
+            raise RuntimeError("atomic transfer claim could not be verified")
+        return
     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id, patch)
 
 
@@ -636,6 +682,10 @@ def _process_variant_pending(
     if not folder_id or not source_drive_id or not ratio:
         raise RuntimeError("Platform variant row is missing folder, source drive id, or aspect ratio")
 
+    if governor.enabled():
+        # A reused/cached asset still needs a canonical claim before writing
+        # Ready, otherwise it can race a concurrent crop worker.
+        _claim_row(client, record_id, fields)
     if _row_has_authority(fields):
         client.update_record(
             MEDIA_TRANSFER_QUEUE_TABLE,
@@ -655,7 +705,8 @@ def _process_variant_pending(
     cached = _find_persistent_variant(client, row)
     if cached:
         return _apply_cached_variant(client, row, cached)
-    _claim_row(client, record_id, fields)
+    if not governor.enabled():
+        _claim_row(client, record_id, fields)
     source_bytes, _ = drive.download_file(source_drive_id)
     source_ext = str(fields.get("Source_Extension") or "")
     source_bytes = rasterize_still_bytes(
@@ -702,6 +753,11 @@ def process_variant_group(
         if not folder_id or not ratio:
             raise RuntimeError("Platform variant row is missing folder or aspect ratio")
         if _row_has_authority(fields):
+            if governor.enabled():
+                try:
+                    _claim_row(client, row["id"], fields)
+                except TransferClaimConflict:
+                    continue
             patch = {"Transfer_Status": "Ready", "Error_Message": None}
             if airtable_lock:
                 with airtable_lock:
@@ -718,12 +774,16 @@ def process_variant_group(
                 "ratio": ratio,
             })
             continue
-        pending_rows.append(row)
-        if airtable_lock:
-            with airtable_lock:
+        try:
+            if airtable_lock:
+                with airtable_lock:
+                    _claim_row(client, row["id"], fields)
+            else:
                 _claim_row(client, row["id"], fields)
-        else:
-            _claim_row(client, row["id"], fields)
+        except TransferClaimConflict:
+            # Another owner won the canonical claim. Do not crop or fail it.
+            continue
+        pending_rows.append(row)
 
     # Persistent cross-batch lookup before any source download or variant call.
     still_pending = []
@@ -813,7 +873,7 @@ def process_variant_group(
             raise
 
     first_error: Exception | None = None
-    ratio_workers = max(1, min(4, len(pending_rows)))
+    ratio_workers = max(1, min(governor.max_ratio_workers() if governor.enabled() else 4, len(pending_rows)))
     with ThreadPoolExecutor(max_workers=ratio_workers) as pool:
         # Submit in parallel, then collect in pending_rows order so callers
         # (and hermetic assertions) see a stable ratio sequence.
@@ -946,6 +1006,22 @@ def _process_preview_pending(
 
 
 def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
+    if governor.enabled():
+        with governor.resource_slot("transfer", key=str(row["id"]), limit=1):
+            current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, str(row["id"]))
+            fields = current.get("fields") or {}
+            status = str(fields.get("Transfer_Status") or "")
+            preview = str(fields.get("Preview_Status") or "")
+            if status not in {"Pending", "Drive Uploaded"} and not (status == "Ready" and preview == "Pending"):
+                return {"processed": False, "reason": "no_longer_eligible", "queue_record_id": row["id"]}
+            try:
+                return _process_queue_row_unlocked(client, current)
+            except TransferClaimConflict:
+                return {"processed": False, "reason": "claimed_elsewhere", "queue_record_id": row["id"]}
+    return _process_queue_row_unlocked(client, row)
+
+
+def _process_queue_row_unlocked(client: AirtableClient, row: dict) -> dict[str, Any]:
     settings = pipeline_settings(client)
     drive = GoogleDriveClient()
     variant = VariantServiceClient(settings)
@@ -1012,6 +1088,8 @@ def process_one(
     try:
         result = process_queue_row(client, row)
         return {"processed": True, **result}
+    except governor.AdmissionDeferred:
+        return {"processed": False, "reason": "governor_admission_deferred"}
     except Exception as exc:
         message = str(exc)
         preview = (
@@ -1060,19 +1138,28 @@ def process_drain(
     groups: dict[str, list[dict]] = {}
 
     def _run_group(group_rows: list[dict]) -> list[dict[str, Any]]:
-        drive = GoogleDriveClient()
-        variant = VariantServiceClient(settings)
-        return process_variant_group(
-            client,
-            drive,
-            variant,
-            group_rows,
-            airtable_lock=airtable_lock,
-        )
+        with governor.resource_slot("photo_group", limit=governor.max_photo_groups()):
+            with ExitStack() as locks:
+                current_rows = []
+                for selected in sorted(group_rows, key=lambda row: str(row["id"])):
+                    locks.enter_context(governor.resource_slot("transfer", key=str(selected["id"]), limit=1))
+                    current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, str(selected["id"])) if governor.enabled() else selected
+                    if str((current.get("fields") or {}).get("Transfer_Status") or "") == "Pending":
+                        current_rows.append(current)
+                if not current_rows:
+                    return []
+                drive = GoogleDriveClient()
+                variant = VariantServiceClient(settings)
+                return process_variant_group(
+                    client, drive, variant, current_rows, airtable_lock=airtable_lock,
+                )
 
     def _safe_leftover(row: dict) -> dict[str, Any] | None:
         try:
             return process_queue_row(client, row)
+        except governor.AdmissionDeferred:
+            # Resource scarcity is not evidence of a bad or failed asset.
+            return {"processed": False, "route": "governor_admission_deferred"}
         except Exception as exc:
             preview = (
                 str(field(row, "Transfer_Status") or "") == "Ready"
@@ -1118,7 +1205,7 @@ def process_drain(
                 continue
             break
 
-        workers = max(1, min(int(photo_workers or 1), 10, max(1, len(groups) or 1)))
+        workers = max(1, min(int(photo_workers or 1), governor.max_photo_groups() if governor.enabled() else 10, max(1, len(groups) or 1)))
         if groups:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [pool.submit(_run_group, group_rows) for group_rows in groups.values()]
