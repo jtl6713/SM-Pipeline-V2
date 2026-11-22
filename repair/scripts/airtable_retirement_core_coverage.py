@@ -23,8 +23,10 @@ LAST_BEAT_AFTER_MINUTES = 50
 
 
 def utc(value):
-    if not isinstance(value, str) or not value.endswith("Z"):
-        raise ValueError("Expected an explicit UTC timestamp ending in Z")
+    if not isinstance(value, str) or not (
+        value.endswith("Z") or value.endswith("+00:00")
+    ):
+        raise ValueError("Expected an explicit UTC timestamp")
     result = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if result.tzinfo is None or result.utcoffset() != timedelta(0):
         raise ValueError("Expected a UTC timestamp")
