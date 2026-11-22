@@ -1,0 +1,194 @@
+{
+  "schema": "studio.issue2294.original_selected_image_http_audit.1",
+  "issue": 2294,
+  "read_only": true,
+  "verified_public_image_geometry": false,
+  "publication_authorized": false,
+  "db_writes": 0,
+  "provider_writes": 0,
+  "provenance": "Supabase output render_clip_list and selected_assets plus media_assets ownership readback 2026-11-22",
+  "outputs": [
+    {
+      "output_number": 10992,
+      "output_record_id": "rec1p9SOjrpxtpQkV",
+      "platform": "Instagram",
+      "studio_output_type": "Carousel",
+      "expected_slides": 8,
+      "release_to_publish_authorized": false,
+      "slide_package_state": "missing_canonical_slides",
+      "images": [
+        {
+          "order": 1,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/0.jpg",
+          "source_asset_record_id": "rec05Z83pXSEf3IEi",
+          "source_asset_name": "Long Island City 5",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 2,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/1.jpg",
+          "source_asset_record_id": "recGUfybolgFKnFtJ",
+          "source_asset_name": "Long Island City 4",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 3,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/2.jpg",
+          "source_asset_record_id": "recqVw4ijxhQvuTrD",
+          "source_asset_name": "Long Island City 3",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 4,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/3.jpg",
+          "source_asset_record_id": "recIdbxeyZ4zCKIbb",
+          "source_asset_name": "Long Island City 2",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 5,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/4.jpg",
+          "source_asset_record_id": "recSgCYKW45suuyCA",
+          "source_asset_name": "Long Island City 1",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 6,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/5.jpg",
+          "source_asset_record_id": "rec7vsPGEByklbig1",
+          "source_asset_name": "Statue of Liberty 7",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 7,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/6.jpg",
+          "source_asset_record_id": "recLCeoAMCJKbwRrx",
+          "source_asset_name": "Statue of Liberty 6",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 8,
+          "public_url": "https://media.chicagoshining.com/studio/previews/lettered/rec1p9SOjrpxtpQkV/7.jpg",
+          "source_asset_record_id": "recnDqkyqghKRxJX0",
+          "source_asset_name": "Statue of Liberty 5",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        }
+      ]
+    },
+    {
+      "output_number": 10993,
+      "output_record_id": "recX9tOrTfQldqs32",
+      "platform": "Facebook",
+      "studio_output_type": "Multi-Image Post",
+      "expected_slides": 8,
+      "release_to_publish_authorized": false,
+      "slide_package_state": "missing_canonical_slides",
+      "images": [
+        {
+          "order": 1,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-38e491c8b141472aa8-4x5-1bqoDR0KxkWWF-guVW3-TKIplXaRQIVvp.jpg",
+          "source_asset_record_id": "rec05Z83pXSEf3IEi",
+          "source_asset_name": "Long Island City 5",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 2,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-289c1eb0b3e0422f8e-4x5-1lxB097YI1XGrIyRc6WMmvXUSfcLrvLDC.jpg",
+          "source_asset_record_id": "recGUfybolgFKnFtJ",
+          "source_asset_name": "Long Island City 4",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 3,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-103028a9b8464ef7bb-4x5-1baSPF4K_w1MDbslhVWs_J6P-4GcALbLd.jpg",
+          "source_asset_record_id": "recqVw4ijxhQvuTrD",
+          "source_asset_name": "Long Island City 3",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 4,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-d98aedc7b7be4bc7a2-4x5-1Eew54hh8INb8kdG4UvDX6FAoIJ0Wir8d.jpg",
+          "source_asset_record_id": "recIdbxeyZ4zCKIbb",
+          "source_asset_name": "Long Island City 2",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 5,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-af0700090afe446987-4x5-1rd36nSkaCHZNcHmVACR0UWu3AKJOjsD5.jpg",
+          "source_asset_record_id": "recSgCYKW45suuyCA",
+          "source_asset_name": "Long Island City 1",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 6,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-9a5b43b58e974cf7bc-4x5-1Hk90dJU8Y_4nvwU7gUToV3HeOJduPjZU.jpg",
+          "source_asset_record_id": "rec7vsPGEByklbig1",
+          "source_asset_name": "Statue of Liberty 7",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 7,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-76503eda44b54d36ab-4x5-1WrdOmQxv-wwzjME_35KuQeV8dJkgBmHg.jpg",
+          "source_asset_record_id": "recLCeoAMCJKbwRrx",
+          "source_asset_name": "Statue of Liberty 6",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        },
+        {
+          "order": 8,
+          "public_url": "https://media.chicagoshining.com/studio/previews/item4/reczvqjo1xs2jYXn0/ITEM4-VARIANT-fill-crop-v2-reczvqjo1xs2jYXn0-dc48e072183c42b98c-4x5-1meFTsZooiJQlIm4t2iFHPCwZoSzN6hMY.jpg",
+          "source_asset_record_id": "recnDqkyqghKRxJX0",
+          "source_asset_name": "Statue of Liberty 5",
+          "source_rights_metadata": "Owned",
+          "selected_render_match": true,
+          "cdn_image_bytes_verified": false,
+          "aspect_4x5_verified": false
+        }
+      ]
+    }
+  ]
+}
