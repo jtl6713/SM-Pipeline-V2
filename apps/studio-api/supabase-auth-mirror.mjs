@@ -222,6 +222,14 @@ const AUTH_OPTIONAL_MISSING_BY_REST = new WeakMap();
 const AUTH_OPTIONAL_MISSING_TTL_MS = 15 * 60 * 1000;
 
 async function authRestSelect(rest, env, pathWithExtras, pathCore) {
+  // Production's current Supabase auth tables have only the core columns.
+  // Requesting speculative optional fields produces SQLSTATE 42703 on every
+  // cold isolate and can materially worsen database pressure. Extended
+  // projection must be explicitly enabled after those columns are verified.
+  const extended = ["true", "1", "yes"].includes(
+    String(env?.STUDIO_AUTH_EXTENDED_SELECT || "").trim().toLowerCase()
+  );
+  if (pathCore && !extended) return rest(env, pathCore);
   let missingByTable = AUTH_OPTIONAL_MISSING_BY_REST.get(rest);
   if (!missingByTable) {
     missingByTable = new Map();
