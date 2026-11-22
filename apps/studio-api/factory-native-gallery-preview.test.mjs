@@ -149,3 +149,54 @@ test("#2294: exact linked draft native images display as UNAPPROVED with publish
     await assert.rejects(readSupabaseFactoryGallerySlides(env,draftId),/Incomplete draft native gallery/);
   });
 });
+
+
+test("#2294: incomplete verification markers remain previewable only as held, unapproved candidates", async () => {
+  const draftId = "rectw2pvgnBzK3wCN";
+  const url = n => "https://media.chicagoshining.com/studio/previews/lettered/" + draftId + "/" + (n-1) + ".jpg";
+  const clips = [1, 2].map(n => ({
+    order:n,url:url(n),googleDriveFileId:"source_variant_"+n+"_123456",
+    mediaAssetRecordId:"recSourceFamily000"+n,
+  }));
+  const parent = {
+    airtable_record_id:draftId,output_number:10853,
+    platform_output_type:"Facebook Photo Set",studio_output_type:"Multi-Image Post",
+    output_status:"Ready for Review",do_not_publish:true,auto_publish_enabled:false,
+    selected_clip_count:2,
+    selected_assets:{selected_clips:clips.map(c => ({
+      order:c.order,url:c.url,google_drive_file_id:c.googleDriveFileId,media_asset_record_id:c.mediaAssetRecordId
+    }))},render_clip_list:clips,
+  };
+  const slides = clips.map((c,i) => ({
+    airtable_record_id:"sb-native:2294:10853:"+String(i+1).padStart(2,"0"),
+    current_order:i+1,deleted_from_carousel:false,
+    fields:{
+      "Platform Output":[draftId],PO_Output_ID:[10853],
+      "Final Image URL":c.url,"Asset_4x5_Public_URL":c.url,
+      "Google Drive File ID":c.googleDriveFileId,
+      Asset_Family_Key:c.mediaAssetRecordId,
+      "Approved For Final":false,Shared_Asset_Approved:false,"Review Status":"Pending Review",
+      SM_Native_Gallery_Draft_Repair_2294:{
+        output_number:10853,slide_order:i+1,rights_status:"Unverified",
+        image_http_verified:false,image_geometry_verified:false,
+        final_creative_approved:false,publishing_authorized:false,
+      },
+    },
+  }));
+  await withMockSupabase({parent,slides},async ()=>{
+    const result=await readSupabaseFactoryGallerySlides(env,draftId);
+    assert.equal(result.count,2);
+    assert.equal(result.provisional,true);
+    assert.equal(result.publication_authorized,false);
+    assert.equal(result.candidate_bytes_verified,false);
+    assert.match(result.warning,/Unverified source candidates/);
+  });
+  const corrupted=structuredClone(slides);
+  corrupted[0].fields.SM_Native_Gallery_Draft_Repair_2294.image_http_verified=true;
+  await withMockSupabase({parent,slides:corrupted},async ()=>{
+    await assert.rejects(readSupabaseFactoryGallerySlides(env,draftId),/pending approval changed/);
+  });
+  await withMockSupabase({parent:{...parent,auto_publish_enabled:true},slides},async ()=>{
+    await assert.rejects(readSupabaseFactoryGallerySlides(env,draftId),/hold drift/);
+  });
+});
