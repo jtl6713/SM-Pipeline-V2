@@ -1,0 +1,64 @@
+name: Issue 2593 exact ferry recovery R2 audit (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2593-ferry-r2-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Verify current production Worker R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/settings" \
+            -o /tmp/2593-worker-settings.json
+          jq -e '.success==true' /tmp/2593-worker-settings.json >/dev/null
+          jq -er '[.result.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | .bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/2593-worker-settings.json >/tmp/2593-bucket
+          echo 'issue2593_verified_production_r2_binding=true'
+      - name: Read exact one-shot recovery receipt without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="$(cat /tmp/2593-bucket)"
+          PATH_IN_R2='studio/recovery/2593/free-skyline-ferry-hold-v1/reczvqjo1xs2jYXn0.json'
+          npm exec --yes --package=wrangler@4.123.0 -- wrangler --version
+          if timeout 45s npm exec --yes --package=wrangler@4.123.0 -- \
+            wrangler r2 object get "$BUCKET/$PATH_IN_R2" --remote --file /tmp/2593-receipt.json \
+            >/tmp/2593-r2-get.log 2>&1; then
+            jq -c '{
+              receipt:"found",status,request,expected,routed,outputs,
+              verified,resumed,resume_reason,preflight,
+              error:(.error//""|tostring|.[0:180]),at,finished_at,
+              publication_authorized,publish_actions,schedule_actions
+            }' /tmp/2593-receipt.json | tee /tmp/2593-audit.jsonl
+          else
+            reason=unknown
+            if grep -Eqi 'not found|404|does not exist|no such key' /tmp/2593-r2-get.log; then
+              reason=missing
+            elif grep -Eqi '403|401|forbidden|permission|scope|authentication' /tmp/2593-r2-get.log; then
+              reason=token_lacks_read
+            elif grep -Eqi 'unknown argument|unknown command' /tmp/2593-r2-get.log; then
+              reason=cli_syntax
+            fi
+            printf '{"receipt":"unavailable","reason":"%s"}\n' "$reason" | tee /tmp/2593-audit.jsonl
+          fi
+      - name: Save sanitized status-only artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2593-held-fanout-receipt
+          path: /tmp/2593-audit.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
