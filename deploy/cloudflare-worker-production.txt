@@ -1509,3 +1509,4 @@ Deploy #2546 Ideas independent hourly harvest and five-minute photo-ready priori
 2026-11-21 19:05 CT: #2574 prevent Supabase production_request_outputs 23502 NOT NULL failure on effective_resolution when a heterogeneous Reel/Story batch is upserted. Group exact column sets and preserve JSONB override omission. Trigger protected Worker deploy.
 
 2026-11-21 #2574 P0: Isolate optional Supabase draft-backfill query failures from authoritative ready-production R2 claim dispatch; log failures and preserve human approval. Direct recovery verified 74/74 output destinations. Deploy via protected Worker.
+2026-11-21 #2593 Worker 0.10.1013: one-shot exact Free Skyline Ferry Hack C2239 missing Platform Outputs recovery via existing I3/I4 fanout. All restored outputs seeded DNP=true/auto=false/unscheduled, R2 receipt and readback. No provider publishing.
