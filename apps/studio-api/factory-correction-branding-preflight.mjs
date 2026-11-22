@@ -4,6 +4,15 @@
  * verification: its sole purpose is to reject missing/foreign branding BEFORE
  * any correction-batch receipt, scheduling vacate, or review hold is written.
  */
+// Owner-confirmed shared brand watermark across Chicago, NYC, LA and Miami.
+// Only this exact active, owned Chicago catalog entry is globally authorized.
+// Other cross-market marks must continue to fail closed.
+const GLOBAL_SHARED_SMALL={
+  assetId:"recTnq3abS2rcsTzK",
+  ownerProfile:"recT2rbKX3MF7cVFU",
+  driveId:"1WQyd5W1__HkaEkWyC38IMErW8702Rd4u",
+  name:"ChicagoShining_Watermark_Small.png",
+};
 const REC=/^rec[A-Za-z0-9]{14}$/;
 const DRIVE=/^[A-Za-z0-9_-]{20,}$/;
 const asText=v=>String(v??"").trim();
@@ -22,7 +31,11 @@ export function profileWatermarkPreflight({profileId,originalPropsJson,assets,fi
   if(!source)return unsupported("PROFILE_WATERMARK_SOURCE_MISSING");
   const candidates=assets.filter(row=>
     REC.test(asText(row?.id)) &&
-    owned(field(row,"Content_Profile"))===profileId &&
+    (owned(field(row,"Content_Profile"))===profileId ||
+      (asText(row.id)===GLOBAL_SHARED_SMALL.assetId &&
+       owned(field(row,"Content_Profile"))===GLOBAL_SHARED_SMALL.ownerProfile &&
+       asText(field(row,"Google Drive File ID"))===GLOBAL_SHARED_SMALL.driveId &&
+       asText(field(row,"Asset Name"))===GLOBAL_SHARED_SMALL.name)) &&
     selected(field(row,"Asset_Role"))==="Watermark" &&
     selected(field(row,"Asset_Status"))==="Available" &&
     selected(field(row,"Rights_Status"))==="Owned" &&

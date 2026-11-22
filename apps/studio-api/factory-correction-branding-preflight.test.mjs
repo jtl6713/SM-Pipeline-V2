@@ -45,3 +45,45 @@ test("never synthesize watermark eligibility when source props are absent",()=>{
   for(const json of ["","{}","not-json",null])
     assert.equal(check({originalPropsJson:json}).supported,false);
 });
+
+
+test("accept only the owner-confirmed shared small watermark for NYC and other profiles",()=>{
+  const shared={
+    id:"recTnq3abS2rcsTzK",fields:{
+      Content_Profile:["recT2rbKX3MF7cVFU"],
+      "Asset Name":"ChicagoShining_Watermark_Small.png",
+      Asset_Role:"Watermark",Asset_Status:"Available",Rights_Status:"Owned",
+      Active:true,Do_Not_Use:false,MIME_Type:"image/png",
+      "Google Drive File ID":driveId,
+    },
+  };
+  assert.deepEqual(check({assets:[shared]}),{supported:true,reason:null});
+  for(const invalid of [
+    {...shared,id:id(99)},
+    {...shared,fields:{...shared.fields,"Asset Name":"ChicagoShining_Watermark_Large.png"}},
+    {...shared,fields:{...shared.fields,Content_Profile:[other]}},
+    {...shared,fields:{...shared.fields,Active:false}},
+    {...shared,fields:{...shared.fields,Rights_Status:"Unknown"}},
+    {...shared,fields:{...shared.fields,"Google Drive File ID":foreign}},
+  ]) assert.equal(check({assets:[invalid]}).supported,false);
+  assert.equal(check({
+    assets:[shared],
+    originalPropsJson:props(foreign),
+  }).supported,false);
+  // Still fail closed for ambiguous competing small marks, even if shared is valid.
+  assert.equal(check({assets:[shared,asset(driveId,profile)]}).supported,false);
+});
+
+
+test("the canonical shared watermark is eligible for multiple distinct profiles",()=>{
+  const shared={
+    id:"recTnq3abS2rcsTzK",
+    fields:{Content_Profile:["recT2rbKX3MF7cVFU"],
+      "Asset Name":"ChicagoShining_Watermark_Small.png",
+      Asset_Role:"Watermark",Asset_Status:"Available",Rights_Status:"Owned",
+      Active:true,Do_Not_Use:false,MIME_Type:"image/png",
+      "Google Drive File ID":driveId},
+  };
+  assert.deepEqual(check({profileId:profile,assets:[shared]}),{supported:true,reason:null});
+  assert.deepEqual(check({profileId:other,assets:[shared]}),{supported:true,reason:null});
+});
