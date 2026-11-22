@@ -138,6 +138,11 @@ test("#2294: exact linked draft native images display as UNAPPROVED with publish
   await withMockSupabase({parent:{...parent,do_not_publish:false},slides},async () => {
     await assert.rejects(readSupabaseFactoryGallerySlides(env,draftId),/hold drift/);
   });
+  const corruptEvidence=slides.map(x=>structuredClone(x));
+  corruptEvidence[0].fields.SM_Native_Gallery_Draft_Repair_2294.public_sha256="not-verified";
+  await withMockSupabase({parent,slides:corruptEvidence},async () => {
+    await assert.rejects(readSupabaseFactoryGallerySlides(env,draftId),/pending approval changed/);
+  });
   const mixed=slides.map(x=>structuredClone(x));
   delete mixed[1].fields.SM_Native_Gallery_Draft_Repair_2294;
   await withMockSupabase({parent,slides:mixed},async () => {
