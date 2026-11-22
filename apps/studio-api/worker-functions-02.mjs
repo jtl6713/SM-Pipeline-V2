@@ -12374,7 +12374,9 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
   }
 
   if (promotionCompleted(ideaRecord)) {
-    const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx);
+    const finalized = await finalizeProductionRequestPromotion(
+      env, requestRecordId, ideaRecord, ctx, { recoveryHold: requestStatus !== "Promoted" }
+    );
     if (finalized.supersededByRequestId) {
       return respond(request, env, {
         ok: true,
@@ -12414,7 +12416,9 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
     const autonomous = skipsProductionApprove(f(requestRecord, "Production_Notes"));
     ideaRecord = await waitForPromotionResult(env, ideaRecordId, autonomous ? 24 : 3, autonomous ? 1250 : 750);
     if (promotionCompleted(ideaRecord)) {
-      const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx);
+      const finalized = await finalizeProductionRequestPromotion(
+        env, requestRecordId, ideaRecord, ctx, { recoveryHold: true }
+      );
     if (finalized.supersededByRequestId) {
       return respond(request, env, {
         ok: true,
@@ -12477,30 +12481,47 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
     Submitted_At: submittedAt,
   });
 
+  let promotionHandoff = null;
   try {
     const webhook = promotionWebhookUrl(env, ideaRecordId, input);
-    await fetchPromotionHandoff(env, webhook);
+    promotionHandoff = await fetchPromotionHandoff(env, webhook, requestRecordId);
   } catch (error) {
-    // The I3 request itself did not complete. Return to Draft so the user can
-    // safely correct/retry rather than leaving a false Submitted state.
-    try {
-      requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, {
-        Request_Status: "Draft",
-        Submitted_At: null,
-      });
-    } catch {}
-    throw error;
+    // A 5xx can happen AFTER I3/I4 committed a Content Item. Never reset that
+    // transaction to Draft or repeat it just because the HTTP response failed.
+    const persistedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaRecordId).catch(() => null);
+    if (persistedIdea && promotionCompleted(persistedIdea)) {
+      ideaRecord = persistedIdea;
+      promotionHandoff = { recoveryHold: true };
+    } else {
+      const candidateStatus = String(f(persistedIdea || {}, "Candidate_Status") || "");
+      // Exact explicit runner fence rejection cannot have started I3 writes.
+      const neverStarted = candidateStatus === "Generated" &&
+        String(error?.message || "").includes("runner_recovery_read_only");
+      if (neverStarted) {
+        try {
+          requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, {
+            Request_Status: "Draft", Submitted_At: null,
+          });
+        } catch {}
+        throw new HttpError(503, "The production approval service is temporarily gated. Your saved platform choices and crops are intact.");
+      }
+      // Ambiguous or partial I3 transaction: keep Submitted, don't fabricate
+      // failure or rerun I3; subsequent read-only checks show the real state.
+      throw new HttpError(503, "Approval handoff is not yet verified. This request remains Submitted; check approval status to reconcile the result safely.");
+    }
   }
 
   const autonomousSubmit = skipsProductionApprove(f(requestRecord, "Production_Notes"));
-  ideaRecord = await waitForPromotionResult(
+  if (!promotionCompleted(ideaRecord)) ideaRecord = await waitForPromotionResult(
     env,
     ideaRecordId,
     autonomousSubmit ? 24 : 3,
     autonomousSubmit ? 1250 : 750
   );
   if (promotionCompleted(ideaRecord)) {
-    const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx);
+    const finalized = await finalizeProductionRequestPromotion(
+      env, requestRecordId, ideaRecord, ctx, { recoveryHold: promotionHandoff?.recoveryHold === true }
+    );
     if (finalized.supersededByRequestId) {
       return respond(request, env, {
         ok: true,
@@ -12696,13 +12717,21 @@ export function promotionWebhookUrl(env, recordId, input) {
 }
 /*__STUDIO_WORKER_END:promotionWebhookUrl__*/
 
-export async function fetchPromotionHandoff(env, webhook) {
+export async function fetchPromotionHandoff(env, webhook, requestRecordId) {
   const extra = Object.fromEntries(webhook.searchParams.entries());
   extra.trigger_i4 = true;
+  // This is an authenticated Worker-derived request owner, never a browser
+  // supplied Idea id. Recovery I3 verifies that exact Supabase relationship.
+  extra.production_request_record_id = requestRecordId;
   const { response, payload } = await item4PulsePipelineStage(env, "i3", { extra }, "I3");
   if (!response.ok || payload?.status === "error") {
-    throw new HttpError(502, payload?.message || `Python I3 returned HTTP ${response.status}`);
+    throw new HttpError(502, payload?.message || payload?.error || `Python I3 returned HTTP ${response.status}`);
   }
+  const i4 = payload?.details?.run?.i4 || {};
+  if (!/^rec[A-Za-z0-9]{14}$/.test(String(i4.content_item_id || ""))) {
+    throw new HttpError(503, "I3 did not confirm an I4 Content Item. Approval remains Submitted for readback.");
+  }
+  return { recoveryHold: payload?.recovery_approval_hold === true, contentItemId: i4.content_item_id };
 }
 /*__STUDIO_WORKER_END:fetchPromotionHandoff__*/
 
