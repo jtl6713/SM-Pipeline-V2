@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
+    # This is deliberately ONE SHOT. A rerun after an ambiguous POST must
+    # never accidentally admit a second batch.
+    if: github.run_number == 1 && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
