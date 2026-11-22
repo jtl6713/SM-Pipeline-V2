@@ -24,10 +24,36 @@ WAIT_SECONDS = 2
 RENDER_WAIT_SECONDS = 8
 
 
-def start_job(production_request_record_id: str, *, resume: bool = False) -> dict[str, Any]:
+def start_job(
+    production_request_record_id: str, *, resume: bool = False, _governed_prepare: bool = False,
+) -> dict[str, Any]:
     request_id = str(production_request_record_id or "").strip()
     if not request_id.startswith("rec"):
         raise ValueError("production_request_record_id is required")
+    if governor.enabled() and not _governed_prepare:
+        # No canonical write is permitted before the durable producer claim.
+        # This read-only preflight preserves the existing terminal rejection.
+        governor.database_path()
+        request = load_request(AirtableClient(), request_id)
+        job = read_job(request)
+        fields = request.get("fields") or {}
+        notes = " ".join(str(fields.get(name) or "") for name in (
+            "Production_Notes", "Production_Request_Notes",
+            "Production_Config_Notes", "Output_Notes",
+        ))
+        vibe = is_vibe_cut_notes(notes)
+        if job_is_terminal(job) and not resume and not (
+            vibe and is_finished_route(str(job.get("route") or ""))
+        ):
+            return {
+                "accepted": False, "reason": "terminal", "job": job,
+                "production_request_record_id": request_id,
+            }
+        created = _launch(request_id, resume=resume)
+        return {
+            "accepted": True, "already_running": not created, "queued": True,
+            "job": job, "production_request_record_id": request_id,
+        }
     client = AirtableClient()
     request = load_request(client, request_id)
     parent = load_parent(client, request)
@@ -75,6 +101,11 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
     elif not job.get("route"):
         job = {**job, "route": derive_route(fields, outputs)}
         write_job(client, request_id, job)
+    if _governed_prepare:
+        return {
+            "accepted": True, "prepared": True, "job": job,
+            "production_request_record_id": request_id,
+        }
     launched = _launch(request_id)
     return {
         "accepted": True,
@@ -88,9 +119,9 @@ def resume_job(production_request_record_id: str) -> dict[str, Any]:
     return start_job(production_request_record_id, resume=True)
 
 
-def _launch(request_id: str) -> bool:
+def _launch(request_id: str, *, resume: bool = False) -> bool:
     if governor.enabled():
-        created = governor.enqueue(request_id)
+        created = governor.enqueue(request_id, resume=resume)
         governor.ensure_dispatcher(_run_governed)
         return created
     with _LOCK:
@@ -105,10 +136,18 @@ def _launch(request_id: str) -> bool:
 def _run_governed(request_id: str, token: str) -> None:
     """Lease-guarded job; transient DB errors return work to the durable queue."""
     requeue = False
+    progressed = False
     try:
         with governor.job_heartbeat(request_id, token) as stopped:
+            if not governor.job_valid(request_id, token):
+                return
+            resume_requested = governor.claimed_resume_requested(request_id, token)
+            prepared = start_job(request_id, resume=resume_requested, _governed_prepare=True)
+            if not prepared.get("accepted"):
+                return
             outcome = _run(request_id, lease_token=token, heartbeat_stopped=stopped)
-            requeue = outcome == "yielded"
+            requeue = outcome in {"yielded", "yielded_progressed"}
+            progressed = outcome == "yielded_progressed"
     except Exception as error:
         if governor.is_database_overload(error):
             logger.warning("studio producer requeued on database outage request=%s", request_id)
@@ -124,7 +163,7 @@ def _run_governed(request_id: str, token: str) -> None:
                 logger.exception("unable to persist governed producer failure; retaining job request=%s", request_id)
                 requeue = True
     finally:
-        governor.finish_job(request_id, token, requeue=requeue)
+        governor.finish_job(request_id, token, requeue=requeue, progressed=progressed)
 
 
 def _run_safe(request_id: str) -> None:
@@ -149,16 +188,17 @@ def _run(
 ) -> str | None:
     client = AirtableClient()
     started = time.monotonic()
+    advanced = False
     for _ in range(MAX_LOOPS):
         if lease_token and (
             (heartbeat_stopped is not None and heartbeat_stopped.is_set())
             or not governor.job_valid(request_id, lease_token)
             or governor.circuit_open()
         ):
-            return "yielded"
+            return "yielded_progressed" if advanced else "yielded"
         if time.monotonic() - started >= MAX_WALL_SECONDS:
             logger.info("studio produce yielding request=%s after wall clock", request_id)
-            return "yielded"
+            return "yielded_progressed" if advanced else "yielded"
         request = load_request(client, request_id)
         parent = load_parent(client, request)
         outputs = load_outputs(client, request_id, parent)
@@ -217,6 +257,8 @@ def _run(
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         nxt = nxt or next_step(step)
+        if nxt != step:
+            advanced = True
         next_job = with_step(job, nxt)
         if nxt == "done" and isinstance(next_job.get("heal"), dict):
             heal = dict(next_job["heal"])
@@ -227,7 +269,7 @@ def _run(
         write_job(client, request_id, next_job)
         if nxt in TERMINAL_STEPS:
             return
-    return "yielded"
+    return "yielded_progressed" if advanced else "yielded"
 
 # Restore queued work when the Windows runner restarts (no provider publishing).
 if governor.enabled():
