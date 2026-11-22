@@ -69,13 +69,13 @@ test("static QA catalog stays available without ledger credentials, but history 
   const body=await response.json();
   assert.equal(response.status,200);
   assert.equal(body.writeAuthority,"Supabase");
-  assert.equal(body.tests.length,88);
+  assert.equal(body.tests.length,90);
   await assert.rejects(()=>invoke("runs?limit=1"),e=>e.status===503&&/QA ledger URL unavailable/.test(e.message));
 });
 
-test("catalog exposes 88 versioned cases and read-only safe-check allowlist",async()=>{
+test("catalog exposes 90 versioned cases and read-only safe-check allowlist",async()=>{
   const h=harness(),r=await h.call("GET","catalog");const j=await r.json();
-  assert.equal(r.status,200);assert.equal(j.tests.length,88);
+  assert.equal(r.status,200);assert.equal(j.tests.length,90);
   assert.deepEqual(j.safeAutomations,["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
   assert.equal(j.writeAuthority,"Supabase");
 });
@@ -120,7 +120,7 @@ test("manual Pass creates immutable event and gate still blocks unexecuted tests
   assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
   const gate=await (await h.call("GET","runs/"+created.run.runId+"/gate")).json();
   assert.equal(gate.gate.ready,false);assert.equal(gate.gate.passed.length,1);
-  assert.equal(gate.gate.blocked.length,87);
+  assert.equal(gate.gate.blocked.length,89);
 });
 test("falsely healthy assertion never passes and automated Pass needs independent approval",async()=>{
   const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"ui-run-auto001"})).json();
@@ -208,7 +208,7 @@ test("catalog-integrity auto assertion records observed schema, not guessed Pass
   const result=await (await h.call("POST","runs/"+created.run.runId+"/execute/QA-CAT-001",
     {client_request_id:"ui-check-catalog01"})).json();
   assert.equal(result.event.payload.status,"Pass");
-  assert.equal(result.event.payload.evidence[0].totalTests,88);
+  assert.equal(result.event.payload.evidence[0].totalTests,90);
   assert.equal(result.event.payload.evidence[0].invalidCount,0);
   assert.equal(result.event.payload.requiresHumanApproval,true);
 });
