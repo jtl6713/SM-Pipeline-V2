@@ -38,8 +38,11 @@ test("Studio R4 dispatcher gates success on the verified job receipt and bounds 
 test("Cloudflare R2 cursor object is decoded rather than passed as an object identity", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
-  assert.match(source, /const cursorObject = await env\.STUDIO_MEDIA\.get\(cursorKey\)/);
+  assert.match(source, /const \[cursorObject, profileObject\] = await Promise\.all\(/);
+  assert.match(source, /env\.STUDIO_MEDIA\.get\(cursorKey\)/);
+  assert.match(source, /env\.STUDIO_MEDIA\.get\(profileCursorKey\)/);
   assert.match(source, /cursorObject\.text\(\)/);
+  assert.match(source, /profileObject\.text\(\)/);
   assert.doesNotMatch(source, /const cursor = await env\.STUDIO_MEDIA\.get\(cursorKey\)/);
 });
 
