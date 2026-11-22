@@ -189,3 +189,68 @@ def test_speak_until_minimum_does_not_return_a_short_file():
         assert "1.200s" in str(exc)
     else:
         raise AssertionError("short voiceover was returned")
+
+
+def test_bethesda_2303_echoed_ai_rewrite_falls_back_to_measured_nonfactual_narration(monkeypatch):
+    """An echoed two-second line cannot dead-end P2 or bypass the 4s floor."""
+    from types import SimpleNamespace
+
+    import ai_api_router
+    import config
+    from p2.voiceover_floor import lengthen_voiceover_script, speak_until_minimum
+
+    original = "Look up—Central Park’s hidden craft."
+    monkeypatch.setattr(config, "load_settings", lambda: {})
+    monkeypatch.setattr(
+        ai_api_router,
+        "post_responses",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ok=True, json=lambda: {"output_text": original}
+        ),
+    )
+
+    revised = lengthen_voiceover_script(original, measured_seconds=2.090)
+    assert revised.startswith(original)
+    assert revised != original
+    assert revised.endswith(
+        "Take a closer look at the scene and notice the details that stand out."
+    )
+
+    synth_calls = []
+
+    def synthesize(script):
+        synth_calls.append(script)
+        return script.encode("utf-8")
+
+    audio, seconds, spoken, _details = speak_until_minimum(
+        original,
+        synthesize=synthesize,
+        normalize=lambda raw: ({"ok": True}, raw),
+        probe=lambda raw: 2.090 if raw.decode("utf-8") == original else 4.5,
+        lengthen=lengthen_voiceover_script,
+    )
+    assert synth_calls == [original, revised]
+    assert spoken == revised
+    assert audio == revised.encode("utf-8")
+    assert seconds >= MIN_VOICEOVER_SECONDS
+
+
+def test_bethesda_2303_empty_rewrite_still_fails_closed(monkeypatch):
+    """Never save a short clip when the LLM returns no usable text."""
+    from types import SimpleNamespace
+
+    import pytest
+    import ai_api_router
+    import config
+    from p2.voiceover_floor import lengthen_voiceover_script
+
+    monkeypatch.setattr(config, "load_settings", lambda: {})
+    monkeypatch.setattr(
+        ai_api_router,
+        "post_responses",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ok=True, json=lambda: {"output_text": ""}
+        ),
+    )
+    with pytest.raises(VoiceoverTooShort, match="returned no spoken words"):
+        lengthen_voiceover_script("Short line.", measured_seconds=2.090)
