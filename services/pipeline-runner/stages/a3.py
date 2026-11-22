@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import nullcontext
+
+from studio_produce import workload_governor
 
 from a3.constants import MAKE_SCENARIO_ID
 from a3.processor import normalize_record_ids, process_request
@@ -40,7 +43,14 @@ def _run_background(kwargs: dict) -> None:
         while True:
             with _BACKGROUND_LOCK:
                 _ACTIVE_IDS = list(normalize_record_ids(kwargs.get("record_ids")))
-            result = process_request(**kwargs)
+            claim = (
+                workload_governor.resource_slot(
+                    "library_image_classify", limit=1, allow_during_recovery=True,
+                ) if workload_governor.enabled() and workload_governor.admission_paused()
+                else nullcontext()
+            )
+            with claim:
+                result = process_request(**kwargs)
             logger.info(
                 "A3 background classify finished classified=%s passes=%s",
                 result.get("classified_count"),
