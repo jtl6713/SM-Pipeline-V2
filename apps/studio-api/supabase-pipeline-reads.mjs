@@ -2400,13 +2400,87 @@ export async function syncCarouselSlideRecordsToSupabase(env, records) {
  * and its original record ID. Never fall back to Airtable or to a cover URL.
  * Return only vetted public CDN images, never source Drive IDs or slide metadata.
  */
+/**
+ * #2294: An output's selected clips are NOT native Carousel Slides. However,
+ * an exact, DNP-held draft may be shown to its authorized reviewer as a
+ * clearly UNVERIFIED candidate gallery when there are zero linked slide rows.
+ * This is a read-only UX aid, never a publication package or QC attestation.
+ */
+export async function readSupabaseUnverifiedNativeGalleryCandidates(env, parent) {
+  if (parent?.do_not_publish !== true || parent?.auto_publish_enabled === true ||
+      parent?.scheduled_post_date || parent?.studio_scheduled_at ||
+      parent?.published_at || parent?.platform_post_url ||
+      parent?.output_status !== "Ready for Review") {
+    throw new Error("Missing canonical native slides; source preview not authorized");
+  }
+  const id = String(parent.airtable_record_id || "");
+  const clips = parent.selected_assets?.selected_clips;
+  const render = parent.render_clip_list;
+  const count = Number(parent.selected_clip_count);
+  if (!Array.isArray(clips) || !Array.isArray(render) ||
+      !Number.isInteger(count) || count < 2 || count > 10 ||
+      clips.length !== count || render.length !== count) {
+    throw new Error("Missing canonical native slides and exact selected media inventory");
+  }
+  const cdn = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
+  const families = new Set(), seenUrls = new Set(), seenSources = new Set();
+  const draft = clips.map((clip, index) => {
+    const rendered = render[index];
+    const image = String(clip?.url || clip?.src || "").trim();
+    const source = String(clip?.googleDriveFileId || clip?.google_drive_file_id || "").trim();
+    const family = String(clip?.mediaAssetRecordId || clip?.media_asset_record_id || "").trim();
+    if (Number(clip?.order) !== index + 1 || Number(rendered?.order) !== index + 1 ||
+        !/^rec[A-Za-z0-9]{14}$/.test(family) ||
+        !/^[A-Za-z0-9_-]{15,}$/.test(source) ||
+        !cdn.test(image) || image !== String(rendered?.url || rendered?.src || "").trim() ||
+        seenUrls.has(image) || seenSources.has(source)) {
+      throw new Error("Missing canonical native slides; selected source identity is ambiguous");
+    }
+    // A lettered output-specific image or the exact Item4 production request
+    // directory is required; cross-output media URLs must not become previews.
+    const ownedLettered = image.startsWith(
+      "https://media.chicagoshining.com/studio/previews/lettered/" + id + "/")
+      && image.endsWith("/" + index + ".jpg");
+    const requestId = String(parent.error_messages?.Studio_Output_Directives_JSON || "");
+    let plannedRequest = "";
+    try { plannedRequest = JSON.parse(requestId)?.production_request_record_id || ""; }
+    catch { /* no trustworthy production request */ }
+    const ownedItem4 = /^rec[A-Za-z0-9]{14}$/.test(plannedRequest)
+      && image.startsWith("https://media.chicagoshining.com/studio/previews/item4/" + plannedRequest + "/")
+      && image.includes(source);
+    if (!ownedLettered && !ownedItem4) {
+      throw new Error("Missing canonical native slides; preview source is not owned by output");
+    }
+    seenUrls.add(image);
+    seenSources.add(source);
+    families.add(family);
+    return { order: index + 1, image_url: image };
+  });
+  const ids = [...families];
+  const assets = await supabaseRest(env,
+    "media_assets?airtable_record_id=in.(" + ids.map(encodeURIComponent).join(",") + ")"
+    + "&select=airtable_record_id,asset_name,active,do_not_use,asset_status&limit=10");
+  if (!Array.isArray(assets) || assets.length !== ids.length ||
+      assets.some(asset => !families.has(String(asset?.airtable_record_id || "")) ||
+        asset?.active !== true || asset?.do_not_use !== false ||
+        asset?.asset_status !== "Available")) {
+    throw new Error("Missing canonical native slides; linked source assets unavailable or disabled");
+  }
+  return {
+    output_id: id, output_number: parent.output_number, count,
+    slides: draft, do_not_publish: true, source: "unverified-selected-source-images",
+    provisional: true, publication_authorized: false,
+    warning: "Source images only — canonical native slides missing. Do not approve, schedule or publish.",
+  };
+}
+
 export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
   const id = String(outputRecordId || "").trim();
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new Error("Invalid Factory gallery output ID");
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase Factory gallery read is unavailable");
   const parents = await supabaseRest(env,
     `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}`
-    + "&select=airtable_record_id,output_number,platform_output_type,studio_output_type,do_not_publish&limit=1");
+    + "&select=airtable_record_id,output_number,platform_output_type,studio_output_type,do_not_publish,auto_publish_enabled,scheduled_post_date,studio_scheduled_at,published_at,platform_post_url,output_status,render_clip_list,selected_assets,selected_clip_count,error_messages&limit=1");
   const parent = Array.isArray(parents) ? parents[0] : null;
   if (!parent || !Number.isInteger(parent.output_number)) return null;
   if (!/carousel|photo set|multi.image/i.test(
@@ -2419,6 +2493,9 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
     + "&select=airtable_record_id,current_order,deleted_from_carousel,fields"
     + "&order=current_order.asc,airtable_record_id.asc&limit=12");
   if (!Array.isArray(slides)) throw new Error("Factory slide inventory was unavailable");
+  if (slides.length === 0) {
+    return readSupabaseUnverifiedNativeGalleryCandidates(env, parent);
+  }
   if (slides.length > 10) throw new Error("Factory gallery exceeds safe slide limit");
   const seen = new Set();
   const publicUrl = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
