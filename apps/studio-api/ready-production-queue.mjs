@@ -153,6 +153,31 @@ export async function readyProductionEnqueue(bucket, options) {
       revived: recovered.status === "queued" && recovered.stage === "recovered_empty_item4_plan",
     };
   }
+  // #2574: recover exactly the obsolete phantom Ready plan error once.
+  // No unrelated provider retries, user holds or leases are reset.
+  const missingDestinationError =
+    "No enabled platform destinations were found. Rebuild the platform plan before Prepare.";
+  if (prior.value.status === "retry_wait"
+      && String(prior.value.last_error || "").trim() === missingDestinationError
+      && !prior.value.missing_destinations_recovered_at) {
+    const recovered = await cas(bucket, key, (value) => {
+      if (value.status !== "retry_wait"
+          || String(value.last_error || "").trim() !== missingDestinationError
+          || value.missing_destinations_recovered_at
+          || (value.owner && Number(value.lease_expires_ms || 0) > Date.now())) return null;
+      return {
+        ...value, status: "queued", stage: "recovered_missing_item4_destinations",
+        owner: null, lease_expires_ms: 0, next_attempt_ms: 0, last_error: null,
+        missing_destinations_recovered_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+    return {
+      job: recovered, created: false,
+      revived: recovered.status === "queued"
+        && recovered.stage === "recovered_missing_item4_destinations",
+    };
+  }
   // A prior nonterminal observation may have gone dormant (hold, missing assets,
   // etc.). Fresh Airtable eligibility revives it. Truly completed promoted work
   // never appears in the discovery query again.

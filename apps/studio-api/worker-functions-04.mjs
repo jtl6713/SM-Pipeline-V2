@@ -14240,10 +14240,19 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     .filter(readyProductionVerifiedVibeDraft)
     .map((draft) => firstLinkedRecordId(f(draft, "Idea_Candidate")))
     .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id || ""))))];
+  // #2574: photo-ready handoffs older than 30 minutes are due production
+  // work, not speculative new Ideas. Put their existing queued R2 jobs ahead
+  // of historical monitor/retry work; same leases, profile cap and readiness
+  // gates still apply on claim. Never skip a live retry backoff or owner.
+  const overdueReadyIds = enqueued
+    .filter((entry) => entry?.job && ["queued", "retry_wait"].includes(entry.job.status))
+    .filter((entry) => Date.parse(entry.job.created_at || "") <= Date.now() - 30 * 60 * 1000)
+    .filter((entry) => !entry.job.owner || Number(entry.job.lease_expires_ms || 0) <= Date.now())
+    .map((entry) => entry.idea_id);
   const selected = readyProductionSelectJobs(jobs, {
     maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
     maxPerProfile: 1,
-    priorityIdeaIds: priorityVibeIdeaIds,
+    priorityIdeaIds: [...new Set([...priorityVibeIdeaIds, ...overdueReadyIds])],
   });
   stage = "claim";
   const claims = [];

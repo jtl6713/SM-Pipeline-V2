@@ -438,3 +438,58 @@ test("only the verified obsolete Vibe bridge snapshot error is requeued once", a
   });
   assert.equal((await readyProductionRecoverVerifiedVibeBridge(bucket, otherId)).revived, false);
 });
+
+test("#2574 obsolete missing destination retry is revived exactly once", async () => {
+  const bucket = new FakeR2();
+  const ideaId = "recMissingDest25740";
+  await readyProductionEnqueue(bucket, { ideaId, profileId: "recProfileNYC2574" });
+  const claimed = await readyProductionClaim(bucket, ideaId, "owner", Date.now());
+  assert.ok(claimed);
+  const obsolete = "No enabled platform destinations were found. Rebuild the platform plan before Prepare.";
+  await readyProductionFinishClaim(bucket, claimed, {
+    status: "retry_wait", stage: "retry", last_error: obsolete,
+    retry_delay_ms: 30 * 60 * 1000,
+  });
+  const first = await readyProductionEnqueue(bucket, { ideaId });
+  assert.equal(first.revived, true);
+  assert.equal(first.job.status, "queued");
+  assert.equal(first.job.next_attempt_ms, 0);
+  assert.ok(first.job.missing_destinations_recovered_at);
+  const second = await readyProductionEnqueue(bucket, { ideaId });
+  assert.notEqual(second.revived, true);
+  const retry = await readyProductionClaim(bucket, ideaId, "second-owner", Date.now());
+  assert.ok(retry);
+  await readyProductionFinishClaim(bucket, retry, {
+    status: "retry_wait", stage: "retry", last_error: obsolete,
+    retry_delay_ms: 30 * 60 * 1000,
+  });
+  const again = await readyProductionEnqueue(bucket, { ideaId });
+  assert.notEqual(again.revived, true);
+  assert.equal(again.job.status, "retry_wait");
+  const foreignId = "recOtherDest257401";
+  await readyProductionEnqueue(bucket, { ideaId: foreignId });
+  const claim = await readyProductionClaim(bucket, foreignId, "owner-foreign", Date.now());
+  await readyProductionFinishClaim(bucket, claim, {
+    status: "retry_wait", last_error: "Meta provider cooldown",
+    retry_delay_ms: 30 * 60 * 1000,
+  });
+  assert.notEqual((await readyProductionEnqueue(bucket, { ideaId: foreignId })).revived, true);
+});
+
+test("#2574 overdue photo-ready priority does not bypass backoff or monitoring", async () => {
+  const src = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(src, /const overdueReadyIds = enqueued/);
+  assert.match(src, /priorityIdeaIds: \[\.\.\.new Set\(\[\.\.\.priorityVibeIdeaIds, \.\.\.overdueReadyIds\]\)\]/);
+  const now = Date.parse("2026-11-22T01:00:00Z");
+  const jobs = [
+    { idea_id:"older", profile_id:"nyc", status:"queued", next_attempt_ms:0, created_at:"2026-11-01T00:00:00Z" },
+    { idea_id:"recovery", profile_id:"nyc", status:"queued", next_attempt_ms:0, created_at:"2026-11-21T14:45:00Z" },
+    { idea_id:"monitor", profile_id:"miami", status:"awaiting_review", next_attempt_ms:0, created_at:"2026-11-01T00:00:00Z" },
+  ];
+  assert.deepEqual(readyProductionSelectJobs(jobs, { nowMs:now, priorityIdeaIds:["recovery"] })
+    .map((j)=>j.idea_id), ["recovery","monitor"]);
+  jobs[1].status = "retry_wait";
+  jobs[1].next_attempt_ms = now + 100000;
+  assert.deepEqual(readyProductionSelectJobs(jobs, { nowMs:now, priorityIdeaIds:["recovery"] })
+    .map((j)=>j.idea_id), ["older","monitor"]);
+});
