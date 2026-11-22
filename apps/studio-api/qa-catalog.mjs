@@ -2,7 +2,7 @@
 export const QA_CATALOG = Object.freeze({
   "schemaVersion": 1,
   "source": "QA Test Center comprehensive Studio regression plan expanded from 2026-10-31 baseline",
-  "catalogVersion": "2026-11-21.1",
+  "catalogVersion": "2026-11-22.1",
   "tests": [
     {
       "id": "QA-AUTH-001",
@@ -2609,6 +2609,102 @@ export const QA_CATALOG = Object.freeze({
         "public_publish",
         "production_delete",
         "unbounded_mutation"
+      ],
+      "version": 1
+    },
+    {
+      "id": "QA-FACT-2294",
+      "title": "Native Instagram and Facebook gallery preflight — missing canonical slides",
+      "category": "FACT",
+      "severity": "Critical",
+      "automation": "manual",
+      "prerequisites": [
+        "Authenticated Admin with Studio Factory review permissions",
+        "Use held read-only outputs #10992 (Instagram) and #10993 (Facebook) or isolated held QA fixtures, never publish or approve",
+        "Read-only Supabase query access to platform_outputs and carousel_slides"
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Confirm the exact output ID, platform, do_not_publish=true, auto_publish_enabled=false, no schedule or publication and zero active linked carousel_slides for each test output using Supabase"
+        },
+        {
+          "order": 2,
+          "instruction": "Open the exact held output in authenticated Factory Preview. Confirm it shows individual numbered candidate images only with prominent UNVERIFIED SOURCE IMAGES — DO NOT APPROVE OR PUBLISH warning; cover alone is insufficient"
+        },
+        {
+          "order": 3,
+          "instruction": "Perform the preflight checker in dry-run or isolated test mode with a full eight-image selected/render manifest but zero native slides. Confirm the guard returns native_gallery_slide_count_mismatch and rejects Factory approval before any write"
+        },
+        {
+          "order": 4,
+          "instruction": "Repeat the isolated preflight with 7/8 slides, duplicate slide order, foreign owner, mismatched final URL, invalid provenance and explicit creative approval=false. Capture each exact rejection"
+        },
+        {
+          "order": 5,
+          "instruction": "Confirm via independent Supabase readback that all test outputs remain held, unscheduled, unpublished, and have zero unapproved native slides created; attach browser screenshots and CI/console evidence"
+        }
+      ],
+      "expectedResults": [
+        "Missing, partial or mismatched canonical slide packages never pass Factory approval or obtain MAE schedules",
+        "Draft source images are clearly labeled unverified and never counted as approved native slides",
+        "All publication holds and immutable approval receipts survive every test; no provider calls or duplicate publications",
+        "Record Blocked rather than Pass when the authenticated browser or real Supabase readback is unavailable"
+      ],
+      "prohibitedActions": [
+        "public_publish",
+        "production_delete",
+        "unbounded_mutation",
+        "release_publication_hold",
+        "auto_approve"
+      ],
+      "version": 1
+    },
+    {
+      "id": "QA-PUB-2294",
+      "title": "Native Facebook photo-set publisher and geometry fail-closed regression",
+      "category": "PUB",
+      "severity": "Critical",
+      "automation": "manual",
+      "prerequisites": [
+        "Isolated test or dry-run publisher entrypoint with no Meta credentials or network send",
+        "Use frozen issue #2294 public-CDN audit evidence plus exact Supabase output IDs #11136 and #11137",
+        "Read-only access to native slide association and scheduling state"
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Confirm #11136 and #11137 each have ten candidate source images, zero active canonical slides, held status and no active schedules"
+        },
+        {
+          "order": 2,
+          "instruction": "Independently verify actual 4:5 geometry from public decoded images, not filename or selected manifest declarations. These twenty known 9:16 candidates must fail 4:5 package validation"
+        },
+        {
+          "order": 3,
+          "instruction": "Execute FB0_ASSETS publisher preflight in isolated dry-run using a Facebook Photo Set missing canonical approved slides. Confirm no photo-stage attempt, provider create, scheduled retry or auto-recovery elevates unapproved source files to approved slides"
+        },
+        {
+          "order": 4,
+          "instruction": "Test eight canonical approved 4:5 slides with contiguous order and correct owner in the isolated checker; then perturb owner, order, public URL, creative approval and photo count one at a time to verify fail-closed rejection"
+        },
+        {
+          "order": 5,
+          "instruction": "Independently read production output state and assert holds remain, no published IDs or schedules, and no new duplicate provider attempts; attach exact logs and evidence"
+        }
+      ],
+      "expectedResults": [
+        "Native photo-set publishing requires a complete approved canonical slide package and verified 4:5 geometry",
+        "No FB0_ASSETS retry loop or native Graph attempt is triggered for missing/invalid galleries",
+        "Real data or isolated dry-run evidence required; a static source inspection alone is not Pass",
+        "The production source hold stays active until separately authorized human creative and Factory approval"
+      ],
+      "prohibitedActions": [
+        "public_publish",
+        "production_delete",
+        "unbounded_mutation",
+        "meta_graph_post",
+        "release_publication_hold"
       ],
       "version": 1
     }
