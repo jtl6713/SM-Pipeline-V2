@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  isActualPublishRetryPending,
   normalizedOutputState,
   platformPublishStatus,
   mapOutput,
 } from "./worker-functions-01.mjs";
+
+const isActualPublishRetryPending = (record) => mapOutput(record).publish_retry_pending_confirmed;
 
 const future = "2099-12-15T13:35:00Z";
 const scheduled = (number, platform, type) => ({
