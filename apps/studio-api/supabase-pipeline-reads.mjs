@@ -2459,11 +2459,11 @@ export async function readSupabaseUnverifiedNativeGalleryCandidates(env, parent)
   const ids = [...families];
   const assets = await supabaseRest(env,
     "media_assets?airtable_record_id=in.(" + ids.map(encodeURIComponent).join(",") + ")"
-    + "&select=airtable_record_id,asset_name,active,do_not_use,asset_status&limit=10");
+    + "&select=airtable_record_id,asset_name,active,do_not_use,asset_status,metadata&limit=10");
   if (!Array.isArray(assets) || assets.length !== ids.length ||
       assets.some(asset => !families.has(String(asset?.airtable_record_id || "")) ||
         asset?.active !== true || asset?.do_not_use !== false ||
-        asset?.asset_status !== "Available")) {
+        asset?.asset_status !== "Available" || asset?.metadata?.rights_status !== "Owned")) {
     throw new Error("Missing canonical native slides; linked source assets unavailable or disabled");
   }
   return {
