@@ -76,10 +76,19 @@ def lengthen_voiceover_script(text: str, *, measured_seconds: float) -> str:
             f"Spoken audio must be at least {MIN_VOICEOVER_SECONDS:.0f} seconds. Not saved."
         )
     rewritten = _output_text(response.json()).strip().strip('"')
-    if not rewritten or rewritten == original:
+    if not rewritten:
         raise VoiceoverTooShort(
-            f"Voiceover is {spoken:.3f}s and the rewrite did not lengthen the line. "
+            f"Voiceover is {spoken:.3f}s and the rewrite returned no spoken words. "
             f"Spoken audio must be at least {MIN_VOICEOVER_SECONDS:.0f} seconds. Not saved."
+        )
+    if len(rewritten.split()) <= len(original.split()):
+        # An LLM can echo a short caption verbatim. Do not burn the production
+        # heal budget on that response or invent facts about an unverified
+        # location. Add only a neutral spoken observation; the caller still
+        # MUST synthesize, normalize and MEASURE >=4 seconds before saving.
+        rewritten = (
+            f"{original} Take a closer look at the scene and notice "
+            "the details that stand out."
         )
     return rewritten
 
