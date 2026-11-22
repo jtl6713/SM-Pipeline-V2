@@ -12,7 +12,7 @@ alter table public.platform_outputs
 create table if not exists public.platform_output_hold_events (
   id bigint generated always as identity primary key,
   output_uuid uuid not null,
-  output_record_id text not null,
+  output_record_id text,
   operation text not null check (operation in ('held','released')),
   reason text not null,
   source text not null,
@@ -29,12 +29,21 @@ grant usage, select on sequence public.platform_output_hold_events_id_seq to ser
 create or replace function public.stamp_platform_output_publish_hold()
 returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
 declare
+  was_held boolean := false;
+  previous_reason text;
+  previous_source text;
+  previous_actor text;
   supplied_reason text;
 begin
-  if new.do_not_publish is true and
-    (tg_op = 'INSERT' or old.do_not_publish is distinct from true) then
+  if tg_op = 'UPDATE' then
+    was_held := old.do_not_publish is true;
+    previous_reason := old.publish_hold_reason;
+    previous_source := old.publish_hold_source;
+    previous_actor := old.publish_hold_actor;
+  end if;
+  if new.do_not_publish is true and not was_held then
     supplied_reason := nullif(btrim(new.publish_hold_reason),'');
-    if tg_op = 'UPDATE' and supplied_reason = nullif(btrim(old.publish_hold_reason),'') then
+    if supplied_reason is not distinct from nullif(btrim(previous_reason),'') then
       supplied_reason := null;
     end if;
     new.publish_hold_reason := coalesce(
@@ -57,17 +66,17 @@ begin
       end
     );
     new.publish_hold_source := coalesce(
-       case when tg_op = 'INSERT' or new.publish_hold_source is distinct from old.publish_hold_source
+       case when new.publish_hold_source is distinct from previous_source
          then nullif(btrim(new.publish_hold_source),'') end,
        nullif(btrim(new.error_messages->>'Publish_Hold_Source'),''),'pipeline');
     new.publish_hold_actor := coalesce(
-       case when tg_op = 'INSERT' or new.publish_hold_actor is distinct from old.publish_hold_actor
+       case when new.publish_hold_actor is distinct from previous_actor
          then nullif(btrim(new.publish_hold_actor),'') end,'system');
     new.publish_hold_set_at := clock_timestamp();
     new.publish_hold_released_at := null;
     new.publish_hold_release_note := null;
     new.publish_hold_release_actor := null;
-  elsif tg_op = 'UPDATE' and old.do_not_publish is true and new.do_not_publish is distinct from true then
+  elsif tg_op = 'UPDATE' and was_held and new.do_not_publish is distinct from true then
     new.publish_hold_released_at := clock_timestamp();
     new.publish_hold_release_note := coalesce(nullif(btrim(new.publish_hold_release_note),''),
        'Legacy/system release: no explicit note recorded');
@@ -83,14 +92,18 @@ create trigger stamp_platform_output_publish_hold
 
 create or replace function public.audit_platform_output_publish_hold()
 returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+declare
+  was_held boolean := false;
 begin
-  if new.do_not_publish is true and
-    (tg_op = 'INSERT' or old.do_not_publish is distinct from true) then
+  if tg_op = 'UPDATE' then
+    was_held := old.do_not_publish is true;
+  end if;
+  if new.do_not_publish is true and not was_held then
     insert into public.platform_output_hold_events
       (output_uuid,output_record_id,operation,reason,source,actor)
     values (new.id,new.airtable_record_id,'held',
       new.publish_hold_reason,new.publish_hold_source,new.publish_hold_actor);
-  elsif tg_op = 'UPDATE' and old.do_not_publish is true and new.do_not_publish is distinct from true then
+  elsif tg_op = 'UPDATE' and was_held and new.do_not_publish is distinct from true then
     insert into public.platform_output_hold_events
       (output_uuid,output_record_id,operation,reason,source,actor)
     values (new.id,new.airtable_record_id,'released',
