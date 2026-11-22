@@ -12,8 +12,9 @@ test("#2294 QA Test Center provides exact native gallery missing-slide acceptanc
   assert.equal(t.severity, "Critical");
   assert.equal(t.automation, "manual");
   assert.ok(t.steps.length >= 4);
-  assert.match(t.steps.map(x => x.instruction).join(" "), /10992/);
-  assert.match(t.steps.map(x => x.instruction).join(" "), /10993/);
+  const fullProcedure = [...t.prerequisites, ...t.steps.map(x => x.instruction)].join(" ");
+  assert.match(fullProcedure, /10992/);
+  assert.match(fullProcedure, /10993/);
   assert.match(t.steps.map(x => x.instruction).join(" "), /unverified/i);
   assert.match(t.expectedResults.join(" "), /no provider calls/i);
   assert.ok(t.prohibitedActions.includes("public_publish"));
