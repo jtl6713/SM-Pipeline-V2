@@ -7,6 +7,7 @@ const outSelect = [
   "id","airtable_record_id","output_number","content_profile_id","platform","output_title",
   "output_status","review_status","publish_status","render_status","do_not_publish",
   "auto_publish_enabled","test_run_id","platform_post_url","published_at","updated_at",
+  "platform_publish_response",
   "publish_hold_reason","publish_hold_source","publish_hold_actor","publish_hold_set_at",
   "publish_hold_released_at","publish_hold_release_note","error_messages"
 ].join(",");
@@ -38,7 +39,10 @@ export function classifyAdminPublishingHold(row) {
       ["published","publishing"].includes(str(row?.publish_status).toLowerCase())) {
     return block("Published, publishing, cancelled, or skipped output: reconcile status first");
   }
-  if (dispatchKeys.some(key => str(extras[key]))) {
+  if (dispatchKeys.some(key => str(extras[key])) ||
+      Number(extras.Studio_Publish_Dispatch_Count || 0)>0 ||
+      Number(extras.Publish_Attempt_Count || 0)>0 ||
+      (row?.platform_publish_response && Object.keys(row.platform_publish_response).length>0)) {
     return block("Prior dispatch or provider identity: reconcile the publisher before releasing this hold");
   }
   return { releasable:true, block_reason:null, reason };
