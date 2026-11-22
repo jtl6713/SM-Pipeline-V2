@@ -232,7 +232,7 @@ def _brand_photo(base_bytes, watermark):
     y=1350-WATERMARK_MARGIN-height
     if x<0 or y<0: raise RuntimeError("watermark_corner_outside_safe_image")
     layer=Image.new("RGBA",base.size,(0,0,0,0))
-    layer.paste(mark,(x,y),mark)
+    layer.paste(mark,(x,y)) # preserve original PNG alpha; do not multiply transparency twice
     composed=Image.alpha_composite(base,layer)
     # No source file overwrite; JPEG output for provider compatibility.
     out=io.BytesIO()
