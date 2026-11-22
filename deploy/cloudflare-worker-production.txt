@@ -1505,3 +1505,5 @@ Deploy #2546 Ideas independent hourly harvest and five-minute photo-ready priori
 
 2026-11-21: #2574 follow-up bounded 20-request autonomous retry prioritization and one-time exact missing destination R2 recovery. Trigger protected Worker deployment.
 2026-11-21 #2577: Deploy Content Items creation timestamp server-default and sparse-patch immutability fix after SQL NOT NULL/default trigger; verify Supabase-only worker content write contracts, no approval/publish changes.
+
+2026-11-21 19:05 CT: #2574 prevent Supabase production_request_outputs 23502 NOT NULL failure on effective_resolution when a heterogeneous Reel/Story batch is upserted. Group exact column sets and preserve JSONB override omission. Trigger protected Worker deploy.
