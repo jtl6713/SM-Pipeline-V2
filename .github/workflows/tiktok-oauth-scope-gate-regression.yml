@@ -1,0 +1,41 @@
+name: TikTok OAuth Scope Gate Regression
+
+on:
+  pull_request:
+    paths:
+      - 'apps/tiktok-auth-*/worker.js'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/tiktok-analytics-oauth-scope-gate.test.mjs'
+      - 'apps/studio-web/assets/insights-0622.js'
+      - '.github/workflows/tiktok-oauth-scope-gate-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/tiktok-auth-*/worker.js'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/tiktok-analytics-oauth-scope-gate.test.mjs'
+      - '.github/workflows/tiktok-oauth-scope-gate-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scope-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify JavaScript syntax
+        run: |
+          set -euo pipefail
+          for city in la nyc miami; do cp "apps/tiktok-auth-$city/worker.js" "/tmp/tiktok-$city.mjs"; node --check "/tmp/tiktok-$city.mjs"; done
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-web/assets/insights-0622.js
+      - name: Exercise real OAuth redirects and public statuses without API calls
+        run: node --test apps/studio-api/tiktok-analytics-oauth-scope-gate.test.mjs
