@@ -1,0 +1,138 @@
+name: Incident 2670 - Eight Bethesda A3 classifications
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/incident-2670-bethesda-eight.txt'
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-bethesda-eight
+  cancel-in-progress: false
+
+jobs:
+  classify-exact-eight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Verify recovery-only classification gates and no publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 'https://pipeline.chicagoshining.com/health' -o /tmp/health.json
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_image_classification_enabled==true and .recovery_a3_metadata_write_scoped==true and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/health.json >/dev/null
+          echo "bethesda_recovery_safety=PASS"
+      - name: Reclassify only the eight saved NYC Bethesda images, serially
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          token=""
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null; then
+              token="$candidate"
+              break
+            fi
+          done
+          test -n "$token" || { echo 'ops_auth_unavailable'; exit 1; }
+          cat > /tmp/one-image.template.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $assetId='__ASSET__'
+          $envPath='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          if (!(Test-Path -LiteralPath $envPath)) { throw 'runner_env_not_found' }
+          function Get-Value([string]$key) {
+            $found = Get-Content -LiteralPath $envPath | Where-Object { $_ -match ('^\s*' + [regex]::Escape($key) + '\s*=') } | Select-Object -Last 1
+            if (!$found) { throw "missing_env_$key" }
+            $value=(($found -split '=',2)[1]).Trim().Trim('"').Trim("'")
+            if (!$value) { throw "empty_env_$key" }
+            return $value
+          }
+          $h=Invoke-RestMethod 'http://127.0.0.1:3350/health' -TimeoutSec 15
+          if (!($h.ok -and $h.recovery_read_only -and $h.recovery_image_classification_enabled -and $h.recovery_a3_metadata_write_scoped -and $h.workload_governor_enabled -and !$h.i1_durable_jobs -and !$h.airtable_activity.any_activity)) {
+            throw 'runner_recovery_safety_gate_closed'
+          }
+          $secret=Get-Value 'PIPELINE_RUNNER_SHARED_SECRET'
+          $sbUrl=(Get-Value 'SUPABASE_URL').TrimEnd('/')
+          $sbKey=Get-Value 'SUPABASE_SERVICE_ROLE_KEY'
+          $sbHeaders=@{apikey=$sbKey;Authorization="Bearer $sbKey"}
+          function Get-Asset {
+            $uri="$sbUrl/rest/v1/media_assets?airtable_record_id=eq.$assetId&select=airtable_record_id,asset_name,mime_type,google_drive_file_id,do_not_use,metadata&limit=1"
+            $rows=@(Invoke-RestMethod -Uri $uri -Headers $sbHeaders -TimeoutSec 20)
+            if ($rows.Count -ne 1) { throw 'exact_asset_not_found' }
+            return $rows[0]
+          }
+          $row=Get-Asset
+          if ($row.metadata.content_profile_airtable_id -ne 'recgtK8Z7eNADNtVy' -or
+              $row.asset_name -notmatch '^Bethesda Terrace and Fountain [2-9]$' -or
+              !$row.mime_type.StartsWith('image/') -or !$row.google_drive_file_id -or
+              $row.do_not_use) { throw 'asset_identity_or_hold_mismatch' }
+          $status=[string]$row.metadata.classification_status
+          if ($status -eq 'Classified' -and ![string]::IsNullOrWhiteSpace([string]$row.metadata.ai_tags)) {
+            Write-Output ("bethesda_result={0}:already_classified" -f $assetId)
+            exit 0
+          }
+          if ($status -notin @('Processing','Needs Classification','Classification Error','Classifying','Pending')) { throw 'asset_status_not_replayable' }
+          $body=@{extra=@{record_ids=@($assetId);trigger_a4=$false;wait_for_next=$false;drain=$false;background=$true}} | ConvertTo-Json -Compress -Depth 6
+          $response=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/stages/a3' -Method POST -ContentType 'application/json' -Headers @{'X-Pipeline-Secret'=$secret} -Body $body -TimeoutSec 25
+          if ($response.stage -ne 'a3' -or @('ok','skipped') -notcontains $response.status) { throw 'a3_request_not_accepted' }
+          for ($i=0;$i -lt 38;$i++) {
+            Start-Sleep -Seconds 3
+            $after=Get-Asset
+            $state=[string]$after.metadata.classification_status
+            if ($state -eq 'Classified' -and ![string]::IsNullOrWhiteSpace([string]$after.metadata.ai_tags)) {
+              Write-Output ("bethesda_result={0}:classified" -f $assetId)
+              exit 0
+            }
+            if ($state -eq 'Classification Error') { throw 'a3_classification_failed' }
+            $w=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers @{'X-Pipeline-Secret'=$secret} -TimeoutSec 15
+            if (!$w.admission_paused -or $w.database_circuit_open -or $w.active_jobs -gt 0) { throw 'workload_governor_unexpected_activity' }
+          }
+          throw 'a3_classification_no_terminal_receipt'
+          PS
+          ids=(
+            recYaIgo6Q8JHgyWH
+            rectGagK5jg2SpXUC
+            recpbxcwQ8JrEIz4r
+            recRuFQu8kCoFJakg
+            recLbzaqfAKSwssNQ
+            recxKThhYpApSROTz
+            recc6RjNGAncKSsFW
+            recyZDlKFe2uG4KiZ
+          )
+          for asset in "${ids[@]}"; do
+            sed "s/__ASSET__/$asset/g" /tmp/one-image.template.ps1 > /tmp/one-image.ps1
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("/tmp/one-image.json").write_text(json.dumps({"command":Path("/tmp/one-image.ps1").read_text(),"confirm":True}),encoding="utf-8")
+          PY
+            code=$(curl -sS --max-time 20 -o /tmp/jobcreate.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @/tmp/one-image.json || true)
+            [[ "$code" == "202" ]] || { echo "ops_shell_not_started_for_$asset code=$code"; exit 1; }
+            job=$(jq -r '.job.id // empty' /tmp/jobcreate.json)
+            test -n "$job" || { echo 'missing_ops_job_id'; exit 1; }
+            settled=false
+            for n in $(seq 1 90); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $token" "$BASE/api/jobs/$job" -o /tmp/job-status.json
+              state=$(jq -r '.job.status // empty' /tmp/job-status.json)
+              if [[ "$state" == "ok" ]]; then
+                jq -r '.job.log // ""' /tmp/job-status.json | grep -E '^bethesda_result=' | tail -1
+                jq -e '.job.log | contains("bethesda_result=")' /tmp/job-status.json >/dev/null
+                settled=true
+                break
+              fi
+              if [[ "$state" == "failed" ]]; then
+                echo "bethesda_failed=$asset"
+                jq -r '.job.log // ""' /tmp/job-status.json | tail -n 10
+                exit 1
+              fi
+              sleep 2
+            done
+            [[ "$settled" == "true" ]] || { echo "bethesda_status_timeout=$asset"; exit 1; }
+          done
+          echo 'bethesda_eight_terminal_receipts=8'
