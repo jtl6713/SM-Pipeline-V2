@@ -1,13 +1,13 @@
-name: Incident 2670 - Admit already staged exact NYC producer
+name: Incident 2670 - Resume exact Bethesda producer after Supabase fix
 on:
   push:
     branches: [main]
     paths:
-      - 'deploy/incident-2670-admit-only.txt'
+      - 'deploy/incident-2670-exact-resume.txt'
 permissions:
   contents: read
 concurrency:
-  group: incident-2670-admit-only
+  group: incident-2670-exact-resume
   cancel-in-progress: false
 jobs:
   exact-admission:
@@ -62,14 +62,14 @@ jobs:
           $rows=@(Invoke-RestMethod -Uri "$sb/rest/v1/production_requests?airtable_record_id=eq.$requestId&select=id,request_status,master_asset_status,output_plan_status,variant_status,production_job&limit=1" -Headers $sbHeaders -TimeoutSec 20)
           if ($rows.Count -ne 1) {throw 'canary_request_not_unique'}
           $request=$rows[0]
-          if ($request.request_status -ne 'Draft' -or $request.master_asset_status -ne 'Ready' -or $request.output_plan_status -ne 'Ready' -or $request.variant_status -ne 'Preparing') {throw 'canary_request_state_changed'}
+          if ($request.request_status -ne 'Draft' -or $request.production_job.step -ne 'blocked' -or -not ([string]$request.production_job.error).StartsWith('Supabase record lookup unsupported or unavailable for tblBZLXPd1p2NRWRK/')) {throw 'canary_not_matching_expected_blocker'}
           $linkUri="$sb/rest/v1/production_request_outputs?production_request_id=eq.$($request.id)&select=platform_output_id"
           $raw=Invoke-WebRequest -Method GET -UseBasicParsing -Uri $linkUri -Headers $sbHeaders -TimeoutSec 20
           $json=([string]$raw.Content) -replace '\s',''
           if ($json -ne '[{"platform_output_id":null},{"platform_output_id":null}]') {throw 'unexpected_output_links'}
           Write-Output 'admit_preflight=PASS'
-          $body=@{production_request_record_id=$requestId;resume=$false} | ConvertTo-Json -Compress
-          $answer=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/jobs/studio-produce' -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 30
+          $body=@{production_request_record_id=$requestId;resume=$true} | ConvertTo-Json -Compress
+          $answer=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/jobs/studio-produce/resume' -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 30
           if (-not $answer.ok -or -not $answer.accepted -or $answer.production_request_record_id -ne $requestId) {throw 'producer_not_accepted'}
           Write-Output 'admit_exact_nyc=ACCEPTED'
           Start-Sleep -Seconds 12
