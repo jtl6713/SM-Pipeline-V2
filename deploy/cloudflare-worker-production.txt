@@ -1512,4 +1512,6 @@ Deploy #2546 Ideas independent hourly harvest and five-minute photo-ready priori
 
 2026-11-21 #2574 P0: Correct malformed production_notes filter in Supabase Vibe Draft backfill (PGRST100); preserves existing PostgREST authority and prevents optional cron lane 400s. Deploy via protected Worker.
 2026-11-21 #2593 Worker 0.10.1013: one-shot exact Free Skyline Ferry Hack C2239 missing Platform Outputs recovery via existing I3/I4 fanout. All restored outputs seeded DNP=true/auto=false/unscheduled, R2 receipt and readback. No provider publishing.
+
+2026-11-21 #2574 P0: Pending SMV1 crop queue must drain on 5-minute light ticks, not only :00/:30 heavy maintenance. Independent bounded 20-second Worker waitUntil with original runner job lease/safety, no manual Factory approval/publishing and no duplicate same-tick heavy drain. Recover original 96 NYC queued crops after verified Python Supabase lookup fix.
 2026-11-21 #2593 Worker 0.10.1014: Held ferry output recovery v2 after verified v1 canonical Supabase read failure. Bounded GET-only retry, skip redundant directive sync, immutable v2 R2 receipt; 2 outputs must be verified DNP-held, no automatic publish.
