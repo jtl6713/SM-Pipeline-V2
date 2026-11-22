@@ -9,6 +9,7 @@ import logging
 import time
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlsplit
@@ -102,6 +103,11 @@ def _ensure_hourly_schema(db: sqlite3.Connection) -> None:
         "status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, "
         "PRIMARY KEY(hour_utc,source,method,status_class))"
     )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS egress_collector_ticks ("
+        "hour_utc TEXT PRIMARY KEY, first_at TEXT NOT NULL, "
+        "last_at TEXT NOT NULL, samples INTEGER NOT NULL DEFAULT 0)"
+    )
     cols = {row[1] for row in db.execute("PRAGMA table_info(hourly)").fetchall()}
     if "table_kind" in cols:
         return
@@ -150,6 +156,60 @@ def persist_airtable_egress(method: str, status: int, at=None, *, table_kind: st
         return False
 
 
+def persist_runner_collector_heartbeat(at=None) -> bool:
+    """Positive process liveness: a read/export never manufactures coverage."""
+    target = _metrics_path()
+    if not target:
+        return False
+    at = at or datetime.now(timezone.utc)
+    if at.tzinfo is None:
+        raise ValueError("Collector timestamp must be timezone aware")
+    when = at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hour = when[:13] + ":00:00Z"
+    try:
+        path = Path(target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(str(path), timeout=3)
+        try:
+            db.execute("PRAGMA busy_timeout=3000")
+            _ensure_hourly_schema(db)
+            db.execute(
+                "INSERT INTO egress_collector_ticks "
+                "(hour_utc,first_at,last_at,samples) VALUES (?,?,?,1) "
+                "ON CONFLICT(hour_utc) DO UPDATE SET "
+                "last_at=excluded.last_at,samples=samples+1",
+                (hour, when, when),
+            )
+            db.commit()
+        finally:
+            db.close()
+        return True
+    except (OSError, sqlite3.Error) as error:
+        logger.warning("runner collector heartbeat unavailable: %s", type(error).__name__)
+        return False
+
+
+_heartbeat_thread_lock = threading.Lock()
+_heartbeat_thread_started = False
+
+
+def start_runner_collector_heartbeat() -> None:
+    """Start one low-cost heartbeat per process; no Airtable API request."""
+    global _heartbeat_thread_started
+    with _heartbeat_thread_lock:
+        if _heartbeat_thread_started:
+            return
+        def loop():
+            while True:
+                persist_runner_collector_heartbeat()
+                time.sleep(60)
+        worker = threading.Thread(
+            target=loop, daemon=True, name="runner-airtable-retirement-coverage"
+        )
+        worker.start()
+        _heartbeat_thread_started = True
+
+
 def summarize_airtable_activity(hourly, window_hours: int = 48) -> dict:
     """Count real api.airtable.com attempts. A skipped Supabase-only commit is not an attempt."""
     reads = 0
@@ -187,6 +247,11 @@ def read_airtable_egress(hours: int = 48) -> dict:
             "FROM hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class,table_kind",
             (since,),
         ).fetchall()
+        coverage = db.execute(
+            "SELECT hour_utc,first_at,last_at,samples "
+            "FROM egress_collector_ticks WHERE hour_utc>=? ORDER BY hour_utc",
+            (since,),
+        ).fetchall()
     finally:
         db.close()
     # A live exporter read is a collector heartbeat, not proof that every
@@ -198,7 +263,11 @@ def read_airtable_egress(hours: int = 48) -> dict:
     ]
     return {"ok": True, "source": "pipeline_runner_sqlite",
             "collector_heartbeat": {"observed_at": observed_at, "ok": True,
-                                    "scope": "this_runner_metrics_store_only"},
+                                    "scope": "export_only_not_hourly_coverage"},
+            "collector_coverage": [
+                dict(zip(("hour_utc", "first_at", "last_at", "samples"), row))
+                for row in coverage
+            ],
             "hourly": hourly,
             "activity": summarize_airtable_activity(hourly, window)}
 
