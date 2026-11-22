@@ -1,3 +1,4 @@
 Deploy NYC TikTok auth alignment
 Reason: Output 979 NYC TikTok Video stuck on TTD1 HTTP 401 Unauthorized. Port Miami PIPELINE_SECRET_SHA256 fingerprint auth to auth-nyc so X-Pipeline-Secret matches NYC_TIKTOK_PIPELINE_SECRET / established pipeline secret.
 Requested: 2026-09-28T12:35:00Z
+2026-11-21: Deploy v5.2 TikTok OAuth scope-gate fix from issue #2554. Default approved publishing scopes only, video.list opt-in after developer approval. Read-only status-field health check. Preserve all existing tokens, bindings, and publish attempt ledger.
