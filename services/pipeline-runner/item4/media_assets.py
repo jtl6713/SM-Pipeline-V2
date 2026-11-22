@@ -13,7 +13,11 @@ def _now_iso() -> str:
 
 
 def find_by_transfer_id(client: AirtableClient, transfer_id: str) -> dict | None:
-    formula = f"{{Studio_Transfer_ID}}='{transfer_id.replace(chr(39), chr(92)+chr(39))}'"
+    # Supabase-only query translation accepts a double-quoted Airtable literal.
+    # Single quotes caused every crop to fail before it could find/create its
+    # Media Asset, leaving Frame Prepare permanently at Error (#2574).
+    escaped_id = transfer_id.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))
+    formula = f'{{Studio_Transfer_ID}}="{escaped_id}"'
     rows = client.list_records(MEDIA_ASSETS_TABLE, formula=formula, max_records=1)
     return rows[0] if rows else None
 
