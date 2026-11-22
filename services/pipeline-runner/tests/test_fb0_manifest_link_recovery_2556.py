@@ -142,3 +142,26 @@ def test_fb0_repairs_missing_multi_photo_mode(monkeypatch):
     assert result["slideshow_route"] is False
     assert result["fb_publish_status"] == "Ready for Photo Media"
     assert any(x.get("FB_Resolved_Publish_Mode") == "Multi-Photo Collage" for x in client.updates)
+
+
+def test_foreign_location_manifest_guard_blocks_every_fb_stage(monkeypatch):
+    from fb import fb1, fb2
+
+    wrong = output(manifest("Runyon-Canyon-Park"))
+    assert assets.manifest_location_mismatch(wrong) is True
+    assert assets.manifest_location_mismatch(output()) is False
+
+    for stage in (fb0, fb1, fb2):
+        client = Client()
+        client.output = wrong
+        monkeypatch.setattr(stage, "AirtableClient", lambda: client)
+        if stage is fb0:
+            monkeypatch.setattr(stage, "fb0_eligibility_reason", lambda _o: None)
+        elif stage is fb1:
+            monkeypatch.setattr(stage, "fb1_eligibility_reason", lambda _o, **_kw: None)
+        else:
+            monkeypatch.setattr(stage, "fb2_eligibility_reason", lambda _o, **_kw: None)
+        result = stage.process_request(output_record_id=OUTPUT_REC)
+        assert result["processed"] is False
+        assert result["reason"] == "source_location_mismatch"
+        assert client.updates == []

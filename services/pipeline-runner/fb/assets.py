@@ -287,6 +287,22 @@ def _manifest_location_mismatch(output: dict[str, Any], clips: list[dict[str, An
     return False
 
 
+
+def manifest_location_mismatch(output: dict[str, Any]) -> bool:
+    """Reject visibly foreign named source locations at every Facebook stage.
+
+    This checks original source filenames rather than the overlaid image title:
+    an Echo Park label applied to Runyon Canyon does not make its media valid.
+    """
+    raw = field(output, "Render_Clip_List_JSON")
+    try:
+        clips = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return False
+    return isinstance(clips, list) and _manifest_location_mismatch(output, clips)
+
+
+
 def verify_public_4x5_image(url: str) -> bool:
     """Verify retrievable image bytes and dimensions, not merely a URL string."""
     from io import BytesIO

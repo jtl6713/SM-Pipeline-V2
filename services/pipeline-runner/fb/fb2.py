@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc
-from fb.assets import facebook_message, list_ready_photos, photo_ids, post_fingerprint
+from fb.assets import facebook_message, list_ready_photos, manifest_location_mismatch, photo_ids, post_fingerprint
 from fb.common import preview, response_json, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     MAKE_FB2_ID,
@@ -66,6 +66,8 @@ def process_request(
     result["eligibility_reason"] = reason
     if reason:
         return {"processed": False, "reason": reason, **result}
+    if manifest_location_mismatch(output):
+        return {"processed": False, "reason": "source_location_mismatch", **result}
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
