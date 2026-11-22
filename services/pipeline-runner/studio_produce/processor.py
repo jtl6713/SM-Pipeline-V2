@@ -162,7 +162,7 @@ def _run_governed(request_id: str, token: str) -> None:
                 return
             outcome = _run(request_id, lease_token=token, heartbeat_stopped=stopped)
             requeue = outcome in {"yielded", "yielded_progressed"}
-            progressed = outcome == "yielded_progressed"
+            progressed = outcome in {"yielded_progressed", "completed_progressed"}
     except Exception as error:
         if isinstance(error, governor.AdmissionDeferred):
             logger.info("studio producer deferred by workload admission request=%s", request_id)
@@ -232,7 +232,7 @@ def _run(
             wait_streak = 0
             last_step = step
         if step in TERMINAL_STEPS:
-            return
+            return "completed_progressed" if advanced else None
         if int(job.get("attempt") or 1) > MAX_ATTEMPTS:
             write_job(client, request_id, with_step(job, "blocked", error=f"Step {step} exceeded {MAX_ATTEMPTS} attempts"))
             return
@@ -297,7 +297,7 @@ def _run(
             next_job["heal"] = heal
         write_job(client, request_id, next_job)
         if nxt in TERMINAL_STEPS:
-            return
+            return "completed_progressed" if advanced else None
     return "yielded_progressed" if advanced else "yielded"
 
 # Restore queued work when the Windows runner restarts (no provider publishing).
