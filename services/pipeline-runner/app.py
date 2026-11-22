@@ -306,6 +306,7 @@ def health():
             "recovery_read_only": recovery_read_only(),
             "recovery_image_upload_enabled": recovery_image_upload_allowed(),
             "recovery_image_classification_enabled": recovery_image_classification_allowed(),
+            "recovery_a3_scoped_media_patches": recovery_image_classification_allowed(),
             "workload_governor_enabled": workload_governor.enabled(),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
