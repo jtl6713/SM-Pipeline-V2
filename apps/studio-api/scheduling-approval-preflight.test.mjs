@@ -87,6 +87,14 @@ test("#2618: native photo set requires real count and consistent source URLs", (
   assert.equal(assessSchedulingPreflight(row).ready,true);
   assert.equal(assessSchedulingPreflight(row).media.length,4,"all native source bytes are required");
   assert.equal(assessSchedulingPreflight({...row,selected_assets:null}).reason,"native_photo_manifest_mismatch");
+  const compact={...row,selected_assets:null,
+    error_messages:{[PREFLIGHT_KEY]:{
+      status:"verified",signature:schedulingPreflightSignature(row),
+      native_source_count:2,requires_human_approval:true,
+    }}};
+  assert.equal(assessSchedulingPreflight(compact).ready,false,"compact record cannot mint its own proof");
+  assert.equal(verifiedSchedulingPreflight(compact),true,"prior full-image receipt can be displayed");
+  assert.equal(verifiedSchedulingPreflight({...compact,selected_clip_count:3}),false,"changed manifest count invalidates receipt");
   assert.equal(assessSchedulingPreflight({...row,selected_clip_count:3}).reason,"native_photo_manifest_mismatch");
   assert.equal(assessSchedulingPreflight({...row,selected_assets:{selected_clips:[{url:"https://unknown.example/photo.png"},{url:CDN+"source-b.png"}]}}).reason,"native_photo_manifest_mismatch");
 });
