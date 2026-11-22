@@ -134,6 +134,20 @@ function isReadyForReview(row) {
   // Output 3431 / Content 654 had Output_Status=Ready for Review while Remotion
   // still reported Waiting in Render Queue, so Factory incorrectly offered Approve.
   if (row?.kind === "output" && isRenderQueueActive(row)) return false;
+  // #2294: explicitly recognized unapproved gallery candidates may enter
+  // Needs Eyes for PREVIEW + REQUEST CHANGES. They are not final packages and
+  // must keep review_package_ready=false, disabling normal Approve/Submit.
+  const candidateOnly = row?.kind === "output"
+    && row.candidate_gallery_review === true
+    && row.review_package_ready === false
+    && row.do_not_publish === true && row.auto_publish_enabled !== true
+    && String(row.output_status || "").trim() === "Ready for Review"
+    && String(row.render_status || "").trim() === "Native Photo Route"
+    && ["", "Review Sent", "Pending Review", "Pending"].includes(String(row.review_status || "").trim())
+    && ["", "Not Ready"].includes(String(row.publish_status || "").trim())
+    && !row.scheduled_post_date && !row.studio_scheduled_at
+    && !row.youtube_scheduled_publish_at && !row.published_at && !row.platform_post_url;
+  if (candidateOnly) return true;
   if (row?.kind === "output" && row.review_package_ready === false) return false;
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
@@ -334,6 +348,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     scheduling_approval_requirement: row.scheduling_approval_requirement || null,
     studio_owned_exception: row.do_not_publish === true && row.output_status === "In Production",
     protected_media_rework: row.protected_media_rework === true,
+    candidate_gallery_review: row.candidate_gallery_review === true,
     meta_repair_required: row.meta_repair_required === true,
     meta_repair_reason: row.meta_repair_required === true ? (row.meta_repair_reason || "Studio recovery") : null,
     meta_repair_next_step: row.meta_repair_required === true ? (row.meta_repair_next_step || "Studio must inspect the exact record before proceeding.") : null,
