@@ -1,0 +1,74 @@
+name: Issue 2294 Held Native Gallery Exact CDN GET Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/manifests/issue2294-protected-candidate-gallery-cdn-20261122.json'
+      - 'repair/scripts/issue2294-protected-candidate-cdn-readonly.py'
+      - '.github/workflows/issue2294-protected-gallery-cdn-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/manifests/issue2294-protected-candidate-gallery-cdn-20261122.json'
+      - 'repair/scripts/issue2294-protected-candidate-cdn-readonly.py'
+      - '.github/workflows/issue2294-protected-gallery-cdn-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2294-protected-source-cdn-get-audit
+  cancel-in-progress: false
+jobs:
+  exact-cdn-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Static safety checks — no mutation capabilities
+        run: |
+          set -euo pipefail
+          python -m py_compile repair/scripts/issue2294-protected-candidate-cdn-readonly.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          source=Path('repair/scripts/issue2294-protected-candidate-cdn-readonly.py').read_text()
+          manifest=json.loads(Path('repair/manifests/issue2294-protected-candidate-gallery-cdn-20261122.json').read_text())
+          assert manifest['read_only'] and not manifest['release_to_publish_authorized']
+          assert manifest['do_not_approve'] and manifest['record_count']==12
+          assert manifest['candidate_slide_count']==82 and len(manifest['entries'])==12
+          assert all(x['do_not_publish'] is True and x['publication_authorized'] is False
+                     for x in manifest['entries'])
+          for banned in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','execute_sql(',
+                         'requests.post(', 'requests.patch(', 'media_publish(',
+                         'urlopen(req, data=', 'psycopg2', 'subprocess.run('):
+              assert banned not in source, banned
+          print('issue2294_cdn_audit_static_safety=PASS')
+          PY
+      - name: Install pinned Pillow image decoder
+        run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Retrieve actual candidate public media bytes and geometry (GET only)
+        run: python repair/scripts/issue2294-protected-candidate-cdn-readonly.py
+      - name: Assert full evidence and no approval/publishing implications
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/issue2294-protected-candidate-cdn-audit.json').read_text())
+          assert r['read_only'] is True and r['no_supabase_writes'] is True
+          assert r['candidate_total']==82 and len(r['images'])==82 and len(r['dispositions'])==12
+          assert r['native_slide_writes']==r['provider_calls']==r['media_calls']==r['approval_calls']==r['scheduled_posts']==0
+          assert r['publish_hold_released'] is False and r['automatic_creative_approval'] is False
+          print('issue2294_actual_cdn_bytes_verified='+str(r['full_bytes_verified']))
+          print('issue2294_actual_4x5_images_verified='+str(r['exact_4x5_verified']))
+          print('issue2294_galleries_with_all_exact_bytes_and_geometry='+str(r['outputs_with_complete_http_and_geometry']))
+          PY
+      - name: Preserve independent per-slide and per-output evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2294-protected-candidate-cdn-get-evidence
+          path: /tmp/issue2294-protected-candidate-cdn-audit.json
+          retention-days: 30
+          if-no-files-found: warn
