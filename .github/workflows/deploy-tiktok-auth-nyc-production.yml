@@ -34,6 +34,10 @@ jobs:
           grep -q 'PIPELINE_SECRET_SHA256' apps/tiktok-auth-nyc/worker.js
           grep -q 'fingerprintMatch' apps/tiktok-auth-nyc/worker.js
 
+      - name: Test scope-gated TikTok OAuth without external provider calls
+        shell: bash
+        run: node --test apps/studio-api/tiktok-analytics-oauth-scope-gate.test.mjs
+
       - name: Capture current live version and bindings
         shell: bash
         run: |
@@ -102,6 +106,9 @@ jobs:
           done
           test "$code" = "200"
           jq -e '.ok==true' /tmp/health.json >/dev/null
+          status_code=$(curl -sS --max-time 20 -o /tmp/status.json -w '%{http_code}' 'https://auth-nyc.chicagoshining.com/tiktok/status' || true)
+          test "$status_code" = "200"
+          jq -e 'has("posting_scopes_granted") and has("analytics_scope_granted") and has("analytics_scope_request_enabled")' /tmp/status.json >/dev/null
           echo "nyc_tiktok_worker_deploy=PASS"
 
       - name: Upload sanitized deployment evidence
