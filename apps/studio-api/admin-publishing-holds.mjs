@@ -23,16 +23,63 @@ const dispatchKeys = [
   "Platform_Media_ID","Studio_Publish_Dispatch_At","TikTok_Draft_Publish_ID",
   "YouTube_Video_ID","Instagram_Reel_Container_ID","IG_Carousel_Parent_Container_ID"
 ];
+
+// Legacy recovery tooling used multiple exact-key hold/fence names. Every
+// persisted, nonempty active marker is a protected hold, not an operator
+// convenience checkbox. This is deliberately fail-closed: a stale marker must
+// be reconciled by the original workflow rather than overridden here.
+const holdEvidenceKey = key =>
+  /(^|_)(hold|held|fence)(_|$)|unsafe.?gallery|copyright|legal.?block|rights.?block|false_changes_requested_recovery/i.test(key);
+const activeEvidence = value => {
+  if (value == null || value === false || value === 0) return false;
+  const text=str(value).toLowerCase();
+  return !["","false","0","null","none"].includes(text);
+};
+const markerKeys = extras => Object.keys(extras).filter(key =>
+  holdEvidenceKey(key) && activeEvidence(extras[key]));
+const attemptKeys = extras => Object.entries(extras).some(([key,value]) =>
+  (/(^|_)(attempt|dispatch|retry)_count$/i.test(key) && Number(value)>0) ||
+  (/((^|_)(last_)?(publish_)?attempt_at$|^publish_started_at$|^publish_locked_at$|_dispatch_at$)/i.test(key) &&
+    activeEvidence(value)) ||
+  (/(_container_id$|_media_id$|_post_id$|^youtube_video_id$)/i.test(key) && activeEvidence(value))
+);
+function describeAdminHold(row,extras,markers) {
+  const explicit=str(row?.publish_hold_reason);
+  if (explicit) return {reason:explicit,source:str(row?.publish_hold_source)||"Saved hold reason"};
+  for (const key of ["Studio_Production_Hold_Reason","Publish_Hold_Reason","Studio_Hold_Reason",
+    "Studio_Recovery_Duplicate_Reason","Backlog_20261120_Asset_Caption_Mismatch_Reason"]) {
+    const value=str(extras[key]);
+    if (value) return {reason:value.slice(0,500),source:"Recorded output evidence: "+key};
+  }
+  if(markers.length) {
+    // This identifies an actual recorded safety marker. It is NOT a guessed
+    // root cause or proof that the underlying creative issue remains open.
+    return {reason:"Historical protected hold marker: "+markers[0].replaceAll("_"," "),
+      source:"Historical output record (exact safety marker)"};
+  }
+  if(attemptKeys(extras) || (row?.platform_publish_response && 
+       Object.keys(row.platform_publish_response).length>0)) {
+    return {reason:"Historical publish hold with a prior dispatch or provider attempt; reconcile before releasing",
+      source:"Historical provider attempt evidence"};
+  }
+  if(["cancelled","skipped"].includes(str(row?.output_status).toLowerCase())) {
+    return {reason:"Historical publish hold; output is "+str(row?.output_status)+". Original reason was not recorded",
+      source:"Historical output status (not original hold reason)"};
+  }
+  return {reason:"Reason not recorded — historical hold",source:"Historical / unrecorded"};
+}
 export function classifyAdminPublishingHold(row) {
   const extras = row?.error_messages && typeof row.error_messages === "object" && !Array.isArray(row.error_messages)
     ? row.error_messages : {};
-  const reason = str(row?.publish_hold_reason) || "Reason not recorded — historical hold";
-  const block = note => ({ releasable:false, block_reason:note, reason });
+  const markers=markerKeys(extras);
+  const {reason,source}=describeAdminHold(row,extras,markers);
+  const block = note => ({ releasable:false, block_reason:note, reason, reason_source:source });
   if (!yes(row?.do_not_publish)) return block("This output is not on hold");
   if (str(row?.test_run_id)) return block("Test output: this is a permanent publishing restriction");
   if (yes(extras.Studio_Render_Review_Hold_Active) ||
-      safetyKeys.some(key => Boolean(extras[key]) && str(extras[key]) !== "false")) {
-    return block("Protected creative, recovery, copyright, or Factory hold. Resolve it in the owning review workflow");
+      markers.length>0 ||
+      safetyKeys.some(key => activeEvidence(extras[key]))) {
+    return block("Protected creative, recovery, copyright, or Factory hold. Resolve its original safety marker in the owning workflow");
   }
   if (str(row?.review_status).toLowerCase() !== "approved") {
     return block("Factory creative approval is not complete. Review the output in Factory before clearing a publishing hold");
@@ -42,17 +89,17 @@ export function classifyAdminPublishingHold(row) {
   }
   if (row?.published_at || row?.platform_post_url ||
       ["published","publishing","cancelled","skipped"].includes(str(row?.output_status).toLowerCase()) ||
-      ["published","publishing"].includes(str(row?.publish_status).toLowerCase())) {
-    return block("Published, publishing, cancelled, or skipped output: reconcile status first");
+      ["published","publishing","failed","not ready"].includes(str(row?.publish_status).toLowerCase())) {
+    return block("Published, failed, blocked, or otherwise ineligible publisher state; reconcile it first");
   }
-  if (dispatchKeys.some(key => str(extras[key])) ||
-      Number(extras.Studio_Publish_Dispatch_Count || 0)>0 ||
-      Number(extras.Publish_Attempt_Count || 0)>0 ||
+  if (dispatchKeys.some(key => activeEvidence(extras[key])) ||
+      attemptKeys(extras) ||
       (row?.platform_publish_response && Object.keys(row.platform_publish_response).length>0)) {
     return block("Prior dispatch or provider identity: reconcile the publisher before releasing this hold");
   }
-  return { releasable:true, block_reason:null, reason };
+  return { releasable:true, block_reason:null, reason, reason_source:source };
 }
+
 function json(data,status=200) {
   return new Response(JSON.stringify(data),{status,headers:{
     "Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store",
@@ -69,7 +116,7 @@ function asRow(row,profiles) {
     profile_name:profile?.profile_name || profile?.market_name || "Profile",
     output_status:row.output_status,review_status:row.review_status,
     publish_status:row.publish_status,reason:state.reason,
-    source:row.publish_hold_source || "Historical / unrecorded",
+    source:state.reason_source,
     actor:row.publish_hold_actor || null,held_at:row.publish_hold_set_at || null,
     held:true,releasable:state.releasable,block_reason:state.block_reason,
     revision:row.updated_at,hold_set_at:row.publish_hold_set_at,

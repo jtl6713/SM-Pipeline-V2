@@ -43,7 +43,7 @@ const handle=(request,ops,authorization=auth)=>
 
 test("legacy hold has truthful unknown reason and can be reviewed",()=>{
   assert.deepEqual(classifyAdminPublishingHold(row()),{
-    releasable:true,block_reason:null,reason:"Reason not recorded — historical hold"
+    releasable:true,block_reason:null,reason:"Reason not recorded — historical hold",reason_source:"Historical / unrecorded"
   });
 });
 test("protected review, factory, legal, tests, dispatch and published receipts cannot be toggled",()=>{
@@ -53,9 +53,20 @@ test("protected review, factory, legal, tests, dispatch and published receipts c
     {Factory_Review_Handoff_Safety_Hold_At:"2026-11-22"},
     {SM_False_Changes_Requested_Recovery_2563:"protected"},
     {Copyright_Hold:true},
-    {Publish_Started_At:"2026-11-22"}
+    {Publish_Started_At:"2026-11-22"},
+    {Studio_Overdue_UnsafeGallery_Hold_20261121:"needs original-gallery verification"},
+    {SM_Native_Gallery_Preflight_Hold_2294:true},
+    {SM_Factory_Visual_Review_Hold_Restored_20261122:true},
+    {SM_NYC_Sibling_Visual_QA_Hold_20261122:"source mismatch"},
+    {SM_Miami_Frost_Copy_QA_Hold_20261122:"caption needs correction"},
+    {P1_2340_Ambiguous_Child_Retry_Hold:"unknown provider attempt"},
+    {Backlog_20261120_Asset_Caption_Mismatch_Hold:true},
+    {SM_Factory_Held_Review_Staged_20261120:true},
+    {IG_Story_Attempt_Count:1},
+    {IG_Carousel_Retry_Count:2},
+    {Last_Publish_Attempt_At:"2026-11-21T10:00:00Z"}
   ]){
-    assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false);
+    assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false,JSON.stringify(extras));
   }
   assert.equal(classifyAdminPublishingHold({...row(),test_run_id:"test"}).releasable,false);
   assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,false);
@@ -118,6 +129,49 @@ test("protected or stale hold refuses a release without writing",async()=>{
         revision:row().updated_at,hold_set_at:row().publish_hold_set_at})
     }),ops);
     assert.equal(response.status,409);
+    assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
+  }
+});
+
+test("historical reasons use actual output evidence without pretending to be original hold notes",()=>{
+  const cases=[
+    [{Studio_Production_Hold_Reason:"Editorial QA awaiting city-specific images"},"Editorial QA awaiting city-specific images","Recorded output evidence"],
+    [{Studio_Overdue_UnsafeGallery_Hold_20261121:true},"Historical protected hold marker","Historical output record"],
+    [{Studio_Publish_Dispatch_Count:2},"Historical publish hold with a prior dispatch","Historical provider attempt"],
+  ];
+  for (const [extras,fragment,source] of cases) {
+    const state=classifyAdminPublishingHold({...row(),error_messages:extras});
+    assert.match(state.reason,new RegExp(fragment));
+    assert.match(state.reason_source,new RegExp(source));
+  }
+  const cancelled=classifyAdminPublishingHold({...row(),output_status:"Cancelled"});
+  assert.match(cancelled.reason,/output is Cancelled/);
+  assert.equal(cancelled.releasable,false);
+});
+test("explicit captured reason takes precedence over historical markers but never overrides safety",()=>{
+  const state=classifyAdminPublishingHold({...row(),
+    publish_hold_reason:"Rights review required before Instagram Story",
+    publish_hold_source:"rights-review",
+    error_messages:{Copyright_Hold:true}});
+  assert.equal(state.reason,"Rights review required before Instagram Story");
+  assert.equal(state.reason_source,"rights-review");
+  assert.equal(state.releasable,false);
+});
+test("protected historical hold denies mutation even when approved for publishing",async()=>{
+  for(const marker of [
+    {Studio_Overdue_UnsafeGallery_Hold_20261121:true},
+    {SM_Native_Gallery_Preflight_Hold_2294:true},
+    {IG_Story_Attempt_Count:1}
+  ]) {
+    const held=row();held.error_messages=marker;
+    const {ops,calls}=fixture({held});
+    const response=await handle(req("/api/operations/publishing-holds/"+REC+"/release",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({confirm_output_id:REC,
+        release_note:"Safety inspection requires more work",
+        revision:held.updated_at,hold_set_at:held.publish_hold_set_at})
+    }),ops);
+    assert.equal(response.status,409,JSON.stringify(marker));
     assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
   }
 });
