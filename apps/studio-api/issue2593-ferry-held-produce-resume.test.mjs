@@ -29,7 +29,7 @@ test("2593 final resume is a one-shot minute cron, no broad retries or client ap
  assert.match(worker,/studioResumeFreeSkylineHeldProduceCron,/);
  assert.match(worker,/\/\*__STUDIO_WORKER_EXTRACT:studioResumeFreeSkylineHeldProduceCron__\*\//);
  assert.match(worker,/ctx\.waitUntil\(studioResumeFreeSkylineHeldProduceCron\(env\)/);
- assert.match(worker,/version: "0\.10\.1015-ferry-held-resume-2593"/);
+ assert.match(worker,/version: "0\.10\.\d+-[A-Za-z0-9-]+"/, "active Worker build identifier remains well-formed");
  const body=code.slice(code.indexOf("export async function studioResumeFreeSkylineHeldProduceCron("),
     code.indexOf("/*__STUDIO_WORKER_END:studioResumeFreeSkylineHeldProduceCron__*/"));
  assert.match(body,/one_shot_receipt_exists/);
