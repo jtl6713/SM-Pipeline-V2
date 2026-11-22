@@ -419,7 +419,7 @@ def record_db_request(method: str, *, failed: bool, latency_ms: float = 0) -> No
 
 def snapshot() -> dict[str, object]:
     if not enabled():
-        return {"enabled": False, "recovery_read_only": admission_paused(), "admission_paused": True}
+        return {"enabled": False, "recovery_read_only": admission_paused(), "admission_paused": admission_paused()}
     with _connect() as db:
         counts = db.execute("SELECT state,COUNT(*) FROM producer_jobs GROUP BY state").fetchall()
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
