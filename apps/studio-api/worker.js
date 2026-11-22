@@ -773,6 +773,7 @@ import {
   postPlaceReviewAction,
   promoteProductionRequestViaI3I4,
   studioNyc20261121HandoffCron,
+  studioRecoverFreeSkylineFerryFanoutCron,
   promoteIdeaViaI3I4,
   ideaPhotoListeningSessionRoute,
   getAuthorizedIdeaRoute,
@@ -1409,7 +1410,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1012-idea-reset-guards",
+          version: "0.10.1013-ferry-fanout-2593",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4483,6 +4484,16 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Issue #2593: one-shot exact production-output recovery for Content #2239.
+    // Synchronous I3/I4 seed uses a no-publish/no-schedule hold. Independent
+    // of the heavy maintenance cron and consumer browser activity.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil(studioRecoverFreeSkylineFerryFanoutCron(env, ctx)
+        .then((result) => {
+          if (result && !result.skipped) console.info("issue2593 ferry held fanout", result);
+        })
+        .catch((error) => console.error("issue2593 ferry fanout failed closed", String(error?.message || error))));
+    }
     // Incident 2026-11-21: bounded, exact NYC I4 fanout recovery.
     // The recovered parents already exist; one request/one minute, never
     // schedule or publish, durable one-attempt R2 receipt per request.
