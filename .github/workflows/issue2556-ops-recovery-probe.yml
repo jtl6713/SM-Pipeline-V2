@@ -1,0 +1,101 @@
+name: Issue 2556 exact Facebook 10738 Ops import preflight
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2556-ops-recovery-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2556-fb10738-ops-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/2556-ops-recovery-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate approved Ops API without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "RECOVERY_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "fb10738_ops_auth=UNAVAILABLE"; exit 1
+      - name: Read only verify runner, exact output and upload prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/fb10738-probe.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 30
+          if ($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase') { throw 'fb10738_runner_not_supabase_authoritative' }
+          Write-Output 'fb10738_runner_supabase=PASS'
+          $envfile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path $envfile)) { throw 'fb10738_runner_env_missing' }
+          $lines=@(Get-Content $envfile)
+          function EnvValue([string]$key) {
+            $row=@($lines | Where-Object { $_ -match ('^\s*'+[regex]::Escape($key)+'\s*=') }) | Select-Object -Last 1
+            if (-not $row) { return '' }
+            return ([string]$row -split '=',2)[1].Trim().Trim('"',"'")
+          }
+          $required=@('PIPELINE_RUNNER_SHARED_SECRET','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','R2_UPLOAD_WORKER_URL','R2_UPLOAD_WORKER_SECRET','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REFRESH_TOKEN')
+          foreach($key in $required) {
+            if (-not (EnvValue $key)) { Write-Output ('fb10738_missing_config='+$key); throw 'fb10738_missing_required_upload_configuration' }
+          }
+          Write-Output 'fb10738_upload_configuration=PASS'
+          $uri=(EnvValue 'SUPABASE_URL').TrimEnd('/')+'/rest/v1/platform_outputs?airtable_record_id=eq.recfGHDLbkTBLuPYx&select=output_number,content_number,platform,platform_output_type,review_status,output_status,publish_status,fb_publish_status,auto_publish_enabled,do_not_publish,published_at,platform_post_url,selected_assets,render_clip_list,error_messages'
+          $key=EnvValue 'SUPABASE_SERVICE_ROLE_KEY'
+          $head=@{apikey=$key; Authorization=('Bearer '+$key)}
+          $rows=@(Invoke-RestMethod -Uri $uri -Headers $head -TimeoutSec 35)
+          if ($rows.Count -ne 1) { throw 'fb10738_output_missing_or_ambiguous' }
+          $o=$rows[0]
+          if ($o.output_number -ne 10738 -or $o.platform -ne 'Facebook' -or $o.platform_output_type -ne 'Facebook Photo Set' -or $o.review_status -ne 'Approved' -or $o.output_status -ne 'Approved for Publishing' -or $o.auto_publish_enabled -ne $true -or $o.do_not_publish -eq $true -or $o.published_at -or $o.platform_post_url -or $o.error_messages.Platform_Post_ID -or $o.error_messages.FB_Photo_IDs_JSON) { throw 'fb10738_current_output_identity_or_provider_guard_failed' }
+          if (@($o.selected_assets.selected_clips).Count -ne 4 -or @($o.render_clip_list).Count -ne 4) { throw 'fb10738_source_manifest_cardinality_changed' }
+          Write-Output 'fb10738_exact_current_record=PASS'
+          $uris=@(
+            'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:d535db6e-0fb4-4462-994e-4db5f9cd3d21',
+            'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:a645f65b-c3df-4755-9937-3aa175acfd99',
+            'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:022f3008-8b69-462f-b6bd-1bb3d645fa9e',
+            'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:ba04ce00-050f-418f-ace0-1133be2fddb1'
+          )
+          $i=0
+          foreach($u in $uris) {
+            $i++
+            $r=Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 55
+            if ([int]$r.StatusCode -ne 200 -or ([string]$r.Headers['Content-Type']) -notmatch 'image/jpeg' -or $r.RawContentLength -lt 1024) { throw ('fb10738_candidate_'+$i+'_not_available_at_ops') }
+            Write-Output ('fb10738_candidate_'+$i+'_ops_http=PASS')
+          }
+          Write-Output 'fb10738_ops_import_preflight=PASS'
+          PS
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/fb10738-probe.json').write_text(json.dumps({'command':pathlib.Path('/tmp/fb10738-probe.ps1').read_text(),'confirm':True}))
+          PY
+          http=$(curl -sS --max-time 30 -o /tmp/fb10738-start.json -w '%{http_code}' -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/fb10738-probe.json || true)
+          if [[ "$http" != 200 && "$http" != 202 ]]; then echo "fb10738_ops_shell_http=$http"; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/fb10738-start.json)
+          for n in $(seq 1 75); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $RECOVERY_OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/fb10738-status.json
+            status=$(jq -r '.job.status // empty' /tmp/fb10738-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/fb10738-status.json | grep '^fb10738_' || true
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/fb10738-status.json | grep '^fb10738_' | tail -24 || true
+              echo "fb10738_ops_probe=FAILED"; exit 3
+            fi
+            sleep 4
+          done
+          echo "fb10738_ops_probe=UNCONFIRMED"; exit 4
