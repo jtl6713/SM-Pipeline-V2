@@ -22,6 +22,8 @@ test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
       Publish_Error_Message:
         "Facebook rate limit (368/1390008): parked until 2026-10-16T16:00Z. Auto_Publish paused so production Worker does not storm FBS3.",
       Publish_Retry_Eligible: true,
+      Last_Publish_Attempt_At: "2026-10-16T15:59:00Z",
+      Publish_Next_Retry_At: "2026-10-16T16:00:00Z",
       FB_Slideshow_Status: "Video Ready",
       FB_Publish_Status: "Retry Pending",
     },
@@ -29,7 +31,7 @@ test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
   assert.equal(state, "Retry Pending");
 });
 
-test("a leftover carousel image_url error on Ready to Schedule paints Retry Pending", () => {
+test("a historical carousel error without a retry time preserves its future scheduled state", () => {
   const state = normalizedOutputState({
     fields: {
       Platform: "Instagram",
@@ -38,10 +40,11 @@ test("a leftover carousel image_url error on Ready to Schedule paints Retry Pend
       Publish_Status: "Ready to Schedule",
       Auto_Publish_Enabled: true,
       Studio_Publish_Dispatch_Count: 1,
+      Scheduled_Post_Date: "2099-01-10T18:00:00Z",
       IG_Carousel_Error_Message: "(#100) The parameter image_url is required.",
     },
   });
-  assert.equal(state, "Retry Pending");
+  assert.equal(state, "Scheduled");
 });
 
 test("approved Meta auto-publish off with zero dispatches paints Auto Publish Disabled", () => {
@@ -68,6 +71,7 @@ test("FBS3_RATE_LIMIT stage also paints Retry Pending", () => {
       Publish_Error_Stage: "FBS3_RATE_LIMIT",
       Publish_Error_Message: "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.",
       Publish_Retry_Eligible: true,
+      Publish_Next_Retry_At: "2099-01-11T18:00:00Z",
     },
   });
   assert.equal(state, "Retry Pending");
@@ -96,5 +100,5 @@ test("TTD0 asset mismatch held for repair is not incorrectly shown as another ti
       Auto_Publish_Enabled: true,
       Do_Not_Publish: false,
     },
-  }), "Retry Pending");
+  }), "Needs Asset Repair");
 });

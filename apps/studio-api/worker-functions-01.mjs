@@ -2198,19 +2198,36 @@ export function normalizedOutputState(record) {
   if (studioMixRerenderInProgress(record)) return "Rerendering";
 
   const retryablePublish = Boolean(fields.Publish_Retry_Eligible);
+  // A retryable flag is eligibility, not proof of a retry. Keep this check
+  // local: Studio's Worker split harness extracts this function in isolation.
+  const actualPublishRetry = (() => {
+    const eligible = fields.Publish_Retry_Eligible === true
+      || fields.Publish_Retry_Eligible === 1
+      || text("Publish_Retry_Eligible").toLowerCase() === "true";
+    if (!eligible || fields.Do_Not_Publish === true || fields.Auto_Publish_Enabled === false
+        || text("Published_At") || text("Platform_Post_URL") || text("Manual_Published_URL")) return false;
+    const retryTime = Date.parse(text("Publish_Next_Retry_At") || text("IG_Carousel_Next_Retry_At"));
+    if (!Number.isFinite(retryTime)) return false;
+    return Number(fields.Studio_Publish_Dispatch_Count || 0) > 0
+      || Boolean(text("Last_Publish_Attempt_At") || text("Studio_Publish_Dispatch_At")
+        || text("Publish_Error_Stage") || text("Publish_Error_Message")
+        || text("IG_Carousel_Error_Message") || text("FB_Slideshow_Error_Message")
+        || text("YouTube_Error_Message"));
+  })();
   const youtubeVideoReady = Boolean(text("YouTube_Video_ID"))
     && (has("YouTube_Upload_Status", "uploaded") || has("YouTube_Processing_Status", "succeeded"));
   const thumbnailOnlyError = /thumb/i.test(text("Publish_Error_Stage") + " " + text("YouTube_Error_Message") + " " + text("Publish_Error_Message"));
-  const igCarouselRateLimited = retryablePublish
+  const igCarouselRateLimited = actualPublishRetry
     && /user is performing too many actions|rate limit|request limit/i.test(text("IG_Carousel_Error_Message"));
   // Facebook Graph 368 / 1390008 parks keep Publish_Status=Failed until cooldown
   // re-arm, but Pipeline must paint Retry Pending (same as IG AP1C rate limits).
-  const fbGraphRateLimited = /FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT/i.test(text("Publish_Error_Stage"))
-    || isFacebookPublishRateLimitError([
-      text("Publish_Error_Message"),
-      text("FB_Slideshow_Error_Message"),
-      text("Publish_Error_Stage"),
-    ].join(" "));
+  const fbGraphRateLimited = actualPublishRetry
+    && (/FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT/i.test(text("Publish_Error_Stage"))
+      || isFacebookPublishRateLimitError([
+        text("Publish_Error_Message"),
+        text("FB_Slideshow_Error_Message"),
+        text("Publish_Error_Stage"),
+      ].join(" ")));
 
   const errors = [
     "Publish_Error_Message", "Remotion_Error_Message", "Final_File_Error_Message",
@@ -2328,7 +2345,7 @@ export function normalizedOutputState(record) {
     text("Platform").toLowerCase() === "tiktok"
     && text("TikTok_Draft_Status") === "Retry Pending"
     && text("Publish_Error_Stage") === "TTD0_ASSETS"
-    && fields.Publish_Retry_Eligible === false
+    && !actualPublishRetry
   ) return "Needs Asset Repair";
 
   // Meta action throttling is a timed automatic retry, not a terminal failure.
@@ -2372,9 +2389,15 @@ export function normalizedOutputState(record) {
     if (!outputDead && !publishDead && queuedOrReady) {
       // Fall through to Waiting in Render Queue / ready labels below.
     } else if (!outputDead && !publishDead && !renderDead) {
-      // A leftover AP1C or rescue-skip message on a row still queued to publish
-      // is a retry, not a terminal failure.
-      return "Retry Pending";
+      // Historical errors without a real scheduled retry need verification;
+      // never call a stale error or a retry-eligible toggle an active retry.
+      if (actualPublishRetry) return "Retry Pending";
+      const nextPostMs = Date.parse(text("Scheduled_Post_Date") || text("Studio_Scheduled_At"));
+      if (Number.isFinite(nextPostMs) && nextPostMs > Date.now()
+          && (has("Review_Status", "approved") || has("Output_Status", "approved"))) {
+        return "Scheduled";
+      }
+      return "Needs Verification";
     } else {
       return "Failed";
     }
@@ -2396,8 +2419,15 @@ export function normalizedOutputState(record) {
   // "Ready to Schedule" must win over stale Publish_Retry_Eligible and Approved — future-dated posts are armed, not waiting on retry.
   if (has("Publish_Status", "ready to schedule") || text("Publish_Status").toLowerCase() === "scheduled" || has("TikTok_Draft_Status", "waiting for schedule")) return "Scheduled";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
-  // A leftover retry flag must not hide a YouTube video that is already on the platform.
-  if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
+  // Only a recorded retry with a real next-attempt time may receive this badge.
+  // The old eligibility-only rule mislabeled #11125-11127 as Retry Pending.
+  if (!youtubeVideoReady && actualPublishRetry) return "Retry Pending";
+  const nextScheduledPostMs = Date.parse(text("Scheduled_Post_Date") || text("Studio_Scheduled_At"));
+  if (Number.isFinite(nextScheduledPostMs) && nextScheduledPostMs > Date.now()
+      && has("Publish_Status", "ready to publish")
+      && (has("Review_Status", "approved") || has("Output_Status", "approved"))) {
+    return "Scheduled";
+  }
   // Publisher "Ready for Assets" is the start of upload, not a rewind to Studio
   // asset selection. Approved/reviewable work must win or Approve drops 65% → 30%.
   if (has("Review_Status", "approved") || has("Output_Status", "approved")) return "Approved";
@@ -2804,7 +2834,19 @@ export function outputProgressPercent(record, state, job = null) {
 
 export function platformPublishStatus(record) {
   const platform = String(f(record, "Platform") || "").toLowerCase();
-  if (platform === "facebook") return f(record, "FB_Publish_Status") || f(record, "FB_Slideshow_Status") || f(record, "Publish_Status");
+  const safeLabel = (value) => {
+    if (String(value || "").trim() !== "Retry Pending" || normalizedOutputState(record) === "Retry Pending") {
+      return value;
+    }
+    const fallback = String(f(record, "Publish_Status") || "").trim();
+    const postMs = Date.parse(String(f(record, "Scheduled_Post_Date") || f(record, "Studio_Scheduled_At") || ""));
+    if (Number.isFinite(postMs) && postMs > Date.now()
+        && /^(Ready to Publish|Ready to Schedule|Scheduled)$/i.test(fallback)) {
+      return "Scheduled";
+    }
+    return fallback && fallback !== "Retry Pending" ? fallback : "Needs Verification";
+  };
+  if (platform === "facebook") return safeLabel(f(record, "FB_Publish_Status") || f(record, "FB_Slideshow_Status") || f(record, "Publish_Status"));
   if (platform === "tiktok") {
     const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
     const publish = String(f(record, "Publish_Status") || "").trim();
@@ -2819,10 +2861,10 @@ export function platformPublishStatus(record) {
     if (/ready to schedule/i.test(publish) || (!studioTikTokInboxIsDue(record) && /ready for assets/i.test(draft))) {
       return "Waiting for Schedule";
     }
-    return draft || publish;
+    return safeLabel(draft || publish);
   }
-  if (platform === "youtube") return f(record, "Publish_Status") || f(record, "YouTube_Processing_Status") || f(record, "YouTube_Upload_Status");
-  return f(record, "Publish_Status");
+  if (platform === "youtube") return safeLabel(f(record, "Publish_Status") || f(record, "YouTube_Processing_Status") || f(record, "YouTube_Upload_Status"));
+  return safeLabel(f(record, "Publish_Status"));
 }
 /*__STUDIO_WORKER_END:platformPublishStatus__*/
 
@@ -2894,6 +2936,7 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     aspect_ratio: f(record, "Aspect_Ratio"),
     output_status: f(record, "Output_Status"),
     studio_state: studioState,
+    publish_retry_pending_confirmed: studioState === "Retry Pending",
     meta_repair_required: Boolean(metaRepair),
     meta_repair_reason: metaRepair?.category || null,
     meta_repair_next_step: metaRepair?.next_step || null,
