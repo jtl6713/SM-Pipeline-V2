@@ -153,3 +153,15 @@ test("#2618: Studio-held records never masquerade as active render or ready to p
   assert.equal(classifyFactoryLane(prepared),"needs_eyes");
   assert.equal(factoryCardFromRow(prepared).scheduling_approval_ready,true);
 });
+
+test("#2618: Worker five-minute cron and Factory projection wire technical preflight without publishing", async () => {
+  const { readFileSync } = await import("node:fs");
+  const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  const factory=readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+  assert.match(worker,/ctx\.waitUntil\(sweepSchedulingApprovalPreflight\(env, \{ limit: 4 \}\)/);
+  assert.match(factory,/verifiedSchedulingPreflight\(\{/);
+  assert.match(factory,/scheduling_approval_ready: schedulingTechnicalReady === true/);
+  assert.match(factory,/Scheduling approval ready/);
+  const scan=readFileSync(new URL("./scheduling-approval-preflight.mjs",import.meta.url),"utf8");
+  assert.doesNotMatch(scan,/\b(?:auto_publish_enabled|scheduled_post_date|review_status|output_status|publish_status)\s*:\s*["'](?:Approved|Ready to Schedule|Scheduled|Published)/);
+});
