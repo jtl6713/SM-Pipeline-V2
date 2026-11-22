@@ -153,3 +153,25 @@ def test_video_watermark_scales_to_video_width_and_preserves_logo_shape(tmp_path
     assert abs(left - 20) <= 1 and abs(top - 20) <= 1
     assert abs((right - left) - 100) <= 2
     assert abs((bottom - top) - 50) <= 2
+
+
+def test_empty_c6_watermark_view_uses_official_authenticated_fallback_without_archive_scan():
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def list_records(self, table, **kwargs):
+            self.calls.append((table, kwargs))
+            return []
+
+    client = Client()
+    assert watermark_module._c6_watermark_rows(client) == []
+    # The watermark catalog lookup must never issue a second, unsupported
+    # Airtable-style formula lookup in Supabase-only production.
+    assert len(client.calls) == 1
+    assert client.calls[0][1].get("view")
+    assert not client.calls[0][1].get("formula")
+    assert watermark_module.brand_watermark_url(client).endswith(
+        watermark_module.FALLBACK_SMALL_WATERMARK_DRIVE_ID
+    )
+    assert len(client.calls) == 2
