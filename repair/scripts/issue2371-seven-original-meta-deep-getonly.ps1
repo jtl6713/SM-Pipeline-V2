@@ -152,7 +152,7 @@ foreach($r in ($rows|Sort-Object output_number)){
    $photoIds=@([regex]::Matches($txt,'"(\d{12,30})"')|ForEach-Object{[string]$_.Groups[1].Value})
    $story=@()
    foreach($photoId in $photoIds){
-    $get=G ('https://graph.facebook.com/'+$fbver+'/'+$pid+'?fields=id,from{id},page_story_id,created_time') ([string]$histCity.token)
+    $get=G ('https://graph.facebook.com/'+$fbver+'/'+$photoId+'?fields=id,from{id},page_story_id,created_time') ([string]$histCity.token)
     $owned=($get.ok -and [string]$get.obj.id -eq $photoId -and [string]$get.obj.from.id -eq [string]$histCity.page)
     if($owned){$result.matched_saved_original_photos++}
     $sid=if($owned){[string]$get.obj.page_story_id}else{''}
