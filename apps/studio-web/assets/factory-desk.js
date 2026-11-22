@@ -2201,7 +2201,8 @@
         ${card.meta_repair_required === true
           ? `<span class="factory-batch-unavailable factory-meta-repair" role="status"><strong>Studio repair required · ${esc(card.meta_repair_reason || "Recovery")}</strong> · Publishing held<br>
               ${esc(card.meta_repair_next_step || "Studio must diagnose and repair this output.")}
-              <small>${card.meta_repair_user_action_required === true ? "Your action is required; inspect the exact output." : "No action from you yet — Studio owns the repair."} · Tracked in issue #2563</small></span>`
+              <span class="factory-meta-asset-detail"><strong>Asset check:</strong> ${esc(card.meta_repair_asset_message || "Media verification pending.")}</span><br>
+          <small><strong>Owner:</strong> ${esc(card.meta_repair_owner || "Studio")} · ${card.meta_repair_user_action_required === true ? "Your action is required; open the output and review the flagged media." : "No user action requested. Studio must repair and verify."} · Tracked in issue #2563</small></span>`
           : ""}
         ${card.protected_media_rework === true
           ? `<span class="factory-batch-unavailable" role="status" title="${esc(card.recovery_next_step || "")}"><strong>Creative repair:</strong> ${card.recovery_source_inventory_verified === true ? "Original images verified · Rebuild/stage and review" : "Inspect and rebuild media"} · Publishing held</span>`
@@ -3669,7 +3670,11 @@
     renderSummary(summary);
     // #2563: keep Studio-owned blocked repairs visible even while the Repair
     // accordion is collapsed. The user should not have to hunt for 118 holds.
-    const metaCount = filtered(manualCards).filter(card => card.meta_repair_required === true).length;
+    const metaRepairs = filtered(manualCards).filter(card => card.meta_repair_required === true);
+    const metaCount = metaRepairs.length;
+    const missingCount = metaRepairs.filter(card => (card.meta_repair_missing_assets || []).length > 0).length;
+    const needsUserCount = metaRepairs.filter(card => card.meta_repair_user_action_required === true).length;
+    const providerCount = metaRepairs.filter(card => /Meta publication verification|Meta dispatch preflight/.test(String(card.meta_repair_reason || ""))).length;
     const factoryRoot = $("page-factory");
     const bands = factoryRoot?.querySelector(".factory-band")?.parentElement;
     if (bands) {
@@ -3683,9 +3688,10 @@
       }
       notice.hidden = metaCount === 0;
       if (metaCount) {
-        notice.innerHTML = `<span><strong>${metaCount} Instagram/Facebook output${metaCount === 1 ? "" : "s"} require Studio repair.</strong>
-          Their publishing is held. Studio must verify media and provider outcomes; no action from you yet.</span>
-          <button type="button" class="secondary-button">View in Repair</button>`;
+        notice.innerHTML = `<span><strong>${metaCount} Instagram/Facebook outputs blocked from publishing.</strong>
+          <span>${missingCount} with confirmed missing/incomplete-media evidence · ${providerCount} awaiting provider checks · ${needsUserCount} requiring your action.</span>
+          <small>Unverified media is not automatically a missing asset. Each Repair card shows the evidence, who owns the fix, and the next step. No output will silently be considered approved.</small></span>
+          <button type="button" class="secondary-button">View affected outputs</button>`;
         notice.querySelector("button")?.addEventListener("click", () => {
           const band = $("factoryBandBodyManual")?.closest(".factory-band");
           if (band?.classList.contains("is-collapsed")) {
