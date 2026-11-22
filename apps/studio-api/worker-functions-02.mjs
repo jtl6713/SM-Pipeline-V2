@@ -3,7 +3,7 @@ import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffP
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
-import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
+import { r4StartConfirmed, rotateR4CandidatesAfterCursor, fairR4ProfileOrder } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle, scriptedShortExplicitTitle } from "./scripted-short-title.mjs";
@@ -1347,9 +1347,17 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     };
   }
   const cursorKey = "ops/r4-skip-cursor-v1";
-  const cursorObject = await env.STUDIO_MEDIA.get(cursorKey).catch(() => null);
+  const profileCursorKey = "ops/r4-last-confirmed-profile-v1";
+  const [cursorObject, profileObject] = await Promise.all([
+    env.STUDIO_MEDIA.get(cursorKey).catch(() => null),
+    env.STUDIO_MEDIA.get(profileCursorKey).catch(() => null),
+  ]);
   const cursor = cursorObject ? await cursorObject.text().catch(() => null) : null;
-  const queueOrder = rotateR4CandidatesAfterCursor(admitCandidates, cursor, controls);
+  const lastProfile = profileObject ? await profileObject.text().catch(() => null) : null;
+  // Round-robin by profile but preserve FIFO inside each lane. Never change
+  // the single Remotion slot, operator priorities, or shared-render ownership.
+  const fairCandidates = fairR4ProfileOrder(admitCandidates, lastProfile, controls, f);
+  const queueOrder = rotateR4CandidatesAfterCursor(fairCandidates, cursor, controls);
   if (!queueOrder.length) {
     return {
       admitted: false,
@@ -1450,6 +1458,10 @@ export async function studioAdmitRenderQueue(env, options = {}) {
 
     if (r4StartConfirmed(started)) {
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      const startedProfile = firstOpsLinkedId(f(head, "Content_Profile"));
+      if (startedProfile) {
+        await env.STUDIO_MEDIA.put(profileCursorKey, startedProfile).catch(() => null);
+      }
       return {
         admitted: true, reason: "started_head", head: head.id,
         waiting: Math.max(0, total - 1), stamped_waiting: stampedWaiting,
