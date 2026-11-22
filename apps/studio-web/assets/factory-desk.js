@@ -1747,8 +1747,10 @@
     const prior = previous?.batches || [];
     const known = new Set(prior.map(row => row.request_id));
     const batches = [...prior.map(row => byId.get(row.request_id) || row),
-      ...refreshed.filter(row => !known.has(row.request_id))]
-      .filter(factoryBatchActiveRow);
+      ...refreshed.filter(row => !known.has(row.request_id))];
+    // Show the exact verified terminal completion once before the next
+    // full Active discovery removes it. Otherwise the user never sees 4/4.
+    // Clean terminal groups are not polled again and move to Completed history.
     const base = previous || {
       ok: true, scope: "all", view: "active", filter_profile_id: factoryProfileId() || null,
       totals: {}, batches: [],
