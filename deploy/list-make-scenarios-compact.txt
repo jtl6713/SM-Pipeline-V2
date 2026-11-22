@@ -1,2 +1,4 @@
 Read-only full team Make scenario inventory for remaining Item 2 stage/exact-addressing audit. Include all current scenario IDs/names/states/schedules. No Make mutation, activation/run, Airtable write, render, email, draft, or publishing.
 Recheck R2/R2B/R3 identifiers after YouTube recovery — 2026-08-16.
+
+2026-11-22 Airtable retirement issue #2569: independently inspect *current* Make team scenario states and schedules via existing read-only list_make_scenarios_compact operation. Report exact active/inactive IDs and audit artifact. No Make start/stop, activation, schema changes, provider publishing, Worker/runner release or Airtable PAT mutation. Missing/failed inventory is BLOCKED, never assumed disabled.
