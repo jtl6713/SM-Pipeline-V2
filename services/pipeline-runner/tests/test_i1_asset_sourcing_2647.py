@@ -66,6 +66,9 @@ def fake_rest_factory(profile_id=MIAMI, *, media=None, titles=None):
         if path.startswith("idea_candidates?"):
             assert "content_profile_id=eq.00000000-0000-4000-a000-000000000001" in path
             return titles
+        if path.startswith("content_items?"):
+            assert "content_profile_id=eq.00000000-0000-4000-a000-000000000001" in path
+            return []
         pytest.fail("Unexpected canonical query: " + path)
     return fake_rest, paths
 
@@ -210,3 +213,25 @@ def test_same_user_mode_is_included_in_dry_run_prompt(monkeypatch):
     assert result["asset_sourcing_mode"] == "explore"
     assert "ASSET SOURCING STRATEGY V1" in result["prompt"]
     assert "Explore" not in result["prompt"] or "explore" in result["prompt"]
+
+def test_published_history_counts_without_double_counting_one_idea(monkeypatch):
+    fake, _ = fake_rest_factory(media=[VIZ])
+    def source(settings, path, method):
+        if path.startswith("content_items?"):
+            return [
+                {"content_title": "Vizcaya Architecture", "primary_location": "Vizcaya",
+                 "content_status": "Published"}
+                for _ in range(6)
+            ]
+        if path.startswith("idea_candidates?"):
+            return [
+                {"candidate_title": "Vizcaya Ideas " + str(n),
+                 "payload": {"Primary_Location": "Vizcaya"}}
+                for n in range(6)
+            ]
+        return fake(settings, path, method)
+    monkeypatch.setattr(sourcing, "_rest", source)
+    context = sourcing.load_sourcing_context({"url": "mock"}, MIAMI, "balanced")
+    assert context["location_counts"]["vizcaya"] == 6
+    assert any("Vizcaya" in name for name in context["overused"])
+
