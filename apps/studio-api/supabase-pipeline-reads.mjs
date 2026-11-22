@@ -469,6 +469,9 @@ export function supabasePoolErrorMessage(error) {
 }
 
 export function isSupabasePoolOrTimeoutError(error) {
+  // Native AbortSignal.timeout() failures can carry only a DOMException name.
+  // Do not classify a plain caller-driven AbortError as database overload.
+  if (error?.name === "TimeoutError") return true;
   const message = supabasePoolErrorMessage(error);
   return /PGRST003|57014|statement timeout|connection pool|Timed out acquiring|circuit open|signal timed out|connection terminated due to connection timeout|Supabase request timed out/i.test(message)
     || /Supabase\s+\w+\s+.+\s+failed\s+(?:429|500|502|503|504|522):/i.test(message);
