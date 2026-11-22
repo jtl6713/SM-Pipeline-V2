@@ -1,3 +1,4 @@
 Deploy LA TikTok auth alignment
 Reason: Outputs 963/937/889 (@lashining1) stuck on TTD1 HTTP 401 Unauthorized. Port Miami/NYC PIPELINE_SECRET_SHA256 fingerprint auth to auth-la so X-Pipeline-Secret matches LA_TIKTOK_PIPELINE_SECRET / established pipeline secret.
 Requested: 2026-09-28T13:30:00Z
+2026-11-21: Deploy v5.2 TikTok OAuth scope-gate fix from issue #2554. Default approved publishing scopes only, video.list opt-in after developer approval. Read-only status-field health check. Preserve all existing tokens, bindings, and publish attempt ledger.
