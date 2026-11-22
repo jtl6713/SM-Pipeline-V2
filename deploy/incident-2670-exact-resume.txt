@@ -1,0 +1,2 @@
+November 22, 2026: one-time exact-ID NYC Bethesda producer resume after merged and deployed Supabase queue GET fix #2702.
+Only recR4EQcshFZ4fNL0 with persisted original tblBZLXPd1p2NRWRK lookup error. Keep PIPELINE_RUNNER_RECOVERY_READ_ONLY=true, exact producer target, all provider, gallery and DNP safeguards. No global queue replay, no Airtable.
