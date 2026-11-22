@@ -281,7 +281,10 @@ def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed
                     logger.error("producer request=%s paused after repeated no-progress yields", request_id)
         else:
             deleted = db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
-            if deleted.rowcount:
+            if deleted.rowcount and progressed:
+                # Half-open recovery only exits after a governed job has
+                # confirmed a new canonical step write. A terminal no-op
+                # or a blocked/crashed job cannot certify DB recovery.
                 db.execute("DELETE FROM governor_control WHERE name='database' AND until_at<=?", (time.time(),))
         db.commit()
 
