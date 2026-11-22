@@ -774,6 +774,7 @@ import {
   promoteProductionRequestViaI3I4,
   studioNyc20261121HandoffCron,
   studioRecoverFreeSkylineFerryFanoutCron,
+  studioRecoverEmptyPlatformOutputCron,
   studioResumeFreeSkylineHeldProduceCron,
   promoteIdeaViaI3I4,
   ideaPhotoListeningSessionRoute,
@@ -1411,7 +1412,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1015-ferry-held-resume-2593",
+          version: "0.10.1017-empty-fanout-recovery",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4485,6 +4486,13 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Recover user-visible dead-end Production requests, across all profiles.
+    // At most one confirmed zero-output plan per minute; seed only held rows.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil(studioRecoverEmptyPlatformOutputCron(env,ctx)
+        .then((result)=>{ if(result&&!result.skipped)console.info("empty-output fanout healed",result); })
+        .catch((error)=>console.error("empty-output fanout recovery deferred",String(error?.message||error))));
+    }
     // Issue #2593: one-shot exact production-output recovery for Content #2239.
     // Synchronous I3/I4 seed uses a no-publish/no-schedule hold. Independent
     // of the heavy maintenance cron and consumer browser activity.
@@ -7292,6 +7300,7 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
 /*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:studioNyc20261121HandoffCron__*/
 /*__STUDIO_WORKER_EXTRACT:studioRecoverFreeSkylineFerryFanoutCron__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverEmptyPlatformOutputCron__*/
 /*__STUDIO_WORKER_EXTRACT:studioResumeFreeSkylineHeldProduceCron__*/
 /*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
