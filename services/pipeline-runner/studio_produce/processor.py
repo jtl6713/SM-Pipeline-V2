@@ -156,7 +156,10 @@ def _run_governed(request_id: str, token: str) -> None:
             requeue = outcome in {"yielded", "yielded_progressed"}
             progressed = outcome == "yielded_progressed"
     except Exception as error:
-        if governor.is_database_overload(error):
+        if isinstance(error, governor.AdmissionDeferred):
+            logger.info("studio producer deferred by workload admission request=%s", request_id)
+            requeue = True
+        elif governor.is_database_overload(error):
             logger.warning("studio producer requeued on database outage request=%s", request_id)
             governor.trip_database_circuit()
             requeue = True
@@ -244,7 +247,9 @@ def _run(
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         except Exception as exc:
-            if governor.enabled() and governor.is_database_overload(exc):
+            if governor.enabled() and (
+                isinstance(exc, governor.AdmissionDeferred) or governor.is_database_overload(exc)
+            ):
                 # Do not persist a terminal Blocked status on a 522/timeout.
                 # Leave the job claimed until the governed worker safely requeues.
                 raise
