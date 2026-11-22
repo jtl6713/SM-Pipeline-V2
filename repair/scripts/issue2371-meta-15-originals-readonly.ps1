@@ -42,8 +42,10 @@ foreach($line in $spec){$v=$line.Split('|');$expected[[int]$v[0]]=@{rid=$v[1];ma
 $ids=($spec|ForEach-Object{($_.Split('|'))[0]}) -join ','
 $select='output_number,airtable_record_id,content_profile_id,platform,platform_output_type,output_status,review_status,publish_status,auto_publish_enabled,do_not_publish,published_at,platform_post_url,output_caption,output_hashtags,error_messages'
 $outputs=@(Supa ('/rest/v1/platform_outputs?output_number=in.('+$ids+')&select='+$select+'&limit=20'))
-if($outputs.Count -ne 15){throw 'exact_source_count_not_15'}
+if($outputs.Count -eq 1 -and $outputs[0] -is [array]){$outputs=@($outputs[0])}
+if($outputs.Count -ne 15){throw ('exact_source_count_not_15_'+$outputs.Count)}
 $profiles=@(Supa '/rest/v1/content_profiles?select=id,market_name&limit=30')
+if($profiles.Count -eq 1 -and $profiles[0] -is [array]){$profiles=@($profiles[0])}
 $market=@{}
 foreach($p in $profiles){$market[[string]$p.id]=[string]$p.market_name}
 foreach($o in $outputs){
@@ -57,6 +59,7 @@ foreach($o in $outputs){
      $o.published_at -or $o.platform_post_url){throw ('source_changed_stop_'+$n)}
 }
 $rows=@(Supa '/rest/v1/engagement_settings?select=payload&limit=500')
+if($rows.Count -eq 1 -and $rows[0] -is [array]){$rows=@($rows[0])}
 if($rows.Count -ge 500){throw 'settings_scan_incomplete'}
 $cfg=@{}
 foreach($r in $rows){
