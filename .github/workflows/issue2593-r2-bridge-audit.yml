@@ -1,0 +1,130 @@
+# Single-execution diagnostic: GET one R2 receipt; always delete isolated helper.
+name: Issue 2593 temporary read-only R2 binding audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2593-r2-bridge-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2593-r2-ephemeral-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TEMP_WORKER: issue2593-r2-readonly-${{ github.run_id }}
+    steps:
+      - name: Read exact existing production STUDIO_MEDIA binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/settings" \
+            -o /tmp/2593-settings.json
+          jq -e '.success==true' /tmp/2593-settings.json >/dev/null
+          jq -er '[.result.bindings[]|select(.name=="STUDIO_MEDIA" and .type=="r2_bucket")|.bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/2593-settings.json >/tmp/2593-bucket
+          echo 'issue2593_live_r2_binding_verified=true'
+      - name: Prepare isolated temporary Worker with GET-only unguessable route
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib,secrets
+          route='/'+secrets.token_urlsafe(48)
+          pathlib.Path('/tmp/2593-route').write_text(route)
+          source="""const EXPECTED=__ROUTE__;
+          const KEY='studio/recovery/2593/free-skyline-ferry-hold-v1/reczvqjo1xs2jYXn0.json';
+          export default {async fetch(request,env) {
+            const url=new URL(request.url);
+            if(request.method !== 'GET' || url.pathname!==EXPECTED)
+              return new Response('Not found',{status:404});
+            let result={receipt:'missing',request:'reczvqjo1xs2jYXn0'};
+            try {
+              const obj=await env.STUDIO_MEDIA.get(KEY);
+              if(obj) {
+                const p=JSON.parse(await obj.text());
+                result={receipt:'found',request:'reczvqjo1xs2jYXn0',
+                  schema:p.schema||null,status:p.status||null,expected:p.expected||null,
+                  routed:p.routed??null,outputs:p.outputs??null,verified:p.verified===true,
+                  resumed:p.resumed===true,resume_reason:String(p.resume_reason||'').slice(0,130),
+                  preflight:p.preflight||null,error:String(p.error||'').slice(0,170),
+                  finished_at:p.finished_at||null,publish_actions:p.publish_actions??null,
+                  schedule_actions:p.schedule_actions??null};
+              }
+            }catch(e){result={receipt:'read_error',type:String(e?.name||'Error').slice(0,45)}}
+            return Response.json({ok:true,read_only:true,result},
+              {headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+          }};
+          """.replace('__ROUTE__',json.dumps(route))
+          pathlib.Path('/tmp/2593-worker.mjs').write_text(source)
+          bucket=pathlib.Path('/tmp/2593-bucket').read_text().strip()
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-08-02',
+            'bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':bucket}]}
+          pathlib.Path('/tmp/2593-metadata.json').write_text(json.dumps(metadata))
+          PY
+          node --check /tmp/2593-worker.mjs
+          echo 'issue2593_ephemeral_source_readonly=true'
+      - name: Create isolated temporary Worker without changing production
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS --max-time 60 -o /tmp/2593-created.json -w '%{http_code}' \
+            -X PUT "$API/workers/scripts/$TEMP_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/2593-metadata.json;type=application/json' \
+            -F 'worker.mjs=@/tmp/2593-worker.mjs;type=application/javascript+module;filename=worker.mjs')
+          test "$code" -ge 200 && test "$code" -lt 300
+          jq -e '.success==true' /tmp/2593-created.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API/workers/scripts/$TEMP_WORKER/subdomain" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/2593-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/2593-enabled.json >/dev/null
+          curl -fsS --max-time 25 "$API/workers/subdomain" -H "$AUTH" -o /tmp/2593-subdomain.json
+          jq -er '.result.subdomain' /tmp/2593-subdomain.json >/tmp/2593-account-subdomain
+          echo 'issue2593_temporary_worker_created=true'
+      - name: Read only exact sanitized issue 2593 receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$TEMP_WORKER.$(cat /tmp/2593-account-subdomain).workers.dev$(cat /tmp/2593-route)"
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 35 -o /tmp/2593-result.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .read_only==true' /tmp/2593-result.json >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "issue2593_temporary_read_failed_http_$code"
+              exit 1
+            fi
+            sleep 3
+          done
+          jq -c '.result' /tmp/2593-result.json | tee /tmp/2593-result-sanitized.jsonl
+          echo 'issue2593_exact_r2_receipt_read_complete=true'
+      - name: Remove temporary Worker even on failure
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" && -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${TEMP_WORKER:-}" ]]; then
+            curl -sS --max-time 25 -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TEMP_WORKER" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -o /tmp/2593-deleted.json || true
+          fi
+          echo 'issue2593_temporary_cleanup_attempted=true'
+      - name: Save sanitized receipt status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2593-temporary-r2-receipt
+          path: /tmp/2593-result-sanitized.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
