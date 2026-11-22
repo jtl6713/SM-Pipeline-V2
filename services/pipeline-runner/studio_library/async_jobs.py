@@ -17,6 +17,7 @@ from typing import Any
 _LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _TTL_SEC = 900
+_RECOVERY_MAX_PENDING = 3
 
 
 def _prune_locked(now: float) -> None:
@@ -58,6 +59,11 @@ def start_library_ingest_job(
                 if (existing.get("_fingerprint") == fingerprint
                         and existing.get("status") in {"processing", "ok"}):
                     return str(existing["job_id"])
+        from studio_produce import workload_governor as governor
+        if governor.enabled() and governor.admission_paused():
+            waiting = sum(1 for job in _JOBS.values() if job.get("status") == "processing")
+            if waiting >= _RECOVERY_MAX_PENDING:
+                raise RuntimeError("library_ingest_capacity")
         job_id = uuid.uuid4().hex
         _JOBS[job_id] = {
             "job_id": job_id,
@@ -70,14 +76,25 @@ def start_library_ingest_job(
         from studio_library.processor import ingest_studio_library_asset
 
         try:
-            result = ingest_studio_library_asset(
-                content=payload,
-                filename=filename,
-                mime_type=mime_type,
-                profile_name=profile_name,
-                skip_source_master=skip_source_master,
-                override_overlay_hold=override_overlay_hold,
+            from contextlib import nullcontext
+            from studio_produce import workload_governor as governor
+            # Recovery allows *only* this single media-ingest resource.
+            # Drive processing remains bounded while Supabase publishing,
+            # Studio production and all other mutating runner routes stay paused.
+            claim = (
+                governor.resource_slot("library_image_upload", limit=1, allow_during_recovery=True)
+                if governor.enabled() and governor.admission_paused()
+                else nullcontext()
             )
+            with claim:
+                result = ingest_studio_library_asset(
+                    content=payload,
+                    filename=filename,
+                    mime_type=mime_type,
+                    profile_name=profile_name,
+                    skip_source_master=skip_source_master,
+                    override_overlay_hold=override_overlay_hold,
+                )
             with _LOCK:
                 _JOBS[job_id] = {
                     "job_id": job_id,
