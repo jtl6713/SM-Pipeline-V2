@@ -4588,6 +4588,22 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // #2574: never park pending SMV1 crops until the next :00/:30 heavy
+    // maintenance sweep. Run the existing leased, bounded queue dispatcher
+    // independently on each five-minute light tick. Heavy ticks retain their
+    // existing drain, and the two paths do not overlap in one scheduled event.
+    if (!cadence.heavy) {
+      ctx.waitUntil(item4DrainAllPendingWork(env, { maxMs: 20000 })
+        .then((result) => {
+          if (result?.drained?.length) {
+            console.info("item4 light-tick crop drain", JSON.stringify({
+              requests: result.request_ids?.length || 0,
+              drained: result.drained.length,
+            }));
+          }
+        })
+        .catch((error) => console.warn("item4 light-tick crop drain failed", error)));
+    }
     // IDEA HARVEST SLA: do not put the hourly pull or photo-ready FIFO resume
     // behind Factory recovery, platform publishing, or Airtable cooldown checks.
     // Every five-minute tick owns one independent waitUntil; the autonomous
