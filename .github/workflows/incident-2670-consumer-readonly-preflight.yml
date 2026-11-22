@@ -1,0 +1,85 @@
+name: Incident 2670 - Read-only native gallery, Meta and I1 readiness
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-consumer-readonly-preflight.txt']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-consumer-readonly-preflight
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify runner remains healthy and governed
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/health.json
+          jq -e '.ok==true and .recovery_read_only==false and
+            .studio_write_source=="supabase" and
+            .studio_runner_output_read_source=="supabase" and
+            .workload_governor_enabled==true and
+            .airtable_activity.any_activity==false' /tmp/health.json >/dev/null
+      - name: Run read-only provider GET and durable-store inspection on Windows host
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then TOKEN="$candidate"; break; fi
+          done
+          [[ -n "$TOKEN" ]] || { echo 'ops_auth_unavailable'; exit 1; }
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          script=Path('.github/scripts/incident-2670-consumer-and-meta-readonly.py').read_text(encoding='utf-8')
+          command=r'''$ErrorActionPreference='Stop'
+          $path=Join-Path $env:TEMP ('incident2670-readonly-'+[guid]::NewGuid().ToString('N')+'.py')
+          try {
+            $payload=@'
+          '''+script+'''\n'@
+            [IO.File]::WriteAllText($path,$payload,(New-Object System.Text.UTF8Encoding($false)))
+            & python $path
+            if ($LASTEXITCODE -ne 0) {throw 'incident2670_readonly_probe_failed'}
+          } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+          }'''
+          Path('/tmp/incident2670-readonly.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          code=''
+          for n in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/incident2670-readonly.json || true)
+            [[ "$code" != 409 ]] && break
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || { echo "readonly_ops_start_http=$code"; exit 1; }
+          job=$(jq -r '.job.id // empty' /tmp/start.json)
+          [[ -n "$job" ]] || exit 1
+          for n in $(seq 1 95); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/result.json
+            status=$(jq -r '.job.status // empty' /tmp/result.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/result.json | grep '^recovery_preflight_' || true
+              jq -e '.job.log | contains("recovery_preflight_audit_completed=PASS_NO_MUTATIONS")' /tmp/result.json >/dev/null
+              echo 'incident2670_consumer_preflight=COMPLETE'
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/result.json | grep '^recovery_preflight_' || true
+              echo 'incident2670_consumer_preflight=FAILED_NO_ENABLEMENT'
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'incident2670_consumer_preflight=TIMEOUT'
+          exit 1
