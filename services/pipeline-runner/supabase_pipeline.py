@@ -541,10 +541,14 @@ def _partial_output_bag_and_json(settings: dict, record: dict) -> dict:
     body: dict[str, Any] = {}
     bag = _pack(fields, TYPED_OUTPUT, OUTPUT_EXCLUDE)
     # Empty-string clears must reach the merge even though _pack skips them.
+    # AP1C/AP2C unlock_fields() uses None for these sparse lock stamps;
+    # silently omitting those explicit clears strands Children Processing
+    # behind a stale lock and prevents the carousel orchestrator polling AP2C.
+    lock_stamps = {"Publish_Locked_At", "Publish_Started_At"}
     for key, value in fields.items():
         if key in TYPED_OUTPUT or key in OUTPUT_EXCLUDE:
             continue
-        if value == "":
+        if value == "" or (key in lock_stamps and value is None):
             bag[key] = ""
     # Typed columns are SoR. Drop stale bag copies whenever a typed field is
     # patched, or TTD2 keeps reading Ready for Delivery over Processing.
