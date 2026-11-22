@@ -60,7 +60,7 @@ test("Supabase-only Worker refuses an unsaved Output/Content mutation instead of
   // The retired Worker rejects ALL uncommitted Supabase CRUD operations.
   // The old narrower Airtable soft-echo branch no longer exists.
   assert.match(handler, /supabase_only_crud_uncommitted/);
-  assert.match(handler, /Airtable is retired/);
+  assert.match(handler, /Canonical Supabase write uncommitted; no legacy archive fallback/);
   assert.match(handler, /throw new HttpError\(\s*503,/);
   assert.doesNotMatch(handler, /await airtableRequestSlot\(/);
   assert.doesNotMatch(handler, /body = \{ records: \[\] \}/);

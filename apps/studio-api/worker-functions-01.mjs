@@ -8,7 +8,7 @@ import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, F
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate } from "./idea-title-uniqueness.mjs";
-import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { item4EffectivePlanStatus, item4DestinationParity } from "./item4-plan-integrity.mjs";
 import { reconcileApprovedStoryFirstSourcePlan } from "./story-first-production-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -9530,6 +9530,18 @@ export async function item4SyncPlanOutputs(env, requestRecord, items, { schedule
     await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
     { finishedVideo }
   );
+  // #2574: an echoed create is not a committed Supabase destination. Prevent
+  // the caller from persisting Plan Ready until every intended row can be read
+  // back from the authoritative request-scoped destination ledger.
+  const committedRows = await outputRowsForProductionRequest(env, productionRequestId);
+  const parity = item4DestinationParity(uniqueItems, committedRows.map((row) => ({
+    platform: f(row, "Platform"), output_type: f(row, "Output_Type"),
+    enabled: Boolean(f(row, "Enabled")),
+  })));
+  if (!parity.ok) {
+    throw new HttpError(503,
+      `Platform destination persistence incomplete (${parity.enabled_count}/${parity.expected_count}); missing: ${parity.missing.join(", ") || "none"}; duplicates: ${parity.duplicates.join(", ") || "none"}; unplanned: ${parity.unplanned.join(", ") || "none"}. Plan was not confirmed Ready.`);
+  }
 }
 /*__STUDIO_WORKER_END:item4SyncPlanOutputs__*/
 

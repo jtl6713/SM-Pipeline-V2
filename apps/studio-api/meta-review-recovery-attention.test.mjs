@@ -103,5 +103,5 @@ test("#2563 recovery query is independent of Changes Requested and preserved in 
   assert.match(source,/\|\| metaReviewRecoveryShapedRecord\(row\)/);
   assert.match(worker,/meta_repair_required: Boolean\(metaRepair\)/);
   assert.match(factory,/Studio repair required/);
-  assert.match(factory,/No action from you yet — Studio owns the repair/);
+  assert.match(factory,/Studio repair required · Publishing held/);
 });
