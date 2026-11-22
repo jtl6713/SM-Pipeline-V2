@@ -53,7 +53,10 @@ test("#2618: finished unheld output is prepared but never authorized for publish
   assert.equal(verifiedSchedulingPreflight(verified), true);
   assert.equal(verifiedSchedulingPreflight({ ...verified, output_caption: "changed after QA" }), false);
   assert.equal(verifiedSchedulingPreflight({ ...verified, do_not_publish: true }), false);
-  assert.equal(verifiedSchedulingPreflight({ ...verified, scheduled_post_date: stamp }), false);
+  assert.equal(verifiedSchedulingPreflight({ ...verified, scheduled_post_date: stamp }), true,
+    "an unapproved provisional date does not invalidate previously verified media");
+  assert.equal(verifiedSchedulingPreflight({ ...verified, studio_scheduled_at: stamp }), false);
+  assert.equal(verifiedSchedulingPreflight({ ...verified, youtube_scheduled_publish_at: stamp }), false);
   assert.equal(verifiedSchedulingPreflight({ ...verified, review_status: "Approved" }), false);
 });
 
@@ -65,6 +68,10 @@ test("#2618: exact historical holds, old schedules, missing captions, and unfini
     [output({error_messages:{Studio_Publish_Dispatch_At:stamp}}), "historical_provider_or_review_hold"],
     [output({published_at:stamp}), "existing_schedule_or_provider_operation"],
     [output({studio_scheduled_at:stamp}), "existing_schedule_or_provider_operation"],
+    [output({youtube_scheduled_publish_at:stamp}), "existing_schedule_or_provider_operation"],
+    [output({scheduled_post_date:"not-a-date"}), "invalid_provisional_scheduled_date"],
+    [output({publish_status:"Scheduled"}), "review_or_publication_state"],
+    [output({error_messages:{Studio_Publish_Dispatch_Count:1}}), "historical_provider_or_review_hold"],
     [output({review_status:"Approved"}), "review_or_publication_state"],
     [output({output_caption:""}), "caption_missing"],
     [output({render_status:"Waiting in Render Queue"}), "render_incomplete"],
@@ -179,4 +186,29 @@ test("#2618: Worker five-minute cron and Factory projection wire technical prefl
   assert.match(factory,/Scheduling approval ready/);
   const scan=readFileSync(new URL("./scheduling-approval-preflight.mjs",import.meta.url),"utf8");
   assert.doesNotMatch(scan,/\b(?:auto_publish_enabled|scheduled_post_date|review_status|output_status|publish_status)\s*:\s*["'](?:Approved|Ready to Schedule|Scheduled|Published)/);
+});
+
+test("#2618: NYC provisional schedule is technically verified, not approved or published",async()=>{
+  const row=output({
+    platform:"Instagram",studio_output_type:"Reel",review_status:"Review Sent",
+    publish_status:"Ready to Publish",auto_publish_enabled:null,
+    scheduled_post_date:"2026-12-13T19:05:00.000Z",
+  });
+  const result=assessSchedulingPreflight(row);
+  assert.equal(result.ready,true);
+  assert.equal((await probeSchedulingMedia(result,mediaFetch)).ok,true);
+  const receipt={status:"verified",signature:result.signature,requires_human_approval:true,
+    scheduling_authorized:false,publishing_authorized:false};
+  const verified={...row,error_messages:{[PREFLIGHT_KEY]:receipt}};
+  assert.equal(verifiedSchedulingPreflight(verified),true);
+  assert.equal(verified.scheduled_post_date,row.scheduled_post_date);
+  assert.equal(verified.review_status,"Review Sent");
+  assert.equal(verified.auto_publish_enabled,null);
+  assert.equal(verified.error_messages[PREFLIGHT_KEY].publishing_authorized,false);
+  assert.equal(verifiedSchedulingPreflight({...verified,auto_publish_enabled:true}),false);
+  assert.equal(verifiedSchedulingPreflight({...verified,review_status:"Approved"}),false);
+  assert.equal(verifiedSchedulingPreflight({...verified,error_messages:{
+    [PREFLIGHT_KEY]:receipt,Studio_Publish_Dispatch_Count:2,
+  }}),false);
+  assert.equal(verifiedSchedulingPreflight({...verified,studio_scheduled_at:stamp}),false);
 });
