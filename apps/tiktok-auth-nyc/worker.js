@@ -490,11 +490,6 @@ async function handleCallback(url, env) {
   const stored =
     normalizeTokenResponse(tokenData);
 
-  await env.TIKTOK_AUTH.put(
-    TOKEN_KEY,
-    JSON.stringify(stored),
-  );
-
   let creator = null;
 
   try {
@@ -503,10 +498,6 @@ async function handleCallback(url, env) {
         stored.access_token,
       );
 
-    await env.TIKTOK_AUTH.put(
-      CREATOR_KEY,
-      JSON.stringify(creator),
-    );
   } catch (error) {
     console.warn(
       "Creator info query after OAuth failed",
@@ -533,6 +524,19 @@ async function handleCallback(url, env) {
       400,
       "/tiktok/connect",
       "Reconnect TikTok",
+    );
+  }
+
+  // A partially approved consent result must never overwrite a previously
+  // working publishing token or its creator identity.
+  await env.TIKTOK_AUTH.put(
+    TOKEN_KEY,
+    JSON.stringify(stored),
+  );
+  if (creator) {
+    await env.TIKTOK_AUTH.put(
+      CREATOR_KEY,
+      JSON.stringify(creator),
     );
   }
 
