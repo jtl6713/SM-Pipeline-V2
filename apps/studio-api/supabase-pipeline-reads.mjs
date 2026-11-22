@@ -2518,6 +2518,60 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
   if (result.length < 2 || result.some((slide, index) => slide.order !== index + 1)) {
     throw new Error("Native gallery has incomplete or noncontiguous slides");
   }
+  // Distinguish real, linked but *pending approval* Supabase-native draft
+  // slide associations from earlier creative-approved source galleries.
+  // A pending gallery can be inspected, never described as publication-ready.
+  const drafts = slides.filter(slide =>
+    slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.publishing_authorized === false);
+  if (drafts.length) {
+    const selected = parent?.selected_assets?.selected_clips;
+    const render = parent?.render_clip_list;
+    if (drafts.length !== slides.length || parent.do_not_publish !== true ||
+        parent.auto_publish_enabled !== false || parent.scheduled_post_date ||
+        parent.studio_scheduled_at || parent.published_at || parent.platform_post_url ||
+        parent.output_status !== "Ready for Review" ||
+        !Array.isArray(selected) || !Array.isArray(render) ||
+        selected.length !== result.length || render.length !== result.length ||
+        Number(parent.selected_clip_count) !== result.length) {
+      throw new Error("Incomplete draft native gallery or publication hold drift");
+    }
+    for (let index = 0; index < slides.length; index++) {
+      const fields = slides[index].fields || {};
+      const marker = fields.SM_Native_Gallery_Draft_Repair_2294;
+      const candidate = selected[index];
+      const manifest = render[index];
+      const originalSource = String(manifest?.googleDriveFileId || "").trim();
+      const sourceFamily = String(manifest?.mediaAssetRecordId || "").trim();
+      if (slides[index].airtable_record_id !==
+          "sb-native:2294:" + parent.output_number + ":" + String(index + 1).padStart(2, "0")
+          || Number(marker?.output_number) !== parent.output_number ||
+          Number(marker?.slide_order) !== index + 1 ||
+          !/^[a-f0-9]{64}$/.test(String(marker?.public_sha256 || "")) ||
+          marker?.verified_dimensions !== "1080x1350" ||
+          marker?.image_http_verified !== true || marker?.image_geometry_verified !== true ||
+          marker?.final_creative_approved !== false || marker?.publishing_authorized !== false ||
+          fields["Approved For Final"] !== false ||
+          fields.Shared_Asset_Approved !== false ||
+          fields["Review Status"] !== "Pending Review" ||
+          fields["Asset_4x5_Public_URL"] !== result[index].image_url ||
+          Number(candidate?.order) !== index + 1 || Number(manifest?.order) !== index + 1 ||
+          String(candidate?.url || candidate?.src || "") !== result[index].image_url ||
+          String(manifest?.url || manifest?.src || "") !== result[index].image_url ||
+          String(fields["Google Drive File ID"] || "") !== originalSource ||
+          String(fields.Asset_Family_Key || "") !== sourceFamily ||
+          String(candidate?.google_drive_file_id || candidate?.googleDriveFileId || "") !== originalSource ||
+          String(candidate?.media_asset_record_id || candidate?.mediaAssetRecordId || "") !== sourceFamily) {
+        throw new Error("Draft native gallery source identity, order or pending approval changed");
+      }
+    }
+    return {
+      output_id: id, output_number: parent.output_number,
+      do_not_publish: true, count: result.length, slides: result,
+      source: "unverified-native-draft-slides",
+      provisional: true, publication_authorized: false,
+      warning: "Linked native draft slides await creative approval. Do not approve, schedule or publish.",
+    };
+  }
   return {
     output_id: id,
     output_number: parent.output_number,
