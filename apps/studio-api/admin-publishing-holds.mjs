@@ -81,23 +81,34 @@ export function classifyAdminPublishingHold(row) {
       safetyKeys.some(key => activeEvidence(extras[key]))) {
     return block("Protected creative, recovery, copyright, or Factory hold. Resolve its original safety marker in the owning workflow");
   }
-  if (str(row?.review_status).toLowerCase() !== "approved") {
-    return block("Factory creative approval is not complete. Review the output in Factory before clearing a publishing hold");
-  }
-  if (str(row?.output_status).toLowerCase() !== "approved for publishing") {
-    return block("Output is not in the approved publishing stage; resolve the current lifecycle stage first");
-  }
+  // Production and Factory approval are independent lifecycle gates, not
+  // evidence that Do_Not_Publish is itself a protected safety hold.
+  // An admin may release a plain hold while content is still being produced;
+  // the CAS write below always turns automatic publishing OFF. Explicit
+  // creative safety markers, provider attempts, failed/rejected states and
+  // already terminal outputs still require their owning workflows.
+  const outputStatus=str(row?.output_status).toLowerCase();
+  const reviewStatus=str(row?.review_status).toLowerCase();
+  const publishStatus=str(row?.publish_status).toLowerCase();
   if (row?.published_at || row?.platform_post_url ||
-      ["published","publishing","cancelled","skipped"].includes(str(row?.output_status).toLowerCase()) ||
-      ["published","publishing","failed","not ready"].includes(str(row?.publish_status).toLowerCase())) {
-    return block("Published, failed, blocked, or otherwise ineligible publisher state; reconcile it first");
+      ["published","publishing","cancelled","skipped","failed","changes requested"].includes(outputStatus) ||
+      ["published","publishing","failed","cancelled","skipped"].includes(publishStatus) ||
+      ["changes requested","rejected"].includes(reviewStatus)) {
+    return block("Terminal, failed, or changes-requested output: reconcile its current lifecycle state first");
   }
   if (dispatchKeys.some(key => activeEvidence(extras[key])) ||
       attemptKeys(extras) ||
       (row?.platform_publish_response && Object.keys(row.platform_publish_response).length>0)) {
     return block("Prior dispatch or provider identity: reconcile the publisher before releasing this hold");
   }
-  return { releasable:true, block_reason:null, reason, reason_source:source };
+  const awaitingApproval=reviewStatus!=="approved" || outputStatus!=="approved for publishing";
+  return { releasable:true, block_reason:null, reason, reason_source:source,
+    release_warning:awaitingApproval
+      ? "This output is still "+(str(row?.output_status)||"in production")+
+        " / "+(str(row?.review_status)||"not reviewed")+
+        ". Releasing its publishing hold does not advance production or Factory approval."
+      : null };
+
 }
 
 function json(data,status=200) {
@@ -119,6 +130,7 @@ function asRow(row,profiles) {
     source:state.reason_source,
     actor:row.publish_hold_actor || null,held_at:row.publish_hold_set_at || null,
     held:true,releasable:state.releasable,block_reason:state.block_reason,
+    release_warning:state.release_warning||null,
     revision:row.updated_at,hold_set_at:row.publish_hold_set_at,
     automatic_publishing_enabled:yes(row.auto_publish_enabled)
   };
