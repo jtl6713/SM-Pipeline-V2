@@ -4563,14 +4563,35 @@ export function stripNullBytesDeep(value) {
   return value;
 }
 
-function upsertChunk(env, table, rows) {
-  if (!rows.length) return Promise.resolve();
-  const body = homogenizeUpsertRows(rows).map((row) => stripNullBytesDeep(row));
-  return supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
-    method: "POST",
-    body,
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-  });
+/** Keep missing created_at omitted during mixed Content Item bulk sync.
+ * homogenizeUpsertRows intentionally fills absent keys with null for PostgREST,
+ * so content rows with and without original Created_At must never share a batch.
+ */
+export function contentTimestampUpsertGroups(rows) {
+  const withTime = [];
+  const withoutTime = [];
+  for (const row of rows || []) {
+    if (row?.created_at != null && row.created_at !== "") {
+      withTime.push(row);
+    } else {
+      const { created_at: _discardNull, ...preserved } = row || {};
+      withoutTime.push(preserved);
+    }
+  }
+  return [withTime, withoutTime].filter(group => group.length);
+}
+
+async function upsertChunk(env, table, rows) {
+  if (!rows.length) return;
+  const groups = table === "content_items" ? contentTimestampUpsertGroups(rows) : [rows];
+  for (const group of groups) {
+    const body = homogenizeUpsertRows(group).map((row) => stripNullBytesDeep(row));
+    await supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
+      method: "POST",
+      body,
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    });
+  }
 }
 
 function profileLinkIds(value) {
@@ -4750,7 +4771,12 @@ export function mapAirtableContentToSupabase(record, profileUuid, options = {}) 
     primary_location: fields.Primary_Location || null,
     voiceover_status: selectName(fields.Voiceover_Status),
     thumbnail_url: fields.Thumbnail_URL || null,
-    created_at: fields.Created_At || record.createdTime || null,
+    // Missing source time is not a NULL creation time. Omit on INSERT so
+    // Postgres assigns the canonical commit timestamp; on UPSERT omission
+    // also preserves a previously recorded creation timestamp.
+    ...(fields.Created_At || record.createdTime
+      ? { created_at: fields.Created_At || record.createdTime }
+      : {}),
     extras: stampRunnerProjection(packContentExtras(fields), links, complete),
   };
 }
@@ -5933,7 +5959,8 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
   if ("Primary_Location" in fields) patch.primary_location = fields.Primary_Location || null;
   if ("Voiceover_Status" in fields) patch.voiceover_status = selectName(fields.Voiceover_Status);
   if ("Thumbnail_URL" in fields) patch.thumbnail_url = fields.Thumbnail_URL || null;
-  if ("Created_At" in fields || record.createdTime) patch.created_at = fields.Created_At || record.createdTime || null;
+  // Creation timestamps are immutable after INSERT. Do not copy a sparse
+  // legacy Created_At field onto an existing content record.
   if ("Content_Profile" in fields) {
     const requestedProfile = firstLink(fields.Content_Profile);
     patch.content_profile_id = requestedProfile

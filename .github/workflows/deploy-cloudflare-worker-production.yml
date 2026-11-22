@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-api/supabase-pipeline-reads.mjs
           node --check apps/studio-api/worker-functions-02.mjs
-          node --test apps/studio-api/post-insights-supabase-regression.test.mjs
+          node --test apps/studio-api/post-insights-supabase-regression.test.mjs apps/studio-api/content-created-at-integrity.test.mjs
 
       - name: Gate dormant reservation namespace bootstrap
         if: env.BOOTSTRAP_RESERVATION == 'true'
