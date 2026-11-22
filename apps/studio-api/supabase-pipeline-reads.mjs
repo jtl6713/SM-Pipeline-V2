@@ -8470,7 +8470,7 @@ const OUTPUT_SIDE_EQ_FIELDS = {
   FB_Slideshow_Status: "error_messages->>FB_Slideshow_Status",
   TikTok_Draft_Status: "tiktok_draft_status",
   IG_Story_Status: "error_messages->>IG_Story_Status",
-  IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
+  IG_Carousel_Status: "ig_carousel_status",
   // AP4R parent-publishing reconcile — stage lives in the lean bag.
   IG_Carousel_Error_Stage: "error_messages->>IG_Carousel_Error_Stage",
   Asset_Selection_Status: "error_messages->>Asset_Selection_Status",
@@ -8520,8 +8520,10 @@ const OUTPUT_SIDE_BLANK_FIELDS = {
   // AP1-IGS light cron — container/post ids are bag fields.
   IG_Story_Container_ID: "error_messages->>IG_Story_Container_ID",
   IG_Story_Post_ID: "error_messages->>IG_Story_Post_ID",
-  IG_Carousel_Status: "error_messages->>IG_Carousel_Status",
+  IG_Carousel_Status: "ig_carousel_status",
   // AP4R/AP5C — published media id is bag-only (no typed column).
+  // Parent ID is a bag field (not a typed column): needed by AP3C/AP3P/AP4C.
+  IG_Carousel_Parent_Container_ID: "error_messages->>IG_Carousel_Parent_Container_ID",
   IG_Carousel_Published_Media_ID: "error_messages->>IG_Carousel_Published_Media_ID",
   Content_Item: "content_item_airtable_id",
   Render_Status: "render_status",
@@ -9045,7 +9047,7 @@ export function translateContentSideFormula(formula) {
   return outputContentListFilter("content", formula);
 }
 
-function outputContentListFilter(kind, formula) {
+export function outputContentListFilter(kind, formula) {
   const cleaned = tightenSideFormula(formula);
   if (!cleaned) return null;
   if (cleaned.startsWith("AND(") && cleaned.endsWith(")")) {
