@@ -66,8 +66,13 @@ def test_circuit_blocks_new_heavy_jobs_without_discarding_queue(isolated_governo
     assert g.claim_next() is None  # half-open admits one canary, not two
     with g.resource_slot("supabase_read", limit=2, allow_during_circuit=True):
         pass
-    g.finish_job(*half_open)
-    assert g.claim_next()[0] == "recB"
+    g.finish_job(*half_open)  # terminal no-op is NOT successful recovery proof
+    g.enqueue("recC")
+    second_probe = g.claim_next()
+    assert second_probe[0] == "recB"
+    assert g.claim_next() is None  # still half-open, despite available second slot
+    g.finish_job(*second_probe, progressed=True)
+    assert g.claim_next()[0] == "recC"
 
 
 def test_transfer_claim_cross_thread_single_flight(isolated_governor):
