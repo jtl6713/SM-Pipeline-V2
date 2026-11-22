@@ -1,0 +1,7 @@
+Incident #2670 — 2026-11-22 owner-authorized recovery.
+Lift PIPELINE_RUNNER_RECOVERY_READ_ONLY after authenticated local governor,
+Supabase REST and Supabase-only transport checks; leave workload governor ON
+with STUDIO_MAX_PRODUCER_JOBS=1; leave I1 durable, rendering review auto-dispatch,
+native gallery auto-execute, optional outbox disabled for independent staged
+reactivation. Preserve all per-output DNP/copyright/gallery/credential restrictions.
+This marker intentionally triggers a one-time, rollback-capable Ops workflow.
