@@ -19,6 +19,28 @@ test("active Worker and Durable Object contain no Airtable HTTP endpoint", () =>
   }
 });
 
+test("Airtable retirement liveness requires actual scheduled Worker and runner heartbeats", () => {
+  const worker=source("apps/studio-api/worker.js");
+  const controller=source("apps/studio-api/profile-summary-controller.mjs");
+  const durable=source("apps/studio-api/profile-summary-do.mjs");
+  const runner=source("services/pipeline-runner/airtable/egress_monitor.py");
+  const app=source("services/pipeline-runner/app.py");
+  assert.match(worker, /collectorMinute % 5 === 0/);
+  assert.match(worker, /recordStudioAirtableCollectorHeartbeat\(env\)/);
+  assert.match(controller, /summaryRequest\(env, "\/egress-heartbeat", \{\}\)/);
+  assert.match(durable, /airtable_egress_collector_ticks/);
+  assert.match(durable, /request\.method === "POST" && url\.pathname === "\/egress-heartbeat"/);
+  assert.match(durable, /collector_coverage:records\(this\.sql/);
+  assert.match(runner, /def persist_runner_collector_heartbeat\(/);
+  assert.match(runner, /def start_runner_collector_heartbeat\(/);
+  assert.match(runner, /"collector_coverage": \[/);
+  assert.match(app, /start_runner_collector_heartbeat\(\)/);
+  // An exported snapshot is not an active collector tick.
+  const doGet=durable.slice(durable.indexOf('request.method === "GET" && url.pathname === "/egress"'));
+  const doSnapshot=doGet.slice(0,doGet.indexOf('request.method === "GET" && url.pathname === "/status"'));
+  assert.doesNotMatch(doSnapshot, /INSERT INTO airtable_egress_collector_ticks/);
+});
+
 test("Worker raises on missing Supabase CRUD instead of fabricating results", () => {
   const worker = source("apps/studio-api/worker.js");
   const gateway = worker.slice(
