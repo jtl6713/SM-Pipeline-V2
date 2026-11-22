@@ -14,14 +14,14 @@ const row=()=>({
   publish_hold_set_at:"2026-11-22T15:50:00Z",
   publish_hold_reason:null,error_messages:{},
 });
-const auth={permissions:{tenant_admin:true},user:{record_id:"recAUDITOR12345678"}};
+const auth={permissions:{tenant_admin:true},user:{record_id:"recAUDITOR12345678"},organization:{record_id:"recORGABCDEFGHIJ"}};
 function fixture({held=row(),history=[{operation:"released",reason:"Reviewed safely",actor:auth.user.record_id,occurred_at:"2026-11-22T17:00:00Z"}]}={}){
   const calls=[];
   const ops={
-    authorizedProfiles:async()=>[{id:PROFILE}],
     withOutputLock:async(id,fn)=>{assert.equal(id,REC);return fn();},
     supabaseRest:async(_env,path,opt={})=>{
       calls.push({path,opt});
+      if(path.startsWith("organizations?"))return [{id:"4c13a6db-49cd-4d7f-9746-b36d489f576e"}];
       if(path.startsWith("content_profiles?"))return [{id:uuid,airtable_record_id:PROFILE,profile_name:"ChicagoShining"}];
       if(path.startsWith("platform_output_hold_events?"))return history;
       if(opt.method==="PATCH"){
