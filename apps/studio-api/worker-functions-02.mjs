@@ -3870,6 +3870,20 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
   // An explicit draft payload may override defaults; never let that silently
   // drop the Idea's original human creative direction.
   cleaned.production_notes = mergeIdeaProducerDirection(cleaned.production_notes, f(idea, "Idea_Summary"));
+  // #2647: A novel, media-incomplete Idea must arrive in pre-production with
+  // its capture requirements; this is a Draft instruction, never an approval.
+  const capturePlan = f(idea, "Required_Asset_Checklist");
+  const sourcingReadiness = String(f(idea, "Asset_Readiness") || "");
+  if (["Needs new media", "Partial"].includes(sourcingReadiness)
+      && Array.isArray(capturePlan) && capturePlan.length) {
+    const captureItems = capturePlan.map(value => String(value || "").trim().slice(0, 100))
+      .filter(Boolean).slice(0, 5);
+    if (captureItems.length) {
+      cleaned.production_notes = [cleaned.production_notes,
+        "Media to capture/upload before production: " + captureItems.join("; ")]
+        .filter(Boolean).join("\n");
+    }
+  }
   if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
     cleaned.primary_location = defaults.primary_location;
   }
