@@ -3,3 +3,5 @@ Read-only, exact host Windows runtime configuration, I1 persistent job spool sta
 legacy rendering-review and native-gallery job ledger mappings, and authenticated
 Graph GET-only Meta account checks for approved Miami/LA/NYC outputs.
 NO publishing, rights or hold mutation, consumer activation, or Airtable operations.
+
+Retry after verified probe-host packaging failure; no producer or provider writes in either run.
