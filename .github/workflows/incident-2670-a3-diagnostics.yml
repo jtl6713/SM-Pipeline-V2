@@ -33,7 +33,7 @@ jobs:
           $lines=Get-Content -LiteralPath $p -Tail 300
           $found=@($lines | Select-String -Pattern 'a3|classif|Traceback|Exception|ERROR|Supabase|OperationalError|AttributeError|HTTPError' -Context 2,6)
           $safe=@($found | Select-Object -Last 14 | ForEach-Object {
-            $_.ToString() -replace '(?i)sk-[a-z0-9_-]{12,}','[REDACTED]' -replace '(?i)Bearer\s+[^\s]+','Bearer [REDACTED]'
+            $_.ToString() -replace '(?i)sk-[a-z0-9_-]{12,}','[REDACTED]' -replace '(?i)Bearer\s+[^\s]+','Bearer [REDACTED]' -replace '(?i)(secret|token|password)[=:]\s*[^\s]{8,}','$1=[REDACTED]'
           })
           Write-Output 'a3_runner_log_found=true'
           $safe | Select-Object -Last 45
