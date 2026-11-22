@@ -56,15 +56,57 @@ export function metaReviewRecoveryShapedRecord(record) {
       publish_status: f.Publish_Status,
     }, f));
 }
+/**
+ * Evidence-based asset diagnosis. A missing video file is actionable. Photo
+ * sets and carousels publish from per-slide media, so a blank Final_File_URL
+ * alone is NOT proof that images are missing.
+ */
+export function metaRecoveryMediaDiagnostic(fields = {}) {
+  const platform = String(fields.Platform || "");
+  const type = String(fields.Studio_Output_Type || fields.Platform_Output_Type || fields.Format || "").toLowerCase();
+  const isGallery = /carousel|multi-image|photo set/.test(type);
+  const isVideo = /reel|story|video/.test(type) && !isGallery;
+  const hasVideo = Boolean(String(fields.Final_File_URL || fields.Publish_Asset_URL || "").trim());
+  const error = [fields.Publish_Error_Message,fields.IG_Carousel_Error_Message,fields.FB_Slideshow_Error_Message,
+    fields.Studio_Publish_Dispatch_Note].map(v => String(v || "")).join(" ");
+  const missing = [];
+  if (isVideo && !hasVideo) missing.push("Final publishable video not recorded");
+  if (isGallery && /no C9 final slides|no final slides|missing.*slides|not enough.*slides|no frames/i.test(error))
+    missing.push("Final gallery slides missing or incomplete");
+  if (isGallery && /child.*(missing|fail|mismatch)|AP1C|AP0C/i.test(error)
+      && !missing.length) missing.push("Gallery child/slide preparation needs verification");
+  return {
+    missing_assets: missing,
+    asset_evidence: missing.length ? "missing_or_incomplete" : "not_yet_verified",
+    asset_message: missing.length
+      ? missing.join("; ")
+      : isGallery
+        ? "Final gallery images and their public URLs have not been independently verified; a blank video-file field is normal for photo galleries."
+        : isVideo ? "Media and provider delivery still require verification." : "Output media requires verification.",
+    platform,
+  };
+}
+
 export function metaReviewRecoverySummary(record) {
   if (!metaReviewRecoveryShapedRecord(record)) return null;
   const f = record.fields, evidence = marker(f);
   const spec = reasons[evidence.reason] || reasons.production_media_recovery_required;
+  const media = metaRecoveryMediaDiagnostic(f);
+  const assetProblem = media.missing_assets.length > 0;
+  const nextAction = assetProblem
+    ? "Studio must restore or regenerate missing media, verify the final URLs and gallery counts, then run the required provider/review checks."
+    : spec.next_step;
   return {
     issue: 2563, recovery_reason: evidence.reason,
     category: spec.category,
     status: "Studio repair required",
-    next_step: spec.next_step,
+    next_step: nextAction,
+    missing_assets: media.missing_assets,
+    asset_evidence: media.asset_evidence,
+    asset_message: media.asset_message,
+    action_status: assetProblem ? "Missing media — Studio repair required" : spec.category + " — verification pending",
+    recovery_owner: "Studio automation / repair",
+    completion_condition: "Asset URLs checked, provider result reconciled, and Factory review/approval completed.",
     action_owner: "studio",
     user_action_required: false,
     user_instruction: "No action from you yet. Studio needs to complete the listed repair and verify the result.",
