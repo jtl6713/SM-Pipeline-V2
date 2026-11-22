@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyAdminPublishingHold, handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 
-const REC="recABCDEFGHIJKLMNOP";
-const PROFILE="recZYXWVUTSRQPONMLK";
+const REC="recABCDEFGHIJKLMN";
+const PROFILE="recZYXWVUTSRQPON";
 const uuid="f7d5a786-fd54-4286-b22a-4c975049de60";
 const row=()=>({
   id:"f1cf1255-0c34-487c-a938-cb2ddb9f9070",
@@ -14,7 +14,7 @@ const row=()=>({
   publish_hold_set_at:"2026-11-22T15:50:00Z",
   publish_hold_reason:null,error_messages:{},
 });
-const auth={permissions:{tenant_admin:true},user:{record_id:"recAUDITOR12345678"},organization:{record_id:"recORGABCDEFGHIJKLM"}};
+const auth={permissions:{tenant_admin:true},user:{record_id:"recAUDITOR1234567"},organization:{record_id:"recORGABCDEFGHIJK"}};
 function fixture({held=row(),history=[{operation:"released",reason:"Reviewed safely",actor:auth.user.record_id,occurred_at:"2026-11-22T17:00:00Z"}]}={}){
   const calls=[];
   const ops={
