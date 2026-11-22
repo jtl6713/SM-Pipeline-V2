@@ -34,6 +34,12 @@ export function classifyAdminPublishingHold(row) {
       safetyKeys.some(key => Boolean(extras[key]) && str(extras[key]) !== "false")) {
     return block("Protected creative, recovery, copyright, or Factory hold. Resolve it in the owning review workflow");
   }
+  if (str(row?.review_status).toLowerCase() !== "approved") {
+    return block("Factory creative approval is not complete. Review the output in Factory before clearing a publishing hold");
+  }
+  if (str(row?.output_status).toLowerCase() !== "approved for publishing") {
+    return block("Output is not in the approved publishing stage; resolve the current lifecycle stage first");
+  }
   if (row?.published_at || row?.platform_post_url ||
       ["published","publishing","cancelled","skipped"].includes(str(row?.output_status).toLowerCase()) ||
       ["published","publishing"].includes(str(row?.publish_status).toLowerCase())) {
