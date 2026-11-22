@@ -242,30 +242,53 @@ def _ready(record: dict, kind: str) -> bool:
 
 def _rest(settings: dict, path: str, method: str, body: Any = None, *, prefer: str | None = None) -> Any:
     import requests
+    from studio_produce import workload_governor as governor
 
     base = str(settings.get("supabase_url") or "").strip().rstrip("/")
     key = str(settings.get("supabase_service_role_key") or "").strip()
     if prefer is None:
         prefer = "return=representation" if method == "GET" else "return=minimal"
-    response = requests.request(
-        method,
-        f"{base}/rest/v1/{path.lstrip('/')}",
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": prefer,
-        },
-        json=body,
-        timeout=20,
-    )
+
+    def _metric(failed: bool) -> None:
+        # Telemetry must never turn an otherwise successful canonical write into
+        # a retryable failure that could duplicate external side effects.
+        try:
+            governor.record_db_request(method, failed=failed)
+        except Exception:
+            logger.warning("governor request-metrics update failed", exc_info=True)
+
+    scope = "supabase_read" if method.upper() in {"GET", "HEAD"} else "supabase_write"
+    limit = governor.max_db_reads() if scope == "supabase_read" else governor.max_db_writes()
+    with governor.resource_slot(scope, limit=limit):
+        try:
+            response = requests.request(
+                method,
+                f"{base}/rest/v1/{path.lstrip('/')}",
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": prefer,
+                },
+                json=body,
+                timeout=20,
+            )
+        except requests.RequestException:
+            _metric(True)
+            if governor.enabled():
+                governor.trip_database_circuit()
+            raise
+
     if not response.ok:
+        _metric(True)
+        if governor.enabled() and response.status_code in {429, 500, 502, 503, 504, 522}:
+            governor.trip_database_circuit()
         detail = (response.text or "")[:400]
         raise RuntimeError(f"Supabase {method} {path} failed {response.status_code}: {detail}")
+    _metric(False)
     if not response.text:
         return None
     return response.json()
-
 
 def _outbox_missing(error: BaseException) -> bool:
     text = str(error)
