@@ -259,7 +259,7 @@ def _rest(settings: dict, path: str, method: str, body: Any = None, *, prefer: s
 
     scope = "supabase_read" if method.upper() in {"GET", "HEAD"} else "supabase_write"
     limit = governor.max_db_reads() if scope == "supabase_read" else governor.max_db_writes()
-    with governor.resource_slot(scope, limit=limit):
+    with governor.resource_slot(scope, limit=limit, allow_during_circuit=(scope == "supabase_read")):
         try:
             response = requests.request(
                 method,
