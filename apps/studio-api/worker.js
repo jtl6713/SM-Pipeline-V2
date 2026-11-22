@@ -48,6 +48,7 @@ import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-pl
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { sweepPreFactoryReady, PRE_FACTORY_READY_FORMULA } from "./pre-factory-ready-recovery.mjs";
 import { sweepSchedulingApprovalPreflight } from "./scheduling-approval-preflight.mjs";
+import { sweepR4TypedMetadataRecovery } from "./r4-typed-metadata-recovery.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
 import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
@@ -4506,6 +4507,20 @@ export default {
       ctx.waitUntil(recordStudioAirtableCollectorHeartbeat(env).catch(error =>
         console.warn("airtable_retirement_collector_heartbeat_unavailable",
           String(error?.message || error))));
+    }
+    // #2618: Old R3 records can have a complete render package in the JSON bag
+    // while R4's typed filename/frame selectors are null. Recover only exact
+    // unheld, pre-render, no-provider-attempt rows with a verified parent.
+    // This one-minute listener is independent of R4 admission and NEVER starts
+    // a render, approves, schedules, clears a hold, or publishes.
+    if (collectorCron === "* * * * *" && studioWriteSource(env) === "supabase") {
+      ctx.waitUntil(sweepR4TypedMetadataRecovery(env, { limit: 4 })
+        .then(result => {
+          if (result?.repaired || result?.races || result?.unavailable)
+            console.info("R4_TYPED_METADATA_RECOVERY", JSON.stringify(result));
+        })
+        .catch(error => console.warn("R4_TYPED_METADATA_RECOVERY unavailable",
+          error instanceof Error ? error.message : String(error))));
     }
     // Recover user-visible dead-end Production requests, across all profiles.
     // At most one confirmed zero-output plan per minute; seed only held rows.
