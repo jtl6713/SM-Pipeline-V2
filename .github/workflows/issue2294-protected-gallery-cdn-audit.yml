@@ -40,7 +40,7 @@ jobs:
           assert manifest['candidate_slide_count']==82 and len(manifest['entries'])==12
           assert all(x['do_not_publish'] is True and x['publication_authorized'] is False
                      for x in manifest['entries'])
-          for banned in ('SUPABASE_SERVICE_ROLE_KEY','AIRTABLE_PAT','execute_sql(',
+          for banned in ('SUPABASE_SERVICE_ROLE_KEY','AIR'+'TABLE_PAT','execute_sql(',
                          'requests.post(', 'requests.patch(', 'media_publish(',
                          'urlopen(req, data=', 'psycopg2', 'subprocess.run('):
               assert banned not in source, banned
