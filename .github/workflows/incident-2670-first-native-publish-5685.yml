@@ -1,0 +1,86 @@
+name: Incident 2670 - First governed native publish receipt canary 5685
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-first-native-publish-5685.txt']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-first-native-publish
+  cancel-in-progress: false
+jobs:
+  one-exact-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate exact canary PowerShell source
+        shell: pwsh
+        run: |
+          $tok=$null
+          $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-first-publish-5685.ps1'),
+            [ref]$tok,[ref]$errors
+          )
+          if ($errors.Count -gt 0) {throw 'canary_5685_powershell_syntax_invalid'}
+          Write-Output 'canary_5685_powershell_syntax=PASS'
+      - name: Confirm recovered runner and Supabase-only authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/canary-health.json
+          jq -e '.ok==true and .recovery_read_only==false and
+            .workload_governor_enabled==true and .studio_write_source=="supabase" and
+            .studio_runner_output_read_source=="supabase" and
+            .studio_runner_content_read_source=="supabase" and .supabase_pipeline_writes==true and
+            .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/canary-health.json >/dev/null
+          echo 'canary_5685_runner_supabase_authority=PASS'
+      - name: Execute exactly one provider upload and verify canonical provider receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/canary-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/canary-catalog.json >/dev/null 2>&1; then TOKEN="$candidate"; break; fi
+          done
+          [[ -n "$TOKEN" ]] || { echo 'canary_5685_ops_auth_unavailable'; exit 1; }
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          script=Path('.github/scripts/incident-2670-first-publish-5685.ps1').read_text(encoding='utf-8')
+          Path('/tmp/canary-5685.json').write_text(json.dumps({'command':script,'confirm':True}))
+          PY
+          code=''
+          for n in $(seq 1 24); do
+            code=$(curl -sS --max-time 30 -o /tmp/canary-submitted.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/canary-5685.json || true)
+            [[ "$code" != 409 ]] && break
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || { echo "canary_5685_ops_http=$code"; exit 1; }
+          job=$(jq -r '.job.id // empty' /tmp/canary-submitted.json)
+          [[ -n "$job" ]] || { echo 'canary_5685_ops_job_id_missing'; exit 1; }
+          for n in $(seq 1 145); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/canary-job.json
+            status=$(jq -r '.job.status // empty' /tmp/canary-job.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/canary-job.json | grep '^canary_5685_' || true
+              jq -e '.job.log|contains("canary_5685_end_to_end=PASS")' /tmp/canary-job.json >/dev/null
+              echo 'canary_5685_workflow_completed=PASS'
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/canary-job.json | grep '^canary_5685_' || true
+              echo 'canary_5685_failed_or_receipt_pending_no_auto_retry'
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'canary_5685_ops_job_timeout_no_auto_retry'
+          exit 4
