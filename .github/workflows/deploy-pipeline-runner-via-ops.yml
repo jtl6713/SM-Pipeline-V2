@@ -64,6 +64,7 @@ jobs:
             services/pipeline-runner/tests/test_fb0_limits.py \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
+            services/pipeline-runner/tests/test_i1_supabase_title_history_2637.py \
             services/pipeline-runner/tests/test_i1_partial_creation.py \
             services/pipeline-runner/tests/test_i1_durable_jobs.py \
             services/pipeline-runner/tests/test_i1_zero_candidate_regeneration.py \
