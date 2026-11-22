@@ -101,6 +101,9 @@ OUTPUT_PATCH_COLUMNS = {
     "Published_At": "published_at",
     "Remotion_Job_ID": "remotion_job_id",
     "Selected_Clip_Count": "selected_clip_count",
+    # Sparse R3 writes must populate the same typed columns R4 filters on.
+    "Output_Filename": "output_filename",
+    "Render_Total_Frames": "render_total_frames",
     "Test_Run_ID": "test_run_id",
     "Publish_Next_Retry_At": "publish_next_retry_at",
     "YouTube_Stage": "youtube_stage",
@@ -327,6 +330,15 @@ def _projection_bag(bag: dict, links: dict[str, str], *, complete: bool) -> dict
     return marked
 
 
+def _positive_render_frames(value: Any) -> int | None:
+    """Only positive integral frame counts can make an R4 render eligible."""
+    try:
+        frames = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return int(frames) if frames.is_integer() and frames > 0 else None
+
+
 def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> dict:
     from publish_queue import fb_resolved_publish_mode
 
@@ -383,6 +395,10 @@ def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> di
         "published_at": fields.get("Published_At") or None,
         "remotion_job_id": fields.get("Remotion_Job_ID") or None,
         "selected_clip_count": fields.get("Selected_Clip_Count"),
+        **({"output_filename": str(fields.get("Output_Filename") or "").strip() or None}
+           if "Output_Filename" in fields else {}),
+        **({"render_total_frames": _positive_render_frames(fields.get("Render_Total_Frames"))}
+           if "Render_Total_Frames" in fields else {}),
         "error_messages": _projection_bag(bag, links, complete=complete),
     }
     optional = {
@@ -482,6 +498,10 @@ def _partial_patch(record: dict, kind: str) -> dict:
             value = _select(value)
         elif airtable_key in {"Auto_Publish_Enabled", "Image_Output_Selected", "Publish_Retry_Eligible", "Do_Not_Publish"}:
             value = bool(value)
+        elif airtable_key == "Output_Filename":
+            value = str(value or "").strip() or None
+        elif airtable_key == "Render_Total_Frames":
+            value = _positive_render_frames(value)
         elif value == "":
             value = None
         body[column] = value
