@@ -10,6 +10,7 @@ import {
   supabaseRest, airtableShapedOutputFromSupabase,
 } from "./supabase-pipeline-reads.mjs";
 import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages } from "./review-package-readiness.mjs";
+import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
@@ -25,7 +26,7 @@ const FACTORY_APPROVAL_SELECT = [
   "platform", "format", "studio_output_type", "platform_output_type",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "test_run_id", "output_caption", "thumbnail_url",
-  "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets",
+  "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
   "platform_publish_response",
@@ -134,12 +135,15 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
 export async function factorySupabaseGroupPreflight(env, ids, policy) {
   const unique = validIds(ids);
   const rows = await factorySupabaseApprovalRows(env, unique);
-  return unique.map(id => {
+  return Promise.all(unique.map(async id => {
     const entry = rows.get(id);
     const state = factorySupabaseApprovalDisposition(entry, policy);
     const number = entry?.row?.output_number || id;
     if (!state.eligible) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
+    }
+    if (!state.already_satisfied) {
+      await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
     }
     return {
       id, profile_id: entry.profileId,
@@ -147,7 +151,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
       format: entry.row.studio_output_type || entry.row.format,
       title: entry.row.output_title || "", content_id: entry.row.content_item_airtable_id || null,
     };
-  });
+  }));
 }
 
 
@@ -219,6 +223,9 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
   }
+  // Selected clips and HTTP-probed covers alone never authorize a multi-image
+  // publish. The *exact linked* Supabase slide package must be finalized first.
+  await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
   const verified = await verifyImages(state.readiness);
   if (verified?.readiness !== "READY") {
     throw Error("Cannot approve: public review media could not be verified");
