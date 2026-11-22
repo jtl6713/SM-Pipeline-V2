@@ -1,0 +1,292 @@
+"""Single-host, cross-process durable workload governor for incident #2670.
+
+SQLite is local to the Windows runner host, not Supabase, so admission itself
+does not add load during a database outage. All runner processes on this host
+MUST use the same absolute DB path. Do not enable on multiple independent hosts
+without replacing this store with a shared transactional coordinator.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+import tempfile
+import threading
+import time
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Callable, Iterator
+
+logger = logging.getLogger("pipeline-runner.workload-governor")
+DISPATCH_INTERVAL = 2.0
+HEARTBEAT_INTERVAL = 30.0
+LEASE_SECONDS = 20 * 60
+DEFAULT_MAX_JOBS = 2
+DEFAULT_MAX_PHOTO_GROUPS = 4
+DEFAULT_RATIO_WORKERS = 2
+
+_dispatch_lock = threading.Lock()
+_dispatch_started = False
+
+
+def enabled() -> bool:
+    return os.getenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
+def max_jobs() -> int:
+    return _limit("STUDIO_MAX_PRODUCER_JOBS", DEFAULT_MAX_JOBS, 1, 8)
+
+
+def max_photo_groups() -> int:
+    return _limit("STUDIO_MAX_PHOTO_GROUPS", DEFAULT_MAX_PHOTO_GROUPS, 1, 16)
+
+
+def max_ratio_workers() -> int:
+    return _limit("STUDIO_MAX_RATIO_WORKERS", DEFAULT_RATIO_WORKERS, 1, 4)
+
+
+def _limit(name: str, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(os.getenv(name) or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def database_path() -> Path:
+    configured = os.getenv("STUDIO_GOVERNOR_DB_PATH", "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            raise ValueError("STUDIO_GOVERNOR_DB_PATH must be absolute")
+        return path
+    root = Path(os.getenv("PROGRAMDATA") or tempfile.gettempdir())
+    return root / "SM-Pipeline-V2" / "studio-workload.sqlite3"
+
+
+def _connect() -> sqlite3.Connection:
+    path = database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(str(path), timeout=5, isolation_level=None)
+    db.execute("PRAGMA busy_timeout=5000")
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("""CREATE TABLE IF NOT EXISTS producer_jobs (
+        request_id TEXT PRIMARY KEY, state TEXT NOT NULL,
+        token TEXT, lease_until REAL, enqueued_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS resource_leases (
+        scope TEXT NOT NULL, lease_key TEXT NOT NULL,
+        token TEXT NOT NULL, lease_until REAL NOT NULL,
+        PRIMARY KEY (scope, lease_key)
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS governor_control (
+        name TEXT PRIMARY KEY, until_at REAL NOT NULL
+    )""")
+    return db
+
+
+def _transaction(db: sqlite3.Connection) -> None:
+    db.execute("BEGIN IMMEDIATE")
+
+
+def enqueue(request_id: str) -> bool:
+    """Durably queue exactly once. Return True only for a new entry."""
+    with _connect() as db:
+        _transaction(db)
+        created = db.execute(
+            "INSERT OR IGNORE INTO producer_jobs(request_id,state,enqueued_at) VALUES(?,'queued',?)",
+            (request_id, time.time()),
+        ).rowcount
+        db.commit()
+    return bool(created)
+
+
+def circuit_open(db: sqlite3.Connection | None = None) -> bool:
+    if not enabled():
+        return False
+    if db is None:
+        with _connect() as connection:
+            return circuit_open(connection)
+    row = db.execute("SELECT until_at FROM governor_control WHERE name='database'").fetchone()
+    return bool(row and float(row[0]) > time.time())
+
+
+def trip_database_circuit(*, cooldown_seconds: float = 90) -> None:
+    with _connect() as db:
+        _transaction(db)
+        until = time.time() + max(30.0, cooldown_seconds)
+        db.execute("""INSERT INTO governor_control(name,until_at) VALUES('database',?)
+            ON CONFLICT(name) DO UPDATE SET until_at=max(until_at,excluded.until_at)""", (until,))
+        db.commit()
+    logger.warning("database workload circuit open for at least %.0fs", cooldown_seconds)
+
+
+def is_database_overload(error: BaseException) -> bool:
+    message = str(error).lower()
+    return any(s in message for s in (
+        "connection terminated due to connection timeout", "postgrest",
+        "supabase connection", "http 522", "status 522", "pgrst",
+        "database connection", "too many connections",
+    ))
+
+
+def claim_next() -> tuple[str, str] | None:
+    """Atomic FIFO claim and cross-process concurrency check."""
+    with _connect() as db:
+        _transaction(db)
+        now = time.time()
+        db.execute("""UPDATE producer_jobs
+            SET state='queued', token=NULL, lease_until=NULL
+            WHERE state='running' AND lease_until < ?""", (now,))
+        if circuit_open(db):
+            db.commit()
+            return None
+        active = db.execute("SELECT COUNT(*) FROM producer_jobs WHERE state='running'").fetchone()[0]
+        if active >= max_jobs():
+            db.commit()
+            return None
+        row = db.execute(
+            "SELECT request_id FROM producer_jobs WHERE state='queued' ORDER BY enqueued_at, request_id LIMIT 1"
+        ).fetchone()
+        if not row:
+            db.commit()
+            return None
+        token = uuid.uuid4().hex
+        db.execute(
+            "UPDATE producer_jobs SET state='running',token=?,lease_until=? WHERE request_id=? AND state='queued'",
+            (token, now + LEASE_SECONDS, row[0]),
+        )
+        db.commit()
+    return str(row[0]), token
+
+
+def renew_job(request_id: str, token: str) -> bool:
+    with _connect() as db:
+        changed = db.execute("""UPDATE producer_jobs SET lease_until=?
+            WHERE request_id=? AND state='running' AND token=?""",
+            (time.time() + LEASE_SECONDS, request_id, token),
+        ).rowcount
+    return bool(changed)
+
+
+def job_valid(request_id: str, token: str) -> bool:
+    with _connect() as db:
+        row = db.execute("SELECT state,token,lease_until FROM producer_jobs WHERE request_id=?",
+                         (request_id,)).fetchone()
+    return bool(row and row[0] == "running" and row[1] == token and row[2] > time.time())
+
+
+def finish_job(request_id: str, token: str, *, requeue: bool = False) -> None:
+    with _connect() as db:
+        _transaction(db)
+        if requeue:
+            db.execute("""UPDATE producer_jobs
+                SET state='queued',token=NULL,lease_until=NULL
+                WHERE request_id=? AND token=?""", (request_id, token))
+        else:
+            db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
+        db.commit()
+
+
+def _heartbeat(stop: threading.Event, renew: Callable[[], bool]) -> None:
+    while not stop.wait(HEARTBEAT_INTERVAL):
+        try:
+            if not renew():
+                logger.error("workload lease ownership lost; abort at next checkpoint")
+                stop.set()
+        except Exception:
+            logger.exception("workload lease heartbeat failed; stop at next checkpoint")
+            stop.set()
+
+
+@contextmanager
+def job_heartbeat(request_id: str, token: str) -> Iterator[threading.Event]:
+    stopped = threading.Event()
+    thread = threading.Thread(target=_heartbeat, args=(stopped, lambda: renew_job(request_id, token)),
+                              daemon=True, name="studio-job-lease-heartbeat")
+    thread.start()
+    try:
+        yield stopped
+    finally:
+        stopped.set()
+        thread.join(timeout=1)
+
+
+@contextmanager
+def resource_slot(scope: str, *, key: str = "", limit: int = 1) -> Iterator[None]:
+    """Atomic, expiring single-host claims for photo-group and transfer work."""
+    if not enabled():
+        yield
+        return
+    token = uuid.uuid4().hex
+    lease_key = key or token
+    while True:
+        with _connect() as db:
+            _transaction(db)
+            db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (time.time(),))
+            active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
+            if not circuit_open(db) and active < limit:
+                claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
+                    (scope,lease_key,token,lease_until) VALUES(?,?,?,?)""",
+                    (scope, lease_key, token, time.time() + LEASE_SECONDS)).rowcount
+            else:
+                claimed = 0
+            db.commit()
+        if claimed:
+            break
+        time.sleep(DISPATCH_INTERVAL)
+    stopped = threading.Event()
+    def _renew() -> bool:
+        with _connect() as db:
+            return bool(db.execute("""UPDATE resource_leases SET lease_until=?
+                WHERE scope=? AND lease_key=? AND token=?""",
+                (time.time() + LEASE_SECONDS, scope, lease_key, token)).rowcount)
+    renewer = threading.Thread(target=_heartbeat, args=(stopped, _renew), daemon=True,
+                               name="studio-resource-lease-heartbeat")
+    renewer.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        renewer.join(timeout=1)
+        with _connect() as db:
+            db.execute("DELETE FROM resource_leases WHERE scope=? AND lease_key=? AND token=?",
+                       (scope, lease_key, token))
+
+
+def snapshot() -> dict[str, object]:
+    if not enabled():
+        return {"enabled": False}
+    with _connect() as db:
+        counts = db.execute("SELECT state,COUNT(*) FROM producer_jobs GROUP BY state").fetchall()
+        groups = db.execute("""SELECT COUNT(*) FROM resource_leases
+            WHERE scope='photo_group' AND lease_until>?""", (time.time(),)).fetchone()[0]
+        queued = dict(counts)
+        return {
+            "enabled": True, "scope": "single_windows_host", "active_jobs": queued.get("running", 0),
+            "queued_jobs": queued.get("queued", 0), "active_photo_groups": groups,
+            "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),
+            "max_ratio_workers": max_ratio_workers(), "database_circuit_open": circuit_open(db),
+        }
+
+
+def ensure_dispatcher(worker: Callable[[str, str], None]) -> None:
+    global _dispatch_started
+    if not enabled():
+        return
+    with _dispatch_lock:
+        if _dispatch_started:
+            return
+        def _dispatch() -> None:
+            while True:
+                try:
+                    claim = claim_next()
+                    if claim:
+                        request_id, token = claim
+                        threading.Thread(target=worker, args=(request_id, token), daemon=True,
+                                         name=f"studio-governed-{request_id}").start()
+                except Exception:
+                    logger.exception("workload dispatcher failed; retaining durable jobs")
+                time.sleep(DISPATCH_INTERVAL)
+        threading.Thread(target=_dispatch, daemon=True, name="studio-workload-dispatcher").start()
+        _dispatch_started = True
