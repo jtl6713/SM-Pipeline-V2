@@ -15,6 +15,11 @@ test("2593 final job resume has exact blocked-error, output and hold preconditio
  assert.match(body,/tblSITCujCsJTNcDe/);
  assert.match(body,/expected_two_output_links_missing/);
  assert.match(body,/output_identity_or_link_mismatch/);
+ // Phase-6 Supabase PROs omit the old Platform_Output reciprocal array.
+ // A verified typed FK must authorize the guarded one-shot resume.
+ assert.match(body,/await readCommittedPromotionFanout\(env, target\.request, target\.content, target\.expected\)/);
+ assert.match(body,/typed_link_readback_unavailable/);
+ assert.doesNotMatch(body,/studioFirstLinkedId\(f\(row, "Platform_Output"\)\)/);
  assert.match(body,/publishing_hold_not_verified/);
  assert.match(body,/Do_Not_Publish/);
  assert.match(body,/Auto_Publish_Enabled/);

@@ -11713,14 +11713,19 @@ export async function studioResumeFreeSkylineHeldProduceCron(env) {
   const key = (platform, type) => String(platform || "").trim() + "::" + String(type || "").trim();
   const expected = new Set(["Instagram::Carousel", "Facebook::Multi-Image Post"]);
   const actual = new Set(outputs.map(po=>key(f(po, "Platform"), f(po, "Studio_Output_Type"))));
-  const linked = links.every(row => {
-    const poId = studioFirstLinkedId(f(row, "Platform_Output"));
-    return Boolean(poId) && outputs.some(po =>
-      po.id === poId &&
-      key(f(row,"Platform"), f(row,"Output_Type")) === key(f(po,"Platform"), f(po,"Studio_Output_Type")));
-  });
-  if (actual.size !== target.expected || [...expected].some(x=>!actual.has(x)) || !linked)
-    return { skipped: "output_identity_or_link_mismatch" };
+  // Supabase Phase-6 PROs are deliberately densified without the legacy
+  // Platform_Output array. Their typed platform_output_id is authoritative.
+  // The old array-only guard always skipped the valid 2/2 recovery, before
+  // acquiring its one-shot receipt or attempting Runner resume.
+  let linked;
+  try {
+    linked = await readCommittedPromotionFanout(env, target.request, target.content, target.expected);
+  } catch (error) {
+    return { skipped: "typed_link_readback_unavailable",
+      error: String(error?.message || error).slice(0, 160) };
+  }
+  if (actual.size !== target.expected || [...expected].some(x=>!actual.has(x)) || linked?.ok !== true)
+    return { skipped: "output_identity_or_link_mismatch", reason: linked?.reason || "invalid_destination_set" };
   const holds = outputs.every(po =>
     f(po, "Do_Not_Publish") === true &&
     f(po, "Auto_Publish_Enabled") !== true &&

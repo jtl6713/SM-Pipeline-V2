@@ -1,0 +1,2 @@
+2026-11-22 — Issue #2593 Worker 0.10.1019-ferry-typed-resume
+Exact Free Skyline Ferry Hack 2/2 held resume uses authoritative Supabase typed PRO.platform_output_id links, not absent legacy Platform_Output reciprocal arrays. Immutable one-shot R2 fence; original request, content, profile, platform/type, and publication-hold checks. No new output fanout, scheduling, approval, Meta attempt, or publication. Run protected Worker source/binding/health verification and confirm the original C2239 job resumes.
