@@ -37,11 +37,14 @@ def test_authenticated_photo_upload_allowed_without_starting_other_jobs(safe_upl
     assert response.json["job_id"] == "test-only-job"
     assert safe_upload.get("/health").json["recovery_read_only"] is True
     assert safe_upload.get("/health").json["recovery_image_upload_enabled"] is True
-    for path in ("/jobs/studio-produce", "/stages/a3", "/jobs/studio-music-library",
+    for path in ("/jobs/studio-produce", "/stages/a4", "/jobs/studio-music-library",
                  "/jobs/studio-asset-library-delete", "/jobs/studio-asset-watermark"):
         result = safe_upload.post(path, data={})
         assert result.status_code == 503
         assert result.json["error"] == "runner_recovery_read_only"
+    # The newly permitted single-image A3 route still enforces authentication;
+    # it must never perform classification for anonymous requests.
+    assert safe_upload.post("/stages/a3", json={}).status_code == 401
 
 
 def test_recovery_upload_requires_auth_and_governor(safe_upload, monkeypatch):

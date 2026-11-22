@@ -101,12 +101,75 @@ def recovery_image_upload_allowed() -> bool:
     )
 
 
+def recovery_image_classification_allowed() -> bool:
+    """Only safe, authenticated single-image A3 processing during recovery."""
+    return recovery_image_upload_allowed()
+
+
+def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, tuple | None]:
+    """Constrain A3 to an existing, profiled Supabase image; never launch A4.
+
+    Only one exact record id is accepted, regardless of caller-supplied flags.
+    The background A3 thread retains a cross-process governor resource lease.
+    """
+    if not isinstance(request_payload, dict):
+        return None, (jsonify({"error": "recovery_a3_targeted_only"}), 422)
+    extra = request_payload.get("extra")
+    allowed_extra = {"record_ids", "trigger_a4", "wait_for_next", "drain", "background"}
+    if (not isinstance(extra, dict) or request_payload.keys() - {"extra"}
+            or extra.keys() - allowed_extra):
+        return None, (jsonify({"error": "recovery_a3_targeted_only"}), 422)
+    ids = extra.get("record_ids")
+    if not isinstance(ids, list) or len(ids) != 1:
+        return None, (jsonify({"error": "recovery_a3_requires_one_image"}), 422)
+    record_id = ids[0]
+    if not isinstance(record_id, str) or not re.fullmatch(r"rec[A-Za-z0-9]{6,}", record_id):
+        return None, (jsonify({"error": "recovery_a3_invalid_record_id"}), 422)
+    if (extra.get("trigger_a4") is not False or extra.get("wait_for_next") is not False
+            or extra.get("drain") is not False or extra.get("dry_run") is not None):
+        return None, (jsonify({"error": "recovery_a3_side_effects_forbidden"}), 422)
+    try:
+        from airtable.client import AirtableClient  # Supabase-only compatibility API
+        from airtable.constants import MEDIA_ASSETS_TABLE
+        row = AirtableClient().get_record(MEDIA_ASSETS_TABLE, record_id)
+    except Exception:
+        logger.warning("recovery A3 cannot verify Supabase media asset", exc_info=True)
+        return None, (jsonify({"error": "recovery_a3_record_unavailable"}), 503)
+    fields = row.get("fields") if isinstance(row, dict) else None
+    if not isinstance(fields, dict):
+        return None, (jsonify({"error": "recovery_a3_record_unavailable"}), 503)
+    mime = str(fields.get("MIME_Type") or "").lower()
+    category = str(fields.get("Media_Class") or "").lower()
+    profile = fields.get("Content_Profile")
+    if not ((mime.startswith("image/") or category in {"image", "graphic"})
+            and isinstance(profile, list) and len(profile) == 1
+            and re.fullmatch(r"rec[A-Za-z0-9]{6,}", str(profile[0]))):
+        return None, (jsonify({"error": "recovery_a3_image_profile_required"}), 422)
+    if fields.get("Do_Not_Use") is True:
+        return None, (jsonify({"error": "recovery_a3_asset_on_hold"}), 409)
+    # All request payload fields not explicitly needed for single-image
+    # classification are discarded; no caller can invoke background A4/drain.
+    return StageRequest(extra={
+        "record_ids": [record_id],
+        "trigger_a4": False,
+        "wait_for_next": False,
+        "drain": False,
+        "background": True,
+        "max_records": 1,
+    }), None
+
+
 @app.before_request
 def _recovery_read_only_gate():
     # Installed before every blueprint; includes production, manual resume,
     # media transfers, and publishing-related runner HTTP routes. Preserve
     # GET /health for deploy verification and independent read-only Studio.
     if recovery_read_only() and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        if (request.method.upper() == "POST" and request.path == "/stages/a3"
+                and recovery_image_classification_allowed()):
+            if request.content_length is not None and request.content_length > 8192:
+                return jsonify({"error": "recovery_a3_payload_too_large"}), 413
+            return None
         if (request.method.upper() == "POST" and request.path == "/jobs/studio-asset-library"
                 and recovery_image_upload_allowed()):
             # The handler still requires a runner shared secret, checks image
@@ -242,6 +305,7 @@ def health():
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
             "recovery_read_only": recovery_read_only(),
             "recovery_image_upload_enabled": recovery_image_upload_allowed(),
+            "recovery_image_classification_enabled": recovery_image_classification_allowed(),
             "workload_governor_enabled": workload_governor.enabled(),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
@@ -452,7 +516,14 @@ def run_stage(stage_name: str):
     if error_response is not None:
         return error_response, status
 
-    body = StageRequest.from_dict(request.get_json(silent=True))
+    if recovery_read_only():
+        if stage_name != "a3" or not recovery_image_classification_allowed():
+            return jsonify({"error": "runner_recovery_read_only"}), 503
+        body, denied = _validate_recovery_a3(request.get_json(silent=True) or {})
+        if denied is not None:
+            return denied
+    else:
+        body = StageRequest.from_dict(request.get_json(silent=True))
     handler = get_handler(stage_name)
     result = handler(body)
 
