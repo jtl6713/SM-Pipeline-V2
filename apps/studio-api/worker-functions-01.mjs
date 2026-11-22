@@ -2576,6 +2576,11 @@ export function mapIdea(record) {
     story_first: storyFirst,
     story_first_media_complete: storyFirstMediaComplete(storyFirst),
     suggested_visuals: String(f(record, "Suggested_Visuals") || ""),
+    required_assets: String(f(record, "Required_Assets") || ""),
+    asset_sourcing_mode: String(f(record, "Asset_Sourcing_Mode") || "balanced"),
+    asset_readiness: String(f(record, "Asset_Readiness") || ""),
+    required_asset_checklist: Array.isArray(f(record, "Required_Asset_Checklist")) ? f(record, "Required_Asset_Checklist") : [],
+    suggested_library_asset_ids: Array.isArray(f(record, "Suggested_Library_Asset_IDs")) ? f(record, "Suggested_Library_Asset_IDs") : [],
     photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
     matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
     library_asset_ids: [...new Set([
