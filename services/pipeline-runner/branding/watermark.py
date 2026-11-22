@@ -170,23 +170,13 @@ def watermark_service_url() -> str:
 
 def _c6_watermark_rows(client: AirtableClient) -> list:
     rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
-    if rows:
-        return rows
-    # View snapshot can miss under Supabase SoR; fall back to a direct role/name filter.
-    return client.list_records(
-        MEDIA_ASSETS_TABLE,
-        formula=(
-            "AND("
-            "{Asset Role}='Watermark',"
-            "{Asset Status}='Available',"
-            "{Active}=TRUE(),"
-            "OR({Do Not Use}=BLANK(),{Do Not Use}=FALSE()),"
-            "FIND('Watermark_Small',{Asset Name})>0,"
-            "{Google Drive File ID}!=''"
-            ")"
-        ),
-        max_records=1,
-    )
+    # #2574: the old fallback used Airtable-only single-quoted literals,
+    # TRUE()/FALSE() and FIND over a spaced field name. Supabase's authoritative
+    # formula translator cannot execute it, blocking every thumbnail/crop when
+    # the saved C6 view is empty. Callers already load the known official small
+    # watermark using FALLBACK_SMALL_WATERMARK_DRIVE_ID when this returns [].
+    # Preserve that approved fallback rather than querying the retired archive.
+    return rows
 
 
 def brand_watermark_url(client: AirtableClient) -> str:
