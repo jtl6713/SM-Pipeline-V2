@@ -38,6 +38,7 @@ jobs:
               assert bad not in s, f'unsafe operation {bad}'
           for rid in ['5860=@','8803=@','9777=@','10152=@','10638=@','10671=@','10694=@']:
               assert rid in s, f'missing exact target {rid}'
+          assert 'foreach($pid' not in s and "'+'/'+$pid+'?fields=" not in s, 'reserved_PowerShell_PID_variable_prohibited'
           print('META7_DEEP_GET_ONLY_STATIC_PASS')
           PY
   protected-meta-audit:
