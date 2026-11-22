@@ -675,7 +675,7 @@
       if (epoch !== factoryGalleryPreviewEpoch) return;
       const slides = data?.slides;
       const draftOnly = data?.provisional === true
-        && data?.source === "unverified-selected-source-images"
+        && ["unverified-selected-source-images", "unverified-native-draft-slides"].includes(data?.source)
         && data?.do_not_publish === true && data?.publication_authorized === false;
       if (data?.provisional && !draftOnly) {
         throw new Error("Untrusted candidate gallery cannot be shown");
@@ -708,7 +708,9 @@
         const hold = document.createElement("p");
         hold.setAttribute("role", "alert");
         hold.style.cssText = "flex-basis:100%;width:100%;font-weight:700;color:#9a6000;text-align:center";
-        hold.textContent = "Unverified source images only — native carousel slides missing. Do not approve or publish.";
+        hold.textContent = data.source === "unverified-native-draft-slides"
+          ? "Draft native slides linked — final creative approval still pending. Do not approve or publish."
+          : "Unverified source images only — native carousel slides missing. Do not approve or publish.";
         controls.appendChild(hold);
       }
       dialog.appendChild(controls);
@@ -717,11 +719,11 @@
         index = nextIndex;
         image.src = slides[index].image_url;
         image.alt = draftOnly
-          ? `UNVERIFIED selected source image ${index + 1} of ${slides.length}`
+          ? `UNAPPROVED draft/source image ${index + 1} of ${slides.length}`
           : `Verified native gallery slide ${index + 1} of ${slides.length}`;
         image.hidden = false;
         counter.textContent = draftOnly
-          ? `${index + 1} / ${slides.length} source images · NOT approved`
+          ? `${index + 1} / ${slides.length} draft images · NOT approved`
           : `${index + 1} / ${slides.length} native slides · review only`;
         back.disabled = index === 0;
         next.disabled = index === slides.length - 1;
