@@ -2109,7 +2109,7 @@
 
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
-    actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
+    actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}" aria-label="Open ${esc(card.output_id ? `output number ${card.output_id}` : cardLabel(card))}">${card.meta_repair_required === true ? "Open output" : "Open"}</button>`);
     if (pile) {
       actions.push(`<button type="button" class="secondary-button" data-factory-unpin="${esc(card.id)}">Remove</button>`);
     } else if (candidate) {
@@ -2190,6 +2190,11 @@
         : (card.studio_state || (alert ? "Needs repair" : "—")));
     const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
+// Every held Repair output must be navigable even when the narrow action
+// column is off-screen. Both controls use the existing exact-ID Open binder.
+const titleMarkup = lane === "manual" && card.kind === "output"
+  ? `<button type="button" class="factory-repair-title-link" data-factory-open="${esc(card.id)}" aria-label="Open output ${esc(card.output_id || card.id)}: ${esc(card.title || cardLabel(card))}">${esc(card.title || cardLabel(card))}</button>`
+  : esc(card.title || cardLabel(card));
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
         ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label></span>`
@@ -2197,7 +2202,7 @@
       <span class="factory-line-title">
         ${needsEyesOutput
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
-          : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
+          : `${titleMarkup}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
         ${card.meta_repair_required === true
           ? `<span class="factory-batch-unavailable factory-meta-repair" role="status"><strong>Studio repair required · ${esc(card.meta_repair_reason || "Recovery")}</strong> · Publishing held<br>
