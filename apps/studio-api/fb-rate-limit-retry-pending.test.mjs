@@ -44,7 +44,7 @@ test("a leftover carousel image_url error on Ready to Schedule paints Retry Pend
   assert.equal(state, "Retry Pending");
 });
 
-test("approved auto-publish off with zero dispatches paints Manual Action Required", () => {
+test("approved Meta auto-publish off with zero dispatches paints Auto Publish Disabled", () => {
   const state = normalizedOutputState({
     fields: {
       Platform: "Facebook",
@@ -56,7 +56,7 @@ test("approved auto-publish off with zero dispatches paints Manual Action Requir
       Studio_Publish_Dispatch_Count: 0,
     },
   });
-  assert.equal(state, "Manual Action Required");
+  assert.equal(state, "Auto Publish Disabled");
 });
 
 test("FBS3_RATE_LIMIT stage also paints Retry Pending", () => {
