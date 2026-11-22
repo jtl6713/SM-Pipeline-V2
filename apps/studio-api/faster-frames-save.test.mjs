@@ -94,7 +94,7 @@ test("manual promote waits fewer I3/I4 polls and defers fanout", () => {
   );
   assert.match(promote, /autonomousSubmit \? 24 : 3/);
   assert.match(promote, /autonomous \? 24 : 3/);
-  assert.match(promote, /finalizeProductionRequestPromotion\(env, requestRecordId, ideaRecord, ctx\)/);
+  assert.match(promote, /finalizeProductionRequestPromotion\(\s*env, requestRecordId, ideaRecord, ctx, \{ recoveryHold:/);
 
   const finalize = worker.slice(
     worker.indexOf("async function finalizeProductionRequestPromotion"),

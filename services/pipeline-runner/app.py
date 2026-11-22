@@ -164,6 +164,19 @@ def recovery_nonpublishing_media_allowed(stage_name: str) -> bool:
     return True
 
 
+def recovery_idea_promotion_allowed() -> bool:
+    """Only an already-submitted, exact Worker I3 approval while publishers remain fenced."""
+    if not (recovery_image_upload_allowed()
+            and workload_governor.producer_only_recovery_enabled()
+            and workload_governor.producer_only_recovery_target() == "ALL"
+            and settings.get("pipeline_runner_shared_secret", "").strip()):
+        return False
+    if request.content_length is not None and request.content_length > 4096:
+        return False
+    from studio_produce.recovery_approval import parse_recovery_promotion
+    return parse_recovery_promotion(request.get_json(silent=True)) is not None
+
+
 def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, tuple | None]:
     """Constrain A3 to an existing, profiled Supabase image; never launch A4.
 
@@ -243,8 +256,11 @@ def _recovery_read_only_gate():
         if request.method.upper() == "POST":
             stage = request.path.removeprefix("/stages/") if request.path.startswith("/stages/") else ""
             if stage in RECOVERY_MEDIA_STAGES and recovery_nonpublishing_media_allowed(stage):
-                # The handler holds a cross-process single-slot lease. No provider,
-                # native gallery, idea, or unscoped worker routes are reopened.
+                # The handler holds a cross-process single-slot lease.
+                return None
+            if stage == "i3" and recovery_idea_promotion_allowed():
+                # Exact, tenant-authorized Worker approval: I3 calls I4 internally.
+                # It does NOT reenable provider publishing or arbitrary I3 decisions.
                 return None
         response = jsonify({
             "ok": False,
@@ -600,6 +616,7 @@ def run_stage(stage_name: str):
         return error_response, status
 
     recovery_media = False
+    recovery_approval = False
     if recovery_read_only():
         if stage_name == "a3" and recovery_image_classification_allowed():
             body, denied = _validate_recovery_a3(request.get_json(silent=True) or {})
@@ -612,6 +629,9 @@ def run_stage(stage_name: str):
             body.extra["max_runs"] = 1
             if stage_name == "smv1":
                 body.extra["photo_workers"] = 1
+        elif stage_name == "i3" and recovery_idea_promotion_allowed():
+            recovery_approval = True
+            body = StageRequest.from_dict(request.get_json(silent=True))
         else:
             return jsonify({"error": "runner_recovery_read_only"}), 503
     else:
@@ -623,6 +643,26 @@ def run_stage(stage_name: str):
                 result = handler(body)
         except workload_governor.AdmissionDeferred:
             return jsonify({"error": "recovery_media_capacity_deferred"}), 503
+    elif recovery_approval:
+        from studio_produce.recovery_approval import validate_recovery_promotion_authority
+        from studio_produce.recovery_approval import parse_recovery_promotion
+        try:
+            with workload_governor.resource_slot("recovery_idea_promotion", limit=1):
+                owner_id, idea_id = parse_recovery_promotion(request.get_json(silent=True))
+                validate_recovery_promotion_authority(owner_id, idea_id)
+                result = handler(body)
+        except workload_governor.AdmissionDeferred:
+            return jsonify({"error": "recovery_approval_capacity_deferred"}), 503
+        except (ValueError, RuntimeError, LookupError) as error:
+            logger.warning("recovery approval rejected before I3: %s", type(error).__name__)
+            return jsonify({"error": "recovery_approval_preflight_failed",
+                            "reason": str(error)[:140]}), 409
+        # I3 'processed' alone is not a durable approval: I4 must have
+        # created exactly one Content Item, or leave the Worker Submitted.
+        i4_result = (result.details.get("run") or {}).get("i4") or {}
+        if (result.status != "ok" or not i4_result.get("content_item_id")):
+            return jsonify({"error": "recovery_i4_not_confirmed",
+                            "stage": "i3", "recovery_approval_hold": True}), 503
     else:
         result = handler(body)
 
@@ -637,7 +677,12 @@ def run_stage(stage_name: str):
         status_code = 200
 
     logger.info("stage=%s status=%s message=%s", result.stage, result.status, result.message)
-    return jsonify(result.to_dict()), status_code
+    response = result.to_dict()
+    if recovery_approval:
+        # Worker uses this attested flag to seed all new Platform Outputs held,
+        # never approved or scheduled, while the global publisher stays fenced.
+        response["recovery_approval_hold"] = True
+    return jsonify(response), status_code
 
 
 @app.post("/stages/r2/drain")
