@@ -84,6 +84,44 @@ for (const city of WORKERS) {
   });
 }
 
+for (const city of WORKERS) {
+  test(`${city}: incomplete consent cannot overwrite a previously approved account`, async () => {
+    const worker = await loadWorker(city);
+    const env = envWithTokens([...POSTING, ANALYTICS], true);
+    const reconnect = await worker.fetch(new Request(`https://auth-${city}.chicagoshining.com/tiktok/connect`), env);
+    const state = new URL(reconnect.headers.get("location")).searchParams.get("state");
+    assert.ok(state);
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async (url) => {
+        if (String(url).endsWith("/v2/oauth/token/")) {
+          return new Response(JSON.stringify({
+            access_token: "unauthorized-new-access", refresh_token: "unauthorized-new-refresh",
+            scope: "user.info.basic", expires_in: 86400, refresh_expires_in: 86400,
+            open_id: "wrong-or-partial-grant",
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        if (String(url).endsWith("/v2/post/publish/creator_info/query/")) {
+          return new Response(JSON.stringify({ data: { creator_username: "wrong_user" }, error: { code: "ok" } }), {
+            status: 200, headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error("Unexpected outbound call from test");
+      };
+      const callback = await worker.fetch(
+        new Request(`https://auth-${city}.chicagoshining.com/tiktok/callback?code=fixture&state=${encodeURIComponent(state)}`), env,
+      );
+      assert.equal(callback.status, 400);
+      const after = await worker.fetch(new Request(`https://auth-${city}.chicagoshining.com/tiktok/status`), env);
+      const body = await after.json();
+      assert.equal(body.required_scopes_granted, true);
+      assert.equal(body.creator_username, "local_test_only");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
 test("Insights distinguishes developer approval from endless reconnect", async () => {
   const api = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
   const ui = await readFile(new URL("../studio-web/assets/insights-0622.js", import.meta.url), "utf8");
