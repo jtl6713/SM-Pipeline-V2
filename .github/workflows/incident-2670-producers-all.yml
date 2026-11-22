@@ -63,7 +63,9 @@ jobs:
             fi
             if [[ "$state" == failed ]]; then
               echo 'producer_scope_preflight_or_write_failed'
-              jq -r '.job.log // ""' /tmp/stage-status.json | grep -Ei 'throw|failed|mismatch|error' | tail -5 | cut -c1-180 || true
+              # Ops Shell errors are PowerShell CLIXML on one long line. Emit only
+              # short error tokens, not scripts, credentials, or full job logs.
+              jq -r '.job.log // ""' /tmp/stage-status.json | grep -oE '<S S="Error">[^<]*' | sed 's/^<S S="Error">//' | head -n 4 | cut -c1-220 || true
               exit 1
             fi
             sleep 3
