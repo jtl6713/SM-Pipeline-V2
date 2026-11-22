@@ -47,6 +47,15 @@ function harness({ writeFails = false, cleanupFails = false } = {}) {
     assertProductionRequestFanoutComplete: data => {
       assert.equal(data?.routed_count, 6);
     },
+    // The finalizer is executed in an isolated VM: explicitly simulate the
+    // committed Supabase typed-FK readback, not an uncommitted routing count.
+    readCommittedPromotionFanout: async (_env, id, parent, expected) => {
+      events.push(["committed_readback", id, parent, expected]);
+      assert.equal(id, requestId);
+      assert.equal(parent, contentId);
+      assert.equal(expected, 6);
+      return { ok: true, enabled: 6, committed: 6, linked: 6 };
+    },
     productionRequestRevisionOpen: () => false,
     updateProductionRequestPromotionState: async (_env, id, fields) => {
       events.push(["airtable_write", fields.Request_Status]);
@@ -77,6 +86,9 @@ test("successful durable promotion returns before pending sibling cleanup; no ad
   assert.equal(output.sibling_cleanup_deferred, true);
   assert.equal(output.cancelled_sibling_request_ids.length, 0);
   assert.ok(h.events.find(args => args[0] === "airtable_write" && args[1] === "Promoted"));
+  assert.ok(h.events.find(args => args[0] === "committed_readback"));
+  assert.ok(h.events.findIndex(args => args[0] === "committed_readback") <
+    h.events.findIndex(args => args[0] === "airtable_write" && args[1] === "Promoted"));
   assert.ok(h.events.find(args => args[0] === "studio_production_promotion_stage" && args[1]?.stage === "response_ready"));
   assert.equal(h.waiters.length, 2, "media continuation and sibling cleanup run via waitUntil");
   h.release(["recSIBLING0000001"]);

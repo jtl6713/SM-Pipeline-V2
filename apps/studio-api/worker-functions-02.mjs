@@ -1,3 +1,4 @@
+import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
 import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
@@ -12016,6 +12017,32 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     directiveBridge = routing.directiveBridge;
     outputFanout = routing.outputFanout;
     assertProductionRequestFanoutComplete(outputFanout);
+    // Never expose the Content parent as successfully Promoted based on a
+    // fanout counter or uncommitted mutation echo. Verify exact typed
+    // PRO->PO FK, parent owner, profile, platform/type, and count in Supabase.
+    let committed = null;
+    let readbackFailure = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        committed = await readCommittedPromotionFanout(
+          env, requestRecordId, contentItemId, Number(outputFanout?.enabled_output_count || 0)
+        );
+        readbackFailure = null;
+        if (committed.ok) break;
+      } catch (error) {
+        readbackFailure = error;
+      }
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 200));
+    }
+    if (!committed?.ok) {
+      const reason = committed?.reason || (readbackFailure ? "canonical_read_unavailable" : "unverified");
+      console.warn("Studio promotion committed output readback incomplete", requestRecordId, reason);
+      throw new HttpError(409,
+        `Platform Output creation has not been verified in Supabase (${reason}). Production remains in progress; publishing is not authorized.`);
+    }
+    promotionTrace("committed_output_verified", {
+      enabled: committed.enabled, linked: committed.linked, committed: committed.committed,
+    });
     promotionTrace("output_routing_verified", {
       enabled: Number(outputFanout?.enabled_output_count || 0),
       routed: Number(outputFanout?.routed_count || 0),
