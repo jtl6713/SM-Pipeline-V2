@@ -1,0 +1,15 @@
+Branch cleanup authorization and release marker — November 22, 2026.
+
+Snapshot: 41 pre-cleanup branch heads (main + 10 open PR heads + 30 stale candidates).
+Snapshot additionally records the maintenance PR branch, which is not a cleanup target.
+Exactly 30 candidate branch names and immutable SHAs are in
+repair/branch_cleanup_20261122_manifest.json.
+
+Release is an archive-before-delete GitHub Actions operation only:
+- Archive every inactive exact SHA to refs/tags/archive/reviewed-20261122/*
+- Verify all archives before any deletion
+- Check head SHA lease, protected state, open PRs, in-flight Actions immediately before deleting
+- Do not merge superseded code, publish posts, modify Supabase, deploy Worker or runner, or revoke Airtable credentials
+- Leave changed, active, protected and open-PR heads intact
+- Preserve a cleanup report artifact.
+Do not rerun automatically.
