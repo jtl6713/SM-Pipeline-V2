@@ -1,4 +1,6 @@
 import { handleQaApi } from "./qa-http.mjs";
+import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
+import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -1073,6 +1075,8 @@ export default {
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsCreativeRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOperationsGlobalCreativeRoute = url.pathname === "/api/operations/owner-global-creative";
+      const isAdminPublishingHoldsRoute = url.pathname === "/api/operations/publishing-holds" ||
+        /^\/api\/operations\/publishing-holds\/rec[A-Za-z0-9]{14}\/release$/.test(url.pathname);
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
@@ -2398,8 +2402,7 @@ export default {
               url:new URL("/api/rendering-review/outputs/"+outputId,url),
               authorization,
               operations:{
-                authorizedProfiles:reviewAuthorizedProfiles,
-                listRecords:reviewListRecords,
+                    listRecords:reviewListRecords,
                 listRecordsPage:reviewListRecordsPage,
                 airtableFetch,
               },
@@ -3481,6 +3484,19 @@ export default {
           return await mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isAdminPublishingHoldsRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "POST") assertWriteRequest(request, env);
+        return await handleAdminPublishingHolds({
+          request,url,env,authorization,
+          ops:{
+            supabaseRest:adminHoldSupabaseRest,
+            authorizedProfiles:reviewAuthorizedProfiles,
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+          },
+        });
       }
 
       if (isOperationsGlobalCreativeRoute) {
