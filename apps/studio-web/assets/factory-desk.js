@@ -1080,12 +1080,15 @@
   // envelope. Preserve that original request as a pollable batch immediately:
   // otherwise the exact-ID fast path sees no state.batch.batches and a slow
   // global history discovery can strand visible progress at 0%.
-  function factoryBatchActivityEnvelope(batch, profileFilter = factoryProfileId() || null) {
+  function factoryBatchActivityEnvelope(batch, profileFilter) {
+    // Ordinary Active/Completed feed snapshots must remain untouched, including
+    // light-weight rendering/test contexts without an active Factory filter.
     if (!batch?.job_id || Array.isArray(batch.batches)) return batch;
+    const effectiveProfileFilter = profileFilter === undefined ? (factoryProfileId() || null) : profileFilter;
     const active = ["queued", "running", "enqueuing"].includes(batch.status)
       || Number(batch.pending_count || 0) > 0 || Number(batch.failed_count || 0) > 0;
     return {
-      ...batch, view: "active", filter_profile_id: profileFilter, batches: [batch],
+      ...batch, view: "active", filter_profile_id: effectiveProfileFilter, batches: [batch],
       totals: {
         batches: 1, active: active ? 1 : 0,
         approved: Number(batch.approved_count || 0),
