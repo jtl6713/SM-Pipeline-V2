@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install isolated test dependencies only
-        run: python -m pip install --disable-pip-version-check --quiet pytest==8.3.4 requests==2.32.5
+        run: python -m pip install --disable-pip-version-check --quiet -r services/pipeline-runner/requirements.txt pytest==8.3.4
       - name: Parse original FB0 and canonical package guard
         run: python -m py_compile services/pipeline-runner/fb/fb0.py services/pipeline-runner/fb/assets.py services/pipeline-runner/tests/test_fb0_native_gallery_preflight_2294.py
       - name: Prove missing-native-slide refusal before FB0 writes or attempts
