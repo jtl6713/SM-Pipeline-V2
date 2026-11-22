@@ -170,6 +170,11 @@ function isTransientFactoryStuck(row) {
 }
 
 function isManualLane(row) {
+  // A Do_Not_Publish output cannot enter the autonomous render or publication
+  // lane. Keep it visible as a Studio-owned safety exception, not as a task
+  // requiring an operator to click through hundreds of In Production rows.
+  if (row?.kind === "output" && row?.do_not_publish === true &&
+      String(row?.output_status || "").trim() === "In Production") return true;
   // #2563: never hide a canonical, held Studio repair simply because the
   // false human Changes Requested decision was correctly cleared.
   if (row?.kind === "output" && row?.meta_repair_required === true &&
@@ -322,7 +327,12 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
       ? (row.recovery_source_inventory_verified === true
         ? "Media sources verified · Creative repair / Factory review"
         : "Creative package repair · Source review needed")
+      : (row.do_not_publish === true && row.output_status === "In Production")
+      ? "Studio-owned safety hold · Provider/rights verification required"
       : (row.studio_state || ""),
+    scheduling_approval_ready: row.scheduling_approval_ready === true,
+    scheduling_approval_requirement: row.scheduling_approval_requirement || null,
+    studio_owned_exception: row.do_not_publish === true && row.output_status === "In Production",
     protected_media_rework: row.protected_media_rework === true,
     meta_repair_required: row.meta_repair_required === true,
     meta_repair_reason: row.meta_repair_required === true ? (row.meta_repair_reason || "Studio recovery") : null,
@@ -347,7 +357,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
     // The existing client checks DNP and review_package_ready before showing
     // approval actions; explicit card state protects other clients too.
-    can_approve: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
+    can_approve: (row.protected_media_rework === true || row.meta_repair_required === true || row.do_not_publish === true) ? false : undefined,
     can_retry: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
     can_publish: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
     output_status: row.output_status || null,
