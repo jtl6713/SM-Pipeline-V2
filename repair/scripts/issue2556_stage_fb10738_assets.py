@@ -38,6 +38,10 @@ def _load_runner():
     if not root.is_dir() or not env_file.is_file():
         raise RuntimeError("runner_environment_not_found")
     load_dotenv(env_file, override=False)
+    # Some Ops service.env deployments define PORT with an empty value;
+    # the runner listens on 3350 and load_settings() otherwise int("").
+    if not os.environ.get("PORT"):
+        os.environ["PORT"] = "3350"
     sys.path.insert(0, str(root))
     for k in (
         "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
