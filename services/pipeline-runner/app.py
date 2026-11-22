@@ -113,7 +113,7 @@ def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, t
     The background A3 thread retains a cross-process governor resource lease.
     """
     extra = request_payload.get("extra")
-    if not isinstance(extra, dict) or request_payload.keys() - {"extra"}:
+    if not isinstance(request_payload, dict) or not isinstance(extra, dict) or request_payload.keys() - {"extra"}:
         return None, (jsonify({"error": "recovery_a3_targeted_only"}), 422)
     ids = extra.get("record_ids")
     if not isinstance(ids, list) or len(ids) != 1:
@@ -122,7 +122,7 @@ def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, t
     if not isinstance(record_id, str) or not re.fullmatch(r"rec[A-Za-z0-9]{6,}", record_id):
         return None, (jsonify({"error": "recovery_a3_invalid_record_id"}), 422)
     if (extra.get("trigger_a4") is not False or extra.get("wait_for_next") is not False
-            or extra.get("drain") is not False or extra.get("dry_run") not in {None, False}):
+            or extra.get("drain") is not False or extra.get("dry_run") is not None):
         return None, (jsonify({"error": "recovery_a3_side_effects_forbidden"}), 422)
     try:
         from airtable.client import AirtableClient  # Supabase-only compatibility API
@@ -139,7 +139,7 @@ def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, t
     profile = fields.get("Content_Profile")
     if not ((mime.startswith("image/") or category in {"image", "graphic"})
             and isinstance(profile, list) and len(profile) == 1
-            and str(profile[0]).startswith("rec")):
+            and re.fullmatch(r"rec[A-Za-z0-9]{6,}", str(profile[0]))):
         return None, (jsonify({"error": "recovery_a3_image_profile_required"}), 422)
     if fields.get("Do_Not_Use") is True:
         return None, (jsonify({"error": "recovery_a3_asset_on_hold"}), 409)
