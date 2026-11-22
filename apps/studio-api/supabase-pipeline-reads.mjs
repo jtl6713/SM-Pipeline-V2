@@ -471,7 +471,7 @@ export function supabasePoolErrorMessage(error) {
 export function isSupabasePoolOrTimeoutError(error) {
   const message = supabasePoolErrorMessage(error);
   return /PGRST003|57014|statement timeout|connection pool|Timed out acquiring|circuit open|signal timed out|connection terminated due to connection timeout|Supabase request timed out/i.test(message)
-    || /Supabase\\s+\\w+\\s+.+\\s+failed\\s+(?:429|500|502|503|504|522):/i.test(message);
+    || /Supabase\s+\w+\s+.+\s+failed\s+(?:429|500|502|503|504|522):/i.test(message);
 }
 
 export function supabaseCircuitSnapshot(now = Date.now()) {
