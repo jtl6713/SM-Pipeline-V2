@@ -3839,8 +3839,12 @@ export async function studioProfileSetupConnectionSnapshot(env, profile) {
       try {
         const body = await studioInsightsSafeJson(await fetch(base + "/tiktok/status", { headers: { Accept: "application/json" } }));
         connectionState.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || connectionState.tiktok.account_name);
-        connectionState.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
-        connectionState.tiktok.error = connectionState.tiktok.status === "connected" ? null : "TikTok authorization is required.";
+        // Profile setup tests publishing authorization; Insights separately
+        // requires video.list, which may be awaiting TikTok app approval.
+        const publishingScopes = body?.posting_scopes_granted ?? body?.required_scopes_granted;
+        connectionState.tiktok.status = body?.authorized && publishingScopes ? "connected" : "needs_authorization";
+        connectionState.tiktok.error = connectionState.tiktok.status === "connected"
+          ? null : "TikTok publishing authorization or required posting scopes are missing.";
       } catch (error) {
         Object.assign(connectionState.tiktok, studioInsightsConnectionStateFromError(error));
       }
