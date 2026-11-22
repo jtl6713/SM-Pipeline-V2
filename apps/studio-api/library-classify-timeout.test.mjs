@@ -30,3 +30,20 @@ test("Asset Manager Classifying watch expires at 60 seconds", () => {
   assert.match(ui, /LIBRARY_CLASSIFY_WATCH_MAX_AGE_MS = 60 \* 1000/);
   assert.match(ui, /Classification is taking too long/);
 });
+
+test("Recovery Classify all uses bounded single-image A3 admissions without unpausing publication", () => {
+  const funcs = read("apps/studio-api/worker-functions-03.mjs");
+  const start = funcs.indexOf("export async function classifyAllLibraryAssets(");
+  const end = funcs.indexOf("/*__STUDIO_WORKER_END:classifyAllLibraryAssets__*/", start);
+  assert.ok(start > 0 && end > start);
+  const source = funcs.slice(start, end);
+  assert.match(source, /recovery_a3_metadata_write_scoped/);
+  assert.match(source, /const recoveryLimit = 5;/);
+  assert.match(source, /record_ids: \[id\], trigger_a4: false, wait_for_next: false/);
+  assert.match(source, /drain: false, background: true/);
+  assert.match(source, /if \(recovery\) \{/);
+  assert.match(source, /stampLibraryAssetsClassifying/);
+  assert.ok(source.indexOf("if (recovery) {") < source.indexOf("stampLibraryAssetsClassifying("),
+    "Recovery branch returns before legacy bulk mutation and A3 dispatch");
+  assert.match(source, /A3 recovery rejected/);
+});
