@@ -6,8 +6,7 @@
   const body=el("adminPublishHoldsRows"),status=el("adminPublishHoldsStatus");
   const profile=el("adminPublishHoldsProfile"),lookup=el("adminPublishHoldsLookup");
   const more=el("adminPublishHoldsMore"),refresh=el("adminPublishHoldsRefresh");
-  const history=el("adminPublishHoldsHistory");
-  let offset=0,hasMore=false,pending=false,revision=0,loaded=false;
+  let offset=0,hasMore=false,pending=false,revision=0,loaded=false,shown=0,releasable=0;
   const showStatus=(message,isError=false)=>{
     status.textContent=message;
     status.classList.toggle("error-text",Boolean(isError));
@@ -34,17 +33,26 @@
     const d=new Date(value);
     return Number.isNaN(d.getTime())?"Not recorded":d.toLocaleString();
   };
-  async function showHistory(id) {
-    history.hidden=false;
-    history.replaceChildren();
-    label(history,"strong","Hold and release history for "+id);
-    label(history,"p","Loading audit history…");
+  async function showHistory(record,detailRow,button) {
+    // The prior history widget was below 100 held outputs, often multiple
+    // screens away. Expand inline with the requested output instead.
+    const opening=detailRow.hidden;
+    detailRow.hidden=!opening;
+    button.textContent=opening?"Hide history":"History";
+    button.setAttribute("aria-expanded",String(opening));
+    if(!opening)return;
+    const container=detailRow.querySelector(".admin-hold-history-content");
+    container.replaceChildren();
+    label(container,"strong","Hold history for #"+(record.number||record.id));
+    label(container,"p","Current hold: "+record.reason+" (source: "+record.source+").");
+    label(container,"p","Loading audit history…");
     try{
-      const result=await request("/api/operations/publishing-holds?history_for="+encodeURIComponent(id));
-      history.replaceChildren();
-      label(history,"strong","Hold and release history for "+id);
+      const result=await request("/api/operations/publishing-holds?history_for="+encodeURIComponent(record.id));
+      container.replaceChildren();
+      label(container,"strong","Hold history for #"+(record.number||record.id));
+      label(container,"p","Current hold: "+record.reason+" (source: "+record.source+").");
       if(!result.events?.length){
-        label(history,"p","No event history recorded. This may be a historical hold created before tracking began.");
+        label(container,"p","No recorded hold or release events. This legacy hold predates audit tracking; its original reason and date may be unavailable.");
         return;
       }
       const list=document.createElement("ul");
@@ -55,8 +63,12 @@
           " • "+(event.actor||"unknown actor");
         list.append(li);
       }
-      history.append(list);
-    }catch(error){showStatus("Unable to load audit history: "+error.message,true);}
+      container.append(list);
+    }catch(error){
+      const message="Unable to load audit history for #"+(record.number||record.id)+": "+error.message;
+      label(container,"p",message,"error-text");
+      showStatus(message,true);
+    }
   }
   async function releaseHold(record,check) {
     // Keep the hold visually checked until the server confirms the actual release.
@@ -70,7 +82,8 @@
       return;
     }
     if(!confirm("Release publishing hold on output #"+(record.number||record.id)+
-      " only?\n\nAutomatic publishing will remain disabled. You must explicitly approve/schedule/publish later."))return;
+      " only?\n\n"+(record.release_warning?record.release_warning+"\n\n":"")+
+      "Automatic publishing will remain disabled. You must explicitly approve/schedule/publish later."))return;
     check.disabled=true;
     showStatus("Rechecking and releasing output #"+(record.number||record.id)+"…");
     try{
@@ -113,17 +126,33 @@
     control.append(checkbox,document.createTextNode(" Hold for publishing"));
     action.append(control);
     if(!record.releasable)label(action,"p",record.block_reason||"Protected hold","admin-hold-blocked");
-    else label(action,"p","Uncheck to release this hold only","subtle");
+    else {
+      label(action,"p","Uncheck to release this publishing hold only","subtle");
+      if(record.release_warning)label(action,"p",record.release_warning,"admin-hold-pending");
+    }
     const btn=document.createElement("button");
     btn.type="button";btn.className="secondary-button";btn.textContent="History";
-    btn.addEventListener("click",()=>showHistory(record.id));
+    const detailRow=document.createElement("tr");
+    detailRow.className="admin-hold-history-row";
+    detailRow.hidden=true;
+    detailRow.id="admin-hold-history-"+record.id;
+    const detailCell=document.createElement("td");
+    detailCell.colSpan=4;
+    const detailContent=document.createElement("div");
+    detailContent.className="admin-hold-history-content";
+    detailContent.setAttribute("aria-live","polite");
+    detailCell.append(detailContent);
+    detailRow.append(detailCell);
+    btn.setAttribute("aria-controls",detailRow.id);
+    btn.setAttribute("aria-expanded","false");
+    btn.addEventListener("click",()=>showHistory(record,detailRow,btn));
     action.append(btn);tr.append(action);
-    body.append(tr);
+    body.append(tr,detailRow);
   }
   async function load(append=false){
     if(pending)return;
     const serial=++revision;pending=true;refresh.disabled=true;more.disabled=true;
-    if(!append){offset=0;body.replaceChildren();history.hidden=true;}
+    if(!append){offset=0;body.replaceChildren();shown=0;releasable=0;}
     showStatus("Loading publishing holds…");
     try{
       const params=new URLSearchParams({offset:String(offset)});
@@ -138,13 +167,17 @@
         profile.value=selected;
       }
       loaded=true;
-      for(const record of data.records||[])renderRow(record);
+      for(const record of data.records||[]){
+        renderRow(record);
+        shown++;
+        if(record.releasable)releasable++;
+      }
       hasMore=Boolean(data.has_more);
       offset=data.next_offset||offset+100;
       more.hidden=!hasMore;
-      showStatus(body.children.length+" held output(s) shown. "+
-        "Historical holds may lack a recorded reason. Releasing a hold never publishes a post.");
-      if(!body.children.length) {
+      showStatus(shown+" held output(s) shown; "+releasable+
+        " eligible for hold release. Protected holds remain locked. Releasing does not publish a post.");
+      if(!shown) {
         const tr=document.createElement("tr"),td=document.createElement("td");
         td.colSpan=4;td.textContent="No publishing holds match this filter.";tr.append(td);body.append(tr);
       }
