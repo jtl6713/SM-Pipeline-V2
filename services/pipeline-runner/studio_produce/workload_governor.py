@@ -280,14 +280,20 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_cir
             return bool(db.execute("""UPDATE resource_leases SET lease_until=?
                 WHERE scope=? AND lease_key=? AND token=?""",
                 (time.time() + LEASE_SECONDS, scope, lease_key, token)).rowcount)
-    renewer = threading.Thread(target=_heartbeat, args=(stopped, _renew), daemon=True,
-                               name="studio-resource-lease-heartbeat")
-    renewer.start()
+    # Supabase REST has a 20-second timeout; a 20-minute lease is sufficient.
+    # Spawning a heartbeat thread for *every* HTTP call would itself be a
+    # measurable overhead at the incident's request rates.
+    renewer = None
+    if not scope.startswith("supabase_"):
+        renewer = threading.Thread(target=_heartbeat, args=(stopped, _renew), daemon=True,
+                                   name="studio-resource-lease-heartbeat")
+        renewer.start()
     try:
         yield
     finally:
         stopped.set()
-        renewer.join(timeout=1)
+        if renewer is not None:
+            renewer.join(timeout=1)
         with _connect() as db:
             db.execute("DELETE FROM resource_leases WHERE scope=? AND lease_key=? AND token=?",
                        (scope, lease_key, token))
