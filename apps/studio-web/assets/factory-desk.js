@@ -2190,11 +2190,13 @@
         : (card.studio_state || (alert ? "Needs repair" : "—")));
     const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
-// Every held Repair output must be navigable even when the narrow action
-// column is off-screen. Both controls use the existing exact-ID Open binder.
-const titleMarkup = lane === "manual" && card.kind === "output"
-  ? `<button type="button" class="factory-repair-title-link" data-factory-open="${esc(card.id)}" aria-label="Open output ${esc(card.output_id || card.id)}: ${esc(card.title || cardLabel(card))}">${esc(card.title || cardLabel(card))}</button>`
-  : esc(card.title || cardLabel(card));
+    // Every Repair row (output, production request, or idea) gets the same
+    // exact-record navigation as its Open action. Some held repairs are not
+    // platform outputs, so restricting linked titles to kind=output hid the
+    // interaction on most rows. Never infer a parent output for requests.
+    const titleMarkup = lane === "manual"
+      ? `<button type="button" class="factory-repair-title-link" data-factory-open="${esc(card.id)}" aria-label="Open ${esc(card.kind === "output" ? "output" : card.kind === "request" ? "production request" : card.kind === "idea" ? "idea" : "record")} ${esc(card.output_id || card.id)}: ${esc(card.title || cardLabel(card))}">${esc(card.title || cardLabel(card))}</button>`
+      : esc(card.title || cardLabel(card));
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
         ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label></span>`
