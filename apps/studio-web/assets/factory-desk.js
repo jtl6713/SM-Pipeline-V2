@@ -651,7 +651,7 @@
     $("factoryNativeGalleryControls")?.remove();
   }
   function isFactoryNativeGallery(card) {
-    return /carousel|multi[\\s-]?image|photo[\\s-]?set/i.test(
+    return /carousel|multi[\s-]?image|photo[\s-]?set/i.test(
       String(card?.studio_output_type || ""));
   }
   // Never infer a complete gallery from its one cover. Load the exact active
