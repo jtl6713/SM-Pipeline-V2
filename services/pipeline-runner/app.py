@@ -317,6 +317,7 @@ def submit_durable_i1():
             str(body.get("profile_record_id") or "").strip(),
             body.get("requested_count"),
             str(body.get("quality") or "").strip(),
+            str(body.get("asset_sourcing_mode") or "balanced").strip(),
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 422
