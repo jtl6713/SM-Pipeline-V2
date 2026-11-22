@@ -159,7 +159,7 @@ def _run_governed(request_id: str, token: str) -> None:
         if isinstance(error, governor.AdmissionDeferred):
             logger.info("studio producer deferred by workload admission request=%s", request_id)
             requeue = True
-        elif governor.is_database_overload(error):
+        elif governor.is_database_overload(error) or governor.circuit_open():
             logger.warning("studio producer requeued on database outage request=%s", request_id)
             governor.trip_database_circuit()
             requeue = True
@@ -248,7 +248,7 @@ def _run(
             return
         except Exception as exc:
             if governor.enabled() and (
-                isinstance(exc, governor.AdmissionDeferred) or governor.is_database_overload(exc)
+                isinstance(exc, governor.AdmissionDeferred) or governor.is_database_overload(exc) or governor.circuit_open()
             ):
                 # Do not persist a terminal Blocked status on a 522/timeout.
                 # Leave the job claimed until the governed worker safely requeues.
