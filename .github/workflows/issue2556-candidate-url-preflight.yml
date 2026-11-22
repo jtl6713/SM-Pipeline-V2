@@ -1,0 +1,41 @@
+name: Issue 2556 exact replacement image HTTP preflight
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2556-candidate-url-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Read-only check of all four 1080x1350 JPEG candidate URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install -q requests pillow
+          python3 - <<'PY'
+          from io import BytesIO
+          from PIL import Image
+          import hashlib, requests
+          urls=[
+            "https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:d535db6e-0fb4-4462-994e-4db5f9cd3d21",
+            "https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:a645f65b-c3df-4755-9937-3aa175acfd99",
+            "https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:022f3008-8b69-462f-b6bd-1bb3d645fa9e",
+            "https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:ba04ce00-050f-418f-ace0-1133be2fddb1",
+          ]
+          for i,url in enumerate(urls,1):
+              response=requests.get(url, timeout=35)
+              response.raise_for_status()
+              payload=response.content
+              with Image.open(BytesIO(payload)) as im:
+                  im.load()
+                  dims=im.size
+                  fmt=im.format
+              if fmt!="JPEG" or dims!=(1080,1350) or len(payload)<1024 or len(payload)>15000000:
+                  raise RuntimeError(f"candidate_{i}_invalid_format_size_or_bytes")
+              print(f"image_{i}=PASS format={fmt} dimensions={dims[0]}x{dims[1]} bytes={len(payload)} sha256={hashlib.sha256(payload).hexdigest()}")
+          print("all_four_candidate_urls=VERIFIED")
+          PY
