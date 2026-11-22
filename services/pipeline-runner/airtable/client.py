@@ -16,6 +16,9 @@ class AirtableClient:
         if not supabase_configured(settings):
             raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for pipeline CRUD")
         self._settings = settings
+        # Local to one I1 process/client; fresh Supabase deltas are queried for
+        # every subsequent originality check, never an unverified cached pass.
+        self._i1_title_history_cache = {}
 
     def _archive_closed(self) -> bool:
         """Airtable is permanently read-only/offline to this runner."""
@@ -170,7 +173,7 @@ class AirtableClient:
 
         from reference_cache import list_reference_records
         from settings_store import list_settings
-        from supabase_reads import try_list_supabase_records
+        from supabase_reads import try_list_supabase_records, try_list_i1_title_history
 
         # Settings live in engagement_settings.payload once Supabase is the SoR.
         # Without this branch the generic read cannot project Pipeline Settings,
@@ -188,6 +191,14 @@ class AirtableClient:
         )
         if cached_rows is not None:
             return cached_rows
+
+        i1_history = try_list_i1_title_history(
+            self._settings, table_id, formula,
+            max_records=max_records, fields=fields,
+            cache=self._i1_title_history_cache,
+        )
+        if i1_history is not None:
+            return i1_history
 
         supabase_rows = try_list_supabase_records(
             self._settings,
