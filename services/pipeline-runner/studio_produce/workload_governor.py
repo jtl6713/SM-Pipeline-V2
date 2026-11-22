@@ -119,8 +119,15 @@ def _connect() -> Iterator[sqlite3.Connection]:
                     init.execute("""CREATE TABLE IF NOT EXISTS request_metrics (
                         minute INTEGER NOT NULL, operation TEXT NOT NULL,
                         total INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+                        latency_total_ms REAL NOT NULL DEFAULT 0,
+                        latency_max_ms REAL NOT NULL DEFAULT 0,
                         PRIMARY KEY (minute, operation)
                     )""")
+                    metric_columns = {row[1] for row in init.execute("PRAGMA table_info(request_metrics)")}
+                    if "latency_total_ms" not in metric_columns:
+                        init.execute("ALTER TABLE request_metrics ADD COLUMN latency_total_ms REAL NOT NULL DEFAULT 0")
+                    if "latency_max_ms" not in metric_columns:
+                        init.execute("ALTER TABLE request_metrics ADD COLUMN latency_max_ms REAL NOT NULL DEFAULT 0")
                     _initialized_paths.add(identity)
                 finally:
                     init.close()
@@ -365,17 +372,20 @@ def resource_active(scope: str, key: str) -> bool:
     return bool(row)
 
 
-def record_db_request(method: str, *, failed: bool) -> None:
+def record_db_request(method: str, *, failed: bool, latency_ms: float = 0) -> None:
     if not enabled():
         return
     minute = int(time.time() // 60)
     operation = "read" if method.upper() in {"GET", "HEAD"} else "write"
     with _connect() as db:
-        db.execute("""INSERT INTO request_metrics(minute,operation,total,failures)
-            VALUES(?,?,1,?)
+        db.execute("""INSERT INTO request_metrics
+            (minute,operation,total,failures,latency_total_ms,latency_max_ms)
+            VALUES(?,?,1,?,?,?)
             ON CONFLICT(minute,operation) DO UPDATE SET
-            total=total+1, failures=failures+excluded.failures""",
-            (minute, operation, int(failed)))
+            total=total+1, failures=failures+excluded.failures,
+            latency_total_ms=latency_total_ms+excluded.latency_total_ms,
+            latency_max_ms=max(latency_max_ms,excluded.latency_max_ms)""",
+            (minute, operation, int(failed), max(0.0, latency_ms), max(0.0, latency_ms)))
         # Keep only 30 minutes of local counters (no request payloads or IDs).
         db.execute("DELETE FROM request_metrics WHERE minute<?", (minute - 30,))
 
@@ -388,10 +398,19 @@ def snapshot() -> dict[str, object]:
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope='photo_group' AND lease_until>?""", (time.time(),)).fetchone()[0]
         queued = dict(counts)
-        rows = db.execute("""SELECT operation,SUM(total),SUM(failures) FROM request_metrics
-            WHERE minute>=? GROUP BY operation""", (int(time.time() // 60)-1,)).fetchall()
-        traffic = {operation: {"requests_last_two_minutes": total, "failures_last_two_minutes": failed}
-                   for operation, total, failed in rows}
+        rows = db.execute("""SELECT operation,SUM(total),SUM(failures),
+            SUM(latency_total_ms),MAX(latency_max_ms)
+            FROM request_metrics WHERE minute>=? GROUP BY operation""",
+            (int(time.time() // 60)-1,)).fetchall()
+        traffic = {
+            operation: {
+                "requests_last_two_minutes": total,
+                "failures_last_two_minutes": failed,
+                "mean_latency_ms": round(total_ms / max(1, total), 1),
+                "max_latency_ms": round(max_ms, 1),
+            }
+            for operation, total, failed, total_ms, max_ms in rows
+        }
         return {
             "enabled": True, "scope": "single_windows_host", "active_jobs": queued.get("running", 0),
             "queued_jobs": queued.get("queued", 0), "paused_jobs": queued.get("paused", 0),
