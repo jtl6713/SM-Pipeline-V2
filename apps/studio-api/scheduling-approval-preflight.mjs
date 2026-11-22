@@ -20,10 +20,9 @@ export function schedulingPreflightSignature(row) {
   // An exact equality fingerprint: use the complete relevant media identities,
   // not a lossy numerical hash, so changes invalidate previous verification.
   return JSON.stringify([
-    row?.airtable_record_id, row?.content_item_id, row?.content_profile_id,
-    row?.platform, row?.studio_output_type, row?.render_status,
-    row?.final_file_url, row?.studio_preview_url, row?.thumbnail_url,
-    row?.selected_clip_count, row?.selected_assets, row?.output_caption,
+    row?.airtable_record_id, row?.platform, row?.studio_output_type,
+    row?.render_status, row?.final_file_url, row?.studio_preview_url,
+    row?.thumbnail_url, row?.selected_clip_count, row?.output_caption,
   ]);
 }
 
