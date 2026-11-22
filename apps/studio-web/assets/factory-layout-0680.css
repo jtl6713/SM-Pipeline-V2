@@ -843,6 +843,28 @@
   line-height: 1.45;
 }
 .factory-meta-repair-notice[hidden] { display: none; }
+#page-factory > .factory-meta-repair-notice {
+  margin: 10px 0 16px;
+  border-left: 5px solid #b65e08;
+  background: #fff9ec;
+  color: #243549;
+}
+#page-factory .factory-meta-repair-copy {
+  display: grid;
+  gap: 4px;
+  min-width: min(100%, 340px);
+  flex: 1 1 440px;
+}
+#page-factory .factory-meta-repair-copy strong {
+  color: #6e3606;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+#page-factory .factory-meta-repair-copy small {
+  display: block;
+  color: #4a5a6d;
+  line-height: 1.4;
+}
 .factory-meta-repair-notice .secondary-button { max-width: 100%; white-space: normal; }
 .factory-meta-repair { display: block; white-space: normal; line-height: 1.45; }
 .factory-meta-repair small { display: block; margin-top: 4px; }
