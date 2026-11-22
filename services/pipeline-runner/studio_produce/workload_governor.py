@@ -144,7 +144,7 @@ def is_database_overload(error: BaseException) -> bool:
         (" 429", " 500", " 502", " 503", " 504", " 522", "timeout", "timed out")):
         return True
     return any(s in message for s in (
-        "connection terminated due to connection timeout", "postgrest",
+        "connection terminated due to connection timeout",
         "supabase connection", "http 522", "status 522", "pgrst",
         "database connection", "too many connections", "database is locked", "disk i/o error",
     ))
@@ -162,7 +162,11 @@ def claim_next() -> tuple[str, str] | None:
             db.commit()
             return None
         active = db.execute("SELECT COUNT(*) FROM producer_jobs WHERE state='running'").fetchone()[0]
-        if active >= max_jobs():
+        # After a circuit cooldown, probe with one producer before returning to
+        # normal concurrency. A successful job finish clears the half-open latch.
+        has_outage = db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone()
+        allowed = 1 if has_outage else max_jobs()
+        if active >= allowed:
             db.commit()
             return None
         row = db.execute(
@@ -204,7 +208,9 @@ def finish_job(request_id: str, token: str, *, requeue: bool = False) -> None:
                 SET state='queued',token=NULL,lease_until=NULL
                 WHERE request_id=? AND token=?""", (request_id, token))
         else:
-            db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
+            deleted = db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
+            if deleted.rowcount:
+                db.execute("DELETE FROM governor_control WHERE name='database' AND until_at<=?", (time.time(),))
         db.commit()
 
 
@@ -233,7 +239,7 @@ def job_heartbeat(request_id: str, token: str) -> Iterator[threading.Event]:
 
 
 @contextmanager
-def resource_slot(scope: str, *, key: str = "", limit: int = 1) -> Iterator[None]:
+def resource_slot(scope: str, *, key: str = "", limit: int = 1, allow_during_circuit: bool = False) -> Iterator[None]:
     """Atomic, expiring single-host claims for photo-group and transfer work."""
     if not enabled():
         yield
@@ -245,7 +251,7 @@ def resource_slot(scope: str, *, key: str = "", limit: int = 1) -> Iterator[None
             _transaction(db)
             db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (time.time(),))
             active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
-            if not circuit_open(db) and active < limit:
+            if (allow_during_circuit or not circuit_open(db)) and active < limit:
                 claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
                     (scope,lease_key,token,lease_until) VALUES(?,?,?,?)""",
                     (scope, lease_key, token, time.time() + LEASE_SECONDS)).rowcount
