@@ -91,9 +91,8 @@ export function classifyAdminPublishingHold(row) {
   const reviewStatus=str(row?.review_status).toLowerCase();
   const publishStatus=str(row?.publish_status).toLowerCase();
   if (row?.published_at || row?.platform_post_url ||
-      ["published","publishing","cancelled","skipped","failed","changes requested"].includes(outputStatus) ||
-      ["published","publishing","failed","cancelled","skipped"].includes(publishStatus) ||
-      ["changes requested","rejected"].includes(reviewStatus)) {
+      ["published","publishing","cancelled","skipped","failed"].includes(outputStatus) ||
+      ["published","publishing","failed","cancelled","skipped"].includes(publishStatus) ) {
     return block("Terminal, failed, or changes-requested output: reconcile its current lifecycle state first");
   }
   if (dispatchKeys.some(key => activeEvidence(extras[key])) ||
