@@ -7,17 +7,11 @@ from item4.settings import PipelineSettings
 
 
 def get_render_server_url(client: AirtableClient) -> str:
-    rows = client.list_records(
-        PIPELINE_SETTINGS_TABLE,
-        view="CFG - Active Render Server URL",
-        max_records=1,
-    )
-    if rows:
-        value = str(rows[0].get("fields", {}).get("Setting_Value") or "").strip()
-        if value:
-            return value.rstrip("/")
-    settings = PipelineSettings(client)
-    named = settings.get("RENDER_SERVER_BASE_URL")
+    # The retired Airtable "CFG - Active Render Server URL" view has no
+    # Supabase equivalent. A view-only list fails closed before the named
+    # fallback can run, blocking otherwise ready Studio Produce jobs.
+    # Read the exact active setting from Supabase's engagement_settings SoR.
+    named = PipelineSettings(client).get("RENDER_SERVER_BASE_URL")
     if named:
         return named.rstrip("/")
     return str(load_settings().get("remotion_renderer_url") or "http://127.0.0.1:3333").rstrip("/")
