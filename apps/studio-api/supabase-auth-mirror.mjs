@@ -214,12 +214,35 @@ function authLinkIds(value) {
   }).filter(Boolean);
 }
 
+// A missing optional auth column is a schema capability mismatch, not a
+// transient failure. Memoize the negative result per REST implementation,
+// project and table to avoid four failing PostgreSQL queries on every login.
+// Expire it so schema upgrades become visible without an emergency deploy.
+const AUTH_OPTIONAL_MISSING_BY_REST = new WeakMap();
+const AUTH_OPTIONAL_MISSING_TTL_MS = 15 * 60 * 1000;
+
 async function authRestSelect(rest, env, pathWithExtras, pathCore) {
+  let missingByTable = AUTH_OPTIONAL_MISSING_BY_REST.get(rest);
+  if (!missingByTable) {
+    missingByTable = new Map();
+    AUTH_OPTIONAL_MISSING_BY_REST.set(rest, missingByTable);
+  }
+  const table = String(pathWithExtras || "").split("?")[0];
+  const key = `${String(env?.SUPABASE_URL || "")}|${table}`;
+  if (pathCore && (missingByTable.get(key) || 0) > Date.now()) {
+    return await rest(env, pathCore);
+  }
   try {
-    return await rest(env, pathWithExtras);
+    const rows = await rest(env, pathWithExtras);
+    missingByTable.delete(key);
+    return rows;
   } catch (error) {
     if (pathCore && authExtrasMissing(error)) {
-      return await rest(env, pathCore);
+      // Only cache recognized missing optional fields; never cache 5xx,
+      // authentication failures, or failed core reads.
+      const rows = await rest(env, pathCore);
+      missingByTable.set(key, Date.now() + AUTH_OPTIONAL_MISSING_TTL_MS);
+      return rows;
     }
     throw error;
   }
