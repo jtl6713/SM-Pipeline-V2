@@ -43,7 +43,7 @@ const handle=(request,ops,authorization=auth)=>
 
 test("legacy hold has truthful unknown reason and can be reviewed",()=>{
   assert.deepEqual(classifyAdminPublishingHold(row()),{
-    releasable:true,block_reason:null,reason:"Reason not recorded — historical hold",reason_source:"Historical / unrecorded"
+    releasable:true,block_reason:null,reason:"Reason not recorded — historical hold",reason_source:"Historical / unrecorded",release_warning:null
   });
 });
 test("protected review, factory, legal, tests, dispatch and published receipts cannot be toggled",()=>{
@@ -69,8 +69,10 @@ test("protected review, factory, legal, tests, dispatch and published receipts c
     assert.equal(classifyAdminPublishingHold({...row(),error_messages:extras}).releasable,false,JSON.stringify(extras));
   }
   assert.equal(classifyAdminPublishingHold({...row(),test_run_id:"test"}).releasable,false);
-  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,false);
-  assert.equal(classifyAdminPublishingHold({...row(),output_status:"In Production"}).releasable,false);
+  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Pending Review"}).releasable,true);
+  assert.equal(classifyAdminPublishingHold({...row(),output_status:"In Production"}).releasable,true);
+  assert.equal(classifyAdminPublishingHold({...row(),review_status:"Changes Requested"}).releasable,false);
+  assert.equal(classifyAdminPublishingHold({...row(),output_status:"Changes Requested"}).releasable,false);
   assert.equal(classifyAdminPublishingHold({...row(),published_at:"2026-11-22"}).releasable,false);
 });
 test("GET scopes the list to membership and exposes reasons and release eligibility",async()=>{
@@ -172,6 +174,59 @@ test("protected historical hold denies mutation even when approved for publishin
         revision:held.updated_at,hold_set_at:held.publish_hold_set_at})
     }),ops);
     assert.equal(response.status,409,JSON.stringify(marker));
+    assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
+  }
+});
+
+test("ordinary early-stage production output can release a hold without advancing or enabling publishing",async()=>{
+  const held={...row(),output_status:"In Production",review_status:"Pending Review",
+    publish_status:"Not Ready",auto_publish_enabled:false,
+    error_messages:{
+      Output_Notes:"Studio single-parent output seed. Production Request Output is the per-platform execution authority.",
+      Production_Request_Output:["recEkDe7BES0FsYtU"]
+    }};
+  const decision=classifyAdminPublishingHold(held);
+  assert.equal(decision.releasable,true);
+  assert.match(decision.release_warning,/does not advance production or Factory approval/);
+  const {ops,calls}=fixture({held});
+  const response=await handle(req("/api/operations/publishing-holds/"+REC+"/release",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({confirm_output_id:REC,
+      release_note:"Authorized operator cleared the generic hold only",
+      revision:held.updated_at,hold_set_at:held.publish_hold_set_at})
+  }),ops);
+  const data=await response.json();
+  assert.equal(response.status,200,JSON.stringify(data));
+  assert.equal(held.do_not_publish,false);
+  assert.equal(held.auto_publish_enabled,false);
+  assert.equal(held.review_status,"Pending Review");
+  assert.equal(held.output_status,"In Production");
+  assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,1);
+});
+test("ordinary in-production row with a genuine Gallery or recovery safety marker remains locked",async()=>{
+  const held={...row(),output_status:"In Production",review_status:"Pending Review",
+    publish_status:"Not Ready",
+    error_messages:{SM_Native_Gallery_Preflight_Hold_2294:true}};
+  assert.equal(classifyAdminPublishingHold(held).releasable,false);
+  const {ops,calls}=fixture({held});
+  const response=await handle(req("/api/operations/publishing-holds/"+REC+"/release",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({confirm_output_id:REC,
+      release_note:"Attempted plain hold release with marker active",
+      revision:held.updated_at,hold_set_at:held.publish_hold_set_at})
+  }),ops);
+  assert.equal(response.status,409);
+  assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
+});
+test("GET history exposes both existing events and truthful empty legacy history",async()=>{
+  for(const events of [[],[{operation:"held",reason:"Studio hold",source:"studio",actor:"tester",
+    occurred_at:"2026-11-22T17:00:00Z"}]]){
+    const {ops,calls}=fixture({history:events});
+    const response=await handle(req("/api/operations/publishing-holds?history_for="+REC),ops);
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.deepEqual(data.events,events);
+    assert.equal(data.output_id,REC);
     assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
   }
 });
