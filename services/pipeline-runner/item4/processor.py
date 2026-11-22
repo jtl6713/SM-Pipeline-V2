@@ -1083,6 +1083,8 @@ def process_one(
     try:
         result = process_queue_row(client, row)
         return {"processed": True, **result}
+    except governor.AdmissionDeferred:
+        return {"processed": False, "reason": "governor_admission_deferred"}
     except Exception as exc:
         message = str(exc)
         preview = (
@@ -1150,6 +1152,9 @@ def process_drain(
     def _safe_leftover(row: dict) -> dict[str, Any] | None:
         try:
             return process_queue_row(client, row)
+        except governor.AdmissionDeferred:
+            # Resource scarcity is not evidence of a bad or failed asset.
+            return {"processed": False, "route": "governor_admission_deferred"}
         except Exception as exc:
             preview = (
                 str(field(row, "Transfer_Status") or "") == "Ready"
