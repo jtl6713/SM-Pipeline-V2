@@ -41,6 +41,19 @@ test("Airtable retirement liveness requires actual scheduled Worker and runner h
   assert.doesNotMatch(doSnapshot, /INSERT INTO airtable_egress_collector_ticks/);
 });
 
+test("authenticated runner egress proxy preserves durable heartbeat metadata", () => {
+  const worker=source("apps/studio-api/worker.js");
+  const segment=worker.slice(
+    worker.indexOf('url.pathname === "/api/profiles/overview/summary/runner-egress"'),
+    worker.indexOf('url.pathname === "/api/profiles/overview/summary/airtable-egress"')
+  );
+  assert.match(segment, /Array\.isArray\(report\.collector_coverage\)/);
+  assert.match(segment, /report\?\.collector_heartbeat\?\.observed_at/);
+  assert.match(segment, /collector_coverage: report\.collector_coverage/);
+  assert.match(segment, /collector_heartbeat: report\.collector_heartbeat/);
+  assert.match(segment, /runner_metrics_coverage_unavailable/);
+});
+
 test("Worker raises on missing Supabase CRUD instead of fabricating results", () => {
   const worker = source("apps/studio-api/worker.js");
   const gateway = worker.slice(
