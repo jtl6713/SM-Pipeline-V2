@@ -5,6 +5,7 @@ import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from 
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
+import { item4DestinationParity } from "./item4-plan-integrity.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
@@ -697,6 +698,7 @@ import {
   resolveAuthorizedContentProfiles,
   resolveWorkingContentProfile,
   outputRowsForProductionRequest,
+  item4SyncPlanOutputs,
   item4ParseJson,
   item4AssetManifest,
   studioPickSharedAudioMixFields,
@@ -15055,6 +15057,45 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
   }
   if (pick.content_type) {
     current = await alignAutonomousDraftContentType(env, current, pick.content_type);
+  }
+
+  // #2574: do not start Frames Prepare with a phantom Ready plan. Repair an
+  // original autonomous Draft from its saved plan through the normal Item4
+  // destination writer, preserving ownership, output choices and MAE schedule.
+  // Never regenerate Ideas, overwrite edited rows or touch promoted outputs.
+  const savedPlan = item4ParseJson(f(current, "Studio_Output_Plan_JSON"), null);
+  if (String(f(current, "Studio_Output_Plan_Status") || "").trim() === "Ready"
+      && Array.isArray(savedPlan?.items) && savedPlan.items.length) {
+    const rows = await outputRowsForProductionRequest(env, requestId, { includeInactive: true });
+    let parity = item4DestinationParity(savedPlan.items, rows.map((row) => ({
+      platform: f(row, "Platform"), output_type: f(row, "Output_Type"),
+      enabled: Boolean(f(row, "Enabled")),
+    })));
+    if (!parity.ok) {
+      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      const originalUntouchedDraft = !rows.length
+        && String(f(latest, "Request_Status") || "").trim() === "Draft"
+        && Boolean(f(latest, "Active"))
+        && /(?:^|\\n)origin=autonomous(?:\\n|$)/i.test(String(f(latest, "Production_Notes") || ""))
+        && !productionNotesRevisionOpen(f(latest, "Production_Notes"))
+        && !linkedRecordIds(f(latest, "Promoted_Content_Item")).length
+        && String(f(latest, "Studio_Output_Plan_Status") || "").trim() === "Ready"
+        && String(f(latest, "Studio_Output_Plan_JSON") || "")
+          === String(f(current, "Studio_Output_Plan_JSON") || "");
+      if (!originalUntouchedDraft) {
+        throw new HttpError(409,
+          "Saved platform plan and enabled destinations differ; preserved existing changes for review.");
+      }
+      await item4SyncPlanOutputs(env, latest, savedPlan.items);
+      const verifiedRows = await outputRowsForProductionRequest(env, requestId);
+      parity = item4DestinationParity(savedPlan.items, verifiedRows.map((row) => ({
+        platform: f(row, "Platform"), output_type: f(row, "Output_Type"),
+        enabled: Boolean(f(row, "Enabled")),
+      })));
+      if (!parity.ok) throw new HttpError(503,
+        `Autonomous destination repair uncommitted (${parity.enabled_count}/${parity.expected_count}); retry with Supabase available.`);
+      current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    }
   }
 
   const continueAfterPlan = async () => {
