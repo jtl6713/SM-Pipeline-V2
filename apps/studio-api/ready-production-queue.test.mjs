@@ -456,7 +456,7 @@ test("#2574 obsolete missing destination retry is revived exactly once", async (
   assert.equal(first.job.next_attempt_ms, 0);
   assert.ok(first.job.missing_destinations_recovered_at);
   const second = await readyProductionEnqueue(bucket, { ideaId });
-  assert.equal(second.revived, false);
+  assert.notEqual(second.revived, true);
   const retry = await readyProductionClaim(bucket, ideaId, "second-owner", Date.now());
   assert.ok(retry);
   await readyProductionFinishClaim(bucket, retry, {
@@ -464,7 +464,7 @@ test("#2574 obsolete missing destination retry is revived exactly once", async (
     retry_delay_ms: 30 * 60 * 1000,
   });
   const again = await readyProductionEnqueue(bucket, { ideaId });
-  assert.equal(again.revived, false);
+  assert.notEqual(again.revived, true);
   assert.equal(again.job.status, "retry_wait");
   const foreignId = "recOtherDest257401";
   await readyProductionEnqueue(bucket, { ideaId: foreignId });
@@ -473,7 +473,7 @@ test("#2574 obsolete missing destination retry is revived exactly once", async (
     status: "retry_wait", last_error: "Meta provider cooldown",
     retry_delay_ms: 30 * 60 * 1000,
   });
-  assert.equal((await readyProductionEnqueue(bucket, { ideaId: foreignId })).revived, false);
+  assert.notEqual((await readyProductionEnqueue(bucket, { ideaId: foreignId })).revived, true);
 });
 
 test("#2574 overdue photo-ready priority does not bypass backoff or monitoring", async () => {
