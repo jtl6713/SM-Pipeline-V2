@@ -9508,12 +9508,26 @@ export async function getInsightsConnections(request, env, url, authorization) {
           headers: { Accept: "application/json" },
         }));
         result.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || null);
-        result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
-        result.tiktok.error = result.tiktok.status === "connected"
+        const postingConnected = body?.authorized &&
+          (body?.posting_scopes_granted === true || body?.required_scopes_granted === true);
+        const analyticsConnected = body?.authorized && body?.required_scopes_granted === true;
+        const analyticsScopeGated = postingConnected && !analyticsConnected &&
+          body?.analytics_scope_request_enabled === false;
+        result.tiktok.status = analyticsConnected
+          ? "connected"
+          : (analyticsScopeGated ? "needs_developer_approval" : "needs_authorization");
+        result.tiktok.error = analyticsConnected
           ? null
-          : (body?.authorized
-            ? "TikTok OAuth is stored, but required permissions are missing. Reconnect this creator and grant all requested permissions, including video.list."
-            : "Reconnect TikTok to grant owned-video analytics access.");
+          : (analyticsScopeGated
+            ? "TikTok publishing is connected, but owned-video analytics cannot request video.list yet. Verify Display API/video.list approval in the TikTok Developer Portal, then enable TIKTOK_ANALYTICS_SCOPE_APPROVED on this profile's auth worker and reconnect."
+            : postingConnected
+              ? "TikTok publishing is connected. Analytics video.list is not granted; confirm developer app approval, then reconnect to grant that permission."
+              : body?.authorized
+                ? "TikTok is authorized but publishing permissions are incomplete. Check the app's approved scopes before reconnecting."
+                : "Reconnect TikTok to authorize this creator.");
+        // Do not send users into an OAuth flow known to request no analytics
+        // scope: it cannot resolve an analytics-only approval blocker.
+        if (analyticsScopeGated) result.tiktok.reconnect_url = null;
       } catch (error) {
         Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
       }
