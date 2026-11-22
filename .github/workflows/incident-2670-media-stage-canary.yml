@@ -1,4 +1,5 @@
 name: Incident 2670 - Nonpublishing R2 stage live dry run
+# One-time authenticated dry-run only; no provider publication or output mutation.
 on:
   push:
     branches: [main]
