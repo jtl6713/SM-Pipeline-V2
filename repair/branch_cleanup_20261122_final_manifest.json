@@ -1,0 +1,55 @@
+{
+  "schema": "archive-reviewed-stale-branches-20261122.v2",
+  "repository": "jtl6713/SM-Pipeline-V2",
+  "source_main_sha": "4949b0457ef0e86d3c100026f1948e5526e3f355",
+  "expected_candidates_count": 11,
+  "protected_open_pr_heads": [],
+  "candidates": [
+    {
+      "branch": "deploy/2489-nyc-audio-protected-release-v2",
+      "sha": "a1f233e9c77bf5fa9fc2499937f51b4d849e6c4b"
+    },
+    {
+      "branch": "feat/production-to-scheduling-approval-2618",
+      "sha": "a8b81f74eb55c07b3284287cb202f74810c530ec"
+    },
+    {
+      "branch": "fix/2374-ten-safe-original-gallery-review-20261121",
+      "sha": "b66251a18eeb39cc5ad2919ae8820674a15ff8f4"
+    },
+    {
+      "branch": "fix/2574-runner-watermark-p2-supabase-filters",
+      "sha": "cc12ed402fffdf28294544d8554749d23e8e157c"
+    },
+    {
+      "branch": "fix/factory-incident-creative-review-20261120",
+      "sha": "6f9f1323d9e2dc54fa4e4835ae7c589e4620a289"
+    },
+    {
+      "branch": "fix/factory-record-id-rejection-recovery-20261118",
+      "sha": "acc976412566e9403985fcd2df299e9ecb1d0d2f"
+    },
+    {
+      "branch": "fix/flatiron-source-authority-gates-20261117",
+      "sha": "84e7c8f0d8f6db1a742566ed7fd211a2d5897558"
+    },
+    {
+      "branch": "fix/issue2464-ap1c-sparse-lock-clears",
+      "sha": "efecaad07d01529f4594e065b102c5ca16d5dcf7"
+    },
+    {
+      "branch": "fix/issue2464-fbs3-publish-asset-view",
+      "sha": "00ce767a8b58b1fd0054371c89e2d046fc98cf4a"
+    },
+    {
+      "branch": "fix/qa-missing-platform-outputs-20261117",
+      "sha": "433f129b29e5f1a999aa143f0b6a9f702a8a9281"
+    },
+    {
+      "branch": "fix/tiktok-oauth-analytics-scope-gate-20261121",
+      "sha": "77765cf9b4bf2d3aedd80636fbe46b324889b68a"
+    }
+  ],
+  "prior_cleanup_run": "45022256366",
+  "notes": "All ten formerly open PRs were externally closed without merging during the prior cleanup, and their exact heads remain recoverable via this archive-first pass. All eleven branches have fully completed Actions histories."
+}

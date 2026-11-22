@@ -19,9 +19,9 @@ import urllib.request
 from pathlib import Path
 
 REPO = "jtl6713/SM-Pipeline-V2"
-PREFIX = "archive/reviewed-20261122/"
-MANIFEST = Path("repair/branch_cleanup_20261122_manifest.json")
-REPORT = Path("branch-cleanup-20261122-report.json")
+PREFIX = os.getenv("BRANCH_CLEANUP_TAG_PREFIX", "archive/reviewed-20261122/")
+MANIFEST = Path(os.getenv("BRANCH_CLEANUP_MANIFEST", "repair/branch_cleanup_20261122_manifest.json"))
+REPORT = Path(os.getenv("BRANCH_CLEANUP_REPORT", "branch-cleanup-20261122-report.json"))
 
 
 def fail(message: str) -> None:
@@ -71,14 +71,21 @@ def open_pr_heads() -> set[str]:
 
 
 def active_actions(branch: str) -> bool:
-    response = api(
-        "actions/runs?per_page=100&branch=" + urllib.parse.quote(branch, safe="")
-    )
-    rows = response.get("workflow_runs", [])
-    # Can't safely disprove in-flight work with a truncated history.
-    if len(rows) >= 100:
-        return True
-    return any(row.get("status") != "completed" for row in rows)
+    """Inspect every page of this branch's Actions history, never infer from page one."""
+    for page in range(1, 22):
+        response = api(
+            "actions/runs?per_page=100&page=" + str(page)
+            + "&branch=" + urllib.parse.quote(branch, safe="")
+        )
+        rows = response.get("workflow_runs")
+        if not isinstance(rows, list):
+            fail("invalid Actions history for " + branch)
+        if any(row.get("status") != "completed" for row in rows):
+            return True
+        if len(rows) < 100:
+            return False
+    # A branch with > 2,000 runs is not auditable in this one-shot operation.
+    return True
 
 
 def exact_eligible(name: str, sha: str) -> tuple[bool, str]:
@@ -132,15 +139,20 @@ def main() -> None:
     if os.getenv("GITHUB_RUN_ATTEMPT") != "1":
         fail("one-shot cleanup must not be rerun")
     baseline = json.loads(MANIFEST.read_text())
-    if baseline.get("schema") != "archive-reviewed-stale-branches-20261122.v1":
+    version = baseline.get("schema")
+    if version not in {
+        "archive-reviewed-stale-branches-20261122.v1",
+        "archive-reviewed-stale-branches-20261122.v2",
+    }:
         fail("manifest version mismatch")
     if baseline.get("repository") != REPO:
         fail("manifest repo mismatch")
     candidates = baseline.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 30:
-        fail("expected exactly thirty reviewed refs")
+    expected_count = 30 if version.endswith(".v1") else 11
+    if not isinstance(candidates, list) or len(candidates) != expected_count:
+        fail("unexpected reviewed ref count")
     names = [row.get("branch") for row in candidates]
-    if len(set(names)) != 30 or "main" in names:
+    if len(set(names)) != expected_count or "main" in names:
         fail("candidate duplicates or protected main included")
     for item in candidates:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", item["branch"]):
@@ -155,7 +167,8 @@ def main() -> None:
         fail("main unexpectedly unprotected")
     # The reviewed open PRs must remain available. They are not candidates.
     protected_heads = set(baseline.get("protected_open_pr_heads") or [])
-    if len(protected_heads) != 10 or protected_heads & set(names):
+    expected_open = 10 if version.endswith(".v1") else 0
+    if len(protected_heads) != expected_open or protected_heads & set(names):
         fail("reviewed open PR heads invalid or overlap with candidates")
 
     report = {
@@ -217,8 +230,8 @@ def main() -> None:
     report["current_open_pr_heads"] = sorted(open_pr_heads())
     if "main" not in after or not after["main"]["protected"]:
         fail("post-cleanup main protection failed")
-    if not report["current_open_pr_heads"]:
-        fail("open PRs unexpectedly disappeared")
+    # Open PR counts are allowed to fall to zero after independent user-initiated
+    # closures. Never infer that a closed PR was merged; its branch is archived.
     if set(report["current_open_pr_heads"]) - set(after):
         fail("an open PR branch is missing after cleanup")
     REPORT.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

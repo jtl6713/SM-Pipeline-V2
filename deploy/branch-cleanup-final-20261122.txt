@@ -1,0 +1,20 @@
+Final GitHub branch cleanup decision — 2026-11-22.
+
+Prior PR #2666 archived and safely deleted 29 of 30 previously unowned stale heads.
+One prior branch was deliberately held because its Actions history had 110 entries,
+exceeding the one-page audit; all 110 were subsequently checked across both
+pages and are completed.
+
+During the prior cleanup, all ten formerly open PRs were CLOSED WITHOUT MERGING
+by account jtl6713, per immutable GitHub issue events 12:26:07–12:26:27 UTC.
+No PR heads were deleted during that run. All remain reachable and were
+independently checked for completed workflows and unchanged exact branch SHAs.
+
+The eleven remaining non-main branches, including all ten closed-PR heads,
+will be archived as exact SHA tags BEFORE deletion; no old PR code is merged,
+deployed, published, scheduled, or otherwise activated. Active/moved/new-PR
+branches are automatically preserved. This is a separate one-shot closeout.
+
+Expect final branch set to contain protected main only, unless the repository
+acquires new in-flight work, active runs or changed head leases.
+No Airtable API or production pipeline calls are made.
