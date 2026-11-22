@@ -8,13 +8,19 @@ class FakeClient:
     def __init__(self, value):
         self.value = value
         self.calls = []
+        # Exercise the authoritative Supabase-only path without network access.
+        self._settings = {"supabase_url": "https://example.supabase.co",
+                          "supabase_service_role_key": "test-only"}
 
     def list_records(self, table, **options):
         self.calls.append((table, options))
         return [{"fields": {"Setting_Value": self.value}}]
 
 
-def test_scoped_guidance_uses_explicit_content_profile_only():
+def test_scoped_guidance_uses_explicit_content_profile_only(monkeypatch):
+    monkeypatch.setattr("studio_produce.creative_guidance._owner_global_for_profile",
+                        lambda _client, _profile: "")
+
     chicago = "rec12345678901234"
     client = FakeClient('{"shared_direction":"local guide","thumbnail_instructions":"gold","narration_instructions":"warm"}')
     assert profile_id_from_records({"fields": {"Content_Profile": [chicago]}}) == chicago
@@ -37,3 +43,12 @@ def test_no_profile_does_not_guess_by_city_or_query_other_profiles():
 def test_defaults_and_malformed_settings_are_safe():
     assert parse_creative_guidance("bad json")["thumbnail_instructions"] == ""
     assert creative_prompt_suffix({}, mode="narration") == ""
+
+
+def test_missing_supabase_authority_does_not_read_legacy_guidance():
+    chicago = "rec12345678901234"
+    client = FakeClient('{"narration_instructions":"warm"}')
+    client._settings = {}
+    guidance = load_profile_creative_guidance(client, {"fields": {"Content_Profile": [chicago]}})
+    assert guidance["narration_instructions"] == ""
+    assert client.calls == []
