@@ -27,13 +27,25 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
       present(read("Platform_Post_URL", "platform_post_url")) ||
       present(read("Manual_Published_URL", "manual_published_url"))) return block("existing_publication_receipt");
 
-  // A previous dispatch may have succeeded despite the missing receipt. It is
-  // NOT equivalent to "never published" and must use the provider reconciliation
-  // lane, including when no external ID was persisted.
+  // An old approval-time "scheduled-hold" was incorrectly counted as
+  // dispatch #1 before the due time. Do not erase that historical marker.
+  // Only explicit, immutable, per-output reconciliation proof may admit that
+  // *single* fake attempt to the same fenced first-publish path. The proof is
+  // not a provider receipt; ambiguous/multi-dispatch rows remain blocked.
   const dispatchCount = Number(read("Studio_Publish_Dispatch_Count", "studio_publish_dispatch_count") || 0);
   const providerAttempts = Number(read("Publish_Attempt_Count", "publish_attempt_count") || 0);
+  const dispatchAt = time(read("Studio_Publish_Dispatch_At", "studio_publish_dispatch_at"));
+  const slotAt = time(read("Scheduled_Post_Date", "scheduled_post_date"));
+  const auditedEarlyHold =
+    dispatchCount === 1 && providerAttempts === 0 &&
+    str(read("Studio_Early_Hold_Recovery_Proof", "studio_early_hold_recovery_proof")) ===
+      "issue-2340-scheduled-hold-v1" &&
+    dispatchAt !== null && slotAt !== null && dispatchAt < slotAt &&
+    time(read("Studio_Early_Hold_Original_Dispatch_At", "studio_early_hold_original_dispatch_at")) === dispatchAt &&
+    time(read("Studio_Early_Hold_Original_Scheduled_At", "studio_early_hold_original_scheduled_at")) === slotAt;
   if (!Number.isFinite(dispatchCount) || !Number.isFinite(providerAttempts) ||
-      dispatchCount !== 0 || providerAttempts !== 0) return block("previous_attempt_requires_provider_reconciliation");
+      providerAttempts !== 0 || (dispatchCount !== 0 && !auditedEarlyHold))
+    return block("previous_attempt_requires_provider_reconciliation");
   for (const name of [
     "Studio_Publish_Dispatch_At", "Publish_Started_At", "Last_Publish_Attempt_At",
     "Platform_Post_ID", "Platform_Media_ID", "YouTube_Video_ID", "IG_Story_Container_ID",
@@ -41,6 +53,7 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
     "IG_Carousel_Parent_Container_ID", "IG_Carousel_Published_Media_ID",
     "FB_Slideshow_Meta_Video_ID", "TikTok_Draft_Publish_ID",
   ]) {
+    if (name === "Studio_Publish_Dispatch_At" && auditedEarlyHold) continue;
     if (present(read(name, name.toLowerCase()))) return block("prior_provider_or_dispatch_identity");
   }
   // Publish_Retry_Eligible=false forbids another attempt, not the first-ever
@@ -79,5 +92,6 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
     return block("media_not_ready");
   if (!photo && !final) return block("media_not_ready");
   if (!present(read("Output_Caption", "output_caption"))) return block("caption_not_ready");
-  return { eligible: true, reason: "fresh_approved_due_unattempted" };
+  return { eligible: true, reason: auditedEarlyHold
+    ? "audited_pre_schedule_hold_first_publish" : "fresh_approved_due_unattempted" };
 }
