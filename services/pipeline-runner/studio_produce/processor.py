@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from typing import Any
 
 from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
-from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
+from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job, write_job_if_changed
 from studio_produce.job import derive_route, is_finished_route, job_is_terminal, new_job, next_step, utc_now, with_step
 from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step, render_progress_detail
 from vibe_cut import is_vibe_cut_notes
@@ -19,8 +20,14 @@ _LOCK = threading.Lock()
 MAX_WALL_SECONDS = 12 * 60
 MAX_LOOPS = 200
 MAX_ATTEMPTS = 24
-WAIT_SECONDS = 2
-RENDER_WAIT_SECONDS = 8
+WAIT_BACKOFF_SECONDS = (5, 15, 30, 60)
+
+
+def wait_interval(streak: int, *, jitter: float | None = None) -> float:
+    """Bounded adaptive delay with 0-10 percent stagger across simultaneous jobs."""
+    base = WAIT_BACKOFF_SECONDS[min(max(1, streak) - 1, len(WAIT_BACKOFF_SECONDS) - 1)]
+    spread = random.uniform(0, 0.10) if jitter is None else max(0.0, min(0.10, jitter))
+    return base * (1.0 + spread)
 
 
 def start_job(production_request_record_id: str, *, resume: bool = False) -> dict[str, Any]:
@@ -117,6 +124,8 @@ def _run_safe(request_id: str) -> None:
 def _run(request_id: str) -> None:
     client = AirtableClient()
     started = time.monotonic()
+    wait_streak = 0
+    last_step = None
     for _ in range(MAX_LOOPS):
         if time.monotonic() - started >= MAX_WALL_SECONDS:
             logger.info("studio produce yielding request=%s after wall clock", request_id)
@@ -126,13 +135,16 @@ def _run(request_id: str) -> None:
         outputs = load_outputs(client, request_id, parent)
         job = read_job(request)
         step = str(job.get("step") or "themes").strip()
+        if step != last_step:
+            wait_streak = 0
+            last_step = step
         if step in TERMINAL_STEPS:
             return
         if int(job.get("attempt") or 1) > MAX_ATTEMPTS:
             write_job(client, request_id, with_step(job, "blocked", error=f"Step {step} exceeded {MAX_ATTEMPTS} attempts"))
             return
+        # Avoid writing a timestamp-only state on each handler invocation.
         job = with_step(job, step, detail=job.get("detail") or STEP_LABELS.get(step, step), bump_attempt=False)
-        write_job(client, request_id, job)
         handler = STEP_HANDLERS.get(step)
         if not handler:
             write_job(client, request_id, with_step(job, "blocked", error=f"Unknown step {step}"))
@@ -148,8 +160,9 @@ def _run(request_id: str) -> None:
         try:
             nxt = handler(client, ctx)
         except StepWait as exc:
-            write_job(client, request_id, with_step(job, step, detail=str(exc.detail), bump_attempt=False))
-            time.sleep(RENDER_WAIT_SECONDS if step == "render" else WAIT_SECONDS)
+            write_job_if_changed(client, request_id, read_job(request), with_step(job, step, detail=str(exc.detail), bump_attempt=False))
+            wait_streak += 1
+            time.sleep(wait_interval(wait_streak))
             continue
         except StepBlocked as exc:
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
@@ -163,17 +176,12 @@ def _run(request_id: str) -> None:
                     request_id,
                     exc,
                 )
-                write_job(
-                    client,
-                    request_id,
-                    with_step(
-                        job,
-                        "render",
-                        detail=render_progress_detail(ctx.get("outputs") or outputs),
-                        bump_attempt=False,
-                    ),
+                write_job_if_changed(
+                    client, request_id, read_job(request),
+                    with_step(job, "render", detail=render_progress_detail(ctx.get("outputs") or outputs), bump_attempt=False),
                 )
-                time.sleep(RENDER_WAIT_SECONDS)
+                wait_streak += 1
+                time.sleep(wait_interval(wait_streak))
                 continue
             logger.exception("studio produce step failed request=%s step=%s", request_id, step)
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
