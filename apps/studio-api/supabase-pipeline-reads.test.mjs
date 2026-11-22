@@ -1,5 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
-import test, { mock } from "node:test";
+import test, { mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -6705,3 +6705,7 @@ test("Master Original queue write-through retains R2 locator without copying vid
     globalThis.fetch = prior;
   }
 });
+
+// Supabase 5xx stubs in one test must not leave this module's circuit open
+// when the next independent test starts.
+afterEach(() => resetSupabaseCircuitForTests());
