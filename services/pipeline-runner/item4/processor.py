@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from item4.formulas import airtable_quote, smv1_exact_request_formula, smv1_pend
 from item4.media_assets import ensure_media_asset
 from item4.settings import PipelineSettings, field, pipeline_settings
 from item4.sources import resolve_master_source
+from studio_produce import workload_governor as governor
 
 
 def _now_iso() -> str:
@@ -218,6 +220,9 @@ def requeue_stale_processing(
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     requeued = 0
     for row in rows:
+        if governor.resource_active("transfer", str(row["id"])):
+            # An active worker may legitimately need more than the old 90s timeout.
+            continue
         fields = row.get("fields") or {}
         stamp = _row_stamp_ms(row)
         # Video master copies may legitimately run for tens of minutes.
@@ -813,7 +818,7 @@ def process_variant_group(
             raise
 
     first_error: Exception | None = None
-    ratio_workers = max(1, min(4, len(pending_rows)))
+    ratio_workers = max(1, min(governor.max_ratio_workers() if governor.enabled() else 4, len(pending_rows)))
     with ThreadPoolExecutor(max_workers=ratio_workers) as pool:
         # Submit in parallel, then collect in pending_rows order so callers
         # (and hermetic assertions) see a stable ratio sequence.
@@ -946,6 +951,19 @@ def _process_preview_pending(
 
 
 def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
+    if governor.enabled():
+        with governor.resource_slot("transfer", key=str(row["id"]), limit=1):
+            current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, str(row["id"]))
+            fields = current.get("fields") or {}
+            status = str(fields.get("Transfer_Status") or "")
+            preview = str(fields.get("Preview_Status") or "")
+            if status not in {"Pending", "Drive Uploaded"} and not (status == "Ready" and preview == "Pending"):
+                return {"processed": False, "reason": "no_longer_eligible", "queue_record_id": row["id"]}
+            return _process_queue_row_unlocked(client, current)
+    return _process_queue_row_unlocked(client, row)
+
+
+def _process_queue_row_unlocked(client: AirtableClient, row: dict) -> dict[str, Any]:
     settings = pipeline_settings(client)
     drive = GoogleDriveClient()
     variant = VariantServiceClient(settings)
@@ -1060,15 +1078,21 @@ def process_drain(
     groups: dict[str, list[dict]] = {}
 
     def _run_group(group_rows: list[dict]) -> list[dict[str, Any]]:
-        drive = GoogleDriveClient()
-        variant = VariantServiceClient(settings)
-        return process_variant_group(
-            client,
-            drive,
-            variant,
-            group_rows,
-            airtable_lock=airtable_lock,
-        )
+        with governor.resource_slot("photo_group", limit=governor.max_photo_groups()):
+            with ExitStack() as locks:
+                current_rows = []
+                for selected in sorted(group_rows, key=lambda row: str(row["id"])):
+                    locks.enter_context(governor.resource_slot("transfer", key=str(selected["id"]), limit=1))
+                    current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, str(selected["id"])) if governor.enabled() else selected
+                    if str((current.get("fields") or {}).get("Transfer_Status") or "") == "Pending":
+                        current_rows.append(current)
+                if not current_rows:
+                    return []
+                drive = GoogleDriveClient()
+                variant = VariantServiceClient(settings)
+                return process_variant_group(
+                    client, drive, variant, current_rows, airtable_lock=airtable_lock,
+                )
 
     def _safe_leftover(row: dict) -> dict[str, Any] | None:
         try:
@@ -1118,7 +1142,7 @@ def process_drain(
                 continue
             break
 
-        workers = max(1, min(int(photo_workers or 1), 10, max(1, len(groups) or 1)))
+        workers = max(1, min(int(photo_workers or 1), governor.max_photo_groups() if governor.enabled() else 10, max(1, len(groups) or 1)))
         if groups:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [pool.submit(_run_group, group_rows) for group_rows in groups.values()]
