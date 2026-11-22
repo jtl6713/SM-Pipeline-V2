@@ -14170,10 +14170,25 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   stage = "draft_backfill";
   const known = new Map(jobs.map((job) => [job.idea_id, job]));
   let backfilled = 0;
-  const [recentVibes, ordinaryDrafts] = await Promise.all([
+  // #2574: these are OPTIONAL backfill queries. The authoritative
+  // ready-production Idea discovery and R2 queue above may already contain
+  // actionable jobs; a failed legacy-shaped Supabase Draft lookup must not
+  // abort the entire dispatch before the claim stage.
+  const draftDiscovered = await Promise.allSettled([
     discoverReadyVibeProductionDrafts(env, { limit: options.vibeDiscoveryLimit || 25 }),
     discoverAssetReadyProductionDrafts(env, { limit: options.draftDiscoveryLimit || 120 }),
   ]);
+  const draftReadErrors = [];
+  const [recentVibes, ordinaryDrafts] = draftDiscovered.map((entry, index) => {
+    if (entry.status === "fulfilled" && Array.isArray(entry.value)) return entry.value;
+    const reason = entry.status === "rejected"
+      ? String(entry.reason?.message || entry.reason).slice(0, 220)
+      : "Production Draft discovery returned a non-array result";
+    const source = index === 0 ? "verified_vibes" : "asset_ready_drafts";
+    draftReadErrors.push({ source, reason });
+    console.warn("Ready-production optional draft backfill skipped", source, reason);
+    return [];
+  });
   const scannedDrafts = new Set();
   const existingDrafts = [...recentVibes, ...ordinaryDrafts].filter((draft) => {
     if (!draft?.id || scannedDrafts.has(draft.id)) return false;
@@ -14295,7 +14310,9 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   stage = "finished";
   await recordRun("completed", {
     discovered: outcome.discovered, enqueued: outcome.enqueued,
-    claimed: outcome.claimed, results: outcome.results.map(row => ({
+    claimed: outcome.claimed,
+    optional_draft_read_errors: draftReadErrors,
+    results: outcome.results.map(row => ({
       idea_id: row.idea_id, status: row.status,
       stage: row.stage || null, error: String(row.error || "").slice(0, 180) || null,
     })),
