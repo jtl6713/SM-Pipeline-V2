@@ -112,8 +112,12 @@ def _validate_recovery_a3(request_payload: dict) -> tuple[StageRequest | None, t
     Only one exact record id is accepted, regardless of caller-supplied flags.
     The background A3 thread retains a cross-process governor resource lease.
     """
+    if not isinstance(request_payload, dict):
+        return None, (jsonify({"error": "recovery_a3_targeted_only"}), 422)
     extra = request_payload.get("extra")
-    if not isinstance(request_payload, dict) or not isinstance(extra, dict) or request_payload.keys() - {"extra"}:
+    allowed_extra = {"record_ids", "trigger_a4", "wait_for_next", "drain", "background"}
+    if (not isinstance(extra, dict) or request_payload.keys() - {"extra"}
+            or extra.keys() - allowed_extra):
         return None, (jsonify({"error": "recovery_a3_targeted_only"}), 422)
     ids = extra.get("record_ids")
     if not isinstance(ids, list) or len(ids) != 1:
