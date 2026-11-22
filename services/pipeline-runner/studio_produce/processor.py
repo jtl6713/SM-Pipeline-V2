@@ -287,5 +287,9 @@ def _run(
     return "yielded_progressed" if advanced else "yielded"
 
 # Restore queued work when the Windows runner restarts (no provider publishing).
+# Misconfigured durable storage must not take read-only Studio endpoints offline.
 if governor.enabled():
-    governor.ensure_dispatcher(_run_governed)
+    try:
+        governor.ensure_dispatcher(_run_governed)
+    except Exception:
+        logger.exception("governed producer admission disabled: durable store unavailable")
