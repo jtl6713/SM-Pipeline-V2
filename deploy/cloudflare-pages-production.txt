@@ -919,3 +919,4 @@ Deploy #2546 Studio Ideas UI 0.6.1030: single AI Idea Generation card with Quant
 
 2026-11-21: #2574 Ideas status shows last autonomous handoff failures and makes countdown nonauthoritative. Trigger protected Studio Pages deployment.
 Deploy Studio Pages UI 0.6.1040: Factory Repair #2563 restores readable rows, visible exact-output Open buttons, clickable titles and 118 held Meta output navigation. No Worker/database/publish mutations.
+Deploy Studio Pages UI 0.6.1041: Factory Repair title clicks work for every kind of record (production requests, ideas and outputs). Issue #2563 follow-up. UI-only; retain publish holds.
