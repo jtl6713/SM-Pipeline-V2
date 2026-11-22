@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from render.fields import field, field_str, first_linked_id, linked_ids
@@ -150,3 +151,26 @@ def write_job(client: AirtableClient, request_id: str, job: dict[str, Any]) -> d
         request_id,
         {JOB_FIELD: json.dumps(job)},
     )
+
+def job_write_required(previous: dict[str, Any], desired: dict[str, Any], *, heartbeat_seconds: int = 60) -> bool:
+    """Ignore timestamp-only changes until a bounded liveness heartbeat is due."""
+    for key in set(previous or {}) | set(desired or {}):
+        if key != "updated_at" and (previous or {}).get(key) != (desired or {}).get(key):
+            return True
+    stamp = str((previous or {}).get("updated_at") or "")
+    try:
+        last = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last).total_seconds() >= heartbeat_seconds
+    except ValueError:
+        return True
+
+
+def write_job_if_changed(
+    client: AirtableClient, request_id: str, previous: dict[str, Any], desired: dict[str, Any],
+) -> bool:
+    if not job_write_required(previous, desired):
+        return False
+    write_job(client, request_id, desired)
+    return True
