@@ -99,6 +99,58 @@ class RetirementEvidenceGateTest(unittest.TestCase):
         item["quiet_window"]["sources"]["studio_worker"][0]["attempts"] = 1
         self.assertFalse(self.check(item)["evidence_layout_complete"])
 
+    def verified_inactive(self):
+        return {
+            "mode": "verified_inactive",
+            "inactive_since_utc": "2026-11-21T08:00:00Z",
+            "verified_through_utc": "2026-11-21T18:00:00Z",
+            "inventory_before_artifact_ref": "provider-admin-export-before",
+            "inventory_after_artifact_ref": "provider-admin-export-after",
+            "full_window_audit_artifact_ref": "provider-complete-audit-log",
+            "independent_reviewer": "separate-operator",
+            "verified_inactive": True,
+        }
+
+    def test_provably_disabled_sources_need_no_fake_hourly_collector(self):
+        item = copy.deepcopy(self.manifest)
+        for source in ("standalone_scripts", "github_actions", "make_scenarios",
+                       "external_integrations"):
+            item["quiet_window"]["sources"][source] = self.verified_inactive()
+        result = self.check(item)
+        self.assertTrue(result["evidence_layout_complete"], result["blockers"])
+        self.assertEqual(result["metered_sources"], ["pipeline_runner", "studio_worker"])
+        self.assertEqual(len(result["verified_inactive_sources"]), 4)
+        self.assertFalse(result["release_authorized"])
+        self.assertTrue(result["manual_verification_required"])
+        # Inactive-source proof cannot conceal an actual live Worker attempt.
+        item["quiet_window"]["sources"]["studio_worker"][1]["attempts"] = 1
+        self.assertFalse(self.check(item)["evidence_layout_complete"])
+
+    def test_core_worker_runner_cannot_bypass_hourly_measurement(self):
+        for source in ("studio_worker", "pipeline_runner"):
+            item = copy.deepcopy(self.manifest)
+            item["quiet_window"]["sources"][source] = self.verified_inactive()
+            result = self.check(item)
+            self.assertFalse(result["evidence_layout_complete"])
+            self.assertTrue(any("core runtime" in x for x in result["blockers"]))
+
+    def test_inactive_proof_must_cover_whole_window_and_have_audit_trail(self):
+        for bad in (
+            {"inactive_since_utc": "2026-11-21T09:00:01Z"},
+            {"verified_through_utc": "2026-11-21T14:59:59Z"},
+            {"full_window_audit_artifact_ref": ""},
+            {"inventory_before_artifact_ref": ""},
+            {"inventory_after_artifact_ref": ""},
+            {"independent_reviewer": ""},
+            {"verified_inactive": False},
+            {"mode": "claimed_inactive"},
+        ):
+            item = copy.deepcopy(self.manifest)
+            evidence = self.verified_inactive()
+            evidence.update(bad)
+            item["quiet_window"]["sources"]["make_scenarios"] = evidence
+            self.assertFalse(self.check(item)["evidence_layout_complete"], bad)
+
     def test_missing_review_artifact_or_attestation_fails_closed(self):
         for key in PROOFS:
             item = copy.deepcopy(self.manifest)
