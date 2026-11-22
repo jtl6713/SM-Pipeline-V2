@@ -468,9 +468,12 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     if _FIND_CONTAINS.match(text) or _FIND_CONTAINS_SQ.match(text):
         return _find_text_filter(table_id, text)
     upper = text.upper()
-    if ("FIND(" in upper or "ARRAYJOIN(" in upper) and not (
+    # Composite AND/OR with FIND must reach recursive per-clause validation.
+    # Python 'and' binds tighter than 'or'; the old precedence rejected all
+    # nested FIND calls, including R2's supported exact-output selector.
+    if (("FIND(" in upper or "ARRAYJOIN(" in upper) and not (
         text.startswith("AND(") or text.startswith("OR(")
-    ):
+    )):
         return None
 
     match = _RECORD_ID.match(text)
