@@ -1,1 +1,3 @@
 One-time supervised incident #2670 Bethesda Terrace A3 classification canary. Exact media id recUCUmpw4EftqOpQ, profile NYC. No provider publishing or general runner unpause; prereq live recovery gate and single-slot governor.
+
+2026-11-22 follow-up: run ONE nonpublishing Bethesda Terrace retry only after #2686 guarded A3 metadata-write repair is merged and live deployed. Do not mass replay, start production, or release publishing holds.
