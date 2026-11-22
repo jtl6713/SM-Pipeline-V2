@@ -9178,7 +9178,7 @@ export async function studioIdeaEnabledProfile(env, authorization, profileId) {
 }
 /*__STUDIO_WORKER_END:studioIdeaEnabledProfile__*/
 
-export async function studioIdeaCreateBatch(env, profile, count, quality, authorization) {
+export async function studioIdeaCreateBatch(env, profile, count, quality, authorization, sourcingMode = "balanced") {
   const stamp = new Date().toISOString();
   const random = crypto.randomUUID().split("-")[0].toUpperCase();
   const batchId = `IDEAS-${stamp.slice(0, 10).replace(/-/g, "")}-${random}`;
@@ -9190,6 +9190,7 @@ export async function studioIdeaCreateBatch(env, profile, count, quality, author
         Status: "Pending",
         Requested_Count: count,
         Quality: quality,
+        Asset_Sourcing_Mode: sourcingMode,
         Generated_Count: 0,
         Requested_At: stamp,
         Requested_By: authorization?.email || null,
@@ -9424,7 +9425,7 @@ export async function studioIdeaStartPhotoListening(env, authorization, createdI
 }
 /*__STUDIO_WORKER_END:studioIdeaStartPhotoListening__*/
 
-export async function studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality) {
+export async function studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality, sourcingMode = "balanced") {
   await studioIdeaUpdateBatch(env, batch.id, {
     Status: "Running",
     Started_At: new Date().toISOString(),
@@ -9439,6 +9440,7 @@ export async function studioIdeaRunPythonBatch(env, authorization, profile, batc
         batch_record_id: batch.id,
         requested_count: count,
         quality,
+        asset_sourcing_mode: sourcingMode,
         trigger_i2: false,
       },
     }, "I1");
@@ -9487,6 +9489,10 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const count = Number(payload?.count);
   const quality = String(payload?.quality || "Highest Quality").trim();
+  const sourcingMode = String(payload?.asset_sourcing_mode || "balanced").trim().toLowerCase();
+  if (!["existing", "balanced", "explore"].includes(sourcingMode)) {
+    throw new HttpError(400, "Asset sourcing must be existing, balanced or explore");
+  }
   if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) {
     throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
   }
@@ -9506,7 +9512,7 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
   const profileId = requestedProfileId(null, payload);
   // Blocks a second Generate while Manual_Idea_Batch is still linked.
   const profile = await studioIdeaEnabledProfile(env, authorization, profileId);
-  const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
+  const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization, sourcingMode);
   await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
 
   // Opt-in durable I1: the runner persists a job receipt before this request
@@ -9531,6 +9537,7 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
           profile_record_id: profile.id,
           requested_count: count,
           quality,
+          asset_sourcing_mode: sourcingMode,
         }),
         signal: AbortSignal.timeout(10000),
       });
@@ -9576,7 +9583,7 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
   // waitUntil; the UI already polls /api/ideas/generate/:batchId.
   const finish = async () => {
     try {
-      return await studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality);
+      return await studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality, sourcingMode);
     } catch (error) {
       try {
         await studioIdeaUpdateBatch(env, batch.id, {

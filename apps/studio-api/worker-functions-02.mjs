@@ -3870,6 +3870,20 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
   // An explicit draft payload may override defaults; never let that silently
   // drop the Idea's original human creative direction.
   cleaned.production_notes = mergeIdeaProducerDirection(cleaned.production_notes, f(idea, "Idea_Summary"));
+  // #2647: A novel, media-incomplete Idea must arrive in pre-production with
+  // its capture requirements; this is a Draft instruction, never an approval.
+  const capturePlan = f(idea, "Required_Asset_Checklist");
+  const sourcingReadiness = String(f(idea, "Asset_Readiness") || "");
+  if (["Needs new media", "Partial"].includes(sourcingReadiness)
+      && Array.isArray(capturePlan) && capturePlan.length) {
+    const captureItems = capturePlan.map(value => String(value || "").trim().slice(0, 100))
+      .filter(Boolean).slice(0, 5);
+    if (captureItems.length) {
+      cleaned.production_notes = [cleaned.production_notes,
+        "Media to capture/upload before production: " + captureItems.join("; ")]
+        .filter(Boolean).join("\n");
+    }
+  }
   if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
     cleaned.primary_location = defaults.primary_location;
   }
@@ -12745,6 +12759,15 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
   const title = String(f(record, "Candidate_Title") || "").trim();
   const summary = String(f(record, "Idea_Summary") || "").trim();
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
+
+  // #2647: Novel ideas are valuable before footage exists, but missing
+  // source media must never bypass the I3/I4 handoff gate. Operators can
+  // create/edit a Production Draft and attach media first; attaching verified
+  // assets transitions the Idea into the normal photo-wait workflow.
+  if (String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Needs new media") {
+    throw new HttpError(409,
+      "This idea needs new photos or clips before promotion. Open Add media / pre-production, attach the required assets, then continue.");
+  }
 
   const input = cleanPromotionPayload(payload);
   const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
