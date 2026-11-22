@@ -58,7 +58,7 @@ test("#2563 visible Factory banner counts media and provider issues and identifi
   assert.match(source,/meta_repair_missing_assets/);
   assert.match(source,/meta_repair_asset_message/);
   assert.match(source,/meta_repair_owner/);
-  assert.match(source,/requiring your action/);
+  assert.match(source,/currently require your action/);
   assert.match(source,/View affected outputs/);
   assert.match(source,/No user action requested/);
 });
