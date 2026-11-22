@@ -400,6 +400,10 @@ def ensure_dispatcher(worker: Callable[[str, str], None]) -> None:
     global _dispatch_started
     if not enabled():
         return
+    # Fail synchronously if the persistent coordination store is unavailable.
+    # Never start a thread that logs storage errors every two seconds forever.
+    with _connect() as db:
+        db.execute("SELECT 1")
     with _dispatch_lock:
         if _dispatch_started:
             return
