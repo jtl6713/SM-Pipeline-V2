@@ -19,6 +19,7 @@ from pathlib import Path
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_PROFILES_TABLE, IDEA_BATCHES_TABLE, SOURCE_CANDIDATES_TABLE
 from i1.processor import process_request
+from i1.asset_sourcing import sourcing_mode
 
 _LOG = logging.getLogger("pipeline-runner.i1.durable")
 _RECORD = re.compile(r"^rec[A-Za-z0-9]{14}$")
@@ -60,6 +61,7 @@ def _connect() -> sqlite3.Connection:
         profile_id TEXT NOT NULL,
         requested_count INTEGER NOT NULL,
         quality TEXT NOT NULL,
+        asset_sourcing_mode TEXT NOT NULL DEFAULT 'balanced',
         status TEXT NOT NULL DEFAULT 'queued',
         run_token TEXT,
         lease_until REAL NOT NULL DEFAULT 0,
@@ -72,7 +74,9 @@ def _connect() -> sqlite3.Connection:
     columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
     if "resume_count" not in columns:
         db.execute("ALTER TABLE jobs ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0")
-        db.commit()
+    if "asset_sourcing_mode" not in columns:
+        db.execute("ALTER TABLE jobs ADD COLUMN asset_sourcing_mode TEXT NOT NULL DEFAULT 'balanced'")
+    db.commit()
     return db
 
 
@@ -87,7 +91,8 @@ def _db():
         db.close()
 
 
-def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
+def enqueue(batch_id: str, profile_id: str, count: int, quality: str,
+            asset_sourcing_mode: str = "balanced") -> dict:
     """Idempotent admission; identical batch requests never enqueue twice."""
     if not enabled():
         raise RuntimeError("I1 durable queue is disabled")
@@ -95,6 +100,7 @@ def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
         raise ValueError("valid batch_record_id and profile_record_id are required")
     if not isinstance(count, int) or not 1 <= count <= 10 or quality not in _QUALITIES:
         raise ValueError("invalid I1 request")
+    mode = sourcing_mode(asset_sourcing_mode)
     # Start/check the consumer BEFORE committing a receipt. Otherwise a startup
     # failure could return HTTP 503 after admission while the Worker incorrectly
     # marks the Airtable batch Failed, even though the job may run later.
@@ -103,12 +109,12 @@ def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
     with _db() as db:
         inserted = db.execute(
             """INSERT OR IGNORE INTO jobs
-            (batch_id, profile_id, requested_count, quality, status, created_at, updated_at)
-            VALUES (?,?,?,?, 'queued', ?,?)""",
-            (batch_id, profile_id, count, quality, now, now),
+            (batch_id, profile_id, requested_count, quality, asset_sourcing_mode, status, created_at, updated_at)
+            VALUES (?,?,?,?,?, 'queued', ?,?)""",
+            (batch_id, profile_id, count, quality, mode, now, now),
         ).rowcount == 1
         row = db.execute("SELECT * FROM jobs WHERE batch_id=?", (batch_id,)).fetchone()
-        if (row["profile_id"], row["requested_count"], row["quality"]) != (profile_id, count, quality):
+        if (row["profile_id"], row["requested_count"], row["quality"], row["asset_sourcing_mode"]) != (profile_id, count, quality, mode):
             raise ValueError("batch_id already exists with different immutable parameters")
         result = {"accepted": True, "batch_record_id": batch_id, "job_status": row["status"],
                   "already_exists": not inserted}
@@ -293,6 +299,8 @@ def _work(job: dict) -> None:
         profile_links = fields.get("Content_Profile") or []
         if profile_id not in profile_links or int(fields.get("Requested_Count") or 0) != expected:
             raise RuntimeError("batch profile/count mismatch: refusing generation")
+        if sourcing_mode(fields.get("Asset_Sourcing_Mode", "balanced")) != job["asset_sourcing_mode"]:
+            raise RuntimeError("batch sourcing mode differs from immutable job admission")
         existing = _linked_idea_count(batch)
         # A completed batch is immutable; do not downgrade it to Failed even
         # if its linked-record count later changes or a stale lease is reclaimed.
@@ -334,7 +342,8 @@ def _work(job: dict) -> None:
                 (batch.get("fields") or {}).get("Idea Candidates") or [])
             result = process_request(
                 profile_record_id=profile_id, batch_record_id=batch_id,
-                requested_count=missing, quality=job["quality"], trigger_i2=False,
+                requested_count=missing, quality=job["quality"],
+                asset_sourcing_mode=job["asset_sourcing_mode"], trigger_i2=False,
                 excluded_titles=tuple(rejected_titles[-24:]),
                 exclude_titles=linked_titles,
             )
