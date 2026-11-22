@@ -69,7 +69,13 @@ def process_request(
     # #2294: do not count a Facebook Photo Set publishing attempt, reserve a
     # lock, or let FB0 silently mint assets when its exact, final-approved
     # Supabase Carousel Slides package is absent. Read-only preflight first.
-    if field_str(output, "Platform_Output_Type") == "Facebook Photo Set":
+    # Only V2 native photo packages carry a selected clip count or selected
+    # asset manifest. The legacy pre-V2 photo route has neither and keeps its
+    # historical approved-slide count reconciliation; never infer V2 approval
+    # from legacy source metadata. V2 with an incomplete manifest fails closed.
+    if (field_str(output, "Platform_Output_Type") == "Facebook Photo Set"
+            and (field(output, "Selected_Clip_Count") is not None
+                 or field(output, "Selected_Assets_JSON") is not None)):
         ready = list_ready_slides(
             client, field_str(output, "Output_ID"),
             output_record_id=record_id, max_photos=11,
