@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -27,6 +28,17 @@ DEFAULT_SCALE = 0.12
 DEFAULT_MARGIN = 30
 DEFAULT_OPACITY = 1.0
 BRANDED_PATH_MARKERS = ("/lettered/", "/watermarked/")
+# #2371: the owner-approved shared small watermark is precomposited into
+# immutable SHA-prefixed NYC 4:5 R2 derivatives. The normal native lettering
+# processor must not reapply its (top-left) watermark or swap the parent clip
+# back to a legacy /lettered/<output>/<index>.jpg preview.
+# Keep the exemption narrow: exact owned CDN, exact incident cohort, 16-hex
+# content-addressed filenames, never a generic "shared-small" URL.
+_VERIFIED_NYC8_SMALL_WATERMARK = re.compile(
+    r"^https://media\.chicagoshining\.com/studio/previews/repairs/"
+    r"issue2371/nyc-(?:2221|2222|2223|2226|2230)/"
+    r"shared-small-bottom-right/slide-0[1-8]-[a-f0-9]{16}\.jpg$"
+)
 # Proven Chicago small brand mark (Airtable recTnq3abS2rcsTzK / Supabase densify).
 # Used when the C6 view snapshot returns empty under Phase 6 SoR so Asset Manager
 # cannot be parked by a catalog/view miss for a mark that already lives on Drive.
@@ -157,8 +169,9 @@ def watermark_media_bytes(
 
 
 def already_branded_url(url: str) -> bool:
-    lower = str(url or "").lower()
-    return any(marker in lower for marker in BRANDED_PATH_MARKERS)
+    lower = str(url or "").strip().lower()
+    return (any(marker in lower for marker in BRANDED_PATH_MARKERS)
+            or bool(_VERIFIED_NYC8_SMALL_WATERMARK.fullmatch(lower)))
 
 
 def watermark_service_url() -> str:
