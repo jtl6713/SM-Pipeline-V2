@@ -11348,7 +11348,7 @@ export function assertProductionRequestFanoutComplete(outputFanout) {
   if (enabled < 1) {
     throw new HttpError(409, "Promotion created the Content Item, but there are no enabled outputs to route into the Platform Pipeline.");
   }
-  if (blocked > 0 || remaining > 0 || (routed < 1 && !already)) {
+  if (blocked > 0 || remaining > 0 || (!already && routed !== enabled)) {
     throw new HttpError(
       409,
       `Promotion created the Content Item, but Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). The request is not complete and can be retried safely.`

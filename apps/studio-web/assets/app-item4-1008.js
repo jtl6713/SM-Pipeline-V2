@@ -343,7 +343,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1064-native-gallery-draft-2294";
+  const BUILD_ID = "item4-0.6.1065-output-lifecycle-state";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14296,9 +14296,22 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
 
-    host.innerHTML = rows.map(row => {
+    const linkedCount = rows.filter(row => row.platform_output_exists === true
+      || (Array.isArray(row.platform_output_links) && row.platform_output_links.length === 1)).length;
+    const jobStep = String(activeProductionRequest?.studio_production_job?.step || "").trim().toLowerCase();
+    const blocked = ["blocked", "escalated"].includes(jobStep);
+    const progressState = linkedCount === rows.length ? "Created" : blocked ? "Blocked" : "Creating";
+    const progressDetail = blocked
+      ? String(activeProductionRequest?.studio_production_job?.error || "Studio is repairing the missing destinations automatically.")
+      : linkedCount === rows.length
+        ? "Every enabled destination has a committed Platform Output."
+        : "Studio is creating and verifying the missing destinations automatically.";
+
+    host.innerHTML = `<div class="requested-output-progress" role="status"><strong>Platform Outputs · ${progressState} ${linkedCount}/${rows.length}</strong><span>${escapeHtml(progressDetail)}</span></div>` + rows.map(row => {
       const count = overrideCount(row);
       const effective = row.effective || {};
+      const created = row.platform_output_exists === true
+        || (Array.isArray(row.platform_output_links) && row.platform_output_links.length === 1);
       const detail = [
         effective.video_duration_seconds ? `${effective.video_duration_seconds}s` : null,
         effective.video_clip_count_mode && ["Reel","Video Draft","Short","Standard Video"].includes(row.output_type)
@@ -14317,6 +14330,7 @@ function timedScriptAssetLabel(asset, index) {
           <div class="requested-output-detail">${escapeHtml(detail || "Inherits master request")}</div>
         </div>
         <div class="requested-output-actions">
+          <span class="${created ? "inherit-pill" : blocked ? "override-count" : "inherit-pill"}">${created ? "Created" : blocked ? "Blocked" : "Creating"}</span>
           ${count ? `<span class="override-count">${count} override${count === 1 ? "" : "s"}</span>` : '<span class="inherit-pill">Inherits master</span>'}
           <button type="button" class="button secondary small" data-edit-pr-output="${escapeHtml(row.id)}">Override</button>
         </div>
@@ -23476,8 +23490,16 @@ function timedScriptAssetLabel(asset, index) {
         const content = entry.content;
         const number = escapeHtml(String(content.content_id ?? ""));
         const title = escapeHtml(String(content.title || "Untitled content"));
+        const progress = content.platform_output_progress || {};
+        const planned = Number(progress.planned_count || 0);
+        const created = Number(progress.created_count || 0);
+        const state = String(progress.state || (planned ? "Creating" : "Blocked"));
+        const progressText = planned
+          ? `Platform Outputs · ${escapeHtml(state)} ${created}/${planned}`
+          : "Platform Outputs · Blocked 0/0 — no enabled output plan";
+        const reason = String(progress.error || "Studio is reconciling this item automatically.");
         return '<tbody class="pipeline-content-empty"><tr><td colspan="6"><strong>Content #' + number
-          + ' – ' + title + '</strong><div class="subtle">No platform outputs generated yet</div></td></tr></tbody>';
+          + ' – ' + title + '</strong><div class="subtle">' + progressText + '</div><div class="subtle">' + escapeHtml(reason) + '</div></td></tr></tbody>';
       }).join("");
     })();
 

@@ -33,7 +33,9 @@ test("output groups remain sorted across states, not partitioned into archived g
   const b=ui.indexOf("const head =",a);
   const body=ui.slice(a,b);
   assert.ok(body.includes("groupedPipelineRecords(source)"));
-  assert.ok(body.includes("No platform outputs generated yet"));
+  assert.ok(body.includes("Platform Outputs · ${escapeHtml(state)} ${created}/${planned}"));
+  assert.ok(body.includes("Platform Outputs · Blocked 0/0 — no enabled output plan"));
+  assert.ok(!body.includes("No platform outputs generated yet"));
   assert.ok(ui.includes("pipelineContentRecords.filter(content => !represented.has"));
   assert.ok(ui.includes("outputsResult.content_groups"));
   assert.ok(!body.includes("partitionPipelineGroups(source)"));
