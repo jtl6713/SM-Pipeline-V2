@@ -37,7 +37,7 @@ test("legacy I1 behavior remains behind disabled-by-default rollout flag", () =>
 test("Supabase-only manual generation skips legacy profile override writes and cleanup", () => {
   const guard = 'if (studioWriteSource(env) === "supabase") return null;';
   const set = section("studioIdeaSetProfileOverrides", "studioIdeaClearProfileOverrides");
-  const clear = section("studioIdeaClearProfileOverrides", "studioIdeaUnwrap");
+  const clear = section("studioIdeaClearProfileOverrides");
   for (const body of [set, clear]) {
     assert.ok(body.includes(guard), "Supabase-only profile bypass must be explicit");
     assert.ok(body.indexOf(guard) < body.indexOf("airtableFetch("),
