@@ -1,0 +1,3 @@
+Incident #2670. Nonpublishing-media recovery stage live dry-run only.
+Require deployed runner #2723; use one authenticated R2 dry_run=true max_runs=1 on exact existing output recbL59HXWyw8EJ8p (#5162).
+No provider publishing route, no approval or DNP changes, no Airtable/Make, no bulk job admission. Recheck recovery_read_only=true after test.
