@@ -1,0 +1,114 @@
+name: Incident 2670 - Admit already staged exact NYC producer
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/incident-2670-admit-only.txt'
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-admit-only
+  cancel-in-progress: false
+jobs:
+  exact-admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Verify public recovery fence remains active with exact producer scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 'https://pipeline.chicagoshining.com/health' -o /tmp/2670-health.json
+          jq -e '.ok==true and .recovery_read_only==true and .recovery_producer_only_enabled==true and .recovery_producer_scope=="exact_request" and .workload_governor_enabled==true and .i1_durable_jobs==false and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/2670-health.json >/dev/null
+          echo 'admit_only_public_fence=PASS'
+      - name: Validate exact NYC record on Windows and admit only one producer job
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then TOKEN="$candidate"; break; fi
+          done
+          test -n "$TOKEN" || { echo 'ops_auth_unavailable'; exit 1; }
+          cat >/tmp/exact-admit.ps1 <<'PS'
+          $ErrorActionPreference='Stop'
+          $path='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          if (-not (Test-Path -LiteralPath $path)) {throw 'runner_env_missing'}
+          function Read-Setting([string]$name) {
+            $line=Get-Content -LiteralPath $path | Where-Object {$_ -match ('^\s*' + [regex]::Escape($name) + '\s*=')} | Select-Object -Last 1
+            if (-not $line) {throw "required_setting_missing_$name"}
+            return ([string]$line -split '=',2)[1].Trim().Trim('"').Trim("'")
+          }
+          $requestId='recR4EQcshFZ4fNL0'
+          if ((Read-Setting 'PIPELINE_RUNNER_RECOVERY_READ_ONLY') -notmatch '^(1|true|yes)$') {throw 'publisher_recovery_fence_missing'}
+          if ((Read-Setting 'PIPELINE_RUNNER_RECOVERY_PRODUCER_ONLY') -notmatch '^(1|true|yes)$') {throw 'producer_canary_not_staged'}
+          if ((Read-Setting 'PIPELINE_RUNNER_RECOVERY_PRODUCER_TARGET') -ne $requestId) {throw 'incorrect_producer_target'}
+          $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if (-not $h.ok -or -not $h.recovery_read_only -or -not $h.recovery_producer_only_enabled -or $h.recovery_producer_scope -ne 'exact_request' -or $h.i1_durable_jobs -or $h.airtable_activity.any_activity) {throw 'live_recovery_gate_failed'}
+          $secret=Read-Setting 'PIPELINE_RUNNER_SHARED_SECRET'
+          $headers=@{'X-Pipeline-Secret'=$secret}
+          $work=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $headers -TimeoutSec 20
+          if (-not $work.enabled -or $work.admission_paused -or $work.database_circuit_open -or $work.max_jobs -ne 1 -or $work.active_jobs -ne 0 -or $work.queued_jobs -ne 0) {throw 'workload_governor_not_quiet'}
+          $sb=(Read-Setting 'SUPABASE_URL').TrimEnd('/')
+          $key=Read-Setting 'SUPABASE_SERVICE_ROLE_KEY'
+          $sbHeaders=@{apikey=$key;Authorization="Bearer $key"}
+          $rows=@(Invoke-RestMethod -Uri "$sb/rest/v1/production_requests?airtable_record_id=eq.$requestId&select=id,request_status,master_asset_status,output_plan_status,variant_status,production_job&limit=1" -Headers $sbHeaders -TimeoutSec 20)
+          if ($rows.Count -ne 1) {throw 'canary_request_not_unique'}
+          $request=$rows[0]
+          if ($request.request_status -ne 'Draft' -or $request.master_asset_status -ne 'Ready' -or $request.output_plan_status -ne 'Ready' -or $request.variant_status -ne 'Preparing') {throw 'canary_request_state_changed'}
+          $linkUri="$sb/rest/v1/production_request_outputs?production_request_id=eq.$($request.id)&select=platform_output_id"
+          $raw=Invoke-WebRequest -Method GET -UseBasicParsing -Uri $linkUri -Headers $sbHeaders -TimeoutSec 20
+          $json=([string]$raw.Content) -replace '\s',''
+          if ($json -ne '[{"platform_output_id":null},{"platform_output_id":null}]') {throw 'unexpected_output_links'}
+          Write-Output 'admit_preflight=PASS'
+          $body=@{production_request_record_id=$requestId;resume=$false} | ConvertTo-Json -Compress
+          $answer=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/jobs/studio-produce' -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 30
+          if (-not $answer.ok -or -not $answer.accepted -or $answer.production_request_record_id -ne $requestId) {throw 'producer_not_accepted'}
+          Write-Output 'admit_exact_nyc=ACCEPTED'
+          Start-Sleep -Seconds 12
+          $status=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $headers -TimeoutSec 20
+          $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
+          if ($status.database_circuit_open -or $status.active_jobs -gt 1 -or -not $health.recovery_read_only -or -not $health.recovery_producer_only_enabled) {throw 'post_admission_safety_failed'}
+          Write-Output ("admit_snapshot=active:{0};queued:{1};paused:{2}" -f $status.active_jobs,$status.queued_jobs,$status.paused_jobs)
+          Write-Output 'admit_provider_fence=STILL_ENABLED'
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("/tmp/exact-admit.json").write_text(json.dumps({"command": Path("/tmp/exact-admit.ps1").read_text(), "confirm": True}))
+          PY
+          code=''
+          for n in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/launch.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/exact-admit.json || true)
+            if [[ "$code" == 202 ]]; then break; fi
+            if [[ "$code" != 409 ]]; then echo "ops_shell_http=$code"; exit 1; fi
+            sleep 3
+          done
+          [[ "$code" == 202 ]] || { echo 'ops_shell_busy'; exit 1; }
+          job=$(jq -r '.job.id // empty' /tmp/launch.json)
+          test -n "$job"
+          for n in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/job.json
+            state=$(jq -r '.job.status // empty' /tmp/job.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/job.json | grep -E '^(admit_preflight|admit_exact_nyc|admit_snapshot|admit_provider_fence)=' || true
+              jq -e '.job.log|contains("admit_provider_fence=STILL_ENABLED")' /tmp/job.json >/dev/null
+              echo 'incident_2670_exact_producer_canary=PASS'
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'incident_2670_exact_producer_canary=FAILED'
+              jq -r '.job.log // ""' /tmp/job.json | tail -n 5 | cut -c1-220
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'incident_2670_exact_producer_canary=TIMED_OUT'
+          exit 1
