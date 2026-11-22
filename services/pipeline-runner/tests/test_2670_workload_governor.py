@@ -57,7 +57,14 @@ def test_circuit_blocks_new_heavy_jobs_without_discarding_queue(isolated_governo
     assert g.snapshot()["queued_jobs"] == 1
     with g._connect() as db:
         db.execute("UPDATE governor_control SET until_at=0 WHERE name='database'")
-    assert g.claim_next()[0] == "recA"
+    g.enqueue("recB")
+    half_open = g.claim_next()
+    assert half_open[0] == "recA"
+    assert g.claim_next() is None  # half-open admits one canary, not two
+    with g.resource_slot("supabase_read", limit=2, allow_during_circuit=True):
+        pass
+    g.finish_job(*half_open)
+    assert g.claim_next()[0] == "recB"
 
 
 def test_transfer_claim_cross_thread_single_flight(isolated_governor):
