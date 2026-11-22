@@ -9212,6 +9212,9 @@ export async function studioIdeaUpdateBatch(env, recordId, fields) {
 /*__STUDIO_WORKER_END:studioIdeaUpdateBatch__*/
 
 export async function studioIdeaSetProfileOverrides(env, profileId, batchRecordId, count, quality) {
+  // Supabase-only I1 carries count, quality, batch and profile in the durable
+  // job request; the legacy profile overrides are neither needed nor writable.
+  if (studioWriteSource(env) === "supabase") return null;
   return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
     method: "PATCH",
     body: JSON.stringify({
@@ -9227,6 +9230,9 @@ export async function studioIdeaSetProfileOverrides(env, profileId, batchRecordI
 /*__STUDIO_WORKER_END:studioIdeaSetProfileOverrides__*/
 
 export async function studioIdeaClearProfileOverrides(env, profileId) {
+  // No profile override was written in Supabase-only mode. The idea batch
+  // itself is the canonical lease and job record; never PATCH a legacy link.
+  if (studioWriteSource(env) === "supabase") return null;
   return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
     method: "PATCH",
     body: JSON.stringify({

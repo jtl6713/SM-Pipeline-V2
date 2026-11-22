@@ -33,3 +33,20 @@ test("legacy I1 behavior remains behind disabled-by-default rollout flag", () =>
   assert.match(body, /ctx\.waitUntil\(finish\(\)/);
   assert.match(body, /backend: "python"/);
 });
+
+test("Supabase-only manual generation skips legacy profile override writes and cleanup", () => {
+  const guard = 'if (studioWriteSource(env) === "supabase") return null;';
+  const set = section("studioIdeaSetProfileOverrides", "studioIdeaClearProfileOverrides");
+  const clear = section("studioIdeaClearProfileOverrides");
+  for (const body of [set, clear]) {
+    assert.ok(body.includes(guard), "Supabase-only profile bypass must be explicit");
+    assert.ok(body.indexOf(guard) < body.indexOf("airtableFetch("),
+      "Must return before attempting legacy Content Profile PATCH");
+  }
+  const manual = section("startStudioIdeaGeneration", "studioIdeaGenerationStatus");
+  assert.ok(manual.indexOf("await studioIdeaCreateBatch(") <
+    manual.indexOf("await studioIdeaSetProfileOverrides("));
+  assert.match(manual, /batch_record_id: batch\.id/);
+  assert.match(manual, /requested_count: count/);
+  assert.match(manual, /\bquality\b/);
+});
