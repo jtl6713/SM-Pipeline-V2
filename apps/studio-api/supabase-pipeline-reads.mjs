@@ -4810,6 +4810,22 @@ export function mapAirtableContentToSupabase(record, profileUuid, options = {}) 
   };
 }
 
+/** Typed Supabase render selector columns must be written on sparse R3 patches.
+ * Keep the legacy JSONB bag intact for older consumers; never infer missing
+ * filename/frames from unrelated outputs, and explicit clears remain clears.
+ */
+export function studioTypedRenderColumns(fields = {}) {
+  const columns = {};
+  if (Object.prototype.hasOwnProperty.call(fields, "Output_Filename")) {
+    columns.output_filename = String(fields.Output_Filename ?? "").trim() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, "Render_Total_Frames")) {
+    const frames = Number(fields.Render_Total_Frames);
+    columns.render_total_frames = Number.isSafeInteger(frames) && frames > 0 ? frames : null;
+  }
+  return columns;
+}
+
 export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId, fullRecord = false }) {
   const fields = record?.fields || {};
   const contentAirtableId = firstLink(fields.Content_Item);
@@ -4847,6 +4863,7 @@ export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidBy
     published_at: fields.Published_At || null,
     remotion_job_id: fields.Remotion_Job_ID || null,
     selected_clip_count: fields.Selected_Clip_Count ?? null,
+    ...studioTypedRenderColumns(fields),
     error_messages: bag,
   };
   const present = (key) => Object.prototype.hasOwnProperty.call(fields, key);
@@ -5771,6 +5788,7 @@ export function buildPresentOutputColumnPatch(record, {
   if (present("Published_At")) body.published_at = fields.Published_At || null;
   if (present("Remotion_Job_ID")) body.remotion_job_id = fields.Remotion_Job_ID || null;
   if (present("Selected_Clip_Count")) body.selected_clip_count = fields.Selected_Clip_Count ?? null;
+  Object.assign(body, studioTypedRenderColumns(fields));
   if (present("Publish_Next_Retry_At")) body.publish_next_retry_at = fields.Publish_Next_Retry_At || null;
   if (present("YouTube_Stage")) body.youtube_stage = selectName(fields.YouTube_Stage);
   if (present("TikTok_Draft_Status")) body.tiktok_draft_status = selectName(fields.TikTok_Draft_Status);
