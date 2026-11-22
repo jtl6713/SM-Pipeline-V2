@@ -912,3 +912,5 @@ Deploy #2536 Pipeline Content ID UI 0.6.1031-pipeline-content-pages from PR #253
 2026-11-21: Retry #2536 Pages release 0.6.1031-pipeline-content-pages after fixing obsolete Ideas browser selectors and verifying Content ID pagination controls, with full protected production deployment and live custom-domain identity gates.
 
 Deploy #2546 Studio Ideas UI 0.6.1030: single AI Idea Generation card with Quantity, Quality, Generate Ideas, and countdown to next hourly Chicago-time idea pull above Current Ideas. Verify production custom domain and cache keys. 2026-11-21.
+
+2026-11-21 #2563 / PR #2570 UI 0.6.1036-meta-repair-2563: Deploy exact Factory+Pipeline Meta recovery visibility on Studio Pages. All 118 held IG/FB repairs must be discoverable with reason, Studio-owned next step, persistent Repair count and exact output links; never show false Changes Requested or claim user action without evidence. UI only, no publish/scheduling/approval mutations. Verify live custom-domain version, cache keys, Factory card inventory and safe action controls.

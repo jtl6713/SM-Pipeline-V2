@@ -170,6 +170,10 @@ function isTransientFactoryStuck(row) {
 }
 
 function isManualLane(row) {
+  // #2563: never hide a canonical, held Studio repair simply because the
+  // false human Changes Requested decision was correctly cleared.
+  if (row?.kind === "output" && row?.meta_repair_required === true &&
+      row?.do_not_publish === true && !row?.published_at && !row?.platform_post_url) return true;
   // Exact, still-held creative packages remain visible in Factory Repair
   // without entering the Approve or Publishing lanes. Source recovery alone
   // cannot authorize approval, retry, or a new MAE date.
@@ -312,12 +316,19 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     title: row.title || "Untitled",
     profile_name: row.profile_name || "",
     profile_id: row.profile_id || null,
-    studio_state: row.protected_media_rework === true
+    studio_state: row.meta_repair_required === true
+      ? "Studio repair required · Publishing held"
+      : row.protected_media_rework === true
       ? (row.recovery_source_inventory_verified === true
         ? "Media sources verified · Creative repair / Factory review"
         : "Creative package repair · Source review needed")
       : (row.studio_state || ""),
     protected_media_rework: row.protected_media_rework === true,
+    meta_repair_required: row.meta_repair_required === true,
+    meta_repair_reason: row.meta_repair_required === true ? (row.meta_repair_reason || "Studio recovery") : null,
+    meta_repair_next_step: row.meta_repair_required === true ? (row.meta_repair_next_step || "Studio must inspect the exact record before proceeding.") : null,
+    meta_repair_user_action_required: row.meta_repair_user_action_required === true,
+    meta_repair_issue: row.meta_repair_required === true ? 2563 : null,
     recovery_hold_marker: row.protected_media_rework === true ? (row.recovery_hold_marker || null) : null,
     recovery_source_inventory_verified: row.recovery_source_inventory_verified === true,
     // Display-only independently verified source JPEGs; not C9 approved slides.
@@ -330,12 +341,12 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
     // The existing client checks DNP and review_package_ready before showing
     // approval actions; explicit card state protects other clients too.
-    can_approve: row.protected_media_rework === true ? false : undefined,
-    can_retry: row.protected_media_rework === true ? false : undefined,
-    can_publish: row.protected_media_rework === true ? false : undefined,
+    can_approve: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
+    can_retry: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
+    can_publish: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
     output_status: row.output_status || null,
     review_status: row.review_status || null,
-    review_package_ready: row.protected_media_rework === true ? false : row.review_package_ready !== false,
+    review_package_ready: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : row.review_package_ready !== false,
     review_package_readiness: row.review_package_readiness || null,
     review_package_missing: row.review_package_missing || [],
     review_package_reason: row.review_package_reason || null,

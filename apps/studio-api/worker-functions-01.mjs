@@ -3,6 +3,7 @@ import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-pack
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { heldRetryPendingDisposition } from "./held-retry-pending-disposition.mjs";
+import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -2190,6 +2191,9 @@ export function normalizedOutputState(record) {
   const text = (name) => String(fields[name] || "").trim();
   const has = (name, value) => text(name).toLowerCase().includes(value.toLowerCase());
 
+  // #2563: a held Studio-owned repair must never look like an ordinary render
+  // queue entry or a user-requested creative revision.
+  if (typeof metaReviewRecoverySummary === "function" && metaReviewRecoverySummary(record)) return "Studio repair required";
   if (studioMixRerenderInProgress(record)) return "Rerendering";
 
   const retryablePublish = Boolean(fields.Publish_Retry_Eligible);
@@ -2839,13 +2843,16 @@ export function outputCreativeAvailable(record) {
 
 export function mapOutput(record, job = null, queueMeta = null, contentRecord = null) {
   let studioState = normalizedOutputState(record);
+  const metaRepair = typeof metaReviewRecoverySummary === "function" ? metaReviewRecoverySummary(record) : null;
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   const hasJob = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
   const hasFinal = Boolean(String(f(record, "Final_File_URL") || "").trim());
   // Historical R5 status regressions must never masquerade as a free R4
   // admission. Preserve the raw Airtable Render_Status for diagnostics while
   // showing a reconciliation state instead of a fake waiting position.
-  if (isRenderQueueCandidateStatus(renderStatus) && hasFinal) {
+  if (metaRepair) {
+    studioState = metaRepair.status;
+  } else if (isRenderQueueCandidateStatus(renderStatus) && hasFinal) {
     studioState = "Finished media recorded — status reconciliation";
   } else if (isRenderQueueCandidateStatus(renderStatus) && hasJob) {
     studioState = "Remotion job recorded — status reconciliation";
@@ -2870,6 +2877,10 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     aspect_ratio: f(record, "Aspect_Ratio"),
     output_status: f(record, "Output_Status"),
     studio_state: studioState,
+    meta_repair_required: Boolean(metaRepair),
+    meta_repair_reason: metaRepair?.category || null,
+    meta_repair_next_step: metaRepair?.next_step || null,
+    meta_repair_user_action_required: metaRepair?.user_action_required === true,
     render_status: f(record, "Render_Status"),
     remotion_job_id: f(record, "Remotion_Job_ID"),
     remotion_error_message: f(record, "Remotion_Error_Message"),
