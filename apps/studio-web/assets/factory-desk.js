@@ -1076,9 +1076,32 @@
     return { ...row, items, children, ...counts, progress_lag: awaitingLedger };
   }
 
+  // POST/start_group returns a bare durable group, not the global Active feed
+  // envelope. Preserve that original request as a pollable batch immediately:
+  // otherwise the exact-ID fast path sees no state.batch.batches and a slow
+  // global history discovery can strand visible progress at 0%.
+  function factoryBatchActivityEnvelope(batch, profileFilter) {
+    // Ordinary Active/Completed feed snapshots must remain untouched, including
+    // light-weight rendering/test contexts without an active Factory filter.
+    if (!batch?.job_id || Array.isArray(batch.batches)) return batch;
+    const effectiveProfileFilter = profileFilter === undefined ? (factoryProfileId() || null) : profileFilter;
+    const active = ["queued", "running", "enqueuing"].includes(batch.status)
+      || Number(batch.pending_count || 0) > 0 || Number(batch.failed_count || 0) > 0;
+    return {
+      ...batch, view: "active", filter_profile_id: effectiveProfileFilter, batches: [batch],
+      totals: {
+        batches: 1, active: active ? 1 : 0,
+        approved: Number(batch.approved_count || 0),
+        pending: Number(batch.pending_count || 0),
+        failed: Number(batch.failed_count || 0),
+      },
+    };
+  }
+
   function renderFactoryBatchActivity(batch) {
-    if (batch?.view === "completed") state.completedBatch = batch;
-    else state.batch = batch || null;
+    const snapshot = factoryBatchActivityEnvelope(batch);
+    if (snapshot?.view === "completed") state.completedBatch = snapshot;
+    else state.batch = snapshot || null;
     const viewed = state.completedOpen ? state.completedBatch : state.batch;
     const summary = $("factoryBatchSummary");
     const count = $("factoryBatchMetricValue");
@@ -1668,6 +1691,22 @@
     };
   }
 
+  function factoryBatchPreferExactProgress(groupCount, lastFullFetchMs, now, force) {
+    return groupCount > 0 && (force || !lastFullFetchMs || now - lastFullFetchMs < 18000);
+  }
+
+  // Slow global R2 history discovery must never suppress already-known exact
+  // approval requests. Preserve every original request ID and fail closed if
+  // neither authoritative GET succeeds; do not retry POST or mutate ledger.
+  async function factoryBatchPollWithFallback({ preferExact, hasKnownGroups, readExact, readFull }) {
+    if (preferExact) return readExact();
+    try { return await readFull(); }
+    catch (error) {
+      if (!hasKnownGroups) throw error;
+      return readExact();
+    }
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
@@ -1691,15 +1730,17 @@
             (Number(row.pending_count || 0) > 0 || ["queued","running","enqueuing"].includes(row.status)))
           .slice(0, 4)
         : [];
-      const useExact = fastGroups.length > 0 && state.lastBatchFullFetchMs &&
-        now - state.lastBatchFullFetchMs < 18000 && !force;
-      let fetched;
-      if (useExact) {
+      // A just-accepted group has not had a successful global discovery yet.
+      // Exact original-request polling must work immediately and during full
+      // active-history timeouts. It is always GET-only and identity checked.
+      const preferExact = factoryBatchPreferExactProgress(fastGroups.length,
+        state.lastBatchFullFetchMs, now, force);
+      const readExact = async () => {
         const updates = await Promise.all(fastGroups.map(async row => {
-          const params = new URLSearchParams({
+          const exactParams = new URLSearchParams({
             scope: "all", request_id: row.request_id, fresh: String(now),
           });
-          const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, {
+          const value = await fetchJson(`/api/factory/approval-batches?${exactParams.toString()}`, {
             cache: "no-store", timeoutMs: 12000,
           });
           if (value?.ok !== true || value.batches?.length !== 1 ||
@@ -1708,15 +1749,21 @@
           }
           return value.batches[0];
         }));
-        fetched = factoryBatchMergeExactActivity(state.batch, updates);
-      } else {
-        fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
+        return factoryBatchMergeExactActivity(state.batch, updates);
+      };
+      const readFull = async () => {
+        const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
           cache: "no-store", timeoutMs: 12000,
         });
-        if (fetched?.ok !== false && Array.isArray(fetched?.batches)) {
-          state.lastBatchFullFetchMs = Date.now();
+        if (value?.ok === false || !Array.isArray(value?.batches)) {
+          throw new Error("Approval activity response was incomplete");
         }
-      }
+        state.lastBatchFullFetchMs = Date.now();
+        return value;
+      };
+      const fetched = await factoryBatchPollWithFallback({
+        preferExact, hasKnownGroups: fastGroups.length > 0, readExact, readFull,
+      });
       if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
         throw new Error("Approval activity response was incomplete");
       }
