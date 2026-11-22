@@ -36,31 +36,38 @@ After this guard is merged and reviewed, the Windows operator should:
    `D:\Content Creation\ChicagoShining Pipeline\RuntimeData\governor\studio-workload-20261122.sqlite3`.
    Verify the path does **not** already hold queued jobs; never overwrite
    existing durable governor state.
-3. Configure `STUDIO_GOVERNOR_DB_PATH` and
-   `STUDIO_WORKLOAD_GOVERNOR_ENABLED=true`; initially stage even tighter
+3. Stage the new `STUDIO_GOVERNOR_DB_PATH` and strict initial
    canary limits: **1 producer / 2 photo groups / 1 ratio worker per group /
-   4 in-flight reads / 2 in-flight writes**. Increase toward the intended
-   2 / 4 / 2 / 6 / 3 only after sustained load measurements.
+   4 in-flight reads / 2 in-flight writes**, but leave
+   `STUDIO_WORKLOAD_GOVERNOR_ENABLED=false` for the *first* deployment.
 4. **Do not merge the guarded app.py change before the host configuration
    is staged**: `.github/workflows/deploy-pipeline-runner-via-ops.yml`
-   includes `services/pipeline-runner/app.py` in its main-push triggers and
-   can deploy automatically after merge. Once the live `.env` is staged and
-   all CI checks are green, intentionally merge and verify the GitHub deploy
-   workflow status; use the local Ops `PLAN deploy` to confirm the exact
-   target commit and only manually deploy if auto deployment did not succeed.
-   Deployment restarts the service and preserves the live `.env`.
+   includes `services/pipeline-runner/app.py` in main-push triggers and
+   may deploy automatically. After CI is green and operator acknowledges the
+   staged `.env`, merge and review the GitHub deploy workflow result.
+   Use Ops `PLAN deploy` to verify the same commit. Only manually deploy
+   if the automatic rollout did not succeed. The deploy restarts the service
+   but preserves the live `.env`.
 5. Verify loopback `GET /health` reports
-   `recovery_read_only=true`, `workload_governor_enabled=true`,
-   `i1_durable_jobs=false`; then call the loopback-only authenticated
-   `GET /admin/workload` with the local runner shared secret **without
-   printing that secret**.
-6. Require `enabled=true`, `recovery_read_only=true`,
-   `admission_paused=true`, `active_jobs=0`, and inspect
-   `queued_jobs` and `paused_jobs` before changing anything.
-   New clean staging storage should have no jobs.
-7. Check read-only database connectivity and pre/post aggregate hold counts.
+   `recovery_read_only=true`, `workload_governor_enabled=false`,
+   `i1_durable_jobs=false`. Confirm authenticated loopback
+   `GET /admin/workload` returns `enabled=false`. No jobs are launched.
+6. **Second controlled service restart:** once the new guard is confirmed
+   deployed, change only `STUDIO_WORKLOAD_GOVERNOR_ENABLED=true` in the
+   backed-up live `.env` and use the dedicated Ops **Restart one service**
+   action for Pipeline Runner. Do not deploy or restart unrelated services.
+   With `recovery_read_only=true`, the governor initializes SQLite
+   but does not spawn a dispatcher or claim any media.
+7. Require `GET /health` to show `recovery_read_only=true`,
+   `workload_governor_enabled=true`; require authenticated
+   `GET /admin/workload` to show `enabled=true`,
+   `recovery_read_only=true`, `admission_paused=true`,
+   `active_jobs=0`. Inspect queued/paused counts and verify the
+   new staging SQLite path has no pre-existing jobs.
+8. Check read-only database connectivity and pre/post aggregate hold counts.
    No publishing provider calls, automatic I1 or Rendering Review consumer
    restarts, or mass queue admissions are part of this phase.
+   Do not clear recovery read-only merely because health checks pass.
 
 **Do not clear `PIPELINE_RUNNER_RECOVERY_READ_ONLY` merely because health
 passes.** First review the worker's other direct database traffic, reconcile
