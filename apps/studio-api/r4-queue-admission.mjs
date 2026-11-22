@@ -66,3 +66,14 @@ export function fairR4ProfileOrder(records, lastProfile, controls = null,
   return result;
 }
 
+
+/**
+ * R4 uses Supabase end-to-end only when the actual output write selector and
+ * its connection are both live. Historical Airtable cooldown is irrelevant in
+ * that case. Preserve the legacy cooldown fence otherwise; the R4 dispatcher
+ * still performs its own one-slot/lease and provider safety checks.
+ */
+export function r4CronAdmissionAllowed({ writeSource, supabaseConfigured, airtableCooldownMs, failFastMs } = {}) {
+  if (writeSource === "supabase" && supabaseConfigured === true) return true;
+  return Number(airtableCooldownMs) <= Number(failFastMs);
+}
