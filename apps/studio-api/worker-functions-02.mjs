@@ -7349,7 +7349,7 @@ export function item4PlanItemForOutput(requestRecord, outputRow) {
 }
 /*__STUDIO_WORKER_END:item4PlanItemForOutput__*/
 
-export function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage) {
+export function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage, options = {}) {
   const planItem = item4PlanItemForOutput(requestRecord, outputRow) || {};
   const producerPending = /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(
     String(f(requestRecord, "Production_Notes") || "")
@@ -7529,6 +7529,19 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
       if (!raw || Number.isNaN(Date.parse(raw))) return {};
       return { Scheduled_Post_Date: new Date(raw).toISOString() };
     }()),
+    // An escalated zero-output reconstruction may restore output identity,
+    // but source relevance and publish readiness are still unverified.
+    // Last-write precedence deliberately overrides any original plan schedule.
+    ...(options.recoveryHold === true ? {
+      Do_Not_Publish: true,
+      Auto_Publish_Enabled: false,
+      Output_Status: "In Production",
+      Review_Status: "Pending Review",
+      Publish_Status: "Not Ready",
+      Scheduled_Post_Date: null,
+      Studio_Scheduled_At: null,
+      YouTube_Scheduled_Publish_At: null,
+    } : {}),
   };
 }
 /*__STUDIO_WORKER_END:platformOutputSeedFields__*/
@@ -10997,7 +11010,7 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       continue;
     }
     const sourcePackage=item4StudioSourcePackageForOutput(requestRecord,outputRow,effective,parent);
-    let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
+    let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage,{recoveryHold:options.recoveryHold===true});
     let atomicSeedSchedule = null;
     let atomicSeedVacate = false;
     let atomicSeedHasScheduleMutation = false;
@@ -11166,7 +11179,7 @@ export async function completeProductionRequestPromotionSideEffects(env, request
       contentItemId,
       studioFinishedOriginKind(current) === "finished-video"
         ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
-        : { onlyMissing: !productionRequestRevisionOpen(current) }
+        : { onlyMissing: !productionRequestRevisionOpen(current), recoveryHold: options.recoveryHold === true }
     );
   }
 
@@ -11463,7 +11476,111 @@ export async function studioNyc20261121HandoffCron(env, ctx = null, scheduledAtM
 }
 /*__STUDIO_WORKER_END:studioNyc20261121HandoffCron__*/
 
-export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
+/**
+ * Exact one-shot repair for Content #2239. Restore missing output IDENTITIES
+ * using the normal I3/I4 fanout. The source images are still awaiting
+ * editorial relevance verification, so restored outputs carry a hard
+ * no-publish, no-auto, no-schedule hold from their initial seed.
+ * No manual retry/approval/publisher endpoint is invoked.
+ */
+export async function studioRecoverFreeSkylineFerryFanoutCron(env, ctx = null) {
+  const target = Object.freeze({
+    request: "reczvqjo1xs2jYXn0",
+    idea: "recBFUCFOx5hEnj0e",
+    content: "recbxdvQZTDm61Ctq",
+    expected: 2,
+  });
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
+    return { skipped: "authority_unavailable" };
+  const receiptKey = "studio/recovery/2593/free-skyline-ferry-hold-v1/" + target.request + ".json";
+  if (await env.STUDIO_MEDIA.get(receiptKey))
+    return { request: target.request, skipped: "one_shot_receipt_exists" };
+
+  let requestRecord, idea, parent, rows, originalOutputs;
+  try {
+    [requestRecord, idea, parent] = await Promise.all([
+      airtableFetch(env, PRODUCTION_REQUEST_TABLE, target.request),
+      airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, target.idea),
+      airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, target.content),
+    ]);
+    rows = await outputRowsForProductionRequest(env, target.request);
+    originalOutputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit: 60 });
+  } catch (error) {
+    return { request: target.request, skipped: "readback_unavailable",
+      error: String(error?.message || error).slice(0,160) };
+  }
+  const basicPreflight = exactNycHandoffPreflight({ target, request: requestRecord, idea, parent, rows });
+  if (basicPreflight) return { request: target.request, skipped: basicPreflight };
+  if (originalOutputs.length !== 0) return { request: target.request, skipped: "existing_outputs_reconcile_instead" };
+  const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+  const key = (platform, type) => String(platform || "") + "::" + String(type || "");
+  const planned = new Set((plan?.items || []).map(x => key(x.platform, x.output_type)));
+  const selected = new Set(rows.map(x => key(f(x, "Platform"), f(x, "Output_Type"))));
+  if (plan?.schema_version !== "item4.output-plan.1" ||
+      !Array.isArray(plan.items) || planned.size !== target.expected ||
+      selected.size !== target.expected || [...planned].some(x => !selected.has(x)))
+    return { request: target.request, skipped: "plan_destinations_mismatch" };
+  if (String(f(requestRecord, "Production_Notes") || "").includes("origin=autonomous") !== true ||
+      String(f(requestRecord, "Test_Run_ID") || "").trim())
+    return { request: target.request, skipped: "non_autonomous_or_test" };
+
+  const receipt = { schema:"studio.issue2593.free-skyline-held-fanout.1",
+    ...target, at:new Date().toISOString(), status:"attempted",
+    preflight:"zero_platform_outputs_and_exact_two_enabled_destinations",
+    publication_authorized:false, publish_actions:0, schedule_actions:0 };
+  const wrote = await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(receipt), {
+    onlyIf: new Headers({ "If-None-Match": "*" }),
+    httpMetadata: { contentType: "application/json" },
+  });
+  if (!wrote) return { request: target.request, skipped:"concurrent_receipt" };
+  try {
+    const result = await finalizeProductionRequestPromotion(env, target.request, idea, ctx, { recoveryHold:true });
+    const fanout = result?.outputFanout || {};
+    const outputs = await listSupabaseContentPlatformOutputs(env, target.content, { limit:60 });
+    const links = await outputRowsForProductionRequest(env, target.request);
+    const expected = new Set(rows.map(x => key(f(x, "Platform"), f(x, "Output_Type"))));
+    const actual = new Set(outputs.map(x => key(f(x, "Platform"), f(x, "Studio_Output_Type"))));
+    const verified = !result?.supersededByRequestId &&
+      result?.requestRecord?.fields?.Request_Status === "Promoted" &&
+      Number(fanout.enabled_output_count) === target.expected &&
+      Number(fanout.routed_count) === target.expected &&
+      Number(fanout.blocked_count || 0) === 0 &&
+      outputs.length === target.expected && links.length === target.expected &&
+      links.every(x => Boolean(f(x, "Platform_Output_Exists"))) &&
+      actual.size === expected.size && [...expected].every(x => actual.has(x)) &&
+      outputs.every(x => f(x,"Do_Not_Publish") === true &&
+        f(x,"Auto_Publish_Enabled") !== true &&
+        !f(x,"Scheduled_Post_Date") && !f(x,"Studio_Scheduled_At"));
+    let resumed = false, resumeReason = null;
+    if (verified) {
+      try {
+        const response = await enqueueStudioProductionJob(env, target.request, { resume:true });
+        resumed = response?.accepted === true || response?.ok === true;
+        if (!resumed) resumeReason = String(response?.reason || response?.skipped || "not_accepted");
+      } catch (error) { resumeReason = String(error?.message || error).slice(0,180); }
+    }
+    const finished = {...receipt, verified, outputs:outputs.length,
+      routed:Number(fanout.routed_count || 0), resumed,
+      resume_reason:resumeReason, finished_at:new Date().toISOString(),
+      status:!verified ? "needs_investigation" : resumed
+        ? "verified_held_outputs_resumed" : "verified_held_outputs_resume_pending" };
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(finished), {
+      httpMetadata:{contentType:"application/json"},
+    });
+    return finished;
+  } catch(error) {
+    const failed = {...receipt, status:"failed_no_auto_retry",
+      error:String(error?.message || error).slice(0,300), finished_at:new Date().toISOString()};
+    await env.STUDIO_MEDIA.put(receiptKey, JSON.stringify(failed), {
+      httpMetadata:{contentType:"application/json"},
+    }).catch(()=>{});
+    console.error("issue2593 exact ferry output fanout needs investigation", failed);
+    return failed;
+  }
+}
+/*__STUDIO_WORKER_END:studioRecoverFreeSkylineFerryFanoutCron__*/
+
+export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null, options = {}) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
   const promotionStartedAt = Date.now();
   const promotionTrace = (stage, extra = {}) => console.info("studio_production_promotion_stage", {
@@ -11547,7 +11664,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
       requestRecordId,
       requestRecord,
       contentItemId,
-      { routingOnly: true }
+      { routingOnly: true, recoveryHold: options.recoveryHold === true }
     );
     requestRecord = routing.requestRecord || requestRecord;
     directiveBridge = routing.directiveBridge;
