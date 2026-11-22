@@ -142,8 +142,11 @@ def enqueue(request_id: str, *, resume: bool = False) -> bool:
             (request_id, now, now, int(resume)),
         ).rowcount
         if not created and resume:
-            # Only affect queued work, not a worker already executing this ID.
-            db.execute("UPDATE producer_jobs SET resume_requested=1 WHERE request_id=? AND state='queued'", (request_id,))
+            # Only an explicitly authorized resume may unpark stalled work.
+            # Never mutate a currently running claim.
+            db.execute("""UPDATE producer_jobs
+                SET resume_requested=1,state='queued',consecutive_yields=0,available_at=?
+                WHERE request_id=? AND state IN ('queued','paused')""", (now, request_id))
         db.commit()
     return bool(created)
 
@@ -186,9 +189,11 @@ def claim_next() -> tuple[str, str] | None:
         _transaction(db)
         now = time.time()
         db.execute("""UPDATE producer_jobs
-            SET state='queued', token=NULL, lease_until=NULL,
-                available_at=CASE WHEN available_at>? THEN available_at ELSE ? END
-            WHERE state='running' AND lease_until < ?""", (now + 30, now + 30, now))
+            SET state=CASE WHEN consecutive_yields+1>=? THEN 'paused' ELSE 'queued' END,
+                token=NULL, lease_until=NULL,
+                consecutive_yields=consecutive_yields+1, available_at=?
+            WHERE state='running' AND lease_until < ?""",
+            (MAX_CONSECUTIVE_YIELDS, now + 60, now))
         if circuit_open(db):
             db.commit()
             return None
@@ -382,7 +387,8 @@ def snapshot() -> dict[str, object]:
                    for operation, total, failed in rows}
         return {
             "enabled": True, "scope": "single_windows_host", "active_jobs": queued.get("running", 0),
-            "queued_jobs": queued.get("queued", 0), "active_photo_groups": groups,
+            "queued_jobs": queued.get("queued", 0), "paused_jobs": queued.get("paused", 0),
+            "active_photo_groups": groups,
             "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),
             "max_ratio_workers": max_ratio_workers(), "database_circuit_open": circuit_open(db),
             "max_db_reads": max_db_reads(), "max_db_writes": max_db_writes(),
