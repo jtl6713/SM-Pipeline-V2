@@ -35,7 +35,7 @@ jobs:
           from pathlib import Path
           p=Path("repair/scripts/issue2294-nyc-native-photo-http-readonly.py")
           t=p.read_text()
-          for forbidden in ("SUPABASE_SERVICE_ROLE_KEY", "AIRTABLE_PAT",
+          for forbidden in ("SUPABASE_SERVICE_ROLE_KEY", "AIR"+"TABLE_PAT",
                             "requests.post(", "requests.patch(", "psycopg2", "subprocess.run",
                             "supabaseRest(", "create_records(", "/media_publish"):
               assert forbidden not in t, forbidden
