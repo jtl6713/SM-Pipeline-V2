@@ -62,6 +62,15 @@ const PUBLISH_STATUS_URL =
   "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
 
 const TOKEN_KEY = "tiktok:tokens";
+const POSTING_SCOPES = ["user.info.basic", "video.publish", "video.upload"];
+const ANALYTICS_SCOPE = "video.list";
+
+// TikTok rejects an OAuth request containing a permission the developer app
+// has not been approved for. Only operators who have verified app approval
+// may opt into requesting video.list; existing publishing never depends on it.
+function analyticsScopeRequestEnabled(env) {
+  return /^(?:true|1)$/i.test(String(env.TIKTOK_ANALYTICS_SCOPE_APPROVED || "").trim());
+}
 const CREATOR_KEY = "tiktok:creator";
 const STATE_PREFIX = "tiktok:oauth-state:";
 const PIPELINE_REVIEW_PREFIX = "tiktok:pipeline-review:";
@@ -380,7 +389,7 @@ async function startOAuth(env) {
   const params = new URLSearchParams({
     client_key: env.TIKTOK_CLIENT_KEY,
     response_type: "code",
-    scope: "user.info.basic,video.publish,video.upload,video.list",
+    scope: [...POSTING_SCOPES, ...(analyticsScopeRequestEnabled(env) ? [ANALYTICS_SCOPE] : [])].join(","),
     redirect_uri: REDIRECT_URI,
     state,
     disable_auto_auth: "1",
@@ -507,12 +516,9 @@ async function handleCallback(url, env) {
 
   const scopes = parseScopes(stored.scope);
 
-  const requiredScopes = [
-    "user.info.basic",
-    "video.publish",
-    "video.upload",
-    "video.list",
-  ];
+  // The baseline OAuth flow must remain usable without Display API approval.
+  // video.list is only required for the separate owned-video analytics path.
+  const requiredScopes = POSTING_SCOPES;
 
   const missingScopes =
     requiredScopes.filter(
@@ -1309,16 +1315,16 @@ async function publicStatus(env) {
         tokens?.refresh_token,
       ),
 
+    // Legacy flag remains analytics-complete for existing Studio consumers.
     required_scopes_granted:
-      [
-        "user.info.basic",
-        "video.publish",
-        "video.upload",
-        "video.list",
-      ].every(
-        (scope) =>
-          scopes.includes(scope),
-      ),
+      [...POSTING_SCOPES, ANALYTICS_SCOPE].every((scope) => scopes.includes(scope)),
+    posting_scopes_granted:
+      POSTING_SCOPES.every((scope) => scopes.includes(scope)),
+    analytics_scope_granted:
+      scopes.includes(ANALYTICS_SCOPE),
+    // Configuration only, never claimed as proof of TikTok app approval.
+    analytics_scope_request_enabled:
+      analyticsScopeRequestEnabled(env),
 
     access_token_expires_at:
       tokens
