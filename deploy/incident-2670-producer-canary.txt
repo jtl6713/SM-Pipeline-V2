@@ -1,0 +1,4 @@
+Incident #2670: activate exactly one governed nonpublishing NYC producer canary.
+Selected request recR4EQcshFZ4fNL0; all provider publishing endpoints remain behind PIPELINE_RUNNER_RECOVERY_READ_ONLY=true.
+Requires verified release #2694 and ops workflow #2695, configured governor cap 1, current healthy Supabase.
+No bulk queue resume, DNP edits, approvals, scheduling, or Airtable/Make activity.
