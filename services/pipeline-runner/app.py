@@ -88,12 +88,31 @@ def recovery_read_only() -> bool:
     }
 
 
+def recovery_image_upload_allowed() -> bool:
+    """Strict, isolated image intake while other recovery mutations stay frozen."""
+    disabled = {"1", "true", "yes", "on"}
+    return (
+        recovery_read_only()
+        and workload_governor.enabled()
+        and bool(settings.get("pipeline_runner_shared_secret", "").strip())
+        and os.environ.get("I1_DURABLE_ENABLED", "").strip().lower() not in disabled
+        and os.environ.get("RENDERING_REVIEW_AUTO_DISPATCH_ENABLED", "").strip().lower() not in disabled
+        and os.environ.get("NATIVE_GALLERY_AUTO_EXECUTE_ENABLED", "").strip().lower() not in disabled
+    )
+
+
 @app.before_request
 def _recovery_read_only_gate():
     # Installed before every blueprint; includes production, manual resume,
     # media transfers, and publishing-related runner HTTP routes. Preserve
     # GET /health for deploy verification and independent read-only Studio.
     if recovery_read_only() and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        if (request.method.upper() == "POST" and request.path == "/jobs/studio-asset-library"
+                and recovery_image_upload_allowed()):
+            # The handler still requires a runner shared secret, checks image
+            # type, and uses a single durable governor resource slot.
+            request.max_content_length = 26 * 1024 * 1024
+            return None
         response = jsonify({
             "ok": False,
             "error": "runner_recovery_read_only",
@@ -221,6 +240,7 @@ def health():
             "ig_publish_lease_protocol_version": 1,
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
             "recovery_read_only": recovery_read_only(),
+            "recovery_image_upload_enabled": recovery_image_upload_allowed(),
             "workload_governor_enabled": workload_governor.enabled(),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
@@ -684,9 +704,19 @@ def run_studio_asset_library():
     error_response, status = _verify_secret()
     if error_response is not None:
         return error_response, status
+    if recovery_read_only() and not recovery_image_upload_allowed():
+        return jsonify({"error": "image_upload_recovery_unavailable"}), 503
     upload = request.files.get("file")
     filename = str(request.form.get("filename") or getattr(upload, "filename", "") or "").strip()
     mime_type = str(request.form.get("mime_type") or getattr(upload, "mimetype", "") or "").strip()
+    if recovery_read_only():
+        from studio_library.processor import classify_library_file
+        try:
+            spec = classify_library_file(filename=filename, mime_type=mime_type)
+        except ValueError:
+            return jsonify({"error": "only_photo_uploads_during_recovery"}), 415
+        if spec.get("kind") != "image":
+            return jsonify({"error": "only_photo_uploads_during_recovery"}), 503
     profile_name = str(request.form.get("profile_name") or request.form.get("content_profile_name") or "").strip()
     skip_source_raw = str(request.form.get("skip_source_master") or "").strip().lower()
     skip_source_master = skip_source_raw in {"1", "true", "yes", "on"}
@@ -699,16 +729,28 @@ def run_studio_asset_library():
     content = upload.read() if upload else b""
     if not content:
         return jsonify({"error": "file is required"}), 422
+    if recovery_read_only() and len(content) > 25 * 1024 * 1024:
+        return jsonify({"error": "photo_exceeds_25_mb_limit"}), 413
+    if recovery_read_only():
+        # Sync ingest circumvents bounded asynchronous claims; force async.
+        async_mode = True
     if async_mode:
         from studio_library.async_jobs import start_library_ingest_job
-        job_id = start_library_ingest_job(
-            content=content,
-            filename=filename,
-            mime_type=mime_type,
-            profile_name=profile_name,
-            skip_source_master=skip_source_master,
-            override_overlay_hold=override_overlay_hold,
-        )
+        try:
+            job_id = start_library_ingest_job(
+                content=content,
+                filename=filename,
+                mime_type=mime_type,
+                profile_name=profile_name,
+                skip_source_master=skip_source_master,
+                override_overlay_hold=override_overlay_hold,
+            )
+        except RuntimeError as exc:
+            if str(exc) == "library_ingest_capacity":
+                reply = jsonify({"error": "library_ingest_capacity", "retry_after_seconds": 30})
+                reply.headers["Retry-After"] = "30"
+                return reply, 429
+            raise
         logger.info(
             "job=studio-asset-library async accepted job_id=%s file=%s override=%s",
             job_id,
