@@ -1,0 +1,178 @@
+name: Incident 2670 - Restore governed runner publishing
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-restore-governed-publishing.txt']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-governed-publishing-restore
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate PowerShell scripts without executing them
+        shell: pwsh
+        run: |
+          foreach ($path in @(
+            '.github/scripts/incident-2670-lift-runner-recovery-fence.ps1',
+            '.github/scripts/incident-2670-rollback-runner-recovery-fence.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              throw ("powershell_parse_failed: " + $path)
+            }
+          }
+          Write-Output 'incident2670_powershell_syntax=PASS'
+      - name: Validate live public fence and Supabase-only authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/incident2670-health-before.json
+          jq -e '.ok==true and .recovery_read_only==true
+            and .workload_governor_enabled==true
+            and .recovery_producer_only_enabled==true
+            and .recovery_producer_scope=="all_governed_requests"
+            and .i1_durable_jobs==false
+            and .studio_write_source=="supabase"
+            and .studio_phase6_write_source=="supabase"
+            and .studio_runner_content_read_source=="supabase"
+            and .studio_runner_output_read_source=="supabase"
+            and .supabase_pipeline_writes==true
+            and .airtable_activity.ok==true
+            and .airtable_activity.any_activity==false' /tmp/incident2670-health-before.json >/dev/null
+          echo 'incident2670_public_fence_preflight=PASS'
+      - name: Release ONLY emergency runner HTTP fence, retain governor, restart and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            status=$(curl -sS --max-time 20 -o /tmp/incident2670-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$status" == 200 ]] && jq -e '.ok==true' /tmp/incident2670-catalog.json >/dev/null 2>&1; then
+              TOKEN="$candidate"
+              break
+            fi
+          done
+          [[ -n "$TOKEN" ]] || { echo 'ops_auth_unavailable'; exit 1; }
+
+          shell_action() {
+            local script="$1"
+            python - "$script" <<'PY'
+          import json,sys
+          from pathlib import Path
+          Path('/tmp/incident2670-script.json').write_text(
+              json.dumps({'command':Path(sys.argv[1]).read_text(encoding='utf-8'),'confirm':True}))
+          PY
+            local code=''
+            for i in $(seq 1 30); do
+              code=$(curl -sS --max-time 30 -o /tmp/incident2670-shell-submit.json -w '%{http_code}' \
+                -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" \
+                -H 'Content-Type: application/json' --data-binary @/tmp/incident2670-script.json || true)
+              [[ "$code" != 409 ]] && break
+              sleep 3
+            done
+            [[ "$code" == 202 ]] || { echo "ops_shell_submit_http=$code"; return 1; }
+            local job
+            job=$(jq -r '.job.id // empty' /tmp/incident2670-shell-submit.json)
+            [[ -n "$job" ]] || return 1
+            for i in $(seq 1 80); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" \
+                -o /tmp/incident2670-shell-status.json
+              local state
+              state=$(jq -r '.job.status // empty' /tmp/incident2670-shell-status.json)
+              if [[ "$state" == ok ]]; then
+                jq -r '.job.log // ""' /tmp/incident2670-shell-status.json \
+                  | grep -E '^incident2670_(emergency_publishing_fence|governor|optional_background_consumers)=' || true
+                return 0
+              fi
+              if [[ "$state" == failed ]]; then
+                echo "ops_shell_failed script=$(basename "$script")"
+                # Never echo shell log/PowerShell environment: contains credentials.
+                return 1
+              fi
+              sleep 3
+            done
+            echo 'ops_shell_timed_out'
+            return 1
+          }
+          restart_runner() {
+            local status=''
+            for i in $(seq 1 30); do
+              status=$(curl -sS --max-time 30 -o /tmp/incident2670-restart.json -w '%{http_code}' \
+                -X POST "$BASE/api/run" -H "Authorization: Bearer $TOKEN" \
+                -H 'Content-Type: application/json' \
+                --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+              [[ "$status" != 409 ]] && break
+              sleep 3
+            done
+            [[ "$status" == 202 ]] || { echo "ops_restart_http=$status"; return 1; }
+            local job
+            job=$(jq -r '.job.id // empty' /tmp/incident2670-restart.json)
+            [[ -n "$job" ]] || return 1
+            for i in $(seq 1 90); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" \
+                -o /tmp/incident2670-restart-status.json
+              local state
+              state=$(jq -r '.job.status // empty' /tmp/incident2670-restart-status.json)
+              [[ "$state" == ok ]] && return 0
+              [[ "$state" == failed ]] && { echo 'ops_runner_restart_failed'; return 1; }
+              sleep 3
+            done
+            return 1
+          }
+          health_restored() {
+            for i in $(seq 1 20); do
+              curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/incident2670-health-after.json || true
+              if jq -e '.ok==true and .recovery_read_only==false
+                and .workload_governor_enabled==true
+                and .recovery_producer_only_enabled==false
+                and .recovery_producer_scope=="disabled"
+                and .i1_durable_jobs==false
+                and .studio_write_source=="supabase"
+                and .studio_runner_content_read_source=="supabase"
+                and .studio_runner_output_read_source=="supabase"
+                and .supabase_pipeline_writes==true
+                and .airtable_activity.ok==true
+                and .airtable_activity.any_activity==false' /tmp/incident2670-health-after.json >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 5
+            done
+            return 1
+          }
+
+          # Stage environment only after authenticated local governor and
+          # Supabase REST preflight in the PowerShell source. No provider POST.
+          shell_action .github/scripts/incident-2670-lift-runner-recovery-fence.ps1
+          if restart_runner && health_restored; then
+            jq '{ok,recovery_read_only,workload_governor_enabled,
+                 recovery_producer_only_enabled,recovery_producer_scope,
+                 i1_durable_jobs,studio_write_source,supabase_pipeline_writes,
+                 airtable_activity}' /tmp/incident2670-health-after.json
+            echo 'incident2670_emergency_publishing_fence=VERIFIED_OFF'
+            echo 'incident2670_optional_consumers=STILL_DISABLED'
+            exit 0
+          fi
+
+          # If post-restart validation fails, revert only the exact three
+          # emergency recovery settings using a verified pre-change backup.
+          echo 'incident2670_restore_failed_attempting_rollback'
+          if shell_action .github/scripts/incident-2670-rollback-runner-recovery-fence.ps1; then
+            restart_runner || true
+          fi
+          echo 'incident2670_restore_NOT_VERIFIED'
+          exit 1
