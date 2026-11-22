@@ -4343,20 +4343,71 @@ export async function stampLibraryAssetsClassifying(env, recordIds) {
 
 export async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  // During incident #2670 the runner allows only ONE profiled image per
+  // classified request. Detect that state before any Processing writes.
+  const { runnerUrl } = pipelineStageBackend(env, "A3");
+  if (!runnerUrl) throw new HttpError(503, "Image classification runner unavailable");
+  let health;
+  try {
+    const checked = await fetch(`${runnerUrl}/health`);
+    if (!checked.ok) throw new Error("runner health failed");
+    health = await checked.json();
+  } catch {
+    throw new HttpError(503, "Unable to verify image classification safety gates");
+  }
+  const recovery = health?.recovery_read_only === true;
+  if (recovery && (health.recovery_image_classification_enabled !== true ||
+      health.workload_governor_enabled !== true ||
+      health.recovery_a3_metadata_write_scoped !== true)) {
+    throw new HttpError(503, "Recovery classification remains paused");
+  }
+  const recoveryLimit = 5;
+  const recoveryFilter = `OR(${LIBRARY_CLASSIFY_PENDING_FORMULA},AND(${ASSET_LIBRARY_LIST_FORMULA},{Content_Profile}!=BLANK(),{Classification_Status}='Processing'))`;
   const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: LIBRARY_CLASSIFY_ALL_LIMIT,
+    limit: recovery ? 20 : LIBRARY_CLASSIFY_ALL_LIMIT,
     sortField: "Added_At",
     sortDirection: "desc",
-    filterFormula: LIBRARY_CLASSIFY_PENDING_FORMULA,
-    fields: ["Asset Name", "Classification_Status", "Content_Profile"],
+    filterFormula: recovery ? recoveryFilter : LIBRARY_CLASSIFY_PENDING_FORMULA,
+    fields: ["Asset Name", "Classification_Status", "Content_Profile", "Media_Class", "MIME_Type"],
   });
-  const recordIds = (rows || []).map((row) => row.id).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  const eligible = recovery
+    ? (rows || []).filter((row) => {
+        const category = String(f(row, "Media_Class") || "").toLowerCase();
+        const mime = String(f(row, "MIME_Type") || "").toLowerCase();
+        return category === "image" || category === "graphic" || mime.startsWith("image/");
+      }).slice(0, recoveryLimit)
+    : (rows || []);
+  const recordIds = eligible.map((row) => row.id).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
   if (!recordIds.length) {
     return respond(request, env, {
       ok: true,
       classifying: false,
       count: 0,
       message: "Nothing is waiting for classification. Assign a profile to an asset first.",
+    });
+  }
+  if (recovery) {
+    // Each accepted ID is queued by the runner's single A3 governor lease;
+    // no bulk request, A4 chain, publication, or background consumer is enabled.
+    // We do not stamp rows Processing before verifying that A3 accepted them.
+    const accepted = [];
+    for (const id of recordIds) {
+      const { response, payload } = await item4PulsePipelineStage(env, "a3", {
+        extra: {
+          record_ids: [id], trigger_a4: false, wait_for_next: false,
+          drain: false, background: true,
+        },
+      }, "A3");
+      if (!response.ok || payload?.status === "error") {
+        throw new HttpError(response.ok ? 502 : response.status,
+          payload?.message || payload?.error || `A3 recovery rejected ${id}`);
+      }
+      accepted.push(id);
+    }
+    return respond(request, env, {
+      ok: true, classifying: accepted.length > 0, count: accepted.length,
+      record_ids: accepted, truncated: (rows || []).length >= 20,
+      message: `Queued ${accepted.length} image(s) for bounded recovery classification. Other images remain available for the next pass.`,
     });
   }
   try {
