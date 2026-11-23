@@ -4,3 +4,5 @@ persistent ProgramData SQLite, no unresolved preexisting queued/running jobs.
 Keep RENDERING_REVIEW_AUTO_DISPATCH_ENABLED, NATIVE_GALLERY_AUTO_EXECUTE_ENABLED,
 and STUDIO_SIDE_EFFECT_OUTBOX_ENABLED disabled. No automatic publishing/holds
 or batch replay. Exact backup and rollback on runner health failure.
+
+One-time retry after previous fail-closed Ops shell preflight; expose only allowlisted blocker code.

@@ -101,7 +101,13 @@ jobs:
               fi
               if [[ "$state" == failed ]]; then
                 echo "ops_shell_failed script=$(basename "$script")"
-                # Never echo shell log/PowerShell environment: contains credentials.
+                # Parse only allowlisted failure keys from the PowerShell failure
+                # suffix. Never expose scripts, connection URLs or secrets.
+                jq -r '.job.log // ""' /tmp/incident2670-shell-status.json | python -c '
+import sys
+tail=sys.stdin.read()[-1700:]
+allowed=("outage_fence_still_on","governor_not_enabled","i1_already_enabled_require_status_only","other_consumer_active_","producer_concurrency_not_one","runner_live_health_preflight_failed","runner_secret_missing","i1_governor_not_ready","i1_programdata_not_provisioned","i1_existing_spool_path_requires_reconciliation","i1_existing_job_reconciliation_required","i1_spool_schema_unverified","i1_spool_inspection_failed","supabase_credentials_missing","i1_duplicate_setting_do_not_write","i1_env_update_not_verified","runner_env_missing")
+print("incident2670_i1_preflight_blocker="+next((x for x in allowed if x in tail),"UNCLASSIFIED"))'
                 return 1
               fi
               sleep 3
