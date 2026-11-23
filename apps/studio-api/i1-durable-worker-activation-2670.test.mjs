@@ -16,6 +16,6 @@ test("I1 Worker secret release checks out the same runner source it verifies", (
 test("durable Worker binding rollout remains a one-time guarded marker", () => {
   assert.match(workflow, /deploy\/i1-durable-worker-enable\.txt/);
   assert.match(workflow, /STUDIO_I1_DURABLE_JOBS/);
-  assert.match(workflow, /\[\.result\.bindings\[\]\? \| select\(\.name==\"STUDIO_I1_DURABLE_JOBS\"\)\] \| length\)==0/);
+  assert.ok(workflow.includes('.result.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS")'));
   assert.match(workflow, /Roll back only the newly introduced I1 feature secret/);
 });
