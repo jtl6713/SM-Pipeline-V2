@@ -1,0 +1,47 @@
+name: Read-only Bethesda 2303 preview media probe
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-bethesda-2303-preview.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify exact saved R5 previews and original render file without any writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          urls=(
+            '11153|r2|https://media.chicagoshining.com/studio/previews/rec94S2G7FU5HdExh/jobs/job-20261122225847-a3db3877.mp4'
+            '11154|r2|https://media.chicagoshining.com/studio/previews/recpWHfw74GxcybAA/jobs/job-20261122230140-adb85211.mp4'
+            '11155|r2|https://media.chicagoshining.com/studio/previews/recmGB0XBhidcuMq8/jobs/job-20261122230435-2a069565.mp4'
+            '11156|r2|https://media.chicagoshining.com/studio/previews/recAbETkPs5NX5eH2/jobs/job-20261122230719-ea72f9ed.mp4'
+            '11153|render|https://render.chicagoshining.com/out/studio-PR-20261122162504-B5RPXF-instagram-reel.mp4'
+          )
+          for row in "${urls[@]}"; do
+            IFS='|' read -r output origin url <<< "$row"
+            headers="/tmp/bethesda-${output}-${origin}.headers"
+            bytes="/tmp/bethesda-${output}-${origin}.bytes"
+            code=$(curl -sSL --max-time 40 --range '0-4095' -D "$headers" -o "$bytes" -w '%{http_code}' "$url" || true)
+            mime=$(grep -i '^content-type:' "$headers" | tail -n 1 | tr -d '\r' || true)
+            size=$(wc -c < "$bytes" 2>/dev/null || echo 0)
+            sig=$(od -An -tx1 -j4 -N4 "$bytes" 2>/dev/null | tr -d ' \n' || true)
+            echo "bethesda_output=$output source=$origin http=$code bytes=$size ftyp_hex=$sig mime=$mime"
+          done
+          echo 'bethesda_probe_read_only=true'
+      - name: Probe full Reel file with ffprobe, retaining no media
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://media.chicagoshining.com/studio/previews/rec94S2G7FU5HdExh/jobs/job-20261122225847-a3db3877.mp4'
+          code=$(curl -sSL --max-time 100 -o /tmp/bethesda-11153.mp4 -w '%{http_code}' "$url" || true)
+          bytes=$(wc -c < /tmp/bethesda-11153.mp4 2>/dev/null || echo 0)
+          echo "bethesda_full_reel_http=$code bytes=$bytes"
+          if [[ "$code" == '200' && "$bytes" -gt 100000 ]]; then
+            ffprobe -v error -show_entries format=duration,size:stream=codec_name,codec_type,width,height -of json /tmp/bethesda-11153.mp4
+          else
+            echo 'bethesda_cdn_full_file_unavailable_or_too_small=true'
+          fi
