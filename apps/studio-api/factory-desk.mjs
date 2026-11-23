@@ -414,6 +414,12 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     can_publish: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
     output_status: row.output_status || null,
     review_status: row.review_status || null,
+    // #2371: Preserve canonical publication status in the authenticated
+    // Factory card. Browser historical-approval reconciliation requires the
+    // EXACT "Not Ready" status when a corrected image output re-enters review.
+    // Omitting it hid #10855/#10856 while their #10858 video sibling appeared.
+    // Do not infer the value from a prior receipt or review status.
+    publish_status: row.publish_status || null,
     review_package_ready: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true) ? false : row.review_package_ready !== false,
     review_package_readiness: row.review_package_readiness || null,
     review_package_missing: row.review_package_missing || [],
