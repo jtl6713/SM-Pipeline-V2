@@ -11,6 +11,7 @@ function block(startText, endText) {
   return source.slice(start, end);
 }
 const extracted = [
+  block("  function factoryTerminalEligibilityError(", "\n  function factoryUnrecoverableSubmitError("),
   block("  function clearFactoryRecoveryFences(", "\n  function pruneFactorySelectionToNeedsEyes("),
   block("  function factoryRejectedOutputId(", "\n  async function fetchJson("),
 ].join("\n");
@@ -152,4 +153,23 @@ test("a preflight error without a unique numeric match cannot remove a record", 
   assert.equal(api.factoryRejectedOutputId(row), null);
   assert.equal(api.dropFactoryRecoveryEntry(recoveryKey, row).dropped, false);
   assert.equal(store.has(recoveryKey), true);
+});
+
+test("verified no-acceptance native gallery rejection retires only the exact unrepaired member", () => {
+  const row = saved("Output #102: Native gallery publication blocked: native_gallery_slide_count_mismatch (output #102). No new batch was accepted. Repair native gallery media before approval.");
+  const { api, store, state } = fixture(row);
+  const action = api.clearFactoryRecoveryFences({ onlyUnrecoverable: true });
+  assert.equal(action, 1);
+  assert.equal(store.has(recoveryKey), false);
+  assert.deepEqual([...state.selectedOutputs].sort(), [A, C].sort());
+  assert.deepEqual(JSON.parse(store.get(waitingKey)), [A, C]);
+  assert.ok(!state.selectedOutputs.has(B), "missing-gallery output is NOT approved or queued for automatic retry");
+});
+
+test("gallery mismatch without definitive preflight non-acceptance cannot be discarded", () => {
+  const row = saved("Native gallery publication blocked: native_gallery_slide_count_mismatch (output #102)");
+  const { api, store, state } = fixture(row);
+  assert.equal(api.clearFactoryRecoveryFences({ onlyUnrecoverable: true }), 0);
+  assert.equal(store.has(recoveryKey), true, "ambiguous historical response must retain idempotency fence");
+  assert.deepEqual([...state.selectedOutputs], [A, B, C]);
 });
