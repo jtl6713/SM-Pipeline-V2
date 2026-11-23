@@ -60,16 +60,23 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
+          import base64
           import json
           from pathlib import Path
+          source=Path('repair/scripts/incident-2670-native-gallery-prep.py').read_bytes()
+          encoded=base64.b64encode(source).decode('ascii')
           command=r'''$ErrorActionPreference='Stop'
           $py='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\.venv\Scripts\python.exe'
-          $script='D:\Content Creation\ChicagoShining Pipeline\repair\scripts\incident-2670-native-gallery-prep.py'
+          $script=Join-Path $env:TEMP ('incident2670-gallery-prep-'+[guid]::NewGuid().ToString('N')+'.py')
           if(-not (Test-Path -LiteralPath $py)){throw 'runner_python_missing'}
-          if(-not (Test-Path -LiteralPath $script)){throw 'gallery_prep_script_missing'}
-          & $py $script
-          if($LASTEXITCODE -ne 0){throw 'gallery_prep_failed'}
-          '''
+          try {
+            [IO.File]::WriteAllBytes($script,[Convert]::FromBase64String('__SCRIPT_BASE64__'))
+            & $py $script
+            if($LASTEXITCODE -ne 0){throw 'gallery_prep_failed'}
+          } finally {
+            Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
+          }
+          '''.replace('__SCRIPT_BASE64__',encoded)
           Path('/tmp/gallery-prep.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           token=$(cat /tmp/ops-token)
@@ -96,7 +103,7 @@ jobs:
               exit 0
             fi
             if [[ "$status" == failed ]]; then
-              jq -r '.job.log // ""' /tmp/result.json | grep -E 'native_gallery_|RuntimeError|Traceback' || true
+              jq -r '.job.log // ""' /tmp/result.json | grep -E 'native_gallery_|RuntimeError|Traceback|Error|Exception|missing|failed' | tail -80 || true
               exit 1
             fi
             sleep 4
