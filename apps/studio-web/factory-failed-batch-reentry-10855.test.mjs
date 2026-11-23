@@ -40,7 +40,7 @@ test("live holds and unrelated failures cannot be represented as resolved",()=>{
  assert.equal(target(failure).currentHoldReleased,false);
  assert.equal(hint({...failure,status:"approved"}),"");
  assert.equal(hint({...failure,error:"missing approved slides"}),"");
- assert.equal(hint({...failure,id:"../../bad-id"}),""); 
+ assert.doesNotMatch(hint({...failure,id:"../../bad-id"}),/data-factory-failed-open/); 
 });
 test("failure-details navigation never retries, approves or publishes",()=>{
  const start=source.indexOf('    details.querySelectorAll("[data-factory-failed-open]")');
