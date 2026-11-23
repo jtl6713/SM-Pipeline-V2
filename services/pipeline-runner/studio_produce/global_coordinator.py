@@ -8,11 +8,14 @@ Never use this per-row or for an unconditional high-frequency poll.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
+import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 
@@ -140,3 +143,89 @@ def trip(reason: str, *, cooldown_seconds: int = 90,
     if type(result) is not bool:
         raise GlobalAdmissionUnavailable("global_workload_trip_receipt_invalid")
     return result
+
+
+logger = logging.getLogger("pipeline-runner.global-workload")
+PRODUCER_TTL_SECONDS = 900
+PRODUCER_RENEW_SECONDS = 60
+
+
+@dataclass
+class GlobalProducerGuard:
+    """Shared-producer lease receipt. No identity or token is logged/exported."""
+
+    enabled: bool
+    lost: threading.Event
+    verified_progress: bool = False
+
+    def mark_progress(self) -> None:
+        if not self.lost.is_set():
+            self.verified_progress = True
+
+
+@contextmanager
+def producer_lease(
+    request_id: str, *, renew_interval: float = PRODUCER_RENEW_SECONDS,
+    ttl_seconds: int = PRODUCER_TTL_SECONDS,
+) -> Iterator[GlobalProducerGuard]:
+    """Opt-in global producer fence layered *after* the durable local claim.
+
+    With the flag off, this performs ZERO network calls and no additional
+    thread work. With the flag on, refuse absent, denied or ambiguous admission
+    before any canonical Studio step is prepared. This context may only cover
+    one local governed job, never a high-frequency row or polling operation.
+    """
+    guard = GlobalProducerGuard(enabled=False, lost=threading.Event())
+    if not enabled():
+        yield guard
+        return
+    if not re.fullmatch(r"rec[A-Za-z0-9]{6,}", str(request_id or "")):
+        raise GlobalAdmissionUnavailable("global_workload_producer_identity_invalid")
+    if not (60 <= ttl_seconds <= 1800) or not (1 <= renew_interval < ttl_seconds / 2):
+        raise GlobalAdmissionUnavailable("global_workload_producer_lease_config_invalid")
+
+    claim = acquire("producer", "studio-produce:" + request_id, ttl_seconds=ttl_seconds)
+    if not claim.accepted:
+        raise GlobalAdmissionUnavailable("global_workload_capacity_denied")
+
+    guard.enabled = True
+    stop = threading.Event()
+
+    def heartbeat() -> None:
+        while not stop.wait(renew_interval):
+            try:
+                if not renew(claim, ttl_seconds=ttl_seconds):
+                    guard.lost.set()
+                    logger.warning("global producer ownership lost: lease denied")
+                    return
+            except GlobalAdmissionUnavailable:
+                guard.lost.set()
+                logger.warning("global producer ownership unconfirmed: stopping job")
+                return
+
+    thread = threading.Thread(
+        target=heartbeat, daemon=True, name="studio-global-producer-heartbeat",
+    )
+    thread.start()
+    try:
+        yield guard
+    finally:
+        stop.set()
+        # Background renew uses a bounded 6s RPC; do not strand a worker
+        # indefinitely during network outage.
+        thread.join(timeout=7)
+        if thread.is_alive():
+            guard.lost.set()
+            logger.warning("global producer heartbeat did not stop on release")
+        try:
+            # A stale owner is rejected by the SQL fence. Progress can only
+            # clear half-open state if the lease was never observed lost.
+            released = release(
+                claim, verified_progress=guard.verified_progress and not guard.lost.is_set(),
+            )
+            if not released:
+                logger.warning("global producer release was not owner-confirmed")
+        except GlobalAdmissionUnavailable:
+            # Remote fence will expire; do not turn an otherwise successful
+            # producer step into a duplicate or mark the canonical job Blocked.
+            logger.warning("global producer release could not be confirmed")
