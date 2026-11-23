@@ -1,0 +1,1 @@
+Run one GET-only, fixed-host Supabase privileged Metrics API RAM/swap readback via existing Windows Ops, using ONLY an existing sb_secret_ key if present in the allowlisted local runner env. No key export, no database or consumer mutations, no producer cap change, no provider/publish calls. Fail closed and report missing existing metrics credential when unavailable. Issue #2670.
