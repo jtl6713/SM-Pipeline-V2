@@ -1,8 +1,8 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $envPath=Join-Path (Get-Location).Path 'Services\pipeline-runner\service\.env'
-if(!(Test-Path -LiteralPath $envPath)){throw 'env_missing'}
-function Setting($n){$a=@(Get-Content -LiteralPath $envPath|Where-Object {$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')});if($a.Count -ne 1){throw 'setting_missing'};return ($a[0] -split '=',2)[1].Trim().Trim('"').Trim("'")}
+if(!(Test-Path -LiteralPath $envPath)){$envPath=$null}
+function Setting($n){$v=[Environment]::GetEnvironmentVariable($n,'Process');if($v){return $v};$a=@(Get-Content -LiteralPath $envPath|Where-Object {$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')});if($a.Count -ne 1){throw 'setting_missing'};return ($a[0] -split '=',2)[1].Trim().Trim('"').Trim("'")}
 $sb=(Setting 'SUPABASE_URL').TrimEnd('/')
 if($sb -ne 'https://vkwvscgisqsbuwagdvtb.supabase.co'){throw 'wrong_supabase_project'}
 $key=Setting 'SUPABASE_SERVICE_ROLE_KEY'
@@ -76,4 +76,4 @@ foreach($spec in @($reels|Where-Object {[int]$_.n -eq '__REEL__'})){
   if(!$new.remotion_job_id -or $new.remotion_job_id -eq $spec.job -or [string]$new.remotion_props.voiceover.url -ne $vo){throw ('r4_no_voiceover_in_render_props_'+$spec.n)}
   Write-Output ('bethesda_reel_'+$spec.n+'=NEW_R4_JOB_WITH_NARRATION')
 }
-Write-Output 'bethesda_prepare=R4_STARTED_OR_ALREADY_COMPLETE'
+
