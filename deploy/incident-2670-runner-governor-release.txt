@@ -1,0 +1,6 @@
+2026-11-23 Incident #2670 — deliberate protected Windows Runner release marker for PR #2812.
+Source commit: 22ddc7671ceeebb2b2fdc8be67faacd57653c83e.
+The live governor is configured with STUDIO_MAX_PRODUCER_JOBS=1. Previously, Worker Ready-production had zero admissible capacity regardless of idle Python queue.
+Corrected code permits one Worker lease ONLY if the one combined heavy slot is idle and no runnable Python producer is queued; it refuses a second Worker/Python claim and preserves backoff queues. During emergency recovery, all Worker claims and lease renewals remain denied even if an exact Python-only canary was enabled.
+Nonpublishing hermetic incident regression: 59/59 passed on PR #2812. Main PR Safety Gate, Supabase-only retirement and broad functional regression passed.
+This release does NOT raise max_jobs, enable disabled I1/Rendering Review/native galleries, replay queues, change DNP or approval, schedule or publish content, reenable outbox, Airtable or Make. Protected Ops deploy must pass source/health checks. Verify the new runner version and only perform read-only postdeploy workload/Supabase checks; do not create synthetic production jobs.
