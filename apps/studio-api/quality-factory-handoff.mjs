@@ -291,7 +291,7 @@ export async function scanRecentProductionFactoryHandoffs({
     /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(x)))];
   if(!ids.length)return {
     schema:FACTORY_HANDOFF_SCHEMA,signature:FACTORY_HANDOFF_SIGNATURE,
-    status:"ok",checked_at:checkedAt,scanned:0,findings:[],
+    status:"ok",checked_at:checkedAt,scanned:0,findings:[],reports:[],
     incomplete_count:0,verification_required_count:0,
     note:"No newly promoted content with a ready output plan in bounded scan",
   };
