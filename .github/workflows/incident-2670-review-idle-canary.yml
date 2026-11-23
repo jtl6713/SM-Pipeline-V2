@@ -1,0 +1,161 @@
+name: Incident 2670 Rendering Review Empty-Queue Canary
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-review-idle-canary.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-render-review-idle-canary
+  cancel-in-progress: false
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse the exact bounded toggle and GET-only audit before production
+        shell: pwsh
+        run: |
+          foreach($path in @(
+            '.github/scripts/incident-2670-review-idle-toggle.ps1',
+            '.github/scripts/incident-2670-readonly-consumer-audit.ps1'
+          )){
+            $tokens=$null; $parseErrors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),[ref]$tokens,[ref]$parseErrors)
+            if($parseErrors.Count -gt 0){throw 'incident2670_canary_script_parse_failed'}
+          }
+          Write-Output 'review_idle_canary_powershell_parse=PASS'
+      - name: One guarded idle activation with guaranteed rollback on uncertainty
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/pre-health.json
+          jq -e '.ok==true and .recovery_read_only==false and
+            .workload_governor_enabled==true and
+            .studio_write_source=="supabase" and .supabase_pipeline_writes==true and
+            .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/pre-health.json >/dev/null
+          echo 'review_idle_canary_runner_authority=PASS'
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/ops.json
+          jq -e '.ok==true' /tmp/ops.json >/dev/null
+          attempted=0
+          ops_shell(){
+            local file="$1" desire="$2" marker="$3"
+            python3 - "$file" "$desire" <<'PY'
+          import sys,json
+          from pathlib import Path
+          source=Path(sys.argv[1]).read_text(encoding='utf-8')
+          desire=sys.argv[2]
+          if desire not in ('true','false','none'):
+              raise SystemExit('review_canary_desired_invalid')
+          if desire!='none':
+              source=source.replace('__DESIRED__',desire)
+          assert len(source)<8000,'review_canary_script_too_large'
+          Path('/tmp/ops-run.json').write_text(json.dumps({'command':source,'confirm':True}))
+          PY
+            local http
+            http=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' \
+              -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/ops-run.json || true)
+            [[ "$http" == 202 || "$http" == 200 ]] || return 1
+            local id status
+            id=$(jq -r '.job.id // .jobId // empty' /tmp/ops-start.json)
+            [[ -n "$id" ]] || return 1
+            for i in $(seq 1 50); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+                "$BASE/api/jobs/$id" -o /tmp/ops-result.json || return 1
+              status=$(jq -r '.job.status // empty' /tmp/ops-result.json)
+              if [[ "$status" == ok ]]; then
+                jq -r '.job.log // ""' /tmp/ops-result.json |
+                  grep "^$marker" | tail -1 > /tmp/ops-marker.txt
+                test -s /tmp/ops-marker.txt
+                return 0
+              fi
+              [[ "$status" == failed ]] && return 1
+              sleep 2
+            done
+            return 1
+          }
+          ops_restart(){
+            local code id status
+            code=$(curl -sS --max-time 30 -o /tmp/restart.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" -H "Authorization: Bearer $OPS_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+            [[ "$code" == 202 ]] || return 1
+            id=$(jq -r '.job.id // empty' /tmp/restart.json)
+            [[ -n "$id" ]] || return 1
+            for i in $(seq 1 85); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+                "$BASE/api/jobs/$id" -o /tmp/restart-result.json || return 1
+              status=$(jq -r '.job.status // empty' /tmp/restart-result.json)
+              [[ "$status" == ok ]] && return 0
+              [[ "$status" == failed ]] && return 1
+              sleep 3
+            done
+            return 1
+          }
+          rollback(){
+            local status="$1"
+            trap - EXIT
+            if [[ "$status" != 0 && "$attempted" == 1 ]]; then
+              echo 'review_idle_canary=VERIFY_FAILED_ROLLBACK_ATTEMPT'
+              # Never print remote script, job logs, tokens or env.
+              if ops_shell '.github/scripts/incident-2670-readonly-consumer-audit.ps1' none \
+                'incident2670_audit=' &&
+                sed 's/^incident2670_audit=//' /tmp/ops-marker.txt |
+                  jq -e '.review_auto_flag==false and .review_enabled==false' >/dev/null; then
+                  echo 'review_idle_canary=NO_ACTIVATION_TO_ROLLBACK'
+              else
+                if ops_shell '.github/scripts/incident-2670-review-idle-toggle.ps1' false \
+                  'incident2670_review_flag=false' && ops_restart; then
+                  echo 'review_idle_canary=ROLLED_BACK_FALSE'
+                else
+                  echo 'review_idle_canary=ROLLBACK_REQUIRES_OPERATOR'
+                fi
+              fi
+            fi
+            exit "$status"
+          }
+          trap 'rollback $?' EXIT
+          # The toggle itself verifies exact-render=true, all governor slots
+          # idle, native gallery disabled, outbox off, and canonical review
+          # Jobs AND Attempts empty over authorized Supabase service role GETs.
+          attempted=1
+          ops_shell '.github/scripts/incident-2670-review-idle-toggle.ps1' true \
+            'incident2670_review_flag=true'
+          echo 'review_idle_canary_flag=TRUE'
+          ops_restart
+          echo 'review_idle_canary_runner_restart=VERIFIED'
+          verified=0
+          for i in $(seq 1 9); do
+            sleep 7
+            if ops_shell '.github/scripts/incident-2670-readonly-consumer-audit.ps1' none \
+              'incident2670_audit='; then
+              if sed 's/^incident2670_audit=//' /tmp/ops-marker.txt | jq -e '
+                .enabled==true and .scope=="single_windows_host" and
+                .max_jobs==1 and .active_jobs==0 and
+                .database_circuit_open==false and .review_exact_flag==true and
+                .review_auto_flag==true and .review_enabled==true and
+                .review_started==true and .review_last_result=="no_eligible_job" and
+                .gallery_enabled==false and .gallery_auto_flag==false and
+                .optional_outbox_enabled==false and
+                .global_coordinator_enabled_on_runner==false
+              ' >/dev/null; then
+                verified=1
+                break
+              fi
+            fi
+          done
+          [[ "$verified" == 1 ]]
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/after-health.json
+          jq -e '.ok==true and .workload_governor_enabled==true and
+            .recovery_read_only==false and .studio_write_source=="supabase" and
+            .airtable_activity.any_activity==false' /tmp/after-health.json >/dev/null
+          echo 'review_idle_canary=ENABLED_EMPTY_QUEUE_NO_DISPATCH'
