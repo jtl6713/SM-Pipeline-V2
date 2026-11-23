@@ -5,8 +5,8 @@ $mode='__MODE__'
 if($mode -ne 'deny'){throw 'crosshost_mode_invalid'}
 $root='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service'
 $file=Join-Path $root '.env'
-if(-not (Test-Path -LiteralPath $file)){throw 'crosshost_runner_env_unavailable'}
-if(-not (Test-Path -LiteralPath (Join-Path $root 'studio_produce\global_coordinator.py'))){throw 'crosshost_runner_code_unavailable'}
+if(-not (Test-Path -LiteralPath $file)){Write-Output 'incident2670_root_windows_class=RUNNER_ENV_MISSING';throw 'crosshost_runner_env_unavailable'}
+if(-not (Test-Path -LiteralPath (Join-Path $root 'studio_produce\global_coordinator.py'))){Write-Output 'incident2670_root_windows_class=COORDINATOR_MODULE_MISSING';throw 'crosshost_runner_code_unavailable'}
 $lines=@(Get-Content -LiteralPath $file)
 function Lookup([string]$name) {
   $regex='^\s*'+[regex]::Escape($name)+'\s*='
@@ -26,7 +26,11 @@ $env:PYTHONPATH=$root
 $env:INCIDENT2670_CROSSHOST_MODE=$mode
 $python=@'
 import os, sys, time
-from studio_produce import global_coordinator as g
+try:
+  from studio_produce import global_coordinator as g
+except Exception:
+  print('incident2670_root_windows_class=IMPORT_FAILED')
+  raise SystemExit(31)
 
 mode=os.environ["INCIDENT2670_CROSSHOST_MODE"]
 settings={
@@ -34,11 +38,23 @@ settings={
   "supabase_service_role_key":os.environ["SUPABASE_SERVICE_ROLE_KEY"],
 }
 identity="incident2670-crosshost-python-synthetic-20261123-r2"
-result=g.acquire("native_gallery", identity, ttl_seconds=90, settings=settings)
+try:
+  result=g.acquire("native_gallery", identity, ttl_seconds=90, settings=settings)
+except g.GlobalAdmissionUnavailable as exc:
+  reason=str(exc)
+  allowed={'global_workload_rpc_unconfirmed','global_workload_rpc_rejected',
+           'global_workload_rpc_receipt_invalid','global_workload_authority_unavailable'}
+  print('incident2670_root_windows_class='+(
+      reason.upper() if reason in allowed else 'ADMISSION_UNAVAILABLE'))
+  raise SystemExit(32)
+except Exception:
+  print('incident2670_root_windows_class=RUNTIME_FAILURE')
+  raise SystemExit(33)
 if mode=="deny":
   if result.accepted or result.reason!="database_capacity":
     if result.accepted:
       g.release(result, settings=settings)
+    print("incident2670_root_windows_class=UNEXPECTED_ADMISSION_OR_REASON")
     raise SystemExit("crosshost_runner_deny_invalid")
   print("incident2670_crosshost_runner_DENIED_ROOT_CAP")
 elif mode=="hold":
@@ -55,7 +71,15 @@ else:
   raise SystemExit("crosshost_mode_invalid")
 '@
 $result=@(& python -c $python 2>$null)
-if($LASTEXITCODE -ne 0){throw 'crosshost_python_client_failed'}
+if($LASTEXITCODE -ne 0){
+  @($result|Where-Object {$_ -match '^incident2670_root_windows_class=(IMPORT_FAILED|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)
+$verified=@($result|Where-Object {$_ -match '^incident2670_crosshost_runner_(DENIED_ROOT_CAP|HOLD_ACQUIRED|HOLD_RELEASED)$'})
+if($mode -eq 'deny' -and $verified.Count -ne 1){throw 'crosshost_denial_receipt_missing'}
+if($mode -eq 'hold' -and $verified.Count -ne 2){throw 'crosshost_hold_receipts_missing'}
+$verified|ForEach-Object {Write-Output $_}
+})|ForEach-Object {Write-Output $_}
+  throw 'crosshost_python_client_failed'
+}
 $verified=@($result|Where-Object {$_ -match '^incident2670_crosshost_runner_(DENIED_ROOT_CAP|HOLD_ACQUIRED|HOLD_RELEASED)$'})
 if($mode -eq 'deny' -and $verified.Count -ne 1){throw 'crosshost_denial_receipt_missing'}
 if($mode -eq 'hold' -and $verified.Count -ne 2){throw 'crosshost_hold_receipts_missing'}
