@@ -130,7 +130,12 @@ export function assessProductionFactoryHandoff({
     report.status=activeJob(request) ? "in_progress" : "repair_required";
     return report;
   }
-  if (["Draft","Ready","Submitted"].includes(str(request.request_status)) && activeJob(request)) {
+  // A promoted parent can still have a running video/media producer.
+  // Never call this a failed render merely because the final file has not
+  // arrived while its OWN verified execution claim remains active.
+  if (activeJob(request) && canonical.some(row => !terminalOutput(row))
+      && !canonical.some(row => /^(failed|error|blocked)$/i.test(
+        str(row.output_status)+" "+str(row.render_status)))) {
     report.stage="produce";report.status="in_progress";return report;
   }
   const cards=Array.isArray(factoryCards) ? new Map(factoryCards.map(x=>[str(x.id||x.airtable_record_id),x])) : null;
@@ -160,13 +165,24 @@ export function assessProductionFactoryHandoff({
       }
       const slides=gallerySlides && Object.prototype.hasOwnProperty.call(gallerySlides,str(row.output_number))
         ? gallerySlides[str(row.output_number)] : null;
-      if(slides==null){missingProof=true;}
-      else if(!Array.isArray(slides)||slides.length<expected||slides.some(x=>x.deleted_from_carousel
-        ||!publicCdn(x.final_image_url??x.fields?.["Final Image URL"])
-        ||x.media_status==="Error"||x.fields?.Asset_4x5_Public_Status==="Error")) {
-        report.findings.push(incident({stage:"media",kind:"production_factory_handoff",reason:"canonical_gallery_missing_or_unready",output:row,remediation:"Create/repair exact owned ordered native slides; verify CDN bytes, selected manifest, aspect ratio, topic/location/rights/branding; keep publishing held during repair"}));
-        continue;
-      }
+      // C9 carousel_slides are mandatory for Instagram carousels and Facebook
+      // photo sets, but TikTok Multi-Photo is a different native manifest.
+      // Never invent C9 rows for TikTok to make an unrelated gallery pass.
+      const requireC9Gallery=["Instagram","Facebook"].includes(str(row.platform))
+        && expected>1;
+      if (requireC9Gallery) {
+        if(slides==null){missingProof=true;}
+        else if(!Array.isArray(slides)||slides.length<expected||slides.some(x=>x.deleted_from_carousel
+          ||!publicCdn(x.final_image_url??x.fields?.["Final Image URL"])
+          ||x.media_status==="Error"||x.fields?.Asset_4x5_Public_Status==="Error")) {
+          report.findings.push(incident({stage:"media",kind:"production_factory_handoff",reason:"canonical_gallery_missing_or_unready",output:row,remediation:"Create/repair exact owned ordered native slides; verify CDN bytes, selected manifest, aspect ratio, topic/location/rights/branding; keep publishing held during repair"}));
+          continue;
+        }
+      } else if (str(row.platform)==="TikTok" && (!Array.isArray(slides)||slides.length===0)) {
+        // The compact scan has no typed TikTok image array. Ask the exact
+        // TikTok review preflight to verify it rather than falsely fail C9.
+        missingProof=true;
+      } else if (slides==null) missingProof=true;
       // Image final approval is a separate *human* decision. Never change
       // Approved For Final or Shared Asset Approved as an automated repair.
     } else if (!nonempty(row.final_file_url)||!publicCdn(row.thumbnail_url)) {
