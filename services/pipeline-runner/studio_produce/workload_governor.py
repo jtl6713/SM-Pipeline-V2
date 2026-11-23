@@ -247,7 +247,13 @@ def claim_next() -> tuple[str, str] | None:
         if circuit_open(db):
             db.commit()
             return None
-        active = db.execute("SELECT COUNT(*) FROM producer_jobs WHERE state='running'").fetchone()[0]
+        # Worker autonomous ready-production and Python producers share the
+        # same SQLite admission transaction. Without this count, two Cloudflare
+        # isolates could fill their own R2 claims while two Python jobs run.
+        worker_active = db.execute("""SELECT COUNT(*) FROM resource_leases
+            WHERE scope='worker_heavy' AND lease_until>?""", (now,)).fetchone()[0]
+        active = (db.execute("SELECT COUNT(*) FROM producer_jobs WHERE state='running'")
+                  .fetchone()[0] + worker_active)
         # After a circuit cooldown, probe with one producer before returning to
         # normal concurrency. A successful job finish clears the half-open latch.
         has_outage = db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone()
@@ -277,6 +283,91 @@ def claim_next() -> tuple[str, str] | None:
         )
         db.commit()
     return str(row[0]), token
+
+
+
+# Only the authenticated Cloudflare Ready-production caller may use this scope.
+# The browser has no access to the shared secret or these durable leases.
+WORKER_HEAVY_SCOPE = "worker_heavy"
+WORKER_HEAVY_LEASE_SECONDS = 120
+WORKER_HEAVY_LIMIT = 1  # Reserve at least one of the global two slots for Python.
+
+
+def claim_worker_heavy(idea_id: str, token: str) -> bool:
+    """Atomic Worker+Python heavy-job admission, backed by the runner SQLite.
+
+    Refuse on unavailable governor, outage/circuit or duplicate idea owner.
+    Excess ideas remain in the Worker's existing R2 durable ready-production queue.
+    Repeated requests with the *same* live token are idempotent.
+    """
+    if not enabled() or admission_paused():
+        return False
+    with _connect() as db:
+        _transaction(db)
+        now = time.time()
+        if admission_paused() or circuit_open(db):
+            db.commit()
+            return False
+        # Half-open database recovery is Python-only until a canonical
+        # producer step proves the store is healthy again.
+        if db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone():
+            db.commit()
+            return False
+        row = db.execute("""SELECT token,lease_until FROM resource_leases
+            WHERE scope=? AND lease_key=?""", (WORKER_HEAVY_SCOPE, idea_id)).fetchone()
+        if row and float(row[1]) > now:
+            db.commit()
+            return row[0] == token
+        # Cleanup only expired Worker claims, not other stages' leases.
+        db.execute("""DELETE FROM resource_leases
+            WHERE scope=? AND lease_until<=?""", (WORKER_HEAVY_SCOPE, now))
+        running = db.execute("""SELECT COUNT(*) FROM producer_jobs
+            WHERE state='running' AND lease_until>?""", (now,)).fetchone()[0]
+        worker_running = db.execute("""SELECT COUNT(*) FROM resource_leases
+            WHERE scope=? AND lease_until>?""", (WORKER_HEAVY_SCOPE, now)).fetchone()[0]
+        # After a database outage, permit only ONE combined half-open canary.
+        has_outage = db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone()
+        allowed = 1 if has_outage else max_jobs()
+        # Reserve one producer slot even while a Worker performs heavy
+        # idea matching; when configured for one job, Worker admission pauses.
+        worker_limit = min(WORKER_HEAVY_LIMIT, max(0, allowed - 1))
+        if worker_running >= worker_limit or running + worker_running >= allowed:
+            db.commit()
+            return False
+        claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
+            (scope,lease_key,token,lease_until) VALUES (?,?,?,?)""",
+            (WORKER_HEAVY_SCOPE, idea_id, token, now + WORKER_HEAVY_LEASE_SECONDS),
+        ).rowcount
+        db.commit()
+        return bool(claimed)
+
+
+def renew_worker_heavy(idea_id: str, token: str) -> bool:
+    """An expired or superseded token cannot resurrect a Worker workload."""
+    if not enabled() or admission_paused():
+        return False
+    now = time.time()
+    with _connect() as db:
+        if circuit_open(db) or db.execute(
+            "SELECT 1 FROM governor_control WHERE name='database'"
+        ).fetchone():
+            return False
+        return bool(db.execute("""UPDATE resource_leases SET lease_until=?
+            WHERE scope=? AND lease_key=? AND token=? AND lease_until>?""",
+            (now + WORKER_HEAVY_LEASE_SECONDS, WORKER_HEAVY_SCOPE,
+             idea_id, token, now),
+        ).rowcount)
+
+
+def release_worker_heavy(idea_id: str, token: str) -> bool:
+    """Release only the matching owner, including during outage recovery."""
+    if not enabled():
+        return False
+    with _connect() as db:
+        return bool(db.execute("""DELETE FROM resource_leases
+            WHERE scope=? AND lease_key=? AND token=?""",
+            (WORKER_HEAVY_SCOPE, idea_id, token),
+        ).rowcount)
 
 
 def claimed_resume_requested(request_id: str, token: str) -> bool:
@@ -497,6 +588,9 @@ def snapshot() -> dict[str, object]:
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope='photo_group' AND lease_until>?""", (time.time(),)).fetchone()[0]
         queued = dict(counts)
+        worker_heavy = db.execute("""SELECT COUNT(*) FROM resource_leases
+            WHERE scope=? AND lease_until>?""",
+            (WORKER_HEAVY_SCOPE, time.time())).fetchone()[0]
         rows = db.execute("""SELECT operation,SUM(total),SUM(failures),
             SUM(latency_total_ms),MAX(latency_max_ms)
             FROM request_metrics WHERE minute>=? GROUP BY operation""",
@@ -515,6 +609,9 @@ def snapshot() -> dict[str, object]:
             "recovery_read_only": admission_paused(),
             "admission_paused": admission_paused() or circuit_open(db),
             "active_jobs": queued.get("running", 0),
+            "active_worker_heavy": worker_heavy,
+            "combined_heavy_active": queued.get("running", 0) + worker_heavy,
+            "worker_heavy_limit": WORKER_HEAVY_LIMIT,
             "queued_jobs": queued.get("queued", 0), "paused_jobs": queued.get("paused", 0),
             "active_photo_groups": groups,
             "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),

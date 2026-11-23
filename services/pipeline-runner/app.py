@@ -236,6 +236,12 @@ def _recovery_read_only_gate():
     # media transfers, and publishing-related runner HTTP routes. Preserve
     # GET /health for deploy verification and independent read-only Studio.
     if recovery_read_only() and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        # Allow ONLY release of an existing authenticated Worker lease while
+        # frozen. No claim/renew may pass the recovery fence.
+        if request.method.upper() == "POST" and request.path == "/internal/workload/worker-lease":
+            data = request.get_json(silent=True)
+            if isinstance(data, dict) and data.get("action") == "release":
+                return None
         if (request.method.upper() == "POST" and request.path == "/stages/a3"
                 and recovery_image_classification_allowed()):
             if request.content_length is not None and request.content_length > 8192:
@@ -332,6 +338,60 @@ def durable_airtable_egress():
     except (TypeError, ValueError, OSError) as error:
         return jsonify({"ok": False, "error": type(error).__name__}), 400
     return jsonify(result), 200 if result.get("ok") else 503
+
+
+@app.post("/internal/workload/worker-lease")
+def worker_shared_workload_lease():
+    """Server-owned cross-host admission for the Cloudflare Ready queue.
+
+    Never trusts the caller to set capacity, scope, TTL, DB path or commands.
+    No database writes; durable coordinator is the existing Windows SQLite.
+    """
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"ok": False, "error": "runner_auth_unconfigured"}), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    if request.content_length is not None and request.content_length > 1024:
+        return jsonify({"ok": False, "error": "invalid_lease_body_size"}), 413
+    # Cloudflare may use chunked HTTPS requests without Content-Length.
+    # The service secret is verified before reading a bounded JSON body.
+    raw_body = request.get_data(cache=True)
+    if not raw_body or len(raw_body) > 1024:
+        return jsonify({"ok": False, "error": "invalid_lease_body_size"}), 413
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"action", "idea_id", "token"}:
+        return jsonify({"ok": False, "error": "invalid_lease_payload"}), 422
+    action = payload.get("action")
+    idea_id = payload.get("idea_id")
+    token = payload.get("token")
+    if (action not in {"claim", "renew", "release"}
+            or not isinstance(idea_id, str)
+            or not re.fullmatch(r"rec[A-Za-z0-9]{14}", idea_id)
+            or not isinstance(token, str)
+            or not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                token,
+            )):
+        return jsonify({"ok": False, "error": "invalid_lease_identity"}), 422
+    try:
+        if action == "claim":
+            granted = workload_governor.claim_worker_heavy(idea_id, token)
+        elif action == "renew":
+            granted = workload_governor.renew_worker_heavy(idea_id, token)
+        else:
+            released = workload_governor.release_worker_heavy(idea_id, token)
+            return jsonify({"ok": True, "released": released}), 200
+    except (OSError, RuntimeError, ValueError):
+        logger.exception("shared worker admission storage unavailable")
+        return jsonify({"ok": False, "error": "admission_store_unavailable"}), 503
+    # All errors and lack of capacity fail closed; no side effects to source
+    # idea status, R2 queues, Supabase or provider publication.
+    response = jsonify({"ok": True, "admitted": granted, "retry_after_seconds": 30})
+    response.headers["Cache-Control"] = "no-store"
+    if not granted:
+        response.headers["Retry-After"] = "30"
+    return response, 200 if granted else 429
 
 
 @app.get("/admin/workload")
