@@ -88,3 +88,15 @@ def test_missing_ninth_gallery_aborts_global_read_only_preflight():
     with pytest.raises(RuntimeError, match="gallery_owner_authorization_missing:10009"):
         namespace["_preflight_all"](FakeClient())
     assert observed == list(outputs)[:9]
+
+
+def test_gallery_graph_workflow_requires_explicit_operator_dispatch():
+    workflow = (
+        Path(__file__).resolve().parents[3]
+        / ".github" / "workflows" / "incident-2670-native-gallery-review-restore.yml"
+    ).read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in workflow
+    assert "workflow_run:" not in workflow
+    assert "RECOVERY_CONFIRMATION:" in workflow
+    assert 'test "$RECOVERY_CONFIRMATION" = ' in workflow
+    assert "PREPARE-HELD-GALLERIES" in workflow
