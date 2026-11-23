@@ -1276,6 +1276,23 @@ jobs:
               TOTAL=$(jq -r '.summary.needs_eyes' /tmp/factory-review-readonly.json)
               SOURCE=$(jq -r '.read_source' /tmp/factory-review-readonly.json)
               echo "factory_review_backlog=PASS source=$SOURCE total=$TOTAL NYC_count=$NYC_COUNT"
+              # #2371: A healthy overall NYC count cannot prove any of the four
+              # exact Content 2221 siblings survived Factory classification.
+              # This is a read-only sanitized exact-ID check, no media URLs or
+              # private account data ever printed.
+              jq -c '
+                [(.lanes | to_entries[] | .key as $lane | .value[]?
+                  | select(.output_id == 10855 or .output_id == 10856 or
+                           .output_id == 10857 or .output_id == 10858)
+                  | {id:.output_id,lane:$lane,review_package_ready,
+                     review_package_readiness,review_package_reason,
+                     review_package_missing,studio_state,output_status,
+                     render_status,review_status,publish_status,
+                     do_not_publish,auto_publish_enabled,review_hold_active,
+                     safety_hold_active,profile_id})] as $found
+                | {factory_content_2221_exact:$found,
+                   missing_ids:([10855,10856,10857,10858] - [$found[].id])}
+              ' /tmp/factory-review-readonly.json
               exit 0
             fi
             echo "factory_review_backlog invalid_or_unavailable attempt=$i http=$CODE" >&2
