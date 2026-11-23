@@ -6,3 +6,5 @@ and STUDIO_SIDE_EFFECT_OUTBOX_ENABLED disabled. No automatic publishing/holds
 or batch replay. Exact backup and rollback on runner health failure.
 
 One-time retry after previous fail-closed Ops shell preflight; expose only allowlisted blocker code.
+
+Retry after YAML-indentation correction; existing live I1 flag not modified by invalid workflow attempts.
