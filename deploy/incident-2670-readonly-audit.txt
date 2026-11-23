@@ -11,3 +11,4 @@ Nov 23 2026 02:46 UTC: strict GET-only audit parser variable correction, reexecu
 Nov 23 2026 02:48 UTC: one GET-only recheck after AST reported line 25 extra parenthesis. No changes to capacity or provider work.
 
 Nov 23 2026 ~02:50 UTC: final GET-only inspection prints allowlisted current max_jobs and consumer flags; prior successful audit emitted boolean only.
+Nov 23 2026 post #2812/#2813 cap-one idle Ready-production fix: after protected Windows runner deploy #45106060662 succeeds, rerun existing authenticated GET-only governor + review/gallery/outbox inventory. Verify max_jobs=1, existing queue untouched, no circuit, consumer flags stay disabled and optional outbox remains disabled. No production leases, source jobs, publishing holds, Airtable or Make mutations. This audit must not be used as a 70% load acceptance or two-host coordinator enablement.
