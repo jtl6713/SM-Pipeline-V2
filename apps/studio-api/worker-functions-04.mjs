@@ -103,6 +103,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
 import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
@@ -13243,6 +13244,22 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
         continue;
       }
       targets.set(row.id, row);
+    }
+  }
+  // #2618: deletion is an unpublished multi-sibling skip that can erase
+  // historical scheduling and creative review state, not a simple card removal.
+  // Before touching ANY sibling, check the entire exact target set against the
+  // canonical Supabase creative-QA marker, including approved/scheduled holds.
+  // A browser-hidden Delete button is NOT authorization for this mutation.
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    const ids = [...targets.keys()];
+    try {
+      await assertFactoryCreativeQaDeleteSafe(ids, async outputIds => supabaseRest(env,
+        "platform_outputs?airtable_record_id=in.(" + outputIds.join(",") + ")"
+          + "&select=airtable_record_id,error_messages,do_not_publish&limit=41"));
+    } catch (error) {
+      const message = String(error?.message || error);
+      throw new HttpError(message.startsWith("Creative QA hold:") ? 409 : 503, message);
     }
   }
   const patches = [...targets.values()].map((row) => {

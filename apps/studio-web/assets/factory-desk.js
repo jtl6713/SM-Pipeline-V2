@@ -640,6 +640,7 @@
     if (recentFactoryAccepted()[String(card?.id || "")] &&
         String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (card?.kind !== "output") return false;
+    if (card.creative_qa_hold === true) return false;
     if (card.review_package_ready === false) return false;
     // Held revisions must be discoverable and previewable, never approvable
     // from Factory until their separate review and QA handoff completes.
@@ -659,7 +660,8 @@
   function canDelete(card, { candidate = false } = {}) {
     // Recovery Source approved media is intentionally preserved. A generic
     // Delete button in Repair must not destroy the only source of the package.
-    if (card?.protected_media_rework === true || card?.meta_repair_required === true) return false;
+    if (card?.protected_media_rework === true || card?.meta_repair_required === true
+      || card?.creative_qa_hold === true) return false;
     if (candidate) return false;
     if (card?.kind === "idea") return true;
     if (card?.kind === "output") return true;
@@ -2436,6 +2438,9 @@
   // instead of silently omitting the checkbox while leaving Approve active.
   function factoryBatchSelectionReason(card) {
     if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (card.creative_qa_hold === true) {
+      return "Creative QA hold: " + (card.creative_qa_reason || "incorrect source imagery; publishing blocked");
+    }
     if (typeof factoryActiveSubmissionIds === "function"
         && factoryActiveSubmissionIds().has(String(card?.id || ""))) {
       return "Previous approval request remains in flight or awaiting reconciliation. Check Active Approvals before retrying.";
@@ -2479,6 +2484,7 @@
     const render = String(card?.render_status || "").trim().toLowerCase();
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output"
+      && card.creative_qa_hold !== true
       && card.do_not_publish === true
       && !card.held_review_decision
       && card.review_hold_active !== true
@@ -2501,7 +2507,8 @@
     const review = String(card?.review_status || "").trim().toLowerCase();
     const render = String(card?.render_status || "").trim().toLowerCase();
     const publish = String(card?.publish_status || "").trim().toLowerCase();
-    return card?.kind === "output" && card.do_not_publish === true
+    return card?.kind === "output" && card.creative_qa_hold !== true
+      && card.do_not_publish === true
       && !card.held_review_decision
       && card.review_hold_active !== true
       && output === "ready for review"
@@ -2521,6 +2528,7 @@
     const render = String(card?.render_status || "").trim().toLowerCase();
     const publish = String(card?.publish_status || "").trim().toLowerCase();
     return card?.kind === "output"
+      && card.creative_qa_hold !== true
       && card.do_not_publish === true
       && card.review_hold_active !== true
       && card.safety_hold_active !== true
@@ -2603,7 +2611,9 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.meta_repair_required === true
+    const stateLabel = card.creative_qa_hold === true
+      ? "Creative correction required · Publishing held"
+      : card.meta_repair_required === true
       ? "Studio repair required · Publishing held"
       : card.protected_media_rework === true
       ? (card.recovery_source_inventory_verified === true
@@ -2630,6 +2640,11 @@
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${titleMarkup}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${card.creative_qa_hold === true
+          ? `<span class="factory-batch-unavailable factory-creative-qa" role="status"><strong>Creative QA: incorrect media · Publishing held</strong><br>
+              ${esc(card.creative_qa_reason || "Location/season or source image needs replacement and verification.")}
+              <small>Open this exact output for media correction. Prior approval or provisional schedule does not authorize publication. No automatic approval, retry, deletion or hold release.</small></span>`
+          : ""}
         ${card.meta_repair_required === true
           ? `<span class="factory-batch-unavailable factory-meta-repair" role="status"><strong>Studio repair required · ${esc(card.meta_repair_reason || "Recovery")}</strong> · Publishing held<br>
               ${esc(card.meta_repair_next_step || "Studio must diagnose and repair this output.")}
