@@ -107,7 +107,11 @@ jobs:
                       log=job.get('log') or ''
                       marks=[v.strip() for v in log.splitlines() if v.strip().startswith('bethesda_')]
                       for m in marks[-12:]: print(m[:500],flush=True)
-                      if state!='ok': raise SystemExit('bethesda_ops_stage_failed_closed_no_blind_retry')
+                      if state!='ok':
+                          known=('env_missing','setting_missing','wrong_supabase_project','normal_production_fence_changed','governor_not_idle','remotion_busy','unique_row_expected_got_','original_production_request_changed','parent_narration_not_ready','approved_voiceover_mismatch','four_output_identity_changed','output_identity_changed_','publishing_hold_changed_','pro_link_changed_','intentional_story_mute_or_media_changed','explicit_reel_mute_stop_')
+                          reason=next((tag for tag in known if tag in log),'UNCLASSIFIED')
+                          print('bethesda_ops_failure_class='+reason,flush=True)
+                          raise SystemExit('bethesda_ops_stage_failed_closed_no_blind_retry')
                       return '\n'.join(marks)
               raise SystemExit('ops_job_result_unknown_stop_no_auto_retry')
           pre=run_ops('bethesda-2303-bounded-preflight.ps1')
