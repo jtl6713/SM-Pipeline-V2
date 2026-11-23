@@ -1,0 +1,81 @@
+name: Incident 2670 Supabase Memory And Swap Readonly
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-metrics-readonly.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-metrics-readonly
+  cancel-in-progress: false
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse Windows-only fixed-host metrics probe before Ops
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-supabase-metrics-ops.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw 'metrics_ps_parser_invalid'}
+          Write-Output 'incident2670_metrics_parser=PASS'
+      - name: Check protected Runner health and unused Airtable authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/incident2670-metrics-health.json
+          jq -e '.ok==true and .workload_governor_enabled==true and
+            .studio_write_source=="supabase" and .supabase_pipeline_writes==true and
+            .airtable_activity.any_activity==false' /tmp/incident2670-metrics-health.json >/dev/null
+          echo 'incident2670_metrics_runner_health=PASS'
+      - name: Fetch two Supabase metrics samples in existing protected Windows Ops process
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/incident2670-metrics-catalog.json
+          jq -e '.ok==true' /tmp/incident2670-metrics-catalog.json >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          source=Path('.github/scripts/incident-2670-supabase-metrics-ops.ps1').read_text()
+          if not 500<len(source)<8000:
+              raise SystemExit('metrics_script_too_large')
+          Path('/tmp/incident2670-metrics-body.json').write_text(json.dumps({'command':source,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/incident2670-metrics-start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/incident2670-metrics-body.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]] || { echo "incident2670_metrics_ops_http=$code"; exit 1; }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/incident2670-metrics-start.json)
+          test -n "$job"
+          for i in $(seq 1 55); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "$BASE/api/jobs/$job" -o /tmp/incident2670-metrics-status.json
+            status=$(jq -r '.job.status // empty' /tmp/incident2670-metrics-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
+                grep -E '^incident2670_(memory|swap)_(total_mb|available_mb|used_pct|available_delta_mb)=' | tail -6
+              jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
+                grep -x 'incident2670_metrics=PASS_TWO_READONLY_SAMPLES' >/dev/null
+              echo 'incident2670_metrics_production=PASS_READONLY'
+              exit 0
+            fi
+            if [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
+                grep -E '^incident2670_metrics=(NEEDS_EXISTING_SB_SECRET|API_UNAVAILABLE|REQUIRED_SERIES_UNAVAILABLE|RUNNER_ENV_UNAVAILABLE)$' | tail -1 || true
+              echo 'incident2670_metrics_production=UNVERIFIED_NO_CHANGES'
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'incident2670_metrics_production=UNVERIFIED_TIMEOUT'
+          exit 1
