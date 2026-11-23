@@ -4002,7 +4002,13 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
     // fails closed, never retries the pathological ILIKE OR or Airtable.
     path = `platform_outputs?test_run_id=is.null&home_failure_candidate=eq.true&${orderLimit}`;
   } else if (translated) {
-    path = `platform_outputs?${translated}&${orderLimit}`;
+    // The Airtable formula translator returns PostgREST *expression members*
+    // like and(...), or(...), or a field.eq.value leaf. Those are only valid
+    // INSIDE an explicit root logical group. As bare URL parameters they are
+    // silently ignored and paginate all outputs (observed offset=10000 in
+    // a past-due census with only ~5k matching records, incident #2670).
+    // The shared side-table reader already wraps these exact expressions.
+    path = `platform_outputs?and=(${translated})&${orderLimit}`;
   } else if (pastDue) {
     const iso = formula.match(/IS_BEFORE\(\{Scheduled_Post_Date\},"([^"]+)"\)/)?.[1];
     if (!iso) throw new Error("Supabase past-due census needs a clock");
