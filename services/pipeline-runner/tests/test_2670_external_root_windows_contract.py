@@ -17,3 +17,11 @@ def test_safety_and_no_service_role_export():
     assert "Invoke-RestMethod -Method Post" not in PS
     for forbidden in ("STUDIO_MAX_PRODUCER_JOBS=2","do_not_publish=false","airtable.com", "STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED=true"):
         assert forbidden not in WF
+
+def test_one_contiguous_failure_block_no_yaml_fragment_or_source_echo():
+    assert WF.count("incident2670_external_sql_vs_windows_python=UNVERIFIED_FAIL_CLOSED") == 1
+    assert WF.count("incident2670_external_sql_vs_windows_python=UNVERIFIED_TIMEOUT") == 1
+    assert WF.count("grep -E '^incident2670_root_windows_class=") == 1
+    assert "\n  | tail -1 || true" not in WF
+    assert "tail -1 || true\n              echo" in WF
+    assert "SUPABASE_SERVICE_ROLE_KEY: " not in WF
