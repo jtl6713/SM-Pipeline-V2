@@ -89,8 +89,17 @@ jobs:
             [[ "$code" != 409 ]] && break
             sleep 4
           done
-          [[ "$code" == 202 || "$code" == 200 ]]
-          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json); test -n "$job"
+          if [[ "$code" != 202 && "$code" != 200 ]]; then
+            echo "gallery_prep_ops_start_http=$code"
+            jq -c '{ok,error,code,message,jobId,job:(.job|if type=="object" then {id,action,service,status} else null end)}' /tmp/start.json || true
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json)
+          if [[ -z "$job" ]]; then
+            echo 'gallery_prep_ops_job_id=missing'
+            jq -c '{ok,error,code,message,jobId,job:(.job|if type=="object" then {id,action,service,status} else null end)}' /tmp/start.json || true
+            exit 1
+          fi
           for n in $(seq 1 300); do
             curl -fsS --max-time 20 -H "Authorization: Bearer $token" \
               "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/result.json
