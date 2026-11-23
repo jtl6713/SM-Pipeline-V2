@@ -1,0 +1,58 @@
+name: Incident 2670 Load Evidence Safety
+
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/incident2670_load_evidence*.py'
+      - 'docs/incidents/2670-load-*'
+      - '.github/workflows/incident-2670-load-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-evidence:
+    name: Validated nonpublishing load-evidence report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile and test fail-closed evidence evaluator (no network)
+        run: |
+          set -euo pipefail
+          python -m py_compile repair/scripts/incident2670_load_evidence.py
+          python -m unittest discover -s repair/scripts -p incident2670_load_evidence_test.py -v
+      - name: Verify observed data cannot falsely pass the 70 percent gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/incident2670_load_evidence.py \
+            --input docs/incidents/2670-load-observation-20261123.json \
+            --output /tmp/incident2670-load-report.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('/tmp/incident2670-load-report.json').read_text())
+          assert r['baseline']['requests'] == 18465
+          assert r['recovery']['requests'] == 11351
+          assert r['observed_gateway_request_rate_drop_pct'] == 79.5
+          assert r['outbox_404']['status'] == 'PASS'
+          assert r['http_5xx']['status'] == 'PASS'
+          assert r['target_70pct']['status'] == 'INCONCLUSIVE'
+          assert r['duplicate_claims']['status'] == 'INCONCLUSIVE'
+          print('incident2670_load_gate=PASS_WITH_UNVERIFIED_TARGET')
+          PY
+      - name: Upload sanitized nonpublishing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident2670-load-report
+          path: /tmp/incident2670-load-report.json
+          retention-days: 30
+          if-no-files-found: ignore

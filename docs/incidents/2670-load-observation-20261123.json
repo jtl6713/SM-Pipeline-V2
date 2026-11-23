@@ -1,0 +1,143 @@
+{
+  "notes": "Read-only Supabase edge_logs aggregates observed during incident #2670. Different time windows and unmeasured work throughput; do not claim 70% target met.",
+  "baseline": {
+    "scope": "supabase_edge_logs",
+    "coverage_complete": true,
+    "buckets": [
+      {
+        "start_utc": "2026-11-22T12:20:00Z",
+        "requests": 4902,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 264,
+        "mutations": 881
+      },
+      {
+        "start_utc": "2026-11-22T12:25:00Z",
+        "requests": 4567,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 246,
+        "mutations": 590
+      },
+      {
+        "start_utc": "2026-11-22T12:30:00Z",
+        "requests": 5356,
+        "errors_5xx": 1,
+        "errors_522": 0,
+        "outbox_404": 295,
+        "mutations": 1131
+      },
+      {
+        "start_utc": "2026-11-22T12:35:00Z",
+        "requests": 3640,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 275,
+        "mutations": 655
+      }
+    ]
+  },
+  "recovery": {
+    "scope": "supabase_edge_logs",
+    "coverage_complete": true,
+    "buckets": [
+      {
+        "start_utc": "2026-11-23T00:00:00Z",
+        "requests": 1431,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 80
+      },
+      {
+        "start_utc": "2026-11-23T00:05:00Z",
+        "requests": 813,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 2
+      },
+      {
+        "start_utc": "2026-11-23T00:10:00Z",
+        "requests": 909,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 16
+      },
+      {
+        "start_utc": "2026-11-23T00:15:00Z",
+        "requests": 936,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 49
+      },
+      {
+        "start_utc": "2026-11-23T00:20:00Z",
+        "requests": 775,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 15
+      },
+      {
+        "start_utc": "2026-11-23T00:25:00Z",
+        "requests": 782,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 8
+      },
+      {
+        "start_utc": "2026-11-23T00:30:00Z",
+        "requests": 1526,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 84
+      },
+      {
+        "start_utc": "2026-11-23T00:35:00Z",
+        "requests": 841,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 16
+      },
+      {
+        "start_utc": "2026-11-23T00:40:00Z",
+        "requests": 877,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 17
+      },
+      {
+        "start_utc": "2026-11-23T00:45:00Z",
+        "requests": 912,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 17
+      },
+      {
+        "start_utc": "2026-11-23T00:50:00Z",
+        "requests": 752,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 6
+      },
+      {
+        "start_utc": "2026-11-23T00:55:00Z",
+        "requests": 797,
+        "errors_5xx": 0,
+        "errors_522": 0,
+        "outbox_404": 0,
+        "mutations": 8
+      }
+    ]
+  }
+}
