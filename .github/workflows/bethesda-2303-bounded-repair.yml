@@ -1,4 +1,5 @@
 name: Bethesda 2303 bounded narrated Reel repair
+# Follow-up release: resolve service config relative to Ops PIPELINE_ROOT cwd (incident #2670).
 on:
   pull_request:
     paths:
