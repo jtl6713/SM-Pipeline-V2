@@ -1,0 +1,1 @@
+Incident #2670 read-only production inventory, November 23 2026 UTC. No settings changes, job claims, queue writes, provider calls, or publishing. Report authenticated loopback governor limit/active/queued/paused and DB circuit/request metrics, review/native-gallery consumer flags, and assert STUDIO_SIDE_EFFECT_OUTBOX_ENABLED remains disabled.
