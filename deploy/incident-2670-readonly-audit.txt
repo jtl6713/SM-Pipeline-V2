@@ -9,3 +9,5 @@ Nov 23 2026: third strict GET-only audit with PowerShell AST parser gate and ded
 Nov 23 2026 02:46 UTC: strict GET-only audit parser variable correction, reexecute preflight only. No config or publishing changes.
 
 Nov 23 2026 02:48 UTC: one GET-only recheck after AST reported line 25 extra parenthesis. No changes to capacity or provider work.
+
+Nov 23 2026 ~02:50 UTC: final GET-only inspection prints allowlisted current max_jobs and consumer flags; prior successful audit emitted boolean only.
