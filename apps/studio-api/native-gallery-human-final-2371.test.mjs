@@ -29,6 +29,7 @@ function fixture([id, outputNumber, platform, type]) {
     selected_clip_count:4, selected_assets:{selected_clips:clips},
     render_clip_list:clips,
     do_not_publish:false, auto_publish_enabled:false,
+    publish_hold_released_at:"2026-11-23T02:45:37Z",
     scheduled_post_date:null,studio_scheduled_at:null,
     published_at:null,platform_post_url:null,platform_publish_response:null,
     error_messages:{SM_NYC_AI_Creative_QA_20261122:{
@@ -99,6 +100,7 @@ for(const pair of pairs){
     assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
     const approved=await finalizeNycOwnerGalleryOnFactoryClick(env,output,{
       requestId:"factory-new-20261123",approvedByUserRecordId:actor,
+      submittedAt:"2026-11-23T04:45:00Z",
     });
     assert.equal(approved.eligible,true);
     assert.equal(calls.filter(c=>c.method==="PATCH").length,4);
@@ -108,6 +110,7 @@ for(const pair of pairs){
     assert.equal(output.auto_publish_enabled,false);
     const repeat=await finalizeNycOwnerGalleryOnFactoryClick(env,output,{
       requestId:"factory-new-20261124",approvedByUserRecordId:actor,
+      submittedAt:"2026-11-24T04:45:00Z",
     });
     assert.equal(repeat.pending,0);
     assert.equal(calls.filter(c=>c.method==="PATCH").length,4,"idempotent with existing actual review evidence");
@@ -119,6 +122,7 @@ test("#2371 pending slides cannot be finalized while hold is active",async t=>{
   assert.equal(await preflightNycOwnerGalleryApproval(env,output),null);
   assert.equal(await finalizeNycOwnerGalleryOnFactoryClick(env,output,{
     requestId:"factory-new-20261123",approvedByUserRecordId:actor,
+      submittedAt:"2026-11-23T04:45:00Z",
   }),null);
   assert.equal(calls.length,0);
 });
@@ -141,6 +145,7 @@ test("#2371 concurrent slide edit fails closed and never authorizes parent publi
   const {output,slides}=fixture(pairs[0]); const calls=wire(t,slides,{conflictAt:2});
   await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
     requestId:"factory-new-20261123",approvedByUserRecordId:actor,
+      submittedAt:"2026-11-23T04:45:00Z",
   }),/changed during authenticated final approval/);
   assert.equal(calls.filter(c=>c.method==="PATCH").length,2);
   assert.equal(slides[0].fields["Approved For Final"],true,"first authored slide receipt retained");
@@ -154,4 +159,13 @@ test("#2371 no other gallery gets this owner-only human-finalization bridge",asy
   assert.equal(nycOwnerGalleryApprovalEligible(output),false);
   assert.equal(await preflightNycOwnerGalleryApproval(env,output),null);
   assert.equal(calls.length,0);
+});
+
+test("#2371 historic Factory batch predating owner hold release cannot final-approve corrected slides",async t=>{
+  const {output,slides}=fixture(pairs[1]);const calls=wire(t,slides);
+  await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
+    requestId:"old-failed-factory-request",approvedByUserRecordId:actor,
+    submittedAt:"2026-11-22T05:44:56Z",
+  }),/AFTER the owner hold release/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
 });
