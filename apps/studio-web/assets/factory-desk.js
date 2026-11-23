@@ -1581,9 +1581,10 @@
       overall.className = "factory-batch-overall-progress";
       summary.insertAdjacentElement("afterend", overall);
     }
-    overall.hidden = !batches.length || (!state.completedOpen &&
-      !Number(totals.active) && !Number(totals.pending));
-    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : "Overall active approval progress"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
+    // A terminal 100% receipt is still useful until the next completed-history
+    // reconciliation. Do not hide the bar at the exact moment the last item finishes.
+    overall.hidden = !batches.length;
+    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : totals.active ? "Overall active approval progress" : "Latest completed submission"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
       <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
       <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>
       ${factoryLiveSummaryHtml(batches.flatMap(row => row.items || []))}`;
