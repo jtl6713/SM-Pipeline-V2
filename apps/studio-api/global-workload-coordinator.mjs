@@ -23,18 +23,21 @@ export async function globalWorkloadKey(identity) {
   return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-function config(env, scope, key, fence, ttl) {
-  if (!SCOPES.has(scope) || !SHA64.test(String(key)) ||
-      !UUID.test(String(fence)) || !Number.isInteger(ttl) ||
-      ttl < DURATIONS[0] || ttl > DURATIONS[1]) {
-    throw new Error("global_workload_request_invalid");
-  }
+function authority(env) {
   const base = String(env?.SUPABASE_URL || "").trim().replace(/\/+$/, "");
   const secret = String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   if (!/^https:\/\/[a-z0-9.-]+\.supabase\.co$/i.test(base) || secret.length < 32) {
     throw new Error("global_workload_authority_unavailable");
   }
   return { base, secret };
+}
+function config(env, scope, key, fence, ttl) {
+  if (!SCOPES.has(scope) || !SHA64.test(String(key)) ||
+      !UUID.test(String(fence)) || !Number.isInteger(ttl) ||
+      ttl < DURATIONS[0] || ttl > DURATIONS[1]) {
+    throw new Error("global_workload_request_invalid");
+  }
+  return authority(env);
 }
 
 export async function globalWorkloadRpc(env, operation, {
@@ -46,7 +49,7 @@ export async function globalWorkloadRpc(env, operation, {
   if (!["acquire", "renew", "release", "trip"].includes(operation)) {
     throw new Error("global_workload_operation_invalid");
   }
-  const cfg = config(env, scope, key, fence, ttlSeconds);
+  const cfg = operation === "trip" ? authority(env) : config(env, scope, key, fence, ttlSeconds);
   const suffix = operation === "acquire" ? "studio_global_workload_acquire"
     : operation === "renew" ? "studio_global_workload_renew"
     : operation === "release" ? "studio_global_workload_release"
