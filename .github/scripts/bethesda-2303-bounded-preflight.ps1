@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $envPath=Join-Path (Get-Location).Path 'Services\pipeline-runner\service\.env'
 if(!(Test-Path -LiteralPath $envPath)){$envPath=$null}
-function Setting([string]$n){$v=[Environment]::GetEnvironmentVariable($n,'Process');if($v){return $v};
+function Setting([string]$n){$v=[Environment]::GetEnvironmentVariable($n,'Process');if($v){return $v};if(!$envPath){throw 'env_missing'};
   $rows=@(Get-Content -LiteralPath $envPath | Where-Object {$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')})
   if($rows.Count -ne 1){throw ('setting_missing_'+$n)}
   return ($rows[0] -split '=',2)[1].Trim().Trim('"').Trim("'")
