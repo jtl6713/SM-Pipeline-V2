@@ -73,20 +73,12 @@
   async function releaseHold(record,check) {
     // Keep the hold visually checked until the server confirms the actual release.
     check.checked=true;
-    const feedback=check.closest("td")?.querySelector(".admin-hold-release-feedback");
-    const showInline=(message,isError=false)=>{
-      if(!feedback)return;
-      feedback.textContent=message;
-      feedback.classList.toggle("error-text",Boolean(isError));
-    };
-    showInline("");
     const note=prompt("Reason for releasing the publishing hold on #"+
       (record.number||record.id)+" ("+record.profile_name+"):\n\n"+
       "This does NOT approve, schedule, publish, retry, or enable automatic publishing.");
     if(note===null)return;
     if(note.trim().length<12||note.trim().length>500){
       showStatus("Release requires a reason of 12–500 characters. No hold changed.",true);
-      showInline("Hold unchanged: please enter a 12–500 character release reason.",true);
       return;
     }
     if(!confirm("Release publishing hold on output #"+(record.number||record.id)+
@@ -94,7 +86,6 @@
       "Automatic publishing will remain disabled. You must explicitly approve/schedule/publish later."))return;
     check.disabled=true;
     showStatus("Rechecking and releasing output #"+(record.number||record.id)+"…");
-    showInline("Checking current hold protection and revision…");
     try{
       await request("/api/operations/publishing-holds/"+record.id+"/release",{
         method:"POST",body:JSON.stringify({
@@ -103,12 +94,9 @@
         })
       });
       showStatus("Released #"+(record.number||record.id)+". Automatic publishing remains OFF. No post was dispatched.");
-      showInline("Hold release verified; refreshing. Automatic publishing remains OFF.");
       await load(false);
     }catch(error){
-      check.checked=true;
-      showStatus("Hold NOT confirmed released: "+error.message,true);
-      showInline("Hold remains active: "+error.message,true);
+      check.checked=true;showStatus("Hold NOT confirmed released: "+error.message,true);
     }finally{check.disabled=false;}
   }
   function renderRow(record){
@@ -137,9 +125,6 @@
     checkbox.addEventListener("change",()=>releaseHold(record,checkbox));
     control.append(checkbox,document.createTextNode(" Hold for publishing"));
     action.append(control);
-    const feedback=label(action,"p","","admin-hold-release-feedback");
-    feedback.setAttribute("role","status");
-    feedback.setAttribute("aria-live","polite");
     if(!record.releasable)label(action,"p",record.block_reason||"Protected hold","admin-hold-blocked");
     else {
       label(action,"p","Uncheck to release this publishing hold only","subtle");
