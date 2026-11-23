@@ -100,3 +100,75 @@ test("status path isolates partial failures and never submits again", () => {
   assert.match(source, /factoryShowSubmissionPreview\(clickedCards\);/);
   assert.match(source, /renderFactoryBatchActivity\(state\.batch\);\s*syncFactoryFilterOptions\(\)/);
 });
+
+
+test("first original-ID status is shown despite a slow global discovery still loading", async () => {
+  const begin = source.indexOf("  async function refreshFactoryAcceptedReceipt(");
+  const end = source.indexOf("  async function refreshFactoryBatchActivity(", begin);
+  assert.ok(begin > 0 && end > begin);
+  const paths = [];
+  const rendered = [];
+  const events = [];
+  const state = {
+    batchActivityLoading: true, // a previous global history scan remains in flight
+    batch: {ok:true,view:"active",filter_profile_id:null,batches:[]},
+    lastBatchSuccessMs:0, lastBatchFetchMs:0, batchActivityError:"pending",
+  };
+  const make = new Function("state", "factoryProfileId", "fetchJson",
+    "factoryBatchMergeExactActivity", "renderFactoryBatchActivity", "document",
+    "CustomEvent", "updateFactoryBatchFreshness",
+    source.slice(begin,end) + "\nreturn refreshFactoryAcceptedReceipt;");
+
+  const exact = accepted("original_submitted_20261123", [card(1)]);
+  const read = async (url, opts) => {
+    paths.push({url,opts});
+    return {ok:true,batches:[exact]};
+  };
+  const refresh = make(state, () => "", read,
+    (prior,updates) => ({...prior,batches:updates}),
+    snapshot => rendered.push(snapshot),
+    {dispatchEvent: event => events.push(event)},
+    class { constructor(name,args){this.type=name;this.detail=args.detail;} },
+    () => {});
+  const response = await refresh(exact);
+  assert.equal(state.batchActivityLoading,true,
+    "exact progress cannot wait for the ongoing full history scan");
+  assert.equal(paths.length,1);
+  assert.match(paths[0].url,/scope=all/);
+  assert.match(paths[0].url,/request_id=original_submitted_20261123/);
+  assert.equal(paths[0].opts.method,undefined,"status read is GET-only");
+  assert.equal(rendered.length,1);
+  assert.equal(response.batches[0].job_id,exact.job_id);
+  assert.equal(events[0].type,"factory:batch-status");
+  assert.equal(state.batchActivityError,"");
+
+  const local = {...exact,group:false,profile_id:"recNYC",job_id:"fb_original_submitted_20261123"};
+  let localPath = "";
+  const localRead = make(state, () => "",
+    async url => {localPath=url;return local;},
+    (prior,updates) => ({...prior,batches:updates}),
+    () => {},{dispatchEvent(){}},
+    class { constructor(){} },()=>{});
+  assert.equal((await localRead(local))?.batches[0]?.job_id,local.job_id);
+  assert.match(localPath,/content_profile_id=recNYC/);
+  assert.doesNotMatch(localPath,/scope=all/);
+});
+
+test("mismatched first receipt never paints a different submission", async () => {
+  const start = source.indexOf("  async function refreshFactoryAcceptedReceipt(");
+  const stop = source.indexOf("  async function refreshFactoryBatchActivity(",start);
+  const state = {batch:{batches:[]},batchActivityError:"",batchActivityPartialError:""};
+  let paints=0;
+  const fetch = new Function("state","factoryProfileId","fetchJson",
+    "factoryBatchMergeExactActivity","renderFactoryBatchActivity","document",
+    "CustomEvent","updateFactoryBatchFreshness",
+    source.slice(start,stop)+"\nreturn refreshFactoryAcceptedReceipt;")(
+      state,()=>"",async()=>({ok:true,batches:[{
+        ...accepted("different_identity_20261123",[card(1)]),
+      }]}),
+      ()=>{throw Error("mismatched response should not merge");},
+      ()=>{paints++;},{dispatchEvent(){}},class{},()=>{});
+  assert.equal(await fetch(accepted("expected_identity_20261123",[card(1)])),null);
+  assert.equal(paints,0);
+  assert.match(state.batchActivityPartialError,/receipt delayed/);
+});
