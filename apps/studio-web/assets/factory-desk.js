@@ -2258,8 +2258,12 @@
       reconcilePersistedFactoryPending().catch(() => {});
       // At most one slower discovery every 60 seconds, separate from exact
       // status reads. It must not block the current submission's updates.
-      const discoveryAge = now - (state.lastBatchFullFetchMs || state.batchDiscoveryStartedMs);
+      const discoveryAge = now - Math.max(
+        state.lastBatchFullFetchMs || 0, state.batchDiscoveryStartedMs || 0);
       if (fastGroups.length && discoveryAge >= 60000 && !state.batchDiscoveryLoading) {
+        // Throttle attempts, not just successes: a failed R2 global scan must
+        // not be retried every 3 seconds under a database/memory incident.
+        state.batchDiscoveryStartedMs = now;
         state.batchDiscoveryLoading = true;
         const discoveryProfile = params.get("factory_profile") || "";
         readFull().then(discovered => {
