@@ -86,6 +86,39 @@ test("exact R2 receipts add rehydrated original groups and cleanly remove comple
   assert.equal(state.batches.length,7, "no source mutation");
 });
 
+
+test("failed-only retry permits verified 4/4 -> 0/4 reset -> 4/4 success", () => {
+  const initial = group(8,4);
+  const failed = {
+    ...initial, status: "completed", pending_count: 0, done_count: 4,
+    approved_count: 3, failed_count: 1,
+    items: initial.items.map((x,i) => ({...x,status:i===3?"failed":"approved"})),
+  };
+  const retry = {
+    ...initial, status: "running", pending_count: 4, done_count: 0,
+    approved_count: 0, failed_count: 0,
+    items: initial.items.map(x => ({...x,status:"pending"})),
+  };
+  const success = {
+    ...initial, status: "completed", pending_count: 0, done_count: 4,
+    approved_count: 4, failed_count: 0,
+    items: initial.items.map(x => ({...x,status:"approved"})),
+  };
+  let state = display.merge(null,failed);
+  state = poll.exact(state,[retry]);
+  assert.equal(state.batches[0].done_count,0,
+    "new exact GET proves a legitimate retry reset");
+  assert.equal(state.batches[0].pending_count,4);
+  // An older historical listing must not restore stale terminal failure.
+  state = display.discovered(state,{
+    ok:true,view:"active",filter_profile_id:null,batches:[failed],totals:{},
+  });
+  assert.equal(state.batches[0].failed_count,0);
+  state = poll.exact(state,[success]);
+  assert.equal(state.batches[0].approved_count,4);
+  assert.equal(state.batches[0].failed_count,0);
+});
+
 test("accepted request IDs persist across reload, bounded and deduplicated", () => {
   const storage = new Map();
   const localStorage = {
