@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - '.github/scripts/incident-2670-windows-runtime-preflight.ps1'
+      - '.github/scripts/incident-2670-external-root-windows-denial.ps1'
       - '.github/workflows/incident-2670-windows-preflight-parser-ci.yml'
 permissions:
   contents: read
@@ -24,3 +25,15 @@ jobs:
             throw 'incident2670_windows_preflight_syntax_failed'
           }
           Write-Output 'incident2670_windows_preflight_parser=PASS'
+      - name: Parse nonpublishing Windows root-lease canary
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-external-root-windows-denial.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){
+            $errors | ForEach-Object { Write-Output ("incident2670_lease_parser_line="+$_.Extent.StartLineNumber) }
+            throw 'incident2670_windows_lease_syntax_failed'
+          }
+          Write-Output 'incident2670_windows_lease_parser=PASS'

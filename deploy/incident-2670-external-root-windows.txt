@@ -3,3 +3,5 @@ Issue #2670: one-shot independent **already-held** external SQL synthetic global
 Follow-up: first protected action #45111998233 failed before verified denial while external owner held root. Owner released claim, verified leases=0 and exact production counts unchanged. Add allowlisted failure-only classification, no raw Ops logs. A new external root claim must be verified immediately before rerun; do not blindly dispatch. No source/consumer flag changes.
 
 Second attempt #45112487578 was rejected by GitHub workflow parser before any Windows Ops call because a generated sanitizer line was truncated. Test owner lease released true, 0 active. This review fixes the workflow and adds its dedicated regression gate; a fresh synthetic owner claim is required before the next and final protected run.
+
+Follow-up only after verified live Windows virtualenv Python import in protected run #45216103831: use fixed interpreter, temp Python source with guaranteed cleanup to avoid PowerShell native -c quote mangling; submit no provider work. Fresh external SQL producer root lease MUST be verified before marker merge and released with exact fence after protected run.
