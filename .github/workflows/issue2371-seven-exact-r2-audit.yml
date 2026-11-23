@@ -1,0 +1,85 @@
+name: Issue 2371 Exact Seven-Item Factory R2 Audit (Read Only)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue2371-seven-exact-r2-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2371-seven-exact-r2-audit
+  cancel-in-progress: false
+jobs:
+  exact:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      AUDIT_WORKER: studio-factory-2371-exact7-readonly
+    steps:
+      - name: Read one exact immutable parent request without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          STATUS=$(curl -sS --max-time 25 -o /tmp/auditor-exists.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")
+          if [[ "$STATUS" != "404" ]]; then
+            echo "::error::Refuse to overwrite existing auditor, status=$STATUS"; exit 1
+          fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 25 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER" >/dev/null || echo "::warning::Audit Worker cleanup requires follow-up"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN=$(openssl rand -hex 32)
+          cat >/tmp/exact-audit-worker.mjs <<'JS'
+          export default {
+            async fetch(request,env) {
+              if(request.method!=="GET" || new URL(request.url).pathname!=="/exact") return new Response("Not found",{status:404});
+              if(request.headers.get("Authorization")!=="Bearer "+env.AUDIT_TOKEN) return new Response("Unauthorized",{status:401});
+              const target="https://studio.chicagoshining.com/api/factory/approval-batches?scope=all&request_id=dd2fc477-8907-45f4-a34e-123f3948b8fb";
+              const response=await env.STUDIO_API.fetch(new Request(target,{headers:{
+                "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                "Origin":"https://studio.chicagoshining.com",
+                "Accept":"application/json"
+              }}));
+              return new Response(await response.text(),{status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+            }
+          };
+          JS
+          cat >/tmp/exact-audit-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          CODE=$(curl -sS --max-time 35 -o /tmp/audit-put.json -w '%{http_code}' -X PUT "$API/workers/scripts/$AUDIT_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/exact-audit-metadata.json;type=application/json' -F 'worker.mjs=@/tmp/exact-audit-worker.mjs;type=application/javascript+module;filename=worker.mjs')
+          if ! [[ "$CODE" =~ ^2[0-9][0-9]$ ]] || ! jq -e '.success==true' /tmp/audit-put.json >/dev/null; then
+            jq -c '{success,errors:[.errors[]?|{code}]}' /tmp/audit-put.json; exit 1
+          fi
+          OWNED=1
+          curl -fsS --max-time 30 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/audit-subdomain.json
+          jq -e '.success==true' /tmp/audit-subdomain.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 25 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')
+          HTTP=000
+          for try in $(seq 1 12); do
+            HTTP=$(curl -sS --max-time 65 -o /tmp/factory-exact-2371.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev/exact" || true)
+            if [[ "$HTTP" == "200" ]]; then break; fi
+            sleep 2
+          done
+          echo "FACTORY_EXACT_HTTP=$HTTP"
+          if [[ "$HTTP" != "200" ]]; then echo "::error::Authenticated exact ledger GET failed"; exit 1; fi
+          jq -c '{ok,scope,exact_request_id,batches:[.batches[]? | {job_id,request_id,status,total,approved_count,pending_count,failed_count,created_at,updated_at,items:[.items[]? | {id,output_id,profile_id,status,error}],children:[.children[]? | {profile_id,request_id,status,total,approved_count,pending_count,failed_count}]}]}' /tmp/factory-exact-2371.json
+          jq -e '.ok==true and .exact_request_id=="dd2fc477-8907-45f4-a34e-123f3948b8fb" and (.batches|length)==1' /tmp/factory-exact-2371.json >/dev/null
+          echo "FACTORY_EXACT_2371_READONLY=PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: factory-2371-exact-r2-readonly
+          path: /tmp/factory-exact-2371.json
+          if-no-files-found: ignore
+          retention-days: 7
