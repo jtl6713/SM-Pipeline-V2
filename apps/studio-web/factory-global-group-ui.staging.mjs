@@ -35,7 +35,7 @@ const policy={enabled:true,stage:"pilot",mode:"global_all_platforms_v2",max_tota
     TikTok:["Video Draft","Story","Single Photo","Multi-Photo"],
     YouTube:["Short","Standard Video","Slideshow Video"],
   }};
-let job=null,started=0,retried=0,unexpected=[],releaseStartReceipt=null;
+let job=null,started=0,retried=0,unexpected=[],releaseStartReceipt=null,receiptReleased=false;
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
   res.end(JSON.stringify(value));
@@ -79,6 +79,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==="/__release-start-receipt"&&req.method==="GET"){
     // The test explicitly releases the held synthetic POST acknowledgement
     // only after verifying Factory's immediate 0% preview.
+    receiptReleased=true;
     releaseStartReceipt?.();
     releaseStartReceipt=null;
     send(res,{ok:true});return;
@@ -114,7 +115,7 @@ const server=createServer(async(req,res)=>{
       // Hold the first server response until the browser has observed the
       // immediate 0% preview. No flaky 550ms timing race.
       rebuild("queued");
-      await new Promise(resolve => {releaseStartReceipt=resolve});
+      if(!receiptReleased) await new Promise(resolve => {releaseStartReceipt=resolve});
       send(res,job);
       setTimeout(()=>rebuild("failed"),180);return;
     }
