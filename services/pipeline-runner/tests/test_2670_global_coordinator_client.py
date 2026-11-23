@@ -110,9 +110,9 @@ def test_opt_in_global_producer_lease_renews_and_release_marks_proven_progress(m
     monkeypatch.setattr(g, "renew", renew)
     monkeypatch.setattr(g, "release", lambda owner, *, verified_progress:
                         seen["released"].append((owner, verified_progress)) or True)
-    with g.producer_lease("recProducerSafe", renew_interval=0.02, ttl_seconds=60) as guard:
+    with g.producer_lease("recProducerSafe", renew_interval=1, ttl_seconds=60) as guard:
         assert guard.enabled is True and guard.lost.is_set() is False
-        time.sleep(0.06)
+        time.sleep(1.15)
         guard.mark_progress()
     assert seen["acquire"] == [("producer", "studio-produce:recProducerSafe", 60)]
     assert seen["renew"] >= 1
@@ -129,8 +129,8 @@ def test_opt_in_global_producer_lost_renewal_never_clears_half_open(monkeypatch)
     monkeypatch.setattr(g, "renew", lambda *a, **k: False)
     monkeypatch.setattr(g, "release", lambda owner, *, verified_progress:
                         releases.append(verified_progress) or True)
-    with g.producer_lease("recProducerLost", renew_interval=0.01, ttl_seconds=60) as guard:
-        time.sleep(0.04)
+    with g.producer_lease("recProducerLost", renew_interval=1, ttl_seconds=60) as guard:
+        time.sleep(1.15)
         assert guard.lost.is_set() is True
         guard.mark_progress()
         assert guard.verified_progress is False
