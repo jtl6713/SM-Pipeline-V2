@@ -44,7 +44,7 @@ if($desired -eq 'true') {
      $key.Length -lt 32){throw 'review_supabase_authority_missing'}
   $auth=@{'apikey'=$key;'Authorization'="Bearer $key"}
   foreach($table in @('rendering_review_jobs','rendering_review_attempts')) {
-    $result=Invoke-WebRequest -Uri ($url.TrimEnd('/')+"/rest/v1/$table?select=airtable_record_id&limit=1") -UseBasicParsing -Headers $auth -TimeoutSec 15
+    $result=Invoke-WebRequest -Uri ($url.TrimEnd('/')+"/rest/v1/$($table)?select=airtable_record_id&limit=1") -UseBasicParsing -Headers $auth -TimeoutSec 15
     if($result.StatusCode -ne 200 -or $result.Content.Trim() -ne '[]') {
       throw 'review_ledger_not_empty_or_unverified'
     }
