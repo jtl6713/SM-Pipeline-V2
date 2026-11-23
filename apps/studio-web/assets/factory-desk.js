@@ -160,21 +160,52 @@
   // so a slow Desk response or browser reload cannot resurrect checkboxes.
   function factorySubmittedApprovalIds() {
     const ids = new Set();
-    const add = (values) => {
+    const inFlight = new Set();
+    const historical = new Set();
+    const add = (target, values) => {
       for (const id of values || []) {
-        if (/^rec[A-Za-z0-9]+$/.test(String(id))) ids.add(String(id));
+        if (/^rec[A-Za-z0-9]+$/.test(String(id))) target.add(String(id));
       }
     };
-    add(state.submissionIntentIds);
-    add(state.submittingOutputIds);
-    add(Object.keys(recentFactoryAccepted()));
-    add(pendingFactoryApproval()?.ids);
-    for (const { saved } of factoryRecoveryEntries()) add(saved.ids);
+    add(inFlight, state.submissionIntentIds);
+    add(inFlight, state.submittingOutputIds);
+    add(inFlight, pendingFactoryApproval()?.ids);
+    for (const { saved } of factoryRecoveryEntries()) add(inFlight, saved.ids);
+    const accepted = recentFactoryAccepted();
+    add(historical, Object.keys(accepted));
     for (const batch of factoryActivityRows(state.batch)) {
-      add((batch?.items || []).map(item => item?.id));
-      for (const child of batch?.children || []) {
-        add((child?.items || []).map(item => item?.id));
+      const items = [...(batch?.items || []), ...(batch?.children || []).flatMap(child => child?.items || [])];
+      for (const item of items) {
+        const status = String(item?.status || "pending").toLowerCase();
+        const target = ["approved", "already_satisfied", "failed",
+          "skipped_removed", "superseded_duplicate"].includes(status) ? historical : inFlight;
+        add(target, [item?.id]);
       }
+    }
+    add(ids, inFlight);
+    add(ids, historical);
+    // A terminal approval from the previous review cycle must not hide a
+    // canonical item returned to Ready for Review after a gallery/creative
+    // correction. Keep click intent, unresolved recovery requests and live
+    // batch claims fenced. The server independently verifies the exact
+    // slide package and atomically claims approval before any MAE scheduling.
+    for (const card of state.desk?.lanes?.needs_eyes || []) {
+      const id = String(card?.id || "");
+      if (!historical.has(id) || inFlight.has(id)) continue;
+      const age = Date.now() - Number(accepted[id] || 0);
+      if (accepted[id] && (!Number.isFinite(age) || age < 5 * 60 * 1000)) continue;
+      if (card?.kind !== "output"
+          || String(card.output_status || "") !== "Ready for Review"
+          || String(card.review_status || "") !== "Review Sent"
+          || String(card.publish_status || "") !== "Not Ready"
+          || !["Rendered", "Native Photo Route"].includes(String(card.render_status || ""))
+          || card.do_not_publish !== false
+          || card.auto_publish_enabled === true
+          || card.review_package_ready === false
+          || card.scheduled_post_date || card.studio_scheduled_at
+          || card.youtube_scheduled_publish_at || card.published_at
+          || card.platform_post_url) continue;
+      ids.delete(id);
     }
     return ids;
   }
