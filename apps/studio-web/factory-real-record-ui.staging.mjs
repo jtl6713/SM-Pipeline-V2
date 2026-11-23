@@ -83,7 +83,8 @@ const srv=createServer(async(req,res)=>{
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
    const isGlobal=url.searchParams.get("scope")==="all";
    const queryProfile=isGlobal ? url.searchParams.get("factory_profile") :
-     url.searchParams.get("profile")||url.searchParams.get("profile_id");
+     url.searchParams.get("content_profile_id") ||
+     url.searchParams.get("profile") || url.searchParams.get("profile_id");
    const scopedBatch=(isGlobal ? (!queryProfile || queryProfile===profileId) : queryProfile===profileId) ? batch:null;
    const current=scopedBatch||{ok:true,batch:true,status:"idle",job_id:null,items:[]};
    const signals=scopedBatch?(syntheticQualitySignals??batchSignals(scopedBatch)):[];
