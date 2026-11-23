@@ -1,5 +1,7 @@
 name: Read-only Bethesda 2303 preview media probe
 on:
+  pull_request:
+    paths: ['.github/workflows/diagnose-bethesda-2303-preview.yml']
   push:
     branches: [main]
     paths: ['.github/workflows/diagnose-bethesda-2303-preview.yml']
@@ -10,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Install FFmpeg for actual video decoding probe
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Verify exact saved R5 previews and original render file without any writes
         shell: bash
         run: |
