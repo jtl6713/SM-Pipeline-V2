@@ -9,6 +9,7 @@ from typing import Any
 from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
 from studio_produce import workload_governor as governor
+from studio_produce import global_coordinator
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job, write_job_if_changed
 from studio_produce.job import derive_route, is_finished_route, job_is_terminal, new_job, next_step, utc_now, with_step
 from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step, render_progress_detail
@@ -149,23 +150,39 @@ def _launch(request_id: str, *, resume: bool = False) -> bool:
 
 
 def _run_governed(request_id: str, token: str) -> None:
-    """Lease-guarded job; transient DB errors return work to the durable queue."""
+    """Locally claimed producer; optionally require a second cross-host fence."""
     requeue = False
     progressed = False
     try:
-        with governor.job_heartbeat(request_id, token) as stopped:
-            if not governor.job_valid(request_id, token):
-                return
-            resume_requested = governor.claimed_resume_requested(request_id, token)
-            prepared = start_job(request_id, resume=resume_requested, _governed_prepare=True)
-            if not prepared.get("accepted"):
-                return
-            outcome = _run(request_id, lease_token=token, heartbeat_stopped=stopped)
-            requeue = outcome in {"yielded", "yielded_progressed"}
-            progressed = outcome in {"yielded_progressed", "completed_progressed"}
+        if not governor.job_valid(request_id, token):
+            return
+        # Global coordination is OFF unless explicitly activated on the
+        # Windows service. Denied or unconfirmed RPC never prepares a job.
+        with global_coordinator.producer_lease(request_id) as global_guard:
+            with governor.job_heartbeat(request_id, token) as stopped:
+                if not governor.job_valid(request_id, token) or global_guard.lost.is_set():
+                    requeue = True
+                    return
+                resume_requested = governor.claimed_resume_requested(request_id, token)
+                prepared = start_job(request_id, resume=resume_requested, _governed_prepare=True)
+                if not prepared.get("accepted"):
+                    return
+                outcome = _run(
+                    request_id, lease_token=token, heartbeat_stopped=stopped,
+                    global_lease_stopped=global_guard.lost,
+                )
+                requeue = outcome in {"yielded", "yielded_progressed"}
+                progressed = outcome in {"yielded_progressed", "completed_progressed"}
+                if global_guard.lost.is_set():
+                    # Never claim global recovery success after a lost fence.
+                    requeue = True
+                    progressed = False
+                elif progressed:
+                    global_guard.mark_progress()
     except Exception as error:
-        if isinstance(error, governor.AdmissionDeferred):
-            logger.info("studio producer deferred by workload admission request=%s", request_id)
+        if isinstance(error, (governor.AdmissionDeferred,
+                              global_coordinator.GlobalAdmissionUnavailable)):
+            logger.info("studio producer deferred by local/global workload admission")
             requeue = True
         elif governor.is_database_overload(error) or governor.circuit_open():
             logger.warning("studio producer requeued on database outage request=%s", request_id)
@@ -206,7 +223,9 @@ def _run_safe(request_id: str) -> None:
 
 
 def _run(
-    request_id: str, *, lease_token: str | None = None, heartbeat_stopped: threading.Event | None = None,
+    request_id: str, *, lease_token: str | None = None,
+    heartbeat_stopped: threading.Event | None = None,
+    global_lease_stopped: threading.Event | None = None,
 ) -> str | None:
     client = AirtableClient()
     started = time.monotonic()
@@ -216,6 +235,7 @@ def _run(
     for _ in range(MAX_LOOPS):
         if lease_token and (
             (heartbeat_stopped is not None and heartbeat_stopped.is_set())
+            or (global_lease_stopped is not None and global_lease_stopped.is_set())
             or not governor.job_valid(request_id, lease_token)
             or governor.circuit_open()
         ):
@@ -285,6 +305,10 @@ def _run(
             logger.exception("studio produce step failed request=%s step=%s", request_id, step)
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
+        # A remote lease can be fenced while a long handler runs. Before
+        # persisting its next step, require that global ownership remains live.
+        if global_lease_stopped is not None and global_lease_stopped.is_set():
+            return "yielded_progressed" if advanced else "yielded"
         nxt = nxt or next_step(step)
         if nxt != step:
             advanced = True
