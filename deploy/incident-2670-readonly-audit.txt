@@ -7,3 +7,5 @@ Nov 23 2026 02:33 UTC: retry GET-only Ops audit after two fail-closed runs; clas
 Nov 23 2026: third strict GET-only audit with PowerShell AST parser gate and dedicated source file; parser errors fail before Ops. No controls changed.
 
 Nov 23 2026 02:46 UTC: strict GET-only audit parser variable correction, reexecute preflight only. No config or publishing changes.
+
+Nov 23 2026 02:48 UTC: one GET-only recheck after AST reported line 25 extra parenthesis. No changes to capacity or provider work.
