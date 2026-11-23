@@ -441,8 +441,8 @@
       if (pending && (factoryUnrecoverableSubmitError(pending.last_error)
           || pending.terminal_eligibility === true)) {
         const recovered = dropFactoryRecoveryEntry(FACTORY_PENDING_REQUEST_KEY, pending,
-          factoryTerminalEligibilityError(saved?.last_error) &&
-          /Native gallery publication blocked:/i.test(String(saved?.last_error || ""))
+          factoryTerminalEligibilityError(pending?.last_error) &&
+          /Native gallery publication blocked:/i.test(String(pending?.last_error || ""))
             ? "Native gallery is missing verified slides. This output was not approved; its rejected request was retired. Other selected outputs remain available."
             : "The identified stale output was skipped; remaining approvals are preserved.");
         if (recovered.dropped) dropped += 1;
