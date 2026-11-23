@@ -47,6 +47,7 @@ DECLARE
   v_active integer;
   v_root_active integer;
   v_saved integer;
+  v_limit integer;
 BEGIN
   IF p_scope IS NULL OR p_scope = 'database'
      OR p_claim_key !~ '^[a-f0-9]{64}$'
@@ -70,14 +71,22 @@ BEGIN
     FROM public.studio_global_workload_leases
     WHERE scope=p_scope AND claim_key=p_claim_key;
   IF v_until > v_now THEN
-    RETURN jsonb_build_object('accepted',v_owner=p_fence,
-      'replay',v_owner=p_fence,
-      'reason',CASE WHEN v_owner=p_fence THEN 'already_owned' ELSE 'other_owner' END);
+    IF v_owner = p_fence THEN
+      RETURN jsonb_build_object('accepted',true,'replay',true,
+        'reason','already_owned');
+    END IF;
+    RETURN jsonb_build_object('accepted',false,'replay',false,
+      'reason','other_owner');
   END IF;
   DELETE FROM public.studio_global_workload_leases WHERE lease_until <= v_now;
   SELECT count(*) INTO v_active FROM public.studio_global_workload_leases
     WHERE scope=p_scope AND lease_until>v_now;
-  IF v_active >= CASE WHEN v_config.recovery_probe_required THEN 1 ELSE v_config.max_active END THEN
+  IF v_config.recovery_probe_required THEN
+    v_limit := 1;
+  ELSE
+    v_limit := v_config.max_active;
+  END IF;
+  IF v_active >= v_limit THEN
     RETURN jsonb_build_object('accepted',false,'reason','scope_capacity');
   END IF;
   IF v_root.recovery_probe_required THEN
@@ -94,8 +103,10 @@ BEGIN
           updated_at=v_now
       WHERE public.studio_global_workload_leases.lease_until<=v_now;
   GET DIAGNOSTICS v_saved = ROW_COUNT;
-  RETURN jsonb_build_object('accepted',v_saved=1,'replay',false,
-    'reason',CASE WHEN v_saved=1 THEN 'admitted' ELSE 'lease_conflict' END);
+  IF v_saved = 1 THEN
+    RETURN jsonb_build_object('accepted',true,'replay',false,'reason','admitted');
+  END IF;
+  RETURN jsonb_build_object('accepted',false,'replay',false,'reason','lease_conflict');
 END;
 $function$;
 
