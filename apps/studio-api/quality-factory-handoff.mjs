@@ -226,3 +226,66 @@ export function auditFactoryCardProjection(sourceRows,needsEyesCards){
       return [];
     });
 }
+
+/**
+ * Bounded, read-only Supabase Quality Agent sampler. Two indexed, narrow
+ * production-family reads; it never enumerates the full platform_outputs
+ * catalog or pulls big JSONB media manifests. Exact linked-slide/CDN proofs
+ * are a separate deep preflight; absence of that evidence is NOT a pass.
+ *
+ * 'read' is the existing authenticated server-side Supabase REST adapter.
+ * This sampler never runs from an untrusted public browser.
+ */
+export async function scanRecentProductionFactoryHandoffs({
+  read,limit=4,checkedAt=new Date().toISOString(),
+}={}) {
+  if(typeof read!=="function") throw Error("authoritative Supabase read required");
+  const n=Math.max(1,Math.min(8,Number(limit)||4));
+  const requests=await read("production_requests?request_status=in.(Promoted,Submitted)"
+    +"&output_plan_status=eq.Ready&promoted_content_item_id=not.is.null"
+    +"&select=airtable_record_id,promoted_content_item_id,content_profile_id,"
+    +"request_status,output_plan,production_job,updated_at"
+    +"&order=updated_at.desc&limit="+n);
+  if(!Array.isArray(requests)||requests.length>n)throw Error("handoff request inventory unavailable");
+  const ids=[...new Set(requests.map(r=>str(r.promoted_content_item_id)).filter(x=>
+    /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(x)))];
+  if(!ids.length)return {
+    schema:FACTORY_HANDOFF_SCHEMA,signature:FACTORY_HANDOFF_SIGNATURE,
+    status:"ok",checked_at:checkedAt,scanned:0,findings:[],
+    incomplete_count:0,verification_required_count:0,
+    note:"No newly promoted content with a ready output plan in bounded scan",
+  };
+  const outputLimit=8*24+1;
+  const outputs=await read("platform_outputs?content_item_id=in.("+ids.join(",")+")"
+    +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,"
+    +"platform,studio_output_type,platform_output_type,output_status,"
+    +"render_status,review_status,publish_status,do_not_publish,"
+    +"output_caption,studio_preview_url,thumbnail_url,final_file_url,"
+    +"selected_clip_count,scheduled_post_date,studio_scheduled_at,"
+    +"published_at,platform_post_url,test_run_id"
+    +"&order=output_number.desc.nullslast&limit="+outputLimit);
+  if(!Array.isArray(outputs)||outputs.length>=outputLimit)
+    throw Error("handoff output inventory truncated; status unknown, not all-clear");
+  const reports=requests.map(request=>assessProductionFactoryHandoff({
+    request,outputs:outputs.filter(x=>str(x.content_item_id)===str(request.promoted_content_item_id)),
+    gallerySlides:null,factoryCards:null,
+  }));
+  const findings=reports.flatMap(report=>report.findings.map(row=>({
+    ...row,content_item_id:report.content_item_id,request_id:report.request_id,
+  })));
+  return {
+    schema:FACTORY_HANDOFF_SCHEMA,signature:FACTORY_HANDOFF_SIGNATURE,
+    status:"ok",checked_at:checkedAt,scanned:reports.length,
+    incomplete_count:reports.filter(r=>r.status==="repair_required"||r.status==="blocked").length,
+    verification_required_count:reports.filter(r=>r.status==="verification_required").length,
+    findings:findings.slice(0,80),
+    reports:reports.map(r=>({
+      request_id:r.request_id,content_item_id:r.content_item_id,
+      status:r.status,stage:r.stage,expected_count:r.expected_count,
+      actual_count:r.actual_count,ready_count:r.ready_count,
+      terminal:r.terminal,publishing_authorized:false,
+    })),
+    scope:"latest_ready_promoted_content_only",
+    note:"Native slide/CDN byte and Factory browser visibility require exact second-stage verification; they are not treated as clear from a compact scan",
+  };
+}
