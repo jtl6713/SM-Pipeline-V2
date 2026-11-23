@@ -104,7 +104,10 @@ const server=createServer(async(req,res)=>{
       job={ok:true,batch:true,group:true,accepted:true,job_id:"fg_"+payload.request_id,
         request_id:payload.request_id,profile_id:null,profile_ids:[chicago,nyc],
         created_at:new Date().toISOString()};
-      rebuild("queued");send(res,job);
+      // Hold server acknowledgement: the click must paint 0% before the POST resolves.
+      rebuild("queued");
+      await new Promise(resolve => setTimeout(resolve, 550));
+      send(res,job);
       setTimeout(()=>rebuild("failed"),180);return;
     }
     if(payload.action==="retry_group"){
@@ -137,6 +140,14 @@ try{
   assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/4 outputs selected/);
   await page.locator("#factoryProfileFilter").selectOption("");
   await page.locator("#factoryBatchSubmit").click();
+  // Submission preview must be visible while the server response is still held.
+  await page.waitForFunction(() => document.querySelector("#factoryBatchSummary")
+    ?.textContent.includes("4 selected output(s) awaiting server acceptance"));
+  assert.match(await page.locator("#factoryBatchOverallProgress").innerText(),
+    /0 of 4 processed · 0%/);
+  assert.equal(await page.locator("#factoryBatchDetails .factory-batch-item-list > li").count(),4);
+  assert.match(await page.locator(".factory-batch-recent-row").first().innerText(),/Submitting/);
+  assert.equal(started,1,"POST is sent exactly once while 0% preview is shown");
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
   assert.equal(started,1);
   await new Promise(resolve=>setTimeout(resolve,240));
