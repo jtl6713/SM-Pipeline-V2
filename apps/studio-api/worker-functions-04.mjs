@@ -13846,7 +13846,6 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
     fields: [
       "Candidate_Title",
       "Candidate_Status",
-      "Asset_Sourcing_Mode",
       "Content_Profile",
       "Content Items",
       "Promoted_Content_Record_ID",
@@ -15451,7 +15450,6 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
       fields: [
         "Candidate_Title",
         "Content_Profile",
-        "Asset_Sourcing_Mode",
         "Studio_Photo_Wait_Status",
         "Promoted_Content_Record_ID",
         "Candidate_Status",
@@ -15496,6 +15494,16 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
     })
   ), enabledIds)) {
     if (adopted.length >= max) break;
+    // Legacy projected lists omit newer sourcing fields. Refresh the exact
+    // candidate when mode is missing rather than adding an unsupported field
+    // to the lean projection (which can make the entire queue HTTP 422).
+    if (!idea.sourcing_mode) {
+      const liveIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => null);
+      if (!liveIdea || exploreIdeaNeedsApproval({
+        sourcingMode: f(liveIdea, "Asset_Sourcing_Mode"),
+        candidateStatus: f(liveIdea, "Candidate_Status"),
+      })) continue;
+    }
     const draft = idea.draft;
     if (!draft?.id) continue;
     const assetCount = Number(f(draft, "Studio_Master_Asset_Count") || 0);
