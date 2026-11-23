@@ -89,7 +89,9 @@ def build_finished_thumbnail_prompt(
             f"Compose for a {orientation} {ratio} platform cover that matches the video frame.",
             "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%. Do not let lettering dominate the frame.",
             "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
-            cover_closeup_guidance(market=market),
+            cover_closeup_guidance(
+                market=market, creation_key=f"{market}|{brand}|{title}|{ratio}",
+            ),
             creative_prompt_suffix(creative_guidance, mode="thumbnail"),
         )
         if part
