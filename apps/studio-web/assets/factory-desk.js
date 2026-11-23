@@ -2235,7 +2235,10 @@
           }
           // Paint each completed GET as it arrives; one slow sibling status
           // cannot postpone another approved output until the 12s timeout.
-          if (factoryProfileId() === filterId) {
+          // Normalize blank All-Profiles filter to null, matching filterId.
+          // A raw ""===null comparison skipped every incremental repaint on
+          // the default global Factory view until the slowest GET had finished.
+          if ((factoryProfileId() || null) === filterId) {
             const incremental = factoryBatchMergeExactActivity(state.batch, [verifiedRow]);
             state.lastBatchSuccessMs = Date.now();
             state.batchActivityError = "";
