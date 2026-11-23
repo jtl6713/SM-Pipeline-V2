@@ -338,22 +338,25 @@ def try_list_supabase_records(
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
     if table_id in _REVIEW_TABLES:
-        # Review callers perform their full eligibility checks in Python.  A
-        # bounded JSON-table scan avoids pretending the retired Airtable
-        # formula language is generally supported.
+        # The ledger is Supabase-only and may contain thousands of archived
+        # attempts. Never ignore a caller's Job_ID, Retry_Count, lease fence,
+        # or output predicate while taking the first ten rows: that can hide
+        # valid work or incorrectly present attempted work as queue candidates.
+        # Unrecognized Airtable formulas fail closed, with no archive fallback.
         if view or sort_field:
             return None
+        query_filter = None
+        if formula:
+            query_filter = formula_to_postgrest_filter(table_id, formula)
+            if query_filter is None:
+                return None
         limit = max(1, min(int(max_records or 10), 100))
         table = _supabase_table(table_id)
-        active_filter = (
-            "&fields->>Job_State=eq.queued"
-            "&fields->>Progress_Stage=eq.awaiting_isolated_renderer"
-            if table_id == "tblUkZB6SMtf9Ib6I" else ""
-        )
         path = (
             f"{table}?select=airtable_record_id,fields,created_at"
-            f"{active_filter}&order=created_at.asc&limit={limit}"
+            f"&order=created_at.asc&limit={limit}"
         )
+        path = attach_formula_filter(path, query_filter)
         try:
             payload = _rest(settings or {}, path, "GET")
         except Exception as error:
