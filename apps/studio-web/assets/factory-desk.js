@@ -220,6 +220,33 @@
       localStorage.setItem(FACTORY_VERIFIED_ABSENCE_KEY, JSON.stringify(deduped));
     } catch { /* no browser storage: never impact actual approval reconciliation */ }
   }
+
+  // A definitive preflight rejection is also useful evidence. Preserve the
+  // original request ID when an identified rejected output releases its fence;
+  // do not infer that any sibling was accepted or safely repeat the POST.
+  const FACTORY_PREFLIGHT_REJECTION_KEY = "studio.factory.preflight-rejected-requests.v1";
+  function factoryPreflightRejectionHistory() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(FACTORY_PREFLIGHT_REJECTION_KEY) || "[]");
+      return Array.isArray(rows) ? rows.filter(row =>
+        /^[A-Za-z0-9_-]{12,128}$/.test(String(row?.request_id || ""))).slice(0, 20) : [];
+    } catch { return []; }
+  }
+  function rememberFactoryPreflightRejection(saved, rejectedOutputId) {
+    const rows = factoryPendingExactCandidates(saved, []).filter(row =>
+      row.expected_ids.includes(String(rejectedOutputId))).map(row => ({
+        request_id: row.request_id, ids: row.expected_ids,
+        profiles: row.profiles || [], profile_id: row.profile_id || null,
+        checked_at: new Date().toISOString(), preflight_rejected: true,
+        last_error: String(saved?.last_error || "").slice(0, 320),
+      }));
+    if (!rows.length) return;
+    try {
+      const all = [...rows, ...factoryPreflightRejectionHistory()];
+      localStorage.setItem(FACTORY_PREFLIGHT_REJECTION_KEY, JSON.stringify(
+        [...new Map(all.map(row => [row.request_id, row])).values()].slice(0, 20)));
+    } catch { /* preserve existing recovery behavior when local storage is full */ }
+  }
   function factorySavedRequestDiagnostics(serverRows = []) {
     const pending = pendingFactoryApproval();
     const recovery = factoryRecoveryEntries();
@@ -241,7 +268,7 @@
     const pendingRows = factoryPendingExactCandidates(pending, recovery)
       .filter(row => !serverIds.has(row.request_id))
       .map(row => ({ ...row, ...metadata.get(row.request_id), verified_absent: false }));
-    const priorRows = factoryVerifiedAbsentHistory()
+    const priorRows = [...factoryVerifiedAbsentHistory(), ...factoryPreflightRejectionHistory()]
       .filter(row => !serverIds.has(row.request_id));
     const rows = [...new Map([...pendingRows, ...priorRows].reverse()
       .map(row => [row.request_id, row])).values()].reverse();
@@ -640,6 +667,7 @@
     // key; never reuse the invalid plan's original key for a different set.
     const survivors = (saved.ids || []).filter(id =>
       id !== rejectedId && state.selectedOutputs.has(id));
+    rememberFactoryPreflightRejection(saved, rejectedId);
     const waiting = [...new Set([...waitingFactorySelection(), ...survivors])]
       .filter(id => id !== rejectedId);
     try {
@@ -1671,11 +1699,15 @@
         const count = (row.expected_ids || row.ids || []).length;
         const status = row.verified_absent
           ? "Last exact server check: not found (not an accepted batch at that time)"
-          : row.retry_blocked ? "Submission rejected or blocked; acceptance unconfirmed"
+          : row.preflight_rejected
+            ? "Original selection contained a rejected output; siblings not proven accepted"
+            : row.retry_blocked ? "Submission rejected or blocked; acceptance unconfirmed"
           : "Saved request; server acceptance unconfirmed";
         const detail = row.verified_absent && row.verified_at
           ? " · verified " + new Date(row.verified_at).toLocaleString()
-          : "";
+          : row.preflight_rejected && row.checked_at
+            ? " · rejected " + new Date(row.checked_at).toLocaleString()
+            : "";
         return `<div class="factory-batch-saved-request" role="status">
           <strong>Original saved request ID — ${esc(status)}</strong>
           <div><code>${esc(id)}</code>
