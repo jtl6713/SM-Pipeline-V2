@@ -92,6 +92,14 @@ jobs:
             /tmp/shared-workload-health.json >/dev/null
           node --test apps/studio-api/worker-shared-admission.test.mjs
           echo 'shared_runner_broker_route_live_and_auth_gated=PASS'
+          # The QA diagnostics endpoint must also be live before Worker
+          # source enables /api/admin/qa/workload; unauthorized read is
+          # a proof of route presence without accessing queue metrics.
+          snapshot_code=$(curl -sS --max-time 20 -o /tmp/governor-snapshot-denied.json -w '%{http_code}' \
+            'https://pipeline.chicagoshining.com/internal/workload/snapshot' || true)
+          test "$snapshot_code" = "401"
+          jq -e '.error=="Invalid pipeline secret"' /tmp/governor-snapshot-denied.json >/dev/null
+          echo 'qa_runner_workload_snapshot_live_and_auth_gated=PASS'
       - name: Owner-global generation guidance API regression #2532
         shell: bash
         run: |
