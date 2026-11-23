@@ -12,6 +12,9 @@ def test_exact_canonical_project_and_live_worker_source():
     assert "home_failure_candidate=eq.true" in WORKFLOW
     assert "QA_CENSUS_OUTPUT_SELECT" in WORKFLOW
     assert "test_run_id=is.null" in PS
+    # Audit can check the .env URL, but cannot use an env-supplied host as a GET destination.
+    assert "$uri='https://vkwvscgisqsbuwagdvtb.supabase.co/rest/v1/platform_outputs?" in PS
+    assert "$uri=$base" not in PS
 
 
 def test_three_nonpublishing_pages_and_duplicate_safety():
