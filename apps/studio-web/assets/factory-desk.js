@@ -1403,14 +1403,11 @@
         previous?.filter_profile_id !== fetched.filter_profile_id) return fetched;
     const prior = new Map((previous.batches || []).map(row =>
       [String(row.request_id || row.job_id || ""), row]));
-    // A full discovery can finish after a newer exact receipt. Never regress
-    // processed counts to an older R2 listing.
-    const rows = fetched.batches.map(row => {
-      const old = prior.get(String(row.request_id || row.job_id || ""));
-      const done = value => Number(value?.done_count ??
-        (Number(value?.total || 0) - Number(value?.pending_count || 0)));
-      return old && done(old) > done(row) ? old : row;
-    });
+    // An expensive historical discovery may be older than the exact receipt.
+    // It discovers other requests; it never overrides the last exact snapshot
+    // of a known request, including a legitimate retry that resets progress.
+    const rows = fetched.batches.map(row =>
+      prior.get(String(row.request_id || row.job_id || "")) || row);
     const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
       row?.request_id && (row.group || row.profile_id) && factoryBatchActiveRow(row) &&
@@ -2083,12 +2080,10 @@
     const byId = new Map(refreshed.map(row => [row.request_id, row]));
     const prior = previous?.batches || [];
     const known = new Set(prior.map(row => row.request_id));
-    const done = row => Number(row?.done_count ??
-      (Number(row?.total || 0) - Number(row?.pending_count || 0)));
-    const batches = [...prior.map(row => {
-      const incoming = byId.get(row.request_id);
-      return incoming && done(incoming) >= done(row) ? incoming : row;
-    }), ...refreshed.filter(row => !known.has(row.request_id))];
+    // Original-request GETs are authoritative even when processed counts go
+    // backwards during a verified failed-only retry. Never suppress that reset.
+    const batches = [...prior.map(row => byId.get(row.request_id) || row),
+      ...refreshed.filter(row => !known.has(row.request_id))];
     // Show the exact verified terminal completion once before the next
     // full Active discovery removes it. Otherwise the user never sees 4/4.
     // Clean terminal groups are not polled again and move to Completed history.
