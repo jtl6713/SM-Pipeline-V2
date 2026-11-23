@@ -287,7 +287,8 @@ export async function scanRecentProductionFactoryHandoffs({
     +"selected_clip_count,scheduled_post_date,studio_scheduled_at,"
     +"published_at,platform_post_url,test_run_id"
     +"&order=output_number.desc.nullslast&limit="+outputLimit);
-  if(!Array.isArray(outputs)||outputs.length>=outputLimit)
+  if(!Array.isArray(outputs)) throw Error("handoff output inventory unavailable");
+  if(outputs.length>=outputLimit)
     throw Error("handoff output inventory truncated; status unknown, not all-clear");
   const reports=requests.map(request=>assessProductionFactoryHandoff({
     request,outputs:outputs.filter(x=>str(x.content_item_id)===str(request.promoted_content_item_id)),
