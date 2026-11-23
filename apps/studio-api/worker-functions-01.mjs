@@ -13037,6 +13037,16 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
 /*__STUDIO_WORKER_END:healStuckStudioRenders__*/
 
 export async function studioCompleteNativePhotoPublishArming(env, record, note = "Native photo approve-incomplete heal") {
+  // A prior failed finish-arming attempt must not append another unbounded
+  // Review_Notes entry, or silently upgrade a never-reviewed output.
+  if (String(f(record, "Review_Status") || "").trim() !== "Approved") {
+    throw Error("Native photo arming requires an existing Factory approval");
+  }
+  if (f(record, "Do_Not_Publish") === true) {
+    throw Error("Native photo arming is blocked by a publishing hold");
+  }
+  if (String(f(record, "Review_Notes") || "").includes(
+    "Native photo approve-incomplete heal (finish arming)")) return record;
   const stamp = new Date().toISOString();
   let current = record;
   if (studioOutputIsNativePhoto(current)) {
@@ -13097,23 +13107,17 @@ export async function studioHealNativePhotoReviewStrands(env, options = {}) {
     const live = (rows || []).find((record) => record.id === row.id) || row;
     try {
       if (strand && String(row.output_status || "").trim() === "Ready for Review") {
-        await approveOutputRecordForPublishing(
-          env,
-          live,
-          "Native photo review-strand heal (full approve)",
-          stamp,
-          {},
-        );
-        healed.push({
-          key: "NATIVE_PHOTO_REVIEW_STRAND",
-          id: row.id,
-          output_id: row.output_id || null,
-          fingerprint: strand.fingerprint,
-          mode: "full_approve",
-        });
+        // #2618: a sibling's approval and a provisional date are NOT an
+        // authenticated human review decision for this exact output. Keep the
+        // output in Factory Needs Eyes; no autonomous approve/arming here.
         continue;
       }
       if (incomplete) {
+        // #2618: avoid rearming outputs with no recorded Factory review, and
+        // never repeat the same unsuccessful native-photo arming every 30 min.
+        if (String(f(live, "Review_Status") || "").trim() !== "Approved") continue;
+        if (String(f(live, "Review_Notes") || "").includes(
+          "Native photo approve-incomplete heal (finish arming)")) continue;
         await studioCompleteNativePhotoPublishArming(
           env,
           live,
