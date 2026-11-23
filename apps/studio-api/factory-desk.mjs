@@ -472,6 +472,13 @@ export function partitionFactoryLanes(rows, controls = null, { ideaCandidates = 
 
   for (const pinned of desk.needs_assets) {
     const source = byId.get(pinned.id) || pinned;
+    // A former R2 asset-repair pin must not take precedence over a CURRENT,
+    // canonical, package-ready RFR output. Otherwise it is marked "claimed"
+    // here and disappears entirely from Needs Eyes, even while its video
+    // siblings appear in the same content group (#2371, #10855/#10856).
+    // Keep unresolved pins in the working pile; do not change their record,
+    // review, publishing hold, or approval flags.
+    if (source.kind === "output" && isReadyForReview(source)) continue;
     const card = factoryCardFromRow({
       ...source,
       kind: source.kind || pinned.kind,
