@@ -343,7 +343,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1079-factory-bounded-activity-1013";
+  const BUILD_ID = "item4-0.6.1080-photo-readiness-2873";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12060,14 +12060,26 @@ function timedScriptAssetLabel(asset, index) {
         body: `${item4MediaCountPhrase(counts)} saved to Google Drive. You can keep editing or leave this screen anytime.`,
       };
     }
+    // Drive/media identifiers can be complete even while the aggregate status is stale.
+    // Never suggest more uploads, or unfinished Drive copies, solely from that status.
+    if (!item4Uploading && target > 0 && ready >= target && state !== "Ready" && state !== "Error") {
+      return {
+        heal: "reconciling",
+        title: "All selected media have saved records. Confirm Production readiness.",
+        body: `${ready} of ${target} assets have Google Drive and media IDs. Studio still reports preparation in progress. Recheck status; if it stays blocked, review the Platforms and Frames steps.`,
+        count: `${ready} of ${target} saved`,
+        action: "recheck",
+      };
+    }
     if (state === "Error") {
       return {
         heal: "error",
         title: item4IsVideoUploadMode() || ezIsClipRequest() ? "Media upload needs attention." : "Master photos need attention.",
-        body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
+        body: `${ready} of ${target} have Google Drive and media IDs. Studio reports a preparation error; recheck status and review the media and Frames steps. Your originals remain in Studio.`,
+        action: "recheck",
       };
     }
-    const count = target ? `${ready} of ${target} saved so far.` : "";
+    const count = target ? `${ready} of ${target} Google Drive records confirmed.` : "";
     const clipUpload = item4Uploading && ezIsClipRequest();
     return {
       heal: "uploading",
@@ -12078,8 +12090,11 @@ function timedScriptAssetLabel(asset, index) {
         ? (ezIsVibeCut() ? "Keep this tab open until the source video finishes uploading." : "You can keep working on this screen, or leave and come back.")
         : (clipUpload
           ? "Keep this tab open until the clip appears in the strip. Drive copies finish in the background."
-          : "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background."),
+          : (item4Uploading
+            ? "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background."
+            : "Studio is confirming the remaining Drive copies. Use Recheck status to get the latest result.")),
       count,
+      ...(!item4Uploading ? { action: "recheck" } : {}),
     };
   }
 
@@ -12111,7 +12126,27 @@ function timedScriptAssetLabel(asset, index) {
             <p><strong>Can I leave?</strong> ${escapeHtml(guide.leave)}</p>
             <p><strong>Where will I find it?</strong> ${escapeHtml(guide.returnTo)}</p>
           </div>` : "";
-      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>${guidanceHtml}`;
+      const recheckHtml = markup.action === "recheck"
+        ? '<button type="button" class="secondary-button item4-progress-recheck" data-item4-recheck>Recheck status</button>'
+        : "";
+      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>${guidanceHtml}${recheckHtml}`;
+      progress.querySelector("[data-item4-recheck]")?.addEventListener("click", async (event) => {
+        if (!activeProductionRequest?.id) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = "Checking…";
+        await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
+        if (item4Workspace?.assets_status === "Ready"
+          && item4Workspace?.plan_status === "Ready"
+          && item4Workspace?.variant_status === "Ready") {
+          await loadItem4BridgePreflight(activeProductionRequest);
+        } else if (item4Workspace?.assets_status !== "Ready"
+          && item4Workspace?.assets_status !== "Error") {
+          startItem4MasterPolling();
+        }
+        button.disabled = false;
+        button.textContent = "Recheck status";
+      });
       const tip = `${markup.title} ${markup.body} ${guide ? `${guide.leave} ${guide.returnTo}` : ""}`.trim();
       progress.dataset.phase6Tooltip = tip;
       if (typeof window.studioLockTooltip === "function") window.studioLockTooltip(progress, tip);
