@@ -63,7 +63,7 @@ test("failed activity read cannot report an authoritative all-clear", () => {
   assert.match(script, /Boolean\(state\.batchActivityError\) && batches\.length === 0/);
   assert.match(script, /This is not an all-clear/);
   assert.match(script, /Checking approval activity/);
-  assert.match(script, /No active approval batches\. All clear/);
+  assert.match(script, /No server-confirmed active approval batches in this view/);
 });
 
 test("conclusively absent saved request is not a failed Activity GET or fabricated global all-clear", () => {
@@ -90,4 +90,39 @@ test("bounded Factory discovery carries completed child/group history flags inde
   assert.match(script, /scanParams\.set\("group_done", "1"\)/);
   assert.match(script, /state\.batchDiscoveryChildDone = value\.discovery\.child_done === true/);
   assert.match(script, /state\.batchDiscoveryGroupDone = value\.discovery\.group_done === true/);
+});
+
+test("Factory displays saved original request ID without adding an accepted or active batch", () => {
+  assert.match(script, /const savedRequests = state\.completedOpen \? \[\] : factorySavedRequestDiagnostics\(serverRows\)/);
+  assert.match(script, /savedRequestsNode\.hidden = !savedRequests\.length \|\| state\.completedOpen/);
+  assert.match(script, /Original saved request ID/);
+  assert.match(script, /data-factory-copy-saved-id/);
+  assert.match(script, /Not counted as active or approved\. No resubmission occurs from this control/);
+  assert.match(script, /navigator\.clipboard\.writeText\(id\)/);
+});
+
+test("verified missing original IDs are retained for diagnostics only after exact read and grace", () => {
+  assert.match(script, /const verifiedMissing = isGlobal\s*\? factoryActivityProvesPlanMissing\(status, plan\)/);
+  assert.match(script, /if \(!graceExpired\)/);
+  assert.match(script, /verifiedMissingPlans\.push\(plan\)/);
+  assert.match(script, /if \(verifiedMissingPlans\.length\) rememberFactoryVerifiedAbsent\(saved, verifiedMissingPlans\)/);
+  assert.match(script, /studio\.factory\.verified-absent-requests\.v1/);
+  assert.match(script, /Last exact server check: not found \(not an accepted batch at that time\)/);
+  assert.match(script, /No server-confirmed active approval batches in this view/);
+});
+
+test("saved request history controls cannot issue POST or change server approval state", () => {
+  const diagnostics = script.slice(
+    script.indexOf("  const FACTORY_VERIFIED_ABSENCE_KEY"),
+    script.indexOf("  function archiveFactoryPending()"));
+  assert.ok(diagnostics.length > 1000);
+  assert.doesNotMatch(diagnostics, /fetchJson\(|method:\s*["']POST["']|api\/factory\/approval-batches/);
+  assert.match(diagnostics, /factoryPendingExactCandidates\(pending, recovery\)/);
+});
+
+test("identified preflight rejection retains only the matching original request evidence", () => {
+  assert.match(script, /factoryPendingExactCandidates\(saved, \[\]\)\.filter\(row =>\s*row\.expected_ids\.includes\(String\(rejectedOutputId\)\)\)/);
+  assert.match(script, /rememberFactoryPreflightRejection\(saved, rejectedId\)/);
+  assert.match(script, /Original selection contained a rejected output; siblings not proven accepted/);
+  assert.match(script, /studio\.factory\.preflight-rejected-requests\.v1/);
 });

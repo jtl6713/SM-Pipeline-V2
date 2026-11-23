@@ -946,3 +946,5 @@ Deploy Studio UI 0.6.1076 factory timeout receipt exact-ID recovery and truthful
 Deploy Studio UI 0.6.1077 exact gallery-repair rejection and safe saved-submission retirement (#2847 #2294). Require protected custom-domain verification, no auto-approve or publish.
 Deploy Studio UI 0.6.1079 Factory bounded Activity R2 pagination #1013/#2847; preserve original receipt and partial status, protected custom-domain release.
 2026-11-23 #2618 PR #2860 UI 0.6.1078: Factory corrected-media preview error fallback opens only the exact validated finished Drive video, no image substitution or automatic approval. Protected Pages release required; verify custom-domain v/BUILD_ID and iPhone Factory #10970 Preview modal, no publishing side effects.
+
+2026-11-23 #2847 UI 0.6.1080: surface original saved unconfirmed Factory request IDs with copy control; preserve verified-absent exact R2 checks locally for diagnostics; show no server-accepted active batches distinctly from review-ready Needs Eyes. No automatic approval/publishing, claim changes, or backend writes. Require protected custom-domain Pages release and real owner acceptance evidence.

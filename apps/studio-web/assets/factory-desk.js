@@ -189,6 +189,103 @@
     return [...new Map(found.map(row => [row.request_id, row])).values()].slice(0, 24);
   }
 
+
+  // #2847: Keep the exact original request identity visible when a submission
+  // was saved before POST acknowledgement. These rows are NOT accepted batches.
+  // Even after a proven absent exact R2 read releases a browser fence, keep a
+  // read-only local diagnostic instead of deleting all trace of the request.
+  const FACTORY_VERIFIED_ABSENCE_KEY = "studio.factory.verified-absent-requests.v1";
+  function factoryVerifiedAbsentHistory() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(FACTORY_VERIFIED_ABSENCE_KEY) || "[]");
+      return Array.isArray(rows) ? rows.filter(row =>
+        /^[A-Za-z0-9_-]{12,128}$/.test(String(row?.request_id || ""))).slice(0, 20) : [];
+    } catch { return []; }
+  }
+  function rememberFactoryVerifiedAbsent(saved, plans) {
+    const original = factoryPendingExactCandidates(saved, []);
+    const byId = new Map(original.map(row => [row.request_id, row]));
+    const verifiedAt = new Date().toISOString();
+    const rows = (plans || []).map(plan => byId.get(String(plan?.request_id || "")))
+      .filter(Boolean).map(row => ({
+        request_id: row.request_id, ids: row.expected_ids,
+        profiles: row.profiles || [], profile_id: row.profile_id || null,
+        verified_at: verifiedAt, last_error: String(saved?.last_error || "").slice(0, 320),
+        verified_absent: true,
+      }));
+    if (!rows.length) return;
+    try {
+      const all = [...rows, ...factoryVerifiedAbsentHistory()];
+      const deduped = [...new Map(all.map(row => [row.request_id, row])).values()].slice(0, 20);
+      localStorage.setItem(FACTORY_VERIFIED_ABSENCE_KEY, JSON.stringify(deduped));
+    } catch { /* no browser storage: never impact actual approval reconciliation */ }
+  }
+
+  // A definitive preflight rejection is also useful evidence. Preserve the
+  // original request ID when an identified rejected output releases its fence;
+  // do not infer that any sibling was accepted or safely repeat the POST.
+  const FACTORY_PREFLIGHT_REJECTION_KEY = "studio.factory.preflight-rejected-requests.v1";
+  function factoryPreflightRejectionHistory() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(FACTORY_PREFLIGHT_REJECTION_KEY) || "[]");
+      return Array.isArray(rows) ? rows.filter(row =>
+        /^[A-Za-z0-9_-]{12,128}$/.test(String(row?.request_id || ""))).slice(0, 20) : [];
+    } catch { return []; }
+  }
+  function rememberFactoryPreflightRejection(saved, rejectedOutputId) {
+    const rows = factoryPendingExactCandidates(saved, []).filter(row =>
+      row.expected_ids.includes(String(rejectedOutputId))).map(row => ({
+        request_id: row.request_id, ids: row.expected_ids,
+        profiles: row.profiles || [], profile_id: row.profile_id || null,
+        checked_at: new Date().toISOString(), preflight_rejected: true,
+        last_error: String(saved?.last_error || "").slice(0, 320),
+      }));
+    if (!rows.length) return;
+    try {
+      const all = [...rows, ...factoryPreflightRejectionHistory()];
+      localStorage.setItem(FACTORY_PREFLIGHT_REJECTION_KEY, JSON.stringify(
+        [...new Map(all.map(row => [row.request_id, row])).values()].slice(0, 20)));
+    } catch { /* preserve existing recovery behavior when local storage is full */ }
+  }
+  function factorySavedRequestDiagnostics(serverRows = []) {
+    const pending = pendingFactoryApproval();
+    const recovery = factoryRecoveryEntries();
+    const sources = [pending, ...recovery.map(row => row.saved)].filter(Boolean);
+    const metadata = new Map();
+    for (const saved of sources) {
+      const plans = saved.profile_id === "global" ? saved.batches :
+        [{ request_id: saved.request_id, ids: saved.ids }];
+      for (const plan of plans || []) {
+        const id = String(plan?.request_id || "");
+        if (/^[A-Za-z0-9_-]{12,128}$/.test(id)) metadata.set(id, {
+          last_error: String(saved.last_error || "").slice(0, 320),
+          saved_ms: Number(saved.saved_ms || 0), retry_blocked: saved.retry_blocked === true,
+        });
+      }
+    }
+    const serverIds = new Set((serverRows || []).filter(row => !row.preview_only)
+      .map(row => String(row.request_id || "")).filter(Boolean));
+    const pendingRows = factoryPendingExactCandidates(pending, recovery)
+      .filter(row => !serverIds.has(row.request_id))
+      .map(row => ({ ...row, ...metadata.get(row.request_id), verified_absent: false }));
+    const priorRows = [...factoryVerifiedAbsentHistory(), ...factoryPreflightRejectionHistory()]
+      .filter(row => !serverIds.has(row.request_id));
+    const rows = [...new Map([...pendingRows, ...priorRows].reverse()
+      .map(row => [row.request_id, row])).values()].reverse();
+    const profileId = factoryProfileId();
+    const deskCards = (state.desk?.lanes?.needs_eyes || [])
+      .filter(card => card?.kind === "output");
+    return rows.filter(row => {
+      if (!profileId) return true;
+      const profiles = row.profiles?.length ? row.profiles
+        : row.profile_id ? [row.profile_id]
+        : deskCards.filter(card => (row.ids || row.expected_ids || []).includes(card.id))
+          .map(card => card.profile_id).filter(Boolean);
+      // Unknown scope is not a reason to hide the saved original identity.
+      return !profiles.length || profiles.includes(profileId);
+    }).slice(0, 20);
+  }
+
   function archiveFactoryPending() {
     if (state.submittingBatch) return;
     const saved = pendingFactoryApproval();
@@ -570,6 +667,7 @@
     // key; never reuse the invalid plan's original key for a different set.
     const survivors = (saved.ids || []).filter(id =>
       id !== rejectedId && state.selectedOutputs.has(id));
+    rememberFactoryPreflightRejection(saved, rejectedId);
     const waiting = [...new Set([...waitingFactorySelection(), ...survivors])]
       .filter(id => id !== rejectedId);
     try {
@@ -1569,6 +1667,7 @@
     else state.batch = snapshot || null;
     const viewed = state.completedOpen ? state.completedBatch : state.batch;
     const summary = $("factoryBatchSummary");
+    const savedRequestsNode = $("factoryBatchSavedRequests");
     const count = $("factoryBatchMetricValue");
     const recent = $("factoryBatchRecentList");
     const inspect = $("factoryBatchInspect");
@@ -1590,6 +1689,47 @@
       (viewed?.job_id ? [viewed] : []);
     const preview = !state.completedOpen ? factoryReconcileSubmissionPreview(serverRows) : null;
     const batches = [...serverRows, ...(preview ? [preview] : [])].map(factoryBatchDisplayRow);
+    // A saved, unconfirmed request must not increase the server-active metric.
+    // Show original IDs independently from both accepted and provisional rows.
+    const savedRequests = state.completedOpen ? [] : factorySavedRequestDiagnostics(serverRows);
+    if (savedRequestsNode) {
+      savedRequestsNode.hidden = !savedRequests.length || state.completedOpen;
+      savedRequestsNode.innerHTML = savedRequests.map(row => {
+        const id = String(row.request_id || "");
+        const count = (row.expected_ids || row.ids || []).length;
+        const status = row.verified_absent
+          ? "Last exact server check: not found (not an accepted batch at that time)"
+          : row.preflight_rejected
+            ? "Original selection contained a rejected output; siblings not proven accepted"
+            : row.retry_blocked ? "Submission rejected or blocked; acceptance unconfirmed"
+          : "Saved request; server acceptance unconfirmed";
+        const detail = row.verified_absent && row.verified_at
+          ? " · verified " + new Date(row.verified_at).toLocaleString()
+          : row.preflight_rejected && row.checked_at
+            ? " · rejected " + new Date(row.checked_at).toLocaleString()
+            : "";
+        return `<div class="factory-batch-saved-request" role="status">
+          <strong>Original saved request ID — ${esc(status)}</strong>
+          <div><code>${esc(id)}</code>
+          <button type="button" class="secondary-button" data-factory-copy-saved-id="${esc(id)}">Copy request ID</button></div>
+          <small>${count} selected output(s)${esc(detail)}. Not counted as active or approved. No resubmission occurs from this control.</small>
+          ${row.last_error ? `<p class="error-text">${esc(row.last_error)}</p>` : ""}
+        </div>`;
+      }).join("");
+      savedRequestsNode.querySelectorAll("[data-factory-copy-saved-id]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const id = button.getAttribute("data-factory-copy-saved-id") || "";
+          if (!/^[A-Za-z0-9_-]{12,128}$/.test(id)) return;
+          try {
+            if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+            await navigator.clipboard.writeText(id);
+            setStatus("Copied original saved request ID " + id + " (not proof of approval).");
+          } catch {
+            setStatus("Clipboard unavailable; select and copy the request ID shown above.", true);
+          }
+        });
+      });
+    }
     const activityUnknown = !state.completedOpen && (
       (!viewed && !preview) ||
       (Boolean(state.batchActivityError) && batches.length === 0) ||
@@ -1716,7 +1856,7 @@
               : viewed?.activity_confidence === "bounded-partial"
                 ? "Scanning Factory history in safe pages. No all-clear until the sweep completes."
                 : "Checking approval activity…")
-          : "No active approval batches. All clear.") + '</p>';
+          : "No server-confirmed active approval batches in this view. Review-ready outputs remain in Needs Eyes; past unconfirmed submissions require exact request-ID verification.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
@@ -2042,6 +2182,7 @@
     const graceExpired = Number(saved.saved_ms) > 0
       && ageMs >= FACTORY_PENDING_MISSING_GRACE_MS;
     const committed = [];
+    const verifiedMissingPlans = [];
     for (const plan of plans) {
       const requestId = String(plan.request_id);
       const url = isGlobal
@@ -2115,12 +2256,15 @@
           return { resolved: false, message: "Saved approval " + requestId
             + " is within its 90-second commit window. Automatic verification will retry shortly." };
         }
+        // Preserve a diagnostic only after exact authoritative absence and grace.
+        verifiedMissingPlans.push(plan);
       }
     }
     // Do not erase a request changed by another tab while exact-ID reads ran.
     if (JSON.stringify(saved) !== localStorage.getItem(recoveryKey)) {
       return { resolved: false, message: "Saved submission changed during recovery. Refresh Activity first." };
     }
+    if (verifiedMissingPlans.length) rememberFactoryVerifiedAbsent(saved, verifiedMissingPlans);
     try { localStorage.removeItem(recoveryKey); }
     catch {
       return { resolved: false, message: "The previous request was verified, but its browser lock could not be released." };

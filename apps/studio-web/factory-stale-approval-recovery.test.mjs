@@ -47,6 +47,7 @@ function fixture(snapshot) {
   const store = new Map([[recoveryKey, JSON.stringify(snapshot)]]);
   const state = { selectedOutputs: new Set([A, B, C]) };
   let selectionWrites = 0;
+  const preflightAudits = [];
   const localStorage = {
     removeItem(key) { store.delete(key); },
     getItem(key) { return store.get(key) ?? null; },
@@ -61,17 +62,19 @@ function fixture(snapshot) {
     pendingFactoryApproval: () => null,
     saveFactorySelection: () => { selectionWrites++; },
     setBatchSubmissionError: () => {},
+    rememberFactoryPreflightRejection: (saved, id) => preflightAudits.push({request_id: saved.batches?.[0]?.request_id, id}),
   };
   const api = vm.runInNewContext(extracted + "\n({factoryRejectedOutputId,dropFactoryRecoveryEntry,clearFactoryRecoveryFences})", context, {
     timeout: 1000,
   });
-  return { api, store, state, get selectionWrites() { return selectionWrites; } };
+  return { api, store, state, preflightAudits, get selectionWrites() { return selectionWrites; } };
 }
 
 test("exact server-identified stale output is removed without discarding other approvals", () => {
   const row = saved("Output #102: output is no longer ready for approval. No new batch was accepted.");
-  const { api, store, state } = fixture(row);
+  const { api, store, state, preflightAudits } = fixture(row);
   const result = api.dropFactoryRecoveryEntry(recoveryKey, row, "Skipped expired output");
+  assert.deepEqual(preflightAudits, [{request_id: "factory_test_1234", id: B}]);
   assert.equal(result.dropped, true);
   assert.equal(result.skipped_output_id, B);
   assert.equal(result.remaining, 2);

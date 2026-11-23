@@ -340,8 +340,9 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
   const dropFactoryRecoveryEntry = new Function(
     "localStorage", "FACTORY_WAITING_SELECTION_KEY", "waitingFactorySelection",
     "state", "saveFactorySelection", "factoryRecoveryEntries", "setBatchSubmissionError",
+    "rememberFactoryPreflightRejection",
     dropFn + "; return dropFactoryRecoveryEntry;",
-  )(localStorage, "waiting", () => [], state, () => {}, () => [], () => {});
+  )(localStorage, "waiting", () => [], state, () => {}, () => [], () => {}, () => {});
   const reconcile = new Function(
     "pendingFactoryApproval", "FACTORY_PENDING_MISSING_GRACE_MS",
     "fetchJson", "localStorage", "FACTORY_PENDING_REQUEST_KEY",
@@ -350,6 +351,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     "setBatchSubmissionError", "renderDesk", "updateFactoryBatchToolbar", "setStatus",
     "factorySavedPayloadMatchesPlan", "retrySavedFactoryPlan", "factoryRecoveryEntries",
     "factoryTerminalEligibilityError", "factoryUnrecoverableSubmitError", "dropFactoryRecoveryEntry",
+    "rememberFactoryVerifiedAbsent",
     recoveryFn + "; return reconcileFactorySubmissionFence;",
   )(
     () => stored ? JSON.parse(stored) : null, 90_000,
@@ -358,6 +360,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     ids => accepted.push(...ids), state, () => {},
     () => {}, () => {}, () => {}, message => messages.push(message), () => false, async () => null, () => [],
     factoryTerminalEligibilityError, factoryUnrecoverableSubmitError, dropFactoryRecoveryEntry,
+    () => {},
   );
   return { reconcile, state, calls, accepted, messages, pending: () => stored ? JSON.parse(stored) : null };
 }
@@ -564,6 +567,7 @@ function automaticRecoveryHarness(saved, response) {
     const setBatchSubmissionError=message=>messages.push(message),setStatus=message=>messages.push(message),
       updateFactoryBatchToolbar=()=>{},
       saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
+    const rememberFactoryVerifiedAbsent=()=>{}, rememberFactoryPreflightRejection=()=>{};
     const refreshFactoryApprovalPolicy=async()=>{};
     const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
     ${functions}\n${asyncFunctions}
