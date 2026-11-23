@@ -113,3 +113,47 @@ export async function globalWorkloadAdmission(env, scope, identity, options = {}
     options);
   return { ...receipt, scope, key, fence };
 }
+
+
+/**
+ * Renewal guard for one already-admitted heavy Worker job. Call only when
+ * `STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED=true`; never from cron polling
+ * or asset-row loops. Failed or ambiguous renewals prohibit further work.
+ */
+export function startGlobalWorkloadHeartbeat(
+  env, claim, { heartbeatMs = 90_000, ttlSeconds = 600, transport = fetch } = {},
+) {
+  if (!claim?.enabled || claim.accepted !== true ||
+      !SCOPES.has(claim.scope) || !SHA64.test(claim.key) || !UUID.test(claim.fence)) {
+    throw new Error("global_workload_missing_admitted_owner");
+  }
+  let lost = false;
+  let stopped = false;
+  let pending = Promise.resolve();
+  const timer = setInterval(() => {
+    if (lost || stopped) return;
+    pending = pending.then(async () => {
+      if (lost || stopped) return;
+      try {
+        const renewed = await globalWorkloadRpc(
+          env, "renew", {
+            scope: claim.scope, key: claim.key, fence: claim.fence, ttlSeconds,
+          }, { transport },
+        );
+        if (renewed.accepted !== true) lost = true;
+      } catch {
+        lost = true;
+      }
+    }).catch(() => { lost = true; });
+  }, heartbeatMs);
+  return {
+    assertOwned() {
+      if (lost) throw new Error("global_workload_lease_lost");
+    },
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      await pending;
+    },
+  };
+}
