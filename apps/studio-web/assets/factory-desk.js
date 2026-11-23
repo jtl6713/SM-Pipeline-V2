@@ -1673,7 +1673,9 @@
       : '<p class="subtle">' + (state.completedOpen
         ? (state.completedLoading ? "Loading completed batches…" : "No completed batches in this page.")
         : activityUnknown
-          ? "Approval history could not be verified. This is not an all-clear; original saved request IDs are checked automatically."
+          ? (state.batchActivityError
+            ? "Approval history could not be verified. This is not an all-clear; original saved request IDs are checked automatically."
+            : "Checking approval activity…")
           : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
