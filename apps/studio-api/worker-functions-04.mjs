@@ -1,4 +1,5 @@
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
+import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
 import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
 import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
@@ -14382,21 +14383,44 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   });
   stage = "claim";
   const claims = [];
+  const deferredByGovernor = [];
   for (const job of selected) {
     const owner = crypto.randomUUID();
-    const lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
-    if (lease) claims.push(lease);
+    // Atomic shared capacity with the Windows Python producer: the durable
+    // R2 job is NOT claimed or mutated on denied/unreachable admission.
+    const admission = await runnerWorkerLease(env, "claim", job.idea_id, owner);
+    if (!admission.admitted) {
+      deferredByGovernor.push({ idea_id: job.idea_id, reason: admission.reason });
+      continue;
+    }
+    let lease = null;
+    try {
+      lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
+      if (lease) claims.push({ lease, owner });
+    } finally {
+      if (!lease) await runnerWorkerLease(env, "release", job.idea_id, owner);
+    }
   }
   stage = "process";
-  const settled = await Promise.all(claims.map(async (lease, index) => {
+  const settled = await Promise.all(claims.map(async ({ lease, owner }, index) => {
+    const heartbeat = startRunnerWorkerLeaseHeartbeat(env, lease.job.idea_id, owner);
     try {
+      heartbeat.assertOwned();
       const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
-        // Only one new heavy produce enqueue per pass; the existing render queue
-        // and later one-minute ticks advance the other claimed profile safely.
+        // Only one new heavy produce enqueue per pass; existing render queue
+        // and later ticks advance the other durable R2 jobs safely.
         deferProduce: index > 0,
       });
+      heartbeat.assertOwned();
       return { idea_id: lease.job.idea_id, status: job?.status || "unknown", stage: job?.stage || null };
     } catch (error) {
+      // On lost broker ownership, leave the original durable R2 claim for
+      // its bounded expiry rather than writing a retry under a stale owner.
+      try {
+        heartbeat.assertOwned();
+      } catch {
+        return { idea_id: lease.job.idea_id, status: "deferred", error: "shared_workload_lease_lost" };
+      }
       const failure = readyProductionFailure(error);
       console.warn("Ready-to-produce dispatch failed", lease.job.idea_id, error);
       const job = await readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
@@ -14406,6 +14430,9 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
         ...(!failure.transient ? { retry_delay_ms: 30 * 60 * 1000 } : {}),
       });
       return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
+    } finally {
+      await heartbeat.stop();
+      await runnerWorkerLease(env, "release", lease.job.idea_id, owner);
     }
   }));
   const outcome = {
@@ -14414,6 +14441,7 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     enqueued: enqueued.filter((row) => row.created || row.revived).length + backfilled,
     draft_backfilled: backfilled,
     claimed: claims.length,
+    deferred_global_admission: deferredByGovernor.length,
     max_concurrency: READY_PRODUCTION_MAX_CONCURRENCY,
     results: settled,
     final_approval: "human_only",
