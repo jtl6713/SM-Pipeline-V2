@@ -71,6 +71,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Fail closed unless active runner exposes shared Worker admission broker
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deliberately omit the shared secret: HTTP 401 proves the new
+          # authenticated route is live. No lease / job is created.
+          status=$(curl -sS --max-time 20 -o /tmp/shared-workload-auth.json -w '%{http_code}' \
+            -X POST 'https://pipeline.chicagoshining.com/internal/workload/worker-lease' \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"claim","idea_id":"recAAAAAAAAAAAAAA","token":"9c495032-b392-4ac1-a098-03289c530e88"}' || true)
+          test "$status" = "401"
+          jq -e '.error=="Invalid pipeline secret"' /tmp/shared-workload-auth.json >/dev/null
+          curl -fsS --max-time 20 'https://pipeline.chicagoshining.com/health' -o /tmp/shared-workload-health.json
+          jq -e '.ok==true and .workload_governor_enabled==true and
+            .studio_write_source=="supabase" and
+            .studio_phase6_write_source=="supabase" and
+            .supabase_pipeline_writes==true and
+            .airtable_activity.ok==true and .airtable_activity.any_activity==false' \
+            /tmp/shared-workload-health.json >/dev/null
+          node --test apps/studio-api/worker-shared-admission.test.mjs
+          echo 'shared_runner_broker_route_live_and_auth_gated=PASS'
       - name: Owner-global generation guidance API regression #2532
         shell: bash
         run: |
