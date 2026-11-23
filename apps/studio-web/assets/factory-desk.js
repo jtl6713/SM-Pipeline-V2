@@ -222,14 +222,14 @@
   // Only truly unresolved submissions block a new human approval. A terminal
   // historical Activity receipt is not proof that a freshly returned RFR output
   // still has a live approval in flight (#10855 / #2371).
-  function factoryActiveSubmissionIds() {
+  function factoryActiveSubmissionIds({ ignoreClickIntent = false } = {}) {
     const ids = new Set();
     const add = values => {
       for (const id of values || []) {
         if (/^rec[A-Za-z0-9]+$/.test(String(id))) ids.add(String(id));
       }
     };
-    add(state.submissionIntentIds);
+    if (!ignoreClickIntent) add(state.submissionIntentIds);
     add(state.submittingOutputIds);
     add(pendingFactoryApproval()?.ids);
     for (const { saved } of factoryRecoveryEntries()) add(saved?.ids);
@@ -639,10 +639,10 @@
     }
   }
 
-  function canReviewActions(card, { pile = false, candidate = false } = {}) {
+  function canReviewActions(card, { pile = false, candidate = false, ignoreClickIntent = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id)) return false;
     if (typeof factoryActiveSubmissionIds === "function"
-        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
+        && factoryActiveSubmissionIds({ ignoreClickIntent }).has(String(card?.id || ""))) return false;
     // A 48-hour local acceptance hint is not a saved approval. If the server
     // still reports Ready for Review, allow a fresh explicit operator action;
     // the canonical per-output lease prevents duplicate committed approvals.
@@ -1028,9 +1028,9 @@
     return { ...card, profile_id: profileId };
   }
 
-  function canSelectBatchOutput(card) {
+  function canSelectBatchOutput(card, { ignoreClickIntent = false } = {}) {
     if (typeof factoryActiveSubmissionIds === "function"
-        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
+        && factoryActiveSubmissionIds({ ignoreClickIntent }).has(String(card?.id || ""))) return false;
     if (recentFactoryAccepted()[String(card?.id || "")] &&
         String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
@@ -1120,7 +1120,12 @@
         if (!(includeOtherProfiles || factoryMatchesProfile(card)) || card?.kind !== "output") return false;
         if (submitted.has(String(card.id || ""))
             && !(includeClickIntent && state.submissionIntentIds.has(card.id))) return false;
-        return canReviewActions(card) && canSelectBatchOutput(card);
+        // The click hides rows immediately, but the same transient fence must
+        // not invalidate the exact selection being submitted after policy read.
+        // Ignore ONLY this tab's own click-intent marker. Pending persisted
+        // requests, other claims, holds and backend eligibility remain blocked.
+        return canReviewActions(card, { ignoreClickIntent: includeClickIntent }) &&
+          canSelectBatchOutput(card, { ignoreClickIntent: includeClickIntent });
       })
       .map(withResolvedFactoryProfile);
   }
