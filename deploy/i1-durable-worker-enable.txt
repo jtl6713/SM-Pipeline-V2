@@ -16,3 +16,9 @@ before reading the expected runner version. Exactly one protected feature
 binding activation is attempted, with hard live runner/Cloudflare preflight.
 This marker does not enqueue an idea batch, approve media, release DNP,
 schedule or publish. Any preflight failure must stop without mutation.
+
+Nov 23 2026 secondary safety preflight after run #45098587733. Runner health
+passed but Worker binding/deployment preflight rejected without writing. This
+attempt emits only masked Cloudflare binding metadata and active deployment
+classification; it still fails closed on an existing binding, unexpected
+deployment split, bad health, or missing authority. No provider or I1 jobs.
