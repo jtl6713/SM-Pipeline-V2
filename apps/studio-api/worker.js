@@ -42,6 +42,7 @@ import { returnFactoryRevisionToProducer } from "./rendering-review-factory-retu
 import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
+import { serveIssue2618ReviewPreview, issue2618PreviewSpec } from "./factory-2618-review-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -4317,6 +4318,25 @@ export default {
 
       if (isFactoryOutputPreviewRoute) {
         const outputId=url.pathname.split("/")[4];
+        // Corrected #2618 files are canonical in Supabase, but their old
+        // Studio R5 preview keys were intentionally removed. An unverified
+        // Drive redirect cannot be treated as browser-playable video.
+        // This exact-output, SHA-checked private cache never publishes or
+        // approves; it supports Safari byte-range requests.
+        if(issue2618PreviewSpec(outputId)){
+          requirePermission(authorization,"outputs_review");
+          return serveIssue2618ReviewPreview({
+            request,env,outputId,
+            readRows:id=>adminHoldSupabaseRest(env,
+              "platform_outputs?airtable_record_id=eq."+encodeURIComponent(id)+
+              "&select=airtable_record_id,output_status,review_status,publish_status,"+
+              "do_not_publish,auto_publish_enabled,scheduled_post_date,"+
+              "studio_scheduled_at,youtube_scheduled_publish_at,published_at,"+
+              "platform_post_url,platform_publish_response,final_file_url,error_messages&limit=2"),
+            fetchVideo:(fileId,finalUrl,probe)=>
+              fetchGoogleDriveVideo(fileId,finalUrl,probe,env),
+          });
+        }
         // Only saved exact-output sessions activate protected revision preview.
         const o=makeReviewFactoryHandoffOperations(env);
         const sourceSession=await o.readSession(outputId);

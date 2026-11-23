@@ -1022,8 +1022,26 @@
       video.hidden = true;
       image.hidden = true;
       empty.hidden = false;
-      empty.textContent = "Video playback failed — this cover is not the finished render. Open the output in Pipeline or its original video file to review the scenes.";
-      setStatus(`Video preview failed for ${cardLabel(card)} — not a single-image render.`, true);
+      empty.textContent = "Video playback failed — this cover is not the finished render. Do not approve until you have watched the full video.";
+      // A read-only escape hatch for an exact stored Drive final. It never
+      // turns a still/thumbnail into a successful preview or grants approval.
+      // Avoid arbitrary/off-domain links from untrusted output metadata.
+      try {
+        const source = new URL(String(card.final_file_url || ""));
+        const match = /^\/file\/d\/[A-Za-z0-9_-]{20,}\/view$/.test(source.pathname);
+        if (source.protocol === "https:" && source.hostname === "drive.google.com"
+          && !source.port && !source.username && !source.password
+          && !source.search && !source.hash && match) {
+          const link = document.createElement("a");
+          link.href = source.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = "Open this output's finished video in Google Drive";
+          empty.appendChild(document.createTextNode(" "));
+          empty.appendChild(link);
+        }
+      } catch {}
+      setStatus(`Video preview failed for ${cardLabel(card)} — verify the video before approving.`, true);
     };
     video.onplaying = () => setStatus(`${triedSavedR5 ? "Playing saved original Studio MP4" : "Playing video"} · ${cardLabel(card)}`);
     video.onloadedmetadata = () => {
