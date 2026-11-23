@@ -2,6 +2,11 @@ import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
 import { globalWorkloadEnabled, globalWorkloadAdmission, globalWorkloadRpc, startGlobalWorkloadHeartbeat } from "./global-workload-coordinator.mjs";
 import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
+import {
+  FACTORY_HANDOFF_SIGNATURE,
+  scanRecentProductionFactoryHandoffs,
+  auditFactoryCardProjection,
+} from "./quality-factory-handoff.mjs";
 import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
@@ -10671,6 +10676,36 @@ export async function gatherStudioDeskInventory(env) {
     }
   }
 
+  // A bounded two-query Supabase projection links the exact saved I3/I4
+  // output plan to actual children. Never infer a pass from a 0-row/failed
+  // scan, and never run fanout/hold release/provider writes from Quality Agent.
+  if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+    try {
+      const handoff = await studioReadCoalesce("quality-factory-handoff-2846", 60_000,
+        () => scanRecentProductionFactoryHandoffs({
+          read: path => supabaseRest(env,path), limit:4,
+        }));
+      if (handoff?.status === "ok") {
+        scanned("production_factory_handoff");
+        for (const finding of handoff.findings || []) {
+          const ident = String(finding.record_id || finding.request_id || "unknown");
+          push({
+            ...finding,
+            class: finding.stage === "factory" ? "code_bug" : "data_repair",
+            record_id: ident,
+            fingerprint: "production_factory_handoff:" + ident + ":" +
+              String(finding.reason || "unknown"),
+            actor: "desk_agent",
+            diagnosis: finding.action,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Quality Agent production Factory handoff scan unavailable",
+        String(error?.message || error).slice(0,160));
+    }
+  }
+
   const identityByRecord = new Map();
   const rememberIdentity = (id, ident) => {
     if (!id || !ident) return;
@@ -12300,6 +12335,8 @@ export async function getFactoryDesk(request, env, authorization) {
     queue = {};
   }
   const part = partitionFactoryLanes(queue.rows || [], deskControls, { ideaCandidates });
+  const handoffFindings = auditFactoryCardProjection(
+    queue.rows || [], part.lanes.needs_eyes || []);
   const warningBits = [];
   if (queue.warning) warningBits.push(queue.warning);
   return respond(request, env, {
@@ -12309,6 +12346,11 @@ export async function getFactoryDesk(request, env, authorization) {
     needs_assets_candidates: part.needs_assets_candidates,
     summary: part.summary,
     controls: part.controls,
+    quality_agent_handoff: {
+      signature: FACTORY_HANDOFF_SIGNATURE, scanned: true,
+      status: queue.warning ? "partial" : "ok",
+      findings: handoffFindings.slice(0,25),
+    },
     can_edit: Boolean(
       authorization?.permissions?.tenant_admin
       || authorization?.permissions?.publishing_control
@@ -12326,6 +12368,8 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
   try { queue = await queueResponse.clone().json(); } catch { queue = {}; }
   const ideaCandidates = await loadFactoryIdeaCandidates(env);
   const part = partitionFactoryLanes(queue.rows || [], controls, { ideaCandidates });
+  const handoffFindings = auditFactoryCardProjection(
+    queue.rows || [], part.lanes.needs_eyes || []);
   return respond(request, env, {
     ok: true,
     page: "factory-desk",
@@ -12333,6 +12377,11 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
     needs_assets_candidates: part.needs_assets_candidates,
     summary: part.summary,
     controls: part.controls,
+    quality_agent_handoff: {
+      signature: FACTORY_HANDOFF_SIGNATURE, scanned: true,
+      status: queue.warning ? "partial" : "ok",
+      findings: handoffFindings.slice(0,25),
+    },
     can_edit: true,
     action,
     ...extra,
@@ -18821,10 +18870,28 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
         console.warn("Factory failed-output Quality Agent scan degraded",
           String(error?.code || error?.status || error?.name || "unknown"));
       }
-      // Each data source retains its own verification status; do not claim
-      // batch all-clear when the R2 history is unavailable.
+      // Independent, bounded production-to-Factory handoff scan; no third
+      // Factory/R2 history walker, producer resume or provider operation.
+      let productionToFactory = {status:"unavailable",signature:FACTORY_HANDOFF_SIGNATURE,
+        error:"Canonical production-to-Factory scan unavailable; findings unknown"};
+      if (studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env)) {
+        try {
+          productionToFactory=await studioReadCoalesce(
+            "quality-factory-handoff-2846",60_000,
+            () => scanRecentProductionFactoryHandoffs({
+              read:path=>supabaseRest(env,path),limit:4,
+            }),
+          );
+        } catch(error) {
+          console.warn("Factory handoff Quality Agent bounded scan unavailable",
+            String(error?.message || error).slice(0,160));
+        }
+      }
+      // Each source retains independent verification; unknown never means 0.
       return respond(request, env, {
-        ...report, output_failures: outputFailures, approved_past_due: approvedPastDue,
+        ...report, output_failures: outputFailures,
+        approved_past_due: approvedPastDue,
+        production_to_factory: productionToFactory,
       });
     }
     // Only the explicit view=completed request may load terminal batch history.
