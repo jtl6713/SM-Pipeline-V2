@@ -13,11 +13,17 @@ const drive = n => "owner-drive-reference-nyc-20261122-" + n;
 const family = n => "rec" + String(n).padStart(14, "A");
 const actor = "recAuthUser123456";
 const pairs = [
-  ["recO494MDnQ1Tk51b", 10855, "Instagram", "Instagram Carousel"],
-  ["recWIWOrdflmqyxKW", 10856, "Facebook", "Facebook Photo Set"],
+  ["recO494MDnQ1Tk51b", 10855, "Instagram", "Instagram Carousel", 4],
+  ["recWIWOrdflmqyxKW", 10856, "Facebook", "Facebook Photo Set", 4],
+  ["recVoFLCOAGHNIkD3", 10863, "Instagram", "Instagram Carousel", 8],
+  ["rechOtaxHOwY18A8F", 10864, "Facebook", "Facebook Photo Set", 8],
+  ["rec61JeXiA6Aai1Kk", 10867, "Instagram", "Instagram Carousel", 4],
+  ["recttY0sPY2RGkcaq", 10869, "Instagram", "Instagram Carousel", 4],
+  ["recUIDBjcY6RgSy0n", 10870, "Facebook", "Facebook Photo Set", 4],
+  ["recWq5HIxBT8BCtme", 10875, "Instagram", "Instagram Carousel", 4],
 ];
-function fixture([id, outputNumber, platform, type]) {
-  const clips = [1,2,3,4].map(n => ({
+function fixture([id, outputNumber, platform, type, slideCount]) {
+  const clips = Array.from({length:slideCount}, (_,i)=>i+1).map(n => ({
     order:n, url:image(n), googleDriveFileId:drive(n), mediaAssetRecordId:family(n),
   }));
   const output = {
@@ -26,7 +32,7 @@ function fixture([id, outputNumber, platform, type]) {
     studio_output_type:type==="Instagram Carousel"?"Carousel":"Multi-Image Post",
     render_status:"Native Photo Route",output_status:"Ready for Review",
     review_status:"Review Sent", publish_status:"Not Ready",
-    selected_clip_count:4, selected_assets:{selected_clips:clips},
+    selected_clip_count:slideCount, selected_assets:{selected_clips:clips},
     render_clip_list:clips,
     do_not_publish:false, auto_publish_enabled:false,
     publish_hold_released_at:"2026-11-23T02:45:37Z",
@@ -35,9 +41,10 @@ function fixture([id, outputNumber, platform, type]) {
     error_messages:{SM_NYC_AI_Creative_QA_20261122:{
       subject_verified:true,caption_and_hashtag_review:"pass",
       factory_final_approval:false,publishing_authorized:false,
+      output_native_slides_checked:slideCount,
     }},
   };
-  const slides = [1,2,3,4].map(n=>({
+  const slides = Array.from({length:slideCount}, (_,i)=>i+1).map(n=>({
     id:"a0000000-0000-4000-8000-"+String(n).padStart(12,"0"),
     // Mirror the real 2026-11-22 recovery rows: rec + 16 hex, not Airtable rec14.
     airtable_record_id:"rec"+String(n).padStart(16,"a"),
@@ -87,13 +94,13 @@ function wire(t,slides,{conflictAt=0}={}) {
   return requests;
 }
 for(const pair of pairs){
-  test("#2371 "+pair[1]+": owner-released RFR gallery has 4 valid slides, no automatic/old-receipt approval",async t=>{
+  test("#2371 "+pair[1]+": owner-released RFR gallery has exact validated slides, no automatic/old-receipt approval",async t=>{
     const {output,slides}=fixture(pair);
     const calls=wire(t,slides);
     assert.equal(nycOwnerGalleryApprovalEligible(output),true);
     assert.equal(inspectNativeGalleryPublicationPackage(output,slides).eligible,false);
     const inspected=await preflightNycOwnerGalleryApproval(env,output);
-    assert.equal(inspected.pending,4);
+    assert.equal(inspected.pending,pair[4]);
     assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
     await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
       requestId:"factory-new-20261123",approvedByUserRecordId:null,
@@ -104,7 +111,7 @@ for(const pair of pairs){
       submittedAt:"2026-11-23T04:45:00Z",
     });
     assert.equal(approved.eligible,true);
-    assert.equal(calls.filter(c=>c.method==="PATCH").length,4);
+    assert.equal(calls.filter(c=>c.method==="PATCH").length,pair[4]);
     assert.equal(slides.every(s=>s.fields["Approved For Final"]===true),true);
     assert.equal(slides.every(s=>s.fields.Shared_Asset_Approved===true),true);
     assert.equal(output.output_status,"Ready for Review","parent not approved or published by image finalization");
@@ -114,9 +121,35 @@ for(const pair of pairs){
       submittedAt:"2026-11-24T04:45:00Z",
     });
     assert.equal(repeat.pending,0);
-    assert.equal(calls.filter(c=>c.method==="PATCH").length,4,"idempotent with existing actual review evidence");
+    assert.equal(calls.filter(c=>c.method==="PATCH").length,pair[4],"idempotent with existing actual review evidence");
   });
 }
+test("#2371 exact six-output recovery: an 8-slide High Line gallery cannot silently become four",async t=>{
+  const {output,slides}=fixture(pairs[2]);
+  const calls=wire(t,slides);
+  assert.equal(nycOwnerGalleryApprovalEligible(output),true);
+  slides.splice(4,4);
+  await assert.rejects(preflightNycOwnerGalleryApproval(env,output),/native_gallery_slide_count_mismatch/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+});
+test("#2371 exact six-output recovery: mismatched QA slide count is ineligible",async t=>{
+  const {output,slides}=fixture(pairs[3]);
+  const calls=wire(t,slides);
+  output.error_messages.SM_NYC_AI_Creative_QA_20261122.output_native_slides_checked=4;
+  assert.equal(nycOwnerGalleryApprovalEligible(output),false);
+  assert.equal(await preflightNycOwnerGalleryApproval(env,output),null);
+  assert.equal(calls.length,0);
+});
+test("#2371 exact six-output recovery: prior hold release is required for eight slides",async t=>{
+  const {output,slides}=fixture(pairs[2]);
+  const calls=wire(t,slides);
+  output.publish_hold_released_at="2026-11-23T05:00:00Z";
+  await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
+    requestId:"factory-old-before-release",approvedByUserRecordId:actor,
+    submittedAt:"2026-11-23T04:59:59Z",
+  }),/AFTER the owner hold release/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+});
 test("#2371 rejects a forged/malformed recovered slide identity before any writes",async t=>{
   const {output,slides}=fixture(pairs[0]);
   slides[0].airtable_record_id="rec-fake-slide-id";
