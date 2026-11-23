@@ -104,8 +104,14 @@ export function assessProductionFactoryHandoff({
     report.findings.push(incident({stage:"fanout",kind:"production_factory_handoff",reason:"output_inventory_exceeds_bounded_plan",remediation:"Reconcile duplicates and source ownership; do not automatically create outputs"}));
     return report;
   }
+  // The live production_requests table has NO content_profile_id column.
+  // Its source profile must be obtained by a separate exact parent/idea
+  // identity verification before any mutating repair. Detect cross-profile
+  // leakage among the existing child outputs without inventing that column.
+  const observedProfiles=new Set(canonical.map(x=>str(x.content_profile_id)).filter(Boolean));
   if (canonical.some(x=>request.promoted_content_item_id && str(x.content_item_id)!==str(request.promoted_content_item_id))
-      || canonical.some(x=>request.content_profile_id && str(x.content_profile_id)!==str(request.content_profile_id))) {
+      || canonical.some(x=>request.content_profile_id && str(x.content_profile_id)!==str(request.content_profile_id))
+      || observedProfiles.size>1) {
     report.status="blocked";report.stage="fanout";
     report.findings.push(incident({stage:"fanout",kind:"production_factory_handoff",reason:"wrong_content_or_profile_ownership",remediation:"Quarantine cross-profile media/outputs and reconcile exact links before production"}));
     return report;
@@ -277,7 +283,7 @@ export async function scanRecentProductionFactoryHandoffs({
   const n=Math.max(1,Math.min(8,Number(limit)||4));
   const requests=await read("production_requests?request_status=in.(Promoted,Submitted)"
     +"&output_plan_status=eq.Ready&promoted_content_item_id=not.is.null"
-    +"&select=airtable_record_id,promoted_content_item_id,content_profile_id,"
+    +"&select=airtable_record_id,promoted_content_item_id,"
     +"request_status,output_plan,production_job,updated_at"
     +"&order=updated_at.desc&limit="+n);
   if(!Array.isArray(requests)||requests.length>n)throw Error("handoff request inventory unavailable");
