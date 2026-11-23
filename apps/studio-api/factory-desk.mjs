@@ -191,7 +191,7 @@ function isManualLane(row) {
   if (row?.kind === "output"
     && row.review_package_ready === false
     && String(row.output_status || "").trim() === "Ready for Review"
-    && !isPastEyes(row)) return true;
+    && !isPastEyes(row) && !isInFlightFactoryState(row)) return true;
   // #2618: explicitly marked creative corrections stay visible in Factory
   // Manual/Repair even if they were *previously* approved and scheduled.
   // Their original scheduling history is not permission to publish.
