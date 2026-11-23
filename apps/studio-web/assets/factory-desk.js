@@ -2949,7 +2949,8 @@
     }
     const reviewAllowed = canReviewActions(card, { pile, candidate });
     const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
-    const attentionOutput = card._factoryAttention === true && card.kind === "output";
+    const attentionOutput = card.kind === "output" && (card._factoryAttention === true ||
+      (lane === "manual" && card.review_package_ready === false));
     const reviewActionOutput = needsEyesOutput || attentionOutput;
     const batchReason = reviewActionOutput ? factoryBatchSelectionReason(card) : "";
     const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
@@ -3019,7 +3020,12 @@
       : (card.review_package_ready === false
         ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
         : (card.studio_state || (alert ? "Needs repair" : "—")));
-    const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
+    const reviewMissing = Array.isArray(card.review_package_missing) ? card.review_package_missing : [];
+    const reviewReason = reviewMissing.join(", ") || card.review_package_reason || "";
+    const missingCaption = reviewMissing.includes("Output_Caption");
+    const reviewRepairNotice = lane === "manual" && card.kind === "output" && card.review_package_ready === false
+      ? `<span class="factory-batch-unavailable factory-review-blocker" role="status"><strong>${missingCaption ? "Caption missing — complete creative review" : "Review package incomplete"}</strong> · ${esc(reviewReason || "Check required media and metadata")}. ${missingCaption ? "Open the output to add a caption and verify that the selected photos match the location and season before requesting approval." : "Open the exact output to resolve the listed requirements."} No approval or publishing is authorized.</span>`
+      : "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     // Every Repair row (output, production request, or idea) gets the same
     // exact-record navigation as its Open action. Some held repairs are not
@@ -3037,6 +3043,7 @@
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${titleMarkup}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${reviewActionOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Needs attention:"}</strong> ${esc(batchReason)}</span>` : ""}
+        ${reviewRepairNotice}
         ${card.creative_qa_hold === true
           ? `<span class="factory-batch-unavailable factory-creative-qa" role="status"><strong>Creative QA: incorrect media · Publishing held</strong><br>
               ${esc(card.creative_qa_reason || "Location/season or source image needs replacement and verification.")}
