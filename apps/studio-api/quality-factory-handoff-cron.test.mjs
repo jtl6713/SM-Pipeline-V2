@@ -89,3 +89,35 @@ test("no eligible promoted requests is a real bounded empty sample, not an outag
   assert.equal(receipt.verification_required,0);
   assert.equal(receipt.publish_actions,0);
 });
+
+test("oldest failure: completed Production with no promoted Content owner is investigated, never silently zero",async()=>{
+  const p={airtable_record_id:"recOriginalZero111",promoted_content_item_id:null,
+    request_status:"Submitted",output_plan:{items:[
+      {platform:"Instagram",output_type:"Carousel"},
+      {platform:"YouTube",output_type:"Short"},
+    ]},production_job:{step:"escalated"}};
+  const reads=[];
+  const receipt=await runQualityFactoryHandoffCron({
+    read:async path=>{reads.push(path);return [p];},
+  });
+  assert.equal(reads.length,1,"no output enumeration when Content ownership missing");
+  assert.equal(receipt.status,"checked");
+  assert.equal(receipt.repair_required,1);
+  assert.equal(receipt.finding_count,1);
+  assert.deepEqual(receipt.stages,["fanout"]);
+  assert.equal(receipt.publish_actions,0);
+});
+
+test("newly Submitted, still-active promotion is not a false failure",async()=>{
+  const p={airtable_record_id:"recRunningProd001",promoted_content_item_id:null,
+    request_status:"Submitted",output_plan:{items:[
+      {platform:"Facebook",output_type:"Story"},
+    ]},production_job:{step:"running"}};
+  const result=await runQualityFactoryHandoffCron({
+    read:async()=>[p],
+  });
+  assert.equal(result.status,"checked");
+  assert.equal(result.repair_required,0);
+  assert.equal(result.finding_count,1,"advisory content owner pending, not an auto repair");
+  assert.equal(result.publish_actions,0);
+});
