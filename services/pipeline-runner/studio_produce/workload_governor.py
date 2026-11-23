@@ -308,6 +308,11 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
         if admission_paused() or circuit_open(db):
             db.commit()
             return False
+        # Half-open database recovery is Python-only until a canonical
+        # producer step proves the store is healthy again.
+        if db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone():
+            db.commit()
+            return False
         row = db.execute("""SELECT token,lease_until FROM resource_leases
             WHERE scope=? AND lease_key=?""", (WORKER_HEAVY_SCOPE, idea_id)).fetchone()
         if row and float(row[1]) > now:
@@ -323,7 +328,10 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
         # After a database outage, permit only ONE combined half-open canary.
         has_outage = db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone()
         allowed = 1 if has_outage else max_jobs()
-        if worker_running >= WORKER_HEAVY_LIMIT or running + worker_running >= allowed:
+        # Reserve one producer slot even while a Worker performs heavy
+        # idea matching; when configured for one job, Worker admission pauses.
+        worker_limit = min(WORKER_HEAVY_LIMIT, max(0, allowed - 1))
+        if worker_running >= worker_limit or running + worker_running >= allowed:
             db.commit()
             return False
         claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
@@ -340,7 +348,9 @@ def renew_worker_heavy(idea_id: str, token: str) -> bool:
         return False
     now = time.time()
     with _connect() as db:
-        if circuit_open(db):
+        if circuit_open(db) or db.execute(
+            "SELECT 1 FROM governor_control WHERE name='database'"
+        ).fetchone():
             return False
         return bool(db.execute("""UPDATE resource_leases SET lease_until=?
             WHERE scope=? AND lease_key=? AND token=? AND lease_until>?""",
