@@ -300,12 +300,14 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
     Excess ideas remain in the Worker's existing R2 durable ready-production queue.
     Repeated requests with the *same* live token are idempotent.
     """
-    if not enabled() or admission_paused():
+    # Producer-only recovery mode is explicitly for an exact Python
+    # canary, not a back door for unrelated autonomous Worker claims.
+    if not enabled() or recovery_read_only_active():
         return False
     with _connect() as db:
         _transaction(db)
         now = time.time()
-        if admission_paused() or circuit_open(db):
+        if recovery_read_only_active() or circuit_open(db):
             db.commit()
             return False
         # Half-open database recovery is Python-only until a canonical
@@ -325,12 +327,25 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
             WHERE state='running' AND lease_until>?""", (now,)).fetchone()[0]
         worker_running = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope=? AND lease_until>?""", (WORKER_HEAVY_SCOPE, now)).fetchone()[0]
-        # After a database outage, permit only ONE combined half-open canary.
-        has_outage = db.execute("SELECT 1 FROM governor_control WHERE name='database'").fetchone()
-        allowed = 1 if has_outage else max_jobs()
-        # Reserve one producer slot even while a Worker performs heavy
-        # idea matching; when configured for one job, Worker admission pauses.
-        worker_limit = min(WORKER_HEAVY_LIMIT, max(0, allowed - 1))
+        # The half-open recovery latch was checked above. Normal capacity is
+        # one shared pool, so a configured cap of 1 must not permanently starve
+        # autonomous Ready-production when all Python producers are idle.
+        allowed = max_jobs()
+        worker_limit = min(WORKER_HEAVY_LIMIT, allowed)
+        if allowed == 1:
+            # Give runnable Python work priority under the one-job canary cap.
+            # Delayed/backoff or parked jobs must not block an idle slot.
+            # This read and Worker insertion share the same IMMEDIATE txn as
+            # claim_next(), so no second host can claim capacity in between.
+            python_ready = db.execute("""SELECT 1 FROM producer_jobs
+                WHERE state='queued' AND available_at<=? LIMIT 1""", (now,)).fetchone()
+            if python_ready:
+                db.commit()
+                return False
+        else:
+            # At two or more slots, keep one available for Python while
+            # Worker Ready-production holds at most one global local lease.
+            worker_limit = min(worker_limit, allowed - 1)
         if worker_running >= worker_limit or running + worker_running >= allowed:
             db.commit()
             return False
@@ -344,7 +359,7 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
 
 def renew_worker_heavy(idea_id: str, token: str) -> bool:
     """An expired or superseded token cannot resurrect a Worker workload."""
-    if not enabled() or admission_paused():
+    if not enabled() or recovery_read_only_active():
         return False
     now = time.time()
     with _connect() as db:
