@@ -583,7 +583,7 @@ jobs:
             # argument exempts only this click's temporary local intent marker.
             # Match the function name and first argument, not an obsolete exact
             # parameter signature: the latter falsely flags a correct release.
-            if ! grep -Eq 'function canSelectBatchOutput\\(card(,|\\))' /tmp/custom-factory-canary.js; then
+            if ! grep -Eq 'function canSelectBatchOutput\(card(,|\))' /tmp/custom-factory-canary.js; then
               echo "Factory canary selector guard was not found in deployed code" >&2
               exit 1
             fi
