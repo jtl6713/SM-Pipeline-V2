@@ -2177,7 +2177,17 @@
               value.batches[0]?.request_id !== row.request_id) {
             throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
           }
-          return value.batches[0];
+          const verifiedRow = value.batches[0];
+          // Paint each completed GET as it arrives; one slow sibling status
+          // cannot postpone another approved output until the 12s timeout.
+          if (factoryProfileId() === filterId) {
+            const incremental = factoryBatchMergeExactActivity(state.batch, [verifiedRow]);
+            state.lastBatchSuccessMs = Date.now();
+            state.batchActivityError = "";
+            renderFactoryBatchActivity(incremental);
+            document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: incremental }));
+          }
+          return verifiedRow;
         }));
         const updates = outcomes.filter(row => row.status === "fulfilled").map(row => row.value);
         const missing = outcomes.length - updates.length;
