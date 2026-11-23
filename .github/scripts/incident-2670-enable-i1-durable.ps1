@@ -65,11 +65,14 @@ except Exception:
     print("i1_spool_inspection_failed")
     sys.exit(4)
 '@
+$probeScript=Join-Path $env:TEMP ('incident2670-i1-readonly-'+[guid]::NewGuid().ToString('N')+'.py')
 try {
-  & python -c $probe
+  [IO.File]::WriteAllText($probeScript,$probe,(New-Object System.Text.UTF8Encoding($false)))
+  & python $probeScript
   if ($LASTEXITCODE -ne 0) {throw 'i1_existing_job_reconciliation_required'}
 }
 finally {
+  Remove-Item -LiteralPath $probeScript -Force -ErrorAction SilentlyContinue
   Remove-Item Env:I1_ACTIVATION_DB_READONLY -ErrorAction SilentlyContinue
 }
 $sb=(Read-Setting 'SUPABASE_URL').TrimEnd('/')
