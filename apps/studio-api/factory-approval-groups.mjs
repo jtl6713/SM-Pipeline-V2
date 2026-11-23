@@ -117,6 +117,8 @@ export async function factoryApprovalGroupBuild(options) {
     schema:FACTORY_GROUP_SCHEMA, id:"fg_"+plan.request_id,
     request_id:plan.request_id, status:"enqueuing",
     created_at:now, updated_at:now,
+    submitted_by:/^rec[A-Za-z0-9]{14}$/.test(String(options.submittedBy||""))
+      ? options.submittedBy : null,
     notes:String(options.note||"").slice(0,3000),
     records:plan.records, children,
   };
@@ -139,6 +141,7 @@ export async function factoryApprovalGroupResume(bucket, requestId) {
     await factoryBatchEnqueue(bucket,{
       profileId:child.profile_id, requestId:child.request_id,
       groupRequestId:parent.request_id, records:child.records, note:parent.notes,
+      submittedBy: parent.submitted_by || null,
     });
   }
   await mutate(bucket,key,old => old.status === "enqueuing"
