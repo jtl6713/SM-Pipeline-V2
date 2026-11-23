@@ -1,0 +1,50 @@
+name: Issue 2371 Exact 10855 Live Factory Presence Read Only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2371-10855-live-factory-presence-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Verify deployed Factory asset and exact live output lane without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET"
+          BASE=https://studio.chicagoshining.com
+          HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          curl -fsSL --max-time 30 "${HEADERS[@]}" "$BASE/?exact_factory_10855=$GITHUB_SHA" -o /tmp/10855-index.html
+          grep -q 'UI build 0.6.1071' /tmp/10855-index.html
+          curl -fsSL --max-time 30 "${HEADERS[@]}" "$BASE/assets/factory-desk.js?v=0.6.1071-qa-workload-2670" -o /tmp/10855-factory.js
+          grep -q 'function factoryUnheldReviewCandidate' /tmp/10855-factory.js
+          CODE="$(curl -sS -L --max-time 85 -o /tmp/10855-desk.json -w '%{http_code}' "${HEADERS[@]}" -H 'Accept: application/json' "$BASE/api/factory/desk?exact_10855_readonly=$GITHUB_SHA" || true)"
+          echo "studio_factory_readonly_http=$CODE"
+          if [[ "$CODE" != 200 ]]; then
+            echo "::error::Service Access identity cannot inspect authenticated Factory. Do not infer browser-visible queue or bypass operator authentication."
+            exit 2
+          fi
+          node - <<'NODE'
+          const fs=require('fs');
+          const response=JSON.parse(fs.readFileSync('/tmp/10855-desk.json','utf8'));
+          const rows=Object.entries(response?.lanes || {}).flatMap(([lane,cards])=>
+            (Array.isArray(cards)?cards:[]).filter(card=>Number(card.output_id)===10855)
+            .map(card=>({lane,id:card.id,held:card.do_not_publish,review:card.review_status,status:card.output_status,publish:card.publish_status,ready:card.review_package_ready})));
+          console.log('factory_exact_10855_readonly='+JSON.stringify(rows));
+          if (rows.length!==1 || rows[0].lane!=='needs_eyes' || rows[0].id!=='recO494MDnQ1Tk51b'
+             || rows[0].held!==false || rows[0].review!=='Review Sent'
+             || rows[0].status!=='Ready for Review' || rows[0].publish!=='Not Ready')
+            throw Error('Exact output #10855 not present in live Needs Eyes response; do not claim it was fixed');
+          console.log('FACTORY_10855_SERVER_NEEDS_EYES=PASS');
+          NODE
