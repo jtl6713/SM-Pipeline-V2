@@ -361,6 +361,17 @@ export function selectProfileFairIdeaPhotoCandidates(records, {
   return selected;
 }
 
+/**
+ * Explore I1 intentionally generates editorial ideas without existing media.
+ * Mere matching/Ready is not authorization to start autonomous production.
+ * Operator-directed media searches can still run, but unattended handoff
+ * requires the candidate's independent Approved state.
+ */
+export function exploreIdeaNeedsApproval({ sourcingMode = "", candidateStatus = "" } = {}) {
+  return String(sourcingMode || "").trim().toLowerCase() === "explore"
+    && String(candidateStatus || "").trim().toLowerCase() !== "approved";
+}
+
 export const selectLegacyIdeaListenerCandidates = selectProfileFairIdeaPhotoCandidates;
 
 export function ideaPhotoWaitApplies(input = {}) {
