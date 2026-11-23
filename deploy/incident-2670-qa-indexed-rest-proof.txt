@@ -1,0 +1,1 @@
+Run one bounded production Supabase REST GET proof of merged #2814 and protected Studio Worker deployment #45107619588. Fetch three 100-row pages for the prior HTTP500/57014 QA failure census using the current indexed candidate flag. All request methods GET; no changes to held outputs, provider posts, worker flags, 1-producer cap, or optional outbox.

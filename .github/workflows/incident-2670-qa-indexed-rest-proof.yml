@@ -1,0 +1,68 @@
+name: Incident 2670 Indexed QA Failure REST Page Proof
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-qa-indexed-rest-proof.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-qa-indexed-rest-proof
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify deployed source and canonical project before REST
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          [[ "${SUPABASE_URL%/}" == "https://vkwvscgisqsbuwagdvtb.supabase.co" ]]
+          grep -F 'home_failure_candidate=eq.true' apps/studio-api/supabase-pipeline-reads.mjs >/dev/null
+          echo 'indexed_qa_rest_authority=PASS'
+      - name: Replay three formerly failing QA pages as nonpublishing GET
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          node --input-type=module - <<'JS' > /tmp/indexed-qa-select.txt
+          import { QA_CENSUS_OUTPUT_SELECT } from './apps/studio-api/supabase-pipeline-reads.mjs';
+          if (!QA_CENSUS_OUTPUT_SELECT || QA_CENSUS_OUTPUT_SELECT.length > 6000) {
+            throw new Error('invalid_indexed_qa_select');
+          }
+          process.stdout.write(QA_CENSUS_OUTPUT_SELECT);
+          JS
+          select=$(cat /tmp/indexed-qa-select.txt)
+          > /tmp/indexed-qa-ids.txt
+          for offset in 0 100 200; do
+            started=$(date +%s%3N)
+            code=$(curl -sS --max-time 16 -o /tmp/indexed-qa-page.json -w '%{http_code}' \
+              -G "${SUPABASE_URL%/}/rest/v1/platform_outputs" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              -H 'Accept: application/json' \
+              --data-urlencode 'test_run_id=is.null' \
+              --data-urlencode 'home_failure_candidate=eq.true' \
+              --data-urlencode "select=$select" \
+              --data-urlencode 'order=output_number.asc.nullslast,airtable_record_id.asc' \
+              --data-urlencode 'limit=100' \
+              --data-urlencode "offset=$offset" || true)
+            [[ "$code" == "200" ]] || { echo "indexed_qa_page_http_$offset=$code"; exit 1; }
+            elapsed=$(( $(date +%s%3N)-started ))
+            jq -e 'type=="array" and all(.[]; (.airtable_record_id|type)=="string")' /tmp/indexed-qa-page.json >/dev/null
+            count=$(jq 'length' /tmp/indexed-qa-page.json)
+            [[ "$count" == 100 ]] || [[ "$offset" == 200 && "$count" == 47 ]]
+            jq -r '.[].airtable_record_id' /tmp/indexed-qa-page.json >> /tmp/indexed-qa-ids.txt
+            echo "indexed_qa_rest_page_offset_$offset=count_$count elapsed_ms_$elapsed"
+            [[ "$elapsed" -lt 16000 ]] || exit 1
+          done
+          [[ $(wc -l </tmp/indexed-qa-ids.txt) == 247 ]]
+          [[ $(sort -u /tmp/indexed-qa-ids.txt | wc -l) == 247 ]]
+          rm -f /tmp/indexed-qa-page.json /tmp/indexed-qa-ids.txt /tmp/indexed-qa-select.txt
+          echo 'indexed_qa_rest_three_pages=PASS_247_DISTINCT_NO_WRITES'
