@@ -18,6 +18,7 @@ jobs:
       ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER: chicagoshining-studio-api
     steps:
+      - uses: actions/checkout@v6
       - name: Guard exact enabled runner and current Worker binding inventory
         id: guard
         shell: bash
