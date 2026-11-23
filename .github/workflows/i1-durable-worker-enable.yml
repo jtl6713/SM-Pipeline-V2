@@ -37,11 +37,30 @@ jobs:
           echo "i1_durable_runner_health=ENABLED_AND_VERIFIED"
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
           curl -fsS --max-time 20 "$API/settings" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-worker-before.json
-          jq -e '.success==true and ([.result.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS")] | length)==0' \
-            /tmp/i1-worker-before.json >/dev/null
+          if ! jq -e '.success==true and (.result.bindings|type)=="array"' /tmp/i1-worker-before.json >/dev/null; then
+            echo 'i1_worker_settings=UNVERIFIED'
+            exit 1
+          fi
+          # Print only binding metadata, never the binding value or API JSON.
+          binding_count=$(jq -r '[.result.bindings[] | select(.name=="STUDIO_I1_DURABLE_JOBS")] | length' /tmp/i1-worker-before.json)
+          if [[ "$binding_count" != 0 ]]; then
+            binding_type=$(jq -r '[.result.bindings[] | select(.name=="STUDIO_I1_DURABLE_JOBS") | .type] | unique | join(",")' /tmp/i1-worker-before.json)
+            case "$binding_type" in
+              secret_text|plain_text) ;;
+              *) binding_type=OTHER ;;
+            esac
+            echo "i1_worker_existing_binding_count=$binding_count"
+            echo "i1_worker_existing_binding_type=$binding_type"
+            echo 'i1_worker_binding_reconciliation=REQUIRED_NO_MUTATION'
+            exit 1
+          fi
+          echo 'i1_worker_binding_absent=VERIFIED'
           curl -fsS --max-time 20 "$API/deployments" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-deploy-before.json
-          jq -e '.success==true and (.result.deployments[0].versions | length)==1 and .result.deployments[0].versions[0].percentage==100' \
-            /tmp/i1-deploy-before.json >/dev/null
+          if ! jq -e '.success==true and (.result.deployments[0].versions | length)==1 and .result.deployments[0].versions[0].percentage==100' /tmp/i1-deploy-before.json >/dev/null; then
+            echo 'i1_worker_active_deployment=NOT_SINGLE_100_PERCENT'
+            exit 1
+          fi
+          echo 'i1_worker_active_deployment=SINGLE_100_PERCENT'
           echo "i1_worker_preflight=PASS"
 
       - name: Add one feature flag as a versioned Worker secret without replacing other bindings
