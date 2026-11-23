@@ -352,7 +352,12 @@ def worker_shared_workload_lease():
     denied, code = _verify_secret()
     if denied is not None:
         return denied, code
-    if request.content_length is None or request.content_length > 1024:
+    if request.content_length is not None and request.content_length > 1024:
+        return jsonify({"ok": False, "error": "invalid_lease_body_size"}), 413
+    # Cloudflare may use chunked HTTPS requests without Content-Length.
+    # The service secret is verified before reading a bounded JSON body.
+    raw_body = request.get_data(cache=True)
+    if not raw_body or len(raw_body) > 1024:
         return jsonify({"ok": False, "error": "invalid_lease_body_size"}), 413
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict) or set(payload) != {"action", "idea_id", "token"}:
