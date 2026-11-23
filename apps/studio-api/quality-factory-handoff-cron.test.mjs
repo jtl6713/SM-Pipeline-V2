@@ -51,7 +51,13 @@ test("cron reads only bounded canonical plans/outputs, records actionable signat
   assert.equal(receipt.schedule_actions,0);
   assert.equal(receipt.approval_actions,0);
   assert.deepEqual(logs,[receipt]);
-  assert.equal(JSON.stringify(receipt).includes("media.chicagoshining.com"),false);
+  // Output of the cron is a fixed key whitelist; neither URLs nor captions
+  // can be accidentally included by a future diagnostic extension.
+  assert.deepEqual(Object.keys(receipt).sort(),[
+    "approval_actions","checked_at","finding_count","publish_actions",
+    "repair_required","scanned","schedule_actions","signature","stages",
+    "status","verification_required",
+  ].sort());
 });
 
 test("incomplete Supabase reads fail closed instead of claiming zero incidents",async()=>{
