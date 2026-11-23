@@ -110,6 +110,9 @@ def _read_source_media(settings: dict, profile_id: str) -> list[dict]:
                 "location": location,
                 "key": topic_key(location),
                 "media_class": str(row.get("media_class") or ""),
+                # A3's recorded shot classification is an advisory visual
+                # signal only; a filename or location match is never proof.
+                "shot_type": str(meta.get("shot_type") or meta.get("Shot_Type") or "").strip(),
             })
     return verified
 
@@ -247,13 +250,34 @@ def _is_location_match(location: str, asset: dict) -> bool:
     return key == asset.get("key")
 
 
+def _asks_for_closeup(idea: dict) -> bool:
+    """Recognize explicit, generated creative direction, not generic details."""
+    text = " ".join(str(idea.get(key) or "") for key in (
+        "suggested_visuals", "required_assets", "candidate_title",
+    ))
+    return bool(re.search(
+        r"\b(?:close[\s-]?up|macro|extreme\s+detail|tight(?:ly)?\s+framed)\b",
+        text, flags=re.I,
+    ))
+
+
+def _classified_closeup(asset: dict) -> bool:
+    return str(asset.get("shot_type") or "").strip().lower() in ("close-up", "close up", "detail")
+
+
 def idea_sourcing_fields(idea: dict, context: dict) -> dict:
     mode = sourcing_mode(context.get("mode"))
     location = str(idea.get("primary_location") or idea.get("neighborhood_or_area") or "").strip()
-    possible = [
-        asset["id"] for asset in context.get("assets", [])
+    matched = [
+        asset for asset in context.get("assets", [])
         if _is_location_match(location, asset)
-    ][:8]
+    ]
+    # #2876: only reorder EXISTING eligible same-profile candidates when the
+    # idea explicitly requests a macro/close-up. Nothing here verifies,
+    # approves, creates, attaches, or substitutes an asset for publishing.
+    if _asks_for_closeup(idea):
+        matched.sort(key=lambda asset: 0 if _classified_closeup(asset) else 1)
+    possible = [asset["id"] for asset in matched[:8]]
     # These are suggestions only, never verified selections. The existing
     # explicit media attachment + ownership + rights gates remain decisive.
     readiness = (

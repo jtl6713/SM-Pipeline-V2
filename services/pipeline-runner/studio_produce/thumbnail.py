@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, CONTENT_PROFILES_TABLE
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from integrations.google_drive import GoogleDriveClient
 from integrations.r2_upload import R2UploadClient
@@ -14,7 +14,7 @@ from p2.constants import THUMBNAIL_DRIVE_FOLDER_ID
 from p2.thumbnail_client import generate_thumbnail_png
 from render.fields import field_str
 from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
-from studio_produce.creative_guidance import load_profile_creative_guidance
+from studio_produce.creative_guidance import load_profile_creative_guidance, profile_id_from_records
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -97,9 +97,20 @@ def _generate_cover_bytes(
     *,
     aspect_ratio: str,
 ) -> tuple[bytes, str]:
+    # A linked Content Profile is the only reliable city authority. Content
+    # Items need not contain a denormalized Market_Name. On a read failure,
+    # fall back to neutral Shining branding, never invent a city.
+    profile = None
+    profile_id = profile_id_from_records(parent, request)
+    if profile_id:
+        try:
+            profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+        except Exception as error:
+            logger.warning("close-up cover profile read unavailable: %s", type(error).__name__)
     prompt = build_finished_thumbnail_prompt(
         request, parent, aspect_ratio=aspect_ratio,
         creative_guidance=load_profile_creative_guidance(client, request, parent),
+        profile=profile,
     )
     raw = generate_thumbnail_png(prompt, aspect_ratio=aspect_ratio)
     png = apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")

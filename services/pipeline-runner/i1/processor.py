@@ -20,6 +20,7 @@ from idea.constants import DEFAULT_CONTENT_PROFILE_ID
 from idea.mapping import parse_int
 from idea.prompt import build_i1_prompt
 from studio_produce.creative_guidance import load_profile_creative_guidance, creative_prompt_suffix
+from studio_produce.closeup_direction import idea_closeup_guidance
 from render.fields import field, field_str
 
 
@@ -207,6 +208,9 @@ def process_request(
         getattr(client, "_settings", {}), preview["profile_record_id"], selected_sourcing,
     ) if not dry_run else {"mode": selected_sourcing, "available": False, "assets": [], "overused": []}
     prompt += sourcing_prompt(sourcing_context)
+    prompt += idea_closeup_guidance(
+        market=field_str(profile, "Market_Name"), candidates=pool_size,
+    )
     # Apply owner/global and this profile's every-generation guidance to all
     # I1 paths, including durable retries. The reader uses Supabase settings
     # whenever Studio's Supabase authority is enabled; it never changes output.
