@@ -1,4 +1,4 @@
-name: Issue 2876 Extreme Close-Up Creative CI
+name: Issue 2876 New AI Focal Detail CI
 
 on:
   pull_request:
@@ -30,10 +30,10 @@ jobs:
           python-version: '3.11'
       - name: Install runner test dependencies
         run: python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
-      - name: Verify close-up direction and adjacent creative prompt contracts
+      - name: Verify new-image-only focal guidance and no legacy media re-ranking
         env:
           PYTHONPATH: services/pipeline-runner
-          STUDIO_EXTREME_CLOSEUP_SHARE: '0.5'
+          STUDIO_NEW_AI_FOCAL_DETAIL_SHARE: '0.3333333333333333'
         run: |
           python -m pytest -q \
             services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
