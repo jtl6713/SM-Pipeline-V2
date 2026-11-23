@@ -250,3 +250,27 @@ test("already scheduled, approved or published outputs are not rewound into Fact
   assert.equal(result.findings.length,0);
   assert.equal(result.publishing_authorized,false);
 });
+
+test("a promoted parent with verified active producer is IN_PROGRESS, not failed media",()=>{
+  const p=request();p.request_status="Promoted";p.production_job.step="rendering";
+  const all=source();all[3].final_file_url=null;
+  const result=assessProductionFactoryHandoff({request:p,outputs:all});
+  assert.equal(result.status,"in_progress");
+  assert.equal(result.stage,"produce");
+  assert.equal(result.findings.length,0);
+  all[3].render_status="Failed";
+  const broken=assessProductionFactoryHandoff({request:p,outputs:all});
+  assert.equal(broken.status,"repair_required");
+  assert.equal(broken.findings[0].reason,"generation_or_render_failed");
+});
+
+test("TikTok multi-photo is not forced to invent IG/FB carousel_slides",()=>{
+  const all=source();const gallery=slides();
+  gallery["10857"]=[];
+  const result=assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:gallery,factoryCards:cards(all)});
+  assert.equal(result.status,"verification_required",
+    "typed TikTok media requires separate exact source preflight");
+  assert.ok(!result.findings.some(x=>x.output_id===10857
+    && x.reason==="canonical_gallery_missing_or_unready"));
+});
