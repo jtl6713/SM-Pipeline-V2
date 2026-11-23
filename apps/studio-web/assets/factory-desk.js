@@ -1550,12 +1550,45 @@
     }).join("")}</div>` : "";
     const retryNotice = state.retryBatchNotice?.job_id === latest?.job_id ? state.retryBatchNotice : null;
     const failedItems = items.filter(item => item.status === "failed" || item.error && !["approved", "already_satisfied"].includes(item.status));
+    // R2 batch failure receipts are immutable history. They can predate a
+    // later, independently audited production hold release. Always show the
+    // original error, but offer safe exact-record navigation rather than
+    // implying the old error is a CURRENT publishing hold.
+    const failedTarget = item => {
+      const id = String(item?.id || "");
+      if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
+      const inEyes = (state.desk?.lanes?.needs_eyes || []).find(card =>
+        card?.kind === "output" && String(card.id) === id);
+      const active = (state.desk?.lanes?.auto_high || []).concat(state.desk?.lanes?.manual || [])
+        .find(card => card?.kind === "output" && String(card.id) === id);
+      const card = inEyes || active || null;
+      const currentHoldReleased = card?.do_not_publish === false
+        && String(card.output_status || "") === "Ready for Review"
+        && ["", "Review Sent"].includes(String(card.review_status || ""))
+        && String(card.publish_status || "") === "Not Ready"
+        && !card.published_at && !card.platform_post_url
+        && !card.scheduled_post_date && !card.studio_scheduled_at;
+      return { id, inEyes: Boolean(inEyes), currentHoldReleased, card };
+    };
+    const failedBatchHint = item => {
+      if (item?.status !== "failed"
+        || !/publishing hold is active/i.test(String(item?.error || ""))) return "";
+      const target = failedTarget(item);
+      const stateLine = target?.currentHoldReleased
+        ? "Current Factory record: publishing hold released; original batch result remains Failed."
+        : "This is the historical attempt result, not proof that a publishing hold remains active.";
+      const action = target
+        ? `<button type="button" class="secondary-button" data-factory-failed-open="${esc(target.id)}">${target.inEyes ? "Find in Needs Eyes" : "Open output in Pipeline"}</button>`
+        : "";
+      return `<small class="factory-batch-historical-status">${esc(stateLine)} Review the current media and permissions before requesting a new approval. ${action}</small>`;
+    };
     details.innerHTML = latest ? `${retryNotice ? '<p class="factory-batch-retry-result" role="status">' + esc(retryNotice.message) + '</p>' : ""}
       ${failedItems.length ? '<section class="factory-batch-failed-details"><strong>Failed outputs (' + failedItems.length + ')</strong><ul>' +
         failedItems.map(item => '<li><strong>' + esc(item.title || "Output " + item.output_id) + '</strong> · ' +
           esc(factoryProfileLabel(item.profile_id)) + ' · Output ' + esc(item.output_id || item.id) +
           '<p>' + esc(item.error || "No error details were returned.") + '</p>' +
           (item.previous_failure_error ? '<small>Previous failure: ' + esc(item.previous_failure_error) + '</small>' : '') +
+           failedBatchHint(item) +
           '</li>').join('') + '</ul><p>Retry only after checking the failure. A retry is not proof of success.</p></section>' : ""}
       <div class="factory-batch-inspect-heading">
         <strong>${esc(latest.group ? "Global approval · per-profile progress" : factoryProfileLabel(latest.profile_id))}</strong>
@@ -1569,6 +1602,36 @@
       <details class="factory-batch-technical"><summary>Technical reference</summary>
       <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
       data-factory-copy-batch="${esc(latest.job_id)}">Copy batch ID</button></details>` : "";
+    details.querySelectorAll("[data-factory-failed-open]").forEach(button => {
+      button.addEventListener("click", async () => {
+        const id = String(button.getAttribute("data-factory-failed-open") || "");
+        // Identity comes from the already authenticated Activity response.
+        // No POST, retry, approval or schedule is issued by this control.
+        const item = items.find(row => row?.status === "failed"
+          && String(row?.id) === id
+          && /publishing hold is active/i.test(String(row?.error || "")));
+        if (!item || !/^rec[A-Za-z0-9]{14}$/.test(id)) return;
+        const target = failedTarget(item);
+        button.disabled = true;
+        try {
+          if (target?.inEyes) {
+            const search = $("factoryNeedsEyesSearch");
+            if (search) {
+              search.value = String(item.output_id || id);
+              search.dispatchEvent(new Event("input", { bubbles: true }));
+              $("factoryBandBodyNeedsEyes")?.scrollIntoView?.({ behavior:"smooth", block:"start" });
+              setStatus("Showing the current Factory review entry for output #" +
+                String(item.output_id || id) + ". The previous batch failure remains in history.");
+              return;
+            }
+          }
+          await openStudioTarget({
+            kind: "output", id, profile_id: String(item.profile_id || ""),
+            output_id: item.output_id, title: item.title,
+          });
+        } finally { button.disabled = false; }
+      });
+    });
     details.querySelector("[data-factory-copy-batch]")?.addEventListener("click", () => {
       const value = String(latest?.job_id || "");
       if (value) navigator.clipboard?.writeText(value).catch(() => {});
