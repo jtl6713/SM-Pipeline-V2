@@ -8,7 +8,7 @@ $key=Setting 'SUPABASE_SERVICE_ROLE_KEY';$hdr=@{apikey=$key;Authorization=('Bear
 $rh=@{'X-Pipeline-Secret'=(Setting 'PIPELINE_RUNNER_SHARED_SECRET')}
 function Rows($q){return @(Invoke-RestMethod -Uri ($sb+'/rest/v1/'+$q) -Headers $hdr -TimeoutSec 25)}
 function Held($o){if($o.do_not_publish -ne $true -or $o.auto_publish_enabled -ne $false -or $o.publish_status -ne 'Not Ready' -or $o.scheduled_post_date -or $o.published_at -or $o.platform_post_url -or $o.review_status -eq 'Approved'){throw ('hold_changed_'+$o.output_number)}}
-$n=__REEL__
+$n='__REEL__'
 $rid=if($n -eq 11153){'rec94S2G7FU5HdExh'}else{'recpWHfw74GxcybAA'}
 $old=if($n -eq 11153){'job-20261122225847-a3db3877'}else{'job-20261122230140-adb85211'}
 $vo='https://drive.google.com/uc?id=1g4BgbdA_PFbQbiVqREgTOpJxnRRhc-p7&export=download'
