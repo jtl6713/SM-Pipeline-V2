@@ -238,3 +238,15 @@ test("Quality Agent scan never invents gallery validation or authorizes approval
   assert.equal(report.reports[0].publishing_authorized,false);
   assert.ok(report.note.includes("not treated as clear"));
 });
+
+test("already scheduled, approved or published outputs are not rewound into Factory",()=>{
+  const all=source().map(x=>({...x,output_status:"Approved for Publishing",
+    review_status:"Approved",publish_status:"Scheduled"}));
+  const result=assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:slides(),factoryCards:[]});
+  assert.equal(result.status,"past_factory_review");
+  assert.equal(result.stage,"complete");
+  assert.equal(result.terminal,"no_quality_reapproval_needed");
+  assert.equal(result.findings.length,0);
+  assert.equal(result.publishing_authorized,false);
+});
