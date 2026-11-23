@@ -89,7 +89,11 @@ jobs:
                 {scope,max_jobs,active_jobs,queued_jobs,paused_jobs,
                  database_circuit_open,max_db_reads,max_db_writes,
                  review_enabled,review_started,review_last_result,
+                 review_auto_flag,review_exact_flag,
                  gallery_enabled,gallery_started,gallery_blocked,
+                 gallery_auto_flag,gallery_execute_flag,
+                 gallery_claim_flag,gallery_launch_flag,
+                 gallery_credentials_configured,global_coordinator_enabled_on_runner,
                  optional_outbox_enabled}
               ' >/tmp/audit-safe.json
               echo 'incident2670_readonly_governor_consumer_audit=PASS'
@@ -99,7 +103,7 @@ jobs:
             if [[ "$state" == failed ]]; then
               # Only our static phase names are safe to report from remote logs.
               phase=$(jq -r '.job.log // ""' /tmp/status.json |
-                grep -oE 'incident2670_failure_phase=(read_env|governor_get|review_get|gallery_get|readback_validation|outbox_validation|summary_serialization)' |
+                grep -oE 'incident2670_failure_phase=(read_env|governor_get|review_get|gallery_get|readback_validation|outbox_validation|consumer_feature_preflight|summary_serialization)' |
                 tail -1 || true)
               echo "incident2670_ops_readonly_probe=FAILED_NO_MUTATION"
               echo "incident2670_readonly_failure_phase=${phase:-unclassified}"
