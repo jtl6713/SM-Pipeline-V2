@@ -127,7 +127,10 @@ test("#10855 unheld returned-to-review carousel stays visible even with historic
 });
 
 test("Factory keeps real in-flight claim fences while showing reopened rows", () => {
-  assert.match(js, /function factoryActiveSubmissionIds\(\)/);
-  assert.match(js, /factoryActiveSubmissionIds\(\)\.has\(String\(card\?\.id \|\| ""\)\)/);
+  assert.match(js, /function factoryActiveSubmissionIds\(\{ ignoreClickIntent = false \} = \{\}\)/);
+  assert.match(js, /if \(!ignoreClickIntent\) add\(state\.submissionIntentIds\)/);
+  assert.match(js, /add\(state\.submittingOutputIds\)/);
+  assert.match(js, /add\(pendingFactoryApproval\(\)\?\.ids\)/);
+  assert.match(js, /factoryActiveSubmissionIds\(\{ ignoreClickIntent \}\)\.has\(String\(card\?\.id \|\| ""\)\)/);
   assert.match(js, /visibleNeedsEyes\.sort\(\(a, b\) => Number\(factoryUnheldReviewCandidate\(b\)\)/);
 });

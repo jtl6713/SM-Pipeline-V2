@@ -46,7 +46,7 @@ test("wrong or unavailable canonical status cannot inflate R2 progress", () => {
   assert.equal(project({...basic,progress_verification:{status:"verified",approved_item_ids:["different"]}}).approved_count, 0);
 });
 test("visible active batch count does not use stale state.batch.totals.batches", () => {
-  assert.match(source, /if \(count\) count\.textContent = String\(state\.completedOpen/);
+  assert.match(source, /if \(count\) count\.textContent = activityUnknown \? "—" : String\(state\.completedOpen/);
   assert.doesNotMatch(source, /if \(count\) count\.textContent = String\(state\.batch\?\.totals\?\.batches/);
 });
 
@@ -131,7 +131,7 @@ test("production Factory rendering and refresh are actually wired to exact-first
   assert.match(source, /const preferExact = factoryBatchPreferExactProgress\(fastGroups\.length,/);
   assert.match(source, /const fetched = await factoryBatchPollWithFallback\(/);
   assert.match(source, /request_id: row\.request_id, fresh: String\(now\)/);
-  assert.match(source, /value\.batches\[0\]\?\.request_id !== row\.request_id/);
+  assert.match(source, /verifiedRow\?\.request_id !== row\.request_id/);
 });
 
 test("ordinary active and completed snapshots do not require a Factory profile filter", () => {

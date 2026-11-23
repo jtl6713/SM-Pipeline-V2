@@ -60,6 +60,11 @@
     retryBatchNotice: null,
     lastBatchSuccessMs: 0,
     batchActivityError: "",
+    batchActivityPartialError: "",
+    batchRefreshRequested: false,
+    submissionPreview: null,
+    batchDiscoveryLoading: false,
+    batchDiscoveryStartedMs: Date.now(),
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -83,11 +88,15 @@
   }
   function rememberFactoryGroupRequest(batch) {
     const request_id = String(batch?.request_id || "");
-    if (!batch?.group || !/^[A-Za-z0-9_-]{12,128}$/.test(request_id)) return;
-    const profiles = [...new Set((batch.profile_ids || (batch.items || []).map(item => item.profile_id))
+    if (!batch?.job_id || !/^[A-Za-z0-9_-]{12,128}$/.test(request_id)) return;
+    const group = batch.group === true;
+    const profiles = [...new Set((batch.profile_ids ||
+      (group ? (batch.items || []).map(item => item.profile_id) : [batch.profile_id]))
       .map(String).filter(id => /^rec[A-Za-z0-9]+$/.test(id)))];
+    if (!profiles.length) return;
     const previous = recentFactoryGroupRequests();
-    const rows = [{ request_id, profiles, saved_ms: Date.now() },
+    const rows = [{ request_id, group, profile_id: group ? null : batch.profile_id,
+      profiles, saved_ms: Date.now() },
       ...previous.filter(row => row.request_id !== request_id)].slice(0, 24);
     try { localStorage.setItem(FACTORY_RECENT_GROUPS_KEY, JSON.stringify(rows)); } catch {}
   }
@@ -213,14 +222,14 @@
   // Only truly unresolved submissions block a new human approval. A terminal
   // historical Activity receipt is not proof that a freshly returned RFR output
   // still has a live approval in flight (#10855 / #2371).
-  function factoryActiveSubmissionIds() {
+  function factoryActiveSubmissionIds({ ignoreClickIntent = false } = {}) {
     const ids = new Set();
     const add = values => {
       for (const id of values || []) {
         if (/^rec[A-Za-z0-9]+$/.test(String(id))) ids.add(String(id));
       }
     };
-    add(state.submissionIntentIds);
+    if (!ignoreClickIntent) add(state.submissionIntentIds);
     add(state.submittingOutputIds);
     add(pendingFactoryApproval()?.ids);
     for (const { saved } of factoryRecoveryEntries()) add(saved?.ids);
@@ -630,10 +639,10 @@
     }
   }
 
-  function canReviewActions(card, { pile = false, candidate = false } = {}) {
+  function canReviewActions(card, { pile = false, candidate = false, ignoreClickIntent = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id)) return false;
     if (typeof factoryActiveSubmissionIds === "function"
-        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
+        && factoryActiveSubmissionIds({ ignoreClickIntent }).has(String(card?.id || ""))) return false;
     // A 48-hour local acceptance hint is not a saved approval. If the server
     // still reports Ready for Review, allow a fresh explicit operator action;
     // the canonical per-output lease prevents duplicate committed approvals.
@@ -1019,9 +1028,9 @@
     return { ...card, profile_id: profileId };
   }
 
-  function canSelectBatchOutput(card) {
+  function canSelectBatchOutput(card, { ignoreClickIntent = false } = {}) {
     if (typeof factoryActiveSubmissionIds === "function"
-        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
+        && factoryActiveSubmissionIds({ ignoreClickIntent }).has(String(card?.id || ""))) return false;
     if (recentFactoryAccepted()[String(card?.id || "")] &&
         String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
@@ -1111,7 +1120,12 @@
         if (!(includeOtherProfiles || factoryMatchesProfile(card)) || card?.kind !== "output") return false;
         if (submitted.has(String(card.id || ""))
             && !(includeClickIntent && state.submissionIntentIds.has(card.id))) return false;
-        return canReviewActions(card) && canSelectBatchOutput(card);
+        // The click hides rows immediately, but the same transient fence must
+        // not invalidate the exact selection being submitted after policy read.
+        // Ignore ONLY this tab's own click-intent marker. Pending persisted
+        // requests, other claims, holds and backend eligibility remain blocked.
+        return canReviewActions(card, { ignoreClickIntent: includeClickIntent }) &&
+          canSelectBatchOutput(card, { ignoreClickIntent: includeClickIntent });
       })
       .map(withResolvedFactoryProfile);
   }
@@ -1219,9 +1233,9 @@
     }
     const ageSeconds = Math.floor((Date.now() - state.lastBatchSuccessMs) / 1000);
     const ageLabel = ageSeconds < 5 ? "just now" : ageSeconds + "s ago";
-    if (state.batchActivityError || ageSeconds > 15) {
+    if (state.batchActivityError || state.batchActivityPartialError || ageSeconds > 15) {
       updated.textContent = "Status delayed · last updated " + ageLabel +
-        (state.batchActivityError ? " · retrying" : "");
+        (state.batchActivityError ? " · retrying" : state.batchActivityPartialError ? " · partial update" : "");
     } else {
       updated.textContent = "Updated " + ageLabel + " · auto-refreshing";
     }
@@ -1263,7 +1277,11 @@
   }
 
   function factoryLiveItemHtml(item, compact = false, now = Date.now()) {
-    const phase = factoryLivePhaseLabel(item, now);
+    const phase = item?.local_preview
+      ? (item.phase === "checking_acceptance" ? "Checking server acceptance" : "Submitting")
+      : factoryLivePhaseLabel(item, now);
+    if (item?.local_preview) return '<span class="factory-live-phase">' + esc(phase) +
+      '</span><small class="factory-live-meta">Selected · not yet confirmed by server</small>';
     const running = item?.status === "processing";
     const nextRetry = Number(item?.next_attempt_ms || 0);
     const last = item?.last_progress_at || null;
@@ -1375,7 +1393,7 @@
   // committed those approvals. Accumulate identity-unique original groups.
   function factoryBatchMergeAcceptedActivity(previous, accepted) {
     const envelope = factoryBatchActivityEnvelope(accepted);
-    if (!accepted?.group || !Array.isArray(envelope?.batches)) return envelope;
+    if (!accepted?.job_id || !Array.isArray(envelope?.batches)) return envelope;
     const prior = previous?.filter_profile_id === envelope.filter_profile_id
       ? (previous.batches || []) : [];
     const rows = [accepted, ...prior.filter(row =>
@@ -1388,11 +1406,97 @@
   function factoryBatchMergeDiscoveredActivity(previous, fetched) {
     if (!Array.isArray(fetched?.batches) || fetched?.view !== "active" ||
         previous?.filter_profile_id !== fetched.filter_profile_id) return fetched;
-    const known = new Set(fetched.batches.map(row => String(row.request_id || row.job_id || "")));
+    const prior = new Map((previous.batches || []).map(row =>
+      [String(row.request_id || row.job_id || ""), row]));
+    // An expensive historical discovery may be older than the exact receipt.
+    // It discovers other requests; it never overrides the last exact snapshot
+    // of a known request, including a legitimate retry that resets progress.
+    const rows = fetched.batches.map(row =>
+      prior.get(String(row.request_id || row.job_id || "")) || row);
+    const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
-      row?.group && row?.request_id && factoryBatchActiveRow(row) &&
+      row?.request_id && (row.group || row.profile_id) && factoryBatchActiveRow(row) &&
       !known.has(String(row.request_id)));
-    return factoryBatchRecountActive(fetched, [...fetched.batches, ...pending]);
+    return factoryBatchRecountActive(fetched, [...rows, ...pending]);
+  }
+
+
+  // A click is not a server receipt. Show what was selected immediately, then
+  // replace it only after authoritative POST/GET acknowledgement of the items.
+  function factorySubmissionPreview(cards) {
+    const items = cards.map(card => ({
+      id: String(card.id), output_id: card.output_id || null,
+      profile_id: String(card.profile_id || ""), platform: card.platform || null,
+      format: card.studio_output_type || null, title: card.title || null,
+      status: "pending", phase: "submitting", local_preview: true,
+    }));
+    const byProfile = new Map();
+    for (const item of items) {
+      const existing = byProfile.get(item.profile_id) || [];
+      existing.push(item);
+      byProfile.set(item.profile_id, existing);
+    }
+    const children = [...byProfile].map(([profile_id, rows]) => ({
+      profile_id, status: "submitting", total: rows.length,
+      done_count: 0, approved_count: 0, failed_count: 0, pending_count: rows.length,
+    }));
+    return {
+      preview_only: true, group: true, job_id: "client_" + newFactoryRequestId(),
+      request_id: null, status: "submitting", total: items.length,
+      done_count: 0, approved_count: 0, failed_count: 0, pending_count: items.length,
+      profile_ids: [...byProfile.keys()], items, children,
+    };
+  }
+
+  function factoryShowSubmissionPreview(cards) {
+    if (!cards.length) return;
+    state.submissionPreview = factorySubmissionPreview(cards);
+    state.completedOpen = false;
+    state.activeApprovalsCollapsed = false;
+    state.inspectedBatchKey = state.submissionPreview.job_id;
+    state.batchDetailsOpen = true;
+    renderFactoryBatchActivity(state.batch);
+  }
+
+  function factoryDismissSubmissionPreview() {
+    if (!state.submissionPreview) return;
+    state.submissionPreview = null;
+    renderFactoryBatchActivity(state.batch);
+  }
+
+  // A multi-group selection can contain both accepted and not-yet-accepted
+  // outputs. Remove only authoritative matches to avoid duplicate progress.
+  function factoryReconcileSubmissionPreview(serverRows) {
+    const preview = state.submissionPreview;
+    if (!preview) return null;
+    const confirmed = new Set(serverRows.flatMap(row =>
+      Array.isArray(row.items) && !row.preview_only ? row.items.map(item => item.id) : []));
+    if (!confirmed.size) return preview;
+    const remaining = preview.items.filter(item => !confirmed.has(item.id));
+    if (remaining.length === preview.items.length) return preview;
+    if (!remaining.length) {
+      state.submissionPreview = null;
+      return null;
+    }
+    const children = preview.children.map(child => {
+      const count = remaining.filter(item => item.profile_id === child.profile_id).length;
+      return { ...child, total: count, pending_count: count };
+    }).filter(child => child.total > 0);
+    state.submissionPreview = {
+      ...preview, items: remaining, children, total: remaining.length,
+      pending_count: remaining.length, profile_ids: children.map(child => child.profile_id),
+    };
+    return state.submissionPreview;
+  }
+
+  function factoryMarkSubmissionUnconfirmed() {
+    if (!state.submissionPreview) return;
+    const preview = state.submissionPreview;
+    state.submissionPreview = {
+      ...preview, status: "awaiting_acceptance",
+      items: preview.items.map(item => ({ ...item, phase: "checking_acceptance" })),
+    };
+    renderFactoryBatchActivity(state.batch);
   }
 
   function renderFactoryBatchActivity(batch) {
@@ -1418,8 +1522,11 @@
     // Activity is split into active and completed snapshots. Always render the
     // selected snapshot: using 'batch.batches' here silently replaced completed
     // history with the (often empty) active list.
-    const batches = (Array.isArray(viewed?.batches) ? viewed.batches :
-      (viewed?.job_id ? [viewed] : [])).map(factoryBatchDisplayRow);
+    const serverRows = Array.isArray(viewed?.batches) ? viewed.batches :
+      (viewed?.job_id ? [viewed] : []);
+    const preview = !state.completedOpen ? factoryReconcileSubmissionPreview(serverRows) : null;
+    const batches = [...serverRows, ...(preview ? [preview] : [])].map(factoryBatchDisplayRow);
+    const activityUnknown = !viewed && !preview && !state.completedOpen;
     // The old metric read state.batch.totals.batches even when an active row
     // was on screen; always derive every number from the SAME visible snapshot.
     const totals = {
@@ -1430,7 +1537,7 @@
       pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
-    if (count) count.textContent = String(state.completedOpen
+    if (count) count.textContent = activityUnknown ? "—" : String(state.completedOpen
       ? ((state.batch?.batches || []).filter(row => ["queued","running","enqueuing"].includes(row.status) ||
           Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length)
       : totals.active);
@@ -1456,9 +1563,13 @@
     const ledgerLag = batches.reduce((sum, row) => sum + Number(row.progress_lag || 0), 0);
     const verificationUnavailable = batches.some(row => row.group &&
       row.progress_verification?.status === "unavailable");
-    summary.textContent = `${totals.active} active · ${totals.approved} approved · ${totals.pending} pending · ${totals.failed} failed`
-      + (ledgerLag ? ` · ${ledgerLag} verified approval(s) syncing to Activity` : "")
-      + (verificationUnavailable ? " · Supabase verification unavailable; ledger-only view" : "");
+    summary.textContent = activityUnknown
+      ? (state.batchActivityError ? "Approval activity unavailable · retrying automatically"
+        : "Loading latest approval activity…")
+      : `${totals.active} active · ${totals.approved} approved · ${totals.pending} pending · ${totals.failed} failed`
+        + (preview ? " · " + preview.total + " selected output(s) awaiting server acceptance" : "")
+        + (ledgerLag ? ` · ${ledgerLag} verified approval(s) syncing to Activity` : "")
+        + (verificationUnavailable ? " · Supabase verification unavailable; ledger-only view" : "");
     // Aggregate the selected batch snapshot, not the profile's output queue.
     // Failed/skipped outputs count as processed, never as successfully approved.
     const aggregateTotal = batches.reduce((sum, row) => sum + Math.max(0, Number(row.total) || 0), 0);
@@ -1475,9 +1586,10 @@
       overall.className = "factory-batch-overall-progress";
       summary.insertAdjacentElement("afterend", overall);
     }
-    overall.hidden = !batches.length || (!state.completedOpen &&
-      !Number(totals.active) && !Number(totals.pending));
-    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : "Overall active approval progress"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
+    // A terminal 100% receipt is still useful until the next completed-history
+    // reconciliation. Do not hide the bar at the exact moment the last item finishes.
+    overall.hidden = !batches.length;
+    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : totals.active ? "Overall active approval progress" : "Latest completed submission"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
       <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
       <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>
       ${factoryLiveSummaryHtml(batches.flatMap(row => row.items || []))}`;
@@ -1499,8 +1611,10 @@
         const label = row.group ? `Global approval · ${groupLabel}`
           : item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
         const active = ["running", "queued", "enqueuing"].includes(row.status);
-        const stateLabel = row.progress_lag ? "Syncing approvals" :
-          active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
+        const stateLabel = row.preview_only
+          ? (row.status === "awaiting_acceptance" ? "Checking acceptance" : "Submitting")
+          : row.progress_lag ? "Syncing approvals" :
+            active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
         const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
         const percent = row.total ? Math.round(100 * completed / row.total) : 0;
         const picked = state.batchDetailsOpen && latest?.job_id === row.job_id;
@@ -1972,6 +2086,8 @@
     const byId = new Map(refreshed.map(row => [row.request_id, row]));
     const prior = previous?.batches || [];
     const known = new Set(prior.map(row => row.request_id));
+    // Original-request GETs are authoritative even when processed counts go
+    // backwards during a verified failed-only retry. Never suppress that reset.
     const batches = [...prior.map(row => byId.get(row.request_id) || row),
       ...refreshed.filter(row => !known.has(row.request_id))];
     // Show the exact verified terminal completion once before the next
@@ -1998,7 +2114,8 @@
   }
 
   function factoryBatchPreferExactProgress(groupCount, lastFullFetchMs, now, force) {
-    return groupCount > 0 && (force || !lastFullFetchMs || now - lastFullFetchMs < 18000);
+    // Known original requests take priority over expensive historical scans.
+    return groupCount > 0;
   }
 
   // Slow global R2 history discovery must never suppress already-known exact
@@ -2013,8 +2130,60 @@
     }
   }
 
+  // The first exact status read is independent of an already-running slow
+  // global history scan. A 12-second R2 discovery must not delay the first
+  // server-confirmed progress after Submit. GET-only; no approval mutation.
+  async function refreshFactoryAcceptedReceipt(accepted) {
+    if (!accepted?.job_id || !accepted?.request_id) return null;
+    const profileAtStart = factoryProfileId();
+    const params = new URLSearchParams({
+      request_id: String(accepted.request_id), fresh: String(Date.now()),
+    });
+    if (accepted.group === true) params.set("scope", "all");
+    else if (/^rec[A-Za-z0-9]+$/.test(String(accepted.profile_id || ""))) {
+      params.set("content_profile_id", accepted.profile_id);
+    } else return null;
+    try {
+      const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, {
+        cache: "no-store", timeoutMs: 12000,
+      });
+      const row = accepted.group
+        ? (value?.ok === true && value.batches?.length === 1 ? value.batches[0] : null)
+        : value;
+      if (row?.job_id !== accepted.job_id || row?.request_id !== accepted.request_id ||
+          (!accepted.group && row?.profile_id !== accepted.profile_id)) {
+        throw new Error("Original Factory receipt is not yet available");
+      }
+      if (factoryProfileId() !== profileAtStart) return null;
+      // The first-receipt GET can complete after a newer ordinary exact GET.
+      // It is for initial acceptance only (never retry); don't repaint 0%
+      // over an already verified later result from the same request.
+      const existing = (state.batch?.batches || []).find(item =>
+        item?.request_id === accepted.request_id);
+      const done = item => Number(item?.done_count ??
+        (Number(item?.total || 0) - Number(item?.pending_count || 0)));
+      if (existing && done(existing) > done(row)) return state.batch;
+      const progress = factoryBatchMergeExactActivity(state.batch, [row]);
+      state.lastBatchSuccessMs = Date.now();
+      state.lastBatchFetchMs = Date.now();
+      state.batchActivityError = "";
+      state.batchActivityPartialError = "";
+      renderFactoryBatchActivity(progress);
+      document.dispatchEvent(new CustomEvent("factory:batch-status", {detail: progress}));
+      return progress;
+    } catch (error) {
+      // Continue ordinary polling. This does not mean the submission failed.
+      state.batchActivityPartialError = "First exact receipt delayed; auto-refreshing";
+      updateFactoryBatchFreshness();
+      return null;
+    }
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
-    if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
+    if (state.batchActivityLoading) {
+      if (force) state.batchRefreshRequested = true;
+      return state.batch;
+    }
     const now = Date.now();
     const hasPendingWork = Number(state.batch?.totals?.pending || 0) > 0 ||
       (state.batch?.batches || []).some(row => Number(row.pending_count || 0) > 0 ||
@@ -2033,14 +2202,15 @@
       // No POST, approval, scheduling, publishing, or claim mutation occurs.
       const filterId = factoryProfileId() || null;
       const knownGroups = state.batch?.filter_profile_id === filterId
-        ? (state.batch?.batches || []).filter(row => row.group && row.request_id &&
-            factoryBatchActiveRow(row)) : [];
+        ? (state.batch?.batches || []).filter(row => row.request_id &&
+            (row.group || row.profile_id) && factoryBatchActiveRow(row)) : [];
       const knownIds = new Set(knownGroups.map(row => row.request_id));
       // After reload there may be no state.batch yet. An accepted group is
       // recoverable from the same original R2 request without re-submitting.
       const remembered = recentFactoryGroupRequests().filter(row =>
         (!filterId || row.profiles.includes(filterId)) && !knownIds.has(row.request_id))
-        .map(row => ({ group: true, request_id: row.request_id }));
+        .map(row => ({ group: row.group !== false, request_id: row.request_id,
+          profile_id: row.profile_id || row.profiles[0] || null }));
       const window = factoryBatchPollWindow([...knownGroups, ...remembered],
         state.batchPollCursor || 0, 4);
       const fastGroups = window.groups;
@@ -2051,19 +2221,45 @@
       const preferExact = factoryBatchPreferExactProgress(fastGroups.length,
         state.lastBatchFullFetchMs, now, force);
       const readExact = async () => {
-        const updates = await Promise.all(fastGroups.map(async row => {
+        const outcomes = await Promise.allSettled(fastGroups.map(async row => {
           const exactParams = new URLSearchParams({
-            scope: "all", request_id: row.request_id, fresh: String(now),
+            request_id: row.request_id, fresh: String(now),
           });
+          if (row.group) exactParams.set("scope", "all");
+          else exactParams.set("content_profile_id", row.profile_id);
           const value = await fetchJson(`/api/factory/approval-batches?${exactParams.toString()}`, {
             cache: "no-store", timeoutMs: 12000,
           });
-          if (value?.ok !== true || value.batches?.length !== 1 ||
-              value.batches[0]?.request_id !== row.request_id) {
+          const verifiedRow = row.group ? (
+            value?.ok === true && value.batches?.length === 1 ? value.batches[0] : null
+          ) : value;
+          if (verifiedRow?.request_id !== row.request_id ||
+              (row.job_id && verifiedRow.job_id !== row.job_id) ||
+              (!row.group && verifiedRow.profile_id !== row.profile_id)) {
             throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
           }
-          return value.batches[0];
+          // Paint each completed GET as it arrives; one slow sibling status
+          // cannot postpone another approved output until the 12s timeout.
+          // Normalize blank All-Profiles filter to null, matching filterId.
+          // A raw ""===null comparison skipped every incremental repaint on
+          // the default global Factory view until the slowest GET had finished.
+          if ((factoryProfileId() || null) === filterId) {
+            const incremental = factoryBatchMergeExactActivity(state.batch, [verifiedRow]);
+            state.lastBatchSuccessMs = Date.now();
+            state.batchActivityError = "";
+            renderFactoryBatchActivity(incremental);
+            document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: incremental }));
+          }
+          return verifiedRow;
         }));
+        const updates = outcomes.filter(row => row.status === "fulfilled").map(row => row.value);
+        const missing = outcomes.length - updates.length;
+        state.batchActivityPartialError = missing
+          ? String(missing) + " batch status request(s) delayed" : "";
+        if (!updates.length) {
+          throw outcomes.find(row => row.status === "rejected")?.reason ||
+            new Error("Factory activity status is temporarily unavailable");
+        }
         // Only a verified terminal clean group is forgotten. Failed groups
         // remain visible for explicit exception handling.
         forgetFactoryGroupRequests(updates.filter(row => row.status === "completed" &&
@@ -2084,6 +2280,7 @@
       const fetched = await factoryBatchPollWithFallback({
         preferExact, hasKnownGroups: fastGroups.length > 0, readExact, readFull,
       });
+      if (!fastGroups.length) state.batchActivityPartialError = "";
       if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
         throw new Error("Approval activity response was incomplete");
       }
@@ -2116,6 +2313,25 @@
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       reconcilePersistedFactoryPending().catch(() => {});
+      // At most one slower discovery every 60 seconds, separate from exact
+      // status reads. It must not block the current submission's updates.
+      const discoveryAge = now - Math.max(
+        state.lastBatchFullFetchMs || 0, state.batchDiscoveryStartedMs || 0);
+      if (fastGroups.length && discoveryAge >= 60000 && !state.batchDiscoveryLoading) {
+        // Throttle attempts, not just successes: a failed R2 global scan must
+        // not be retried every 3 seconds under a database/memory incident.
+        state.batchDiscoveryStartedMs = now;
+        state.batchDiscoveryLoading = true;
+        const discoveryProfile = params.get("factory_profile") || "";
+        readFull().then(discovered => {
+          if (factoryProfileId() !== discoveryProfile) return;
+          const rebased = factoryBatchMergeDiscoveredActivity(state.batch, discovered);
+          renderFactoryBatchActivity(rebased);
+          document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: rebased }));
+        }).catch(() => {
+          // Historical discovery failure is not a failed exact status read.
+        }).finally(() => { state.batchDiscoveryLoading = false; });
+      }
       // The API intentionally omits completed jobs from the active feed.
       // When a running batch disappears, refresh the authoritative Desk once,
       // without fetching terminal batch history or leaving stale Needs Eyes rows.
@@ -2133,10 +2349,15 @@
       state.batchActivityError = String(error?.message || error);
       // Keep the last verified counts and bars. A timed-out read is not
       // evidence that approvals stopped or that a batch disappeared.
-      updateFactoryBatchFreshness();
+      if (!state.batch && !state.submissionPreview) renderFactoryBatchActivity(null);
+      else updateFactoryBatchFreshness();
       return null;
     } finally {
       state.batchActivityLoading = false;
+      if (state.batchRefreshRequested) {
+        state.batchRefreshRequested = false;
+        Promise.resolve().then(() => refreshFactoryBatchActivity(true).catch(() => {}));
+      }
     }
   }
 
@@ -2226,7 +2447,10 @@
           job_id: batch.job_id, profile_id: "global",
         })); } catch {}
         rememberFactoryGroupRequest(batch);
+        state.inspectedBatchKey = batch.job_id;
         renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
+        refreshFactoryAcceptedReceipt(batch).catch(() => {});
+        refreshFactoryBatchActivity(true).catch(() => {});
         setStatus(batch.duplicate_prevented
           ? `These outputs were already submitted. Original batch restored; no duplicate created. ${acceptedOutputs} of ${ready.length} reconciled.`
           : batch.recovered_after_error
@@ -2250,6 +2474,7 @@
         saved.next_retry_ms = Date.now() + Math.max(15000, Number(error.retryAfterSeconds || 0) * 1000);
         localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify(saved));
       }
+      factoryMarkSubmissionUnconfirmed();
       setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${remaining} from this attempt are unconfirmed. ${error.message || error} Unconfirmed outputs are checked automatically in the background.`);
       await refreshFactoryBatchActivity();
     } finally {
@@ -2271,12 +2496,16 @@
     localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...submitIntent]));
     try { await refreshFactoryApprovalPolicy(); }
     catch (error) {
+      factoryDismissSubmissionPreview();
       setBatchSubmissionError("Submission saved; approval configuration will be checked automatically. " + (error.message || error));
       setStatus(state.batchSubmissionError, true);
       return;
     }
     if (state.submittingBatch) return;
-    if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
+    if (state.batchApprovalsEnabled === false) {
+      factoryDismissSubmissionPreview();
+      setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return;
+    }
     const selected = readyFactoryOutputs(true, true).filter(card => state.selectedOutputs.has(card.id)
       && (!requestedIds || requestedIds.includes(card.id)));
     const recovering = factoryRecoveringIds();
@@ -2294,6 +2523,7 @@
     localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
     const ready = selected.filter(card => !recovering.has(card.id)).map(withResolvedFactoryProfile);
     if (!ready.length) {
+      factoryDismissSubmissionPreview();
       updateFactoryBatchToolbar();
       setStatus(selected.length ? "Your submission is saved. Previously submitted outputs are being checked automatically; any not yet accepted will continue automatically." : "Select one or more review-ready outputs.");
       await reconcilePersistedFactoryPending(true);
@@ -2307,10 +2537,12 @@
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
     const missingProfile = profiles.some((id) => !/^rec[A-Za-z0-9]+$/.test(id));
     if (missingProfile) {
+      factoryDismissSubmissionPreview();
       setStatus("Some selected outputs are missing a Content Profile id, so multi-profile Submit Approvals cannot partition them safely. Refresh Factory, then reselect. Individual Approve still works.", true);
       return;
     }
     if (!global && profiles.length !== 1) {
+      factoryDismissSubmissionPreview();
       setStatus("Global multi-profile approvals are not enabled for this selection. Choose one city profile, or wait for Global Factory to load, then submit again.", true);
       return;
     }
@@ -2318,6 +2550,7 @@
       return submitFactoryGlobalApprovalBatches(ready);
     }
     if (ready.length > limit) {
+      factoryDismissSubmissionPreview();
       setStatus(`The current rollout permits at most ${limit} eligible outputs.`, true);
       return;
     }
@@ -2355,11 +2588,13 @@
       });
       if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
       if (batch.already_running && !batch.already_submitted) {
+        factoryDismissSubmissionPreview();
         renderFactoryBatchActivity(batch);
         setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
         return;
       }
       rememberFactoryAccepted(selectionIds);
+      rememberFactoryGroupRequest(batch);
       state.lastBatchProfile = profiles[0];
       try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
@@ -2367,10 +2602,14 @@
       saveFactorySelection();
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
-      renderFactoryBatchActivity(batch);
+      state.inspectedBatchKey = batch.job_id;
+      renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
+      refreshFactoryAcceptedReceipt(batch).catch(() => {});
+      refreshFactoryBatchActivity(true).catch(() => {});
       setStatus(`Batch accepted for ${ready.length} outputs. Server processing continues after leaving Factory.`);
       // Never wait for all approvals in the click handler.
     } catch (error) {
+      factoryMarkSubmissionUnconfirmed();
       setStatus(`Batch submission not confirmed: ${error.message || error}. Check Activity before retrying.`, true);
       await refreshFactoryBatchActivity();
     } finally {
@@ -4434,9 +4673,10 @@
     // If preflight definitively refuses the request, the finally block restores
     // the selectable rows. Accepted/uncertain batches remain hidden via the
     // durable pending, recovery, accepted and Activity fences.
-    const clicked = readyFactoryOutputs(true)
-      .filter(card => state.selectedOutputs.has(card.id))
-      .map(card => card.id);
+    const clickedCards = readyFactoryOutputs(true)
+      .filter(card => state.selectedOutputs.has(card.id));
+    const clicked = clickedCards.map(card => card.id);
+    factoryShowSubmissionPreview(clickedCards);
     for (const id of clicked) state.submissionIntentIds.add(id);
     if (clicked.length && state.desk) renderDesk(state.desk);
     submitFactoryBatchApprovals()
@@ -4507,6 +4747,7 @@
   // Populate the Factory filter as soon as this lightweight page module loads.
   // Waiting for /api/factory/desk makes an already-available profile list
   // appear empty while the much more expensive queue request is in flight.
+  renderFactoryBatchActivity(state.batch);
   syncFactoryFilterOptions();
   // The topbar may hydrate from /api/profiles after Factory opens. Observe
   // only its option list; never tie Factory's profile choices to Desk latency.

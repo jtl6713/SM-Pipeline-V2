@@ -35,7 +35,7 @@ const policy={enabled:true,stage:"pilot",mode:"global_all_platforms_v2",max_tota
     TikTok:["Video Draft","Story","Single Photo","Multi-Photo"],
     YouTube:["Short","Standard Video","Slideshow Video"],
   }};
-let job=null,started=0,retried=0,unexpected=[];
+let job=null,jobVisible=false,started=0,retried=0,unexpected=[],releaseStartReceipt=null,receiptReleased=false;
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
   res.end(JSON.stringify(value));
@@ -64,7 +64,7 @@ function rebuild(phase) {
 const server=createServer(async(req,res)=>{
   const url=new URL(req.url,"http://localhost");
   if(url.pathname==="/"){
-    const body='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+    const body='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
       +css+styles+'</head><body>'
       +'<select id="studioProfileSelect"><option value="'+chicago+'">Chicago</option><option value="'+nyc+'">New York</option></select>'
       +section+'<script src="/assets/factory-desk.js"></script></body></html>';
@@ -76,10 +76,18 @@ const server=createServer(async(req,res)=>{
     try{const data=readFileSync(file);res.writeHead(200,{"content-type":file.endsWith(".css")?"text/css":"text/javascript"});res.end(data)}
     catch{res.writeHead(404);res.end()}return;
   }
+  if(url.pathname==="/__release-start-receipt"&&req.method==="GET"){
+    // The test explicitly releases the held synthetic POST acknowledgement
+    // only after verifying Factory's immediate 0% preview.
+    receiptReleased=true;
+    releaseStartReceipt?.();
+    releaseStartReceipt=null;
+    send(res,{ok:true});return;
+  }
   if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
     const filter=url.searchParams.get("factory_profile");
-    const visible=job&&(!filter || job.profile_ids.includes(filter));
+    const visible=jobVisible&&job&&(!filter || job.profile_ids.includes(filter));
     const batch=visible?job:null;
     send(res,{...(batch||{ok:true,batch:true,status:"idle",job_id:null,items:[]}),
       scope:"all",batches:batch?[batch]:[],
@@ -104,7 +112,12 @@ const server=createServer(async(req,res)=>{
       job={ok:true,batch:true,group:true,accepted:true,job_id:"fg_"+payload.request_id,
         request_id:payload.request_id,profile_id:null,profile_ids:[chicago,nyc],
         created_at:new Date().toISOString()};
-      rebuild("queued");send(res,job);
+      // Hold the first server response until the browser has observed the
+      // immediate 0% preview. No flaky 550ms timing race.
+      rebuild("queued");
+      if(!receiptReleased) await new Promise(resolve => {releaseStartReceipt=resolve});
+      jobVisible=true;
+      send(res,job);
       setTimeout(()=>rebuild("failed"),180);return;
     }
     if(payload.action==="retry_group"){
@@ -137,6 +150,31 @@ try{
   assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/4 outputs selected/);
   await page.locator("#factoryProfileFilter").selectOption("");
   await page.locator("#factoryBatchSubmit").click();
+  // The first state may be a local unconfirmed preview OR a server-confirmed
+  // status discovered by GET before the held POST response returns. Both are
+  // correct; never require the transient "Submitting" label to remain visible.
+  try {
+    await page.waitForFunction(() => {
+      const overall=document.querySelector("#factoryBatchOverallProgress");
+      const summary=document.querySelector("#factoryBatchSummary");
+      const items=document.querySelectorAll("#factoryBatchDetails .factory-batch-item-list > li");
+      return overall?.textContent.includes("0 of 4 processed") &&
+        summary?.textContent.includes("4 pending") && items.length===4;
+    },null,{timeout:8000});
+  } catch (error) {
+    console.error("FACTORY_PRE_ACK_DIAGNOSTIC",JSON.stringify({
+      summary:await page.locator("#factoryBatchSummary").textContent(),
+      overall:await page.locator("#factoryBatchOverallProgress").textContent().catch(()=>null),
+      details:await page.locator("#factoryBatchDetails").textContent().catch(()=>null),
+      status:await page.locator("#factoryDeskStatus").textContent(),
+      started, errors,
+    }));
+    throw error;
+  }
+  assert.match(await page.locator("#factoryBatchOverallProgress").innerText(),
+    /0 of 4 processed · 0%/);
+  assert.ok(started<=1,"no duplicate submission during provisional activity");
+  await page.request.get(origin+"/__release-start-receipt");
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
   assert.equal(started,1);
   await new Promise(resolve=>setTimeout(resolve,240));

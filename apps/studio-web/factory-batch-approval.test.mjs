@@ -89,7 +89,18 @@ test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
 function extractNamedFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
   assert.ok(start >= 0, `Missing ${name}`);
-  const brace = source.indexOf("{", start);
+  // Function parameters can destructure an options object. Locate the body
+  // after the balanced argument list, not the first "{" in the signature.
+  let paramsDepth = 0;
+  let brace = -1;
+  for (let i = source.indexOf("(", start); i < source.length; i++) {
+    if (source[i] === "(") paramsDepth++;
+    else if (source[i] === ")") {
+      paramsDepth--;
+      if (paramsDepth === 0) { brace = source.indexOf("{", i + 1); break; }
+    }
+  }
+  assert.ok(brace >= 0, `Missing body for ${name}`);
   let depth = 0;
   for (let i = brace; i < source.length; i++) {
     if (source[i] === "{") depth++;

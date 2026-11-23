@@ -13,7 +13,9 @@ test("Factory active approval progress refresh is bounded, transparent, and uses
   assert.match(factory, /lastBatchSuccessMs = Date\.now\(\)/);
   assert.match(factory, /timeoutMs: 12000/);
   assert.match(factory, /\}, 3000\);/);
-  assert.match(factory, /batchActivityLoading\s*\|\|/);
+  assert.match(factory, /if \(state\.batchActivityLoading\) \{/);
+  assert.match(factory, /batchRefreshRequested = true/);
+  assert.match(factory, /Promise\.allSettled\(fastGroups/);
   assert.match(factory, /aggregateDone = batches\.reduce/);
   assert.match(factory, /const completed = Number\(row\.done_count/);
   assert.match(factory, /state\.batchActivityError = String\(error/);
@@ -38,12 +40,14 @@ test("Factory active approvals show actual stages, output identity, elapsed and 
   assert.match(factory, /function factoryBatchMergeExactActivity\(/);
   assert.match(factory, /request_id: row\.request_id/);
   assert.match(factory, /lastBatchFullFetchMs/);
-  assert.match(factory, /force \|\| !lastFullFetchMs \|\| now - lastFullFetchMs < 18000/);
+  assert.match(factory, /return groupCount > 0;/);
+  assert.match(factory, /discoveryAge >= 60000/);
   assert.match(factory, /factoryBatchPollWithFallback\(/);
   assert.match(factory, /factoryBatchPollWindow\(\[\.\.\.knownGroups, \.\.\.remembered\]/);
   assert.match(factory, /const fastGroups = window\.groups/);
   assert.match(factory, /Exact Factory progress is unavailable; retaining prior snapshot/);
-  assert.match(factory, /!Number\(totals\.active\) && !Number\(totals\.pending\)/);
+  assert.match(factory, /overall\.hidden = !batches\.length;/);
+  assert.match(factory, /Latest completed submission/);
   assert.match(html, /factory-live-approval-progress\.css/);
   assert.match(html, /live=five-stages-20261120/);
   assert.match(css, /@media \(max-width: 600px\)/);
