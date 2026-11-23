@@ -2371,7 +2371,7 @@
 <section id="page-qa-test-center" class="page" aria-label="Administrator QA Test Center">
  <div class="page-heading">
   <div><span class="eyebrow">Administrator</span><h1>QA Test Center</h1>
-    <p>Execute step-by-step tests, retain immutable Airtable evidence and inspect release gates. AI results require independent approval. Nothing publishes.</p></div>
+    <p>Execute step-by-step tests, retain immutable Supabase evidence and inspect release gates. AI results require independent approval. Nothing publishes.</p></div>
   <button class="secondary-button" type="button" id="qaRefresh">Refresh</button>
  </div>
  <div class="qa-panel">
@@ -2389,6 +2389,17 @@
   <p class="subtle">A new test result never overwrites previous evidence. The automated health check is read-only and is not an approval to publish.</p>
  </div>
  <div class="qa-panel" id="qaGate" aria-label="Release gate">Select a run to view its release gate.</div>
+
+ <div class="qa-panel" id="qaWorkloadPanel" aria-label="Database workload governor diagnostics">
+  <div class="qa-toolbar">
+   <h2>Database workload governor</h2>
+   <button type="button" class="secondary-button" id="qaWorkloadRefresh">Load snapshot</button>
+  </div>
+  <p class="subtle">Authenticated, read-only, manual refresh. Runner counters are local to the Windows host and do not equal all Supabase traffic. No queued jobs are resumed or published.</p>
+  <p id="qaWorkloadStatus" role="status" aria-live="polite">Snapshot not requested.</p>
+  <div id="qaWorkloadMetrics" aria-label="Active workload, capacity and circuit status"></div>
+  <div id="qaWorkloadHistory" aria-label="Last 30 minutes of measured runner database requests"></div>
+ </div>
 
  <div class="qa-panel" id="qaFinalPanel">
   <h2>Finalize test run</h2>
