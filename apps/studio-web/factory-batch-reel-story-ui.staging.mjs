@@ -62,11 +62,16 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
     const isGlobal=url.searchParams.get("scope")==="all";
     const selected=isGlobal ? url.searchParams.get("factory_profile") :
+      url.searchParams.get("content_profile_id") ||
       url.searchParams.get("profile")||url.searchParams.get("profile_id");
+    const bounded=isGlobal && url.searchParams.get("bounded_discovery")==="1";
     const pilot=isGlobal ? (!selected || selected===profile) : selected===profile;
     respond(res,{
       ...(pilot && job ? job : {ok:true,batch:true,status:"idle",job_id:null,items:[]}),
       scope:isGlobal?"all":undefined,
+      view:bounded?"active":undefined,filter_profile_id:bounded?(selected||null):undefined,
+      discovery:bounded?{mode:"bounded-r2-cursor",complete:true,
+        child_cursor:null,group_cursor:null,child_scanned:pilot&&job?1:0,group_scanned:0}:undefined,
       batches:isGlobal&&pilot&&job?[job]:[],
       totals:isGlobal?{batches:pilot&&job?1:0,active:pilot&&job&&["queued","running"].includes(job.status)?1:0,
         approved:pilot&&job?job.approved_count:0,failed:pilot&&job?job.failed_count:0}:undefined,

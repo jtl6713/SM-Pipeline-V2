@@ -87,10 +87,14 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
     const filter=url.searchParams.get("factory_profile");
+    const bounded=url.searchParams.get("bounded_discovery")==="1";
     const visible=jobVisible&&job&&(!filter || job.profile_ids.includes(filter));
     const batch=visible?job:null;
     send(res,{...(batch||{ok:true,batch:true,status:"idle",job_id:null,items:[]}),
-      scope:"all",batches:batch?[batch]:[],
+      scope:"all",view:bounded?"active":undefined,filter_profile_id:bounded?(filter||null):undefined,
+      discovery:bounded?{mode:"bounded-r2-cursor",complete:true,
+        child_cursor:null,group_cursor:null,child_scanned:0,group_scanned:batch?1:0}:undefined,
+      batches:batch?[batch]:[],
       totals:{batches:batch?1:0,active:batch?.pending_count?1:0,
         approved:batch?.approved_count||0,pending:batch?.pending_count||0,
         failed:batch?.failed_count||0},
