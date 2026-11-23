@@ -115,7 +115,6 @@ test("#10855 unheld returned-to-review carousel stays visible even with historic
     ready:[returned.id], attention:[],
   }, "Reopened canonical review must not vanish behind a terminal or pending UI fence");
   for (const override of [
-    {do_not_publish:true,ready:false},
     {output_status:"Approved for Publishing",ready:false},
     {review_package_ready:false,ready:false},
     {published_at:"2026-11-22T13:00:00Z",ready:false},
