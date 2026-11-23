@@ -135,6 +135,17 @@ def test_existing_finished_cover_prompt_not_rewritten_for_new_style():
     assert prompt == existing
 
 
+def test_existing_thumb_with_url_does_not_get_new_focal_direction_even_if_prompt_is_built(monkeypatch):
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
+    parent = {"fields": {
+        "Market_Name": "Chicago", "Content_Title": "Wrigley Building Clock",
+        "Thumbnail_URL": "https://media.chicagoshining.com/studio/previews/thumbnails/old-cover.png",
+    }}
+    result = build_finished_thumbnail_prompt({}, parent, aspect_ratio="9:16")
+    assert "Create a ChicagoShining social thumbnail" in result
+    assert "NEW AI COVER FOCAL-DETAIL OPTION" not in result
+
+
 def test_creators_explicit_framing_and_landmark_accuracy_still_take_priority(monkeypatch):
     monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
     cover = cover_closeup_guidance(market="LA", creation_key="new-cover")
