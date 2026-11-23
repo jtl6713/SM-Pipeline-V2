@@ -126,3 +126,18 @@ test("#2563 held Meta recovery inventory is surfaced above unrelated Producer Ch
   assert.match(factory, /do_not_publish/);
   assert.match(css, /#page-factory > \.factory-meta-repair-notice/);
 });
+
+
+test("Factory video modal makes one exact R5 retry after authenticated proxy fails, not an image substitution", async () => {
+  const factory = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
+  const preview = factory.slice(factory.indexOf("function openFactoryPreview"), factory.indexOf("function saveFactorySelection"));
+  assert.match(preview, /card\.public_preview_url/);
+  assert.match(preview, /let triedSavedR5 = false/);
+  assert.match(preview, /if \(!triedSavedR5 && publicPreviewUrl && publicPreviewUrl !== previewUrl\)/);
+  assert.match(preview, /triedSavedR5 = true;[\s\S]*?video\.src = publicPreviewUrl;/);
+  assert.match(preview, /video\.onerror =/);
+  assert.match(preview, /galleryEpoch !== factoryGalleryPreviewEpoch/);
+  assert.match(preview, /Playing saved original Studio MP4/);
+  assert.match(preview, /Video playback failed — this cover is not the finished render/);
+  assert.doesNotMatch(preview, /image\.src = publicPreviewUrl/);
+});
