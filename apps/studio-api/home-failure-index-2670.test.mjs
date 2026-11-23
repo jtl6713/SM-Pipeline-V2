@@ -6,8 +6,11 @@ import { supabaseOutputMatchesHomeFailure } from "./supabase-pipeline-reads.mjs"
 const sql = readFileSync(new URL("./migrations/20261123_platform_output_home_failure_candidate_2670.sql", import.meta.url), "utf8");
 const source = readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
 
-const typed = ["Output_Status", "Render_Status", "Publish_Status",
-  "IG_Carousel_Status", "TikTok_Draft_Status", "FB_Publish_Status"];
+const typed = [
+  ["Output_Status","output_status"], ["Render_Status","render_status"],
+  ["Publish_Status","publish_status"], ["IG_Carousel_Status","ig_carousel_status"],
+  ["TikTok_Draft_Status","tiktok_draft_status"], ["FB_Publish_Status","fb_publish_status"],
+];
 const bagStatuses = ["Asset_Selection_Status", "IG_Carousel_Status",
   "FB_Slideshow_Status", "YouTube_Package_Status",
   "YouTube_Upload_Status", "YouTube_Processing_Status"];
@@ -16,13 +19,12 @@ const errors = ["Publish_Error_Message", "Remotion_Error_Message",
   "Music_Error_Message", "FB_Slideshow_Error_Message",
   "YouTube_Error_Message", "YouTube_Processing_Failure_Reason",
   "YouTube_Rejection_Reason"];
-const snake = name => name.replace(/[A-Z]/g, (c, i) => (i ? "_" : "") + c).toLowerCase();
 
 test("all six typed failure statuses share exact SQL+JS predicate", () => {
-  for(const name of typed){
+  for(const [name,column] of typed){
     assert.equal(supabaseOutputMatchesHomeFailure({[name]:"Retry error"}), true, name);
     assert.equal(supabaseOutputMatchesHomeFailure({[name]:"FAILED"}), true, name);
-    assert.ok(sql.includes(snake(name)), name);
+    assert.ok(sql.includes(column), name);
   }
 });
 test("all six densified JSONB statuses share exact SQL+JS predicate", () => {
