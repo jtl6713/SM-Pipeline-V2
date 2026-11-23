@@ -29,28 +29,65 @@ if(Test-Path -LiteralPath $envFile){
     $key=$null
   }catch{Write-Output 'incident2670_preflight_env=UNREADABLE';$ready=$false}
 }else{Write-Output 'incident2670_preflight_env=MISSING';$ready=$false}
-$python=Get-Command python -ErrorAction SilentlyContinue
-if($null -eq $python){Write-Output 'incident2670_preflight_python=MISSING';$ready=$false}
-else{
-  Write-Output 'incident2670_preflight_python=FOUND'
-  $env:PYTHONPATH=$root
-  $env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
-  # PowerShell on Windows can turn a Python stderr line into a terminating
-  # NativeCommandError before stdout is captured under Stop. Use Continue ONLY
-  # for the two isolated child processes; no stderr/log/secret is returned.
-  $priorPreference=$ErrorActionPreference
+# Python may be a WindowsApps alias even when Get-Command finds it. Prefer
+# a running interpreter and bounded known installation candidates, never a
+# downloaded binary or an unverified PATH entry.
+$env:PYTHONPATH=$root
+$env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
+$script:SelectedPython=$null
+function Probe-Python([string]$exe,[string[]]$prefix,[string]$kind){
+  if(-not $exe){return}
+  $old=$ErrorActionPreference
   $ErrorActionPreference='Continue'
   try{
-    $hello=@(& python -c 'print("incident2670_preflight_hello=PASS")' 2>$null)
-    $helloExit=$LASTEXITCODE
-  }catch{$hello=@();$helloExit=99}
-  finally{$ErrorActionPreference=$priorPreference}
-  if($helloExit -ne 0 -or @($hello|Where-Object {$_ -eq 'incident2670_preflight_hello=PASS'}).Count -ne 1){
-    Write-Output 'incident2670_preflight_hello=FAILED'
-    $ready=$false
-  }else{
-    Write-Output 'incident2670_preflight_hello=PASS'
-    $code=@'
+    $out=@(& $exe @prefix -c 'print("incident2670_preflight_hello=PASS")' 2>$null)
+    $exit=$LASTEXITCODE
+  }catch{
+    $out=@();$exit=99
+  }finally{$ErrorActionPreference=$old}
+  if($exit -eq 0 -and @($out|Where-Object {$_ -eq 'incident2670_preflight_hello=PASS'}).Count -eq 1){
+    $script:SelectedPython=[PSCustomObject]@{exe=$exe;prefix=$prefix;kind=$kind}
+  }
+}
+$venvs=@(
+  (Join-Path $root '.venv\Scripts\python.exe'),
+  (Join-Path $root 'venv\Scripts\python.exe'),
+  (Join-Path (Split-Path $root -Parent) '.venv\Scripts\python.exe')
+)
+foreach($candidate in $venvs){
+  if($script:SelectedPython){break}
+  if(Test-Path -LiteralPath $candidate -PathType Leaf){
+    Probe-Python $candidate @() 'VENV'
+  }
+}
+if(-not $script:SelectedPython){
+  $running=@(Get-Process -Name python,python3 -ErrorAction SilentlyContinue)
+  foreach($proc in $running){
+    if($script:SelectedPython){break}
+    $exe=[string]$proc.Path
+    if($exe -and $exe -notmatch '(?i)\\WindowsApps\\' -and
+       (Test-Path -LiteralPath $exe -PathType Leaf)){
+      Probe-Python $exe @() 'RUNNING'
+    }
+  }
+}
+if(-not $script:SelectedPython){
+  $launcher=Get-Command py -ErrorAction SilentlyContinue
+  if($launcher){Probe-Python 'py' @('-3') 'LAUNCHER'}
+}
+if(-not $script:SelectedPython){
+  $pathPython=Get-Command python -ErrorAction SilentlyContinue
+  if($pathPython){Probe-Python 'python' @() 'PATH'}
+}
+if(-not $script:SelectedPython){
+  Write-Output 'incident2670_preflight_python=UNUSABLE'
+  Write-Output 'incident2670_preflight_hello=FAILED'
+  $ready=$false
+}else{
+  Write-Output 'incident2670_preflight_python=FOUND'
+  Write-Output ('incident2670_preflight_python_source='+$script:SelectedPython.kind)
+  Write-Output 'incident2670_preflight_hello=PASS'
+  $code=@'
 try:
     import requests
     print("incident2670_preflight_requests=AVAILABLE", flush=True)
@@ -71,24 +108,24 @@ except Exception:
     print("incident2670_preflight_interface=FAIL", flush=True)
     raise SystemExit(44)
 '@
-    $priorPreference=$ErrorActionPreference
-    $ErrorActionPreference='Continue'
-    try{
-      $receipt=@(& python -c $code 2>$null)
-      $pythonExit=$LASTEXITCODE
-    }catch{$receipt=@();$pythonExit=99}
-    finally{$ErrorActionPreference=$priorPreference}
-    @($receipt | Where-Object {
-      $_ -match '^incident2670_preflight_(requests=(AVAILABLE|UNAVAILABLE)|import=(PASS|FAIL)|interface=(PASS|FAIL))$'
-    }) | ForEach-Object {Write-Output $_}
-    if($pythonExit -ne 0){Write-Output 'incident2670_preflight_python_run=FAILED';$ready=$false}
-    elseif(@($receipt|Where-Object {$_ -eq 'incident2670_preflight_interface=PASS'}).Count -ne 1){
-      Write-Output 'incident2670_preflight_python_run=FAILED'
-      $ready=$false
-    }
-    else{Write-Output 'incident2670_preflight_python_run=PASS'}
-  }
-
+  $exe=$script:SelectedPython.exe
+  $prefix=[string[]]$script:SelectedPython.prefix
+  $old=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try{
+    $receipt=@(& $exe @prefix -c $code 2>$null)
+    $pythonExit=$LASTEXITCODE
+  }catch{$receipt=@();$pythonExit=99}
+  finally{$ErrorActionPreference=$old}
+  @($receipt|Where-Object {
+    $_ -match '^incident2670_preflight_(requests=(AVAILABLE|UNAVAILABLE)|import=(PASS|FAIL)|interface=(PASS|FAIL))$'
+  })|ForEach-Object {Write-Output $_}
+  if($pythonExit -ne 0 -or
+     @($receipt|Where-Object {$_ -eq 'incident2670_preflight_interface=PASS'}).Count -ne 1){
+    Write-Output 'incident2670_preflight_python_run=FAILED'
+    $ready=$false
+  }else{Write-Output 'incident2670_preflight_python_run=PASS'}
 }
+
 if($ready){Write-Output 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST'}
 else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}
