@@ -32,4 +32,6 @@ def test_workflow_is_explicit_marker_only_and_sanitizes_job_output():
     assert "grep -E '^incident2670_preflight_" in WF
     assert "READY_FOR_SYNTHETIC_TEST" in WF
     assert "STUDIO_MAX_PRODUCER_JOBS=2" not in WF
+    assert "len(command) < 8000" in WF
+    assert len(PS) < 8000
     assert "do_not_publish=false" not in WF

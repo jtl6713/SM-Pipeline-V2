@@ -7,3 +7,5 @@ Second follow-up: `python` command was present but even a trivial hello failed. 
 If all Python candidates fail, classify registry PythonCore, LocalAppData/known installation, CIM process executable, launcher and PATH's WindowsApps alias without exposing local paths. No RPC or job mutations.
 
 2026-11-23: rerun after repairing truncated CIM/launcher diagnostic source, gated by new credential-free PowerShell parser PR check; no claims or producer mutation.
+
+Guarded Ops endpoint enforces SHELL_MAX_CHARS=8000. Read-only interpreter discovery shortened under limit; new pre-merge size check. No claims or provider work.

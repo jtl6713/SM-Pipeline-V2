@@ -1,5 +1,3 @@
-# Issue 2670: isolated Windows runtime preflight. No RPC, writes, secrets or provider actions.
-# Run only on the authorized Windows Ops host. Emit allowlisted classifications.
 $ErrorActionPreference='Stop'
 $root='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service'
 $envFile=Join-Path $root '.env'
@@ -29,9 +27,6 @@ if(Test-Path -LiteralPath $envFile){
     $key=$null
   }catch{Write-Output 'incident2670_preflight_env=UNREADABLE';$ready=$false}
 }else{Write-Output 'incident2670_preflight_env=MISSING';$ready=$false}
-# Python may be a WindowsApps alias even when Get-Command finds it. Prefer
-# a running interpreter and bounded known installation candidates, never a
-# downloaded binary or an unverified PATH entry.
 $env:PYTHONPATH=$root
 $env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
 $script:SelectedPython=$null
@@ -71,7 +66,6 @@ if(-not $script:SelectedPython){
     }
   }
 }
-# Bounded Windows installation discovery; no full disk search or paths logged.
 $regFound=$false
 if(-not $script:SelectedPython){
   foreach($base in @('HKLM:\SOFTWARE\Python\PythonCore',
@@ -191,6 +185,5 @@ except Exception:
     $ready=$false
   }else{Write-Output 'incident2670_preflight_python_run=PASS'}
 }
-
 if($ready){Write-Output 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST'}
 else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}
