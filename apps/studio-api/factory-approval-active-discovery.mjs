@@ -53,14 +53,13 @@ export async function factoryBoundedActiveDiscovery(bucket, {
   if (!Array.isArray(childPage?.objects) || !Array.isArray(groupPage?.objects))
     throw Error("Factory R2 active discovery returned incomplete storage listing");
   const children = [];
-  const readChild = childPage.objects.filter(object => {
+  childPage.objects.forEach(object => {
     const match = String(object.key || "").match(CHILD_KEY);
-    if (!match || (profileId && match[1] !== profileId)) return false;
+    if (!match || (profileId && match[1] !== profileId)) return;
     const meta = object.customMetadata || {};
-    if (meta.factory_group) return false; // Global children are represented by their parent.
-    if (meta.factory_active === "false") return false;
+    if (meta.factory_group) return; // Global children are represented by their parent.
+    if (meta.factory_active === "false") return;
     children.push({ profileId: match[1], requestId: match[2] });
-    return true;
   });
   // Read exact canonical ledgers, never trust the storage listing as approval.
   const jobRows = await Promise.all(children.map(async child => {
