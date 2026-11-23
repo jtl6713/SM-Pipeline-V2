@@ -141,3 +141,10 @@ test("Factory video modal makes one exact R5 retry after authenticated proxy fai
   assert.match(preview, /Video playback failed — this cover is not the finished render/);
   assert.doesNotMatch(preview, /image\.src = publicPreviewUrl/);
 });
+
+
+test("Factory hides failed video element so its poster cannot impersonate a successful render", async () => {
+  const css = await readFile(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
+  assert.match(css, /#page-factory \.library-preview-dialog>video\[hidden\]/);
+  assert.match(css, /#page-factory \.library-preview-dialog>img\[hidden\]\{display:none!important\}/);
+});
