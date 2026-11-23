@@ -273,14 +273,20 @@ def _run(
         try:
             nxt = handler(client, ctx)
         except StepWait as exc:
+            if global_lease_stopped is not None and global_lease_stopped.is_set():
+                return "yielded_progressed" if advanced else "yielded"
             write_job_if_changed(client, request_id, read_job(request), with_step(job, step, detail=str(exc.detail), bump_attempt=False))
             wait_streak += 1
             time.sleep(wait_interval(wait_streak))
             continue
         except StepBlocked as exc:
+            if global_lease_stopped is not None and global_lease_stopped.is_set():
+                return "yielded_progressed" if advanced else "yielded"
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         except Exception as exc:
+            if global_lease_stopped is not None and global_lease_stopped.is_set():
+                return "yielded_progressed" if advanced else "yielded"
             if governor.enabled() and (
                 isinstance(exc, governor.AdmissionDeferred) or governor.is_database_overload(exc) or governor.circuit_open()
             ):
