@@ -307,7 +307,9 @@ test("issue #2294: Factory preflight and final approval both reject missing 8-im
   const mock = mockSupabase(t, [output(IDS[0], 8946)], { missingSlides: true });
   await assert.rejects(
     factorySupabaseGroupPreflight(env, [IDS[0]], policy),
-    /native_gallery_slide_count_mismatch/,
+    error => /Output #8946: Native gallery publication blocked: native_gallery_slide_count_mismatch/.test(error.message)
+      && /No new batch was accepted/.test(error.message)
+      && /Repair native gallery media before approval/.test(error.message),
   );
   await assert.rejects(
     factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
