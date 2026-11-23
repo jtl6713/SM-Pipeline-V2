@@ -176,6 +176,7 @@ def side_table_kind(table_id: str) -> str:
     if table in {
         "tblHX3UdoNszkoquG", "tblUkZB6SMtf9Ib6I",
         "tbl7wPOAE26o2coMU", "tblalFXUJyYg5PBrz",
+        "tbl5sq9xBrF6bgPph",
     }:
         return "review_records"
     return ""
@@ -1553,6 +1554,7 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         "tblUkZB6SMtf9Ib6I": "review_records",
         "tbl7wPOAE26o2coMU": "review_records",
         "tblalFXUJyYg5PBrz": "review_records",
+        "tbl5sq9xBrF6bgPph": "review_records",
     }.get(table) or table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
@@ -1582,6 +1584,7 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
             "tblUkZB6SMtf9Ib6I": "rendering_review_jobs",
             "tbl7wPOAE26o2coMU": "rendering_review_attempts",
             "tblalFXUJyYg5PBrz": "rendering_review_plans",
+            "tbl5sq9xBrF6bgPph": "native_gallery_jobs",
         }
         target = names.get(table)
         saved = 0

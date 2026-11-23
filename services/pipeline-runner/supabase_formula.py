@@ -79,6 +79,7 @@ _REVIEW_JSON_TABLES = frozenset({
     "tblUkZB6SMtf9Ib6I",  # rendering_review_jobs
     "tbl7wPOAE26o2coMU",  # rendering_review_attempts
     "tblalFXUJyYg5PBrz",  # rendering_review_plans
+    "tbl5sq9xBrF6bgPph",  # native_gallery_jobs (creative C5/C6 only)
 })
 
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')

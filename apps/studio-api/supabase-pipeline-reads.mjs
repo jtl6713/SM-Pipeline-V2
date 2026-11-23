@@ -7538,6 +7538,7 @@ function sideTableKind(env, tableId) {
     return "engagement_settings";
   }
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
+  if (table === "tbl5sq9xBrF6bgPph") return "native_gallery_jobs";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   if (table === "Exception Recovery Messages") return "exception_messages";
   if (table === "Quality Agent Recovery Ledger") return "recovery_ledger";
@@ -9652,6 +9653,41 @@ export async function studioUpsertSettingOnSupabase(env, name, value, notes) {
  * Content Profile reads from Supabase. Returns null when this call must stay
  * on Airtable. A missing Output/Content/Profile row stays null.
  */
+// #2670: exact native-gallery C5/C6 held creative jobs (not FB0/AP0C
+// publisher photo staging). Never infer these rows from Platform Outputs.
+const NATIVE_GALLERY_LEDGER = "native_gallery_jobs";
+const NATIVE_GALLERY_RECORD = /^rec[A-Za-z0-9]{14}$/;
+const NATIVE_GALLERY_ALLOWED_FILTERS = new Set(["Job_ID", "Output_Record_ID", "Job_State"]);
+function nativeGalleryLedgerRow(row) {
+  const id = String(row?.airtable_record_id || "");
+  if (!NATIVE_GALLERY_RECORD.test(id) || !isPlainObject(row?.fields)) {
+    throw new Error("native_gallery_supabase_row_invalid");
+  }
+  return { id, fields: { ...row.fields }, createdTime: row.created_at || null };
+}
+async function readNativeGalleryLedger(env, { id = "", formula = "", limit = 30, offset = 0 } = {}) {
+  let filter = "";
+  if (id) {
+    if (!NATIVE_GALLERY_RECORD.test(id)) throw new Error("native_gallery_record_id_invalid");
+    filter = "&airtable_record_id=eq." + encodeURIComponent(id);
+  } else if (formula) {
+    const match = String(formula).trim().match(/^\{(Job_ID|Output_Record_ID|Job_State)\}="([A-Za-z0-9_-]{1,120})"$/);
+    if (!match || !NATIVE_GALLERY_ALLOWED_FILTERS.has(match[1])) {
+      throw new Error("native_gallery_filter_not_allowlisted");
+    }
+    filter = "&fields->>" + match[1] + "=eq." + encodeURIComponent(match[2]);
+  }
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+  const safeOffset = Math.max(0, Math.min(5000, Number(offset) || 0));
+  const rows = await supabaseRest(
+    env, NATIVE_GALLERY_LEDGER +
+      "?select=airtable_record_id,fields,created_at" + filter +
+      "&order=created_at.asc&limit=" + safeLimit + "&offset=" + safeOffset
+  );
+  if (!Array.isArray(rows)) throw new Error("native_gallery_ledger_response_unverified");
+  return rows.map(nativeGalleryLedgerRow);
+}
+
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
   const kind = sideTableKind(env, tableId);
@@ -9673,6 +9709,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     }
     if (kind === "idea_batch") {
       return await readIdeaBatchRow(env, id);
+    }
+    if (kind === "native_gallery_jobs") {
+      const rows = await readNativeGalleryLedger(env, { id, limit: 1 });
+      return rows[0] || null;
     }
     if (kind === "slides") {
       const rows = await listSupabaseCarouselSlidesByIds(env, [id]);
@@ -9712,6 +9752,15 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
+  if (kind === "native_gallery_jobs") {
+    // Only exact job/output/state predicates are supported. A malformed
+    // filter is a 503 fail-closed error, never a full-table eligibility scan.
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await readNativeGalleryLedger(env, { formula, limit, offset });
+    const result = { records };
+    if (records.length === limit) result.offset = String(offset + records.length);
+    return result;
+  }
   if (kind === "profile") {
     const cleaned = compactFormula(formula);
     // Full list, Active=1, and Active+Autonomous_Produce_Enabled=1 are the
@@ -10217,6 +10266,32 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
     if (kind === "idea") records = await commitIdeaRecords(env, parsed);
     else if (kind === "idea_batch") records = await commitIdeaBatchRecords(env, parsed);
     else if (kind === "slides") records = await commitSlideRecords(env, parsed);
+    else if (kind === "native_gallery_jobs") {
+      records = [];
+      for (const row of parsed) {
+        if (!NATIVE_GALLERY_RECORD.test(String(row?.id || "")) ||
+            !isPlainObject(row.fields)) throw new Error("native_gallery_write_identity_invalid");
+        const prior = verb === "PATCH"
+          ? await readNativeGalleryLedger(env, { id: row.id, limit: 1 }) : [];
+        if (verb === "PATCH" && prior.length !== 1)
+          throw new Error("native_gallery_patch_requires_existing_row");
+        const merged = { ...(prior[0]?.fields || {}), ...row.fields };
+        if (!/^(ngjob_[A-Za-z0-9_-]{12,110})$/.test(String(merged.Job_ID || "")))
+          throw new Error("native_gallery_job_id_invalid");
+        const committed = await supabaseRest(env,
+          "native_gallery_jobs?on_conflict=airtable_record_id&select=airtable_record_id,fields,created_at", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+          body: [{ airtable_record_id: row.id, fields: merged,
+            updated_at: new Date().toISOString() }],
+        });
+        if (!Array.isArray(committed) || committed.length !== 1 ||
+            committed[0]?.airtable_record_id !== row.id) {
+          throw new Error("native_gallery_supabase_commit_unconfirmed");
+        }
+        records.push(nativeGalleryLedgerRow(committed[0]));
+      }
+    }
     else if (kind === "pro_output") {
       records = await commitProOutputRecords(env, parsed, { insert: verb === "POST" });
     }
