@@ -1,5 +1,6 @@
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
+import { globalWorkloadEnabled, globalWorkloadAdmission, globalWorkloadRpc, startGlobalWorkloadHeartbeat } from "./global-workload-coordinator.mjs";
 import { protectedMediaReworkSummary } from "./factory-protected-media-rework.mjs";
 import { metaReviewRecoverySummary } from "./meta-review-recovery-attention.mjs";
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
@@ -14420,40 +14421,82 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   const deferredByGovernor = [];
   for (const job of selected) {
     const owner = crypto.randomUUID();
-    // Atomic shared capacity with the Windows Python producer: the durable
-    // R2 job is NOT claimed or mutated on denied/unreachable admission.
+    // The Windows runner is the existing local shared limiter. Its durable
+    // claim is obtained before any R2 Ready-production claim.
     const admission = await runnerWorkerLease(env, "claim", job.idea_id, owner);
     if (!admission.admitted) {
       deferredByGovernor.push({ idea_id: job.idea_id, reason: admission.reason });
       continue;
     }
     let lease = null;
+    let globalClaim = null;
     try {
+      // Optional *second* cross-host fence, OFF by default. Only one RPC per
+      // heavy admission (plus bounded renewals); never per row or cron scan.
+      // Denial/uncertain receipt retains the original durable R2 queued job.
+      if (globalWorkloadEnabled(env)) {
+        try {
+          globalClaim = await globalWorkloadAdmission(
+            env, "producer", "ready-production:" + job.idea_id,
+            { ttlSeconds: 600 },
+          );
+        } catch {
+          deferredByGovernor.push({ idea_id: job.idea_id, reason: "global_rpc_unconfirmed" });
+          continue;
+        }
+        if (!globalClaim.accepted) {
+          deferredByGovernor.push({ idea_id: job.idea_id, reason: "global_capacity_denied" });
+          continue;
+        }
+      }
       lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
-      if (lease) claims.push({ lease, owner });
+      if (lease) claims.push({ lease, owner, globalClaim });
     } finally {
-      if (!lease) await runnerWorkerLease(env, "release", job.idea_id, owner);
+      if (!lease) {
+        if (globalClaim?.accepted) {
+          try {
+            await globalWorkloadRpc(env, "release", {
+              scope: globalClaim.scope, key: globalClaim.key,
+              fence: globalClaim.fence, verifiedProgress: false,
+            });
+          } catch {
+            // A stale/uncertain lease expires remotely. Never retry admission
+            // or write a synthetic R2 completion to hide a release failure.
+            console.warn("Ready-production global lease release unconfirmed");
+          }
+        }
+        await runnerWorkerLease(env, "release", job.idea_id, owner);
+      }
     }
   }
   stage = "process";
-  const settled = await Promise.all(claims.map(async ({ lease, owner }, index) => {
+  const settled = await Promise.all(claims.map(async ({ lease, owner, globalClaim }, index) => {
     const heartbeat = startRunnerWorkerLeaseHeartbeat(env, lease.job.idea_id, owner);
+    let globalHeartbeat = null;
     try {
+      if (globalClaim?.accepted) {
+        globalHeartbeat = startGlobalWorkloadHeartbeat(env, globalClaim, {
+          heartbeatMs: 90_000, ttlSeconds: 600,
+        });
+      }
       heartbeat.assertOwned();
+      globalHeartbeat?.assertOwned();
       const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
         // Only one new heavy produce enqueue per pass; existing render queue
         // and later ticks advance the other durable R2 jobs safely.
         deferProduce: index > 0,
       });
       heartbeat.assertOwned();
+      globalHeartbeat?.assertOwned();
       return { idea_id: lease.job.idea_id, status: job?.status || "unknown", stage: job?.stage || null };
     } catch (error) {
-      // On lost broker ownership, leave the original durable R2 claim for
-      // its bounded expiry rather than writing a retry under a stale owner.
+      // A lost local OR global owner must never finish a durable R2 claim.
+      // Leave the original lease to expire before a new owner may retry.
       try {
         heartbeat.assertOwned();
+        globalHeartbeat?.assertOwned();
       } catch {
-        return { idea_id: lease.job.idea_id, status: "deferred", error: "shared_workload_lease_lost" };
+        return { idea_id: lease.job.idea_id, status: "deferred", error: "workload_lease_lost" };
       }
       const failure = readyProductionFailure(error);
       console.warn("Ready-to-produce dispatch failed", lease.job.idea_id, error);
@@ -14466,6 +14509,17 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
       return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
     } finally {
       await heartbeat.stop();
+      if (globalHeartbeat) await globalHeartbeat.stop();
+      if (globalClaim?.accepted) {
+        try {
+          await globalWorkloadRpc(env, "release", {
+            scope: globalClaim.scope, key: globalClaim.key,
+            fence: globalClaim.fence, verifiedProgress: false,
+          });
+        } catch {
+          console.warn("Ready-production global lease release unconfirmed");
+        }
+      }
       await runnerWorkerLease(env, "release", lease.job.idea_id, owner);
     }
   }));
