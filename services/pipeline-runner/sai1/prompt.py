@@ -111,4 +111,5 @@ def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: in
         total=int(total),
     )
     return (prompt + creative_prompt_suffix(creative_guidance, mode="narration")
-            + ai_slide_closeup_guidance(market=market, requested_count=needed))
+            + ai_slide_closeup_guidance(market=market, requested_count=needed,
+                                         creation_key=f"{market}|{title}|{total}|{covered_text}"))

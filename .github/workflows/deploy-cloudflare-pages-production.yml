@@ -86,6 +86,7 @@ jobs:
             apps/studio-web/factory-content-toggle.test.mjs \
             apps/studio-web/factory-profile-filter-fast.test.mjs \
             apps/studio-web/factory-desk.test.mjs \
+            apps/studio-web/factory-remove-manual-crop-2876.test.mjs \
             apps/studio-web/unified-platform-outputs.test.mjs \
             apps/studio-web/all-profiles-load.test.mjs \
             apps/studio-web/all-profiles-cache-age.test.mjs \

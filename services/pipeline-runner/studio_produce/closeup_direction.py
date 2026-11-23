@@ -1,17 +1,18 @@
-"""Issue #2876: shared extreme-close-up visual direction for Shining profiles.
+"""Issue #2876: optional focal-detail direction for NEW AI-created stills only.
 
-Prompt-only preference. No media mutation, generation calls, approval changes,
-or publishing decisions occur here. An environment setting allows cautious
-rollout without introducing a new database field or implicit asset authority.
+This file never selects existing library media, changes a crop, regenerates an
+approved image, or bypasses human review. The ~1/3 target is an editorial
+preference, not permission to overwrite or a publication quota.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 
-DEFAULT_EXTREME_CLOSEUP_SHARE = 0.5
-CLOSEUP_SHARE_ENV = "STUDIO_EXTREME_CLOSEUP_SHARE"
+DEFAULT_EXTREME_CLOSEUP_SHARE = 1.0 / 3.0
+CLOSEUP_SHARE_ENV = "STUDIO_NEW_AI_FOCAL_DETAIL_SHARE"
 
 _CITY_EXAMPLES = {
     "chicago": (
@@ -34,11 +35,7 @@ _CITY_EXAMPLES = {
 
 
 def extreme_closeup_share(raw: str | None = None) -> float:
-    """Configured candidate-set preference (0 disables it, 1 favors all eligible).
-
-    Ignore invalid configuration rather than silently enabling an unexpected
-    extreme setting. The default is the owner's initial 50% creative target.
-    """
+    """Target proportion for NEW AI images; 0 opts out, invalid uses 1/3."""
     value = os.environ.get(CLOSEUP_SHARE_ENV, "") if raw is None else raw
     if str(value or "").strip() == "":
         return DEFAULT_EXTREME_CLOSEUP_SHARE
@@ -49,12 +46,23 @@ def extreme_closeup_share(raw: str | None = None) -> float:
     return share if math.isfinite(share) and 0 <= share <= 1 else DEFAULT_EXTREME_CLOSEUP_SHARE
 
 
-def closeup_target(count: int, share: float | None = None) -> int:
-    """Editorial guidance for candidate batches, not an auto-approval quota."""
+def _stable_eligible(creation_key: str, share: float) -> bool:
+    """Consistent 1-in-3 sampling for independently generated single images."""
+    if not creation_key:
+        return False  # no stable new-image identity: do not force an image change
+    digest = hashlib.sha256(str(creation_key).encode("utf-8")).digest()
+    fraction = int.from_bytes(digest[:8], "big") / 2**64
+    return fraction < share
+
+
+def closeup_target(count: int, share: float | None = None, *, creation_key: str = "") -> int:
+    """Approximate new AI-image prompt quota, not an exact output guarantee."""
     total = max(0, int(count))
     fraction = extreme_closeup_share() if share is None else share
     if not math.isfinite(fraction) or not 0 <= fraction <= 1:
         fraction = DEFAULT_EXTREME_CLOSEUP_SHARE
+    if total == 1:
+        return int(_stable_eligible(creation_key, fraction))
     return min(total, math.floor(total * fraction + 0.5))
 
 
@@ -68,65 +76,52 @@ def market_closeup_examples(market: str) -> str:
         return _CITY_EXAMPLES["los angeles"]
     if "miami" in name:
         return _CITY_EXAMPLES["miami"]
-    return "verified landmark details, meaningful objects, signs, textures, and seasonal activity close-ups"
+    return "verified architectural details, meaningful objects, signs, textures and local activities"
 
 
-def idea_closeup_guidance(*, market: str, candidates: int) -> str:
-    share = extreme_closeup_share()
-    if not share or candidates <= 0:
-        return ""
-    target = closeup_target(candidates, share)
-    return (
-        "\n\nEXTREME CLOSE-UP CREATIVE PRIORITY — issue #2876\n"
-        f"For this {candidates}-candidate slate, aim for approximately {target} "
-        "visually eligible ideas with a CLOSE-UP HERO opportunity (not a rigid quota). "
-        "Write a specific, shootable extreme-close-up in suggested_visuals and "
-        "required_assets when appropriate; keep their existing word limits and JSON schema. "
-        "Make one distinctive, relevant subject/detail occupy roughly 65–90% of the frame. "
-        "Think Wrigley Building clock filling the screen or a photorealistic ice-skate "
-        "boot/blade macro, not a generic skyline or wide travel postcard. "
-        f"Relevant {market or 'market'} possibilities, only when actually on-topic: "
-        f"{market_closeup_examples(market)}. "
-        "Still include establishing/context shots when necessary to identify a place "
-        "or explain a route; do not force close-ups on text-only ideas. "
-        "Do not invent real-world landmark features, promise unavailable source media, "
-        "or cross markets. Existing rights, provenance, and approval gates remain binding."
-    )
-
-
-def ai_slide_closeup_guidance(*, market: str, requested_count: int) -> str:
+def ai_slide_closeup_guidance(*, market: str, requested_count: int, creation_key: str = "") -> str:
+    """Add focal-detail ideas ONLY to prompts for new AI-generated slide images."""
     share = extreme_closeup_share()
     if not share or requested_count <= 0:
         return ""
-    target = closeup_target(requested_count, share)
+    target = closeup_target(requested_count, share, creation_key=creation_key)
+    if not target:
+        return ""
     return (
-        "\n\nAI SLIDE EXTREME CLOSE-UP DIRECTION — issue #2876\n"
-        f"Among {requested_count} AI-generated slide image prompts, aim for approximately "
-        f"{target} visually suitable extreme-close-up/macro compositions. "
-        "For those, show one highly specific, recognizable object or true landmark "
-        "detail filling about 65–90% of a photorealistic vertical 9:16 image, "
-        "with striking textures and lighting. Keep the caption overlay safe area clear; "
-        "do not render words, logos, or UI into the generated photo. "
-        f"Possible {market or 'market'} visual subjects when relevant: "
+        "\n\nNEW AI IMAGE FOCAL-DETAIL VARIETY — issue #2876\n"
+        f"Among these {requested_count} NEW AI-generated image prompts, aim for approximately "
+        f"{target} image(s) with an interesting, visibly detailed feature that would "
+        "look compelling if a creator later chose to zoom in. "
+        "For that subset, make an authentic recognizable focal element (for example "
+        "a clock face, decorative dome, skate blade, mosaic, sculpture or texture) "
+        "clear and sharp, with useful surrounding context; keep the image itself "
+        "naturally composed instead of pre-cropping to a macro shot. "
+        "Do not force every generated image into close-up framing. "
+        f"Relevant {market or 'market'} examples ONLY when on-topic: "
         f"{market_closeup_examples(market)}. "
-        "Do not replace a requested attraction with an unrelated decorative object. "
-        "If tight framing obscures the location or risks fabricated landmark geometry, "
-        "use a truthful medium/establishing composition instead. "
-        "Preserve all existing slide-count, subject, profile, and approval rules."
+        "Preserve the requested aspect ratio and safe margins; don't burn in text, "
+        "logos or UI. Do not fabricate actual landmark details or cross cities. "
+        "This applies ONLY to brand-new AI-generated images, never to creator-supplied "
+        "photos, library assets, existing rendered outputs or approved imagery. "
+        "Never replace, crop, overwrite, re-rank or modify existing media. "
+        "Preserve all existing slide counts, subject, provenance and approval rules."
     )
 
 
-def cover_closeup_guidance(*, market: str = "") -> str:
-    if not extreme_closeup_share():
+def cover_closeup_guidance(*, market: str = "", creation_key: str = "") -> str:
+    """Stable opt-in for ~1/3 of NEW AI-created covers; never change old covers."""
+    share = extreme_closeup_share()
+    if not share or not _stable_eligible(creation_key, share):
         return ""
     return (
-        "VISUAL HERO PREFERENCE (issue #2876): When it fits the named subject, "
-        "favor an extraordinary, true-to-place close-up rather than a generic wide "
-        "cityscape: a single recognizable clock, dome, skate, architectural detail, "
-        "or sign should dominate roughly 65–90% of the photo. "
-        f"Market-appropriate inspiration: {market_closeup_examples(market)}. "
-        "Keep cover lettering readable without hiding the hero subject; respect "
-        "the requested aspect ratio and existing safe margins. Do not fabricate "
-        "the landmark, invent source imagery, or override an explicit composition "
-        "requested by the creator. Use an establishing shot when context matters."
+        "NEW AI COVER FOCAL-DETAIL OPTION (issue #2876): For this brand-new image, "
+        "include one interesting, sharply rendered real-world feature with enough "
+        "natural context that a creator COULD choose a close-up in a later, separate "
+        "creative step. Do not crop or zoom the original, or make an excessive macro "
+        "the default. Relevant real local subjects: "
+        f"{market_closeup_examples(market)}. "
+        "Respect the requested aspect ratio, brand lettering and safe margins, "
+        "avoid fabricated landmark geometry and honor any explicit creator framing. "
+        "Never substitute, recrop, regenerate or overwrite an existing library "
+        "image, finished thumbnail or approved/published image merely for this style."
     )

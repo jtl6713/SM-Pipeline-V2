@@ -1,42 +1,54 @@
-"""Regression tests for the prompt-only first slice of issue #2876."""
+"""#2876: new AI-image focal detail variety; never crop/replace existing media."""
 
 from idea.prompt import build_i1_prompt
 from sai1.prompt import build_themer_prompt
 from studio_produce.closeup_direction import (
     CLOSEUP_SHARE_ENV,
+    DEFAULT_EXTREME_CLOSEUP_SHARE,
     ai_slide_closeup_guidance,
     closeup_target,
     cover_closeup_guidance,
     extreme_closeup_share,
-    idea_closeup_guidance,
     market_closeup_examples,
 )
 from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
 
 
-def test_default_is_half_of_eligible_candidate_sets(monkeypatch):
+def test_default_one_third_of_new_image_batches(monkeypatch):
     monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
-    assert extreme_closeup_share() == 0.5
+    assert abs(extreme_closeup_share() - 1 / 3) < 0.00001
+    assert DEFAULT_EXTREME_CLOSEUP_SHARE == 1 / 3
     assert closeup_target(0) == 0
-    assert closeup_target(4) == 2
-    assert closeup_target(5) == 3
-    assert closeup_target(10) == 5
+    assert closeup_target(3) == 1
+    assert closeup_target(4) == 1
+    assert closeup_target(6) == 2
+    assert closeup_target(9) == 3
+    assert closeup_target(10) == 3
 
 
-def test_setting_is_configurable_and_invalid_values_are_bounded(monkeypatch):
+def test_config_disabled_one_third_or_forced(monkeypatch):
     monkeypatch.setenv(CLOSEUP_SHARE_ENV, "0")
     assert extreme_closeup_share() == 0
-    assert idea_closeup_guidance(market="Chicago", candidates=10) == ""
-    assert ai_slide_closeup_guidance(market="Miami", requested_count=5) == ""
-    assert cover_closeup_guidance() == ""
+    assert ai_slide_closeup_guidance(market="Miami", requested_count=6, creation_key="x") == ""
+    assert cover_closeup_guidance(market="Chicago", creation_key="x") == ""
     monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
-    assert closeup_target(7) == 7
+    assert closeup_target(3) == 3
+    assert closeup_target(1, creation_key="single") == 1
+    assert "NEW AI COVER" in cover_closeup_guidance(market="Miami", creation_key="single")
     for bad in ("banana", "-1", "1.1", "NaN", "inf"):
         monkeypatch.setenv(CLOSEUP_SHARE_ENV, bad)
-        assert extreme_closeup_share() == 0.5
+        assert extreme_closeup_share() == 1 / 3
 
 
-def test_localized_examples_do_not_mix_shining_markets():
+def test_single_new_ai_creation_stable_sampling_without_global_force(monkeypatch):
+    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
+    targets = [closeup_target(1, creation_key=f"new-image-{i}") for i in range(120)]
+    assert 20 <= sum(targets) <= 60
+    assert targets == [closeup_target(1, creation_key=f"new-image-{i}") for i in range(120)]
+    assert closeup_target(1) == 0  # unidentifiable image never overrides a prior choice
+
+
+def test_local_examples_are_specific_to_each_profile():
     assert "Wrigley Building" in market_closeup_examples("Chicago")
     assert "Grand Central" in market_closeup_examples("New York City")
     assert "Griffith" in market_closeup_examples("Los Angeles")
@@ -44,89 +56,109 @@ def test_localized_examples_do_not_mix_shining_markets():
     assert "Wrigley" not in market_closeup_examples("Miami")
 
 
-def test_i1_actual_dry_run_includes_closeup_visual_brief_without_new_schema(monkeypatch):
+def test_ideas_are_not_image_generation_and_receive_no_forced_closeup(monkeypatch):
     from i1 import processor
 
     class Client:
         _settings = {}
 
         def get_record(self, table, record_id):
-            return {
-                "id": record_id,
-                "fields": {
-                    "Profile_Name": "ChicagoShining",
-                    "Market_Name": "Chicago",
-                    "Daily_Idea_Limit": 10,
-                },
-            }
+            return {"id": record_id, "fields": {
+                "Profile_Name": "ChicagoShining", "Market_Name": "Chicago",
+                "Daily_Idea_Limit": 10,
+            }}
 
     monkeypatch.setattr(processor, "AirtableClient", Client)
-    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
     result = processor.process_request(
         profile_record_id="rec" + "P" * 14,
-        requested_count=4,
-        dry_run=True,
+        requested_count=4, dry_run=True,
     )
-    assert "EXTREME CLOSE-UP CREATIVE PRIORITY" in result["prompt"]
-    assert "Wrigley Building clock" in result["prompt"]
-    assert "roughly 65–90%" in result["prompt"]
-    assert "suggested_visuals" in result["prompt"]
-    assert "Do not invent" in result["prompt"]
-    assert "no auto-approval" not in result["prompt"].lower()
+    assert "EXTREME CLOSE-UP CREATIVE PRIORITY" not in result["prompt"]
+    assert "NEW AI IMAGE FOCAL-DETAIL VARIETY" not in result["prompt"]
+    original = build_i1_prompt({"fields": {"Market_Name": "Chicago"}}, remaining_slots=1, quality="Balanced")
+    for field in ('"suggested_visuals"', '"required_assets"', '"ideas"'):
+        assert field in original
 
 
-def test_ai_slide_prompt_steers_two_of_four_eligible_slides_but_preserves_contract(monkeypatch):
+def test_ai_slide_prompt_requests_one_zoomable_detail_for_three_new_images(monkeypatch):
     monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
     prompt = build_themer_prompt(
-        title="Miami Art Deco Details",
-        covered_text="(none)",
-        needed=4,
-        total=4,
-        market="Miami",
+        title="Miami Art Deco Details", covered_text="(none)", needed=3,
+        total=3, market="Miami",
         creative_guidance={"narration_instructions": "Friendly and brief"},
     )
-    assert "approximately 2 visually suitable extreme-close-up" in prompt
+    assert "approximately 1 image(s)" in prompt
+    assert "brand-new AI-generated images" in prompt
+    assert "chose to zoom in" in prompt
+    assert "naturally composed instead of pre-cropping" in prompt
+    assert "Never replace, crop, overwrite, re-rank or modify existing media" in prompt
     assert "Vizcaya stonework" in prompt
     assert "Friendly and brief" in prompt
     assert "slides array length must be exactly the REQUESTED COUNT" in prompt
-    assert "do not render words, logos, or UI" in prompt
-    assert "Preserve all existing slide-count" in prompt
 
 
-def test_generated_cover_prefers_closeup_without_losing_ratio_or_lettering(monkeypatch):
+def test_single_slide_batch_uses_stable_per_creation_key(monkeypatch):
     monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
-    prompt = build_finished_thumbnail_prompt(
-        {"fields": {"Requested_Title": "Wrigley Building Clock"}},
+    covered = "(none)"
+    results = []
+    for idx in range(90):
+        title = f"Chicago Scene {idx}"
+        key = f"Chicago|{title}|1|{covered}"
+        prompt = build_themer_prompt(title=title, covered_text=covered,
+                                     needed=1, total=1, market="Chicago")
+        included = "NEW AI IMAGE FOCAL-DETAIL VARIETY" in prompt
+        results.append(included)
+        assert included == (closeup_target(1, creation_key=key) == 1)
+    assert 15 <= sum(results) <= 45
+
+
+def test_new_cover_prompt_one_third_not_every_cover(monkeypatch):
+    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
+    prompts = [build_finished_thumbnail_prompt(
+        {"fields": {"Requested_Title": f"Chicago Feature {i}"}},
         {"fields": {"Market_Name": "Chicago"}},
         aspect_ratio="9:16",
-    )
-    assert "single recognizable clock" in prompt
-    assert "65–90%" in prompt
-    assert "9:16 platform cover" in prompt
-    assert "safe margins" in prompt
-    assert "Do not fabricate" in prompt
+    ) for i in range(90)]
+    selected = [p for p in prompts if "NEW AI COVER FOCAL-DETAIL OPTION" in p]
+    assert 15 <= len(selected) <= 45
+    for prompt in selected:
+        assert "could choose a close-up" in prompt.lower()
+        assert "Do not crop or zoom the original" in prompt
+        assert "Never substitute, recrop, regenerate or overwrite" in prompt
+        assert "9:16 platform cover" in prompt
 
 
-def test_closeup_direction_never_overrides_explicit_creator_composition():
-    assert "Do not invent real-world landmark features" in idea_closeup_guidance(
-        market="New York", candidates=5,
-    )
-    assert "use a truthful medium/establishing composition" in ai_slide_closeup_guidance(
-        market="Chicago", requested_count=3,
-    )
-    assert "Do not fabricate" in cover_closeup_guidance(market="LA")
-    assert "override an explicit composition" in cover_closeup_guidance()
+def test_existing_finished_cover_prompt_not_rewritten_for_new_style():
+    existing = "Gold block lettering, FRAME: Exact portrait vertical 9:16 and original approved subject."
+    old = {"fields": {"Thumbnail_Prompt": existing, "Market_Name": "Chicago"}}
+    prompt = build_finished_thumbnail_prompt({}, old, aspect_ratio="9:16")
+    assert prompt == existing
 
 
-def test_short_single_idea_still_respects_original_json_schema():
-    original = build_i1_prompt({"fields": {"Market_Name": "Chicago"}}, remaining_slots=1, quality="Balanced")
-    assert '"suggested_visuals"' in original
-    assert '"required_assets"' in original
-    assert '"ideas"' in original
+def test_existing_thumb_with_url_does_not_get_new_focal_direction_even_if_prompt_is_built(monkeypatch):
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
+    parent = {"fields": {
+        "Market_Name": "Chicago", "Content_Title": "Wrigley Building Clock",
+        "Thumbnail_URL": "https://media.chicagoshining.com/studio/previews/thumbnails/old-cover.png",
+    }}
+    result = build_finished_thumbnail_prompt({}, parent, aspect_ratio="9:16")
+    assert "Create a ChicagoShining social thumbnail" in result
+    assert "NEW AI COVER FOCAL-DETAIL OPTION" not in result
 
 
-def test_cover_uses_explicit_linked_city_profile_instead_of_chicago_default(monkeypatch):
-    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
+def test_creators_explicit_framing_and_landmark_accuracy_still_take_priority(monkeypatch):
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
+    cover = cover_closeup_guidance(market="LA", creation_key="new-cover")
+    assert "honor any explicit creator framing" in cover
+    assert "Never substitute, recrop, regenerate or overwrite" in cover
+    slide = ai_slide_closeup_guidance(market="New York", requested_count=3, creation_key="new-slide")
+    assert "Do not fabricate actual landmark details" in slide
+    assert "creator-supplied" in slide
+    assert "preserve" in slide.lower()
+
+
+def test_profile_brand_from_verified_linked_market_not_generic_chicago(monkeypatch):
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
     parent = {"fields": {"Content_Title": "Ocean Drive Neon", "Content_Profile": ["rec" + "M" * 14]}}
     profile = {"fields": {"Market_Name": "Miami", "Brand_Name": "Miami Shining"}}
     prompt = build_finished_thumbnail_prompt({}, parent, profile=profile)
@@ -136,7 +168,7 @@ def test_cover_uses_explicit_linked_city_profile_instead_of_chicago_default(monk
     assert "Wrigley Building" not in prompt
 
 
-def test_cover_without_verified_profile_uses_neutral_brand_not_chicago():
+def test_missing_profile_neutral_brand_no_inferred_chicago():
     prompt = build_finished_thumbnail_prompt(
         {"fields": {"Requested_Title": "An Unknown Location"}},
         {"fields": {}},
@@ -145,7 +177,7 @@ def test_cover_without_verified_profile_uses_neutral_brand_not_chicago():
     assert "ChicagoShining" not in prompt
 
 
-def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
+def test_cover_runner_uses_linked_content_profile(monkeypatch):
     from studio_produce import thumbnail
 
     class FakeClient:
@@ -155,6 +187,7 @@ def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
             return {"fields": {"Market_Name": "New York City", "Brand_Name": "New York Shining"}}
 
     received = {}
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
     monkeypatch.setattr(thumbnail, "load_profile_creative_guidance", lambda *a: {})
     monkeypatch.setattr(thumbnail, "generate_thumbnail_png",
                         lambda prompt, aspect_ratio: received.update(prompt=prompt, ratio=aspect_ratio) or b"png")
@@ -162,10 +195,9 @@ def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
     monkeypatch.setattr(thumbnail, "apply_watermark_bytes",
                         lambda raw, watermark, output_format: raw)
     result, prompt = thumbnail._generate_cover_bytes(
-        FakeClient(),
-        {"fields": {}},
-        {"fields": {"Content_Title": "Grand Central Clock", "Content_Profile": ["rec" + "N" * 14]}},
-        aspect_ratio="9:16",
+        FakeClient(), {"fields": {}},
+        {"fields": {"Content_Title": "Grand Central Clock",
+                    "Content_Profile": ["rec" + "N" * 14]}}, aspect_ratio="9:16",
     )
     assert result == b"png"
     assert "New York Shining" in prompt
@@ -174,7 +206,7 @@ def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
     assert received["ratio"] == "9:16"
 
 
-def test_classified_closeup_library_assets_are_suggested_first_without_auto_approval():
+def test_existing_library_asset_order_remains_unchanged_even_for_macro_ideas():
     from i1.asset_sourcing import idea_sourcing_fields
 
     assets = [
@@ -184,64 +216,22 @@ def test_classified_closeup_library_assets_are_suggested_first_without_auto_appr
         {"id": "rec" + "F" * 14, "key": "centralpark", "shot_type": "Close-up"},
     ]
     ctx = {"mode": "existing", "available": True, "assets": assets}
-    macro_idea = {
-        "primary_location": "Vizcaya Museum and Gardens",
-        "suggested_visuals": "Extreme close-up of historic stonework",
-        "required_assets": "Macro stone detail",
-    }
-    fields = idea_sourcing_fields(macro_idea, ctx)
-    assert fields["Suggested_Library_Asset_IDs"] == [
-        "rec" + "D" * 14, "rec" + "M" * 14, "rec" + "W" * 14,
-    ]
-    assert fields["Verified_Library_Asset_IDs"] == []
-    assert "rec" + "F" * 14 not in fields["Suggested_Library_Asset_IDs"]
-
-    ordinary = idea_sourcing_fields({
-        "primary_location": "Vizcaya Museum and Gardens",
-        "suggested_visuals": "Wide garden and building overview",
-    }, ctx)
-    assert ordinary["Suggested_Library_Asset_IDs"] == [
-        "rec" + "W" * 14, "rec" + "D" * 14, "rec" + "M" * 14,
-    ]
+    for requested_visual in ("Extreme close-up of stonework", "Wide garden and building overview"):
+        fields = idea_sourcing_fields({
+            "primary_location": "Vizcaya Museum and Gardens",
+            "suggested_visuals": requested_visual,
+        }, ctx)
+        assert fields["Suggested_Library_Asset_IDs"] == [
+            "rec" + "W" * 14, "rec" + "D" * 14, "rec" + "M" * 14,
+        ]
+        assert fields["Verified_Library_Asset_IDs"] == []
 
 
-def test_explicit_macro_intent_only_and_classifier_required():
-    from i1.asset_sourcing import _asks_for_closeup, _classified_closeup
-
-    assert _asks_for_closeup({"suggested_visuals": "Macro clock face"}) is True
-    assert _asks_for_closeup({"required_assets": "Tightly framed skating blade"}) is True
-    assert _asks_for_closeup({"candidate_title": "Ice Skate Closeup"}) is True
-    assert _asks_for_closeup({"suggested_visuals": "Building architectural details"}) is False
-    assert _classified_closeup({"shot_type": "Detail"}) is True
-    assert _classified_closeup({"shot_type": "Close-up"}) is True
-    assert _classified_closeup({"shot_type": "Wide"}) is False
-    assert _classified_closeup({"asset_name": "closeup.jpg"}) is False
-
-
-def test_actual_supabase_source_metadata_drives_only_advisory_shot_type(monkeypatch):
-    from i1 import asset_sourcing as sourcing
-
-    profile_id = "rec" + "M" * 14
-    media = {
-        "airtable_record_id": "rec" + "X" * 14,
-        "asset_name": "Vizcaya-Detail.jpg",
-        "asset_role": "Raw Photo",
-        "media_class": "Image",
-        "asset_status": "Available",
-        "active": True,
-        "do_not_use": False,
-        "google_drive_file_id": "drive-verified",
-        "metadata": {
-            "location": "Vizcaya Museum and Gardens, Miami",
-            "content_profile_airtable_id": profile_id,
-            "rights_status": "Owned",
-            "classification_status": "Classified",
-            "shot_type": "Close-up",
-        },
-    }
-    monkeypatch.setattr(sourcing, "_request",
-                        lambda settings, path: [media] if "asset_role=eq.Raw%20Photo" in path else [])
-    assets = sourcing._read_source_media({"mock": True}, profile_id)
-    assert len(assets) == 1
-    assert assets[0]["shot_type"] == "Close-up"
-    assert assets[0]["id"] == media["airtable_record_id"]
+def test_no_automatic_media_crop_or_approval_in_new_direction_module():
+    from pathlib import Path
+    import studio_produce.closeup_direction as direction
+    code = Path(direction.__file__).read_text(encoding="utf-8")
+    assert "requests.post(" not in code
+    assert "update_record(" not in code
+    assert "idea_closeup_guidance(" not in code
+    assert "only to brand-new ai-generated images" in code.lower()
