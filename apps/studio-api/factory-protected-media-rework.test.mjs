@@ -195,7 +195,7 @@ test("Factory source always uses independent exact Supabase rework query and no 
   assert.match(source, /matchesOpsQueueReviewFormula\(row\.fields\) \|\| protectedMediaReworkShapedRecord\(row\)/);
   assert.match(worker, /const mediaRework = protectedMediaReworkSummary\(record\)/);
   assert.match(worker, /protected_media_rework: Boolean\(mediaRework\)/);
-  assert.ok(worker.includes("review_package_ready: (mediaRework || metaRepair || candidateGalleryReview) ? false : reviewVisibility.visible"));
+  assert.match(worker, /review_package_ready: \(mediaRework \|\| metaRepair \|\| (?:creativeQa \|\| )?candidateGalleryReview\) \? false : reviewVisibility\.visible/);;
   assert.match(client, /if \(card\?\.protected_media_rework === true \|\| card\?\.meta_repair_required === true\) return false;/);
   assert.match(client, /Creative repair:/);
   assert.match(client, /if \(card\.protected_media_rework === true\) \{/);
