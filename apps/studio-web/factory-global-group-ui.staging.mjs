@@ -64,7 +64,7 @@ function rebuild(phase) {
 const server=createServer(async(req,res)=>{
   const url=new URL(req.url,"http://localhost");
   if(url.pathname==="/"){
-    const body='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+    const body='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
       +css+styles+'</head><body>'
       +'<select id="studioProfileSelect"><option value="'+chicago+'">Chicago</option><option value="'+nyc+'">New York</option></select>'
       +section+'<script src="/assets/factory-desk.js"></script></body></html>';
