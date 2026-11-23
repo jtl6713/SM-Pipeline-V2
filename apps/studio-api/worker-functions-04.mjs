@@ -12170,6 +12170,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platform_post_url: f(record, "Platform_Post_URL") || null,
       thumbnail_url: mapped.thumbnail_url || mediaReworkThumbnail || null,
       final_file_url: mapped.final_file_url || null,
+      // Canonical R5 public MP4 must be available to the Factory card's
+      // strict same-output fallback validator, not just the Pipeline page.
+      studio_preview_url: f(record, "Studio_Preview_URL") || null,
       render_queue_position: mapped.render_queue_position,
       render_queue_total: mapped.render_queue_total || renderQueueTotal,
       render_queue_label: mapped.render_queue_label,

@@ -13,6 +13,7 @@ import {
   classifyFactoryLane,
   emptyFactoryDeskControls,
   factoryCardFromRow,
+  factorySavedR5PublicPreview,
   normalizeFactoryDeskControls,
   partitionFactoryLanes,
   pinFactoryNeedsAssets,
@@ -562,4 +563,39 @@ test("held but unreviewed RFR media enters Needs Eyes with explicit release opti
   assert.match(server, /Auto_Publish_Enabled: false/);
   assert.match(server, /requireAnyPermission\(authorization, \["publishing_control", "tenant_admin"\]\)/);
   assert.match(server, /refresh_required: true/);
+});
+
+
+test("Factory supplies only exact same-output R5 MP4 fallback, never a private revision or gallery cover", () => {
+  const id = "rec94S2G7FU5HdExh";
+  const mp4 = "https://media.chicagoshining.com/studio/previews/rec94S2G7FU5HdExh/jobs/job-20261122225847-a3db3877.mp4";
+  const row = {
+    id, kind: "output", output_number: 11153, output_status: "Ready for Review",
+    render_status: "Rendered", review_hold_active: false, do_not_publish: true,
+    auto_publish_enabled: false, studio_preview_url: mp4,
+  };
+  assert.equal(factorySavedR5PublicPreview(row), mp4);
+  const card = factoryCardFromRow(row);
+  assert.equal(card.public_preview_url, mp4);
+  assert.equal(card.preview_url, `/api/factory/outputs/${id}/preview`);
+  // A single failed proxy may fall back only to that exact saved public R5
+  // object. Never to another output, off-host path, a URL with query, or HTML.
+  for (const url of [
+    "https://evil.example/studio/previews/rec94S2G7FU5HdExh/jobs/job-20261122225847-a3db3877.mp4",
+    mp4.replace(id, "recpWHfw74GxcybAA"),
+    mp4 + "?token=unsafe",
+    mp4.replace(".mp4", ".jpg"),
+    mp4.replace("/jobs/job-", "/job-"),
+    mp4.replace("https:", "http:"),
+  ]) assert.equal(factorySavedR5PublicPreview({ ...row, studio_preview_url: url }), null);
+  for (const changes of [
+    { kind: "request" }, { output_status: "In Production" },
+    { render_status: "Rendering" }, { review_hold_active: true },
+    { protected_media_rework: true }, { meta_repair_required: true },
+  ]) assert.equal(factorySavedR5PublicPreview({ ...row, ...changes }), null);
+});
+
+test("Factory ops queue actually carries the exact saved R5 preview URL into card construction", async () => {
+  const worker = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  assert.match(worker, /studio_preview_url: f\(record, "Studio_Preview_URL"\) \|\| null/);
 });

@@ -321,6 +321,34 @@ export function classifyFactoryLane(row) {
   return null;
 }
 
+/**
+ * A saved R5 Studio preview may be played directly when the authenticated
+ * Factory proxy fails (e.g. native <video> cannot pass Studio auth headers).
+ * Only an exact same-output public MP4 is allowed; never fall back to a
+ * private revised attempt, off-host URL, or a gallery cover.
+ */
+export function factorySavedR5PublicPreview(row = {}) {
+  const id = String(row.id || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)
+    || row.kind !== "output"
+    || row.protected_media_rework === true
+    || row.meta_repair_required === true
+    || row.review_hold_active === true
+    || String(row.render_status || "") !== "Rendered"
+    || String(row.output_status || "") !== "Ready for Review") return null;
+  try {
+    const source = new URL(String(row.studio_preview_url || ""));
+    if (source.protocol !== "https:"
+      || source.hostname !== "media.chicagoshining.com"
+      || source.port || source.username || source.password
+      || source.search || source.hash) return null;
+    const prefix = `/studio/previews/${id}/jobs/`;
+    if (!source.pathname.startsWith(prefix)) return null;
+    const file = source.pathname.slice(prefix.length);
+    return /^[A-Za-z0-9_-]{8,140}\.mp4$/.test(file) ? source.href : null;
+  } catch { return null; }
+}
+
 export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
   const kind = row.kind || "request";
   const finalFileUrl = String(row.final_file_url || "").trim() || null;
@@ -408,6 +436,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     final_file_url: finalFileUrl,
     thumbnail_url: thumbnailUrl,
     preview_url: previewPath,
+    public_preview_url: factorySavedR5PublicPreview(row),
     can_preview: Boolean(previewPath && (finalFileUrl || thumbnailUrl || /ready for review/i.test(String(row.studio_state || "")))),
   };
 }
