@@ -799,6 +799,10 @@
     const thumb = String(card.thumbnail_url || "").trim();
     const previewUrl = String(card.preview_url || "").trim()
       || (/^rec[A-Za-z0-9]+$/.test(String(card.id || "")) ? `/api/outputs/${card.id}/preview` : "");
+    // Server has already verified an exact-output R5 media.chicagoshining.com
+    // MP4. Only use this if the authenticated Factory proxy cannot play.
+    const publicPreviewUrl = String(card.public_preview_url || "").trim();
+    let triedSavedR5 = false;
     const imageOnly = looksLikeImageOnly(card);
 
     // A recovery-marked, publishing-held gallery is NOT a video preview.
@@ -863,6 +867,23 @@
     dialog.classList.remove("is-image");
     if (thumb) video.setAttribute("poster", thumb);
     video.onerror = () => {
+      if (galleryEpoch !== factoryGalleryPreviewEpoch || backdrop.hidden) return;
+      // Native <video> cannot attach the API client's authenticated headers.
+      // A proxy failure must not strand an otherwise valid saved R5 MP4.
+      // One guarded fallback only: never invent a render or loop forever.
+      if (!triedSavedR5 && publicPreviewUrl && publicPreviewUrl !== previewUrl) {
+        triedSavedR5 = true;
+        video.pause();
+        video.src = publicPreviewUrl;
+        video.hidden = false;
+        empty.hidden = true;
+        video.load();
+        setStatus(`Factory stream unavailable; trying saved Studio MP4 · ${cardLabel(card)}`, true);
+        video.play?.().catch(() => {
+          if (!video.error) setStatus(`Saved MP4 ready · tap Play · ${cardLabel(card)}`);
+        });
+        return;
+      }
       // A failed video is not a successful still render. Never silently
       // replace the movie with its cover image (Output 3129).
       video.pause();
@@ -872,9 +893,9 @@
       empty.textContent = "Video playback failed — this cover is not the finished render. Open the output in Pipeline or its original video file to review the scenes.";
       setStatus(`Video preview failed for ${cardLabel(card)} — not a single-image render.`, true);
     };
-    video.onplaying = () => setStatus(`Playing video · ${cardLabel(card)}`);
+    video.onplaying = () => setStatus(`${triedSavedR5 ? "Playing saved original Studio MP4" : "Playing video"} · ${cardLabel(card)}`);
     video.onloadedmetadata = () => {
-      if (video.paused) setStatus(`Video ready · tap Play to review all scenes of ${cardLabel(card)}`);
+      if (video.paused) setStatus(`${triedSavedR5 ? "Saved original Studio MP4" : "Video"} ready · tap Play to review all scenes of ${cardLabel(card)}`);
     };
     video.controls = true;
     video.src = previewUrl;
