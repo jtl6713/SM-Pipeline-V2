@@ -27,6 +27,17 @@ on:
       - 'services/pipeline-runner/c9/processor.py'
       - 'services/pipeline-runner/tests/test_ap1c_unstaged_asset_2374.py'
       - 'services/pipeline-runner/tests/test_c8_c9_gallery_identity_2374.py'
+      # Incident #2670 staged consumer recovery: exact held galleries and
+      # Supabase-only Rendering Review queue under the workload governor.
+      - 'services/pipeline-runner/config.py'
+      - 'services/pipeline-runner/rendering_review/auto_dispatch.py'
+      - 'services/pipeline-runner/supabase_pipeline.py'
+      - 'services/pipeline-runner/supabase_reads.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_auto_dispatch.py'
+      - 'services/pipeline-runner/tests/test_2670_native_gallery_prep_contract.py'
+      - 'services/pipeline-runner/tests/test_2670_review_supabase_store.py'
+      - 'repair/scripts/incident-2670-native-gallery-prep.py'
+      - '.github/workflows/incident-2670-native-gallery-review-restore.yml'
 
 permissions:
   contents: read
@@ -133,6 +144,10 @@ jobs:
             services/pipeline-runner/tests/test_native_gallery_readiness_http.py \
             services/pipeline-runner/tests/test_native_gallery_auto_execute.py \
             services/pipeline-runner/tests/test_native_gallery_execute_http.py
+          PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_rendering_review_auto_dispatch.py \
+            services/pipeline-runner/tests/test_2670_native_gallery_prep_contract.py \
+            services/pipeline-runner/tests/test_2670_review_supabase_store.py
 
       - name: Fail closed unless runner is Supabase-only and Airtable archive is idle
         shell: bash
