@@ -13396,6 +13396,35 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     if (action === "approve") {
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
       requirePermission(authorization, "outputs_review");
+      // #2371: The historic one-click Factory Desk writer uses the retired
+      // Airtable approval path. These exact two corrected NYC native outputs
+      // must instead enter the SAME guarded Supabase R2 group/claim workflow
+      // as Submit Approvals, with the new authenticated submitter and timestamp.
+      // Do not call a legacy output writer or sidestep independent slide QA.
+      if ((id === "recO494MDnQ1Tk51b" || id === "recWIWOrdflmqyxKW")
+          && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        if (!/^rec[A-Za-z0-9]{14}$/.test(String(authorization?.user?.record_id || ""))) {
+          throw new HttpError(403, "Current authenticated Factory user is required for final gallery approval");
+        }
+        const resultResponse = await factoryBatchGroupSubmitRoute(
+          request, env, authorization, {
+            action: "start_group",
+            request_id: "factory-single-nyc-" + crypto.randomUUID(),
+            record_ids: [id],
+            notes: note || "Owner Factory Approve for four exact verified NYC gallery slides",
+          }, ctx,
+        );
+        const receipt = await resultResponse.json();
+        if (receipt?.accepted !== true) {
+          throw new HttpError(409, "Factory governed approval was not accepted; no direct approval performed");
+        }
+        return respond(request, env, {
+          ok: true, page: "factory-desk", action: "approve",
+          result: { id, approval_submitted: true, ...receipt },
+          message: "Governed approval submitted for corrected NYC gallery. Check Factory Activity for the actual verified result.",
+          refresh_required: true,
+        });
+      }
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
     } else if (action === "approve_held_review" || action === "reject_held_review") {
       if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
