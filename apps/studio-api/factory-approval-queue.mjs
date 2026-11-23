@@ -110,7 +110,7 @@ export function factoryBatchSummary(job) {
     })),
   };
 }
-export function factoryBatchBuild({ profileId, requestId, records, note = "", groupRequestId = null, now = new Date().toISOString() }) {
+export function factoryBatchBuild({ profileId, requestId, records, note = "", groupRequestId = null, submittedBy = null, now = new Date().toISOString() }) {
   factoryBatchKey(profileId, requestId);
   if (groupRequestId !== null && !/^[A-Za-z0-9_-]{12,128}$/.test(String(groupRequestId))) throw Error("Invalid parent group request ID");
   if (!Array.isArray(records) || !records.length || records.length > 100) throw Error("Select 1–100 output records");
@@ -132,7 +132,11 @@ export function factoryBatchBuild({ profileId, requestId, records, note = "", gr
   }
   return {
     schema: "studio.factory-batch.2", id: "fb_" + requestId, request_id: requestId,
-    profile_id: profileId, group_request_id: groupRequestId, status: "queued", created_at: now, updated_at: now,
+    profile_id: profileId, group_request_id: groupRequestId,
+    // Bound to the authenticated HTTP submitter, never a browser-provided name.
+    // Old queued batches remain null rather than acquiring a fabricated actor.
+    submitted_by: /^rec[A-Za-z0-9]{14}$/.test(String(submittedBy || "")) ? submittedBy : null,
+    status: "queued", created_at: now, updated_at: now,
     notes: String(note || "").slice(0, 3000), items,
   };
 }
