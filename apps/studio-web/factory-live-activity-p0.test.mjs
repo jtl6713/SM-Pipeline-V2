@@ -91,6 +91,8 @@ test("status path isolates partial failures and never submits again", () => {
     source.indexOf("async function refreshFactoryCompletedBatches("));
   assert.match(polling, /Promise\.allSettled\(fastGroups/);
   assert.match(polling, /outcomes\.filter\(row => row\.status === "fulfilled"\)/);
+  assert.match(polling, /if \(\(factoryProfileId\(\) \|\| null\) === filterId\)/,
+    "All Profiles must repaint successful exact GETs immediately (empty filter is null)");
   assert.match(polling, /batchActivityPartialError/);
   assert.match(polling, /if \(state\.batchRefreshRequested\)/);
   assert.match(polling, /discoveryAge >= 60000/);
