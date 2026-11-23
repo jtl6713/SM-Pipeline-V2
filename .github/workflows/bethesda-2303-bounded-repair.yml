@@ -71,7 +71,7 @@ jobs:
               except subprocess.TimeoutExpired:
                   raise RuntimeError('ops_network_timeout')
               if result.returncode!=0: raise RuntimeError('ops_transport_error')
-              raw,code=result.stdout.rsplit('\\n',1)
+              raw,code=result.stdout.rsplit('\n',1)
               return int(code),json.loads(raw)
           for candidate in (os.environ.get('OPS_TOKEN_A'),os.environ.get('OPS_TOKEN_B'),os.environ.get('OPS_TOKEN_C')):
               if not candidate: continue
