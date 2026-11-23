@@ -64,6 +64,7 @@
     batchRefreshRequested: false,
     submissionPreview: null,
     batchDiscoveryLoading: false,
+    batchDiscoveryStartedMs: Date.now(),
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -1396,11 +1397,21 @@
   function factoryBatchMergeDiscoveredActivity(previous, fetched) {
     if (!Array.isArray(fetched?.batches) || fetched?.view !== "active" ||
         previous?.filter_profile_id !== fetched.filter_profile_id) return fetched;
-    const known = new Set(fetched.batches.map(row => String(row.request_id || row.job_id || "")));
+    const prior = new Map((previous.batches || []).map(row =>
+      [String(row.request_id || row.job_id || ""), row]));
+    // A full discovery can finish after a newer exact receipt. Never regress
+    // processed counts to an older R2 listing.
+    const rows = fetched.batches.map(row => {
+      const old = prior.get(String(row.request_id || row.job_id || ""));
+      const done = value => Number(value?.done_count ??
+        (Number(value?.total || 0) - Number(value?.pending_count || 0)));
+      return old && done(old) > done(row) ? old : row;
+    });
+    const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
       row?.group && row?.request_id && factoryBatchActiveRow(row) &&
       !known.has(String(row.request_id)));
-    return factoryBatchRecountActive(fetched, [...fetched.batches, ...pending]);
+    return factoryBatchRecountActive(fetched, [...rows, ...pending]);
   }
 
 
@@ -2068,8 +2079,12 @@
     const byId = new Map(refreshed.map(row => [row.request_id, row]));
     const prior = previous?.batches || [];
     const known = new Set(prior.map(row => row.request_id));
-    const batches = [...prior.map(row => byId.get(row.request_id) || row),
-      ...refreshed.filter(row => !known.has(row.request_id))];
+    const done = row => Number(row?.done_count ??
+      (Number(row?.total || 0) - Number(row?.pending_count || 0)));
+    const batches = [...prior.map(row => {
+      const incoming = byId.get(row.request_id);
+      return incoming && done(incoming) >= done(row) ? incoming : row;
+    }), ...refreshed.filter(row => !known.has(row.request_id))];
     // Show the exact verified terminal completion once before the next
     // full Active discovery removes it. Otherwise the user never sees 4/4.
     // Clean terminal groups are not polled again and move to Completed history.
@@ -2094,7 +2109,8 @@
   }
 
   function factoryBatchPreferExactProgress(groupCount, lastFullFetchMs, now, force) {
-    return groupCount > 0 && (force || !lastFullFetchMs || now - lastFullFetchMs < 18000);
+    // Known original requests take priority over expensive historical scans.
+    return groupCount > 0;
   }
 
   // Slow global R2 history discovery must never suppress already-known exact
@@ -2150,7 +2166,7 @@
       const preferExact = factoryBatchPreferExactProgress(fastGroups.length,
         state.lastBatchFullFetchMs, now, force);
       const readExact = async () => {
-        const updates = await Promise.all(fastGroups.map(async row => {
+        const outcomes = await Promise.allSettled(fastGroups.map(async row => {
           const exactParams = new URLSearchParams({
             scope: "all", request_id: row.request_id, fresh: String(now),
           });
@@ -2163,6 +2179,14 @@
           }
           return value.batches[0];
         }));
+        const updates = outcomes.filter(row => row.status === "fulfilled").map(row => row.value);
+        const missing = outcomes.length - updates.length;
+        state.batchActivityPartialError = missing
+          ? String(missing) + " batch status request(s) delayed" : "";
+        if (!updates.length) {
+          throw outcomes.find(row => row.status === "rejected")?.reason ||
+            new Error("Factory activity status is temporarily unavailable");
+        }
         // Only a verified terminal clean group is forgotten. Failed groups
         // remain visible for explicit exception handling.
         forgetFactoryGroupRequests(updates.filter(row => row.status === "completed" &&
@@ -2183,6 +2207,7 @@
       const fetched = await factoryBatchPollWithFallback({
         preferExact, hasKnownGroups: fastGroups.length > 0, readExact, readFull,
       });
+      if (!fastGroups.length) state.batchActivityPartialError = "";
       if (fetched?.ok === false || !Array.isArray(fetched?.batches)) {
         throw new Error("Approval activity response was incomplete");
       }
@@ -2215,6 +2240,21 @@
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       reconcilePersistedFactoryPending().catch(() => {});
+      // At most one slower discovery every 60 seconds, separate from exact
+      // status reads. It must not block the current submission's updates.
+      const discoveryAge = now - (state.lastBatchFullFetchMs || state.batchDiscoveryStartedMs);
+      if (fastGroups.length && discoveryAge >= 60000 && !state.batchDiscoveryLoading) {
+        state.batchDiscoveryLoading = true;
+        const discoveryProfile = params.get("factory_profile") || "";
+        readFull().then(discovered => {
+          if (factoryProfileId() !== discoveryProfile) return;
+          const rebased = factoryBatchMergeDiscoveredActivity(state.batch, discovered);
+          renderFactoryBatchActivity(rebased);
+          document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: rebased }));
+        }).catch(() => {
+          // Historical discovery failure is not a failed exact status read.
+        }).finally(() => { state.batchDiscoveryLoading = false; });
+      }
       // The API intentionally omits completed jobs from the active feed.
       // When a running batch disappears, refresh the authoritative Desk once,
       // without fetching terminal batch history or leaving stale Needs Eyes rows.
