@@ -49,6 +49,8 @@ jobs:
           import json
           from pathlib import Path
           command=r'''$ErrorActionPreference='Stop'
+          $phase='read_env'
+          trap { Write-Output ('incident2670_failure_phase='+$phase); exit 1 }
           $envFile='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
           if (-not (Test-Path -LiteralPath $envFile)) {throw 'runner_env_missing'}
           $lines=@(Get-Content -LiteralPath $envFile)
@@ -58,15 +60,21 @@ jobs:
           if ($secret.Length -lt 24) {throw 'runner_secret_invalid'}
           $header=@{'X-Pipeline-Secret'=$secret}
           $root='http://127.0.0.1:3350'
+          $phase='governor_get'
           $g=Invoke-RestMethod -Uri "$root/admin/workload" -Headers $header -TimeoutSec 15
+          $phase='review_get'
           $r=Invoke-RestMethod -Uri "$root/jobs/rendering-review/dispatch-health" -Headers $header -TimeoutSec 15
+          $phase='gallery_get'
           $n=Invoke-RestMethod -Uri "$root/jobs/native-gallery/dispatch-health" -Headers $header -TimeoutSec 15
+          $phase='readback_validation'
           if ($g.ok -ne $true -or $g.enabled -ne $true -or $r.ok -ne $true -or $n.ok -ne $true) {throw 'consumer_or_governor_readback_invalid'}
+          $phase='outbox_validation'
           $outbox=@($lines | Where-Object {$_ -match '^\s*STUDIO_SIDE_EFFECT_OUTBOX_ENABLED\s*='})
           if ($outbox.Count -gt 1) {throw 'outbox_config_ambiguous'}
           $outboxOn=$false
           if ($outbox.Count -eq 1) {$outboxOn=(([string]($outbox[0] -split '=',2)[1]).Trim().Trim('"').ToLower()) -in @('true','yes','1'))}
           if ($outboxOn) {throw 'optional_outbox_must_remain_disabled'}
+          $phase='summary_serialization'
           $summary=[ordered]@{
             enabled=[bool]$g.enabled; scope=[string]$g.scope
             max_jobs=[int]$g.max_jobs; active_jobs=[int]$g.active_jobs
@@ -108,7 +116,12 @@ jobs:
               exit 0
             fi
             if [[ "$state" == failed ]]; then
-              echo 'incident2670_ops_readonly_probe=FAILED_NO_MUTATION'
+              # Only our static phase names are safe to report from remote logs.
+              phase=$(jq -r '.job.log // ""' /tmp/status.json |
+                grep -oE 'incident2670_failure_phase=(read_env|governor_get|review_get|gallery_get|readback_validation|outbox_validation|summary_serialization)' |
+                tail -1 || true)
+              echo "incident2670_ops_readonly_probe=FAILED_NO_MUTATION"
+              echo "incident2670_readonly_failure_phase=${phase:-unclassified}"
               exit 1
             fi
             sleep 3
