@@ -55,17 +55,24 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, time, urllib.error, urllib.request
+          import json, os, time, subprocess
           from pathlib import Path
           base='https://ops.chicagoshining.com'
           token=None
           def request(method,path,bearer,payload=None,timeout=25):
-              raw=None if payload is None else json.dumps(payload).encode('utf-8')
-              headers={'Authorization':'Bearer '+bearer}
-              if raw is not None: headers['Content-Type']='application/json'
-              req=urllib.request.Request(base+path,data=raw,headers=headers,method=method)
-              with urllib.request.urlopen(req,timeout=timeout) as resp:
-                  return resp.status,json.load(resp)
+              args=['curl','-sS','--retry','0','--connect-timeout','12','--max-time',str(timeout),'-w','\\n%{http_code}','-H','Authorization: Bearer '+bearer]
+              data=None
+              if payload is not None:
+                  data=json.dumps(payload)
+                  args+=['-X',method,'-H','Content-Type: application/json','--data-binary','@-']
+              args.append(base+path)
+              try:
+                  result=subprocess.run(args,input=data,text=True,capture_output=True,timeout=timeout+5)
+              except subprocess.TimeoutExpired:
+                  raise RuntimeError('ops_network_timeout')
+              if result.returncode!=0: raise RuntimeError('ops_transport_error')
+              raw,code=result.stdout.rsplit('\n',1)
+              return int(code),json.loads(raw)
           for candidate in (os.environ.get('OPS_TOKEN_A'),os.environ.get('OPS_TOKEN_B'),os.environ.get('OPS_TOKEN_C')):
               if not candidate: continue
               try:
@@ -84,12 +91,10 @@ jobs:
                   if reel not in (11153,11154) or code.count('__REEL__')!=1: raise SystemExit('reel_parameter_invalid')
                   code=code.replace('__REEL__',str(reel))
               if len(code)>8000: raise SystemExit('ops_shell_command_above_published_limit')
-              try:
-                  status,body=request('POST','/api/shell',token,{'command':code,'confirm':True},timeout=35)
-              except urllib.error.HTTPError as err:
-                  print(f'bethesda_ops_not_admitted_http={err.code};no_auto_retry=true',flush=True)
+              status,body=request('POST','/api/shell',token,{'command':code,'confirm':True},timeout=35)
+              if status!=202 or not body.get('ok'):
+                  print(f'bethesda_ops_not_admitted_http={status};no_auto_retry=true',flush=True)
                   raise SystemExit(1)
-              if status!=202 or not body.get('ok'): raise SystemExit('ops_job_not_admitted')
               jobid=(body.get('job') or {}).get('id')
               if not jobid: raise SystemExit('ops_receipt_missing')
               print(f'bethesda_ops_stage={file};reel={reel or "all"};job={jobid}',flush=True)
