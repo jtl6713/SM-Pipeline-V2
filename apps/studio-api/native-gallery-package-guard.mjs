@@ -190,13 +190,19 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
  * stays RFR and the unmodified publication gate still requires 4/4.
  */
 export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
-  requestId, approvedByUserRecordId,
+  requestId, approvedByUserRecordId, submittedAt,
 } = {}) {
   const proof = await preflightNycOwnerGalleryApproval(env, output);
   if (!proof || !proof.pending) return proof;
+  // A historic Failed/accepted batch must never silently consent to NEW
+  // corrected slides. Require the Factory request itself to postdate the
+  // explicit owner hold release recorded on the canonical output.
   if (!USER_RECORD.test(String(approvedByUserRecordId || ""))
-      || !/^[A-Za-z0-9_-]{8,128}$/.test(String(requestId || ""))) {
-    throw Error("Native gallery final approval requires a new authenticated Factory submitter and request");
+      || !/^[A-Za-z0-9_-]{8,128}$/.test(String(requestId || ""))
+      || !Number.isFinite(Date.parse(String(submittedAt || "")))
+      || !Number.isFinite(Date.parse(String(output.publish_hold_released_at || "")))
+      || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)) {
+    throw Error("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
   }
   const now = new Date().toISOString();
   for (const slide of proof.slides) {
