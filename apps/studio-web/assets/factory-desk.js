@@ -1388,7 +1388,7 @@
   // committed those approvals. Accumulate identity-unique original groups.
   function factoryBatchMergeAcceptedActivity(previous, accepted) {
     const envelope = factoryBatchActivityEnvelope(accepted);
-    if (!accepted?.group || !Array.isArray(envelope?.batches)) return envelope;
+    if (!accepted?.job_id || !Array.isArray(envelope?.batches)) return envelope;
     const prior = previous?.filter_profile_id === envelope.filter_profile_id
       ? (previous.batches || []) : [];
     const rows = [accepted, ...prior.filter(row =>
@@ -1413,7 +1413,7 @@
     });
     const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
-      row?.group && row?.request_id && factoryBatchActiveRow(row) &&
+      row?.request_id && (row.group || row.profile_id) && factoryBatchActiveRow(row) &&
       !known.has(String(row.request_id)));
     return factoryBatchRecountActive(fetched, [...rows, ...pending]);
   }
@@ -2545,7 +2545,7 @@
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
       state.inspectedBatchKey = batch.job_id;
-      renderFactoryBatchActivity(batch);
+      renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
       refreshFactoryBatchActivity(true).catch(() => {});
       setStatus(`Batch accepted for ${ready.length} outputs. Server processing continues after leaving Factory.`);
       // Never wait for all approvals in the click handler.
