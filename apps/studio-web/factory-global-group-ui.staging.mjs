@@ -150,13 +150,29 @@ try{
   assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/4 outputs selected/);
   await page.locator("#factoryProfileFilter").selectOption("");
   await page.locator("#factoryBatchSubmit").click();
-  // Submission preview must be visible while the server response is still held.
-  await page.waitForFunction(() => document.querySelector("#factoryBatchSummary")
-    ?.textContent.includes("4 selected output(s) awaiting server acceptance"));
+  // The first state may be a local unconfirmed preview OR a server-confirmed
+  // status discovered by GET before the held POST response returns. Both are
+  // correct; never require the transient "Submitting" label to remain visible.
+  try {
+    await page.waitForFunction(() => {
+      const overall=document.querySelector("#factoryBatchOverallProgress");
+      const summary=document.querySelector("#factoryBatchSummary");
+      const items=document.querySelectorAll("#factoryBatchDetails .factory-batch-item-list > li");
+      return overall?.textContent.includes("0 of 4 processed") &&
+        summary?.textContent.includes("4 pending") && items.length===4;
+    },null,{timeout:8000});
+  } catch (error) {
+    console.error("FACTORY_PRE_ACK_DIAGNOSTIC",JSON.stringify({
+      summary:await page.locator("#factoryBatchSummary").textContent(),
+      overall:await page.locator("#factoryBatchOverallProgress").textContent().catch(()=>null),
+      details:await page.locator("#factoryBatchDetails").textContent().catch(()=>null),
+      status:await page.locator("#factoryDeskStatus").textContent(),
+      started, errors,
+    }));
+    throw error;
+  }
   assert.match(await page.locator("#factoryBatchOverallProgress").innerText(),
     /0 of 4 processed · 0%/);
-  assert.equal(await page.locator("#factoryBatchDetails .factory-batch-item-list > li").count(),4);
-  assert.match(await page.locator(".factory-batch-recent-row").first().innerText(),/Submitting/);
   assert.ok(started<=1,"no duplicate submission during provisional activity");
   await page.request.get(origin+"/__release-start-receipt");
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
