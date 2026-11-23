@@ -65,6 +65,9 @@
     submissionPreview: null,
     batchDiscoveryLoading: false,
     batchDiscoveryStartedMs: Date.now(),
+    batchDiscoveryProfile: null,
+    batchDiscoveryChildCursor: "",
+    batchDiscoveryGroupCursor: "",
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -1570,7 +1573,8 @@
     const activityUnknown = !state.completedOpen && (
       (!viewed && !preview) ||
       (Boolean(state.batchActivityError) && batches.length === 0) ||
-      (viewed?.activity_confidence === "saved-requests-only" && batches.length === 0));
+      (["saved-requests-only", "bounded-partial"].includes(viewed?.activity_confidence)
+        && batches.length === 0));
     // The old metric read state.batch.totals.batches even when an active row
     // was on screen; always derive every number from the SAME visible snapshot.
     const totals = {
@@ -1611,7 +1615,9 @@
       ? (state.batchActivityError ? "Approval activity unavailable · retrying automatically"
         : viewed?.activity_confidence === "saved-requests-only"
           ? "Saved submission not accepted; global activity discovery is still unverified"
-          : "Loading latest approval activity…")
+          : viewed?.activity_confidence === "bounded-partial"
+            ? "Checking Factory activity in bounded history pages; totals not yet verified"
+            : "Loading latest approval activity…")
       : `${totals.active} active · ${totals.approved} approved · ${totals.pending} pending · ${totals.failed} failed`
         + (preview ? " · " + preview.total + " selected output(s) awaiting server acceptance" : "")
         + (ledgerLag ? ` · ${ledgerLag} verified approval(s) syncing to Activity` : "")
@@ -1687,7 +1693,9 @@
             ? "Approval history could not be verified. This is not an all-clear; original saved request IDs are checked automatically."
             : viewed?.activity_confidence === "saved-requests-only"
               ? "No accepted batch found for saved request IDs. Other activity has not yet been verified."
-              : "Checking approval activity…")
+              : viewed?.activity_confidence === "bounded-partial"
+                ? "Scanning Factory history in safe pages. No all-clear until the sweep completes."
+                : "Checking approval activity…")
           : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
@@ -2360,12 +2368,35 @@
         return factoryBatchMergeExactActivity(state.batch, updates);
       };
       const readFull = async () => {
-        const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}&fresh=${now}`, {
+        // Discover small canonical R2 windows with separate child/group cursors.
+        // A completed history scan must NEVER run in the foreground Activity GET.
+        if (state.batchDiscoveryProfile !== filterId) {
+          state.batchDiscoveryProfile = filterId;
+          state.batchDiscoveryChildCursor = "";
+          state.batchDiscoveryGroupCursor = "";
+        }
+        const scanParams = new URLSearchParams(params);
+        scanParams.set("bounded_discovery", "1");
+        if (state.batchDiscoveryChildCursor)
+          scanParams.set("child_cursor", state.batchDiscoveryChildCursor);
+        if (state.batchDiscoveryGroupCursor)
+          scanParams.set("group_cursor", state.batchDiscoveryGroupCursor);
+        const value = await fetchJson(`/api/factory/approval-batches?${scanParams.toString()}&fresh=${now}`, {
           cache: "no-store", timeoutMs: 12000,
         });
-        if (value?.ok === false || !Array.isArray(value?.batches)) {
-          throw new Error("Approval activity response was incomplete");
+        if (value?.ok === false || !Array.isArray(value?.batches) ||
+            value.discovery?.mode !== "bounded-r2-cursor") {
+          throw new Error("Bounded Factory activity response was incomplete");
         }
+        if ((factoryProfileId() || null) === filterId) {
+          state.batchDiscoveryChildCursor = value.discovery.child_cursor || "";
+          state.batchDiscoveryGroupCursor = value.discovery.group_cursor || "";
+          if (value.discovery.complete) {
+            state.batchDiscoveryChildCursor = "";
+            state.batchDiscoveryGroupCursor = "";
+          }
+        }
+        value.activity_confidence = value.discovery.complete ? "verified" : "bounded-partial";
         state.lastBatchFullFetchMs = Date.now();
         return factoryBatchMergeDiscoveredActivity(state.batch, value);
       };
