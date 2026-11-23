@@ -111,6 +111,20 @@ jobs:
                   if [[ "$error_suffix" == *"$expected"* ]]; then error_category="$expected"; break; fi
                 done
                 echo "incident2670_i1_preflight_blocker=$error_category"
+                # This token contains only a bounded count, never job IDs/PII.
+                local spool_summary
+                spool_summary=$(printf '%s' "$error_suffix" | grep -oE 'i1_spool_unresolved_jobs=[0-9]{1,5}' | tail -1 || true)
+                if [[ -n "$spool_summary" ]]; then
+                  echo "incident2670_$spool_summary"
+                elif [[ "$error_suffix" == *"i1_spool_inspection_failed"* ]]; then
+                  echo 'incident2670_i1_spool=READ_FAILED'
+                elif [[ "$error_suffix" == *"i1_spool_schema_unverified"* ]]; then
+                  echo 'incident2670_i1_spool=SCHEMA_UNVERIFIED'
+                elif [[ "$error_suffix" == *"i1_spool_queued_and_running=0"* ]]; then
+                  echo 'incident2670_i1_spool=NO_ACTIVE_JOBS'
+                else
+                  echo 'incident2670_i1_spool=NOT_CLASSIFIED'
+                fi
                 return 1
               fi
               sleep 3
