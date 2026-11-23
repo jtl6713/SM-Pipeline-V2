@@ -147,7 +147,21 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
     }
     if (!state.already_satisfied) {
-      await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+      try {
+        await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+      } catch (error) {
+        // This exact media-package gate runs BEFORE any R2 approval claim.
+        // Its deterministic rejection is not a transient 503: otherwise an
+        // unaccepted saved batch re-POSTs the same unrepaired output forever.
+        // Preserve the output number and definitive no-acceptance evidence so
+        // the browser can quarantine only this one rejected selection member.
+        const reason = String(error?.message || error);
+        if (/^Native gallery publication blocked: native_gallery_[a-z0-9_]+(?: \(output #\d+\))?$/i.test(reason)) {
+          throw Error("Output #" + number + ": " + reason
+            + ". No new batch was accepted. Repair native gallery media before approval.");
+        }
+        throw error; // Network, authentication and unknown errors remain uncertain.
+      }
     }
     return {
       id, profile_id: entry.profileId,
