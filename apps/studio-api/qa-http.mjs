@@ -5,6 +5,7 @@ import {validateManualResult,SAFE_ASSERTIONS} from "./qa-test-core.mjs";
 import {executeQaAssertion} from "./qa-registry.mjs";
 import {withQaIdempotencyLock} from "./qa-idempotency-lock.mjs";
 import {createSupabaseQaLedger,QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-supabase-ledger.mjs";
+import {supabaseCircuitSnapshot} from "./supabase-pipeline-reads.mjs";
 export {QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-supabase-ledger.mjs";
 
 // The Runner release identity is read only from the trusted production origin.
@@ -231,6 +232,102 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
       if(!offset)return all.map(exposeEvent).sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc)));
     }
     throw error(409,"QA run history exceeds 1,000-event safe scan; release gate blocked");
+  }
+  if(pathname===apiPrefix+"workload"&&request.method==="GET"){
+    // Existing Worker route requires tenant_admin before reaching this handler.
+    // Only the server holds the Runner shared secret; never expose it to the UI.
+    const origin=String(env?.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+    const secret=String(env?.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+    if(origin!=="https://pipeline.chicagoshining.com"||!secret)
+      throw error(503,"Authenticated runner workload diagnostics unavailable");
+    let response,payload;
+    try{
+      response=await fetchHealth(origin+"/internal/workload/snapshot",{
+        method:"GET",redirect:"error",
+        headers:{"X-Pipeline-Secret":secret,Accept:"application/json"},
+        signal:AbortSignal.timeout(4500)
+      });
+      if(!response.ok)throw error(503,"Runner workload snapshot unavailable");
+      payload=await response.json();
+    }catch{
+      throw error(503,"Runner workload snapshot unavailable");
+    }
+    if(payload?.ok!==true||payload?.enabled!==true||
+      payload?.scope!=="single_windows_host")
+      throw error(503,"Runner workload governor not verified");
+    const finite=value=>Number.isFinite(Number(value))?
+      Math.max(0,Number(value)):null;
+    const metrics=payload.supabase_request_metrics||{};
+    const scrubTraffic=entry=>entry&&typeof entry==="object"?{
+      requests_last_two_minutes:finite(entry.requests_last_two_minutes),
+      failures_last_two_minutes:finite(entry.failures_last_two_minutes),
+      mean_latency_ms:finite(entry.mean_latency_ms),
+      max_latency_ms:finite(entry.max_latency_ms),
+    }:null;
+    const allowedScopes=["photo_group","ratio","transfer","supabase_read",
+      "supabase_write","worker_heavy","library_image_upload","library_image_classify"];
+    const slots={};
+    for(const scope of allowedScopes)
+      slots[scope]=finite(payload.active_resource_slots?.[scope]);
+    const rawHistory=Array.isArray(payload.runner_request_history)?
+      payload.runner_request_history.slice(0,60):[];
+    const history=rawHistory.filter(row=>
+      row?.operation==="read"||row?.operation==="write")
+      .map(row=>({
+        minute_epoch:finite(row.minute_epoch),
+        operation:row.operation,
+        requests:finite(row.requests),
+        failures:finite(row.failures),
+        mean_latency_ms:finite(row.mean_latency_ms),
+        max_latency_ms:finite(row.max_latency_ms),
+      }));
+    const circuit=supabaseCircuitSnapshot();
+    return send({
+      ok:true,
+      observed_at_utc:clock().toISOString(),
+      scope:"single_windows_host",
+      runner:{
+        active_jobs:finite(payload.active_jobs),
+        queued_jobs:finite(payload.queued_jobs),
+        paused_jobs:finite(payload.paused_jobs),
+        active_worker_heavy:finite(payload.active_worker_heavy),
+        combined_heavy_active:finite(payload.combined_heavy_active),
+        active_photo_groups:finite(payload.active_photo_groups),
+        max_jobs:finite(payload.max_jobs),
+        max_photo_groups:finite(payload.max_photo_groups),
+        max_ratio_workers:finite(payload.max_ratio_workers),
+        max_db_reads:finite(payload.max_db_reads),
+        max_db_writes:finite(payload.max_db_writes),
+        resource_slots:slots,
+        database_circuit_phase:["open","half_open","closed"]
+          .includes(payload.database_circuit_phase)?
+          payload.database_circuit_phase:"unknown",
+        database_circuit_until_epoch:finite(payload.database_circuit_until_epoch),
+        admission_paused:payload.admission_paused===true,
+        recovery_read_only:payload.recovery_read_only===true,
+        request_metrics:{
+          read:scrubTraffic(metrics.read),
+          write:scrubTraffic(metrics.write),
+        },
+        request_history:history,
+        last_recovery:null,
+        last_admission_decisions:null,
+      },
+      worker:{
+        circuit_scope:"per_isolate",
+        circuit_open:circuit.open===true,
+        circuit_until:finite(circuit.open_until),
+        circuit_failures:finite(circuit.failures),
+        // Never relay raw SQL, URLs or trace details from error messages.
+        circuit_reason:circuit.open?"Supabase timeout/overload threshold":"not_open",
+      },
+      limitations:[
+        "Runner request metrics cover only supabase_pipeline REST calls",
+        "Worker circuit is per isolate, not a global observed circuit",
+        "Workload decision/recovery event ledger is not yet instrumented",
+        "Queue and provider publishing state are not modified",
+      ],
+    });
   }
   if(pathname===apiPrefix+"catalog"&&request.method==="GET"){
     return send({ok:true,catalogVersion:QA_CATALOG.catalogVersion,tests:catalog,
