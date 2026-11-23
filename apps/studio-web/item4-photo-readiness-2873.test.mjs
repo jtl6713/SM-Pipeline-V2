@@ -46,7 +46,7 @@ test("incomplete Drive/media confirmation shows separate progress and recheck ac
   const rendered = statusFor(3);
   assert.equal(rendered.heal, "uploading");
   assert.equal(rendered.action, "recheck");
-  assert.equal(rendered.count, "3 of 4 Google Drive records confirmed.");
+  assert.equal(rendered.count, "3 of 4 Google Drive/media records confirmed.");
 });
 test("backend Ready remains success and does not require a redundant recheck", () => {
   const rendered = statusFor(4, 4, "Ready");
@@ -64,6 +64,7 @@ test("a truly active upload remains uploading rather than falsely reported as re
   assert.equal(rendered.heal, "uploading");
   assert.equal(rendered.action, undefined);
   assert.doesNotMatch(rendered.count, /saved so far/);
+  assert.equal(rendered.count, "4 of 4 upload requests saved · 4 Google Drive/media records confirmed.");
 });
 test("recheck control refreshes saved state and downstream preflight without publishing", () => {
   const handler = extract("  function updateItem4MasterProgress(", "  function mergeItem4WorkspaceStatus(");
