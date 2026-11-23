@@ -7,13 +7,12 @@ PS = (ROOT / ".github/scripts/incident-2670-qa-indexed-rest-ops.ps1").read_text(
 
 
 def test_exact_canonical_project_and_live_worker_source():
-    assert "https://vkwvscgisqsbuwagdvtb.supabase.co" in PS
     assert "home_failure_candidate=eq.true" in PS
     assert "home_failure_candidate=eq.true" in WORKFLOW
     assert "QA_CENSUS_OUTPUT_SELECT" in WORKFLOW
     assert "test_run_id=is.null" in PS
     # Audit can check the .env URL, but cannot use an env-supplied host as a GET destination.
-    assert "$uri='https://vkwvscgisqsbuwagdvtb.supabase.co/rest/v1/platform_outputs?" in PS
+    assert any(line.startswith("  $uri='https://vkwvscgisqsbuwagdvtb.supabase.co/rest/v1/platform_outputs?") for line in PS.splitlines())
     assert "$uri=$base" not in PS
 
 
