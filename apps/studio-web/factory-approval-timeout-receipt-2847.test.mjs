@@ -119,3 +119,10 @@ test("saved request history controls cannot issue POST or change server approval
   assert.doesNotMatch(diagnostics, /fetchJson\(|method:\s*["']POST["']|api\/factory\/approval-batches/);
   assert.match(diagnostics, /factoryPendingExactCandidates\(pending, recovery\)/);
 });
+
+test("identified preflight rejection retains only the matching original request evidence", () => {
+  assert.match(script, /factoryPendingExactCandidates\(saved, \[\]\)\.filter\(row =>\s*row\.expected_ids\.includes\(String\(rejectedOutputId\)\)\)/);
+  assert.match(script, /rememberFactoryPreflightRejection\(saved, rejectedId\)/);
+  assert.match(script, /Original selection contained a rejected output; siblings not proven accepted/);
+  assert.match(script, /studio\.factory\.preflight-rejected-requests\.v1/);
+});
