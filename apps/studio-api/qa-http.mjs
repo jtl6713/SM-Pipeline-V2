@@ -255,8 +255,8 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
     if(payload?.ok!==true||payload?.enabled!==true||
       payload?.scope!=="single_windows_host")
       throw error(503,"Runner workload governor not verified");
-    const finite=value=>Number.isFinite(Number(value))?
-      Math.max(0,Number(value)):null;
+    const finite=value=>value===null||value===undefined||value===""?
+      null:Number.isFinite(Number(value))?Math.max(0,Number(value)):null;
     const metrics=payload.supabase_request_metrics||{};
     const scrubTraffic=entry=>entry&&typeof entry==="object"?{
       requests_last_two_minutes:finite(entry.requests_last_two_minutes),
