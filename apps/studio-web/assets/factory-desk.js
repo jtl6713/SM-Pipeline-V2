@@ -150,6 +150,40 @@
     }
     return rows;
   }
+  // A timed-out POST may already have committed a durable Factory parent. Its
+  // original ID is persisted *before* the POST but isn't in accepted history.
+  // Poll that exact ID by GET instead of depending on a slow global R2 scan.
+  // These are UNCONFIRMED candidates, never fabricated accepted batches.
+  function factoryPendingExactCandidates(pending, entries = []) {
+    const found = [];
+    for (const saved of [pending, ...(entries || []).map(entry => entry?.saved)]) {
+      if (!saved || !Array.isArray(saved.ids)) continue;
+      const global = saved.profile_id === "global";
+      const profile = String(saved.profile_id || "");
+      if (!global && !/^rec[A-Za-z0-9]+$/.test(profile)) continue;
+      const plans = global ? saved.batches :
+        [{ request_id: saved.request_id, ids: saved.ids }];
+      if (!Array.isArray(plans)) continue;
+      for (const plan of plans) {
+        const request_id = String(plan?.request_id || "");
+        const ids = plan?.ids;
+        if (!/^[A-Za-z0-9_-]{12,128}$/.test(request_id) ||
+            !Array.isArray(ids) || !ids.length ||
+            ids.some(id => !/^rec[A-Za-z0-9]+$/.test(String(id)))) continue;
+        const profiles = global
+          ? [...new Set((Array.isArray(plan.payload?.items) ? plan.payload.items : [])
+            .map(item => String(item?.profile_id || ""))
+            .filter(id => /^rec[A-Za-z0-9]+$/.test(id)))]
+          : [profile];
+        found.push({
+          request_id, group: global, profile_id: global ? null : profile,
+          profiles, unconfirmed: true, expected_ids: ids.map(String).sort(),
+        });
+      }
+    }
+    return [...new Map(found.map(row => [row.request_id, row])).values()].slice(0, 24);
+  }
+
   function archiveFactoryPending() {
     if (state.submittingBatch) return;
     const saved = pendingFactoryApproval();
@@ -1526,7 +1560,9 @@
       (viewed?.job_id ? [viewed] : []);
     const preview = !state.completedOpen ? factoryReconcileSubmissionPreview(serverRows) : null;
     const batches = [...serverRows, ...(preview ? [preview] : [])].map(factoryBatchDisplayRow);
-    const activityUnknown = !viewed && !preview && !state.completedOpen;
+    const activityUnknown = !state.completedOpen && (
+      (!viewed && !preview) ||
+      (Boolean(state.batchActivityError) && batches.length === 0));
     // The old metric read state.batch.totals.batches even when an active row
     // was on screen; always derive every number from the SAME visible snapshot.
     const totals = {
@@ -1636,7 +1672,9 @@
       }).join("")
       : '<p class="subtle">' + (state.completedOpen
         ? (state.completedLoading ? "Loading completed batches…" : "No completed batches in this page.")
-        : "No active approval batches. All clear.") + '</p>';
+        : activityUnknown
+          ? "Approval history could not be verified. This is not an all-clear; original saved request IDs are checked automatically."
+          : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
@@ -2207,10 +2245,18 @@
       const knownIds = new Set(knownGroups.map(row => row.request_id));
       // After reload there may be no state.batch yet. An accepted group is
       // recoverable from the same original R2 request without re-submitting.
-      const remembered = recentFactoryGroupRequests().filter(row =>
-        (!filterId || row.profiles.includes(filterId)) && !knownIds.has(row.request_id))
+      // Unacknowledged saved requests are eligible for GET-only exact recovery
+      // even if the submission POST timed out before an accepted receipt.
+      const pendingExact = factoryPendingExactCandidates(
+        pendingFactoryApproval(), factoryRecoveryEntries());
+      const remembered = [...new Map([
+        ...pendingExact, ...recentFactoryGroupRequests(),
+      ].filter(row => (!filterId || row.profiles.includes(filterId)) &&
+        !knownIds.has(row.request_id)).map(row => [row.request_id, row])).values()]
         .map(row => ({ group: row.group !== false, request_id: row.request_id,
-          profile_id: row.profile_id || row.profiles[0] || null }));
+          profile_id: row.profile_id || row.profiles[0] || null,
+          unconfirmed: row.unconfirmed === true,
+          expected_ids: row.expected_ids || null }));
       const window = factoryBatchPollWindow([...knownGroups, ...remembered],
         state.batchPollCursor || 0, 4);
       const fastGroups = window.groups;
@@ -2237,6 +2283,16 @@
               (row.job_id && verifiedRow.job_id !== row.job_id) ||
               (!row.group && verifiedRow.profile_id !== row.profile_id)) {
             throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
+          }
+          // A saved-but-unacknowledged POST cannot become a confirmed UI row
+          // unless the exact canonical output set matches its original plan.
+          if (row.unconfirmed) {
+            const actual = (verifiedRow.items || []).map(item => String(item.id)).sort();
+            const expected = row.expected_ids || [];
+            if (actual.length !== expected.length ||
+                actual.some((id, index) => id !== expected[index])) {
+              throw new Error("Saved Factory request identity mismatch; no approval was repeated");
+            }
           }
           // Paint each completed GET as it arrives; one slow sibling status
           // cannot postpone another approved output until the 12s timeout.
