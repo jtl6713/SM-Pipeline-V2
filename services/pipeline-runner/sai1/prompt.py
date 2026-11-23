@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from studio_produce.creative_guidance import creative_prompt_suffix
+from studio_produce.closeup_direction import ai_slide_closeup_guidance
 
 PROMPT_TEMPLATE = """You are the Studio AI slide themer and caption writer for SM Pipeline V2.
 
@@ -109,4 +110,5 @@ def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: in
         needed=int(needed),
         total=int(total),
     )
-    return prompt + creative_prompt_suffix(creative_guidance, mode="narration")
+    return (prompt + creative_prompt_suffix(creative_guidance, mode="narration")
+            + ai_slide_closeup_guidance(market=market, requested_count=needed))
