@@ -453,3 +453,80 @@ def test_authenticated_workload_snapshot_never_admits_or_mutates_jobs(
         assert response.headers["Cache-Control"] == "private, no-store"
     assert g.snapshot()["queued_jobs"] == 1
     assert g.snapshot()["active_jobs"] == 0
+
+
+def test_cap_one_idle_worker_can_run_without_raising_global_limit(
+    isolated_governor, monkeypatch,
+):
+    """An empty Python queue must not permanently starve Ready-production."""
+    import uuid
+    g = isolated_governor
+    monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "1")
+    idea, token = "rec" + "E" * 14, str(uuid.uuid4())
+    assert g.claim_worker_heavy(idea, token) is True
+    assert g.snapshot()["max_jobs"] == 1
+    assert g.snapshot()["combined_heavy_active"] == 1
+    assert g.claim_worker_heavy(idea, token) is True  # Same owner idempotent.
+    assert g.claim_worker_heavy("rec" + "F" * 14, str(uuid.uuid4())) is False
+    assert g.enqueue("recPythonAfterWorker") is True
+    assert g.claim_next() is None  # Shared global ceiling is still one.
+    assert g.release_worker_heavy(idea, str(uuid.uuid4())) is False
+    assert g.claim_next() is None  # Wrong-token release preserves fencing.
+    assert g.release_worker_heavy(idea, token) is True
+    claimed = g.claim_next()
+    assert claimed and claimed[0] == "recPythonAfterWorker"
+    assert g.claim_worker_heavy(idea, str(uuid.uuid4())) is False
+    g.finish_job(*claimed)
+
+
+def test_cap_one_runnable_python_gets_priority_but_delayed_work_does_not(
+    isolated_governor, monkeypatch,
+):
+    """Prioritize immediately runnable Python work without blocking idle slots."""
+    import uuid
+    g = isolated_governor
+    monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "1")
+    idea, owner = "rec" + "G" * 14, str(uuid.uuid4())
+    assert g.enqueue("recPythonQueued")
+    assert g.claim_worker_heavy(idea, owner) is False
+    assert g.snapshot()["queued_jobs"] == 1
+    # No side effects: the still-queued Python job is on backoff until later.
+    with g._connect() as db:
+        db.execute(
+            "UPDATE producer_jobs SET available_at=? WHERE request_id=?",
+            (time.time() + 300, "recPythonQueued"),
+        )
+    assert g.claim_worker_heavy(idea, owner) is True
+    assert g.claim_next() is None  # Backoff is preserved, not drained.
+    assert g.snapshot()["queued_jobs"] == 1
+    assert g.release_worker_heavy(idea, owner)
+    with g._connect() as db:
+        db.execute(
+            "UPDATE producer_jobs SET available_at=0 WHERE request_id=?",
+            ("recPythonQueued",),
+        )
+    result = g.claim_next()
+    assert result and result[0] == "recPythonQueued"
+    g.finish_job(*result)
+
+
+def test_cap_one_python_only_emergency_canary_never_opens_worker_ingress(
+    isolated_governor, monkeypatch,
+):
+    """Even if recovery producer-only admits Python, Worker stays frozen."""
+    import uuid
+    g = isolated_governor
+    monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "1")
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "true")
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_PRODUCER_ONLY", "true")
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_PRODUCER_TARGET", "recCanarySafe")
+    assert g.producer_only_recovery_enabled() is True
+    assert g.admission_paused() is False
+    idea, token = "rec" + "H" * 14, str(uuid.uuid4())
+    assert g.claim_worker_heavy(idea, token) is False
+    assert g.renew_worker_heavy(idea, token) is False
+    assert g.enqueue("recCanarySafe")
+    claimed = g.claim_next()
+    assert claimed and claimed[0] == "recCanarySafe"
+    assert g.snapshot()["active_worker_heavy"] == 0
+    g.finish_job(*claimed)
