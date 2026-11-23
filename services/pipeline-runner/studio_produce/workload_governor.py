@@ -290,10 +290,13 @@ def claimed_resume_requested(request_id: str, token: str) -> bool:
 
 
 def renew_job(request_id: str, token: str) -> bool:
+    # A stale heartbeat must never revive an expired claim, even when the
+    # dispatcher has not yet noticed its expiry.
+    now = time.time()
     with _connect() as db:
         changed = db.execute("""UPDATE producer_jobs SET lease_until=?
-            WHERE request_id=? AND state='running' AND token=?""",
-            (time.time() + LEASE_SECONDS, request_id, token),
+            WHERE request_id=? AND state='running' AND token=? AND lease_until>?""",
+            (now + LEASE_SECONDS, request_id, token, now),
         ).rowcount
     return bool(changed)
 
@@ -313,22 +316,31 @@ def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed
     """
     with _connect() as db:
         _transaction(db)
+        now = time.time()
         if requeue:
             row = db.execute(
-                "SELECT consecutive_yields FROM producer_jobs WHERE request_id=? AND token=?",
-                (request_id, token),
+                """SELECT consecutive_yields FROM producer_jobs
+                WHERE request_id=? AND token=? AND state='running' AND lease_until>?""",
+                (request_id, token, now),
             ).fetchone()
             if row:
                 streak = 1 if progressed else int(row[0]) + 1
                 parked = streak >= MAX_CONSECUTIVE_YIELDS
                 delay = min(MAX_REQUEUE_DELAY_SECONDS, 30 * (2 ** min(streak - 1, 5)))
                 db.execute("""UPDATE producer_jobs SET state=?,token=NULL,lease_until=NULL,
-                    available_at=?,consecutive_yields=? WHERE request_id=? AND token=?""",
-                    ("paused" if parked else "queued", time.time() + delay, streak, request_id, token))
+                    available_at=?,consecutive_yields=?
+                    WHERE request_id=? AND token=? AND state='running' AND lease_until>?""",
+                    ("paused" if parked else "queued", now + delay, streak, request_id, token, now))
                 if parked:
                     logger.error("producer request=%s paused after repeated no-progress yields", request_id)
         else:
-            deleted = db.execute("DELETE FROM producer_jobs WHERE request_id=? AND token=?", (request_id, token))
+            # Do not delete a durable request if this worker's lease expired.
+            # Leave it for bounded crash recovery (even before a new claim).
+            deleted = db.execute(
+                """DELETE FROM producer_jobs
+                WHERE request_id=? AND token=? AND state='running' AND lease_until>?""",
+                (request_id, token, now),
+            )
             if deleted.rowcount and progressed:
                 # Half-open recovery only exits after a governed job has
                 # confirmed a new canonical step write. A terminal no-op
@@ -423,10 +435,13 @@ def resource_slot(
         time.sleep(min(DISPATCH_INTERVAL, max(0.0, deadline - time.monotonic())))
     stopped = threading.Event()
     def _renew() -> bool:
+        # Never resurrect an expired resource slot; a newer owner may be
+        # preparing a fenced retry after cleanup.
+        now = time.time()
         with _connect() as db:
             return bool(db.execute("""UPDATE resource_leases SET lease_until=?
-                WHERE scope=? AND lease_key=? AND token=?""",
-                (time.time() + LEASE_SECONDS, scope, lease_key, token)).rowcount)
+                WHERE scope=? AND lease_key=? AND token=? AND lease_until>?""",
+                (now + LEASE_SECONDS, scope, lease_key, token, now)).rowcount)
     # Supabase REST has a 20-second timeout; a 20-minute lease is sufficient.
     # Spawning a heartbeat thread for *every* HTTP call would itself be a
     # measurable overhead at the incident's request rates.
