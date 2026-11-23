@@ -396,7 +396,8 @@
       return false;
     }
     return /\bpast_review\b|no longer ready for approval|Approved for Publishing|already past review/i
-      .test(text);
+      .test(text) || (/Native gallery publication blocked:\s*native_gallery_[a-z0-9_]+/i.test(text)
+        && /No new batch was accepted[.!]?/i.test(text));
   }
 
   // Flood/deleted Platform Outputs return a durable 409 from global preflight.
@@ -423,7 +424,10 @@
         // Continue only if the backend identified exactly which output failed
         // BEFORE acceptance; otherwise preserve the fence for inspection.
         const recovered = dropFactoryRecoveryEntry(key, saved,
-          "The identified stale output was skipped; remaining approvals are preserved.");
+          factoryTerminalEligibilityError(saved?.last_error) &&
+          /Native gallery publication blocked:/i.test(String(saved?.last_error || ""))
+            ? "Native gallery is missing verified slides. This output was not approved; its rejected request was retired. Other selected outputs remain available."
+            : "The identified stale output was skipped; remaining approvals are preserved.");
         if (recovered.dropped) dropped += 1;
         continue;
       }
@@ -437,7 +441,10 @@
       if (pending && (factoryUnrecoverableSubmitError(pending.last_error)
           || pending.terminal_eligibility === true)) {
         const recovered = dropFactoryRecoveryEntry(FACTORY_PENDING_REQUEST_KEY, pending,
-          "The identified stale output was skipped; remaining approvals are preserved.");
+          factoryTerminalEligibilityError(saved?.last_error) &&
+          /Native gallery publication blocked:/i.test(String(saved?.last_error || ""))
+            ? "Native gallery is missing verified slides. This output was not approved; its rejected request was retired. Other selected outputs remain available."
+            : "The identified stale output was skipped; remaining approvals are preserved.");
         if (recovered.dropped) dropped += 1;
       }
     }
