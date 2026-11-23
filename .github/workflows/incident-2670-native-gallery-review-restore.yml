@@ -1,0 +1,210 @@
+name: Incident 2670 - Restore held native galleries and review dispatcher
+
+on:
+  workflow_run:
+    workflows: ['Deploy Pipeline Runner via Ops Dashboard']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-2670-native-gallery-review-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require exact deployed governed Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='2026-11-23-incident2670-native-gallery-review-v1'
+          grep -Fq "PIPELINE_RUNNER_CODE_VERSION = \"$expected\"" services/pipeline-runner/config.py
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/health-before.json
+          jq -e --arg expected "$expected" '.ok==true and .version==$expected and
+            .recovery_read_only==false and .workload_governor_enabled==true and
+            .studio_write_source=="supabase" and .airtable_activity.any_activity==false' \
+            /tmp/health-before.json >/dev/null
+      - name: Select connected Ops authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$base/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected"
+          echo "::add-mask::$selected"
+          printf '%s' "$selected" >/tmp/ops-token
+      - name: Prepare exact ten repaired galleries at concurrency one
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $py='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\.venv\Scripts\python.exe'
+          $script='D:\Content Creation\ChicagoShining Pipeline\repair\scripts\incident-2670-native-gallery-prep.py'
+          if(-not (Test-Path -LiteralPath $py)){throw 'runner_python_missing'}
+          if(-not (Test-Path -LiteralPath $script)){throw 'gallery_prep_script_missing'}
+          & $py $script
+          if($LASTEXITCODE -ne 0){throw 'gallery_prep_failed'}
+          '''
+          Path('/tmp/gallery-prep.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          token=$(cat /tmp/ops-token)
+          code=''
+          for n in $(seq 1 40); do
+            code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' \
+              -X POST https://ops.chicagoshining.com/api/shell \
+              -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/gallery-prep.json || true)
+            [[ "$code" != 409 ]] && break
+            sleep 4
+          done
+          [[ "$code" == 202 || "$code" == 200 ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json); test -n "$job"
+          for n in $(seq 1 300); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/result.json
+            status=$(jq -r '.job.status // empty' /tmp/result.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/result.json | grep '^native_gallery_' || true
+              jq -e '.job.log | contains("\"outputs\":10") and
+                contains("\"slides\":60") and contains("\"hold_releases\":0") and
+                contains("\"published_posts\":0")' /tmp/result.json >/dev/null
+              exit 0
+            fi
+            if [[ "$status" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/result.json | grep -E 'native_gallery_|RuntimeError|Traceback' || true
+              exit 1
+            fi
+            sleep 4
+          done
+          exit 1
+      - name: Enable only Supabase review dispatcher and restart once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $file='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $file)){throw 'runner_env_missing'}
+          $lines=@(Get-Content -LiteralPath $file)
+          $next=@();$seen=0
+          foreach($line in $lines){
+            if($line -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='){
+              if($seen -eq 0){$next+='RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}
+              $seen++
+            }else{$next+=$line}
+          }
+          if($seen -eq 0){$next+='RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}
+          [IO.File]::WriteAllLines($file,$next,[Text.UTF8Encoding]::new($false))
+          if(@(Get-Content $file|Where-Object {$_ -eq 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}).Count -ne 1){throw 'flag_readback_failed'}
+          Write-Output 'review_auto_dispatch_flag=true'
+          '''
+          Path('/tmp/enable-review.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          token=$(cat /tmp/ops-token)
+          code=$(curl -sS --max-time 30 -o /tmp/enable-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/enable-review.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/enable-start.json); test -n "$job"
+          for n in $(seq 1 60); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/enable-result.json
+            status=$(jq -r '.job.status // empty' /tmp/enable-result.json)
+            [[ "$status" == ok ]] && break
+            [[ "$status" == failed ]] && exit 1
+            sleep 3
+          done
+          jq -e '(.job.status=="ok") and (.job.log|contains("review_auto_dispatch_flag=true"))' /tmp/enable-result.json >/dev/null
+          code=$(curl -sS --max-time 25 -o /tmp/restart.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/run \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          [[ "$code" == 202 ]]
+          restart=$(jq -r '.job.id // empty' /tmp/restart.json); test -n "$restart"
+          for n in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$restart" -o /tmp/restart-result.json
+            status=$(jq -r '.job.status // empty' /tmp/restart-result.json)
+            [[ "$status" == ok ]] && exit 0
+            [[ "$status" == failed ]] && exit 1
+            sleep 4
+          done
+          exit 1
+      - name: Verify review consumer heartbeat and preserved governor
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='2026-11-23-incident2670-native-gallery-review-v1'
+          for n in $(seq 1 30); do
+            curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/health-after.json || true
+            if jq -e --arg expected "$expected" '.ok==true and .version==$expected and
+              .workload_governor_enabled==true and .recovery_read_only==false and
+              .airtable_activity.any_activity==false' /tmp/health-after.json >/dev/null 2>&1; then break; fi
+            sleep 4
+          done
+          jq -e --arg expected "$expected" '.ok==true and .version==$expected and
+            .workload_governor_enabled==true and .airtable_activity.any_activity==false' \
+            /tmp/health-after.json >/dev/null
+          token=$(cat /tmp/ops-token)
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $file='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          $line=@(Get-Content $file|Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($line.Count -ne 1){throw 'runner_secret_missing'}
+          $secret=([string]($line[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          $result=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/jobs/rendering-review/dispatch-health' -Headers @{'X-Pipeline-Secret'=$secret} -TimeoutSec 20
+          if($result.ok -ne $true -or $result.enabled -ne $true -or $result.started -ne $true){throw 'review_dispatch_not_started'}
+          if($result.last_result -eq 'airtable_archive_closed'){throw 'review_dispatch_still_on_retired_archive'}
+          Write-Output ('review_auto_dispatch_last_result='+[string]$result.last_result)
+          Write-Output 'review_auto_dispatch_started=true'
+          '''
+          Path('/tmp/review-health.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/health-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/review-health.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/health-start.json); test -n "$job"
+          for n in $(seq 1 60); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/health-result.json
+            status=$(jq -r '.job.status // empty' /tmp/health-result.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/health-result.json | grep '^review_auto_dispatch_'
+              exit 0
+            fi
+            [[ "$status" == failed ]] && exit 1
+            sleep 3
+          done
+          exit 1

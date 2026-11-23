@@ -37,6 +37,16 @@ from supabase_pipeline import (
 
 logger = logging.getLogger("pipeline-runner.supabase-reads")
 
+# Rendering Review kept Airtable-shaped JSON records.  The archive is retired,
+# so these four durable workflow tables use the same compatibility shape while
+# Supabase remains the only read authority.
+_REVIEW_TABLES = {
+    "tblHX3UdoNszkoquG": "rendering_review_sessions",
+    "tblUkZB6SMtf9Ib6I": "rendering_review_jobs",
+    "tbl7wPOAE26o2coMU": "rendering_review_attempts",
+    "tblalFXUJyYg5PBrz": "rendering_review_plans",
+}
+
 # An empty Supabase list for these tables is the answer. Output and Content
 # writes already commit to Supabase, and both copies are ahead of the frozen
 # Airtable archive, so a zero-row filter must not be read from Airtable again.
@@ -52,6 +62,7 @@ FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset({
     CAROUSEL_SLIDES_TABLE,
     SOURCE_CANDIDATES_TABLE,
     IDEA_BATCHES_TABLE,
+    *_REVIEW_TABLES.keys(),
 })
 
 # Legacy R4 expects these Airtable-named fields. Render package details are
@@ -119,6 +130,8 @@ def _columns_for(table_id: str) -> dict[str, str]:
 
 
 def _supabase_table(table_id: str) -> str:
+    if table_id in _REVIEW_TABLES:
+        return _REVIEW_TABLES[table_id]
     if table_id == PLATFORM_OUTPUTS_TABLE:
         return "platform_outputs"
     if table_id == CONTENT_ITEMS_TABLE:
@@ -324,6 +337,39 @@ def try_list_supabase_records(
         return stored_settings
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
+    if table_id in _REVIEW_TABLES:
+        # Review callers perform their full eligibility checks in Python.  A
+        # bounded JSON-table scan avoids pretending the retired Airtable
+        # formula language is generally supported.
+        if view or sort_field:
+            return None
+        limit = max(1, min(int(max_records or 10), 100))
+        table = _supabase_table(table_id)
+        active_filter = (
+            "&fields->>Job_State=eq.queued"
+            "&fields->>Progress_Stage=eq.awaiting_isolated_renderer"
+            if table_id == "tblUkZB6SMtf9Ib6I" else ""
+        )
+        path = (
+            f"{table}?select=airtable_record_id,fields,created_at"
+            f"{active_filter}&order=created_at.asc&limit={limit}"
+        )
+        try:
+            payload = _rest(settings or {}, path, "GET")
+        except Exception as error:
+            logger.warning("supabase review queue read failed for %s: %s", table_id, error)
+            return None
+        records = [
+            shaped for row in (payload if isinstance(payload, list) else [])
+            if isinstance(row, dict) and (shaped := _record_from_row(row, table_id))
+        ]
+        if fields:
+            records = [
+                {"id": row["id"], "createdTime": row.get("createdTime"),
+                 "fields": {key: value for key, value in row["fields"].items() if key in fields}}
+                for row in records
+            ]
+        return records
     # Unknown views and views that use an Airtable formula field stay on Airtable.
     # A snapshotted view filter is combined with an allowlisted formula.
     # Carousel slide lists already encode readiness in the formula (PO_Output_ID
@@ -414,6 +460,8 @@ def try_list_supabase_records(
 
 
 def _list_select(table_id: str) -> str:
+    if table_id in _REVIEW_TABLES:
+        return "airtable_record_id,fields,created_at"
     columns = _columns_for(table_id)
     base = ",".join(["airtable_record_id", *dict.fromkeys(columns.values())])
     if table_id == PLATFORM_OUTPUTS_TABLE:
@@ -468,6 +516,15 @@ def _linked(row: dict, key: str) -> str:
 
 
 def _record_from_row(row: dict, table_id: str) -> dict | None:
+    if table_id in _REVIEW_TABLES:
+        record_id = str(row.get("airtable_record_id") or "").strip()
+        fields = row.get("fields") if isinstance(row.get("fields"), dict) else None
+        if not record_id or fields is None:
+            return None
+        shaped = {"id": record_id, "fields": dict(fields)}
+        if row.get("created_at"):
+            shaped["createdTime"] = row.get("created_at")
+        return shaped
     if table_id == PLATFORM_OUTPUTS_TABLE:
         bag = row.get("error_messages") if isinstance(row.get("error_messages"), dict) else {}
         columns = _OUTPUT_FIELDS

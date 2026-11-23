@@ -1,6 +1,7 @@
 """Fail-closed regression tests for the automatic Rendering Review dispatcher."""
 import os
 import unittest
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
@@ -56,22 +57,37 @@ class DispatchTest(unittest.TestCase):
         })
         self.config.start()
         self.addCleanup(self.config.stop)
+        self.governor = patch.object(d, "governor_enabled", return_value=True)
+        self.slot = patch.object(d, "resource_slot", side_effect=lambda *a, **k: nullcontext())
+        self.governor.start()
+        self.slot.start()
+        self.addCleanup(self.governor.stop)
+        self.addCleanup(self.slot.stop)
         self.now = datetime.now(timezone.utc)
     def test_disabled_without_explicit_two_flags(self):
         with patch.dict(os.environ, {"RENDERING_REVIEW_AUTO_DISPATCH_ENABLED": "false"}):
             self.assertEqual(d.sweep_once()["status"], "disabled")
 
-    def test_supabase_write_sor_skips_airtable_job_poll(self):
+    def test_supabase_queue_is_scanned_after_airtable_archive_retirement(self):
         client = Airtable(candidate())
         client._settings = {
             "studio_write_source": "supabase",
             "supabase_url": "https://example.supabase.co",
             "supabase_service_role_key": "secret",
         }
-        out = d.sweep_once(client=client, now=self.now)
-        self.assertEqual(out["status"], "airtable_archive_closed")
+        out = d.sweep_once(
+            client=client, now=self.now,
+            authority=lambda *a, **kw: True,
+            sender=lambda *a, **kw: Response(),
+        )
+        self.assertEqual(out["status"], "accepted")
+        self.assertTrue(out["dispatched"])
+        self.assertEqual(len(client.reads), 1)
+    def test_governor_is_mandatory(self):
+        with patch.object(d, "governor_enabled", return_value=False):
+            out = d.sweep_once(client=Airtable(candidate()), now=self.now)
+        self.assertEqual(out["status"], "governor_disabled")
         self.assertFalse(out["dispatched"])
-        self.assertEqual(client.reads, [])
     def test_guard_rejects_young_claimed_attempted_and_ambiguous_rows(self):
         for row in [
             candidate(minutes=1),

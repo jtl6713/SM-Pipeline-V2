@@ -22,6 +22,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from airtable.constants import (
     CAROUSEL_SLIDES_TABLE,
@@ -172,6 +173,11 @@ def side_table_kind(table_id: str) -> str:
         return "ideas"
     if table == IDEA_BATCHES_TABLE:
         return "idea_batches"
+    if table in {
+        "tblHX3UdoNszkoquG", "tblUkZB6SMtf9Ib6I",
+        "tbl7wPOAE26o2coMU", "tblalFXUJyYg5PBrz",
+    }:
+        return "review_records"
     return ""
 
 
@@ -1543,6 +1549,10 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         CAROUSEL_SLIDES_TABLE: "slides",
         SOURCE_CANDIDATES_TABLE: "ideas",
         IDEA_BATCHES_TABLE: "idea_batches",
+        "tblHX3UdoNszkoquG": "review_records",
+        "tblUkZB6SMtf9Ib6I": "review_records",
+        "tbl7wPOAE26o2coMU": "review_records",
+        "tblalFXUJyYg5PBrz": "review_records",
     }.get(table) or table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
@@ -1566,6 +1576,41 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         except Exception as error:
             logger.warning("supabase idea batch write-through failed: %s", error)
             return {"ok": False, "kind": "idea_batches", "count": 0, "error": type(error).__name__}
+    if kind == "review_records":
+        names = {
+            "tblHX3UdoNszkoquG": "rendering_review_sessions",
+            "tblUkZB6SMtf9Ib6I": "rendering_review_jobs",
+            "tbl7wPOAE26o2coMU": "rendering_review_attempts",
+            "tblalFXUJyYg5PBrz": "rendering_review_plans",
+        }
+        target = names.get(table)
+        saved = 0
+        try:
+            for record in records or []:
+                record_id = str(record.get("id") or "").strip()
+                patch = record.get("fields") if isinstance(record.get("fields"), dict) else None
+                if not record_id or patch is None:
+                    continue
+                merged = dict(patch)
+                if partial:
+                    prior = _rest(
+                        settings or {},
+                        f"{target}?airtable_record_id=eq.{quote(record_id, safe='')}&select=fields&limit=1",
+                        "GET",
+                    )
+                    if isinstance(prior, list) and prior and isinstance(prior[0].get("fields"), dict):
+                        merged = {**prior[0]["fields"], **patch}
+                _rest(
+                    settings or {}, f"{target}?on_conflict=airtable_record_id", "POST",
+                    [{"airtable_record_id": record_id, "fields": merged,
+                      "updated_at": datetime.now(timezone.utc).isoformat()}],
+                    prefer="resolution=merge-duplicates,return=minimal",
+                )
+                saved += 1
+            return {"ok": saved == len(records or []), "kind": kind, "count": saved}
+        except Exception as error:
+            logger.warning("supabase review-record write failed: %s", error)
+            return {"ok": False, "kind": kind, "count": saved, "error": type(error).__name__}
     mirrored = 0
     for record in records or []:
         if not isinstance(record, dict) or not record.get("id"):

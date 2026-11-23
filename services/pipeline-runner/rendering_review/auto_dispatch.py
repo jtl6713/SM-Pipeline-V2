@@ -1,6 +1,6 @@
 """Bounded, autonomous dispatch of already-committed Rendering Review jobs.
 
-Airtable is authoritative. Only explicit, immutable, held Chicago V2+ jobs
+Supabase is authoritative. Only explicit, immutable, held Chicago V2+ jobs
 are eligible; this module NEVER creates a plan, attempt, job or publication.
 A durable Retry_Count=1 is written and read back BEFORE the only dispatch
 request. Any ambiguous response is for manual reconciliation, not replay.
@@ -19,6 +19,7 @@ import requests
 from airtable.client import AirtableClient
 from rendering_review.one_job import JOBS
 from rendering_review.recovery import require_unlaunched_authority
+from studio_produce.workload_governor import enabled as governor_enabled, resource_slot
 
 _LOG = logging.getLogger("pipeline-runner.rendering-review-dispatch")
 _RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
@@ -82,28 +83,26 @@ def eligible_candidate(row: dict, now: datetime) -> dict | None:
 
 
 def sweep_once(*, client=None, now=None, sender=None, authority=None) -> dict:
+    """Admit exactly one queue scan through the incident workload governor."""
+    if not enabled():
+        return {"status": "disabled", "dispatched": False}
+    if not governor_enabled():
+        _update(last_result="governor_disabled", last_error_code="workload_governor_required")
+        return {"status": "governor_disabled", "dispatched": False}
+    with resource_slot("rendering_review_auto_dispatch", limit=1):
+        return _sweep_admitted(client=client, now=now, sender=sender, authority=authority)
+
+
+def _sweep_admitted(*, client=None, now=None, sender=None, authority=None) -> dict:
     """At most one existing job, at most one POST, no automatic replay.
 
     The persistent attempt marker is deliberately fail-closed. A crash after
     marking but before POST leaves a queued job needing operator attention.
     """
-    if not enabled():
-        return {"status": "disabled", "dispatched": False}
     now = now or datetime.now(timezone.utc)
     sender = sender or requests.post
     authority = authority or require_unlaunched_authority
     client = client or AirtableClient()
-    from rendering_review.archive_poll import airtable_archive_poll_closed
-
-    if airtable_archive_poll_closed(getattr(client, "_settings", None)):
-        _update(
-            last_scan_utc=now.isoformat(),
-            last_error_code=None,
-            last_result="airtable_archive_closed",
-            scanned_count=0,
-            eligible_count=0,
-        )
-        return {"status": "airtable_archive_closed", "dispatched": False}
     _update(last_scan_utc=now.isoformat(), last_error_code=None)
     try:
         rows = client.list_records(
@@ -196,6 +195,8 @@ def start_consumer() -> None:
         return
     if len(os.environ.get("PIPELINE_RUNNER_SHARED_SECRET", "").strip()) < 24:
         raise RuntimeError("rendering review auto-dispatch requires Runner authentication")
+    if not governor_enabled():
+        raise RuntimeError("rendering review auto-dispatch requires workload governor")
     with _LOCK:
         if _STARTED:
             return
