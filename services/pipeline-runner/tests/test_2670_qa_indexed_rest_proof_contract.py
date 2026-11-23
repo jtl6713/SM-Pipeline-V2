@@ -14,7 +14,7 @@ def test_three_read_only_no_duplicate_pagination():
     assert "'order=output_number.asc.nullslast,airtable_record_id.asc'" in SOURCE
     assert "sort -u /tmp/indexed-qa-ids.txt" in SOURCE
     assert "PASS_247_DISTINCT_NO_WRITES" in SOURCE
-    assert 'curl -sS --max-time 16' in SOURCE
+    assert 'Invoke-RestMethod -Method Get' in SOURCE\n    assert '-TimeoutSec 16' in SOURCE\n    assert 'OPS_DASHBOARD_TOKEN' in SOURCE
     assert 'timeout-minutes: 6' in SOURCE
     for forbidden in ("-X POST", "-X PATCH", "-X PUT", "-X DELETE",
                       "STUDIO_MAX_PRODUCER_JOBS=2", "do_not_publish=false"):
