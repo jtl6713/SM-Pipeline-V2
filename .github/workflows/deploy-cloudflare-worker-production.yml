@@ -449,6 +449,22 @@ jobs:
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run >/tmp/wrangler-dry-run.log 2>&1
           echo "wrangler_dry_run=PASS"
 
+      - name: Enforce dormant incident 2670 global coordinator is absent from both binding contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Do not disclose secret metadata. Deployment must fail before any
+          # mutation if a coordinator activation flag was set elsewhere.
+          jq -e '.success==true and
+            ([.result.resources.bindings[]? |
+              select(.name=="STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED")] | length)==0' \
+            /tmp/version-before.json >/dev/null
+          if grep -Fq 'STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED' /tmp/wrangler-production/wrangler.jsonc; then
+            echo 'incident2670_global_worker_flag=UNSAFE_STAGED_BINDING_REFUSED'
+            exit 1
+          fi
+          echo 'incident2670_global_worker_flag=ABSENT_IN_ACTIVE_AND_STAGED_VERSIONS'
+
       - name: Deploy source with preserved vars secrets and explicit R2 binding
         id: deploy_source
         shell: bash
