@@ -271,7 +271,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { selectLegacyIdeaListenerCandidates, ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { exploreIdeaNeedsApproval, selectLegacyIdeaListenerCandidates, ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import { preserveProducerThreadOnEdit } from "./producer-conversation.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -13163,6 +13163,12 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
       // media, opened Production, or placed a hold after discovery.
       const live = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id);
       const liveStatus = String(f(live, "Candidate_Status") || "").trim();
+      // Explore is an editorial-only generation choice. Never silently
+      // start an asset search or production handoff before approval.
+      if (exploreIdeaNeedsApproval({
+        sourcingMode: f(live, "Asset_Sourcing_Mode"),
+        candidateStatus: liveStatus,
+      })) continue;
       if (String(f(live, "Studio_Photo_Wait_Status") || "").trim()
           || liveStatus === "On Hold" || liveStatus === "Rejected"
           || liveStatus === "Promoted"
