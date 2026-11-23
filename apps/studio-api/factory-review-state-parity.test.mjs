@@ -129,3 +129,16 @@ test("already approved or published outputs are never relabeled as review-ready"
   assert.notEqual(normalize(video({ Review_Status: "Approved", Output_Status: "Approved for Publishing" })), "Ready for Review");
   assert.equal(normalize(video({ Publish_Status: "Published", Output_Status: "Published" })), "Published");
 });
+
+// #2618: merely finding an approved sibling must never be a human decision
+// for an unreviewed native photo output, and recurring arming must be bounded.
+test("native photo worker recovery cannot autonomously approve a Ready for Review sibling", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const block = source.split("export async function studioHealNativePhotoReviewStrands")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioHealNativePhotoReviewStrands__*/")[0];
+  assert.ok(block, "worker recovery implementation must exist");
+  assert.doesNotMatch(block, /approveOutputRecordForPublishing\s*\(/,
+    "Factory review decisions cannot be created by an autonomous sibling heuristic");
+  assert.match(block, /Review_Status"\)\s*\|\|\s*""\)\.trim\(\) !== "Approved"/);
+  assert.match(block, /Review_Notes"\)\s*\|\|\s*""\)\.includes/);
+});
