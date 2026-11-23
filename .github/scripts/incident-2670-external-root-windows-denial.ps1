@@ -24,6 +24,7 @@ $env:SUPABASE_SERVICE_ROLE_KEY=$sbKey
 $env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
 $env:PYTHONPATH=$root
 $env:INCIDENT2670_CROSSHOST_MODE=$mode
+if(-not (Get-Command python -ErrorAction SilentlyContinue)){Write-Output 'incident2670_root_windows_class=PYTHON_EXE_MISSING';throw 'crosshost_python_unavailable'}
 $python=@'
 import os, sys, time
 try:
