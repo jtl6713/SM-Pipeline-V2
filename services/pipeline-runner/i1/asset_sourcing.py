@@ -256,7 +256,7 @@ def _asks_for_closeup(idea: dict) -> bool:
         "suggested_visuals", "required_assets", "candidate_title",
     ))
     return bool(re.search(
-        r"\\b(?:close[\\s-]?up|macro|extreme\\s+detail|tight(?:ly)?\\s+framed)\\b",
+        r"\b(?:close[\s-]?up|macro|extreme\s+detail|tight(?:ly)?\s+framed)\b",
         text, flags=re.I,
     ))
 
