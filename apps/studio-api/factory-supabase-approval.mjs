@@ -10,7 +10,11 @@ import {
   supabaseRest, airtableShapedOutputFromSupabase,
 } from "./supabase-pipeline-reads.mjs";
 import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages } from "./review-package-readiness.mjs";
-import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
+import {
+  assertSupabaseNativeGalleryPublicationPackage,
+  preflightNycOwnerGalleryApproval,
+  finalizeNycOwnerGalleryOnFactoryClick,
+} from "./native-gallery-package-guard.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
@@ -147,7 +151,13 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
     }
     if (!state.already_satisfied) {
-      await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+      // #2371: an actual new authenticated Factory click can finalize these
+      // two pre-verified NYC slide sets; preflight is read-only and cannot
+      // mark assets approved, schedule, or create publisher work.
+      const pendingHumanReview = await preflightNycOwnerGalleryApproval(env, entry.row);
+      if (!pendingHumanReview?.pending) {
+        await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+      }
     }
     return {
       id, profile_id: entry.profileId,
@@ -228,9 +238,13 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
   }
-  // Selected clips and HTTP-probed covers alone never authorize a multi-image
-  // publish. The *exact linked* Supabase slide package must be finalized first.
-  await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+  // Selected clips and covers never authorize publishing. For the exact
+  // owner-released NYC pair only, distinguish verified gallery structure from
+  // the final decision made by this NEW authenticated human Approve click.
+  const pendingHumanReview = await preflightNycOwnerGalleryApproval(env, entry.row);
+  if (!pendingHumanReview?.pending) {
+    await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+  }
   const verified = await verifyImages(state.readiness);
   if (verified?.readiness !== "READY") {
     throw Error("Cannot approve: public review media could not be verified");
@@ -238,6 +252,15 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   // Slot must be proven BEFORE the single status+schedule CAS; otherwise the
   // Factory historically committed Approved with no future plan and no auto.
   const scheduled = await factorySupabaseNextApprovedSlot(env, entry);
+  if (pendingHumanReview?.pending) {
+    await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
+      requestId, approvedByUserRecordId,
+    });
+  }
+  // NEVER remove this independent persisted-slide gate. The only new slide
+  // approvals were recorded with the authenticated user and exact Factory
+  // request ID, not from historic/AI receipts or a publication-hold release.
+  await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
   const stamp = new Date().toISOString();
   const row = entry.row;
   if (!row.updated_at || !UUID.test(row.id)) {
