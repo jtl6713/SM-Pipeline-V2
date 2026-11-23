@@ -4710,7 +4710,7 @@ test("Production Request Preparing/Error/Promoted list formulas prefer Supabase"
   assert.match(calls[0], /variant_status=eq\.Error/);
 });
 
-test("failed-output census bounds via PostgREST OR and LOWER FIND leaves", async () => {
+test("failed-output census uses indexed candidate with exact FIND failure semantics", async () => {
   const {
     translateOutputSideFormula,
     homeFailureCensusOrFilter,
@@ -4761,10 +4761,12 @@ test("failed-output census bounds via PostgREST OR and LOWER FIND leaves", async
     globalThis.fetch = originalFetch;
   }
   assert.equal(calls.length, 1);
-  assert.match(calls[0], /output_status\.ilike/);
-  // Full translated FIND/LOWER string must not drive the census page.
-  assert.match(calls[0], /test_run_id=is\.null&or=/);
-  assert.doesNotMatch(calls[0], /platform_outputs\?test_run_id=is\.null&select=/);
+  // The legacy multi-ILIKE OR hit PostgreSQL statement_timeout (57014).
+  // One indexed, database-generated candidate flag retains exact parity with
+  // JS row-level recheck; no full-scan/archived-AirTable fallback is allowed.
+  assert.match(calls[0], /test_run_id=is\.null&home_failure_candidate=eq\.true/);
+  assert.doesNotMatch(calls[0], /or=\(|\.ilike/);
+  assert.match(calls[0], /order=output_number\.asc\.nullslast,airtable_record_id\.asc/);
 });
 
 test("publish reconcile/FBS UPPER FIND and schedule DATEADD prefer Supabase", async () => {
