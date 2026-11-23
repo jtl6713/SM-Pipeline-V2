@@ -70,7 +70,8 @@ const unique = items => new Set(items.map(x=>key(x.platform,x.type))).size===ite
  * automatic production approval/publish/schedule permission.
  */
 export function assessProductionFactoryHandoff({
-  request,outputs,gallerySlides=null,factoryCards=null,activeSubmissionIds=[],
+  request,outputs,gallerySlides=null,factoryCards=null,
+  activeSubmissionIds=[],verifiedMediaEvidence=null,
 }={}) {
   const at=new Date().toISOString();
   const report={
@@ -212,6 +213,16 @@ export function assessProductionFactoryHandoff({
         continue;
       }
     } else missingProof=true;
+    // Existence of an https image URL or a C9 row does not independently
+    // prove public bytes, creative location, permitted source, 4:5/9:16
+    // dimensions, branding, or video sound. Keep deep QA UNKNOWN until an
+    // authenticated image/video validator returns exact output evidence.
+    const proof=verifiedMediaEvidence && typeof verifiedMediaEvidence==="object"
+      ? verifiedMediaEvidence[str(row.output_number)] : null;
+    const required=["cdn_bytes_verified","topic_location_verified",
+      "rights_verified","branding_verified","aspect_ratio_verified"];
+    if(!nativePhoto(row))required.push("audio_verified");
+    if(!proof || !required.every(k=>proof[k]===true)) missingProof=true;
     report.ready_count++;
   }
   if(report.findings.length){
