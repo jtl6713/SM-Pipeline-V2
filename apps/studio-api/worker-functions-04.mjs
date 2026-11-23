@@ -18974,6 +18974,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
                 approvedByUserRecordId: job.submitted_by || null,
+                submittedAt: job.created_at || null,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
