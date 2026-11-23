@@ -209,8 +209,8 @@ test("click-intent hides a selection without blocking its own approval POST", ()
   let persisted=null;
   const active=new Function("state","pendingFactoryApproval",
     "factoryRecoveryEntries","factoryActivityRows",
-    between("  function factoryActiveSubmissionIds(", "  // A publication hold"),
-    )(state,()=>persisted,()=>[],()=>[]);
+    between("  function factoryActiveSubmissionIds(", "  // A publication hold")+
+    "\\nreturn factoryActiveSubmissionIds;")(state,()=>persisted,()=>[],()=>[]);
   assert.equal(active().has(card.id),true,
     "ordinary actions must remain fenced after click");
   assert.equal(active({ignoreClickIntent:true}).has(card.id),false);
