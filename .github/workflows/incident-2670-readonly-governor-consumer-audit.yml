@@ -27,10 +27,10 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path $file),[ref]$tokens,[ref]$errors)
           if($errors.Count -gt 0){
-            foreach($error in $errors){
-              $safeId=([string]$error.ErrorId -replace '[^A-Za-z0-9_-]','')
+            foreach($parseError in $errors){
+              $safeId=([string]$parseError.ErrorId -replace '[^A-Za-z0-9_-]','')
               Write-Output ('incident2670_powershell_parser_failure='+$safeId+
-                ':line_'+$error.Extent.StartLineNumber)
+                ':line_'+$parseError.Extent.StartLineNumber)
             }
             throw 'readonly_audit_powershell_parse_failed'
           }
