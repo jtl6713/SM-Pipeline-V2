@@ -212,6 +212,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
+  approvedByUserRecordId = null,
   verifyImages = verifyReviewImages, onStage = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
@@ -246,6 +247,12 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     request_id: requestId, output_record_id: id,
     output_number: row.output_number, profile_record_id: profileId,
     approved_at: stamp, authority: "supabase", scheduled: true,
+    // A saved batch submitter is attribution evidence, NOT proof of a
+    // human visually inspecting images; never invent an old approver.
+    approval_actor_record_id: /^rec[A-Za-z0-9]{14}$/.test(String(approvedByUserRecordId || ""))
+      ? approvedByUserRecordId : null,
+    actor_provenance: /^rec[A-Za-z0-9]{14}$/.test(String(approvedByUserRecordId || ""))
+      ? "authenticated_factory_submission" : "legacy_batch_actor_not_captured",
     scheduled_for: scheduled.iso, scheduled_timezone: scheduled.timeZone,
     published: false,
   };

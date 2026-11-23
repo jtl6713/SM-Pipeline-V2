@@ -309,3 +309,23 @@ test("Factory group cron cursor inspects every parent, with no silent 50-to-12 s
   assert.match(worker, /maxScan: parentInspectionBudget/);
   assert.match(worker, /inspectedGroups >= parentInspectionBudget/);
 });
+
+test("#2618: global Factory submission actor survives parent to child and R2 resume", async () => {
+  const bucket = new FakeR2();
+  const actor = "recAuthUser123456";
+  const first = await factoryApprovalGroupEnqueue(bucket, {
+    ...opts, submittedBy:actor,
+  });
+  const parent = await factoryApprovalGroupRead(bucket,opts.requestId);
+  assert.equal(parent.submitted_by,actor);
+  for (const child of parent.children) {
+    const job = await factoryBatchRead(bucket,child.profile_id,child.request_id);
+    assert.equal(job.submitted_by,actor);
+  }
+  const restarted = await factoryApprovalGroupResume(bucket,opts.requestId);
+  assert.ok(restarted);
+  const after = await factoryApprovalGroupRead(bucket,opts.requestId);
+  assert.equal(after.submitted_by,actor);
+  const legacy = await factoryApprovalGroupBuild(opts);
+  assert.equal(legacy.submitted_by,null);
+});

@@ -892,3 +892,16 @@ test("Factory receipt cron selector rotates fairly; newer jobs cannot indefinite
   const noPending = [{ ...jobs[0], job: { ...jobs[0].job, status: "completed" } }];
   assert.deepEqual(factoryBatchCronReceiptCandidates(noPending, { nowMs: 0 }), []);
 });
+
+test("#2618: exact submitter persists on Factory batch and cannot be rewritten on retry", async () => {
+  const bucket = new FakeR2();
+  const original = await factoryBatchEnqueue(bucket, {
+    ...opts, submittedBy:"recAuthUser123456",
+  });
+  assert.equal(original.job.submitted_by, "recAuthUser123456");
+  const retry = await factoryBatchEnqueue(bucket, { ...opts, submittedBy:"recAnotherUser999" });
+  assert.equal(retry.already_submitted, true);
+  assert.equal(retry.job.submitted_by, "recAuthUser123456");
+  const legacy = factoryBatchBuild({...opts, requestId:"new_legacy_batch_id"});
+  assert.equal(legacy.submitted_by, null);
+});

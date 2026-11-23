@@ -336,3 +336,20 @@ test("#2618: unresolved media QA blocks exact Supabase Factory approval even wit
   }), /unresolved creative QA media correction/);
   assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });
+
+test("#2618: future Factory receipt includes authenticated submission actor; legacy stays unverified", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946),output(IDS[1],8948)]);
+  await factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId:"factory_provenance_explicit", approvedByUserRecordId:"recAuthUser123456",
+    verifyImages: async r => r,
+  });
+  const proven = mock.rows[0].error_messages.SM_Factory_Supabase_Approval_Receipt;
+  assert.equal(proven.approval_actor_record_id,"recAuthUser123456");
+  assert.equal(proven.actor_provenance,"authenticated_factory_submission");
+  await factorySupabaseApproveOutput(env, IDS[1], PROFILE_ID, {
+    requestId:"factory_provenance_legacy", verifyImages: async r => r,
+  });
+  const legacy = mock.rows[1].error_messages.SM_Factory_Supabase_Approval_Receipt;
+  assert.equal(legacy.approval_actor_record_id,null);
+  assert.equal(legacy.actor_provenance,"legacy_batch_actor_not_captured");
+});
