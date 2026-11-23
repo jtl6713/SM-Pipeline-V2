@@ -203,6 +203,28 @@ test("ordinary early-stage production output can release a hold without advancin
   assert.equal(held.output_status,"In Production");
   assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,1);
 });
+test("output #10992 native-gallery Rehold receipt cannot be cleared through ordinary Admin toggle",async()=>{
+  const held={...row(),output_status:"Ready for Review",review_status:null,
+    publish_status:"Not Ready",error_messages:{
+      SM_Native_Gallery_Factory_Release_Rehold_2294:{
+        reason:"Unsafe release-for-formal-review while canonical native slide package still absent",
+        issue_number:2294,publication_authorized:false
+      }
+    }};
+  const state=classifyAdminPublishingHold(held);
+  assert.equal(state.releasable,false);
+  assert.match(state.reason,/canonical native slide package still absent/);
+  assert.match(state.block_reason,/Native-gallery recovery hold/);
+  const {ops,calls}=fixture({held});
+  const response=await handle(req("/api/operations/publishing-holds/"+REC+"/release",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({confirm_output_id:REC,
+      release_note:"Operator asked about the held gallery record",
+      revision:held.updated_at,hold_set_at:held.publish_hold_set_at})
+  }),ops);
+  assert.equal(response.status,409);
+  assert.equal(calls.filter(x=>x.opt.method==="PATCH").length,0);
+});
 test("ordinary in-production row with a genuine Gallery or recovery safety marker remains locked",async()=>{
   const held={...row(),output_status:"In Production",review_status:"Pending Review",
     publish_status:"Not Ready",
