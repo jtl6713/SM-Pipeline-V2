@@ -588,9 +588,45 @@ def snapshot() -> dict[str, object]:
         groups = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope='photo_group' AND lease_until>?""", (time.time(),)).fetchone()[0]
         queued = dict(counts)
+        now = time.time()
         worker_heavy = db.execute("""SELECT COUNT(*) FROM resource_leases
             WHERE scope=? AND lease_until>?""",
-            (WORKER_HEAVY_SCOPE, time.time())).fetchone()[0]
+            (WORKER_HEAVY_SCOPE, now)).fetchone()[0]
+        active_resources = dict(db.execute("""SELECT scope, COUNT(*)
+            FROM resource_leases WHERE lease_until>?
+            GROUP BY scope""", (now,)).fetchall())
+        permitted_resource_names = (
+            "photo_group", "ratio", "transfer", "supabase_read",
+            "supabase_write", "worker_heavy", "library_image_upload",
+            "library_image_classify",
+        )
+        active_resources = {
+            scope: int(active_resources.get(scope, 0))
+            for scope in permitted_resource_names
+        }
+        circuit_row = db.execute("""SELECT until_at FROM governor_control
+            WHERE name='database'""").fetchone()
+        circuit_phase = (
+            "open" if circuit_row and float(circuit_row[0]) > now
+            else "half_open" if circuit_row else "closed"
+        )
+        history_rows = db.execute("""SELECT minute, operation, total, failures,
+            latency_total_ms, latency_max_ms
+            FROM request_metrics WHERE minute>=?
+            ORDER BY minute DESC, operation LIMIT 60""",
+            (int(now // 60) - 29,),
+        ).fetchall()
+        history = [
+            {
+                "minute_epoch": int(minute),
+                "operation": operation,
+                "requests": int(total),
+                "failures": int(failed),
+                "mean_latency_ms": round(total_ms / max(1, total), 1),
+                "max_latency_ms": round(max_ms, 1),
+            }
+            for minute, operation, total, failed, total_ms, max_ms in history_rows
+        ]
         rows = db.execute("""SELECT operation,SUM(total),SUM(failures),
             SUM(latency_total_ms),MAX(latency_max_ms)
             FROM request_metrics WHERE minute>=? GROUP BY operation""",
@@ -616,8 +652,14 @@ def snapshot() -> dict[str, object]:
             "active_photo_groups": groups,
             "max_jobs": max_jobs(), "max_photo_groups": max_photo_groups(),
             "max_ratio_workers": max_ratio_workers(), "database_circuit_open": circuit_open(db),
+            "database_circuit_phase": circuit_phase,
+            "database_circuit_until_epoch": float(circuit_row[0]) if circuit_row else None,
+            "active_resource_slots": active_resources,
             "max_db_reads": max_db_reads(), "max_db_writes": max_db_writes(),
             "supabase_request_metrics": traffic,
+            "runner_request_history": history,  # Last 30 min; runner REST only.
+            "last_recovery": None,  # No durable recovery event ledger exists yet.
+            "last_admission_decisions": None,  # Do not invent history.
         }
 
 
