@@ -28,3 +28,13 @@
 #qaFinalPanel textarea{resize:vertical;min-height:78px}
 #qaFinalPanel select:disabled,#qaFinalPanel textarea:disabled{opacity:.55}
 #qaFinalPanel button{white-space:nowrap}
+
+#qaWorkloadPanel .qa-toolbar{align-items:center;justify-content:space-between}
+#qaWorkloadPanel #qaWorkloadStatus{overflow-wrap:anywhere}
+#qaWorkloadStatus[data-kind="error"]{color:#b5262b}
+#qaWorkloadMetrics .qa-event-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 14px;max-height:none}
+#qaWorkloadMetrics p{margin:5px 0;padding:6px 8px;border:1px solid var(--border,#d8e0e9);border-radius:7px;overflow-wrap:anywhere}
+#qaWorkloadHistory{overflow-x:auto}
+.qa-workload-history-table{width:100%;border-collapse:collapse;font-size:.88rem;min-width:560px}
+.qa-workload-history-table th,.qa-workload-history-table td{padding:8px 9px;text-align:left;border-bottom:1px solid var(--border,#d8e0e9);white-space:nowrap}
+.qa-workload-history-table th{position:sticky;top:0;background:var(--card-bg,#fff);font-weight:700}
