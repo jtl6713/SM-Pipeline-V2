@@ -123,3 +123,52 @@ def test_short_single_idea_still_respects_original_json_schema():
     assert '"suggested_visuals"' in original
     assert '"required_assets"' in original
     assert '"ideas"' in original
+
+
+def test_cover_uses_explicit_linked_city_profile_instead_of_chicago_default(monkeypatch):
+    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
+    parent = {"fields": {"Content_Title": "Ocean Drive Neon", "Content_Profile": ["rec" + "M" * 14]}}
+    profile = {"fields": {"Market_Name": "Miami", "Brand_Name": "Miami Shining"}}
+    prompt = build_finished_thumbnail_prompt({}, parent, profile=profile)
+    assert "Create a Miami Shining social thumbnail" in prompt
+    assert "Ocean Drive Art Deco neon" in prompt
+    assert "ChicagoShining" not in prompt
+    assert "Wrigley Building" not in prompt
+
+
+def test_cover_without_verified_profile_uses_neutral_brand_not_chicago():
+    prompt = build_finished_thumbnail_prompt(
+        {"fields": {"Requested_Title": "An Unknown Location"}},
+        {"fields": {}},
+    )
+    assert "Create a Shining Cities social thumbnail" in prompt
+    assert "ChicagoShining" not in prompt
+
+
+def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
+    from studio_produce import thumbnail
+
+    class FakeClient:
+        def get_record(self, table, record_id):
+            assert table == thumbnail.CONTENT_PROFILES_TABLE
+            assert record_id == "rec" + "N" * 14
+            return {"fields": {"Market_Name": "New York City", "Brand_Name": "New York Shining"}}
+
+    received = {}
+    monkeypatch.setattr(thumbnail, "load_profile_creative_guidance", lambda *a: {})
+    monkeypatch.setattr(thumbnail, "generate_thumbnail_png",
+                        lambda prompt, aspect_ratio: received.update(prompt=prompt, ratio=aspect_ratio) or b"png")
+    monkeypatch.setattr(thumbnail, "brand_watermark_bytes", lambda client: b"watermark")
+    monkeypatch.setattr(thumbnail, "apply_watermark_bytes",
+                        lambda raw, watermark, output_format: raw)
+    result, prompt = thumbnail._generate_cover_bytes(
+        FakeClient(),
+        {"fields": {}},
+        {"fields": {"Content_Title": "Grand Central Clock", "Content_Profile": ["rec" + "N" * 14]}},
+        aspect_ratio="9:16",
+    )
+    assert result == b"png"
+    assert "New York Shining" in prompt
+    assert "Grand Central's clock" in prompt
+    assert "Wrigley Building" not in prompt
+    assert received["ratio"] == "9:16"
