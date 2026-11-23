@@ -28,7 +28,7 @@ import { isFacebookPublishRateLimitError } from "./desk-inventory.mjs";
 import { overdueSkipReceiptFields, publishDispatchAttemptStampFields } from "./overdue-retry-receipt.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
+import { exploreIdeaNeedsApproval, ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure, homeOutputInProduction } from "./profile-summary-classification.mjs";
@@ -1328,6 +1328,12 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
   const waitStatusNow = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  if (!force && exploreIdeaNeedsApproval({
+    sourcingMode: f(idea, "Asset_Sourcing_Mode"),
+    candidateStatus: f(idea, "Candidate_Status"),
+  })) {
+    return { action: "needs_approval", idea, production_request: productionRequest || null, skipped: true };
+  }
   // Cron discovery can race an operator Hold, Reject or Promotion. Fail closed
   // before ranking and again before attaching matched media.
   if (["On Hold", "Rejected", "Promoted"].includes(String(f(idea, "Candidate_Status") || "").trim())
@@ -1495,11 +1501,17 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     });
     // Stamp origin=autonomous so morning resume / Factory Auto High can pick this
     // up — photo Ready alone used to park forever as a blank-notes Draft.
-    requestRecord = await ideaPhotoWaitStage("stamp_autonomous", () => stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord));
+    const autonomousAdmitted = !exploreIdeaNeedsApproval({
+      sourcingMode: f(ideaReady, "Asset_Sourcing_Mode"),
+      candidateStatus: f(ideaReady, "Candidate_Status"),
+    });
+    if (autonomousAdmitted) {
+      requestRecord = await ideaPhotoWaitStage("stamp_autonomous", () => stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord));
+    }
     // A Ready match is a durable production handoff, not merely a green
     // photo badge. R2 enqueue is idempotent by Idea ID and the one-minute
     // dispatcher still rechecks holds, reciprocal request and asset evidence.
-    if (env.STUDIO_MEDIA) {
+    if (env.STUDIO_MEDIA && autonomousAdmitted) {
       try {
         const queued = await readyProductionEnqueue(env.STUDIO_MEDIA, {
           ideaId: ideaReady.id,
