@@ -1028,7 +1028,7 @@
       // Avoid arbitrary/off-domain links from untrusted output metadata.
       try {
         const source = new URL(String(card.final_file_url || ""));
-        const match = /^\\/file\\/d\\/[A-Za-z0-9_-]{20,}\\/view$/.test(source.pathname);
+        const match = /^\/file\/d\/[A-Za-z0-9_-]{20,}\/view$/.test(source.pathname);
         if (source.protocol === "https:" && source.hostname === "drive.google.com"
           && !source.port && !source.username && !source.password
           && !source.search && !source.hash && match) {
