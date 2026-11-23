@@ -1,0 +1,123 @@
+name: Bethesda 2303 bounded narrated Reel repair
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/bethesda-2303-bounded-repair.yml'
+      - '.github/scripts/bethesda-2303-bounded-*.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bethesda-2303-bounded-repair.yml'
+permissions:
+  contents: read
+concurrency:
+  group: bethesda-2303-narrated-original-two-reels
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse all bounded scripts and enforce Ops console size
+        shell: pwsh
+        run: |
+          $files=@('.github/scripts/bethesda-2303-bounded-preflight.ps1','.github/scripts/bethesda-2303-bounded-prepare.ps1','.github/scripts/bethesda-2303-bounded-poll.ps1')
+          foreach($f in $files){
+            $t=Get-Content $f -Raw
+            if($t.Length -gt 8000){throw "ops_shell_8000_limit_exceeded: $f"}
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count -gt 0){$errors|ForEach-Object {Write-Error $_.ToString()};exit 1}
+            if($t -match '(?i)stages/(?:ap1|publish|ttd)|api/outputs/.*/approve|airtable\.com'){throw 'publisher_or_airtable_call_denied'}
+          }
+          Write-Output 'bethesda_bounded_powershell_syntax_and_size=PASS'
+  execute:
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 68
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify public normal-production Supabase recovery and safeguards
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/bethesda-health.json
+          jq -e '.ok==true and .recovery_read_only==false and .recovery_producer_only_enabled==false and .recovery_producer_scope=="disabled" and .workload_governor_enabled==true and .studio_write_source=="supabase" and .i1_durable_jobs==true and .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/bethesda-health.json >/dev/null
+          echo 'bethesda_bounded_public_health=PASS'
+      - name: Preflight, exact Reel R4, and bounded R5 reviews (no publishing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+          from pathlib import Path
+          base='https://ops.chicagoshining.com'
+          token=None
+          def request(method,path,bearer,payload=None,timeout=25):
+              raw=None if payload is None else json.dumps(payload).encode('utf-8')
+              headers={'Authorization':'Bearer '+bearer}
+              if raw is not None: headers['Content-Type']='application/json'
+              req=urllib.request.Request(base+path,data=raw,headers=headers,method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as resp:
+                  return resp.status,json.load(resp)
+          for candidate in (os.environ.get('OPS_TOKEN_A'),os.environ.get('OPS_TOKEN_B'),os.environ.get('OPS_TOKEN_C')):
+              if not candidate: continue
+              try:
+                  status,body=request('GET','/api/catalog',candidate)
+                  if status==200 and body.get('ok') is True:
+                      token=candidate;break
+              except Exception:
+                  continue
+          if not token: raise SystemExit('ops_token_unavailable_no_mutation')
+          scripts=Path('.github/scripts')
+          def run_ops(file,reel=None):
+              code=(scripts/file).read_text(encoding='utf-8')
+              if reel is None:
+                  if '__REEL__' in code: raise SystemExit('reel_parameter_required')
+              else:
+                  if reel not in (11153,11154) or code.count('__REEL__')!=1: raise SystemExit('reel_parameter_invalid')
+                  code=code.replace('__REEL__',str(reel))
+              if len(code)>8000: raise SystemExit('ops_shell_command_above_published_limit')
+              try:
+                  status,body=request('POST','/api/shell',token,{'command':code,'confirm':True},timeout=35)
+              except urllib.error.HTTPError as err:
+                  print(f'bethesda_ops_not_admitted_http={err.code};no_auto_retry=true',flush=True)
+                  raise SystemExit(1)
+              if status!=202 or not body.get('ok'): raise SystemExit('ops_job_not_admitted')
+              jobid=(body.get('job') or {}).get('id')
+              if not jobid: raise SystemExit('ops_receipt_missing')
+              print(f'bethesda_ops_stage={file};reel={reel or "all"};job={jobid}',flush=True)
+              for _ in range(43):
+                  time.sleep(7)
+                  status,response=request('GET','/api/jobs/'+str(jobid),token,timeout=24)
+                  job=response.get('job') or {}
+                  state=job.get('status')
+                  if state in ('ok','failed'):
+                      log=job.get('log') or ''
+                      marks=[v.strip() for v in log.splitlines() if v.strip().startswith('bethesda_')]
+                      for m in marks[-12:]: print(m[:500],flush=True)
+                      if state!='ok': raise SystemExit('bethesda_ops_stage_failed_closed_no_blind_retry')
+                      return '\n'.join(marks)
+              raise SystemExit('ops_job_result_unknown_stop_no_auto_retry')
+          pre=run_ops('bethesda-2303-bounded-preflight.ps1')
+          if 'bethesda_2303_preflight=PASS' not in pre: raise SystemExit('exact_preflight_not_proven')
+          for reel in (11153,11154):
+              launch=run_ops('bethesda-2303-bounded-prepare.ps1',reel)
+              if f'bethesda_reel_{reel}=NEW_R4_JOB_WITH_NARRATION' not in launch and f'bethesda_reel_{reel}=ALREADY_NARRATED_NO_DUPLICATE' not in launch:
+                  raise SystemExit('exact_r4_narration_unproven')
+              for _ in range(10):
+                  status=run_ops('bethesda-2303-bounded-poll.ps1',reel)
+                  if 'bethesda_poll=COMPLETE' in status:
+                      print(f'bethesda_reel_{reel}=NEW_NARRATED_RENDER_READY_FOR_REVIEW',flush=True)
+                      break
+                  if 'bethesda_poll=PENDING' not in status: raise SystemExit('r5_unknown_state_stop')
+              else:
+                  raise SystemExit('bounded_r5_poll_budget_exhausted_no_retry')
+          print('bethesda_2303_two_reel_render_repair=COMPLETE;stories=UNCHANGED;all_four_DNP=true;no_publishing=true',flush=True)
+          PY
