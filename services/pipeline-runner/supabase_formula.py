@@ -72,6 +72,15 @@ _MEDIA_COLUMNS = {
     "Search_Keywords": "metadata->>search_keywords",
 }
 
+# Dedicated Supabase JSONB workflow ledgers; never query nonexistent extras.
+# This list is intentionally narrower than a generic Airtable-side-table router.
+_REVIEW_JSON_TABLES = frozenset({
+    "tblHX3UdoNszkoquG",  # rendering_review_sessions
+    "tblUkZB6SMtf9Ib6I",  # rendering_review_jobs
+    "tbl7wPOAE26o2coMU",  # rendering_review_attempts
+    "tblalFXUJyYg5PBrz",  # rendering_review_plans
+})
+
 _RECORD_ID = re.compile(r'^RECORD_ID\(\)="(rec[A-Za-z0-9]+)"$')
 _EQ = re.compile(r'^\{([A-Za-z0-9_ ]+)\}="([^"]*)"$')
 _BLANK = re.compile(r'^\{([A-Za-z0-9_ ]+)\}=BLANK\(\)$')
@@ -149,7 +158,7 @@ def _bag(table_id: str) -> str:
         return "publish_status"
     if table_id == MEDIA_ASSETS_TABLE:
         return "metadata"
-    if table_id == CAROUSEL_SLIDES_TABLE:
+    if table_id == CAROUSEL_SLIDES_TABLE or table_id in _REVIEW_JSON_TABLES:
         return "fields"
     return "extras"
 
@@ -515,6 +524,14 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     if checkbox:
         return checkbox
 
+    # The guarded Rendering Review scan compares numeric zero on JSONB
+    # attempt/fence fields. Never silently skip these conditions; doing so
+    # would allow a previously attempted job to appear in an eligible scan.
+    if table_id in _REVIEW_JSON_TABLES:
+        zero = re.fullmatch(r"\{(Retry_Count|Lease_Fence|Progress_Percent)\}=0", text)
+        if zero:
+            return f"fields->>{zero.group(1)}.eq.0"
+
     match = _EQ.match(text)
     if match:
         ref = _field_ref(table_id, match.group(1))
@@ -581,6 +598,7 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
         PRODUCTION_REQUESTS_TABLE,
         MEDIA_ASSETS_TABLE,
         CAROUSEL_SLIDES_TABLE,
+        *_REVIEW_JSON_TABLES,
     ):
         return None
     if formula is None:
