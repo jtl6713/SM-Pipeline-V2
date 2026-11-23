@@ -4769,6 +4769,44 @@ test("failed-output census uses indexed candidate with exact FIND failure semant
   assert.match(calls[0], /order=output_number\.asc\.nullslast,airtable_record_id\.asc/);
 });
 
+test("QA output census wraps complex, OR, and single-leaf formulas in a real PostgREST root filter", async () => {
+  const { listSupabaseOutputCensusPage } = await import("./supabase-pipeline-reads.mjs");
+  const { qaHomePastDueCandidateFormula } = await import("./quality-agent-home-parity.mjs");
+  const cases = [
+    [qaHomePastDueCandidateFormula(Date.parse("2026-11-23T03:50:00.000Z")), "scheduled_post_date.lt."],
+    ['OR({Output_Status}="Published",{Output_Status}="Failed")', "or(output_status.eq.Published,output_status.eq.Failed)"],
+    ['{Review_Status}="Approved"', "review_status.eq.Approved"],
+  ];
+  const env = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const paths = [];
+  globalThis.fetch = async (url) => {
+    paths.push(String(url));
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    for (const [formula, expected] of cases) {
+      await listSupabaseOutputCensusPage(env, { limit: 100, offset: 10000, filterFormula: formula });
+      const url = new URL(paths.at(-1));
+      const params = url.searchParams;
+      // Regression: ?and(...) is ignored by PostgREST as an unknown URL
+      // parameter, silently returning all 10k outputs despite an AND filter.
+      assert.ok(params.has("and"), "missing root and=(...) query parameter");
+      assert.ok(params.get("and").includes(expected), "original predicate was lost");
+      assert.ok(![...params.keys()].some((key) => /^(?:and|or)\(/.test(key)),
+        "bare logical expression escaped into an unrecognized URL parameter");
+      assert.equal(params.get("limit"), "100");
+      assert.equal(params.get("offset"), "10000");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(paths.length, cases.length);
+});
+
 test("publish reconcile/FBS UPPER FIND and schedule DATEADD prefer Supabase", async () => {
   const { translateOutputSideFormula } = await import("./supabase-pipeline-reads.mjs");
   const pub = translateOutputSideFormula(
