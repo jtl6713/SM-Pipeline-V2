@@ -98,3 +98,36 @@ test("held review remains unselectable for publishing and unsafe held records re
   assert.deepEqual(result.ready, ["recCreativeSafe"]);
   assert.deepEqual(result.attention, cards.slice(1).map(card => card.id));
 });
+
+test("#10855 unheld returned-to-review carousel stays visible even with historical browser acceptance", () => {
+  const returned = {
+    id:"recO494MDnQ1Tk51b", kind:"output", output_id:10855,
+    title:"Free Ferry Views or a Liberty Island Visit?",
+    output_status:"Ready for Review", review_status:"Review Sent",
+    publish_status:"Not Ready", render_status:"Native Photo Route",
+    do_not_publish:false, auto_publish_enabled:false,
+    review_package_ready:true, review_hold_active:false,
+    safety_hold_active:false, scheduled_post_date:null,
+    studio_scheduled_at:null, youtube_scheduled_publish_at:null,
+    published_at:null, platform_post_url:null, ready:true,
+  };
+  assert.deepEqual(partition([returned], [returned.id]), {
+    ready:[returned.id], attention:[],
+  }, "Reopened canonical review must not vanish behind a terminal or pending UI fence");
+  for (const override of [
+    {output_status:"Approved for Publishing",ready:false},
+    {review_package_ready:false,ready:false},
+    {published_at:"2026-11-22T13:00:00Z",ready:false},
+    {scheduled_post_date:"2026-11-24T15:00:00Z",ready:false},
+  ]) {
+    const card={...returned,...override};
+    const found=partition([card],[card.id]);
+    assert.deepEqual(found.ready, [], "Unsafe/unfinished state cannot override submission fence");
+  }
+});
+
+test("Factory keeps real in-flight claim fences while showing reopened rows", () => {
+  assert.match(js, /function factoryActiveSubmissionIds\(\)/);
+  assert.match(js, /factoryActiveSubmissionIds\(\)\.has\(String\(card\?\.id \|\| ""\)\)/);
+  assert.match(js, /visibleNeedsEyes\.sort\(\(a, b\) => Number\(factoryUnheldReviewCandidate\(b\)\)/);
+});
