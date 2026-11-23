@@ -207,7 +207,9 @@ test("bounded Supabase Quality Agent scan catches partial output fanout in two r
     },
   });
   assert.equal(urls.length,2);
-  assert.ok(urls[0].includes("limit=4"));
+  assert.ok(urls[0].includes("limit=4"))
+  assert.ok(!urls[0].includes("content_profile_id"),
+    "production_requests has no content_profile_id column in live Supabase");;
   assert.ok(urls[1].includes("content_item_id=in.("+uuid+")"));
   assert.ok(urls[1].includes("&limit=193"));
   assert.equal(scan.status,"ok");
@@ -298,4 +300,14 @@ test("URLs and gallery count without verified bytes, city, rights, branding and 
   assert.equal(assessProductionFactoryHandoff({request:request(),outputs:all,
     gallerySlides:slides(),factoryCards:cards(all),
     verifiedMediaEvidence:proof}).status,"awaiting_human_factory_approval");
+});
+
+test("cross-profile leakage among children is held even without parent profile projection",()=>{
+  const p=request();delete p.content_profile_id;
+  const all=source().map(x=>({...x}));
+  all[1].content_profile_id="profile-la";
+  const result=assessProductionFactoryHandoff({request:p,outputs:all});
+  assert.equal(result.stage,"fanout");
+  assert.equal(result.status,"blocked");
+  assert.equal(result.findings[0].reason,"wrong_content_or_profile_ownership");
 });
