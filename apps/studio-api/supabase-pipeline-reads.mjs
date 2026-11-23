@@ -4544,7 +4544,7 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   // Changes Requested. Without this, protected recovery media vanishes from
   // Factory even when its source images have been restored.
   let mediaReworkScanWarning = null;
-  const [outputRows, reviewReadyRows, originalHeldReworkRows, newHeldReworkRows, metaHeldRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  const [outputRows, reviewReadyRows, originalHeldReworkRows, newHeldReworkRows, metaHeldRows, creativeQaHeldRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
@@ -4599,6 +4599,27 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     }).catch(error => {
       mediaReworkScanWarning = "Meta recovery inventory unavailable; unresolved held outputs must not be treated as cleared";
       console.warn("Supabase Factory Meta recovery scan failed", String(error?.message || error));
+      return [];
+    }),
+    // #2618: independently recover ALL explicit creative-QA held outputs,
+    // including already-approved/scheduled items omitted from normal output
+    // and Ready-for-Review inventories. A correction hold is NOT approval.
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.true`
+        + `&error_messages->>SM_2618_Creative_QA_Hold=not.is.null`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 50, maxRows: 250 },
+    ).then(rows => {
+      if (rows.length >= 250) throw Error("Issue #2618 creative QA hold inventory exceeded bound");
+      return rows.filter(row => row.do_not_publish === true
+        && row.auto_publish_enabled === false
+        && row.error_messages?.SM_2618_Creative_QA_Hold?.publishing_permitted === false
+        && !row.published_at && !row.platform_post_url);
+    }).catch(error => {
+      const warning = "Creative QA hold inventory unavailable; held repairs are not cleared";
+      mediaReworkScanWarning = mediaReworkScanWarning ? mediaReworkScanWarning + " · " + warning : warning;
+      console.warn("Supabase Factory #2618 creative QA scan failed", String(error?.message || error));
       return [];
     }),
     supabaseRest(
@@ -4684,9 +4705,13 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const heldReworkRows = [...(originalHeldReworkRows || []), ...(newHeldReworkRows || [])];
   const protectedReworkRows = (heldReworkRows || []).filter(protectedMediaReworkSourceRow);
   const metaRecoveredRows = (metaHeldRows || []).filter(metaReviewRecoverySourceRow);
+  const creativeQaRows = (creativeQaHeldRows || []).filter(row =>
+    row?.do_not_publish === true && row?.auto_publish_enabled === false
+      && row?.error_messages?.SM_2618_Creative_QA_Hold?.publishing_permitted === false
+      && !row?.published_at && !row?.platform_post_url);
   // Only canonical, still-held, unpublished records with an explicit exact
   // source marker qualify. Never show test, scheduled or published candidates.
-  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows, ...metaRecoveredRows]) {
+  for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows, ...metaRecoveredRows, ...creativeQaRows]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
   const rawShapedOutputs = [...outputById.values()]
@@ -4719,14 +4744,16 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
   const reviewOutputs = shapedOutputs.filter((row) =>
     matchesOpsQueueReviewFormula(row.fields) || protectedMediaReworkShapedRecord(row)
-    || metaReviewRecoveryShapedRecord(row));
+    || metaReviewRecoveryShapedRecord(row)
+    || (row.fields?.Do_Not_Publish === true
+      && row.fields?.SM_2618_Creative_QA_Hold?.publishing_permitted === false));
   const activeHolds = await listSupabaseDeskHealOutputs(env, { kind: "render_active", limit: 16 }).catch(() => []);
 
   // Factory reviews can outlive the recent Production Request window. Resolve
   // their parent from Supabase by the durable promoted-content key; do not
   // require the parent to remain an active request/production job.
   // These parents enrich review cards only, not the active production lane.
-  const reviewContentIds = [...new Set([...(reviewReadyRows || []), ...metaRecoveredRows]
+  const reviewContentIds = [...new Set([...(reviewReadyRows || []), ...metaRecoveredRows, ...creativeQaRows]
     .map((row) => String(
       row?.content_items?.airtable_record_id
       || row?.error_messages?.Content_Item?.[0]
