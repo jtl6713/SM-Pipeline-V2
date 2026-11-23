@@ -210,11 +210,54 @@
     return ids;
   }
 
+  // Only truly unresolved submissions block a new human approval. A terminal
+  // historical Activity receipt is not proof that a freshly returned RFR output
+  // still has a live approval in flight (#10855 / #2371).
+  function factoryActiveSubmissionIds() {
+    const ids = new Set();
+    const add = values => {
+      for (const id of values || []) {
+        if (/^rec[A-Za-z0-9]+$/.test(String(id))) ids.add(String(id));
+      }
+    };
+    add(state.submissionIntentIds);
+    add(state.submittingOutputIds);
+    add(pendingFactoryApproval()?.ids);
+    for (const { saved } of factoryRecoveryEntries()) add(saved?.ids);
+    for (const batch of factoryActivityRows(state.batch)) {
+      const items = [...(batch?.items || []),
+        ...(batch?.children || []).flatMap(child => child?.items || [])];
+      for (const item of items) {
+        if (!["approved", "already_satisfied", "failed",
+          "skipped_removed", "superseded_duplicate"].includes(
+            String(item?.status || "pending").toLowerCase())) add([item?.id]);
+      }
+    }
+    return ids;
+  }
+
   // A publication hold blocks *publishing approval*, not a separate human
   // creative review. Keep held rendered outputs with eligible review decisions
   // in Needs Eyes. They remain non-selectable for batch publishing approval.
   function factoryHasHumanReviewAction(card) {
     return canReviewActions(card) || canReviewHeldOutput(card) || canRejectHeldOutput(card);
+  }
+
+  // The canonical output has returned to a fresh, unheld review state. Browser
+  // submission/history fences may require reconciliation, but must not make
+  // the item itself invisible. Unresolved claims remain non-selectable.
+  function factoryUnheldReviewCandidate(card) {
+    return card?.kind === "output"
+      && String(card.output_status || "") === "Ready for Review"
+      && String(card.review_status || "") === "Review Sent"
+      && String(card.publish_status || "") === "Not Ready"
+      && ["Rendered", "Native Photo Route"].includes(String(card.render_status || ""))
+      && card.do_not_publish === false && card.auto_publish_enabled !== true
+      && card.review_hold_active !== true && card.safety_hold_active !== true
+      && card.review_package_ready !== false
+      && !card.scheduled_post_date && !card.studio_scheduled_at
+      && !card.youtube_scheduled_publish_at && !card.published_at
+      && !card.platform_post_url;
   }
 
   function factoryVisibleNeedsEyes(cards) {
@@ -229,6 +272,10 @@
       // the independent server/Do_Not_Publish eligibility gates.
       const heldReview = canReviewHeldOutput(card) || canRejectHeldOutput(card);
       if (heldReview) return true;
+      // If an old accepted/recovery fence outlives the changed canonical state,
+      // the unheld RFR stays visible for inspection. The active request fence
+      // still disables approval/selection until its receipt is reconciled.
+      if (factoryUnheldReviewCandidate(card)) return true;
       return !submitted.has(String(card.id || "")) && factoryHasHumanReviewAction(card);
     });
   }
@@ -585,6 +632,8 @@
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id)) return false;
+    if (typeof factoryActiveSubmissionIds === "function"
+        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
     // A 48-hour local acceptance hint is not a saved approval. If the server
     // still reports Ready for Review, allow a fresh explicit operator action;
     // the canonical per-output lease prevents duplicate committed approvals.
@@ -969,6 +1018,8 @@
   }
 
   function canSelectBatchOutput(card) {
+    if (typeof factoryActiveSubmissionIds === "function"
+        && factoryActiveSubmissionIds().has(String(card?.id || ""))) return false;
     if (recentFactoryAccepted()[String(card?.id || "")] &&
         String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
@@ -2385,6 +2436,10 @@
   // instead of silently omitting the checkbox while leaving Approve active.
   function factoryBatchSelectionReason(card) {
     if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (typeof factoryActiveSubmissionIds === "function"
+        && factoryActiveSubmissionIds().has(String(card?.id || ""))) {
+      return "Previous approval request remains in flight or awaiting reconciliation. Check Active Approvals before retrying.";
+    }
     if (card.review_package_ready === false) {
       return "Review package incomplete: " + ((card.review_package_missing || []).join(", ") || card.review_package_reason || "required assets not verified");
     }
@@ -4023,6 +4078,11 @@
     // Display exactly the still-selectable review queue, excluding every
     // submitted output while durable Activity owns its progress and failures.
     const visibleNeedsEyes = factoryVisibleNeedsEyes(desk.lanes?.needs_eyes);
+    // Operators should see the very small actionable unheld review cohort
+    // before long publication-held preview queues, even with 12-group paging.
+    // Display order cannot grant approval or change the canonical Factory state.
+    visibleNeedsEyes.sort((a, b) => Number(factoryUnheldReviewCandidate(b))
+      - Number(factoryUnheldReviewCandidate(a)));
     const attentionCards = factoryReviewAttentionCards(desk.lanes?.needs_eyes);
     const manualCards = [...(desk.lanes?.manual || [])];
     const inManual = new Set(manualCards.map(card => String(card.id || "")));
