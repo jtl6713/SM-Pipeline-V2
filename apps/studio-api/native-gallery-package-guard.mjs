@@ -105,8 +105,16 @@ export async function assertSupabaseNativeGalleryPublicationPackage(env, output)
  * MAE, and provider gates. Other galleries retain their independent gate.
  */
 const NYC_FACTORY_FINAL_REVIEW = new Map([
-  ["recO494MDnQ1Tk51b", { number: 10855, platform: "Instagram", type: "Instagram Carousel" }],
-  ["recWIWOrdflmqyxKW", { number: 10856, platform: "Facebook", type: "Facebook Photo Set" }],
+  ["recO494MDnQ1Tk51b", { number: 10855, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
+  ["recWIWOrdflmqyxKW", { number: 10856, platform: "Facebook", type: "Facebook Photo Set", slides: 4 }],
+  // Exact six repaired NYC gallery outputs still in Factory after the first
+  // two completed; public source/rights and SHA evidence verified per slide.
+  ["recVoFLCOAGHNIkD3", { number: 10863, platform: "Instagram", type: "Instagram Carousel", slides: 8 }],
+  ["rechOtaxHOwY18A8F", { number: 10864, platform: "Facebook", type: "Facebook Photo Set", slides: 8 }],
+  ["rec61JeXiA6Aai1Kk", { number: 10867, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
+  ["recttY0sPY2RGkcaq", { number: 10869, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
+  ["recUIDBjcY6RgSy0n", { number: 10870, platform: "Facebook", type: "Facebook Photo Set", slides: 4 }],
+  ["recWq5HIxBT8BCtme", { number: 10875, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
 ]);
 const USER_RECORD = /^rec[A-Za-z0-9]{14}$/;
 // #2371 recovered Supabase-native slides have rec + 16 hex (19 chars),
@@ -123,6 +131,8 @@ export function nycOwnerGalleryApprovalEligible(output) {
   const bag = output.error_messages || {};
   const qa = bag.SM_NYC_AI_Creative_QA_20261122 || {};
   return output.output_number === exact.number
+    && output.selected_clip_count === exact.slides
+    && qa.output_native_slides_checked === exact.slides
     && output.platform === exact.platform
     && output.platform_output_type === exact.type
     && output.output_status === "Ready for Review"
@@ -168,8 +178,11 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
   // Verify ALL independent exact link, order, 4:5 CDN, selected/render
   // manifest, source lineage and READY guards without declaring human approval.
   const technical = inspectNativeGalleryPublicationPackage(output, asIfFinal);
-  if (!technical.eligible || technical.slide_count !== 4) {
-    throw Error("Native gallery preapproval blocked: " + technical.reason);
+  const expected = NYC_FACTORY_FINAL_REVIEW.get(String(output.airtable_record_id)).slides;
+  if (!technical.eligible || technical.slide_count !== expected) {
+    throw Error("Native gallery preapproval blocked: "
+      + (technical.eligible ? "native_gallery_verified_slide_count_mismatch" : technical.reason)
+      + " (output #" + output.output_number + ")");
   }
   for (const slide of slides) {
     const f = slide.fields || {};
@@ -192,7 +205,7 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
  * Only called by an authenticated NEW Factory Approve operation that carries
  * its real submitter ID. No background worker or historic receipt can mark
  * slides final. Partial same-output CAS writes are safe to retry: the parent
- * stays RFR and the unmodified publication gate still requires 4/4.
+ * stays RFR and the unmodified publication gate still requires every expected slide.
  */
 export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
   requestId, approvedByUserRecordId, submittedAt,
