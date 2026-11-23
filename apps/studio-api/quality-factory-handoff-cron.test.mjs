@@ -35,7 +35,7 @@ test("cron reads only bounded canonical plans/outputs, records actionable signat
   const receipt=await runQualityFactoryHandoffCron({
     read:async path=>{
       calls.push(path);
-      assert.ok(!/PATCH|POST|DELETE/i.test(path));
+      assert.ok(path.startsWith("production_requests?") || path.startsWith("platform_outputs?"),"only canonical read-only table URLs allowed");
       return calls.length===1?[pr]:[];
     },logger:entry=>logs.push(entry),
   });
