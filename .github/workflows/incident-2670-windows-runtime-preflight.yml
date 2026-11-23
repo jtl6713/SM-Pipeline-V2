@@ -45,7 +45,7 @@ jobs:
           import json
           from pathlib import Path
           command=Path('.github/scripts/incident-2670-windows-runtime-preflight.ps1').read_text()
-          if not 500 < len(command) < 8000: raise SystemExit('preflight_script_size_invalid')
+          if not 500 < len(command) < 12000: raise SystemExit('preflight_script_size_invalid')
           Path('/tmp/incident2670-preflight-body.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           code=$(curl -sS --max-time 30 -o /tmp/incident2670-preflight-start.json -w '%{http_code}' \
