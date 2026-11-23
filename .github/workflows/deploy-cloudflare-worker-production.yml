@@ -449,6 +449,23 @@ jobs:
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run >/tmp/wrangler-dry-run.log 2>&1
           echo "wrangler_dry_run=PASS"
 
+      - name: Enforce dormant incident 2670 global coordinator flag is not in active or staged bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never print binding values or secret metadata. The live version's
+          # binding manifest and generated config must both have this flag
+          # ABSENT; a future deliberate enablement needs its own release gate.
+          jq -e '.success==true and
+            ([.result.resources.bindings[]? |
+              select(.name=="STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED")] | length)==0' \
+            /tmp/version-before.json >/dev/null
+          if grep -Fq 'STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED' /tmp/wrangler-production/wrangler.jsonc; then
+            echo 'incident2670_worker_global_coordinator=STAGED_FLAG_PRESENT_REFUSING'
+            exit 1
+          fi
+          echo 'incident2670_worker_global_coordinator=VERIFIED_DORMANT_NO_BINDING'
+
       - name: Deploy source with preserved vars secrets and explicit R2 binding
         id: deploy_source
         shell: bash
