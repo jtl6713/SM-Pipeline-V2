@@ -17,7 +17,9 @@ from typing import Any
 
 import requests
 
-RUNNER = Path(__file__).resolve().parents[2] / "services" / "pipeline-runner"
+LOCAL_RUNNER = Path(__file__).resolve().parents[2] / "services" / "pipeline-runner"
+DEPLOYED_RUNNER = Path(r"D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner")
+RUNNER = LOCAL_RUNNER if LOCAL_RUNNER.exists() else DEPLOYED_RUNNER
 if str(RUNNER) not in sys.path:
     sys.path.insert(0, str(RUNNER))
 
