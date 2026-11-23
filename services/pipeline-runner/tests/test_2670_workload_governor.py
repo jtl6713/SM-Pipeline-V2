@@ -268,3 +268,132 @@ def test_read_only_mode_initializes_store_without_starting_dispatcher(
     assert g.snapshot()["enabled"] is True
     assert g._dispatch_started is False
     assert called == []
+
+
+def test_worker_and_python_share_global_two_job_limit(isolated_governor):
+    import uuid
+    g = isolated_governor
+    g.enqueue("recPythonOne")
+    g.enqueue("recPythonTwo")
+    first = g.claim_next()
+    assert first and first[0] == "recPythonOne"
+    idea = "rec" + "A" * 14
+    token = str(uuid.uuid4())
+    assert g.claim_worker_heavy(idea, token) is True
+    assert g.claim_worker_heavy(idea, token) is True  # Idempotent retry.
+    assert g.claim_worker_heavy(idea, str(uuid.uuid4())) is False
+    assert g.claim_next() is None  # Worker occupies the second global slot.
+    snap = g.snapshot()
+    assert snap["active_jobs"] == 1
+    assert snap["active_worker_heavy"] == 1
+    assert snap["combined_heavy_active"] == 2
+    assert snap["queued_jobs"] == 1
+    assert g.release_worker_heavy(idea, str(uuid.uuid4())) is False
+    assert g.claim_next() is None  # Wrong-token release didn't free capacity.
+    assert g.release_worker_heavy(idea, token) is True
+    second = g.claim_next()
+    assert second and second[0] == "recPythonTwo"
+
+
+def test_worker_lease_expiry_and_fenced_token_recovery(isolated_governor):
+    import uuid
+    g = isolated_governor
+    idea = "rec" + "B" * 14
+    old_token, next_token = str(uuid.uuid4()), str(uuid.uuid4())
+    assert g.claim_worker_heavy(idea, old_token)
+    with g._connect() as db:
+        db.execute(
+            "UPDATE resource_leases SET lease_until=0 WHERE scope=? AND lease_key=?",
+            (g.WORKER_HEAVY_SCOPE, idea),
+        )
+    assert g.renew_worker_heavy(idea, old_token) is False
+    assert g.claim_worker_heavy(idea, next_token)
+    assert g.release_worker_heavy(idea, old_token) is False
+    assert g.renew_worker_heavy(idea, next_token) is True
+    assert g.release_worker_heavy(idea, next_token) is True
+
+
+def test_worker_claims_pause_on_circuit_half_open_and_one_job_canary(isolated_governor):
+    import uuid
+    g = isolated_governor
+    idea = "rec" + "C" * 14
+    token = str(uuid.uuid4())
+    assert g.enqueue("recCanary")
+    g.trip_database_circuit(cooldown_seconds=90)
+    assert not g.claim_worker_heavy(idea, token)
+    with g._connect() as db:
+        db.execute("UPDATE governor_control SET until_at=0 WHERE name='database'")
+    # Cooldown alone is not a proof of database recovery: Python-only canary.
+    assert not g.claim_worker_heavy(idea, token)
+    job = g.claim_next()
+    assert job and job[0] == "recCanary"
+    assert g.claim_next() is None
+    g.finish_job(*job, progressed=True)
+    assert g.claim_worker_heavy(idea, token)
+    assert g.release_worker_heavy(idea, token)
+
+
+def test_worker_claims_are_atomic_across_competing_threads(isolated_governor):
+    import uuid
+    g = isolated_governor
+    barrier = threading.Barrier(8)
+    admitted = []
+    errors = []
+    lock = threading.Lock()
+
+    def compete(i):
+        try:
+            barrier.wait(timeout=4)
+            granted = g.claim_worker_heavy(
+                "rec" + f"{i:014d}",
+                str(uuid.uuid4()),
+            )
+            with lock:
+                admitted.append(granted)
+        except Exception as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=compete, args=(i,)) for i in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=8)
+    assert not errors
+    assert len(admitted) == 8
+    assert admitted.count(True) == 1
+    assert g.snapshot()["combined_heavy_active"] == 1
+
+
+def test_authenticated_remote_worker_broker_denies_invalid_and_recovery_claims(
+    isolated_governor, monkeypatch,
+):
+    import uuid
+    from app import app, settings
+    monkeypatch.setitem(settings, "pipeline_runner_shared_secret", "test-shared-broker-secret")
+    idea, token = "rec" + "D" * 14, str(uuid.uuid4())
+    with app.test_client() as client:
+        payload = {"action": "claim", "idea_id": idea, "token": token}
+        assert client.post("/internal/workload/worker-lease", json=payload).status_code == 401
+        headers = {"X-Pipeline-Secret": "test-shared-broker-secret"}
+        assert client.post(
+            "/internal/workload/worker-lease", json={**payload, "extra": "unsafe"},
+            headers=headers,
+        ).status_code == 422
+        claimed = client.post("/internal/workload/worker-lease", json=payload, headers=headers)
+        assert claimed.status_code == 200 and claimed.json["admitted"] is True
+        assert client.post(
+            "/internal/workload/worker-lease",
+            json={**payload, "token": str(uuid.uuid4())}, headers=headers,
+        ).status_code == 429
+        monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "true")
+        assert client.post(
+            "/internal/workload/worker-lease", json=payload, headers=headers,
+        ).status_code == 503
+        # A release cannot resume production, so it is allowed while frozen.
+        released = client.post(
+            "/internal/workload/worker-lease",
+            json={**payload, "action": "release"}, headers=headers,
+        )
+        assert released.status_code == 200 and released.json["released"] is True
+        assert isolated_governor.snapshot()["active_worker_heavy"] == 0
