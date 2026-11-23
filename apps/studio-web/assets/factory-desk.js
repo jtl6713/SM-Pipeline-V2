@@ -885,6 +885,67 @@
     }
   }
 
+  // #2876: read-only framing inspector. It never approves, releases a hold,
+  // substitutes source images, or claims the generated/published frame matches.
+  function resetFactoryCloseupInspector() {
+    const panel = $("factoryCloseupInspector");
+    const crop = $("factoryCloseupCropFrame");
+    const preview = $("factoryCloseupCropStill");
+    const toggle = $("factoryCloseupToggle");
+    if (panel) panel.hidden = true;
+    if (crop) crop.hidden = true;
+    if (preview) preview.removeAttribute("src");
+    if (toggle) { toggle.hidden = true; toggle.setAttribute("aria-expanded", "false"); }
+  }
+
+  function attachFactoryCloseupInspector(card, image, previewEpoch) {
+    resetFactoryCloseupInspector();
+    const quality = window.StudioFactoryCloseupQuality;
+    const select = $("factoryCloseupRatio");
+    const panel = $("factoryCloseupInspector");
+    const summary = $("factoryCloseupSummary");
+    const crop = $("factoryCloseupCropFrame");
+    const preview = $("factoryCloseupCropStill");
+    const toggle = $("factoryCloseupToggle");
+    if (!quality || !select || !panel || !summary || !crop || !preview || !toggle) return;
+    const defaultAspect = quality.normalizedRatio(
+      card?.aspect_ratio || card?.output_aspect_ratio || card?.asset_aspect_family || ""
+    );
+    select.value = defaultAspect;
+    const update = () => {
+      if (previewEpoch !== factoryGalleryPreviewEpoch || !image?.naturalWidth
+          || !image?.naturalHeight || image.hidden) return;
+      const report = quality.frameReport({
+        width: image.naturalWidth, height: image.naturalHeight, ratio: select.value,
+      });
+      panel.hidden = false;
+      const issues = report.issues || [];
+      const issueText = issues.map(issue => ({
+        source_resolution_below_review_floor: "Resolution may be too low for this output ratio",
+        center_crop_discards_over_25_percent: "A center crop discards over 25% of source pixels",
+        verified_focal_box_clipped: "Known subject may be clipped",
+      }[issue] || "Manual framing review required")).join("; ");
+      summary.textContent = report.status === "unavailable"
+        ? `Image ${image.naturalWidth}×${image.naturalHeight}. Choose an output aspect ratio to inspect the expected center crop.`
+        : `Image ${report.width}×${report.height} · ${report.ratio} · center crop removes ${report.cropLossPct}% of the source. ${issueText || "Pixel dimensions meet the minimum inspection size."} Subject identity, visible edges, on-image text, and actual rendered output still require human review.`;
+      crop.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.hidden = !report.ratio || report.status === "unavailable";
+      if (!toggle.hidden) {
+        preview.src = image.currentSrc || image.src;
+        preview.style.aspectRatio = report.ratio.replace(":", " / ");
+      } else {
+        preview.removeAttribute("src");
+      }
+    };
+    image.onload = update; // Also refreshes on each verified gallery image.
+    select.onchange = update; // Local preview only; never saved to output.
+    toggle.onclick = () => {
+      crop.hidden = !crop.hidden;
+      toggle.setAttribute("aria-expanded", String(!crop.hidden));
+    };
+  }
+
   function closeFactoryPreview() {
     factoryGalleryPreviewEpoch += 1;
     clearFactoryNativeGalleryControls();
@@ -901,11 +962,13 @@
       video.load();
     }
     if (image) {
+      image.onload = null;
       image.onerror = null;
       image.removeAttribute("src");
       image.hidden = true;
     }
     if (empty) empty.hidden = true;
+    resetFactoryCloseupInspector();
     dialog?.classList.remove("is-image");
     dialog?.classList.add("is-video");
     if (backdrop) backdrop.hidden = true;
@@ -926,6 +989,8 @@
       return;
     }
     if (title) title.textContent = cardLabel(card);
+    image.onload = null;
+    attachFactoryCloseupInspector(card, image, galleryEpoch);
     empty.hidden = true;
     image.hidden = true;
     image.removeAttribute("src");
