@@ -1,0 +1,76 @@
+name: Incident 2670 External Root Vs Real Windows Python Claim
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-external-root-windows.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-external-root-windows
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse bounded Windows lease canary
+        shell: pwsh
+        run: |
+          $t=$null;$e=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-external-root-windows-denial.ps1'),
+            [ref]$t,[ref]$e)
+          if($e.Count -ne 0){throw 'root_windows_ps_syntax_invalid'}
+          Write-Output 'incident2670_root_windows_parser=PASS'
+      - name: Verify Supabase-only active runner, no Airtable and cap 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/inc2670-runner.json
+          jq -e '.ok==true and .workload_governor_enabled==true and
+            .recovery_read_only==false and .studio_write_source=="supabase" and
+            .airtable_activity.any_activity==false' /tmp/inc2670-runner.json >/dev/null
+          echo 'incident2670_root_windows_runner=PASS'
+      - name: Prove Windows deployed Python client denies while independent SQL root owner holds
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/inc2670-catalog.json
+          jq -e '.ok==true' /tmp/inc2670-catalog.json >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          command=Path('.github/scripts/incident-2670-external-root-windows-denial.ps1').read_text().replace('__MODE__','deny')
+          if not 500<len(command)<8000: raise SystemExit('root_windows_script_size_invalid')
+          Path('/tmp/inc2670-ps-body.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          http=$(curl -sS --max-time 30 -o /tmp/inc2670-start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/inc2670-ps-body.json || true)
+          [[ "$http" == 202 || "$http" == 200 ]] || { echo "incident2670_root_windows_ops_http=$http"; exit 1; }
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/inc2670-start.json)
+          test -n "$id"
+          for i in $(seq 1 55); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "$BASE/api/jobs/$id" -o /tmp/inc2670-status.json
+            state=$(jq -r '.job.status // empty' /tmp/inc2670-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/inc2670-status.json |
+                grep -x 'incident2670_crosshost_runner_DENIED_ROOT_CAP' >/dev/null
+              echo 'incident2670_external_sql_vs_windows_python=PASS_DENIED_ROOT_CAP'
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'incident2670_external_sql_vs_windows_python=UNVERIFIED_FAIL_CLOSED'
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'incident2670_external_sql_vs_windows_python=UNVERIFIED_TIMEOUT'
+          exit 1
