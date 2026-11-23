@@ -76,3 +76,16 @@ test("scheduled Worker cron has no producer/approval/publisher side effects in t
   assert.match(snippet,/read: path=>adminHoldSupabaseRest\(env,path\)/);
   assert.doesNotMatch(snippet,/enqueueStudioProductionJob|fanoutProductionRequestOutputs|PATCH|publishNow|studioPublish|approveOutput/);
 });
+
+test("no eligible promoted requests is a real bounded empty sample, not an outage",async()=>{
+  const calls=[];
+  const receipt=await runQualityFactoryHandoffCron({
+    read:async path=>{calls.push(path);return [];},
+  });
+  assert.equal(calls.length,1,"no output-table scan when zero candidate content IDs");
+  assert.equal(receipt.status,"checked");
+  assert.equal(receipt.scanned,0);
+  assert.equal(receipt.repair_required,0);
+  assert.equal(receipt.verification_required,0);
+  assert.equal(receipt.publish_actions,0);
+});
