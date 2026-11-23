@@ -46,7 +46,7 @@ test("wrong or unavailable canonical status cannot inflate R2 progress", () => {
   assert.equal(project({...basic,progress_verification:{status:"verified",approved_item_ids:["different"]}}).approved_count, 0);
 });
 test("visible active batch count does not use stale state.batch.totals.batches", () => {
-  assert.match(source, /if \(count\) count\.textContent = String\(state\.completedOpen/);
+  assert.match(source, /if \(count\) count\.textContent = activityUnknown \? "—" : String\(state\.completedOpen/);
   assert.doesNotMatch(source, /if \(count\) count\.textContent = String\(state\.batch\?\.totals\?\.batches/);
 });
 
