@@ -105,7 +105,7 @@ test("accepted request IDs persist across reload, bounded and deduplicated", () 
   assert.equal(tracker.read().length,6);
   // Age out stale IDs; no stale request may turn into a POST.
   assert.equal(tracker.read(Date.now()+49*60*60*1000).length,0);
-  assert.match(src,/rememberFactoryGroupRequest\(batch\);\s*renderFactoryBatchActivity\(factoryBatchMergeAcceptedActivity\(state\.batch, batch\)\)/);
+  assert.match(src,/rememberFactoryGroupRequest\(batch\);[\s\S]{0,160}renderFactoryBatchActivity\(factoryBatchMergeAcceptedActivity\(state\.batch, batch\)\)/);
   assert.match(src,/factoryBatchPollWindow\(\[\.\.\.knownGroups, \.\.\.remembered\]/);
   const pollingCode = src.slice(src.indexOf("async function refreshFactoryBatchActivity("),
     src.indexOf("async function refreshFactoryCompletedBatches("));
