@@ -2150,10 +2150,19 @@
         throw new Error("Original Factory receipt is not yet available");
       }
       if (factoryProfileId() !== profileAtStart) return null;
+      // The first-receipt GET can complete after a newer ordinary exact GET.
+      // It is for initial acceptance only (never retry); don't repaint 0%
+      // over an already verified later result from the same request.
+      const existing = (state.batch?.batches || []).find(item =>
+        item?.request_id === accepted.request_id);
+      const done = item => Number(item?.done_count ??
+        (Number(item?.total || 0) - Number(item?.pending_count || 0)));
+      if (existing && done(existing) > done(row)) return state.batch;
       const progress = factoryBatchMergeExactActivity(state.batch, [row]);
       state.lastBatchSuccessMs = Date.now();
       state.lastBatchFetchMs = Date.now();
       state.batchActivityError = "";
+      state.batchActivityPartialError = "";
       renderFactoryBatchActivity(progress);
       document.dispatchEvent(new CustomEvent("factory:batch-status", {detail: progress}));
       return progress;
