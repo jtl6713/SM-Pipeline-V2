@@ -131,7 +131,7 @@ test("production Factory rendering and refresh are actually wired to exact-first
   assert.match(source, /const preferExact = factoryBatchPreferExactProgress\(fastGroups\.length,/);
   assert.match(source, /const fetched = await factoryBatchPollWithFallback\(/);
   assert.match(source, /request_id: row\.request_id, fresh: String\(now\)/);
-  assert.match(source, /value\.batches\[0\]\?\.request_id !== row\.request_id/);
+  assert.match(source, /verifiedRow\?\.request_id !== row\.request_id/);
 });
 
 test("ordinary active and completed snapshots do not require a Factory profile filter", () => {
