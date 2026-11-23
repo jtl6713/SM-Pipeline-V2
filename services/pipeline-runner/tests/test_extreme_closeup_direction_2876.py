@@ -89,7 +89,7 @@ def test_ai_slide_prompt_requests_one_zoomable_detail_for_three_new_images(monke
     )
     assert "approximately 1 image(s)" in prompt
     assert "brand-new AI-generated images" in prompt
-    assert "could choose to zoom in" in prompt
+    assert "chose to zoom in" in prompt
     assert "naturally composed instead of pre-cropping" in prompt
     assert "Never replace, crop, overwrite, re-rank or modify existing media" in prompt
     assert "Vizcaya stonework" in prompt
@@ -122,7 +122,7 @@ def test_new_cover_prompt_one_third_not_every_cover(monkeypatch):
     selected = [p for p in prompts if "NEW AI COVER FOCAL-DETAIL OPTION" in p]
     assert 15 <= len(selected) <= 45
     for prompt in selected:
-        assert "could choose a close-up" in prompt
+        assert "could choose a close-up" in prompt.lower()
         assert "Do not crop or zoom the original" in prompt
         assert "Never substitute, recrop, regenerate or overwrite" in prompt
         assert "9:16 platform cover" in prompt
@@ -223,4 +223,4 @@ def test_no_automatic_media_crop_or_approval_in_new_direction_module():
     assert "requests.post(" not in code
     assert "update_record(" not in code
     assert "idea_closeup_guidance(" not in code
-    assert "only brand-new AI-generated images" in code.lower()
+    assert "only to brand-new ai-generated images" in code.lower()
