@@ -46,17 +46,33 @@ def build_finished_thumbnail_prompt(
     *,
     aspect_ratio: str = "9:16",
     creative_guidance: dict[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> str:
     existing = _text(parent, "Thumbnail_Prompt")
     ratio = str(aspect_ratio or "9:16").replace("x", ":").strip() or "9:16"
     # Old landscape-leaning prompts must not be reused for vertical platform covers.
     if not creative_prompt_suffix(creative_guidance, mode="thumbnail") and existing and _prompt_has_letter_style(existing) and f"{ratio}" in existing and "FRAME:" in existing:
         return existing
+    # The explicitly linked profile, when available, outranks stale inherited
+    # parent/request metadata. Never brand NYC/LA/Miami output as Chicago.
+    market = (_text(profile, "Market_Name") or _text(parent, "Market_Name")
+              or _text(request, "Market_Name"))
+    brand = (_text(profile, "Brand_Name") or _text(parent, "Brand_Name")
+             or _text(request, "Brand_Name"))
+    if not brand:
+        lower_market = market.lower().strip()
+        brand = (
+            "ChicagoShining" if "chicago" in lower_market
+            else "New York Shining" if ("new york" in lower_market or lower_market == "nyc")
+            else "LA Shining" if ("los angeles" in lower_market or lower_market == "la")
+            else "Miami Shining" if "miami" in lower_market
+            else "Shining Cities"
+        )
     title = (
         _text(request, "Requested_Title")
         or _text(parent, "Content_Title")
         or _text(parent, "Hook")
-        or "Chicago"
+        or market or "Shining Cities"
     )
     caption = (
         _text(request, "Requested_Caption")
@@ -67,13 +83,13 @@ def build_finished_thumbnail_prompt(
     return "\n".join(
         part
         for part in (
-            f"Create a ChicagoShining social thumbnail / promo still for: {title}.",
+            f"Create a {brand} social thumbnail / promo still for: {title}.",
             f"Post context: {caption[:500]}" if caption else "",
             THUMBNAIL_LETTER_STYLE_RULE,
             f"Compose for a {orientation} {ratio} platform cover that matches the video frame.",
             "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%. Do not let lettering dominate the frame.",
             "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
-            cover_closeup_guidance(market=_text(parent, "Market_Name") or _text(request, "Market_Name")),
+            cover_closeup_guidance(market=market),
             creative_prompt_suffix(creative_guidance, mode="thumbnail"),
         )
         if part
