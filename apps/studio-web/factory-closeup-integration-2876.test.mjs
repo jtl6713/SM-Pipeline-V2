@@ -10,7 +10,7 @@ const helper = fs.readFileSync(new URL("./assets/factory-closeup-quality.js", im
 
 test("Factory preview has explicit, user-facing crop QA and no false approval claim", () => {
   for (const id of ["factoryCloseupInspector","factoryCloseupRatio","factoryCloseupSummary",
-                    "factoryCloseupToggle","factoryCloseupCropFrame","factoryCloseupCropStill"]) {
+                    "factoryCloseupToggle","factoryCloseupCropFrame","factoryCloseupCropVisual"]) {
     assert.match(html, new RegExp('id="' + id + '"'));
   }
   assert.match(html, /This panel never releases a hold/);
@@ -24,6 +24,13 @@ test("Factory helper loads before Factory desk, and inspector follows actual gal
   assert.match(factory, /select\.onchange = update/);
   assert.match(factory, /previewEpoch !== factoryGalleryPreviewEpoch/);
   assert.match(factory, /resetFactoryCloseupInspector\(\)/);
+  assert.match(factory, /cropVisual\.appendChild\(image\)/);
+  assert.match(factory, /dialog\.insertBefore\(image, empty\)/);
+  assert.doesNotMatch(factory, /preview\.src\s*=/);
+  assert.doesNotMatch(factory, /image\.currentSrc\s*\|\|\s*image\.src/);
+  assert.doesNotMatch(html, /id="factoryCloseupCropStill"/);
+  assert.match(html, /#factoryCloseupCropVisual>#factoryPreviewImage/);
+  assert.match(factory, /resetFactoryCloseupInspector\(\); \/\/ Never show a previous slide's crop/);
   assert.match(factory, /source_resolution_below_review_floor/);
 });
 test("Advisory QA never changes publishing authorization or automates approval", () => {
@@ -33,7 +40,7 @@ test("Advisory QA never changes publishing authorization or automates approval",
 });
 test("Factory crop preview follows a strictly newer consistent Studio UI version", () => {
   const c = readUiReleaseContract(html, app);
-  assert.equal(c.version, "0.6.1080");
-  assert.equal(c.cacheKey, "0.6.1080-closeup-qa-2876");
+  assert.equal(c.version, "0.6.1081");
+  assert.equal(c.cacheKey, "0.6.1081-crop-original-2876");
   assert.ok(c.versionedAssetCount >= 20);
 });
