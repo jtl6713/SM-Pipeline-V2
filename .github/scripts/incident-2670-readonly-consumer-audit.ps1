@@ -22,7 +22,10 @@ $phase='outbox_validation'
 $outbox=@($lines | Where-Object {$_ -match '^\s*STUDIO_SIDE_EFFECT_OUTBOX_ENABLED\s*='})
 if ($outbox.Count -gt 1) {throw 'outbox_config_ambiguous'}
 $outboxOn=$false
-if ($outbox.Count -eq 1) {$outboxOn=(([string]($outbox[0] -split '=',2)[1]).Trim().Trim('"').ToLower()) -in @('true','yes','1'))}
+if ($outbox.Count -eq 1) {
+  $setting=([string](($outbox[0] -split '=',2)[1])).Trim().Trim('"').Trim([char]39).ToLowerInvariant()
+  $outboxOn=($setting -in @('true','yes','1'))
+}
 if ($outboxOn) {throw 'optional_outbox_must_remain_disabled'}
 $phase='summary_serialization'
 $summary=[ordered]@{
