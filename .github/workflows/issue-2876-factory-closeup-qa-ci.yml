@@ -8,6 +8,7 @@ on:
       - 'apps/studio-web/assets/app-item4-1008.js'
       - 'apps/studio-web/index.html'
       - 'apps/studio-web/factory-closeup-*.test.mjs'
+      - 'apps/studio-web/factory-crop-original-image-2876.test.mjs'
       - '.github/workflows/issue-2876-factory-closeup-qa-ci.yml'
   workflow_dispatch:
 
@@ -34,6 +35,7 @@ jobs:
           node --test \
             apps/studio-web/factory-closeup-quality-2876.test.mjs \
             apps/studio-web/factory-closeup-integration-2876.test.mjs \
+            apps/studio-web/factory-crop-original-image-2876.test.mjs \
             apps/studio-web/factory-desk.test.mjs \
             apps/studio-web/factory-review-selection-eligibility.test.mjs \
             apps/studio-web/ui-release-contract.test.mjs \
