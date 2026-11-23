@@ -24,6 +24,7 @@
     if(!refresh||!status||!metrics||!history)return;
     refresh.disabled=true;
     status.textContent="Reading authenticated runner workload snapshot…";
+    status.dataset.kind="";
     metrics.replaceChildren();history.replaceChildren();
     const value=(v,units="")=>v===null||v===undefined||!Number.isFinite(Number(v))
       ?"Not measured":String(Number(v))+units;
@@ -44,6 +45,7 @@
       kv(metricsList,"Python jobs (queued / running / paused)",
         [r.queued_jobs,r.active_jobs,r.paused_jobs].map(v=>value(v)).join(" / "));
       kv(metricsList,"Cloudflare Ready-production active leases",value(r.active_worker_heavy));
+      kv(metricsList,"Cloudflare ready-production queued","Not instrumented (R2 durable backlog)");
       kv(metricsList,"Photo groups (running / allowed)",
         value(r.active_photo_groups)+" / "+value(r.max_photo_groups));
       kv(metricsList,"Ratio workers per photo group",value(r.max_ratio_workers));
@@ -51,8 +53,11 @@
         ["transfer","ratio","supabase_read","supabase_write"]
           .map(k=>k+" "+value(r.resource_slots?.[k])).join(" · "));
       kv(metricsList,"Database circuit state",String(r.database_circuit_phase||"unknown"));
+      kv(metricsList,"Database circuit expiry",r.database_circuit_until_epoch
+        ?new Date(Number(r.database_circuit_until_epoch)*1000).toLocaleString():"None recorded");
       kv(metricsList,"New heavy-job admission",r.admission_paused?"Paused":"Not paused locally");
       kv(metricsList,"Worker circuit (this isolate)",w.circuit_open?"Open":"Not open");
+      kv(metricsList,"Worker circuit reason",String(w.circuit_reason||"Not reported"));
       for(const operation of ["read","write"]){
         const m=r.request_metrics?.[operation];
         kv(metricsList,"Runner "+operation+" requests / 2 min",
@@ -88,6 +93,7 @@
         history.append(el("p",data.limitations.join(" · "),"subtle"));
       if(!r.last_admission_decisions)
         history.append(el("p","Last admission decisions and confirmed recovery events are not yet instrumented; no fabricated results.","subtle"));
+      history.append(el("p","Comparable-workload ≥70% runner request reduction: INCONCLUSIVE until a normalized nonpublishing test is completed.","subtle"));
     }catch(err){
       status.textContent="Workload snapshot unavailable: "+String(err.message||err);
       status.dataset.kind="error";
