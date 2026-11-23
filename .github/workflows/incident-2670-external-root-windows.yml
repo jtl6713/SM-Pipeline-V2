@@ -67,14 +67,8 @@ jobs:
               exit 0
             fi
             if [[ "$state" == failed ]]; then
-              jq -r '.job.log // ""' /tmp/inc2670-status.json | grep -E '^incident2670_root_windows_class=(IMPORT_FAILED|COORDINATOR_MODULE_MISSING|RUNNER_ENV_MISSING|PYTHON_EXE_MISSING|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)
-              exit 1
-            fi
-            sleep 2
-          done
-          echo 'incident2670_external_sql_vs_windows_python=UNVERIFIED_TIMEOUT'
-          exit 1
- | tail -1 || true
+              jq -r '.job.log // ""' /tmp/inc2670-status.json |
+                grep -E '^incident2670_root_windows_class=(IMPORT_FAILED|COORDINATOR_MODULE_MISSING|RUNNER_ENV_MISSING|PYTHON_EXE_MISSING|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)$' | tail -1 || true
               echo 'incident2670_external_sql_vs_windows_python=UNVERIFIED_FAIL_CLOSED'
               exit 1
             fi
