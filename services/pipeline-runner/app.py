@@ -394,6 +394,24 @@ def worker_shared_workload_lease():
     return response, 200 if granted else 429
 
 
+@app.get("/internal/workload/snapshot")
+def shared_workload_readonly_snapshot():
+    """Authenticated and bounded Worker QA proxy; no queue/Supabase writes."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"ok": False, "error": "runner_auth_unconfigured"}), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    try:
+        state = workload_governor.snapshot()
+    except (OSError, RuntimeError, ValueError):
+        logger.exception("shared workload snapshot unavailable")
+        return jsonify({"ok": False, "error": "governor_diagnostics_unavailable"}), 503
+    response = jsonify({"ok": True, **state})
+    response.headers["Cache-Control"] = "private, no-store"
+    return response, 200
+
+
 @app.get("/admin/workload")
 def workload_diagnostics():
     """Local-only authenticated runner workload diagnostics (never mutate jobs)."""

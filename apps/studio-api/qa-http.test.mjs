@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,qaDeploymentBlockers,QA_WORKER_BUILD,QA_UI_BUILD,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
 function harness(overrides={}){
@@ -441,4 +442,87 @@ test("foreign QA runs cannot accept results and stale-build runs remain readable
  gate=(await(await h.call("GET","runs/"+run.runId+"/gate")).json()).gate;
  assert.ok(gate.deploymentBlockers.some(x=>/Worker deployment does not match/.test(x)));
  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
+});
+
+
+test("Admin workload diagnostics proxy is read-only, bounded and never exposes runner secrets",async()=>{
+  const secret="integration-unit-secret";
+  const h=harness({
+    PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",
+    PIPELINE_RUNNER_SHARED_SECRET:secret,
+  });
+  let calls=0;
+  const response=await h.call("GET","workload",undefined,"recADMIN00000001",async(url,options)=>{
+    calls++;
+    assert.equal(url,"https://pipeline.chicagoshining.com/internal/workload/snapshot");
+    assert.equal(options.method,"GET");
+    assert.equal(options.headers["X-Pipeline-Secret"],secret);
+    return new Response(JSON.stringify({
+      ok:true,enabled:true,scope:"single_windows_host",
+      active_jobs:1,queued_jobs:7,paused_jobs:2,
+      active_worker_heavy:1,combined_heavy_active:2,
+      active_photo_groups:3,max_jobs:2,max_photo_groups:4,
+      max_ratio_workers:2,max_db_reads:6,max_db_writes:3,
+      active_resource_slots:{photo_group:3,transfer:1,supabase_read:2},
+      database_circuit_phase:"closed",admission_paused:false,
+      supabase_request_metrics:{
+        read:{requests_last_two_minutes:24,failures_last_two_minutes:0,
+          mean_latency_ms:10,max_latency_ms:40},
+      },
+      runner_request_history:[
+        {minute_epoch:29923418,operation:"read",requests:10,failures:0,
+         mean_latency_ms:12,max_latency_ms:24},
+        {minute_epoch:29923418,operation:"invalid",requests:999},
+      ],
+      hostile_secret:"do-not-echo",
+      last_recovery:{claimed:"never"},
+    }),{status:200});
+  });
+  assert.equal(response.status,200);
+  const result=await response.json();
+  assert.equal(result.ok,true);
+  assert.equal(result.runner.queued_jobs,7);
+  assert.equal(result.runner.combined_heavy_active,2);
+  assert.equal(result.runner.request_history.length,1);
+  assert.equal(result.runner.request_metrics.read.requests_last_two_minutes,24);
+  assert.equal(result.runner.request_metrics.write,null);
+  assert.equal(result.runner.last_recovery,null);
+  assert.equal(result.worker.circuit_scope,"per_isolate");
+  assert.equal(calls,1);
+  assert.equal(h.rows.get(QA_RUNS_TABLE).length,0);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
+  assert.doesNotMatch(JSON.stringify(result),/do-not-echo|integration-unit-secret/);
+});
+
+test("Admin workload diagnostics fails closed on untrusted URL, missing key, broker outage and bad snapshot",async()=>{
+  const baseEnv={
+    PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",
+    PIPELINE_RUNNER_SHARED_SECRET:"test-secret",
+  };
+  let called=false;
+  for(const env of [
+    {...baseEnv,PIPELINE_RUNNER_URL:"https://unsafe.example.test"},
+    {...baseEnv,PIPELINE_RUNNER_SHARED_SECRET:""},
+  ]){
+    const h=harness(env);
+    await assert.rejects(()=>h.call("GET","workload",undefined,"recADMIN00000001",async()=>{
+      called=true;
+      return new Response(JSON.stringify({ok:true,enabled:true}),{status:200});
+    }),e=>e.status===503);
+  }
+  assert.equal(called,false);
+  const h=harness(baseEnv);
+  await assert.rejects(()=>h.call("GET","workload",undefined,"recADMIN00000001",
+    async()=>new Response(JSON.stringify({ok:false}),{status:503})),e=>e.status===503);
+  await assert.rejects(()=>h.call("GET","workload",undefined,"recADMIN00000001",
+    async()=>new Response(JSON.stringify({ok:true,enabled:true,scope:"wrong"}),{status:200})),
+    e=>e.status===503);
+});
+
+test("QA workload dashboard requires an explicit manual refresh, never auto polls the runner",()=>{
+  const source=readFileSync(new URL("../studio-web/assets/qa-test-center.js",import.meta.url),"utf8");
+  assert.match(source,/\$\("qaWorkloadRefresh"\)\?\.addEventListener\("click",loadWorkload\)/);
+  assert.match(source,/async function loadWorkload\(/);
+  const initial=source.slice(source.indexOf("async function initialize()"),source.indexOf('$("qaSearch")?.addEventListener'));
+  assert.doesNotMatch(initial,/loadWorkload\(/);
 });

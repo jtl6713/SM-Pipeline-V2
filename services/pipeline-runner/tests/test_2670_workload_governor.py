@@ -397,3 +397,59 @@ def test_authenticated_remote_worker_broker_denies_invalid_and_recovery_claims(
         )
         assert released.status_code == 200 and released.json["released"] is True
         assert isolated_governor.snapshot()["active_worker_heavy"] == 0
+
+
+
+def test_bounded_workload_dashboard_snapshot_has_real_runner_metrics(isolated_governor):
+    g = isolated_governor
+    g.enqueue("recSensitiveWork")
+    g.record_db_request("GET", failed=False, latency_ms=41)
+    g.record_db_request("PATCH", failed=True, latency_ms=120)
+    status = g.snapshot()
+    assert status["queued_jobs"] == 1
+    assert status["database_circuit_phase"] == "closed"
+    assert status["active_resource_slots"]["transfer"] == 0
+    history = status["runner_request_history"]
+    assert any(row["operation"] == "read" and row["requests"] == 1 for row in history)
+    assert any(row["operation"] == "write" and row["failures"] == 1 for row in history)
+    assert len(history) <= 60
+    assert status["last_recovery"] is None
+    assert status["last_admission_decisions"] is None
+    assert "recSensitiveWork" not in str(status)
+
+
+def test_workload_history_reflects_actual_circuit_without_fabricating_recovery(
+    isolated_governor,
+):
+    g = isolated_governor
+    g.trip_database_circuit(cooldown_seconds=90)
+    status = g.snapshot()
+    assert status["database_circuit_phase"] == "open"
+    assert status["admission_paused"] is True
+    with g._connect() as db:
+        db.execute("UPDATE governor_control SET until_at=0 WHERE name='database'")
+    status = g.snapshot()
+    assert status["database_circuit_phase"] == "half_open"
+    assert status["database_circuit_until_epoch"] == 0
+    assert status["last_recovery"] is None
+
+
+def test_authenticated_workload_snapshot_never_admits_or_mutates_jobs(
+    isolated_governor, monkeypatch,
+):
+    from app import app, settings
+    g = isolated_governor
+    g.enqueue("recPersistentWork")
+    monkeypatch.setitem(settings, "pipeline_runner_shared_secret", "test-diagnostics-secret")
+    with app.test_client() as client:
+        assert client.get("/internal/workload/snapshot").status_code == 401
+        response = client.get("/internal/workload/snapshot", headers={
+            "X-Pipeline-Secret": "test-diagnostics-secret",
+        })
+        assert response.status_code == 200
+        assert response.json["ok"] is True
+        assert response.json["queued_jobs"] == 1
+        assert response.json["active_jobs"] == 0
+        assert response.headers["Cache-Control"] == "private, no-store"
+    assert g.snapshot()["queued_jobs"] == 1
+    assert g.snapshot()["active_jobs"] == 0

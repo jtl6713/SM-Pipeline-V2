@@ -18,6 +18,88 @@
     if(!response.ok)throw new Error(data.error||"QA request failed ("+response.status+")");
     return data;
   }
+  async function loadWorkload(){
+    const refresh=$("qaWorkloadRefresh"),status=$("qaWorkloadStatus");
+    const metrics=$("qaWorkloadMetrics"),history=$("qaWorkloadHistory");
+    if(!refresh||!status||!metrics||!history)return;
+    refresh.disabled=true;
+    status.textContent="Reading authenticated runner workload snapshot…";
+    status.dataset.kind="";
+    metrics.replaceChildren();history.replaceChildren();
+    const value=(v,units="")=>v===null||v===undefined||!Number.isFinite(Number(v))
+      ?"Not measured":String(Number(v))+units;
+    const kv=(parent,k,v)=>{
+      const item=el("p");
+      item.append(el("strong",k+": "),document.createTextNode(String(v)));
+      parent.append(item);
+    };
+    try{
+      const data=await call("workload");
+      if(!data.ok||!data.runner)throw new Error("Runner snapshot unavailable");
+      const r=data.runner,w=data.worker||{};
+      status.textContent="Measured "+String(data.observed_at_utc||"unknown time")+
+        " · Runner single-host data; Worker circuit is isolate-local";
+      const metricsList=el("div",null,"qa-event-list");
+      kv(metricsList,"Heavy jobs running / allowed",
+        value(r.combined_heavy_active)+" / "+value(r.max_jobs));
+      kv(metricsList,"Python jobs (queued / running / paused)",
+        [r.queued_jobs,r.active_jobs,r.paused_jobs].map(v=>value(v)).join(" / "));
+      kv(metricsList,"Cloudflare Ready-production active leases",value(r.active_worker_heavy));
+      kv(metricsList,"Cloudflare ready-production queued","Not instrumented (R2 durable backlog)");
+      kv(metricsList,"Photo groups (running / allowed)",
+        value(r.active_photo_groups)+" / "+value(r.max_photo_groups));
+      kv(metricsList,"Ratio workers per photo group",value(r.max_ratio_workers));
+      kv(metricsList,"Current transfer / ratio / Supabase read / write slots",
+        ["transfer","ratio","supabase_read","supabase_write"]
+          .map(k=>k+" "+value(r.resource_slots?.[k])).join(" · "));
+      kv(metricsList,"Database circuit state",String(r.database_circuit_phase||"unknown"));
+      kv(metricsList,"Database circuit expiry",r.database_circuit_until_epoch
+        ?new Date(Number(r.database_circuit_until_epoch)*1000).toLocaleString():"None recorded");
+      kv(metricsList,"New heavy-job admission",r.admission_paused?"Paused":"Not paused locally");
+      kv(metricsList,"Worker circuit (this isolate)",w.circuit_open?"Open":"Not open");
+      kv(metricsList,"Worker circuit reason",String(w.circuit_reason||"Not reported"));
+      for(const operation of ["read","write"]){
+        const m=r.request_metrics?.[operation];
+        kv(metricsList,"Runner "+operation+" requests / 2 min",
+          m?value(m.requests_last_two_minutes):"Not measured");
+        kv(metricsList,"Runner "+operation+" errors / mean / max latency",
+          m?value(m.failures_last_two_minutes)+" / "+
+            value(m.mean_latency_ms," ms")+" / "+value(m.max_latency_ms," ms"):"Not measured");
+      }
+      metrics.append(metricsList);
+      history.append(el("h3","Runner REST history — latest 30 minutes"));
+      const rows=Array.isArray(r.request_history)?r.request_history:[];
+      if(!rows.length)history.append(el("p","No historical runner request counters recorded."));
+      else{
+        const table=el("table",null,"qa-workload-history-table");
+        const head=el("thead"),hrow=el("tr");
+        for(const label of ["Minute (local)","Operation","Requests","Errors","Mean ms","Max ms"])
+          hrow.append(el("th",label));
+        head.append(hrow);table.append(head);
+        const tbody=el("tbody");
+        for(const record of rows.slice(0,60)){
+          const tr=el("tr");
+          const minute=Number.isFinite(Number(record.minute_epoch))
+            ?new Date(Number(record.minute_epoch)*60000).toLocaleString():"Unknown";
+          for(const text of [minute,record.operation||"unknown",
+            value(record.requests),value(record.failures),
+            value(record.mean_latency_ms),value(record.max_latency_ms)])
+            tr.append(el("td",text));
+          tbody.append(tr);
+        }
+        table.append(tbody);history.append(table);
+      }
+      if(Array.isArray(data.limitations))
+        history.append(el("p",data.limitations.join(" · "),"subtle"));
+      if(!r.last_admission_decisions)
+        history.append(el("p","Last admission decisions and confirmed recovery events are not yet instrumented; no fabricated results.","subtle"));
+      history.append(el("p","Comparable-workload ≥70% runner request reduction: INCONCLUSIVE until a normalized nonpublishing test is completed.","subtle"));
+    }catch(err){
+      status.textContent="Workload snapshot unavailable: "+String(err.message||err);
+      status.dataset.kind="error";
+      metrics.replaceChildren();history.replaceChildren();
+    }finally{refresh.disabled=false;}
+  }
   function freshId(){return crypto.randomUUID();}
   function renderRunSelectors(){
     const selected=state.run?.runId||"",previous=baseline?.value||"";
@@ -298,6 +380,7 @@
     try{await finalizeRun();}catch(error){message(error.message,"error");}
   });
   $("qaRefresh")?.addEventListener("click",()=>initialize());
+  $("qaWorkloadRefresh")?.addEventListener("click",loadWorkload);
   $("qaCompare")?.addEventListener("click",async()=>{
     try{await compareRuns();}catch(error){message(error.message,"error");}
   });
