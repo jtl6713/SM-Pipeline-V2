@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$envPath='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+$envPath=Join-Path (Get-Location).Path 'Services\pipeline-runner\service\.env'
 if(!(Test-Path -LiteralPath $envPath)){throw 'env_missing'}
 function Setting([string]$n){
   $rows=@(Get-Content -LiteralPath $envPath | Where-Object {$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')})
