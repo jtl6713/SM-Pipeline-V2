@@ -134,3 +134,16 @@ test("Factory keeps real in-flight claim fences while showing reopened rows", ()
   assert.match(js, /factoryActiveSubmissionIds\(\{ ignoreClickIntent \}\)\.has\(String\(card\?\.id \|\| ""\)\)/);
   assert.match(js, /visibleNeedsEyes\.sort\(\(a, b\) => Number\(factoryUnheldReviewCandidate\(b\)\)/);
 });
+
+
+test("#2873: blocked native-photo captions display an exact in-page fix path, not an approval", () => {
+  assert.match(js, /lane === "manual" && card\.review_package_ready === false/);
+  assert.match(js, /reviewMissing\.includes\("Output_Caption"\)/);
+  assert.match(js, /Caption missing — complete creative review/);
+  assert.match(js, /selected photos match the location and season/);
+  assert.match(js, /\$\{reviewRepairNotice\}/);
+  assert.match(js, /data-factory-make-ready/);
+  assert.match(js, /await openStudioTarget\(card\)/);
+  assert.match(js, /if \(reviewAllowed \|\| needsEyesOutput\)/,
+    "Repair must not offer a publish-approval control");
+});

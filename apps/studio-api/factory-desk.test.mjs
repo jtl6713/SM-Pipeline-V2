@@ -683,3 +683,29 @@ test("#2371 Factory cards carry exact Not Ready publishing status for NYC galler
   assert.equal(candidate({...cards[0],review_package_ready:false}),false,
     "incomplete creative media cannot masquerade as approval ready");
 });
+
+
+test("#2873: incomplete native photo RFR must stay visible in Repair, never Needs Eyes", () => {
+  const base = {
+    id: "recRfrCaption2873", kind: "output", output_id: 10853, content_id: 2233,
+    output_status: "Ready for Review", studio_state: "Ready for Review",
+    render_status: "Native Photo Route", review_status: null,
+    publish_status: "Not Ready", do_not_publish: false, auto_publish_enabled: false,
+    selected_clip_count: 4,
+    review_package_ready: false, review_package_readiness: "BLOCKED",
+    review_package_missing: ["Output_Caption"],
+  };
+  const other = { ...base, id: "recRfrCaption2874", output_id: 10854 };
+  const lanes = partitionFactoryLanes([base, other]).lanes;
+  assert.deepEqual(lanes.needs_eyes, [], "missing captions cannot become approvable");
+  assert.deepEqual(lanes.manual.map(row => row.output_id), [10853, 10854],
+    "both missing-caption native outputs must remain inspectable in Repair");
+  assert.deepEqual(lanes.manual[0].review_package_missing, ["Output_Caption"]);
+  assert.equal(lanes.manual[0].review_package_ready, false);
+  assert.equal(classifyFactoryLane({ ...base, review_package_ready: true }), "needs_eyes",
+    "successful repair may enter review only after authoritative validation");
+  assert.equal(classifyFactoryLane({ ...base, output_status: "Published", publish_status: "Published" }), null,
+    "past-provider output must not be reintroduced into review");
+  assert.equal(classifyFactoryLane({ ...base, output_status: "In Production", render_status: "Rendering" }), "auto_high",
+    "ongoing render must not become a false manual repair");
+});

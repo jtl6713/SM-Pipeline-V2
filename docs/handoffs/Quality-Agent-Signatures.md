@@ -2,6 +2,34 @@
 
 This file is the machine-readable/text companion to `docs/handoffs/Quality-Agent.docx`. Quality Agent checks should consult this catalog when scanning failed, retry-pending, or soon-to-publish outputs.
 
+## QA-PRODUCTION-PHOTO-REVIEW-2873 — Saved media but review is blocked
+
+**First observed:** 2026-11-23; New York Content #2233, Platform Outputs #10853 (Facebook Photo Set) and #10854 (Instagram Carousel). Related incident #2873.
+
+### Detection / do not conflate these states
+
+- A progress label such as `4 of 4 saved so far` can confirm persisted Google Drive + Media Asset IDs **without** proving that the complete output is ready for human review. Derive counts from the exact per-request master manifest; distinguish chosen files, server-confirmed IDs, aggregate `Studio_Master_Asset_Status`, platform plan and variant readiness.
+- Evaluate photo-count requirements **from each selected platform/output type** (actual output plan and provider mapping). Do **not** assume `5` photos: both verified #2233 native-photo plans contain exactly **four**, with four selected clips.
+- When `Output_Status=Ready for Review` but `Output_Caption` is blank, or the canonical review package validator reports missing cover, preview, slides or source manifest, label the item `Review blocked` with the **exact missing requirements**. It belongs in Factory Repair/Needs Attention, **never an approvable Needs Eyes row**, unless an independently authorized creative-review-only held state applies.
+- **Independently verify source context.** #2233's content/voiceover concerns Bryant Park Winter Village ice skating, while its selected masters `New York Autumn 15/14/12/11` describe Central Park autumn imagery. This is a confirmed location/season mismatch, even though all four assets are stored and the Production job says done. If explicit source metadata contradicts the parent place or season, do not fabricate matching copy or call it ready.
+- A previous production job's recovered `No Platform Outputs found` error is not proof of current absence. Read current canonical `production_request_outputs` and `platform_outputs` first.
+
+### Safe automatic response
+
+1. Read the exact canonical **Supabase** Production Request, four master asset IDs, output plan, variant manifest and downstream output IDs. Do not use the retired Airtable authority or infer linkage by title alone.
+2. If all Drive/media IDs exist but the aggregate status lags, display `N of N saved · verifying Production readiness` with read-only Recheck and durable bounded retry. Do not silently reupload media or reset a completed job.
+3. If the required caption/cover/preview/selection is missing, surface a per-field blocker and an exact-output `Fix / Make Ready` action. Allow the Producer to prepare a caption **only after** content/place/season and selected media have been verified. Do not shift `Review_Status` to Approved merely to clear the queue.
+4. If the source-content mismatch is explicit, preserve original media and order and escalate a **creative correction**, with two safe choices: source verified media for the stated Bryant Park winter topic, or explicitly revise the content brief to accurately describe the original Central Park autumn sequence. Rebuild variants/outputs and revalidate media and captions through the normal revision workflow.
+5. After correcting the actual blockers, re-evaluate the canonical review-package gate and show verified outputs in Factory for **separate operator-controlled approval**. Report before/after exact IDs and evidence. Do not auto-schedule, publish, remove Do_Not_Publish holds or bypass pending review.
+
+### Escalate / no autonomous mutation
+
+- No verified Winter Village source images exist in the currently searched active library; ordinary summer Bryant Park photos are **not automatically equivalent**.
+- Source attribution, image rights, parent media associations, actual provider minimums or final creative intent are ambiguous.
+- Existing approval, provider attempt, publication receipt, protected review hold or schedule must remain unchanged until independently reconciled.
+
+**Implementation tracking:** #2873 / draft PR #2874 introduces truthful upload state and Factory Repair visibility. The catalog entry is a governance signature; it is **not evidence that the live Quality Agent detector, creative repair, deployment or end-to-end Factory UI verification is complete**.
+
 ## QA-TT-DUPLICATE-SLIDES — TikTok duplicate carousel slide links
 
 **First observed:** Platform Output 997, Content 226, October 5, 2026.

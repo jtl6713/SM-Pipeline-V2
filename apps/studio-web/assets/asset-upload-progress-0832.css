@@ -70,3 +70,12 @@
 .library-classify-progress[data-state="attention"] #libraryUploadClassificationMeter::-webkit-progress-value{background:#d49b60}
 .library-classify-progress[data-state="attention"] #libraryUploadClassificationMeter::-moz-progress-bar{background:#d49b60}
 @media(prefers-reduced-motion:reduce){#libraryUploadClassificationMeter::-webkit-progress-value,#libraryUploadClassificationMeter::-moz-progress-bar{transition:none}}
+
+/* #2873: confirmed uploads waiting for aggregate Production reconciliation are not failures. */
+.item4-upload-progress[data-heal="reconciling"]{
+  background:#eaf6f2;border:1px solid #b0d4c7;color:#174c3c
+}
+.item4-upload-progress[data-heal="reconciling"] .item4-upload-progress-count{
+  color:#174c3c;font-style:normal;font-weight:750
+}
+.item4-progress-recheck{display:inline-flex;margin-top:9px;max-width:100%;align-self:start}
