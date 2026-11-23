@@ -135,10 +135,13 @@ export function assessProductionFactoryHandoff({
   }
   const cards=Array.isArray(factoryCards) ? new Map(factoryCards.map(x=>[str(x.id||x.airtable_record_id),x])) : null;
   const active=new Set(activeSubmissionIds.map(str));
-  let missingProof=false;
+  let missingProof=false, alreadyPastFactory=0;
   for (const dest of plan) {
     const row=byKey.get(key(dest.platform,dest.type))[0];
-    if(terminalOutput(row)) continue; // do not rewind approved/published siblings
+    if(terminalOutput(row)) {
+      alreadyPastFactory++;
+      continue; // do not rewind approved/published siblings
+    }
     const problem=statusName(row.output_status)==="failed" || /^(failed|blocked|error)$/i.test(str(row.render_status))
       || /^(failed|error)$/i.test(str(row.publish_status));
     if(problem){
@@ -201,6 +204,10 @@ export function assessProductionFactoryHandoff({
     report.stage=report.findings[0].stage;report.status="repair_required";
   } else if (missingProof) {
     report.stage="verification";report.status="verification_required";
+  } else if (alreadyPastFactory===plan.length) {
+    report.stage="complete";report.status="past_factory_review";
+    report.terminal="no_quality_reapproval_needed";
+    report.stop_before_factory_approval=true;
   } else {
     report.stage="approval";report.status="awaiting_human_factory_approval";
   }
