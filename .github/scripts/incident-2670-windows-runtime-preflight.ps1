@@ -35,12 +35,12 @@ function Probe-Python([string]$exe,[string[]]$prefix,[string]$kind){
   $old=$ErrorActionPreference
   $ErrorActionPreference='Continue'
   try{
-    $out=@(& $exe @prefix -c 'print("incident2670_preflight_hello=PASS")' 2>$null)
+    $out=@(& $exe @prefix -c 'print(2670)' 2>$null)
     $exit=$LASTEXITCODE
   }catch{
     $out=@();$exit=99
   }finally{$ErrorActionPreference=$old}
-  if($exit -eq 0 -and @($out|Where-Object {$_ -eq 'incident2670_preflight_hello=PASS'}).Count -eq 1){
+  if($exit -eq 0 -and @($out|Where-Object {[string]$_ -eq '2670'}).Count -eq 1){
     $script:SelectedPython=[PSCustomObject]@{exe=$exe;prefix=$prefix;kind=$kind}
   }
 }
@@ -146,44 +146,29 @@ if(-not $script:SelectedPython){
   Write-Output 'incident2670_preflight_python=FOUND'
   Write-Output ('incident2670_preflight_python_source='+$script:SelectedPython.kind)
   Write-Output 'incident2670_preflight_hello=PASS'
-  $code=@'
-try:
-    import requests
-    print("incident2670_preflight_requests=AVAILABLE", flush=True)
-except Exception:
-    print("incident2670_preflight_requests=UNAVAILABLE", flush=True)
-    raise SystemExit(42)
-try:
-    from studio_produce import global_coordinator as g
-    print("incident2670_preflight_import=PASS", flush=True)
-except Exception:
-    print("incident2670_preflight_import=FAIL", flush=True)
-    raise SystemExit(43)
-try:
-    if not g.enabled() or not callable(g.acquire):
-        raise RuntimeError("not_ready")
-    print("incident2670_preflight_interface=PASS", flush=True)
-except Exception:
-    print("incident2670_preflight_interface=FAIL", flush=True)
-    raise SystemExit(44)
-'@
   $exe=$script:SelectedPython.exe
   $prefix=[string[]]$script:SelectedPython.prefix
-  $old=$ErrorActionPreference
-  $ErrorActionPreference='Continue'
-  try{
-    $receipt=@(& $exe @prefix -c $code 2>$null)
-    $pythonExit=$LASTEXITCODE
-  }catch{$receipt=@();$pythonExit=99}
-  finally{$ErrorActionPreference=$old}
-  @($receipt|Where-Object {
-    $_ -match '^incident2670_preflight_(requests=(AVAILABLE|UNAVAILABLE)|import=(PASS|FAIL)|interface=(PASS|FAIL))$'
-  })|ForEach-Object {Write-Output $_}
-  if($pythonExit -ne 0 -or
-     @($receipt|Where-Object {$_ -eq 'incident2670_preflight_interface=PASS'}).Count -ne 1){
-    Write-Output 'incident2670_preflight_python_run=FAILED'
-    $ready=$false
-  }else{Write-Output 'incident2670_preflight_python_run=PASS'}
+  $tests=@(
+    @{name='requests';code='import requests;print(2671)';receipt='2671'},
+    @{name='import';code='from studio_produce import global_coordinator as g;print(2672)';receipt='2672'},
+    @{name='interface';code='from studio_produce import global_coordinator as g;print(2673 if g.enabled() and callable(g.acquire) else 0)';receipt='2673'}
+  )
+  $passedAll=$true
+  foreach($test in $tests){
+    $old=$ErrorActionPreference
+    $ErrorActionPreference='Continue'
+    try{
+      $out=@(& $exe @prefix -c $test.code 2>$null)
+      $exit=$LASTEXITCODE
+    }catch{$out=@();$exit=99}
+    finally{$ErrorActionPreference=$old}
+    $pass=($exit -eq 0 -and @($out|Where-Object {[string]$_ -eq $test.receipt}).Count -eq 1)
+    $status=if($pass){if($test.name -eq 'requests'){'AVAILABLE'}else{'PASS'}}else{if($test.name -eq 'requests'){'UNAVAILABLE'}else{'FAIL'}}
+    Write-Output ('incident2670_preflight_'+$test.name+'='+$status)
+    if(-not $pass){$passedAll=$false;break}
+  }
+  if($passedAll){Write-Output 'incident2670_preflight_python_run=PASS'}
+  else{Write-Output 'incident2670_preflight_python_run=FAILED';$ready=$false}
 }
 if($ready){Write-Output 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST'}
 else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}

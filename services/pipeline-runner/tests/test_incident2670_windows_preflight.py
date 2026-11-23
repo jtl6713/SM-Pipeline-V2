@@ -13,6 +13,9 @@ def test_only_diagnostic_preflight_without_claim_or_provider_side_effects():
     assert "callable(g.acquire)" in PS
     assert "incident2670_preflight_hello=PASS" in PS
     assert "Probe-Python" in PS
+    assert "print(2670)" in PS
+    assert "print(2673 if g.enabled()" in PS
+    assert 'print("incident2670_preflight_hello=PASS")' not in PS
     assert "Get-Process -Name python,python3" in PS
     assert "WindowsApps" in PS
     assert "PythonCore" in PS
