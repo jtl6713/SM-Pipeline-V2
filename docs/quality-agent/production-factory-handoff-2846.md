@@ -37,6 +37,8 @@ The 2026-11-23 incident was caused by `factoryCardFromRow` omitting `publish_sta
 | RFR but not Factory-visible | Compare actual server lanes, card fields, browser history; fix code and deploy with exact-ID canary | No false status rewrite |
 | Everything ready | Stop at operator Factory approval, with complete package and queue evidence | No auto Approve, MAE schedule, external post, `published_at` |
 
+Even if all C9 slides have HTTPS URLs and a Factory card exists, a deep `verifiedMediaEvidence` proof is needed before the Quality Agent calls a package fully ready: `cdn_bytes_verified`, `topic_location_verified`, `rights_verified`, `branding_verified`, `aspect_ratio_verified`, and (for video) `audio_verified`. Each must be `true` for the exact output. An unperformed probe is `verification_required`, not a passed image or silent approval. The compact recent-request scanner does **not** generate this evidence by itself.
+
 The **separate** human image-finalization and Factory submission gates remain authoritative. A user click needs authenticated actor, final slide evidence, exact batch/claim safety, and independent publication preflight. The Quality Agent may diagnose progress before that, never authorize an action on the user's behalf.
 
 ## Monitoring and evidence
