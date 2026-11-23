@@ -98,8 +98,8 @@ if(-not $script:SelectedPython){
 Write-Output ('incident2670_preflight_python_registry='+$(if($regFound){'FOUND'}else{'NONE'}))
 if(-not $script:SelectedPython){
   $userCandidates=@()
-  $localPrograms=Join-Path $env:LOCALAPPDATA 'Programs\Python'
-  if(Test-Path -LiteralPath $localPrograms){
+  $localPrograms=if($env:LOCALAPPDATA){Join-Path $env:LOCALAPPDATA 'Programs\Python'}else{''}
+  if($localPrograms -and (Test-Path -LiteralPath $localPrograms)){
     foreach($dir in @(Get-ChildItem -LiteralPath $localPrograms -Directory -ErrorAction SilentlyContinue)){
       $userCandidates+=Join-Path $dir.FullName 'python.exe'
     }
