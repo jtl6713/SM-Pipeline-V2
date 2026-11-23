@@ -7539,6 +7539,10 @@ function sideTableKind(env, tableId) {
   }
   if (table === CAROUSEL_SLIDES_TABLE_ID || table === "Carousel Slides") return "slides";
   if (table === "tbl5sq9xBrF6bgPph") return "native_gallery_jobs";
+  if ([
+    "tblHX3UdoNszkoquG", "tblUkZB6SMtf9Ib6I", "tbl7wPOAE26o2coMU",
+    "tblalFXUJyYg5PBrz", "tbl8tuxw838DQiGKo", "tblbnKA0Cb2Mnlg5r",
+  ].includes(table)) return "review_ledger";
   if (table === PHASE6_TRANSFER_QUEUE_TABLE_ID || table === "Studio Media Transfer Queue") return "queue";
   if (table === "Exception Recovery Messages") return "exception_messages";
   if (table === "Quality Agent Recovery Ledger") return "recovery_ledger";
@@ -9688,6 +9692,58 @@ async function readNativeGalleryLedger(env, { id = "", formula = "", limit = 30,
   return rows.map(nativeGalleryLedgerRow);
 }
 
+// #2670: Six immutable Rendering Review ledgers. Worker and Windows Runner
+// consume only these canonical Supabase tables, never the retired archive.
+const REVIEW_LEDGER_TABLES = Object.freeze({
+  tblHX3UdoNszkoquG: "rendering_review_sessions",
+  tblUkZB6SMtf9Ib6I: "rendering_review_jobs",
+  tbl7wPOAE26o2coMU: "rendering_review_attempts",
+  tblalFXUJyYg5PBrz: "rendering_review_plans",
+  tbl8tuxw838DQiGKo: "rendering_review_messages",
+  tblbnKA0Cb2Mnlg5r: "rendering_review_requirements",
+});
+const REVIEW_LEDGER_FILTERS = new Set([
+  "Output_Record_ID", "Session_ID", "Job_ID", "Attempt_ID", "Plan_Hash",
+  "Message_ID", "Requirement_ID", "Job_State", "Progress_Stage",
+]);
+function reviewLedgerRow(row) {
+  const id = String(row?.airtable_record_id || "");
+  if (!NATIVE_GALLERY_RECORD.test(id) || !isPlainObject(row?.fields)) {
+    throw new Error("rendering_review_supabase_row_invalid");
+  }
+  return { id, fields: {...row.fields}, createdTime: row.created_at || null };
+}
+function reviewLedgerFormula(formula) {
+  const cleaned = String(formula || "").trim().replace(/\s+/g, " ");
+  if (!cleaned) return "";
+  const parts = cleaned.startsWith("AND(") && cleaned.endsWith(")")
+    ? (splitQueueArgs(cleaned.slice(4,-1)) || []) : [cleaned];
+  if (!parts.length || parts.length > 3) throw new Error("rendering_review_filter_not_allowlisted");
+  const filters=[];
+  for (const part of parts) {
+    const m = part.trim().match(/^\{([A-Za-z0-9_]+)\}=(["'])([A-Za-z0-9_-]{1,160})\2$/);
+    if (!m || !REVIEW_LEDGER_FILTERS.has(m[1])) {
+      throw new Error("rendering_review_filter_not_allowlisted");
+    }
+    filters.push("&fields->>" + m[1] + "=eq." + encodeURIComponent(m[3]));
+  }
+  return filters.join("");
+}
+async function readReviewLedger(env, tableId, { id="", formula="", limit=30, offset=0 }={}) {
+  const table = REVIEW_LEDGER_TABLES[String(tableId)];
+  if (!table) throw new Error("rendering_review_ledger_unknown_table");
+  if (id && !NATIVE_GALLERY_RECORD.test(id)) throw new Error("rendering_review_record_id_invalid");
+  const filter = id ? "&airtable_record_id=eq." + encodeURIComponent(id)
+    : reviewLedgerFormula(formula);
+  const safeLimit = Math.max(1, Math.min(100, Number(limit)||30));
+  const safeOffset = Math.max(0, Math.min(5000, Number(offset)||0));
+  const rows = await supabaseRest(env, table +
+    "?select=airtable_record_id,fields,created_at" + filter +
+    "&order=created_at.asc&limit=" + safeLimit + "&offset=" + safeOffset);
+  if (!Array.isArray(rows)) throw new Error("rendering_review_ledger_unverified");
+  return rows.map(reviewLedgerRow);
+}
+
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
   const kind = sideTableKind(env, tableId);
@@ -9712,6 +9768,10 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     }
     if (kind === "native_gallery_jobs") {
       const rows = await readNativeGalleryLedger(env, { id, limit: 1 });
+      return rows[0] || null;
+    }
+    if (kind === "review_ledger") {
+      const rows = await readReviewLedger(env, tableId, { id, limit: 1 });
       return rows[0] || null;
     }
     if (kind === "slides") {
@@ -9752,6 +9812,13 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
+  if (kind === "review_ledger") {
+    const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
+    const records = await readReviewLedger(env, tableId, { formula, limit, offset });
+    const result = { records };
+    if (records.length === limit) result.offset = String(offset + records.length);
+    return result;
+  }
   if (kind === "native_gallery_jobs") {
     // Only exact job/output/state predicates are supported. A malformed
     // filter is a 503 fail-closed error, never a full-table eligibility scan.
@@ -10266,6 +10333,37 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
     if (kind === "idea") records = await commitIdeaRecords(env, parsed);
     else if (kind === "idea_batch") records = await commitIdeaBatchRecords(env, parsed);
     else if (kind === "slides") records = await commitSlideRecords(env, parsed);
+    else if (kind === "review_ledger") {
+      const table = REVIEW_LEDGER_TABLES[String(tableId)];
+      if (!table) throw new Error("rendering_review_ledger_unknown_table");
+      records = [];
+      for (const row of parsed) {
+        if (!NATIVE_GALLERY_RECORD.test(String(row?.id || "")) ||
+            !isPlainObject(row.fields)) throw new Error("rendering_review_write_identity_invalid");
+        const prior = verb === "PATCH"
+          ? await readReviewLedger(env, tableId, {id:row.id,limit:1}) : [];
+        if (verb === "PATCH" && prior.length !== 1) {
+          throw new Error("rendering_review_patch_requires_existing_row");
+        }
+        const merged = {...(prior[0]?.fields || {}),...row.fields};
+        if (verb === "PATCH" && prior[0]?.fields?.Row_Version != null &&
+            row.fields?.Row_Version != null &&
+            Number(row.fields.Row_Version) !== Number(prior[0].fields.Row_Version)+1) {
+          throw new Error("rendering_review_row_version_advance_required");
+        }
+        const saved = await supabaseRest(env,
+          table+"?on_conflict=airtable_record_id&select=airtable_record_id,fields,created_at",{
+            method:"POST",
+            headers:{Prefer:"resolution=merge-duplicates,return=representation"},
+            body:[{airtable_record_id:row.id,fields:merged,updated_at:new Date().toISOString()}],
+          });
+        if (!Array.isArray(saved) || saved.length!==1 ||
+            saved[0]?.airtable_record_id!==row.id) {
+          throw new Error("rendering_review_supabase_commit_unconfirmed");
+        }
+        records.push(reviewLedgerRow(saved[0]));
+      }
+    }
     else if (kind === "native_gallery_jobs") {
       records = [];
       for (const row of parsed) {
