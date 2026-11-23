@@ -2245,7 +2245,8 @@
       return state.batch;
     }
     const now = Date.now();
-    const hasPendingWork = Number(state.batch?.totals?.pending || 0) > 0 ||
+    const hasPendingWork = state.batch?.activity_confidence === "bounded-partial" ||
+      Number(state.batch?.totals?.pending || 0) > 0 ||
       (state.batch?.batches || []).some(row => Number(row.pending_count || 0) > 0 ||
         ["queued", "running", "enqueuing"].includes(row.status));
     const minInterval = hasPendingWork ? 3000 : 15000;
@@ -2436,11 +2437,15 @@
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       reconcilePersistedFactoryPending().catch(() => {});
-      // At most one slower discovery every 60 seconds, separate from exact
-      // status reads. It must not block the current submission's updates.
+      // Fast exact-ID receipts always win. When a global inventory is
+      // incomplete, continue its bounded cursor every 3s rather than waiting
+      // 60s for each page. After a full sweep, the normal 60s cadence applies.
       const discoveryAge = now - Math.max(
         state.lastBatchFullFetchMs || 0, state.batchDiscoveryStartedMs || 0);
-      if (fastGroups.length && discoveryAge >= 60000 && !state.batchDiscoveryLoading) {
+      const discoveryIncomplete = state.batch?.activity_confidence === "bounded-partial";
+      if (fastGroups.length && (discoveryIncomplete
+            ? discoveryAge >= 3000 : discoveryAge >= 60000) &&
+          !state.batchDiscoveryLoading) {
         // Throttle attempts, not just successes: a failed R2 global scan must
         // not be retried every 3 seconds under a database/memory incident.
         state.batchDiscoveryStartedMs = now;
