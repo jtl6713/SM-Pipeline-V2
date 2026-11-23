@@ -1,7 +1,7 @@
 /**
- * Airtable adapter for the Rendering Review admission coordinator.
- * Zero routes or workflows call this until dispatch/approval fences are proven.
- * Existing Airtable is the authoritative write source; no Supabase authority.
+ * Airtable-shaped compatibility adapter for Rendering Review admission.
+ * Supabase is the ONLY record authority; the retired Airtable archive is closed.
+ * All six ledger table IDs are mapped to canonical Supabase rows by the Worker.
  *
  * MUTATIONS ARE DISABLED BY DEFAULT, EVEN IF A CALLER INSTANTIATES THIS MODULE.
  * Never flip the protected deployment flag until the irreversible platform

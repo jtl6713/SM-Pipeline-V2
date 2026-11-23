@@ -177,6 +177,7 @@ def side_table_kind(table_id: str) -> str:
         "tblHX3UdoNszkoquG", "tblUkZB6SMtf9Ib6I",
         "tbl7wPOAE26o2coMU", "tblalFXUJyYg5PBrz",
         "tbl5sq9xBrF6bgPph",
+        "tbl8tuxw838DQiGKo", "tblbnKA0Cb2Mnlg5r",
     }:
         return "review_records"
     return ""
@@ -1585,6 +1586,8 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
             "tbl7wPOAE26o2coMU": "rendering_review_attempts",
             "tblalFXUJyYg5PBrz": "rendering_review_plans",
             "tbl5sq9xBrF6bgPph": "native_gallery_jobs",
+            "tbl8tuxw838DQiGKo": "rendering_review_messages",
+            "tblbnKA0Cb2Mnlg5r": "rendering_review_requirements",
         }
         target = names.get(table)
         saved = 0
