@@ -29,7 +29,7 @@ const FACTORY_APPROVAL_SELECT = [
   "content_item_id", "content_item_airtable_id", "content_profile_id",
   "platform", "format", "studio_output_type", "platform_output_type",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
-  "do_not_publish", "test_run_id", "output_caption", "thumbnail_url",
+  "do_not_publish", "publish_hold_released_at", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
@@ -222,7 +222,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
-  approvedByUserRecordId = null,
+  approvedByUserRecordId = null, submittedAt = null,
   verifyImages = verifyReviewImages, onStage = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
@@ -256,7 +256,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     // Finalization itself re-runs the UNCHANGED persisted-slide publication
     // gate. No extra photo inventory read for unrelated Factory approvals.
     await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
-      requestId, approvedByUserRecordId,
+      requestId, approvedByUserRecordId, submittedAt,
     });
   }
   const stamp = new Date().toISOString();
