@@ -52,6 +52,52 @@ def test_crash_expiry_releases_claim_but_not_the_request(isolated_governor):
     assert g.job_valid(request_id, new_claim[1])
 
 
+
+def test_expired_producer_cannot_revive_or_remove_durable_request(isolated_governor):
+    g = isolated_governor
+    assert g.enqueue("recExpired")
+    request_id, token = g.claim_next()
+    with g._connect() as db:
+        db.execute("UPDATE producer_jobs SET lease_until=0 WHERE request_id=?", (request_id,))
+    # The old owner must not renew, delete, or requeue an expired claim,
+    # even if the dispatcher has not yet performed crash recovery.
+    assert g.renew_job(request_id, token) is False
+    g.finish_job(request_id, token, progressed=True)
+    with g._connect() as db:
+        state = db.execute(
+            "SELECT state,token FROM producer_jobs WHERE request_id=?", (request_id,)
+        ).fetchone()
+    assert state == ("running", token)
+    assert g.claim_next() is None  # Expired claim becomes delayed, durable queue entry.
+    assert g.snapshot()["queued_jobs"] == 1
+    with g._connect() as db:
+        db.execute("UPDATE producer_jobs SET available_at=0 WHERE request_id=?", (request_id,))
+    new_request, new_token = g.claim_next()
+    assert new_request == request_id and new_token != token
+    g.finish_job(request_id, token, requeue=True)  # Cannot rewrite the new claim.
+    assert g.job_valid(new_request, new_token)
+    g.finish_job(new_request, new_token)
+
+
+def test_expired_media_slot_cannot_be_reanimated_by_heartbeat(
+    isolated_governor, monkeypatch,
+):
+    g = isolated_governor
+    monkeypatch.setattr(g, "HEARTBEAT_INTERVAL", 0.01)
+    with g.resource_slot("photo_group", key="recMedia", limit=1):
+        with g._connect() as db:
+            db.execute(
+                "UPDATE resource_leases SET lease_until=0 "
+                "WHERE scope='photo_group' AND lease_key='recMedia'"
+            )
+        # The background heartbeat runs but must not renew an already
+        # expired slot. A new process is free to claim it after cleanup.
+        time.sleep(0.08)
+        assert not g.resource_active("photo_group", "recMedia")
+    with g.resource_slot("photo_group", key="recMedia", limit=1):
+        assert g.resource_active("photo_group", "recMedia")
+
+
 def test_circuit_blocks_new_heavy_jobs_without_discarding_queue(isolated_governor):
     g = isolated_governor
     g.enqueue("recA")
