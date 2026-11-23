@@ -599,3 +599,45 @@ test("Factory ops queue actually carries the exact saved R5 preview URL into car
   const worker = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
   assert.match(worker, /studio_preview_url: f\(record, "Studio_Preview_URL"\) \|\| null/);
 });
+
+test("issue #2371: three stale Needs Assets pins cannot hide the image siblings of visible NYC #10858", () => {
+  const rows = [
+    ["recO494MDnQ1Tk51b",10855,"Instagram","Native Photo Route"],
+    ["recWIWOrdflmqyxKW",10856,"Facebook","Native Photo Route"],
+    ["rec8I104V9gQmiOxf",10857,"TikTok","Native Photo Route"],
+    ["recrmu0sv44I7J2Ks",10858,"YouTube","Rendered"],
+  ].map(([id,output_id,platform,render_status])=>({
+    id,kind:"output",output_id,platform,render_status,
+    content_id:2221,content_item_id:"reclHHAP4oFodMt91",
+    profile_id:"recgtK8Z7eNADNtVy",
+    studio_state:"Ready for Review",output_status:"Ready for Review",
+    review_status:"Review Sent",publish_status:"Not Ready",
+    do_not_publish:false,auto_publish_enabled:false,
+    review_package_ready:true,
+    thumbnail_url:"https://media.chicagoshining.com/studio/previews/nyc.jpg",
+  }));
+  const controls={
+    needs_assets: rows.slice(0,3).map(({id})=>({id,kind:"output",title:"Historic missing native image"})),
+  };
+  const part=partitionFactoryLanes(rows,controls);
+  assert.deepEqual(part.lanes.needs_eyes.map(r=>r.output_id),[10855,10856,10857,10858]);
+  assert.equal(part.summary.needs_eyes,4);
+  assert.equal(part.summary.needs_assets_pile,0);
+  assert.equal(part.lanes.needs_eyes.every(r=>r.do_not_publish===false),true);
+  // The R2 pin history is untouched; only the read-only lane claim changes.
+  assert.equal(controls.needs_assets.length,3);
+});
+
+test("incomplete pinned media stays in Needs Assets and gains no final approval",()=>{
+  const needsRepair={
+    id:"recO494MDnQ1Tk51b",kind:"output",output_id:10855,
+    studio_state:"Ready for Review",output_status:"Ready for Review",
+    render_status:"Native Photo Route",review_status:"Review Sent",
+    review_package_ready:false,do_not_publish:true,auto_publish_enabled:false,
+  };
+  const controls={needs_assets:[{id:needsRepair.id,kind:"output",title:"Review package missing"}]};
+  const part=partitionFactoryLanes([needsRepair],controls);
+  assert.equal(part.summary.needs_assets_pile,1);
+  assert.equal(part.summary.needs_eyes,0);
+  assert.equal(part.lanes.needs_assets[0].do_not_publish,true);
+});
