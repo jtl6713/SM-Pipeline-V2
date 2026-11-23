@@ -60,7 +60,7 @@ jobs:
             state=$(jq -r '.job.status // empty' /tmp/incident2670-preflight-status.json)
             if [[ "$state" == ok || "$state" == failed ]]; then
               jq -r '.job.log // ""' /tmp/incident2670-preflight-status.json |
-                grep -E '^incident2670_preflight_(root|module|env|url|authority|python|python_source|hello|requests|import|interface|python_run|result)=(PRESENT|MISSING|UNREADABLE|EXPECTED|INVALID|FOUND|AVAILABLE|UNAVAILABLE|PASS|FAIL|FAILED|READY_FOR_SYNTHETIC_TEST|INCOMPLETE_NO_CHANGES|UNUSABLE|VENV|RUNNING|LAUNCHER|PATH)$' || true
+                grep -E '^incident2670_preflight_(root|module|env|url|authority|python|python_source|python_registry|python_path_category|hello|requests|import|interface|python_run|result)=(PRESENT|MISSING|UNREADABLE|EXPECTED|INVALID|FOUND|AVAILABLE|UNAVAILABLE|PASS|FAIL|FAILED|READY_FOR_SYNTHETIC_TEST|INCOMPLETE_NO_CHANGES|UNUSABLE|VENV|RUNNING|LAUNCHER|PATH|REGISTRY|LOCAL|CIM_RUNNING|NONE|WINDOWS_APPS_ALIAS|OTHER)$' || true
               if [[ "$state" == ok ]] && jq -r '.job.log // ""' /tmp/incident2670-preflight-status.json |
                   grep -x 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST' >/dev/null; then
                 echo 'incident2670_preflight_acceptance=PASS'
