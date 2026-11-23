@@ -124,8 +124,20 @@ if(-not $script:SelectedPython){
     foreach($item in $cim){
       if($script:SelectedPython){break}
       $candidate=[string]$item.ExecutablePath
-      if($candidate -and $candidate -notmatch '(?i)\\WindowsApps\\' -and
-         $candidate -match '(?i)\\python\.exe
+      if($candidate -and [IO.Path]::GetFileName($candidate) -ieq 'python.exe' -and
+         $candidate -notlike '*\WindowsApps\*' -and
+         (Test-Path -LiteralPath $candidate -PathType Leaf)){
+        Probe-Python $candidate @() 'CIM_RUNNING'
+      }
+    }
+  }catch{}
+}
+$pathCommand=Get-Command python -ErrorAction SilentlyContinue
+$pathEntry=[string]$pathCommand.Source
+$pathCategory=if(-not $pathCommand){'MISSING'}elseif($pathEntry -like '*\WindowsApps\*'){'WINDOWS_APPS_ALIAS'}else{'OTHER'}
+Write-Output ('incident2670_preflight_python_path_category='+$pathCategory)
+if(-not $script:SelectedPython){
+  $launcher=Get-Command py -ErrorAction SilentlyContinue
   if($launcher){Probe-Python 'py' @('-3') 'LAUNCHER'}
 }
 if(-not $script:SelectedPython){
