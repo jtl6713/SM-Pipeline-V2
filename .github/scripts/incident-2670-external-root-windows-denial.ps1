@@ -24,7 +24,23 @@ $env:SUPABASE_SERVICE_ROLE_KEY=$sbKey
 $env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
 $env:PYTHONPATH=$root
 $env:INCIDENT2670_CROSSHOST_MODE=$mode
-if(-not (Get-Command python -ErrorAction SilentlyContinue)){Write-Output 'incident2670_root_windows_class=PYTHON_EXE_MISSING';throw 'crosshost_python_unavailable'}
+$pythonExe=$null
+$candidates=@(
+  (Join-Path $root '.venv\Scripts\python.exe'),
+  (Join-Path $root 'venv\Scripts\python.exe'),
+  (Join-Path (Split-Path $root -Parent) '.venv\Scripts\python.exe')
+)
+foreach($candidate in $candidates){
+  if($pythonExe){break}
+  if(-not(Test-Path -LiteralPath $candidate -PathType Leaf)){continue}
+  $old=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  try{$hello=@(& $candidate -c 'print(2670)' 2>$null);$rc=$LASTEXITCODE}
+  catch{$hello=@();$rc=99}
+  finally{$ErrorActionPreference=$old}
+  if($rc -eq 0 -and @($hello|Where-Object {[string]$_ -eq '2670'}).Count -eq 1){$pythonExe=$candidate}
+}
+if(-not $pythonExe){Write-Output 'incident2670_root_windows_class=PYTHON_EXE_MISSING';throw 'crosshost_python_unavailable'}
+Write-Output 'incident2670_root_windows_python=VERIFIED_VENV'
 $python=@'
 import os, sys, time
 try:
@@ -71,8 +87,17 @@ elif mode=="hold":
 else:
   raise SystemExit("crosshost_mode_invalid")
 '@
-$result=@(& python -c $python 2>$null)
-if($LASTEXITCODE -ne 0){
+$tempScript=Join-Path ([IO.Path]::GetTempPath()) ('incident2670-'+[guid]::NewGuid().ToString('N')+'.py')
+try{
+  [IO.File]::WriteAllText($tempScript,$python,[Text.Encoding]::UTF8)
+  $old=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  try{$result=@(& $pythonExe $tempScript 2>$null);$pythonExit=$LASTEXITCODE}
+  catch{$result=@();$pythonExit=99}
+  finally{$ErrorActionPreference=$old}
+}finally{
+  Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+}
+if($pythonExit -ne 0){
   @($result|Where-Object {$_ -match '^incident2670_root_windows_class=(IMPORT_FAILED|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)$'})|ForEach-Object {Write-Output $_}
   throw 'crosshost_python_client_failed'
 }
