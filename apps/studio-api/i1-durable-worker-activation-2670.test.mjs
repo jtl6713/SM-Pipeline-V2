@@ -16,6 +16,9 @@ test("I1 Worker secret release checks out the same runner source it verifies", (
 test("durable Worker binding rollout remains a one-time guarded marker", () => {
   assert.match(workflow, /deploy\/i1-durable-worker-enable\.txt/);
   assert.match(workflow, /STUDIO_I1_DURABLE_JOBS/);
-  assert.ok(workflow.includes('.result.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS")'));
+  // Preflight inspects script settings; post-deploy verification inspects
+  // the *active version's* resources rather than the old settings envelope.
+  assert.ok(workflow.includes('.result.bindings[] | select(.name=="STUDIO_I1_DURABLE_JOBS")'));
+  assert.ok(workflow.includes('.result.resources.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS" and .type=="secret_text")'));
   assert.match(workflow, /Roll back only the newly introduced I1 feature secret/);
 });
