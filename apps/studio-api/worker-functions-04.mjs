@@ -10686,7 +10686,10 @@ export async function gatherStudioDeskInventory(env) {
           read: path => supabaseRest(env,path), limit:4,
         }));
       if (handoff?.status === "ok") {
-        scanned("production_factory_handoff");
+        // A compact scan cannot inspect every native slide or browser.
+        // Never stamp Quality Agent "pass" when deeper evidence is required.
+        if (handoff.verification_required_count === 0)
+          scanned("production_factory_handoff");
         for (const finding of handoff.findings || []) {
           const ident = String(finding.record_id || finding.request_id || "unknown");
           push({
