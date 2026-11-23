@@ -1,5 +1,5 @@
 name: Bethesda 2303 bounded narrated Reel repair
-# Follow-up release: resolve service config relative to Ops PIPELINE_ROOT cwd (incident #2670).
+# Follow-up release: allow process-injected runner secrets and report only source presence (incident #2670).
 on:
   pull_request:
     paths:
@@ -115,6 +115,8 @@ jobs:
                           raise SystemExit('bethesda_ops_stage_failed_closed_no_blind_retry')
                       return '\n'.join(marks)
               raise SystemExit('ops_job_result_unknown_stop_no_auto_retry')
+          probe=run_ops('bethesda-2303-config-source-probe.ps1')
+          if 'bethesda_config_probe=PASS_READ_ONLY' not in probe: raise SystemExit('config_source_probe_unconfirmed')
           pre=run_ops('bethesda-2303-bounded-preflight.ps1')
           if 'bethesda_2303_preflight=PASS' not in pre: raise SystemExit('exact_preflight_not_proven')
           for reel in (11153,11154):
