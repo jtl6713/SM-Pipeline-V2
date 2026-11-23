@@ -46,7 +46,7 @@ test("Factory active approvals show actual stages, output identity, elapsed and 
   assert.match(factory, /factoryBatchPollWindow\(\[\.\.\.knownGroups, \.\.\.remembered\]/);
   assert.match(factory, /const fastGroups = window\.groups/);
   assert.match(factory, /Exact Factory progress is unavailable; retaining prior snapshot/);
-  assert.match(factory, /!Number\(totals\.active\) && !Number\(totals\.pending\)/);
+  assert.match(factory, /overall\.hidden = !batches\.length;/);\n  assert.match(factory, /Latest completed submission/);
   assert.match(html, /factory-live-approval-progress\.css/);
   assert.match(html, /live=five-stages-20261120/);
   assert.match(css, /@media \(max-width: 600px\)/);
