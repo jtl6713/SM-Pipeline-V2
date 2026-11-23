@@ -776,6 +776,7 @@
     let index = 0;
     function display(indexToShow) {
       index = indexToShow;
+      resetFactoryCloseupInspector(); // Hide stale framing while next source loads.
       image.src = urls[index];
       image.alt = `Verified original preview image ${index + 1} of ${urls.length}; not an approved or staged Instagram asset`;
       image.hidden = false;
@@ -854,6 +855,7 @@
       let index = 0;
       const show = (nextIndex) => {
         index = nextIndex;
+        resetFactoryCloseupInspector(); // Never show a previous slide's crop.
         image.src = slides[index].image_url;
         image.alt = draftOnly
           ? `UNAPPROVED draft/source image ${index + 1} of ${slides.length}`
@@ -868,8 +870,10 @@
           ? `UNVERIFIED source preview only — missing linked slides · ${cardLabel(card)}`
           : `Viewing native slide ${index + 1} of ${slides.length} · ${cardLabel(card)}`, draftOnly);
       };
-      image.onerror = () => setStatus(
-        `Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);
+      image.onerror = () => {
+        resetFactoryCloseupInspector();
+        setStatus(`Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);
+      };
       back.addEventListener("click", () => show(index - 1));
       next.addEventListener("click", () => show(index + 1));
       show(0);
@@ -887,14 +891,29 @@
 
   // #2876: read-only framing inspector. It never approves, releases a hold,
   // substitutes source images, or claims the generated/published frame matches.
+  // Reuse the already-loaded, verified Factory image node. Copying its src into
+  // another <img> creates a second HTTP request, which can fail independently
+  // (observed owner QA: Carousel output #11129, UI 0.6.1080).
+  function restoreFactoryCloseupImage() {
+    const image = $("factoryPreviewImage");
+    const cropVisual = $("factoryCloseupCropVisual");
+    const empty = $("factoryPreviewEmpty");
+    const dialog = $("factoryPreviewBackdrop")?.querySelector(".library-preview-dialog");
+    if (image && cropVisual && image.parentElement === cropVisual
+        && empty?.parentElement === dialog) {
+      dialog.insertBefore(image, empty);
+    }
+  }
+
   function resetFactoryCloseupInspector() {
+    restoreFactoryCloseupImage();
     const panel = $("factoryCloseupInspector");
     const crop = $("factoryCloseupCropFrame");
-    const preview = $("factoryCloseupCropStill");
+    const cropVisual = $("factoryCloseupCropVisual");
     const toggle = $("factoryCloseupToggle");
     if (panel) panel.hidden = true;
     if (crop) crop.hidden = true;
-    if (preview) preview.removeAttribute("src");
+    if (cropVisual) cropVisual.style.removeProperty("aspect-ratio");
     if (toggle) { toggle.hidden = true; toggle.setAttribute("aria-expanded", "false"); }
   }
 
@@ -905,16 +924,20 @@
     const panel = $("factoryCloseupInspector");
     const summary = $("factoryCloseupSummary");
     const crop = $("factoryCloseupCropFrame");
-    const preview = $("factoryCloseupCropStill");
+    const cropVisual = $("factoryCloseupCropVisual");
     const toggle = $("factoryCloseupToggle");
-    if (!quality || !select || !panel || !summary || !crop || !preview || !toggle) return;
+    if (!quality || !select || !panel || !summary || !crop || !cropVisual || !toggle) return;
     const defaultAspect = quality.normalizedRatio(
       card?.aspect_ratio || card?.output_aspect_ratio || card?.asset_aspect_family || ""
     );
     select.value = defaultAspect;
     const update = () => {
-      if (previewEpoch !== factoryGalleryPreviewEpoch || !image?.naturalWidth
-          || !image?.naturalHeight || image.hidden) return;
+      if (previewEpoch !== factoryGalleryPreviewEpoch) return;
+      if (!image?.complete || !image.naturalWidth || !image.naturalHeight || image.hidden) {
+        resetFactoryCloseupInspector(); // Missing slide is never a valid crop preview.
+        return;
+      }
+      const wasCropping = !crop.hidden && image.parentElement === cropVisual;
       const report = quality.frameReport({
         width: image.naturalWidth, height: image.naturalHeight, ratio: select.value,
       });
@@ -928,21 +951,39 @@
       summary.textContent = report.status === "unavailable"
         ? `Image ${image.naturalWidth}×${image.naturalHeight}. Choose an output aspect ratio to inspect the expected center crop.`
         : `Image ${report.width}×${report.height} · ${report.ratio} · center crop removes ${report.cropLossPct}% of the source. ${issueText || "Pixel dimensions meet the minimum inspection size."} Subject identity, visible edges, on-image text, and actual rendered output still require human review.`;
-      crop.hidden = true;
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.hidden = !report.ratio || report.status === "unavailable";
-      if (!toggle.hidden) {
-        preview.src = image.currentSrc || image.src;
-        preview.style.aspectRatio = report.ratio.replace(":", " / ");
+      const validRatio = Boolean(report.ratio) && report.status !== "unavailable";
+      toggle.hidden = !validRatio;
+      if (!validRatio || !wasCropping) {
+        restoreFactoryCloseupImage();
+        crop.hidden = true;
+        toggle.setAttribute("aria-expanded", "false");
       } else {
-        preview.removeAttribute("src");
+        // Changing 9:16 / 4:5 / 1:1 / 16:9 only changes CSS. No new src
+        // assignment, no fetch, no canvas CORS dependency, no saved mutation.
+        cropVisual.style.aspectRatio = report.ratio.replace(":", " / ");
       }
     };
-    image.onload = update; // Also refreshes on each verified gallery image.
-    select.onchange = update; // Local preview only; never saved to output.
+    image.onload = update; // Refresh only after the verified slide actually loads.
+    select.onchange = update; // A local read-only crop, never written to output.
     toggle.onclick = () => {
-      crop.hidden = !crop.hidden;
-      toggle.setAttribute("aria-expanded", String(!crop.hidden));
+      if (!crop.hidden) {
+        restoreFactoryCloseupImage();
+        crop.hidden = true;
+        toggle.setAttribute("aria-expanded", "false");
+        return;
+      }
+      const report = quality.frameReport({
+        width: image.naturalWidth, height: image.naturalHeight, ratio: select.value,
+      });
+      if (report.status === "unavailable" || image.hidden || !image.complete
+          || !image.naturalWidth || !image.naturalHeight) {
+        summary.textContent = "Cannot inspect the crop until the actual image loads and a valid ratio is selected.";
+        return;
+      }
+      cropVisual.style.aspectRatio = report.ratio.replace(":", " / ");
+      cropVisual.appendChild(image); // Same already-loaded Factory image, no second request.
+      crop.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
     };
   }
 
@@ -961,6 +1002,7 @@
       video.removeAttribute("poster");
       video.load();
     }
+    resetFactoryCloseupInspector(); // Restore original parent before clearing the image.
     if (image) {
       image.onload = null;
       image.onerror = null;
@@ -968,7 +1010,6 @@
       image.hidden = true;
     }
     if (empty) empty.hidden = true;
-    resetFactoryCloseupInspector();
     dialog?.classList.remove("is-image");
     dialog?.classList.add("is-video");
     if (backdrop) backdrop.hidden = true;
@@ -990,6 +1031,7 @@
     }
     if (title) title.textContent = cardLabel(card);
     image.onload = null;
+    image.onerror = null;
     attachFactoryCloseupInspector(card, image, galleryEpoch);
     empty.hidden = true;
     image.hidden = true;
