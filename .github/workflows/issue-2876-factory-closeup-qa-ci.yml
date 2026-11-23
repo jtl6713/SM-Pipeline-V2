@@ -1,0 +1,40 @@
+name: Issue 2876 Factory Close-Up QA CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/assets/factory-closeup-quality.js'
+      - 'apps/studio-web/assets/factory-desk.js'
+      - 'apps/studio-web/assets/app-item4-1008.js'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/factory-closeup-*.test.mjs'
+      - '.github/workflows/issue-2876-factory-closeup-qa-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check safe browser scripts and release version contract
+        run: |
+          node --check apps/studio-web/assets/factory-closeup-quality.js
+          node --check apps/studio-web/assets/factory-desk.js
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node apps/studio-web/ui-release-contract.mjs
+      - name: Close-up geometry and Factory review regressions
+        run: |
+          node --test \
+            apps/studio-web/factory-closeup-quality-2876.test.mjs \
+            apps/studio-web/factory-closeup-integration-2876.test.mjs \
+            apps/studio-web/factory-desk.test.mjs \
+            apps/studio-web/factory-review-selection-eligibility.test.mjs \
+            apps/studio-web/ui-release-contract.test.mjs \
+            apps/studio-web/pages-production-deploy-contract.test.mjs
