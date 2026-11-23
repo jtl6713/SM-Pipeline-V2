@@ -2245,7 +2245,8 @@
       return state.batch;
     }
     const now = Date.now();
-    const hasPendingWork = state.batch?.activity_confidence === "bounded-partial" ||
+    const hasPendingWork = ["bounded-partial", "saved-requests-only"]
+      .includes(state.batch?.activity_confidence) ||
       Number(state.batch?.totals?.pending || 0) > 0 ||
       (state.batch?.batches || []).some(row => Number(row.pending_count || 0) > 0 ||
         ["queued", "running", "enqueuing"].includes(row.status));
@@ -2442,7 +2443,8 @@
       // 60s for each page. After a full sweep, the normal 60s cadence applies.
       const discoveryAge = now - Math.max(
         state.lastBatchFullFetchMs || 0, state.batchDiscoveryStartedMs || 0);
-      const discoveryIncomplete = state.batch?.activity_confidence === "bounded-partial";
+      const discoveryIncomplete = ["bounded-partial", "saved-requests-only"]
+        .includes(state.batch?.activity_confidence);
       if (fastGroups.length && (discoveryIncomplete
             ? discoveryAge >= 3000 : discoveryAge >= 60000) &&
           !state.batchDiscoveryLoading) {
