@@ -97,6 +97,23 @@ export function assessProductionFactoryHandoff({
     return report;
   }
   report.expected_count=plan.length;
+  // Earliest false-success signature: Production says Promoted / completed
+  // but has no canonical linked Content owner at all. Never treat this as
+  // 0 outputs successfully validated, and never create output records from
+  // an unowned request. An active Submitted job remains in-progress.
+  if (!str(request.promoted_content_item_id)) {
+    report.actual_count=0;report.stage="fanout";
+    const step=statusName(request.production_job?.step||request.production_job?.status);
+    const unfinished= str(request.request_status)==="Submitted"
+      && !["done","failed","escalated","error","complete"].includes(step);
+    report.status=unfinished?"in_progress":"repair_required";
+    report.findings.push(incident({
+      stage:"fanout",kind:"production_factory_handoff",
+      reason:"production_content_promotion_not_reconciled",
+      remediation:"Reconcile original Idea / Production Request ownership, completed job and content link; only a fenced I3/I4 fanout may create missing outputs after exact readback",
+    }));
+    return report;
+  }
   const canonical=list(outputs).filter(x=>!x.test_run_id);
   report.actual_count=canonical.length;
   if (canonical.length>24) {
@@ -282,19 +299,32 @@ export async function scanRecentProductionFactoryHandoffs({
   if(typeof read!=="function") throw Error("authoritative Supabase read required");
   const n=Math.max(1,Math.min(8,Number(limit)||4));
   const requests=await read("production_requests?request_status=in.(Promoted,Submitted)"
-    +"&output_plan_status=eq.Ready&promoted_content_item_id=not.is.null"
+    +"&output_plan_status=eq.Ready"
     +"&select=airtable_record_id,promoted_content_item_id,"
     +"request_status,output_plan,production_job,updated_at"
     +"&order=updated_at.desc&limit="+n);
   if(!Array.isArray(requests)||requests.length>n)throw Error("handoff request inventory unavailable");
   const ids=[...new Set(requests.map(r=>str(r.promoted_content_item_id)).filter(x=>
     /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(x)))];
-  if(!ids.length)return {
-    schema:FACTORY_HANDOFF_SCHEMA,signature:FACTORY_HANDOFF_SIGNATURE,
-    status:"ok",checked_at:checkedAt,scanned:0,findings:[],
-    incomplete_count:0,verification_required_count:0,
-    note:"No newly promoted content with a ready output plan in bounded scan",
-  };
+  if(!ids.length) {
+    const reports=requests.map(request=>assessProductionFactoryHandoff({
+      request,outputs:[],gallerySlides:null,factoryCards:null,
+    }));
+    return {
+      schema:FACTORY_HANDOFF_SCHEMA,signature:FACTORY_HANDOFF_SIGNATURE,
+      status:"ok",checked_at:checkedAt,scanned:reports.length,
+      findings:reports.flatMap(r=>r.findings.map(item=>({...item,
+        request_id:r.request_id,content_item_id:r.content_item_id}))),
+      incomplete_count:reports.filter(r=>r.status==="repair_required"||r.status==="blocked").length,
+      verification_required_count:reports.filter(r=>r.status==="verification_required").length,
+      reports:reports.map(r=>({request_id:r.request_id,content_item_id:r.content_item_id,
+        status:r.status,stage:r.stage,expected_count:r.expected_count,
+        actual_count:r.actual_count,ready_count:r.ready_count,
+        terminal:r.terminal,publishing_authorized:false})),
+      scope:"latest_ready_production_requests", 
+      note:"No linked content owner in sampled requests; verify promotion before any fanout repair",
+    };
+  }
   const outputLimit=8*24+1;
   const outputs=await read("platform_outputs?content_item_id=in.("+ids.join(",")+")"
     +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,"
@@ -326,7 +356,7 @@ export async function scanRecentProductionFactoryHandoffs({
       actual_count:r.actual_count,ready_count:r.ready_count,
       terminal:r.terminal,publishing_authorized:false,
     })),
-    scope:"latest_ready_promoted_content_only",
+    scope:"latest_ready_production_requests",
     note:"Native slide/CDN byte and Factory browser visibility require exact second-stage verification; they are not treated as clear from a compact scan",
   };
 }

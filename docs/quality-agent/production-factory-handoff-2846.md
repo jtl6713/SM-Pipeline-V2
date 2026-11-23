@@ -50,3 +50,11 @@ This is **detection and safe recovery orchestration**, not a second unbounded pr
 ## Regression obligations
 
 Run `quality-factory-handoff.test.mjs`, `quality-checks.test.mjs`, `factory-desk.test.mjs`, `factory-quality-monitor.test.mjs` and Worker/Pages CI. Include zero/partial/duplicate/wrong-profile plans, live produce, failed render, absent/corrupt slides, unverified deep probe, hold preservation, historical Failed/terminal batch, lost card `publish_status`, hidden card with matching server readiness, and successful stop before user approval. Verify postdeploy on the actual Factory page and exact output IDs; a healthy NYC count is never enough.
+
+## Proactive monitor, phase 2A (#2853)
+
+Phase 1 used on-demand bounded Quality Agent reads when a user opened the panel. Phase 2A adds an independently staggered Worker cron read at UTC minute 2, 7, 12, etc. This samples up to four recently updated ready-plan Production Requests plus their typed Platform Outputs (at most two authoritative indexed Supabase queries). `QUALITY_FACTORY_HANDOFF_CRON_DISABLED=true` is an emergency runtime kill switch. The event logs only stage/count/checked timestamp, no media URLs or credentials. Invalid reads report unavailable; a missing image/link cannot be silently treated as approval ready. This monitor runs while the user is away, but **does not itself manufacture media or execute an I3/I4 repair**. The existing safe one-minute zero-output and producer/render recovery workers continue separately. General partial fanout and gallery auto-repair must still pass phase 2B's durable admission/rights/lease tests before activation.
+
+### Early no-Content / zero-output pre-promotion signature
+
+Do **not** filter the bounded Quality Agent scan only to Production Requests that already have `Promoted_Content_Item`: that would erase the first and most damaging failure, where a completed/escalated Production Request has a valid plan but no linked Content and therefore no outputs. The #2853 cron includes Ready-plan Submitted/Promoted requests even without a parent. An active Submitted producer is `in_progress`; a terminal/escalated job with no content link is a real `production_content_promotion_not_reconciled` failure. It must reconcile the original Idea, owner, Content, job and plan before any I3/I4 resumption. **No automatic fanout from an unowned request.**

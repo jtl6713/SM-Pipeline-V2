@@ -1,6 +1,10 @@
 import { handleQaApi } from "./qa-http.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
+import {
+  shouldRunQualityFactoryHandoffCron,
+  runQualityFactoryHandoffCron,
+} from "./quality-factory-handoff-cron.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -4535,6 +4539,25 @@ export default {
       ctx.waitUntil(recordStudioAirtableCollectorHeartbeat(env).catch(error =>
         console.warn("airtable_retirement_collector_heartbeat_unavailable",
           String(error?.message || error))));
+    }
+    // #2853: Proactive, read-only 5-minute Quality Agent check of at most
+    // four recent production plans and their platform output identities.
+    // Existing zero-output recovery runs independently below. This probe
+    // never creates media, writes a publishing hold, approves, schedules, or
+    // calls a provider; keep it staggered from the 5-minute heartbeat.
+    if (shouldRunQualityFactoryHandoffCron({
+      cron: collectorCron,minute:collectorMinute,
+      source: studioWriteSource(env),
+      configured: studioSupabaseConfigured(env),
+      disabled: env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED==="true",
+    })) {
+      ctx.waitUntil(runQualityFactoryHandoffCron({
+        read: path=>adminHoldSupabaseRest(env,path),
+        limit:4,
+        logger: receipt=>console.info("QA_FACTORY_HANDOFF_E2E_2846",
+          JSON.stringify(receipt)),
+      }).catch(error=>console.warn("QA_FACTORY_HANDOFF_E2E_UNAVAILABLE",
+        String(error?.message||error).slice(0,200))));
     }
     // #2618: Old R3 records can have a complete render package in the JSON bag
     // while R4's typed filename/frame selectors are null. Recover only exact
