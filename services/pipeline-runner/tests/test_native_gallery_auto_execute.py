@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,14 @@ class AutoDispatchTests(unittest.TestCase):
                      return_value="1VdULNl85JDoL_EaurRKMPm0tRi8xOawH")
         mock.start()
         self.addCleanup(mock.stop)
+        governor = patch("rendering_review.native_gallery_auto_execute.governor_enabled",
+                         return_value=True)
+        governor.start()
+        self.addCleanup(governor.stop)
+        slot = patch("rendering_review.native_gallery_auto_execute.resource_slot",
+                     side_effect=lambda *a, **kw: nullcontext())
+        self.slot = slot.start()
+        self.addCleanup(slot.stop)
 
     def test_disabled_does_not_claim(self):
         called = []
@@ -45,6 +54,7 @@ class AutoDispatchTests(unittest.TestCase):
                                       rights_factory=verified_rights)
         self.assertEqual(out["job_id"], "ngjob_abc")
         self.assertEqual(len(calls), 1)
+        self.slot.assert_called_once_with("native_gallery_c5c6", limit=1)
         self.assertEqual(calls[0]["staging_folder_id"], "1VdULNl85JDoL_EaurRKMPm0tRi8xOawH")
         self.assertTrue(callable(calls[0]["generator"]))
         self.assertFalse(out["publication_authorized"])
@@ -75,6 +85,21 @@ class AutoDispatchTests(unittest.TestCase):
                 dispatch.sweep_once({}, client=object(), drive=object(),
                     executor=lambda **_: called.append(True),
                     rights_factory=lambda _: (lambda **__: True))
+        self.assertEqual(called, [])
+
+    def test_enabled_without_governor_fails_before_provider_or_job(self):
+        flags = {"NATIVE_GALLERY_AUTO_EXECUTE_ENABLED": "true",
+                 "NATIVE_GALLERY_RUNNER_EXECUTE_ENABLED": "true",
+                 "NATIVE_GALLERY_RUNNER_CLAIM_ENABLED": "true",
+                 "NATIVE_GALLERY_RUNNER_LAUNCH_ENABLED": "true"}
+        called = []
+        with patch.dict(os.environ, flags, clear=True), patch(
+            "rendering_review.native_gallery_auto_execute.governor_enabled",
+            return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "workload_governor_required"):
+                dispatch.sweep_once({}, client=object(), drive=object(),
+                                    executor=lambda **_: called.append(True),
+                                    rights_factory=verified_rights)
         self.assertEqual(called, [])
 
 
