@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   FACTORY_HANDOFF_SCHEMA, FACTORY_HANDOFF_SIGNATURE, FACTORY_HANDOFF_RUNBOOK,
-  assessProductionFactoryHandoff, auditFactoryCardProjection,
+  assessProductionFactoryHandoff, auditFactoryCardProjection, scanRecentProductionFactoryHandoffs,
 } from "./quality-factory-handoff.mjs";
 
 const request=()=>({
@@ -187,4 +187,54 @@ test("Factory read-time audit catches only dropped/absent current review cards",
     {id:rows[1].id,publish_status:"Not Ready"},
   ]),[]);
   assert.deepEqual(auditFactoryCardProjection(rows.map(x=>({...x,do_not_publish:true})),[]),[]);
+});
+
+test("bounded Supabase Quality Agent scan catches partial output fanout in two reads",async()=>{
+  const uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",profile="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const pr={...request(),promoted_content_item_id:uuid,content_profile_id:profile};
+  const rows=source().slice(0,2).map(x=>({...x,content_item_id:uuid,content_profile_id:profile}));
+  const urls=[];
+  const scan=await scanRecentProductionFactoryHandoffs({
+    read:async path=>{
+      urls.push(path);
+      return path.startsWith("production_requests?")?[pr]:rows;
+    },
+  });
+  assert.equal(urls.length,2);
+  assert.ok(urls[0].includes("limit=4"));
+  assert.ok(urls[1].includes("content_item_id=in.("+uuid+")"));
+  assert.ok(urls[1].includes("&limit=193"));
+  assert.equal(scan.status,"ok");
+  assert.equal(scan.incomplete_count,1);
+  assert.equal(scan.findings.length,2);
+  assert.deepEqual(scan.findings.map(x=>x.platform),["TikTok","YouTube"]);
+  assert.equal(scan.reports[0].publishing_authorized,false);
+});
+
+test("Quality Agent scanner fails closed on truncated or unavailable canonical source",async()=>{
+  const uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const p={...request(),promoted_content_item_id:uuid};
+  await assert.rejects(scanRecentProductionFactoryHandoffs({
+    read:async path=>path.startsWith("production_requests?")?[p]:Array.from({length:193},()=>source()[0]),
+  }),/truncated/);
+  await assert.rejects(scanRecentProductionFactoryHandoffs({
+    read:async path=>path.startsWith("production_requests?")?[p]:null,
+  }),/unavailable/);
+  await assert.rejects(scanRecentProductionFactoryHandoffs({
+    read:async()=>null,
+  }),/unavailable/);
+});
+
+test("Quality Agent scan never invents gallery validation or authorizes approval when no deep read",async()=>{
+  const uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",profile="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const pr={...request(),promoted_content_item_id:uuid,content_profile_id:profile};
+  const rows=source().map(x=>({...x,content_item_id:uuid,content_profile_id:profile}));
+  const report=await scanRecentProductionFactoryHandoffs({
+    read:async path=>path.startsWith("production_requests?")?[pr]:rows,
+  });
+  assert.equal(report.incomplete_count,0);
+  assert.equal(report.verification_required_count,1);
+  assert.equal(report.reports[0].status,"verification_required");
+  assert.equal(report.reports[0].publishing_authorized,false);
+  assert.ok(report.note.includes("not treated as clear"));
 });
