@@ -10,7 +10,11 @@ import {
   supabaseRest, airtableShapedOutputFromSupabase,
 } from "./supabase-pipeline-reads.mjs";
 import { evaluateReviewPackage, formalFactoryApprovalReady, verifyReviewImages } from "./review-package-readiness.mjs";
-import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
+import {
+  assertSupabaseNativeGalleryPublicationPackage,
+  preflightNycOwnerGalleryApproval,
+  finalizeNycOwnerGalleryOnFactoryClick,
+} from "./native-gallery-package-guard.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
@@ -25,7 +29,7 @@ const FACTORY_APPROVAL_SELECT = [
   "content_item_id", "content_item_airtable_id", "content_profile_id",
   "platform", "format", "studio_output_type", "platform_output_type",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
-  "do_not_publish", "test_run_id", "output_caption", "thumbnail_url",
+  "do_not_publish", "publish_hold_released_at", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
@@ -148,7 +152,12 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
     }
     if (!state.already_satisfied) {
       try {
-        await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+        // Read-only technical gallery preflight for a new authenticated approval.
+        // The actual human decision is recorded only inside the claimed job.
+        const review = await preflightNycOwnerGalleryApproval(env, entry.row);
+        if (!review?.pending) {
+          await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+        }
       } catch (error) {
         // This exact media-package gate runs BEFORE any R2 approval claim.
         // Its deterministic rejection is not a transient 503: otherwise an
@@ -226,7 +235,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
-  approvedByUserRecordId = null,
+  approvedByUserRecordId = null, submittedAt = null,
   verifyImages = verifyReviewImages, onStage = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
@@ -242,9 +251,13 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
   }
-  // Selected clips and HTTP-probed covers alone never authorize a multi-image
-  // publish. The *exact linked* Supabase slide package must be finalized first.
-  await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+  // Selected clips and covers never authorize publishing. For the exact
+  // owner-released NYC pair only, distinguish verified gallery structure from
+  // the final decision made by this NEW authenticated human Approve click.
+  const pendingHumanReview = await preflightNycOwnerGalleryApproval(env, entry.row);
+  if (!pendingHumanReview?.pending) {
+    await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+  }
   const verified = await verifyImages(state.readiness);
   if (verified?.readiness !== "READY") {
     throw Error("Cannot approve: public review media could not be verified");
@@ -252,6 +265,13 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   // Slot must be proven BEFORE the single status+schedule CAS; otherwise the
   // Factory historically committed Approved with no future plan and no auto.
   const scheduled = await factorySupabaseNextApprovedSlot(env, entry);
+  if (pendingHumanReview?.pending) {
+    // Finalization itself re-runs the UNCHANGED persisted-slide publication
+    // gate. No extra photo inventory read for unrelated Factory approvals.
+    await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
+      requestId, approvedByUserRecordId, submittedAt,
+    });
+  }
   const stamp = new Date().toISOString();
   const row = entry.row;
   if (!row.updated_at || !UUID.test(row.id)) {

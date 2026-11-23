@@ -93,3 +93,151 @@ export async function assertSupabaseNativeGalleryPublicationPackage(env, output)
   }
   return state;
 }
+
+
+/**
+ * #2371 — two corrected NYC gallery outputs already have byte-verified owned
+ * 4:5 media, but their original AI creative inspection was intentionally NOT
+ * final Factory approval. This narrow bridge records a NEW authenticated
+ * Factory approval of the exact gallery slides when the owner clicks Approve.
+ * It never uses old approval receipts, release-only instructions, or AI QA as
+ * an approver. Publication remains controlled by the existing output CAS,
+ * MAE, and provider gates. Other galleries retain their independent gate.
+ */
+const NYC_FACTORY_FINAL_REVIEW = new Map([
+  ["recO494MDnQ1Tk51b", { number: 10855, platform: "Instagram", type: "Instagram Carousel" }],
+  ["recWIWOrdflmqyxKW", { number: 10856, platform: "Facebook", type: "Facebook Photo Set" }],
+]);
+const USER_RECORD = /^rec[A-Za-z0-9]{14}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
+const SHA256 = /^[a-f0-9]{64}$/;
+
+export function nycOwnerGalleryApprovalEligible(output) {
+  const exact = NYC_FACTORY_FINAL_REVIEW.get(String(output?.airtable_record_id || ""));
+  if (!exact) return false;
+  const bag = output.error_messages || {};
+  const qa = bag.SM_NYC_AI_Creative_QA_20261122 || {};
+  return output.output_number === exact.number
+    && output.platform === exact.platform
+    && output.platform_output_type === exact.type
+    && output.output_status === "Ready for Review"
+    && output.review_status === "Review Sent"
+    && output.publish_status === "Not Ready"
+    && output.render_status === "Native Photo Route"
+    && output.do_not_publish === false
+    && output.auto_publish_enabled === false
+    && !output.test_run_id
+    && !output.scheduled_post_date
+    && !output.studio_scheduled_at
+    && !output.published_at
+    && !output.platform_post_url
+    && !output.platform_publish_response
+    && !bag.Platform_Post_ID && !bag.Platform_Media_ID
+    && !bag.IG_Carousel_Parent_Container_ID
+    && !bag.Studio_Publish_Dispatch_Count
+    && !bag.Publish_Attempt_Count
+    && qa.subject_verified === true
+    && qa.caption_and_hashtag_review === "pass"
+    && qa.factory_final_approval === false
+    && qa.publishing_authorized === false
+    && bag.SM_2618_Creative_QA_Hold?.publishing_permitted !== false;
+}
+
+async function readNycOwnerGallerySlides(env, output) {
+  const rows = await supabaseRest(env,
+    "carousel_slides?deleted_from_carousel=eq.false"
+    + "&fields->PO_Output_ID=cs." + encodeURIComponent(JSON.stringify([output.output_number]))
+    + "&select=id,airtable_record_id,current_order,deleted_from_carousel,fields,updated_at"
+    + "&order=current_order.asc,airtable_record_id.asc&limit=12");
+  if (!Array.isArray(rows)) throw Error("Native gallery final review: slide read unavailable");
+  return rows;
+}
+
+export async function preflightNycOwnerGalleryApproval(env, output) {
+  if (!nycOwnerGalleryApprovalEligible(output)) return null;
+  const slides = await readNycOwnerGallerySlides(env, output);
+  const asIfFinal = slides.map(slide => ({
+    ...slide,
+    fields: { ...slide.fields, Shared_Asset_Approved: true, "Approved For Final": true },
+  }));
+  // Verify ALL independent exact link, order, 4:5 CDN, selected/render
+  // manifest, source lineage and READY guards without declaring human approval.
+  const technical = inspectNativeGalleryPublicationPackage(output, asIfFinal);
+  if (!technical.eligible || technical.slide_count !== 4) {
+    throw Error("Native gallery preapproval blocked: " + technical.reason);
+  }
+  for (const slide of slides) {
+    const f = slide.fields || {};
+    const qa = f.SM_NYC_AI_Creative_QA_20261122 || {};
+    if (!UUID.test(String(slide.id || "")) || !slide.updated_at
+        || !USER_RECORD.test(String(slide.airtable_record_id || ""))
+        || qa.brand_verified !== true || qa.source_owner_rights_verified !== true
+        || qa.publishing_authorized !== false
+        || !SHA256.test(String(qa.verified_branded_sha256 || ""))
+        || (f.Shared_Asset_Approved === true) !== (f["Approved For Final"] === true)
+        || (![ "Review Sent", "Final Approved" ].includes(String(f["Review Status"] || "")))
+        || (f["Review Status"] === "Final Approved" && f["Approved For Final"] !== true)) {
+      throw Error("Native gallery preapproval blocked: independent slide evidence/decision invalid");
+    }
+  }
+  return { slides, pending: slides.filter(slide => slide.fields["Approved For Final"] !== true).length };
+}
+
+/**
+ * Only called by an authenticated NEW Factory Approve operation that carries
+ * its real submitter ID. No background worker or historic receipt can mark
+ * slides final. Partial same-output CAS writes are safe to retry: the parent
+ * stays RFR and the unmodified publication gate still requires 4/4.
+ */
+export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
+  requestId, approvedByUserRecordId, submittedAt,
+} = {}) {
+  const proof = await preflightNycOwnerGalleryApproval(env, output);
+  if (!proof || !proof.pending) return proof;
+  // A historic Failed/accepted batch must never silently consent to NEW
+  // corrected slides. Require the Factory request itself to postdate the
+  // explicit owner hold release recorded on the canonical output.
+  if (!USER_RECORD.test(String(approvedByUserRecordId || ""))
+      || !/^[A-Za-z0-9_-]{8,128}$/.test(String(requestId || ""))
+      || !Number.isFinite(Date.parse(String(submittedAt || "")))
+      || !Number.isFinite(Date.parse(String(output.publish_hold_released_at || "")))
+      || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)) {
+    throw Error("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
+  }
+  const now = new Date().toISOString();
+  for (const slide of proof.slides) {
+    const f = slide.fields;
+    if (f["Approved For Final"] === true && f.Shared_Asset_Approved === true) continue;
+    const approvedFields = {
+      ...f,
+      "Approved For Final": true,
+      Shared_Asset_Approved: true,
+      "Review Status": "Final Approved",
+      SM_Factory_NYC_Final_Slide_Approval_2371: {
+        at: now,
+        actor_record_id: approvedByUserRecordId,
+        actor_provenance: "new_authenticated_factory_approve_click",
+        request_id: requestId,
+        output_number: output.output_number,
+        slide_order: slide.current_order,
+        exact_final_image_url: f["Final Image URL"],
+        source_sha256: f.SM_NYC_AI_Creative_QA_20261122.verified_branded_sha256,
+        provider_writes: 0,
+      },
+    };
+    const selector = "carousel_slides?id=eq." + encodeURIComponent(slide.id)
+      + "&airtable_record_id=eq." + encodeURIComponent(slide.airtable_record_id)
+      + "&updated_at=eq." + encodeURIComponent(slide.updated_at)
+      + "&deleted_from_carousel=eq.false";
+    const patched = await supabaseRest(env, selector, {
+      method: "PATCH",
+      body: { fields: approvedFields, updated_at: now },
+      headers: { Prefer: "return=representation" },
+    });
+    if (!Array.isArray(patched) || patched.length !== 1) {
+      throw Error("Native gallery slide changed during authenticated final approval; output remains unapproved");
+    }
+  }
+  // The ORIGINAL publisher guard verifies fresh persisted final decisions.
+  return assertSupabaseNativeGalleryPublicationPackage(env, output);
+}
