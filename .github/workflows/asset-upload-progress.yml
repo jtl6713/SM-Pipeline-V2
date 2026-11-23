@@ -23,4 +23,4 @@ jobs:
       - run: |
           node --check apps/studio-web/assets/app-item4-1008.js
           node --check apps/studio-web/assets/profile-upload-preflight.js
-          node --test apps/studio-web/asset-upload-progress.test.mjs apps/studio-web/library-cards.test.mjs apps/studio-web/library-picker-previews.test.mjs apps/studio-web/profile-upload-preflight.test.mjs
+          node --test apps/studio-web/asset-upload-progress.test.mjs apps/studio-web/item4-photo-readiness-2873.test.mjs apps/studio-web/library-cards.test.mjs apps/studio-web/library-picker-previews.test.mjs apps/studio-web/profile-upload-preflight.test.mjs
