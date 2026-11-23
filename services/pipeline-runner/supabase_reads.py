@@ -45,6 +45,7 @@ _REVIEW_TABLES = {
     "tblUkZB6SMtf9Ib6I": "rendering_review_jobs",
     "tbl7wPOAE26o2coMU": "rendering_review_attempts",
     "tblalFXUJyYg5PBrz": "rendering_review_plans",
+    "tbl5sq9xBrF6bgPph": "native_gallery_jobs",
 }
 
 # An empty Supabase list for these tables is the answer. Output and Content
