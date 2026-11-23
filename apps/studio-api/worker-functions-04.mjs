@@ -9641,7 +9641,9 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
     backend: "python",
     photo_listening_started: photoListening.filter((row) => row.action !== "error").length,
     photo_matches_ready: photoListening.filter((row) => row.action === "ready").length,
-    message: `${created} idea${created === 1 ? "" : "s"} created. Ideas are listening for photos automatically.`,
+    message: sourcingMode === "explore"
+      ? `${created} idea${created === 1 ? "" : "s"} created for new-media capture. Review and approve them before automatic production.`
+      : `${created} idea${created === 1 ? "" : "s"} created. Ideas are listening for photos automatically.`,
   }, 200);
 }
 /*__STUDIO_WORKER_END:startStudioIdeaGeneration__*/
