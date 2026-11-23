@@ -9,6 +9,11 @@ def test_worker_claim_uses_canonical_runner_and_synthetic_id():
     assert 'g.acquire("native_gallery", identity' in PS
     assert 'result.reason!="database_capacity"' in PS
     assert "DENIED_ROOT_CAP" in WF
+    assert "print(2670)" in PS
+    assert "WriteAllText($tempScript" in PS
+    assert "Remove-Item -LiteralPath $tempScript -Force" in PS
+    assert "$pythonExe $tempScript" in PS
+    assert len(PS) < 8000
 def test_safety_and_no_service_role_export():
     assert "SUPABASE_SERVICE_ROLE_KEY" in PS
     assert "SUPABASE_SERVICE_ROLE_KEY: ${{" not in WF
