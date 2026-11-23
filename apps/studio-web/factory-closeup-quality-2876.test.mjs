@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-const { frameReport, normalizedRatio } = require("./assets/factory-closeup-quality.js");
+import "./assets/factory-closeup-quality.js";
+const { frameReport, normalizedRatio } = globalThis.StudioFactoryCloseupQuality;
 
 test("vertical AI still retains adequate real pixels after center crop", () => {
   const result = frameReport({ width: 1024, height: 1536, ratio: "9:16" });
