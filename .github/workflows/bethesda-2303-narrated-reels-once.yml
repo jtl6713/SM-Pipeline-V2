@@ -1,4 +1,4 @@
-name: Bethesda 2303 narrated Reel-only one-shot repair
+name: Bethesda 2303 narrated Reel-only one-shot normal mode
 on:
   pull_request:
     paths:
@@ -48,13 +48,13 @@ jobs:
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - name: Verify recovery publishing fence
+      - name: Verify actual normal-production safety baseline and live Supabase authority
         shell: bash
         run: |
           set -euo pipefail
           curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/bethesda-health.json
-          jq -e '.ok==true and .recovery_read_only==true and .recovery_producer_only_enabled==true and .recovery_producer_scope=="all_governed_requests" and .workload_governor_enabled==true and .studio_write_source=="supabase" and .i1_durable_jobs==false and .airtable_activity.any_activity==false' /tmp/bethesda-health.json >/dev/null
-          echo 'bethesda_global_publishing_fence=PASS'
+          jq -e '.ok==true and .recovery_read_only==false and .recovery_producer_only_enabled==false and .recovery_producer_scope=="disabled" and .workload_governor_enabled==true and .studio_write_source=="supabase" and .i1_durable_jobs==true and .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/bethesda-health.json >/dev/null
+          echo 'bethesda_normal_production_safety=PASS exact_output_DNP_required_on_windows=true'
       - name: Submit guarded original-Reels-only operation to Windows Ops
         shell: bash
         run: |
