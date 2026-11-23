@@ -112,6 +112,7 @@ import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
 import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
 import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
+import { factoryBoundedActiveDiscovery } from "./factory-approval-active-discovery.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
@@ -18940,6 +18941,40 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     const factoryProfile = String(url.searchParams.get("factory_profile") || "").trim();
     if (factoryProfile && !/^rec[A-Za-z0-9]+$/.test(factoryProfile)) {
       throw new HttpError(400, "Invalid Factory profile filter");
+    }
+    // #1013: explicit cursor-mode active discovery never walks 5,000 historical
+    // R2 ledgers in one browser request. Every returned row is still verified
+    // against its canonical record. Incomplete sweeps remain visibly partial.
+    if (view === "active" && url.searchParams.get("bounded_discovery") === "1") {
+      const bounded = await factoryBoundedActiveDiscovery(env.STUDIO_MEDIA, {
+        profileId: factoryProfile,
+        childCursor: url.searchParams.get("child_cursor") || "",
+        groupCursor: url.searchParams.get("group_cursor") || "",
+        childDone: url.searchParams.get("child_done") === "1",
+        groupDone: url.searchParams.get("group_done") === "1",
+      });
+      const batches = bounded.batches;
+      const qualitySignals = batches.flatMap(row => row.quality_signals || []);
+      const count = key => batches.reduce((n, row) => n + Number(row?.[key] || 0), 0);
+      return respond(request, env, {
+        ...(batches[0] || factoryBatchSummary(null)),
+        scope: "all", view: "active", offset: 0, page_limit: 40,
+        filter_profile_id: factoryProfile || null,
+        batches, totals: {
+          batches: batches.length, active: batches.length,
+          approved: count("approved_count"), pending: count("pending_count"),
+          failed: count("failed_count"),
+          failed_batches: batches.filter(row => Number(row.failed_count || 0) > 0).length,
+          findings: qualitySignals.length,
+        },
+        quality_signals: qualitySignals,
+        has_more: !bounded.discovery.complete,
+        history_complete: bounded.discovery.complete,
+        history_scanned: bounded.discovery.child_scanned + bounded.discovery.group_scanned,
+        discovery: bounded.discovery,
+        approvals_enabled: factoryBatchRolloutPolicy(env).enabled || factoryGlobalPolicy(env).enabled,
+        rollout: factoryBatchRolloutPolicy(env), global_rollout: factoryGlobalPolicy(env),
+      });
     }
     // Request a bounded candidate window from each storage family before merging
     // by timestamp. Do not load either family's terminal rows for the default view.

@@ -83,11 +83,19 @@ const srv=createServer(async(req,res)=>{
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
    const isGlobal=url.searchParams.get("scope")==="all";
    const queryProfile=isGlobal ? url.searchParams.get("factory_profile") :
-     url.searchParams.get("profile")||url.searchParams.get("profile_id");
+     url.searchParams.get("content_profile_id") ||
+     url.searchParams.get("profile") || url.searchParams.get("profile_id");
    const scopedBatch=(isGlobal ? (!queryProfile || queryProfile===profileId) : queryProfile===profileId) ? batch:null;
    const current=scopedBatch||{ok:true,batch:true,status:"idle",job_id:null,items:[]};
    const signals=scopedBatch?(syntheticQualitySignals??batchSignals(scopedBatch)):[];
+   const bounded=isGlobal && url.searchParams.get("bounded_discovery")==="1";
+   // The shipping client now requires the read-only R2 bounded cursor
+   // contract. Keep the fake server's fully-scanned single-page fixture truthful.
    send(res,{...current,scope:isGlobal?"all":undefined,
+     view:bounded?"active":undefined,
+     filter_profile_id:bounded?(queryProfile||null):undefined,
+     discovery:bounded?{mode:"bounded-r2-cursor",complete:true,
+       child_cursor:null,group_cursor:null,child_scanned:scopedBatch?1:0,group_scanned:0}:undefined,
      batches:isGlobal&&scopedBatch?[{...current,quality_signals:signals}]:[],
      totals:isGlobal?{batches:scopedBatch?1:0,active:scopedBatch&&["queued","running"].includes(scopedBatch.status)?1:0,
        approved:scopedBatch?.approved_count||0,failed:scopedBatch?.failed_count||0,findings:signals.length}:undefined,

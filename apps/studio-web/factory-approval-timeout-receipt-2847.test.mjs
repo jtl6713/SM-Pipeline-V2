@@ -75,3 +75,19 @@ test("conclusively absent saved request is not a failed Activity GET or fabricat
   assert.match(script, /Saved submission not accepted; global activity discovery is still unverified/);
   assert.match(script, /No accepted batch found for saved request IDs/);
 });
+
+test("Factory global discovery uses bounded read-only R2 cursors, never historical scan in foreground", () => {
+  assert.match(script, /scanParams\.set\("bounded_discovery", "1"\)/);
+  assert.match(script, /scanParams\.set\("child_cursor", state\.batchDiscoveryChildCursor\)/);
+  assert.match(script, /scanParams\.set\("group_cursor", state\.batchDiscoveryGroupCursor\)/);
+  assert.match(script, /value\.discovery\?\.mode !== "bounded-r2-cursor"/);
+  assert.match(script, /activity_confidence = value\.discovery\.complete \? "verified" : "bounded-partial"/);
+  assert.match(script, /Scanning Factory history in safe pages\. No all-clear until the sweep completes/);
+});
+
+test("bounded Factory discovery carries completed child/group history flags independently", () => {
+  assert.match(script, /scanParams\.set\("child_done", "1"\)/);
+  assert.match(script, /scanParams\.set\("group_done", "1"\)/);
+  assert.match(script, /state\.batchDiscoveryChildDone = value\.discovery\.child_done === true/);
+  assert.match(script, /state\.batchDiscoveryGroupDone = value\.discovery\.group_done === true/);
+});
