@@ -2125,6 +2125,46 @@
     }
   }
 
+  // The first exact status read is independent of an already-running slow
+  // global history scan. A 12-second R2 discovery must not delay the first
+  // server-confirmed progress after Submit. GET-only; no approval mutation.
+  async function refreshFactoryAcceptedReceipt(accepted) {
+    if (!accepted?.job_id || !accepted?.request_id) return null;
+    const profileAtStart = factoryProfileId();
+    const params = new URLSearchParams({
+      request_id: String(accepted.request_id), fresh: String(Date.now()),
+    });
+    if (accepted.group === true) params.set("scope", "all");
+    else if (/^rec[A-Za-z0-9]+$/.test(String(accepted.profile_id || ""))) {
+      params.set("content_profile_id", accepted.profile_id);
+    } else return null;
+    try {
+      const value = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, {
+        cache: "no-store", timeoutMs: 12000,
+      });
+      const row = accepted.group
+        ? (value?.ok === true && value.batches?.length === 1 ? value.batches[0] : null)
+        : value;
+      if (row?.job_id !== accepted.job_id || row?.request_id !== accepted.request_id ||
+          (!accepted.group && row?.profile_id !== accepted.profile_id)) {
+        throw new Error("Original Factory receipt is not yet available");
+      }
+      if (factoryProfileId() !== profileAtStart) return null;
+      const progress = factoryBatchMergeExactActivity(state.batch, [row]);
+      state.lastBatchSuccessMs = Date.now();
+      state.lastBatchFetchMs = Date.now();
+      state.batchActivityError = "";
+      renderFactoryBatchActivity(progress);
+      document.dispatchEvent(new CustomEvent("factory:batch-status", {detail: progress}));
+      return progress;
+    } catch (error) {
+      // Continue ordinary polling. This does not mean the submission failed.
+      state.batchActivityPartialError = "First exact receipt delayed; auto-refreshing";
+      updateFactoryBatchFreshness();
+      return null;
+    }
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading) {
       if (force) state.batchRefreshRequested = true;
@@ -2392,6 +2432,7 @@
         rememberFactoryGroupRequest(batch);
         state.inspectedBatchKey = batch.job_id;
         renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
+        refreshFactoryAcceptedReceipt(batch).catch(() => {});
         refreshFactoryBatchActivity(true).catch(() => {});
         setStatus(batch.duplicate_prevented
           ? `These outputs were already submitted. Original batch restored; no duplicate created. ${acceptedOutputs} of ${ready.length} reconciled.`
@@ -2546,6 +2587,7 @@
       closeFactoryPreview();
       state.inspectedBatchKey = batch.job_id;
       renderFactoryBatchActivity(factoryBatchMergeAcceptedActivity(state.batch, batch));
+      refreshFactoryAcceptedReceipt(batch).catch(() => {});
       refreshFactoryBatchActivity(true).catch(() => {});
       setStatus(`Batch accepted for ${ready.length} outputs. Server processing continues after leaving Factory.`);
       // Never wait for all approvals in the click handler.
