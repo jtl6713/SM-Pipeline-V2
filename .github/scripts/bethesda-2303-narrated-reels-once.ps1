@@ -21,7 +21,10 @@ function One([string]$path){
 }
 function Health(){
   $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 25
-  if(!$h.ok -or !$h.recovery_read_only -or !$h.recovery_producer_only_enabled -or $h.recovery_producer_scope -ne 'all_governed_requests' -or !$h.workload_governor_enabled -or $h.i1_durable_jobs -or $h.airtable_activity.any_activity -or $h.studio_write_source -ne 'supabase'){throw 'publisher_recovery_fence_changed'}
+  # Public read-only proof #45097420535: normal production intentionally restored:
+  # recovery_read_only=false, producer_only=false, i1_durable_jobs=true.
+  # NEVER reactivate recovery flags or waive exact output DNP/MAE protections.
+  if(!$h.ok -or $h.recovery_read_only -or $h.recovery_producer_only_enabled -or $h.recovery_producer_scope -ne 'disabled' -or !$h.workload_governor_enabled -or !$h.i1_durable_jobs -or $h.airtable_activity.any_activity -or $h.studio_write_source -ne 'supabase'){throw 'normal_production_fence_changed_no_mutation'}
 }
 function Idle(){
   $g=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $runnerHeaders -TimeoutSec 25
