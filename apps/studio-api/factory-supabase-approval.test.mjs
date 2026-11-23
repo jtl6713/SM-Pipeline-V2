@@ -318,3 +318,21 @@ test("issue #2294: Factory preflight and final approval both reject missing 8-im
   );
   assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
 });
+
+test("#2618: unresolved media QA blocks exact Supabase Factory approval even without Do_Not_Publish", async t => {
+  const row = output(IDS[0], 8946);
+  row.do_not_publish = false;
+  row.error_messages = { SM_2618_Creative_QA_Hold: {
+    state: "unresolved_requires_creative_correction", publishing_permitted: false
+  }};
+  const mock = mockSupabase(t, [row]);
+  const entries = await factorySupabaseApprovalRows(env, [IDS[0]]);
+  const disposition = factorySupabaseApprovalDisposition(entries.get(IDS[0]), policy);
+  assert.equal(disposition.eligible, false);
+  assert.match(disposition.reason, /unresolved creative QA media correction/);
+  await assert.rejects(factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "blocked-by-creative-review",
+    verifyImages: async readiness => readiness,
+  }), /unresolved creative QA media correction/);
+  assert.equal(mock.calls.filter(call => call.method === "PATCH").length, 0);
+});
