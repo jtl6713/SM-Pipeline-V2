@@ -122,6 +122,19 @@ jobs:
                 tail -1 || true)
               echo "incident2670_ops_readonly_probe=FAILED_NO_MUTATION"
               echo "incident2670_readonly_failure_phase=${phase:-unclassified}"
+              # Only fixed classification labels from stderr; remote logs contain
+              # script source and must never be printed in full.
+              reason=$(jq -r '.job.log // ""' /tmp/status.json |
+                grep -oE 'ParserError|CommandNotFoundException|runner_env_missing|runner_secret_unavailable|runner_secret_invalid|consumer_or_governor_readback_invalid|outbox_config_ambiguous|optional_outbox_must_remain_disabled|Cannot find path|Unable to connect to the remote server|Unexpected token|Missing closing' |
+                tail -1 || true)
+              case "$reason" in
+                ParserError|CommandNotFoundException|runner_env_missing|runner_secret_unavailable|runner_secret_invalid|consumer_or_governor_readback_invalid|outbox_config_ambiguous|optional_outbox_must_remain_disabled)
+                  echo "incident2670_remote_failure_category=$reason" ;;
+                "Cannot find path") echo 'incident2670_remote_failure_category=PATH_UNAVAILABLE' ;;
+                "Unable to connect to the remote server") echo 'incident2670_remote_failure_category=LOOPBACK_CONNECTIVITY' ;;
+                "Unexpected token"|"Missing closing") echo 'incident2670_remote_failure_category=POWERSHELL_SYNTAX' ;;
+                *) echo 'incident2670_remote_failure_category=UNKNOWN' ;;
+              esac
               exit 1
             fi
             sleep 3
