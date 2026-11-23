@@ -134,6 +134,19 @@ export const QUALITY_CHECKS = Object.freeze([
     actor: "worker_heal",
     heal: "recover_schedule_lock",
   }),
+  check({
+    id: "production_factory_handoff",
+    signature: "QA-PRODUCTION-FACTORY-E2E-2846",
+    title: "Audit each production plan through exact platform output fanout, format/media repair, safety holds, Factory visibility and human approval",
+    lane: "both",
+    kind: "production_factory_handoff",
+    actor: "desk_agent",
+    // This classifier NEVER grants a publishing or image-approval permission.
+    // Known fenced one-minute zero-output recovery is already a separate
+    // worker. New partial-fanout/slide/hold writers need explicit proof.
+    heal: "ticket_only",
+    terminal_by_origin: { autonomous: "Ready for Review", other: "Ready for Review" },
+  }),
   check({ id: "factory_batch_stalled", title: "Detect Factory approval batches stalled beyond recovery heartbeat", lane: "service",
     kind: "factory_batch_stalled", actor: "worker_heal", heal: "resume_factory_batch" }),
   check({ id: "factory_batch_state_mismatch", title: "Reconcile Factory batch status that disagrees with durable item states", lane: "service",

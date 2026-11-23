@@ -291,14 +291,43 @@
           '</details>'
           : '<p>No past-due approvals beyond the reconciliation grace window.</p>')
       : '<p class="factory-batch-quality-unavailable">Past-due Quality Agent scan unavailable. Count unknown; do not treat this as zero.</p>';
+    // Quality Agent's independently bounded Production -> Factory signature.
+    // Show its uncertainty explicitly: an unverified gallery is NOT a pass.
+    const handoff = data.production_to_factory;
+    const handoffKnown = handoff?.status === "ok" && Array.isArray(handoff.reports);
+    const handoffCount = handoffKnown ? Number(handoff.incomplete_count || 0) : null;
+    const handoffVerify = handoffKnown ? Number(handoff.verification_required_count || 0) : null;
+    const handoffFindings = handoffKnown ? (handoff.findings || []).slice(0,12) : [];
+    const handoffMarkup = !factoryView ? "" : handoffKnown
+      ? '<details class="factory-quality-handoff"><summary class="factory-batch-quality-heading">' +
+          'QA-PRODUCTION-FACTORY-E2E-2846 · Production → Factory · ' +
+          esc(handoffCount) + ' repair required · ' + esc(handoffVerify) +
+          ' deep verification required (' + esc(handoff.scanned) + ' recent plans sampled)</summary>' +
+          '<p>Checks exact planned outputs, failed production, missing media, holds and Factory readiness. ' +
+          'A compact scan cannot certify native slides or browser visibility. ' +
+          'All validated work stops at human Factory approval; no automatic publishing.</p>' +
+          (handoffFindings.length ? '<ul class="factory-batch-quality-list">' +
+            handoffFindings.map(item =>
+              '<li class="factory-batch-quality-item">' +
+                '<strong>Content ' + esc(item.content_item_id || "unlinked") +
+                (item.output_id == null ? '' : ' · Output ' + esc(item.output_id)) + '</strong>' +
+                ' · ' + esc(item.stage || "unknown") + ' · ' + esc(item.reason || "Unknown") +
+                '<p class="factory-batch-quality-action">' + esc(item.action || "Inspect exact output") + '</p>' +
+              '</li>').join('') + '</ul>' :
+            '<p>No defects were identified in the bounded stage scan; ' +
+            (handoffVerify ? 'deep media/Factory verification is still required.' :
+              'the current sample has no outstanding repair finding.') + '</p>') +
+        '</details>'
+      : '<p class="factory-batch-quality-unavailable">QA-PRODUCTION-FACTORY-E2E-2846: ' +
+          'Production → Factory status unavailable; do not treat this as a clean result.</p>';
     if (!data.job_id) {
       if (data?.batch_monitor_status === "unavailable") {
-        return failureMarkup + overdueMarkup +
+        return failureMarkup + overdueMarkup + handoffMarkup +
           '<p class="factory-batch-quality-unavailable">Factory batch activity monitor is unavailable. Batch counts and findings are unknown; Supabase output and past-due findings above are independently reported.</p>';
       }
       return data?.quality_status === "partial"
-        ? failureMarkup + overdueMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
-        : failureMarkup + overdueMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
+        ? failureMarkup + overdueMarkup + handoffMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
+        : failureMarkup + overdueMarkup + handoffMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
     }
     const global = data.scope === "all";
     const partialNotice = data?.quality_status === "partial"
@@ -326,7 +355,7 @@
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `${failureMarkup}${overdueMarkup}${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
+    return `${failureMarkup}${overdueMarkup}${handoffMarkup}${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
@@ -337,9 +366,12 @@
     state.lastView = { profileId, data, error, global };
     if (data?.output_failures?.status === "ok") state.failures = data.output_failures.items || [];
     const metric = $("factoryBatchQualityMetric");
-    if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok" || data?.approved_past_due?.status !== "ok"
+    if (metric) metric.textContent = error || data?.quality_status !== "ok"
+      || data?.output_failures?.status !== "ok" || data?.approved_past_due?.status !== "ok"
+      || (global && data?.production_to_factory?.status !== "ok")
       ? "!" : String((data?.quality_signals?.length || 0) +
-        (data?.output_failures?.count || 0) + (data?.approved_past_due?.count || 0));
+        (data?.output_failures?.count || 0) + (data?.approved_past_due?.count || 0)
+        + (global ? (data?.production_to_factory?.incomplete_count || 0) : 0));
     const html = panelMarkup({ profileId, data, error, factoryView: global });
     for (const id of panelIds) {
       const node = $(id);

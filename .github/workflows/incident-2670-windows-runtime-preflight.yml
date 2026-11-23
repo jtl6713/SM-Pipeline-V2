@@ -1,0 +1,75 @@
+name: Incident 2670 Windows Coordinator Runtime Preflight
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-windows-runtime-preflight.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-windows-runtime-preflight
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse read-only Windows preflight PowerShell
+        shell: pwsh
+        run: |
+          $t=$null;$e=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-windows-runtime-preflight.ps1'),
+            [ref]$t,[ref]$e)
+          if($e.Count -ne 0){throw 'incident2670_preflight_parser_failed'}
+          Write-Output 'incident2670_preflight_parser=PASS'
+      - name: Verify protected runner canonical authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/incident2670-preflight-health.json
+          jq -e '.ok==true and .studio_write_source=="supabase" and .airtable_activity.any_activity==false' /tmp/incident2670-preflight-health.json >/dev/null
+          echo 'incident2670_preflight_health=PASS'
+      - name: Execute Windows runtime inspection, with no DB or provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/incident2670-preflight-catalog.json
+          jq -e '.ok==true' /tmp/incident2670-preflight-catalog.json >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          command=Path('.github/scripts/incident-2670-windows-runtime-preflight.ps1').read_text()
+          if not 500 < len(command) < 8000: raise SystemExit('preflight_script_size_invalid')
+          Path('/tmp/incident2670-preflight-body.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/incident2670-preflight-start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/incident2670-preflight-body.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]] || { echo "incident2670_preflight_ops_http=$code"; exit 1; }
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/incident2670-preflight-start.json)
+          test -n "$id"
+          for i in $(seq 1 55); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "$BASE/api/jobs/$id" -o /tmp/incident2670-preflight-status.json
+            state=$(jq -r '.job.status // empty' /tmp/incident2670-preflight-status.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/incident2670-preflight-status.json |
+                grep -E '^incident2670_preflight_(root|module|env|url|authority|python|hello|requests|import|interface|python_run|result)=(PRESENT|MISSING|UNREADABLE|EXPECTED|INVALID|FOUND|AVAILABLE|UNAVAILABLE|PASS|FAIL|FAILED|READY_FOR_SYNTHETIC_TEST|INCOMPLETE_NO_CHANGES)$' || true
+              if [[ "$state" == ok ]] && jq -r '.job.log // ""' /tmp/incident2670-preflight-status.json |
+                  grep -x 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST' >/dev/null; then
+                echo 'incident2670_preflight_acceptance=PASS'
+                exit 0
+              fi
+              echo 'incident2670_preflight_acceptance=BLOCKED_NO_CHANGES'
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'incident2670_preflight_acceptance=TIMEOUT_NO_CHANGES'
+          exit 1
