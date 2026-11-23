@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -118,6 +117,8 @@ def _comparable_workload(before: dict, after: dict) -> tuple[bool, str]:
 def compare_windows(before: dict, after: dict) -> dict:
     baseline = summarize_window(before)
     current = summarize_window(after)
+    if baseline["requests"] == 0:
+        raise ValueError("baseline has zero observed requests; cannot compute a reduction")
     observed_drop = round(
         100 * (1 - current["requests_per_five_minutes"]
                / baseline["requests_per_five_minutes"]), 1
