@@ -9,3 +9,5 @@ If all Python candidates fail, classify registry PythonCore, LocalAppData/known 
 2026-11-23: rerun after repairing truncated CIM/launcher diagnostic source, gated by new credential-free PowerShell parser PR check; no claims or producer mutation.
 
 Guarded Ops endpoint enforces SHELL_MAX_CHARS=8000. Read-only interpreter discovery shortened under limit; new pre-merge size check. No claims or provider work.
+
+One-shot retry after Windows registry proved installed Python but commands containing double-quoted Python literals failed. Numeric no-quote Python -c receipts isolate PowerShell 5.1 native-argument escaping. No network RPC/provider call or coordinator activation.
