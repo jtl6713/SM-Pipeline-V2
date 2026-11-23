@@ -5,3 +5,5 @@ Follow-up after actual host preflight: files, config and python command present,
 Second follow-up: `python` command was present but even a trivial hello failed. Probe locally installed venv, running Python process, py launcher, then PATH; only execute verified candidate and never emit executable paths or environment values. No RPC or lease in this diagnostic.
 
 If all Python candidates fail, classify registry PythonCore, LocalAppData/known installation, CIM process executable, launcher and PATH's WindowsApps alias without exposing local paths. No RPC or job mutations.
+
+2026-11-23: rerun after repairing truncated CIM/launcher diagnostic source, gated by new credential-free PowerShell parser PR check; no claims or producer mutation.

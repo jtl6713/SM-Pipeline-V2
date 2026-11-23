@@ -124,65 +124,8 @@ if(-not $script:SelectedPython){
     foreach($item in $cim){
       if($script:SelectedPython){break}
       $candidate=[string]$item.ExecutablePath
-      if($candidate -and $candidate -notmatch '(?i)\\WindowsApps\\' -and
-         $candidate -match '(?i)\\python\.exe
-  if($launcher){Probe-Python 'py' @('-3') 'LAUNCHER'}
-}
-if(-not $script:SelectedPython){
-  $pathPython=Get-Command python -ErrorAction SilentlyContinue
-  if($pathPython){Probe-Python 'python' @() 'PATH'}
-}
-if(-not $script:SelectedPython){
-  Write-Output 'incident2670_preflight_python=UNUSABLE'
-  Write-Output 'incident2670_preflight_hello=FAILED'
-  $ready=$false
-}else{
-  Write-Output 'incident2670_preflight_python=FOUND'
-  Write-Output ('incident2670_preflight_python_source='+$script:SelectedPython.kind)
-  Write-Output 'incident2670_preflight_hello=PASS'
-  $code=@'
-try:
-    import requests
-    print("incident2670_preflight_requests=AVAILABLE", flush=True)
-except Exception:
-    print("incident2670_preflight_requests=UNAVAILABLE", flush=True)
-    raise SystemExit(42)
-try:
-    from studio_produce import global_coordinator as g
-    print("incident2670_preflight_import=PASS", flush=True)
-except Exception:
-    print("incident2670_preflight_import=FAIL", flush=True)
-    raise SystemExit(43)
-try:
-    if not g.enabled() or not callable(g.acquire):
-        raise RuntimeError("not_ready")
-    print("incident2670_preflight_interface=PASS", flush=True)
-except Exception:
-    print("incident2670_preflight_interface=FAIL", flush=True)
-    raise SystemExit(44)
-'@
-  $exe=$script:SelectedPython.exe
-  $prefix=[string[]]$script:SelectedPython.prefix
-  $old=$ErrorActionPreference
-  $ErrorActionPreference='Continue'
-  try{
-    $receipt=@(& $exe @prefix -c $code 2>$null)
-    $pythonExit=$LASTEXITCODE
-  }catch{$receipt=@();$pythonExit=99}
-  finally{$ErrorActionPreference=$old}
-  @($receipt|Where-Object {
-    $_ -match '^incident2670_preflight_(requests=(AVAILABLE|UNAVAILABLE)|import=(PASS|FAIL)|interface=(PASS|FAIL))$'
-  })|ForEach-Object {Write-Output $_}
-  if($pythonExit -ne 0 -or
-     @($receipt|Where-Object {$_ -eq 'incident2670_preflight_interface=PASS'}).Count -ne 1){
-    Write-Output 'incident2670_preflight_python_run=FAILED'
-    $ready=$false
-  }else{Write-Output 'incident2670_preflight_python_run=PASS'}
-}
-
-if($ready){Write-Output 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST'}
-else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}
- -and
+      if($candidate -and [IO.Path]::GetFileName($candidate) -ieq 'python.exe' -and
+         $candidate -notlike '*\WindowsApps\*' -and
          (Test-Path -LiteralPath $candidate -PathType Leaf)){
         Probe-Python $candidate @() 'CIM_RUNNING'
       }
@@ -191,7 +134,7 @@ else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}
 }
 $pathCommand=Get-Command python -ErrorAction SilentlyContinue
 $pathEntry=[string]$pathCommand.Source
-$pathCategory=if(-not $pathCommand){'MISSING'}elseif($pathEntry -match '(?i)\\WindowsApps\\'){'WINDOWS_APPS_ALIAS'}else{'OTHER'}
+$pathCategory=if(-not $pathCommand){'MISSING'}elseif($pathEntry -like '*\WindowsApps\*'){'WINDOWS_APPS_ALIAS'}else{'OTHER'}
 Write-Output ('incident2670_preflight_python_path_category='+$pathCategory)
 if(-not $script:SelectedPython){
   $launcher=Get-Command py -ErrorAction SilentlyContinue
