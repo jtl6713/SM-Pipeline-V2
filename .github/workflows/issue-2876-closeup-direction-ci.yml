@@ -1,0 +1,40 @@
+name: Issue 2876 Extreme Close-Up Creative CI
+
+on:
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/i1/processor.py'
+      - 'services/pipeline-runner/sai1/prompt.py'
+      - 'services/pipeline-runner/studio_produce/closeup_direction.py'
+      - 'services/pipeline-runner/studio_produce/thumbnail_prompt.py'
+      - 'services/pipeline-runner/studio_produce/thumbnail.py'
+      - 'services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py'
+      - 'services/pipeline-runner/tests/test_profile_creative_prompt_integration.py'
+      - 'services/pipeline-runner/tests/test_sai1_market.py'
+      - '.github/workflows/issue-2876-closeup-direction-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runner test dependencies
+        run: python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+      - name: Verify close-up direction and adjacent creative prompt contracts
+        env:
+          PYTHONPATH: services/pipeline-runner
+          STUDIO_EXTREME_CLOSEUP_SHARE: '0.5'
+        run: |
+          python -m pytest -q \
+            services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
+            services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
+            services/pipeline-runner/tests/test_sai1_market.py \
+            services/pipeline-runner/tests/test_i1_candidate_pool.py
