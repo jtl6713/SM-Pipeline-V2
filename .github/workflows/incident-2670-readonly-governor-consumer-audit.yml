@@ -1,0 +1,117 @@
+name: Incident 2670 read-only governed recovery inventory
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-readonly-audit.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-readonly-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Inspect production Runner health before Ops access
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/runner-health.json
+          jq -e '.ok==true and .recovery_read_only==false and
+            .recovery_producer_only_enabled==false and .workload_governor_enabled==true and
+            .studio_write_source=="supabase" and .supabase_pipeline_writes==true and
+            .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/runner-health.json >/dev/null
+          echo 'incident2670_public_runner_authority=PASS'
+      - name: Collect authenticated loopback workload and consumer flags (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected" || { echo 'incident2670_ops_authority=UNAVAILABLE'; exit 1; }
+          echo "::add-mask::$selected"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $envFile='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+          if (-not (Test-Path -LiteralPath $envFile)) {throw 'runner_env_missing'}
+          $lines=@(Get-Content -LiteralPath $envFile)
+          $keys=@($lines | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if ($keys.Count -ne 1) {throw 'runner_secret_unavailable'}
+          $secret=([string]($keys[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          if ($secret.Length -lt 24) {throw 'runner_secret_invalid'}
+          $header=@{'X-Pipeline-Secret'=$secret}
+          $root='http://127.0.0.1:3350'
+          $g=Invoke-RestMethod -Uri "$root/admin/workload" -Headers $header -TimeoutSec 15
+          $r=Invoke-RestMethod -Uri "$root/jobs/rendering-review/dispatch-health" -Headers $header -TimeoutSec 15
+          $n=Invoke-RestMethod -Uri "$root/jobs/native-gallery/dispatch-health" -Headers $header -TimeoutSec 15
+          if ($g.ok -ne $true -or $g.enabled -ne $true -or $r.ok -ne $true -or $n.ok -ne $true) {throw 'consumer_or_governor_readback_invalid'}
+          $outbox=@($lines | Where-Object {$_ -match '^\s*STUDIO_SIDE_EFFECT_OUTBOX_ENABLED\s*='})
+          if ($outbox.Count -gt 1) {throw 'outbox_config_ambiguous'}
+          $outboxOn=$false
+          if ($outbox.Count -eq 1) {$outboxOn=(([string]($outbox[0] -split '=',2)[1]).Trim().Trim('"').ToLower()) -in @('true','yes','1'))}
+          if ($outboxOn) {throw 'optional_outbox_must_remain_disabled'}
+          $summary=[ordered]@{
+            enabled=[bool]$g.enabled; scope=[string]$g.scope
+            max_jobs=[int]$g.max_jobs; active_jobs=[int]$g.active_jobs
+            queued_jobs=[int]$g.queued_jobs; paused_jobs=[int]$g.paused_jobs
+            database_circuit_open=[bool]$g.database_circuit_open
+            max_db_reads=[int]$g.max_db_reads; max_db_writes=[int]$g.max_db_writes
+            supabase_request_metrics=$g.supabase_request_metrics
+            review_enabled=[bool]$r.enabled; review_started=[bool]$r.started
+            review_last_result=[string]$r.last_result
+            gallery_enabled=[bool]$n.enabled; gallery_started=[bool]$n.started
+            gallery_blocked=[bool]$n.blocked
+            optional_outbox_enabled=$false
+          }
+          Write-Output ('incident2670_audit='+($summary|ConvertTo-Json -Compress -Depth 6))
+          '''
+          assert len(command)<8000, 'Ops shell command must stay below 8k'
+          Path('/tmp/workload-audit.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/workload-audit.json || true)
+          if [[ "$code" != 202 && "$code" != 200 ]]; then
+            echo "incident2670_ops_admission_http=$code"; exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json)
+          test -n "$job"
+          for attempt in $(seq 1 45); do
+            curl -fsS --max-time 20 -o /tmp/status.json -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job"
+            state=$(jq -r '.job.status // empty' /tmp/status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/status.json | grep '^incident2670_audit=' | tail -1 > /tmp/audit-line.txt
+              test -s /tmp/audit-line.txt
+              sed 's/^incident2670_audit=//' /tmp/audit-line.txt | jq -e \
+                '.enabled==true and .scope=="single_windows_host" and
+                 .max_jobs>=1 and .max_jobs<=8 and
+                 .optional_outbox_enabled==false' >/tmp/audit-safe.json
+              echo 'incident2670_readonly_governor_consumer_audit=PASS'
+              cat /tmp/audit-safe.json
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'incident2670_ops_readonly_probe=FAILED_NO_MUTATION'
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'incident2670_ops_readonly_probe=TIMEOUT'
+          exit 1
