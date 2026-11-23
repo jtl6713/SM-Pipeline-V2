@@ -11,6 +11,8 @@ def test_only_diagnostic_preflight_without_claim_or_provider_side_effects():
     assert "incident2670_preflight_result=INCOMPLETE_NO_CHANGES" in PS
     assert "from studio_produce import global_coordinator as g" in PS
     assert "callable(g.acquire)" in PS
+    assert "incident2670_preflight_hello=PASS" in PS
+    assert "priorPreference" in PS
     assert "g.acquire(" not in PS
     assert "Invoke-RestMethod" not in PS
     assert "studio_global_workload_acquire" not in PS

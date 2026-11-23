@@ -35,39 +35,60 @@ else{
   Write-Output 'incident2670_preflight_python=FOUND'
   $env:PYTHONPATH=$root
   $env:STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED='true'
-  $code=@'
-import sys
+  # PowerShell on Windows can turn a Python stderr line into a terminating
+  # NativeCommandError before stdout is captured under Stop. Use Continue ONLY
+  # for the two isolated child processes; no stderr/log/secret is returned.
+  $priorPreference=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try{
+    $hello=@(& python -c 'print("incident2670_preflight_hello=PASS")' 2>$null)
+    $helloExit=$LASTEXITCODE
+  }catch{$hello=@();$helloExit=99}
+  finally{$ErrorActionPreference=$priorPreference}
+  if($helloExit -ne 0 -or @($hello|Where-Object {$_ -eq 'incident2670_preflight_hello=PASS'}).Count -ne 1){
+    Write-Output 'incident2670_preflight_hello=FAILED'
+    $ready=$false
+  }else{
+    Write-Output 'incident2670_preflight_hello=PASS'
+    $code=@'
 try:
     import requests
-    print("incident2670_preflight_requests=AVAILABLE")
+    print("incident2670_preflight_requests=AVAILABLE", flush=True)
 except Exception:
-    print("incident2670_preflight_requests=UNAVAILABLE")
+    print("incident2670_preflight_requests=UNAVAILABLE", flush=True)
     raise SystemExit(42)
 try:
     from studio_produce import global_coordinator as g
-    print("incident2670_preflight_import=PASS")
+    print("incident2670_preflight_import=PASS", flush=True)
 except Exception:
-    print("incident2670_preflight_import=FAIL")
+    print("incident2670_preflight_import=FAIL", flush=True)
     raise SystemExit(43)
 try:
     if not g.enabled() or not callable(g.acquire):
         raise RuntimeError("not_ready")
-    print("incident2670_preflight_interface=PASS")
+    print("incident2670_preflight_interface=PASS", flush=True)
 except Exception:
-    print("incident2670_preflight_interface=FAIL")
+    print("incident2670_preflight_interface=FAIL", flush=True)
     raise SystemExit(44)
 '@
-  try{
-    $receipt=@(& python -c $code 2>$null)
+    $priorPreference=$ErrorActionPreference
+    $ErrorActionPreference='Continue'
+    try{
+      $receipt=@(& python -c $code 2>$null)
+      $pythonExit=$LASTEXITCODE
+    }catch{$receipt=@();$pythonExit=99}
+    finally{$ErrorActionPreference=$priorPreference}
     @($receipt | Where-Object {
       $_ -match '^incident2670_preflight_(requests=(AVAILABLE|UNAVAILABLE)|import=(PASS|FAIL)|interface=(PASS|FAIL))$'
     }) | ForEach-Object {Write-Output $_}
-    if($LASTEXITCODE -ne 0){Write-Output 'incident2670_preflight_python_run=FAILED';$ready=$false}
+    if($pythonExit -ne 0){Write-Output 'incident2670_preflight_python_run=FAILED';$ready=$false}
+    elseif(@($receipt|Where-Object {$_ -eq 'incident2670_preflight_interface=PASS'}).Count -ne 1){
+      Write-Output 'incident2670_preflight_python_run=FAILED'
+      $ready=$false
+    }
     else{Write-Output 'incident2670_preflight_python_run=PASS'}
-  }catch{
-    Write-Output 'incident2670_preflight_python_run=FAILED'
-    $ready=$false
   }
+
 }
 if($ready){Write-Output 'incident2670_preflight_result=READY_FOR_SYNTHETIC_TEST'}
 else{Write-Output 'incident2670_preflight_result=INCOMPLETE_NO_CHANGES'}
