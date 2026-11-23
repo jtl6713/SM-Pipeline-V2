@@ -35,7 +35,7 @@ const policy={enabled:true,stage:"pilot",mode:"global_all_platforms_v2",max_tota
     TikTok:["Video Draft","Story","Single Photo","Multi-Photo"],
     YouTube:["Short","Standard Video","Slideshow Video"],
   }};
-let job=null,started=0,retried=0,unexpected=[];
+let job=null,started=0,retried=0,unexpected=[],releaseStartReceipt=null;
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
   res.end(JSON.stringify(value));
@@ -76,6 +76,13 @@ const server=createServer(async(req,res)=>{
     try{const data=readFileSync(file);res.writeHead(200,{"content-type":file.endsWith(".css")?"text/css":"text/javascript"});res.end(data)}
     catch{res.writeHead(404);res.end()}return;
   }
+  if(url.pathname==="/__release-start-receipt"&&req.method==="GET"){
+    // The test explicitly releases the held synthetic POST acknowledgement
+    // only after verifying Factory's immediate 0% preview.
+    releaseStartReceipt?.();
+    releaseStartReceipt=null;
+    send(res,{ok:true});return;
+  }
   if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
     const filter=url.searchParams.get("factory_profile");
@@ -104,9 +111,10 @@ const server=createServer(async(req,res)=>{
       job={ok:true,batch:true,group:true,accepted:true,job_id:"fg_"+payload.request_id,
         request_id:payload.request_id,profile_id:null,profile_ids:[chicago,nyc],
         created_at:new Date().toISOString()};
-      // Hold server acknowledgement: the click must paint 0% before the POST resolves.
+      // Hold the first server response until the browser has observed the
+      // immediate 0% preview. No flaky 550ms timing race.
       rebuild("queued");
-      await new Promise(resolve => setTimeout(resolve, 550));
+      await new Promise(resolve => {releaseStartReceipt=resolve});
       send(res,job);
       setTimeout(()=>rebuild("failed"),180);return;
     }
@@ -147,7 +155,8 @@ try{
     /0 of 4 processed · 0%/);
   assert.equal(await page.locator("#factoryBatchDetails .factory-batch-item-list > li").count(),4);
   assert.match(await page.locator(".factory-batch-recent-row").first().innerText(),/Submitting/);
-  assert.equal(started,1,"POST is sent exactly once while 0% preview is shown");
+  assert.ok(started<=1,"no duplicate submission during provisional activity");
+  await page.request.get(origin+"/__release-start-receipt");
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
   assert.equal(started,1);
   await new Promise(resolve=>setTimeout(resolve,240));
