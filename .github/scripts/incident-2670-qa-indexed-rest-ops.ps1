@@ -1,5 +1,6 @@
 # Incident #2670: three real QA PostgREST page GETs via existing Windows env.
 # Only count and elapsed milliseconds leave Ops. No data/secret is printed.
+# Fetch a fixed, allowlisted host; the runner .env URL is verified but never used as an outbound destination.
 $ErrorActionPreference='Stop'
 $file='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
 if(-not (Test-Path -LiteralPath $file)){throw 'indexed_qa_env_unavailable'}
@@ -19,7 +20,7 @@ if($select.Length -lt 100 -or $select.Length -gt 6000){throw 'indexed_qa_select_
 $header=@{'apikey'=$secret;'Authorization'="Bearer $secret";'Accept'='application/json'}
 $ids=New-Object 'System.Collections.Generic.HashSet[string]'
 foreach($offset in @(0,100,200)) {
-  $uri=$base+'/rest/v1/platform_outputs?test_run_id=is.null&home_failure_candidate=eq.true&select='+[Uri]::EscapeDataString($select)+'&order=output_number.asc.nullslast,airtable_record_id.asc&limit=100&offset='+$offset
+  $uri='https://vkwvscgisqsbuwagdvtb.supabase.co/rest/v1/platform_outputs?test_run_id=is.null&home_failure_candidate=eq.true&select='+[Uri]::EscapeDataString($select)+'&order=output_number.asc.nullslast,airtable_record_id.asc&limit=100&offset='+$offset
   $watch=[Diagnostics.Stopwatch]::StartNew()
   $response=Invoke-RestMethod -Method Get -Uri $uri -Headers $header -TimeoutSec 16
   $watch.Stop()
