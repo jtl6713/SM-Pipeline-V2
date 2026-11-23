@@ -1569,7 +1569,8 @@
     const batches = [...serverRows, ...(preview ? [preview] : [])].map(factoryBatchDisplayRow);
     const activityUnknown = !state.completedOpen && (
       (!viewed && !preview) ||
-      (Boolean(state.batchActivityError) && batches.length === 0));
+      (Boolean(state.batchActivityError) && batches.length === 0) ||
+      (viewed?.activity_confidence === "saved-requests-only" && batches.length === 0));
     // The old metric read state.batch.totals.batches even when an active row
     // was on screen; always derive every number from the SAME visible snapshot.
     const totals = {
@@ -1608,7 +1609,9 @@
       row.progress_verification?.status === "unavailable");
     summary.textContent = activityUnknown
       ? (state.batchActivityError ? "Approval activity unavailable · retrying automatically"
-        : "Loading latest approval activity…")
+        : viewed?.activity_confidence === "saved-requests-only"
+          ? "Saved submission not accepted; global activity discovery is still unverified"
+          : "Loading latest approval activity…")
       : `${totals.active} active · ${totals.approved} approved · ${totals.pending} pending · ${totals.failed} failed`
         + (preview ? " · " + preview.total + " selected output(s) awaiting server acceptance" : "")
         + (ledgerLag ? ` · ${ledgerLag} verified approval(s) syncing to Activity` : "")
@@ -1682,7 +1685,9 @@
         : activityUnknown
           ? (state.batchActivityError
             ? "Approval history could not be verified. This is not an all-clear; original saved request IDs are checked automatically."
-            : "Checking approval activity…")
+            : viewed?.activity_confidence === "saved-requests-only"
+              ? "No accepted batch found for saved request IDs. Other activity has not yet been verified."
+              : "Checking approval activity…")
           : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest || listCollapsed;
@@ -2285,6 +2290,15 @@
           const value = await fetchJson(`/api/factory/approval-batches?${exactParams.toString()}`, {
             cache: "no-store", timeoutMs: 12000,
           });
+          // A saved unacknowledged POST can be conclusively absent in R2.
+          // The exact-ID endpoint returns an EMPTY list in that case. It is
+          // NOT a failed GET, nor proof that all global approvals are clear.
+          // Preserve the idempotency record for the separate recovery flow.
+          if (row.unconfirmed && row.group && value?.ok === true &&
+              value.exact_request_id === row.request_id &&
+              Array.isArray(value.batches) && value.batches.length === 0) {
+            return { verified_absent: true, request_id: row.request_id };
+          }
           const verifiedRow = row.group ? (
             value?.ok === true && value.batches?.length === 1 ? value.batches[0] : null
           ) : value;
@@ -2317,13 +2331,26 @@
           }
           return verifiedRow;
         }));
-        const updates = outcomes.filter(row => row.status === "fulfilled").map(row => row.value);
-        const missing = outcomes.length - updates.length;
-        state.batchActivityPartialError = missing
-          ? String(missing) + " batch status request(s) delayed" : "";
+        const fulfilled = outcomes.filter(row => row.status === "fulfilled").map(row => row.value);
+        const absent = fulfilled.filter(row => row?.verified_absent).length;
+        const updates = fulfilled.filter(row => !row?.verified_absent);
+        const failed = outcomes.filter(row => row.status === "rejected");
+        state.batchActivityPartialError = failed.length
+          ? String(failed.length) + " batch status request(s) delayed" : "";
         if (!updates.length) {
-          throw outcomes.find(row => row.status === "rejected")?.reason ||
-            new Error("Factory activity status is temporarily unavailable");
+          if (failed.length) throw failed[0].reason;
+          if (!absent) throw new Error("Factory activity status is temporarily unavailable");
+          // All saved original IDs were conclusively NOT accepted. A historic
+          // global listing is still unverified; no invented all-clear / 0 count.
+          // A separate throttled background discovery may find other owners'
+          // activity without blocking the screen or resubmitting the POST.
+          return {
+            ...(state.batch || {}), ok: true, scope: "all", view: "active",
+            filter_profile_id: filterId, batches: state.batch?.batches || [],
+            totals: state.batch?.totals || {},
+            activity_confidence: "saved-requests-only",
+            history_complete: false,
+          };
         }
         // Only a verified terminal clean group is forgotten. Failed groups
         // remain visible for explicit exception handling.
