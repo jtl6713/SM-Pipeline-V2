@@ -23,7 +23,7 @@ jobs:
       - name: Parse all bounded scripts and enforce Ops console size
         shell: pwsh
         run: |
-          $files=@('.github/scripts/bethesda-2303-bounded-preflight.ps1','.github/scripts/bethesda-2303-bounded-prepare.ps1','.github/scripts/bethesda-2303-bounded-poll.ps1')
+          $files=@('.github/scripts/bethesda-2303-bounded-preflight.ps1','.github/scripts/bethesda-2303-bounded-prepare.ps1','.github/scripts/bethesda-2303-bounded-poll.ps1','.github/scripts/bethesda-2303-config-source-probe.ps1')
           foreach($f in $files){
             $t=Get-Content $f -Raw
             if($t.Length -gt 8000){throw "ops_shell_8000_limit_exceeded: $f"}
