@@ -18,6 +18,7 @@ from integrations.google_drive import GoogleDriveClient
 from rendering_review.native_gallery_c5c6_executor import execute_one_native_gallery
 from rendering_review.native_gallery_rights_policy import build_approved_native_gallery_clearance
 from rendering_review.native_gallery_staging_settings import resolve_private_native_gallery_staging_folder
+from studio_produce.workload_governor import enabled as governor_enabled, resource_slot
 
 _LOG = logging.getLogger("pipeline-runner.native-gallery-dispatch")
 _LOCK = threading.Lock()
@@ -48,6 +49,19 @@ def sweep_once(settings, *, client=None, drive=None, executor=execute_one_native
     with _LOCK:
         if _BLOCKED:
             return {"ok": False, "status": "operator_reconciliation_required"}
+    if not governor_enabled():
+        raise RuntimeError("native_gallery_workload_governor_required")
+    with resource_slot("native_gallery_c5c6", limit=1):
+        return _sweep_admitted(
+            settings, client=client, drive=drive, executor=executor,
+            rights_factory=rights_factory,
+        )
+
+
+def _sweep_admitted(settings, *, client=None, drive=None,
+                    executor=execute_one_native_gallery,
+                    rights_factory=build_approved_native_gallery_clearance):
+    """Provider and Drive work never runs without the cross-process lease."""
     rights = rights_factory(settings)
     account = getattr(rights, "preferred_account", None)
     if account not in ("PRIMARY", "SECONDARY"):
@@ -99,6 +113,8 @@ def start_consumer(settings):
     global _STARTED
     if not enabled():
         return
+    if not governor_enabled():
+        raise RuntimeError("native_gallery_workload_governor_required")
     # Fail startup before an async thread can claim anything under an
     # unapproved rights policy or missing immutable server configuration.
     rights = build_approved_native_gallery_clearance(settings)
