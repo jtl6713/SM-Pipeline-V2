@@ -39,7 +39,8 @@ function fixture([id, outputNumber, platform, type]) {
   };
   const slides = [1,2,3,4].map(n=>({
     id:"a0000000-0000-4000-8000-"+String(n).padStart(12,"0"),
-    airtable_record_id:"rec"+String(n).padStart(14,"A"),
+    // Mirror the real 2026-11-22 recovery rows: rec + 16 hex, not Airtable rec14.
+    airtable_record_id:"rec"+String(n).padStart(16,"a"),
     current_order:n,deleted_from_carousel:false,
     updated_at:"2026-11-23T04:35:40.123456Z",
     fields:{
@@ -116,6 +117,25 @@ for(const pair of pairs){
     assert.equal(calls.filter(c=>c.method==="PATCH").length,4,"idempotent with existing actual review evidence");
   });
 }
+test("#2371 rejects a forged/malformed recovered slide identity before any writes",async t=>{
+  const {output,slides}=fixture(pairs[0]);
+  slides[0].airtable_record_id="rec-fake-slide-id";
+  const calls=wire(t,slides);
+  await assert.rejects(preflightNycOwnerGalleryApproval(env,output),/independent slide evidence\/decision invalid/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+  assert.equal(output.output_status,"Ready for Review");
+});
+test("#2371 the actual recovered 19-character slide IDs do not authenticate a user",async t=>{
+  const {output,slides}=fixture(pairs[0]);
+  const calls=wire(t,slides);
+  const validated=await preflightNycOwnerGalleryApproval(env,output);
+  assert.equal(validated.pending,4);
+  await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
+    requestId:"factory-new-20261123",approvedByUserRecordId:slides[0].airtable_record_id,
+    submittedAt:"2026-11-23T04:45:00Z",
+  }),/authenticated Factory submitter/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+});
 test("#2371 pending slides cannot be finalized while hold is active",async t=>{
   const {output,slides}=fixture(pairs[0]);output.do_not_publish=true;
   const calls=wire(t,slides);

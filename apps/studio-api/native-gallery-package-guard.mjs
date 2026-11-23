@@ -109,6 +109,11 @@ const NYC_FACTORY_FINAL_REVIEW = new Map([
   ["recWIWOrdflmqyxKW", { number: 10856, platform: "Facebook", type: "Facebook Photo Set" }],
 ]);
 const USER_RECORD = /^rec[A-Za-z0-9]{14}$/;
+// #2371 recovered Supabase-native slides have rec + 16 hex (19 chars),
+// unlike authenticated Factory user IDs which remain strict rec + 14 chars.
+// These synthetic slide IDs are also fenced by UUID, exact output linkage,
+// source media/rights QA, updated_at CAS and the original gallery guard.
+const RECOVERED_SLIDE_RECORD = /^rec[a-f0-9]{16}$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -170,7 +175,7 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
     const f = slide.fields || {};
     const qa = f.SM_NYC_AI_Creative_QA_20261122 || {};
     if (!UUID.test(String(slide.id || "")) || !slide.updated_at
-        || !USER_RECORD.test(String(slide.airtable_record_id || ""))
+        || !RECOVERED_SLIDE_RECORD.test(String(slide.airtable_record_id || ""))
         || qa.brand_verified !== true || qa.source_owner_rights_verified !== true
         || qa.publishing_authorized !== false
         || !SHA256.test(String(qa.verified_branded_sha256 || ""))
