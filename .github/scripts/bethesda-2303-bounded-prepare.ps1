@@ -36,7 +36,7 @@ if($parent.extras.Include_Voiceover -ne 'Yes' -or $duration -lt 4 -or $vo -notli
 $all=@(Rows 'platform_outputs?content_number=eq.2303&select=output_number,remotion_job_id,do_not_publish,auto_publish_enabled,publish_status,published_at,scheduled_post_date,platform_post_url,review_status&order=output_number.asc')
 if($all.Count -ne 4 -or (($all|ForEach-Object {$_.output_number}) -join ',') -ne '11153,11154,11155,11156'){throw 'four_output_guard_failed'}
 foreach($a in $all){Protected $a;if($a.output_number -ge 11155 -and $a.remotion_job_id -ne (@($stories|Where-Object {$_.n -eq $a.output_number})[0].job)){throw 'story_render_changed'}}
-foreach($spec in @($reels|Where-Object {[int]$_.n -eq __REEL__})){
+foreach($spec in @($reels|Where-Object {[int]$_.n -eq '__REEL__'})){
 
   Health;Idle
   $o=Output $spec.rid;Protected $o
