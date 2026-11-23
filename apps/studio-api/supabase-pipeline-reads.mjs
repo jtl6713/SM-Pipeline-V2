@@ -3984,9 +3984,10 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   if (start >= 12000) return { records: [], offset: null };
   const formula = String(filterFormula || "");
   const pastDue = formula.includes("{Scheduled_Post_Date}");
-  // QA home failure uses many FIND/LOWER leaves. Prefer the bounded PostgREST
-  // OR probe even when translateOutputSideFormula succeeds — the full
-  // translated AND/OR string times out deploy verify (~70s, 0 bytes).
+  // QA Home failure has an EXACT, automatically-maintained Supabase
+  // generated boolean with a narrow partial btree index. The old 30+ ILIKE
+  // OR over typed/JSON fields caused 57014 statement timeouts (three HTTP
+  // 500s on Nov 23, 2026). No unfiltered or cached fallback on DB errors.
   const failure = formula.includes("FIND(");
   // Output numbers are unique when present, but hundreds of legacy outputs
   // have no number. PostgREST offset paging without a unique tie-breaker
@@ -3996,7 +3997,10 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   let path = `platform_outputs?test_run_id=is.null&${orderLimit}`;
   const translated = formula ? outputContentListFilter("output", formula) : null;
   if (failure) {
-    path = `platform_outputs?test_run_id=is.null&${homeFailureCensusOrFilter()}&${orderLimit}`;
+    // Migration 20261123_platform_output_home_failure_candidate_2670.sql
+    // must be deployed BEFORE Worker source. A missing canonical column
+    // fails closed, never retries the pathological ILIKE OR or Airtable.
+    path = `platform_outputs?test_run_id=is.null&home_failure_candidate=eq.true&${orderLimit}`;
   } else if (translated) {
     path = `platform_outputs?${translated}&${orderLimit}`;
   } else if (pastDue) {
@@ -4009,8 +4013,8 @@ export async function listSupabaseOutputCensusPage(env, { limit = 100, offset = 
   const rows = await supabaseRest(env, path);
   const batch = Array.isArray(rows) ? rows : [];
   let records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
-  // Translated / past-due paths already bound rows. Failure OR is a superset of
-  // the JS predicate; keep the shaped-row filter so bag/typed lag cannot widen.
+  // Translated / past-due paths already bound rows. Keep the independently
+  // shaped-row JS predicate as a cross-check on the indexed generated column.
   if (failure) records = records.filter((row) => supabaseOutputMatchesHomeFailure(row.fields));
   const next = start + capped;
   return { records, offset: batch.length === capped && next < 12000 ? String(next) : null };
