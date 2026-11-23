@@ -242,12 +242,57 @@ def _prepare_instagram(client: AirtableClient, output: dict[str, Any], number: i
             "published_posts": 0, "hold_preserved": True}
 
 
+
+def _preflight_all(client: AirtableClient) -> None:
+    """Fail the entire approved cohort before any external provider or canonical write.
+
+    Checking each gallery only during its mutation could create Instagram child
+    containers for the first eight before discovering missing output #10802.
+    This read-only pass verifies exact output holds, owner authorization, the
+    entire 60-slide identity/order, and existing provider identities upfront.
+    Per-output guards remain mandatory during the subsequent execution.
+    """
+    for record_id, (number, platform, expected) in OUTPUTS.items():
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
+        _assert_held(output, record_id, number)
+        if platform == "facebook":
+            slides = list_ready_slides(
+                client, str(number), output_record_id=record_id, max_photos=11,
+            )
+        elif platform == "instagram":
+            slides = list_final_slides(client, str(number))
+        else:
+            raise RuntimeError(f"gallery_unsupported_platform:{number}")
+        if len(slides) != expected:
+            raise RuntimeError(f"gallery_batch_preflight_count_mismatch:{number}:{len(slides)}:{expected}")
+        existing_children = []
+        for order, slide in enumerate(slides, start=1):
+            _assert_slide_marker(slide, record_id, number, order)
+            if platform == "facebook" and field_str(slide, "FB_Photo_ID"):
+                raise RuntimeError(f"gallery_batch_existing_fb_photo_reconcile:{number}:{order}")
+            if platform == "instagram":
+                child = field_str(slide, "IG_Child_Container_ID")
+                status = field_str(slide, "IG_Child_Container_Status").casefold()
+                if child:
+                    existing_children.append(child)
+                elif status not in {"", "not created"}:
+                    raise RuntimeError(f"gallery_batch_ambiguous_ig_child_reconcile:{number}:{order}")
+        if len(existing_children) != len(set(existing_children)):
+            raise RuntimeError(f"gallery_batch_duplicate_ig_children:{number}")
+        if platform == "facebook":
+            reason = native_photo_preflight_reason(output, slides)
+            if reason:
+                raise RuntimeError(f"gallery_batch_facebook_preflight_failed:{number}:{reason}")
+    print(f"native_gallery_batch_preflight_passed=outputs:{len(OUTPUTS)},slides:{sum(x[2] for x in OUTPUTS.values())}")
+
+
 def main() -> int:
     if not governor_enabled():
         raise RuntimeError("workload_governor_required")
     if os.environ.get("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "").lower() in {"1", "true", "yes"}:
         raise RuntimeError("recovery_read_only_still_active")
     client = AirtableClient()
+    _preflight_all(client)  # all ten must pass before any provider or canonical mutation
     results = []
     for record_id, (number, platform, expected) in OUTPUTS.items():
         with resource_slot("incident_2670_native_gallery_prep", limit=1):
