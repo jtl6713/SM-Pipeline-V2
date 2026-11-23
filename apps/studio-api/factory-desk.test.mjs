@@ -594,3 +594,8 @@ test("Factory supplies only exact same-output R5 MP4 fallback, never a private r
     { protected_media_rework: true }, { meta_repair_required: true },
   ]) assert.equal(factorySavedR5PublicPreview({ ...row, ...changes }), null);
 });
+
+test("Factory ops queue actually carries the exact saved R5 preview URL into card construction", async () => {
+  const worker = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  assert.match(worker, /studio_preview_url: f\(record, "Studio_Preview_URL"\) \|\| null/);
+});
