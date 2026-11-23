@@ -3,3 +3,5 @@ Incident #2670 read-only production inventory, November 23 2026 UTC. No settings
 Read-only retry 2026-11-23 02:29 UTC: prior Ops job failed safely; emit a bounded allowlisted failing phase only. No env changes or secret values.
 
 Nov 23 2026 02:33 UTC: retry GET-only Ops audit after two fail-closed runs; classify error using allowlisted labels without leaking remote script or secrets.
+
+Nov 23 2026: third strict GET-only audit with PowerShell AST parser gate and dedicated source file; parser errors fail before Ops. No controls changed.
