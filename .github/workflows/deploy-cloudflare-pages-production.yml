@@ -579,7 +579,15 @@ jobs:
               -o /tmp/custom-factory-canary.js -w '%{http_code}' \
               "$CUSTOM_URL$FACTORY_DESK_URL" || true)
             test "$PILOT_JS_HTTP" = "200"
-            require_match 'function canSelectBatchOutput(card)' /tmp/custom-factory-canary.js "Factory canary client guard"
+            # The selector keeps its real claim check when an optional second
+            # argument exempts only this click's temporary local intent marker.
+            # Match the function name and first argument, not an obsolete exact
+            # parameter signature: the latter falsely flags a correct release.
+            if ! grep -Eq 'function canSelectBatchOutput\\(card(,|\\))' /tmp/custom-factory-canary.js; then
+              echo "Factory canary selector guard was not found in deployed code" >&2
+              exit 1
+            fi
+            require_match 'factoryActiveSubmissionIds({ ignoreClickIntent })' /tmp/custom-factory-canary.js "Factory real-claim enforcement"
             require_match 'Limited production pilot: approve one Chicago Instagram Reel at a time.' /tmp/custom-factory-canary.js "Factory canary operator guidance"
             require_match 'selectable > limit' /tmp/custom-factory-canary.js "Factory single-output limit"
             echo "factory_chicago_canary_live_asset_verify=PASS"
