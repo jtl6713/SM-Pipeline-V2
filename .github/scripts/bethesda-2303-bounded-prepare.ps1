@@ -9,19 +9,19 @@ $key=Setting 'SUPABASE_SERVICE_ROLE_KEY'
 $dbHeaders=@{apikey=$key;Authorization=('Bearer '+$key)}
 $writeHeaders=@{apikey=$key;Authorization=('Bearer '+$key);Prefer='return=representation'}
 $runnerHeaders=@{'X-Pipeline-Secret'=(Setting 'PIPELINE_RUNNER_SHARED_SECRET')}
-function Rows([string]$path){return @(Invoke-RestMethod -Method Get -Uri ($sb+'/rest/v1/'+$path) -Headers $dbHeaders -TimeoutSec 30)}
+function Rows([string]$path){return @(Invoke-RestMethod -Method Get -Uri ($sb+'/rest/v1/'+$path) -Headers $dbHeaders -TimeoutSec 15)}
 function One([string]$path){
   $r=@(Rows $path)
   if($r.Count -ne 1){throw ('unique_row_expected_got_'+$r.Count)}
   return $r[0]
 }
-function Health(){$h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 25;if(!$h.ok -or $h.recovery_read_only -or $h.recovery_producer_only_enabled -or $h.recovery_producer_scope -ne 'disabled' -or !$h.workload_governor_enabled -or !$h.i1_durable_jobs -or $h.airtable_activity.any_activity -or $h.studio_write_source -ne 'supabase'){throw 'normal_production_fence_changed'}}
-function Idle(){$g=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $runnerHeaders -TimeoutSec 25;if(!$g.enabled -or $g.admission_paused -or $g.database_circuit_open -or [int]$g.max_jobs -ne 1 -or [int]$g.active_jobs -ne 0 -or [int]$g.queued_jobs -ne 0){throw 'governor_not_idle'};$m=Invoke-RestMethod -Uri 'http://127.0.0.1:3333/health' -TimeoutSec 20;if(!$m.ok -or [int]$m.remotionActiveRenders -ne 0){throw 'remotion_busy'}}
+function Health(){$h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12;if(!$h.ok -or $h.recovery_read_only -or $h.recovery_producer_only_enabled -or $h.recovery_producer_scope -ne 'disabled' -or !$h.workload_governor_enabled -or !$h.i1_durable_jobs -or $h.airtable_activity.any_activity -or $h.studio_write_source -ne 'supabase'){throw 'normal_production_fence_changed'}}
+function Idle(){$g=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $runnerHeaders -TimeoutSec 12;if(!$g.enabled -or $g.admission_paused -or $g.database_circuit_open -or [int]$g.max_jobs -ne 1 -or [int]$g.active_jobs -ne 0 -or [int]$g.queued_jobs -ne 0){throw 'governor_not_idle'};$m=Invoke-RestMethod -Uri 'http://127.0.0.1:3333/health' -TimeoutSec 10;if(!$m.ok -or [int]$m.remotionActiveRenders -ne 0){throw 'remotion_busy'}}
 function Protected($o){
   if($o.do_not_publish -ne $true -or $o.auto_publish_enabled -ne $false -or $o.publish_status -ne 'Not Ready' -or $o.published_at -or $o.scheduled_post_date -or $o.platform_post_url -or $o.review_status -eq 'Approved'){throw ('publishing_hold_changed_'+$o.output_number)}
 }
 function Output([string]$rid){return One ("platform_outputs?airtable_record_id=eq.$rid&select=*&limit=2")}
-function Stage($w,$id){$b=@{output_record_id=$id;extra=@{max_runs=1}}|ConvertTo-Json -Compress;return Invoke-RestMethod -Method Post -Uri ('http://127.0.0.1:3350/stages/'+$w) -Headers $runnerHeaders -ContentType 'application/json' -Body $b -TimeoutSec 180}
+function Stage($w,$id){$b=@{output_record_id=$id;extra=@{max_runs=1}}|ConvertTo-Json -Compress;return Invoke-RestMethod -Method Post -Uri ('http://127.0.0.1:3350/stages/'+$w) -Headers $runnerHeaders -ContentType 'application/json' -Body $b -TimeoutSec 120}
 $reels=@(
   @{n=11153;rid='rec94S2G7FU5HdExh';pro='rec0GzSxP5pnl31Hc';job='job-20261122225847-a3db3877';kind='Instagram Reel'},
   @{n=11154;rid='recpWHfw74GxcybAA';pro='recW65aRX35rIMBTV';job='job-20261122230140-adb85211';kind='Facebook Reel'}
@@ -67,7 +67,7 @@ foreach($spec in @($reels|Where-Object {[int]$_.n -eq '__REEL__'})){
   }
   $body=@{studio_effective_voiceover_mode='Yes';render_status='Ready for Render';output_status='In Production';remotion_job_id=$null;final_file_url=$null;studio_preview_url=$null;remotion_props=$null;final_file_storage_status=$null;render_heal_fields=$heal;error_messages=$bag}|ConvertTo-Json -Depth 90 -Compress
   $condition="platform_outputs?id=eq.$($o.id)&output_number=eq.$($spec.n)&render_status=eq.Rendered&remotion_job_id=eq.$($spec.job)&do_not_publish=eq.true&auto_publish_enabled=eq.false"
-  $saved=@(Invoke-RestMethod -Method Patch -Uri ($sb+'/rest/v1/'+$condition) -Headers $writeHeaders -ContentType 'application/json' -Body $body -TimeoutSec 35)
+  $saved=@(Invoke-RestMethod -Method Patch -Uri ($sb+'/rest/v1/'+$condition) -Headers $writeHeaders -ContentType 'application/json' -Body $body -TimeoutSec 20)
   if($saved.Count -ne 1 -or $saved[0].render_status -ne 'Ready for Render' -or $saved[0].studio_effective_voiceover_mode -ne 'Yes'){throw ('narration_preparation_not_atomic_'+$spec.n)}
   Write-Output ('bethesda_reel_'+$spec.n+'=OLD_MEDIA_BACKED_UP_AND_NARRATION_PREPARED')
   $launch=Stage 'r4' $spec.rid
