@@ -82,10 +82,16 @@ jobs:
             if [[ "$state" == ok ]]; then
               jq -r '.job.log // ""' /tmp/status.json | grep '^incident2670_audit=' | tail -1 > /tmp/audit-line.txt
               test -s /tmp/audit-line.txt
-              sed 's/^incident2670_audit=//' /tmp/audit-line.txt | jq -e \
-                '.enabled==true and .scope=="single_windows_host" and
-                 .max_jobs>=1 and .max_jobs<=8 and
-                 .optional_outbox_enabled==false' >/tmp/audit-safe.json
+              sed 's/^incident2670_audit=//' /tmp/audit-line.txt | jq -e '
+                select(.enabled==true and .scope=="single_windows_host" and
+                  .max_jobs>=1 and .max_jobs<=8 and
+                  .optional_outbox_enabled==false) |
+                {scope,max_jobs,active_jobs,queued_jobs,paused_jobs,
+                 database_circuit_open,max_db_reads,max_db_writes,
+                 review_enabled,review_started,review_last_result,
+                 gallery_enabled,gallery_started,gallery_blocked,
+                 optional_outbox_enabled}
+              ' >/tmp/audit-safe.json
               echo 'incident2670_readonly_governor_consumer_audit=PASS'
               cat /tmp/audit-safe.json
               exit 0
