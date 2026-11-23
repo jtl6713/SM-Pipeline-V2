@@ -1,1 +1,11 @@
-Activate STUDIO_I1_DURABLE_JOBS=true only after production runner version 2026-11-01-i1-durable-queue-v1 has passed persistent storage/restart/health verification. Use Cloudflare single-secret versioned binding update with active deployment readback and fail-safe delete on error. No automatic test publishing.
+Incident #2670 owner-authorized end-to-end I1 durable activation on Nov 23 2026.
+The persistent Windows I1 SQLite consumer was verified enabled by protected
+Actions run 45087584513; postrestart production /health confirms
+recovery_read_only=false, i1_durable_jobs=true, governor=true,
+Supabase-only reads/writes and zero Airtable activity.
+Use current runner code version read directly from services/pipeline-runner/config.py
+instead of obsolete Nov 1 pin. Add only STUDIO_I1_DURABLE_JOBS=true
+via Cloudflare single-secret/versioned binding update after active deployment
+preflight; prove the currently active Worker version contains this binding
+and rollback only the new secret on failure. No automatic test publishing,
+bulk backlog replay or bypass of per-output holds.

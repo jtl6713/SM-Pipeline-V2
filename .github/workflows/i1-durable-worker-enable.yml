@@ -17,7 +17,6 @@ jobs:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER: chicagoshining-studio-api
-      RUNNER_VERSION: "2026-11-01-i1-durable-queue-v1"
     steps:
       - name: Guard exact enabled runner and current Worker binding inventory
         id: guard
@@ -26,8 +25,14 @@ jobs:
           set -euo pipefail
           test -n "$CF_TOKEN" && test -n "$ACCOUNT_ID"
           curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/i1-runner-health.json
-          jq -e --arg v "$RUNNER_VERSION" \
-            '.ok==true and .version==$v and .i1_durable_jobs==true' /tmp/i1-runner-health.json >/dev/null
+          EXPECTED=$(sed -n 's/^PIPELINE_RUNNER_CODE_VERSION = "\(.*\)"$/\1/p' services/pipeline-runner/config.py)
+          [[ -n "$EXPECTED" ]] || { echo 'i1_code_version_missing'; exit 1; }
+          jq -e --arg v "$EXPECTED" \
+            '.ok==true and .version==$v and .i1_durable_jobs==true and
+             .recovery_read_only==false and .workload_governor_enabled==true and
+             .studio_write_source=="supabase" and .supabase_pipeline_writes==true and
+             .studio_runner_output_read_source=="supabase" and
+             .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/i1-runner-health.json >/dev/null
           echo "i1_durable_runner_health=ENABLED_AND_VERIFIED"
           API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
           curl -fsS --max-time 20 "$API/settings" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-worker-before.json
