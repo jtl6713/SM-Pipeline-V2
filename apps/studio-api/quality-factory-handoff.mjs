@@ -134,8 +134,8 @@ export function assessProductionFactoryHandoff({
   // Never call this a failed render merely because the final file has not
   // arrived while its OWN verified execution claim remains active.
   if (activeJob(request) && canonical.some(row => !terminalOutput(row))
-      && !canonical.some(row => /^(failed|error|blocked)$/i.test(
-        str(row.output_status)+" "+str(row.render_status)))) {
+      && !canonical.some(row => /^(failed|error|blocked)$/i.test(str(row.output_status))
+        || /^(failed|error|blocked)$/i.test(str(row.render_status)))) {
     report.stage="produce";report.status="in_progress";return report;
   }
   const cards=Array.isArray(factoryCards) ? new Map(factoryCards.map(x=>[str(x.id||x.airtable_record_id),x])) : null;
