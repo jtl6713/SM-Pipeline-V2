@@ -184,3 +184,59 @@ test("mismatched first receipt never paints a different submission", async () =>
   assert.equal(paints,0);
   assert.match(state.batchActivityPartialError,/receipt delayed/);
 });
+
+
+test("click-intent hides a selection without blocking its own approval POST", () => {
+  // Regression: the operator selected four records, but click-time hiding
+  // inserted an active-submission fence before policy GET returned. That
+  // caused readyFactoryOutputs(true,true) to drop every selected record.
+  const between = (from,to) => {
+    const start=source.indexOf(from);
+    const end=source.indexOf(to,start+from.length);
+    assert.ok(start>=0 && end>start, "required Factory helper not found");
+    return source.slice(start,end);
+  };
+  const card={id:"recClickIntentCheck001",kind:"output",profile_id:"recNYC",
+    output_id:92001,platform:"Instagram",studio_output_type:"Carousel",
+    output_status:"Ready for Review",render_status:"Rendered",
+    review_status:"Review Sent",studio_state:"Ready for Review"};
+  const state={submissionIntentIds:new Set([card.id]),submittingOutputIds:null,
+    selectedOutputs:new Set([card.id]),batch:null,
+    batchApprovalsEnabled:true,batchGlobal:{
+      enabled:true,allowed_platforms:["Instagram"],
+      allowed_output_types_by_platform:{Instagram:["Carousel"]}},
+    desk:{lanes:{needs_eyes:[card]}}};
+  let persisted=null;
+  const active=new Function("state","pendingFactoryApproval",
+    "factoryRecoveryEntries","factoryActivityRows",
+    between("  function factoryActiveSubmissionIds(", "  // A publication hold"),
+    )(state,()=>persisted,()=>[],()=>[]);
+  assert.equal(active().has(card.id),true,
+    "ordinary actions must remain fenced after click");
+  assert.equal(active({ignoreClickIntent:true}).has(card.id),false);
+
+  const canReview=new Function("state","factoryActiveSubmissionIds",
+    "recentFactoryAccepted",
+    between("  function canReviewActions(","  function canDelete(")+
+    "\nreturn canReviewActions;")(state,active,()=>({}));
+  const canSelect=new Function("state","factoryActiveSubmissionIds",
+    "recentFactoryAccepted","resolveFactoryCardProfileId",
+    between("  function canSelectBatchOutput(", "  function factoryProfileId(")+
+    "\nreturn canSelectBatchOutput;")(state,active,()=>({}),c=>c.profile_id);
+  assert.equal(canReview(card),false);
+  assert.equal(canSelect(card),false);
+  assert.equal(canReview(card,{ignoreClickIntent:true}),true);
+  assert.equal(canSelect(card,{ignoreClickIntent:true}),true);
+  const ready=new Function("state","factorySubmittedApprovalIds",
+    "factoryMatchesProfile","canReviewActions","canSelectBatchOutput",
+    "withResolvedFactoryProfile",
+    between("  function readyFactoryOutputs(","  function planFactoryApprovalBatches(")+
+    "\nreturn readyFactoryOutputs;")(
+      state,()=>new Set([card.id]),()=>true,canReview,canSelect,c=>c);
+  assert.equal(ready(true).length,0,"Needs Eyes should hide the clicked row");
+  assert.deepEqual(ready(true,true).map(c=>c.id),[card.id],
+    "the same click's post-policy selection must still be submitted");
+  persisted={ids:[card.id]};
+  assert.equal(ready(true,true).length,0,
+    "real persisted recovery claims are never exempted by click-intent");
+});
