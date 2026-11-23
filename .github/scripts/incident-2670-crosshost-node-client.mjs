@@ -9,7 +9,7 @@ const env = {
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
   STUDIO_GLOBAL_WORKLOAD_COORDINATOR_ENABLED: "true",
 };
-if (String(env.SUPABASE_URL || "").replace(/\\/+$/, "") !==
+if (String(env.SUPABASE_URL || "").replace(new RegExp("/+$"), "") !==
     "https://vkwvscgisqsbuwagdvtb.supabase.co" ||
     !env.SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("crosshost_javascript_wrong_authority");
