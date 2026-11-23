@@ -152,6 +152,16 @@ test("first original-ID status is shown despite a slow global discovery still lo
   assert.equal((await localRead(local))?.batches[0]?.job_id,local.job_id);
   assert.match(localPath,/content_profile_id=recNYC/);
   assert.doesNotMatch(localPath,/scope=all/);
+
+  // An earlier receipt can return after regular status polling has already
+  // verified an approval. The late queued snapshot must not regress the bar.
+  state.batch = {batches:[{...exact,done_count:1,pending_count:0,
+    approved_count:1,status:"completed"}]};
+  const paintsBefore = rendered.length;
+  const staleRead = await refresh(exact);
+  assert.equal(staleRead,state.batch);
+  assert.equal(rendered.length,paintsBefore,
+    "late first-receipt GET must not repaint 0% over a newer 100%");
 });
 
 test("mismatched first receipt never paints a different submission", async () => {
