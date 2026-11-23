@@ -18892,8 +18892,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
       }
       // Each source retains independent verification; unknown never means 0.
       return respond(request, env, {
-        ...report, output_failures: outputFailures,
-        approved_past_due: approvedPastDue,
+        ...report, output_failures: outputFailures, approved_past_due: approvedPastDue,
         production_to_factory: productionToFactory,
       });
     }
