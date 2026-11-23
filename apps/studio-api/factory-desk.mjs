@@ -184,6 +184,11 @@ function isTransientFactoryStuck(row) {
 }
 
 function isManualLane(row) {
+  // #2618: explicitly marked creative corrections stay visible in Factory
+  // Manual/Repair even if they were *previously* approved and scheduled.
+  // Their original scheduling history is not permission to publish.
+  if (row?.kind === "output" && row?.creative_qa_hold === true
+    && row?.do_not_publish === true) return true;
   // A Do_Not_Publish output cannot enter the autonomous render or publication
   // lane. Keep it visible as a Studio-owned safety exception, not as a task
   // requiring an operator to click through hundreds of In Production rows.
@@ -363,7 +368,9 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     title: row.title || "Untitled",
     profile_name: row.profile_name || "",
     profile_id: row.profile_id || null,
-    studio_state: row.meta_repair_required === true
+    studio_state: row.creative_qa_hold === true
+      ? "Creative correction required · Publishing held"
+      : row.meta_repair_required === true
       ? "Studio repair required · Publishing held"
       : row.protected_media_rework === true
       ? (row.recovery_source_inventory_verified === true
@@ -376,6 +383,8 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     scheduling_approval_requirement: row.scheduling_approval_requirement || null,
     studio_owned_exception: row.do_not_publish === true && row.output_status === "In Production",
     protected_media_rework: row.protected_media_rework === true,
+    creative_qa_hold: row.creative_qa_hold === true,
+    creative_qa_reason: row.creative_qa_hold === true ? (row.creative_qa_reason || null) : null,
     candidate_gallery_review: row.candidate_gallery_review === true,
     meta_repair_required: row.meta_repair_required === true,
     meta_repair_reason: row.meta_repair_required === true ? (row.meta_repair_reason || "Studio recovery") : null,
@@ -400,12 +409,12 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     recovery_next_step: row.protected_media_rework === true ? (row.recovery_next_step || null) : null,
     // The existing client checks DNP and review_package_ready before showing
     // approval actions; explicit card state protects other clients too.
-    can_approve: (row.protected_media_rework === true || row.meta_repair_required === true || row.do_not_publish === true) ? false : undefined,
-    can_retry: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
-    can_publish: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
+    can_approve: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true || row.do_not_publish === true) ? false : undefined,
+    can_retry: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
+    can_publish: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true) ? false : undefined,
     output_status: row.output_status || null,
     review_status: row.review_status || null,
-    review_package_ready: (row.protected_media_rework === true || row.meta_repair_required === true) ? false : row.review_package_ready !== false,
+    review_package_ready: (row.creative_qa_hold === true || row.protected_media_rework === true || row.meta_repair_required === true) ? false : row.review_package_ready !== false,
     review_package_readiness: row.review_package_readiness || null,
     review_package_missing: row.review_package_missing || [],
     review_package_reason: row.review_package_reason || null,

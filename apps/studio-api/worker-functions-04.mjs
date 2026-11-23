@@ -12049,6 +12049,15 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     const readiness = evaluateReviewPackage(record);
     const mediaRework = protectedMediaReworkSummary(record);
     const metaRepair = metaReviewRecoverySummary(record);
+    // #2618: creative correctness is independent of technical CDN readiness.
+    // A held wrong-location/wrong-season image must be visibly repairable in
+    // Factory, never offered as a ready-to-approve or scheduled item.
+    const creativeQaMarker = f(record, "SM_2618_Creative_QA_Hold");
+    const creativeQa = f(record, "Do_Not_Publish") === true
+      && creativeQaMarker?.publishing_permitted === false;
+    const creativeQaReason = creativeQa
+      ? String(creativeQaMarker.evidence || "Media or location correction pending").slice(0, 450)
+      : null;
     // #2294: an exact pending draft-slide inventory can be offered for
     // inspection while its formal media/package review remains incomplete.
     // Never convert this inspection-only marker into approval readiness.
@@ -12068,7 +12077,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       record, readiness, studioState, outputCreativeAvailable(record),
     );
     const schedulingTechnicalReady = reviewVisibility.visible &&
-      !mediaRework && !metaRepair && verifiedSchedulingPreflight({
+      !mediaRework && !metaRepair && !creativeQa && verifiedSchedulingPreflight({
         id: record.id,
         airtable_record_id: record.id,
         content_item_id: contentId,
@@ -12125,7 +12134,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platform: mapped.platform,
       format: mapped.format || null,
       studio_output_type: mapped.studio_output_type || mapped.format,
-      studio_state: candidateGalleryReview
+      studio_state: creativeQa
+        ? "Creative correction required · Publishing held"
+        : candidateGalleryReview
         ? "Unverified gallery candidates · Visual review only · Publishing held"
         : schedulingTechnicalReady
         ? "Scheduling approval ready · Media verified"
@@ -12140,6 +12151,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
       protected_media_rework: Boolean(mediaRework),
+      creative_qa_hold: creativeQa,
+      creative_qa_reason: creativeQaReason,
       meta_repair_required: Boolean(metaRepair),
       meta_repair_reason: metaRepair?.category || null,
       meta_repair_next_step: metaRepair?.next_step || null,
@@ -12184,9 +12197,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
-      stuck_kind: metaRepair ? "meta_repair_required" : (stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null),
-      stuck_class: metaRepair ? "recovery" : (stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null),
-      produce_error: metaRepair?.next_step || stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
+      stuck_kind: creativeQa ? "creative_qa_hold" : metaRepair ? "meta_repair_required" : (stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null),
+      stuck_class: creativeQa ? "recovery" : metaRepair ? "recovery" : (stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null),
+      produce_error: creativeQaReason || metaRepair?.next_step || stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
         || inheritedParentStuck?.error || mapped.remotion_error_message || null,
       lane: queueLaneForStudioState(studioState, {
         producePaused,
@@ -12204,13 +12217,17 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       // This is metadata validation; the approval route probes actual CDN bytes.
       // Never let recovered source images turn a Changes Requested item into
       // a Factory Approve candidate. It belongs in manual creative repair.
-      review_package_ready: (mediaRework || metaRepair || candidateGalleryReview) ? false : reviewVisibility.visible,
+      review_package_ready: (mediaRework || metaRepair || creativeQa || candidateGalleryReview) ? false : reviewVisibility.visible,
       review_package_held_preview_only: reviewVisibility.held_preview_only || candidateGalleryReview,
       review_package_readiness: readiness.readiness,
-      review_package_missing: candidateGalleryReview
+      review_package_missing: creativeQa
+        ? [creativeQaReason || "Source artwork requires verified creative correction"]
+        : candidateGalleryReview
         ? ["Source artwork awaits human review, branding/rights verification and final creative approval"]
         : readiness.missing_requirements,
-      review_package_reason: candidateGalleryReview
+      review_package_reason: creativeQa
+        ? "creative_qa_hold_2618"
+        : candidateGalleryReview
         ? "unverified_native_candidate_visual_review_only" : readiness.reason,
       updated_at: outputUpdatedAt,
     };

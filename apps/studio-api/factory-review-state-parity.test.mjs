@@ -142,3 +142,45 @@ test("native photo worker recovery cannot autonomously approve a Ready for Revie
   assert.match(block, /Review_Status"\)\s*\|\|\s*""\)\.trim\(\) !== "Approved"/);
   assert.match(block, /Review_Notes"\)\s*\|\|\s*""\)\.includes/);
 });
+
+test("#2618: held creative QA stays in Factory Manual even after an old approval", () => {
+  for (const output_status of ["Approved for Publishing", "Ready for Review"]) {
+    const record = {
+      id: "recQaCreative12345", kind: "output", title: "Union Square Station Sounds",
+      studio_state: "Scheduling approval ready", output_status,
+      review_status: output_status === "Ready for Review" ? "Review Sent" : "Approved",
+      publish_status: output_status === "Ready for Review" ? "Not Ready" : "Ready to Schedule",
+      do_not_publish: true, auto_publish_enabled: false,
+      creative_qa_hold: true, creative_qa_reason: "wrong subway station photographed",
+      review_package_ready: false,
+      scheduled_post_date: "2026-12-15T03:15:00Z",
+      studio_scheduled_at: output_status === "Approved for Publishing" ? "2026-12-15T03:15:00Z" : null,
+    };
+    const desk = partitionFactoryLanes([record]);
+    assert.equal(desk.summary.manual, 1);
+    assert.equal(desk.summary.needs_eyes, 0);
+    assert.equal(desk.summary.auto_high, 0);
+    const card = desk.lanes.manual[0];
+    assert.equal(card.creative_qa_hold, true);
+    assert.match(card.studio_state, /Creative correction required/);
+    assert.match(card.creative_qa_reason, /wrong subway station/);
+    assert.equal(card.can_approve, false);
+    assert.equal(card.can_retry, false);
+    assert.equal(card.can_publish, false);
+    assert.equal(card.review_package_ready, false);
+    assert.equal(card.do_not_publish, true);
+    assert.equal(card.auto_publish_enabled, false);
+    assert.equal(card.scheduled_post_date, record.scheduled_post_date);
+  }
+});
+
+test("#2618: independent held-QA Supabase pack and Factory output mapper both preserve QA evidence", () => {
+  const sqlPack = readFileSync(new URL("./supabase-pipeline-reads.mjs", import.meta.url), "utf8");
+  const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(sqlPack, /error_messages->>SM_2618_Creative_QA_Hold=not\.is\.null/);
+  assert.match(sqlPack, /\.\.\.metaRecoveredRows, \.\.\.creativeQaRows/);
+  assert.match(sqlPack, /creativeQaRows\]/);
+  assert.match(worker, /creative_qa_hold: creativeQa/);
+  assert.match(worker, /creativeQa \? "creative_qa_hold"/);
+  assert.match(worker, /review_package_ready: \(mediaRework \|\| metaRepair \|\| creativeQa/);
+});
