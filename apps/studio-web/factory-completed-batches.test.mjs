@@ -52,6 +52,7 @@ function viewHarness() {
     document: { createElement: () => ({ id: "", className: "", innerHTML: "", hidden: false }) },
     esc: val => String(val ?? ""),
     factoryProfileLabel: profile => profile || "All Profiles",
+    factorySavedRequestDiagnostics: () => [],
     navigator: { clipboard: { writeText: () => Promise.resolve() } },
   };
   const render = vm.runInNewContext(body + "\nrenderFactoryBatchActivity", context);
@@ -74,7 +75,7 @@ test("completed history shows a 24-output batch when active activity has no rows
   assert.equal(nodes.factoryBatchCompletedPrev.hidden, true, "Previous stays hidden in active view");
   assert.equal(nodes.factoryBatchCompletedNext.hidden, true, "Next stays hidden in active view");
   assert.equal(nodes.factoryBatchCompletedPage.hidden, true, "Pagination label stays hidden in active view");
-  assert.match(nodes.factoryBatchRecentList.innerHTML, /No active approval batches/);
+  assert.match(nodes.factoryBatchRecentList.innerHTML, /No server-confirmed active approval batches/);
   assert.equal(nodes.factoryBatchMetricValue.textContent,"0");
 
   state.completedOpen = true;
@@ -101,7 +102,7 @@ test("completed history shows a 24-output batch when active activity has no rows
   state.completedOpen = false;
   render(state.batch);
   assert.equal(nodes.factoryBatchCompletedClose.hidden, true, "Closing completed history restores active header");
-  assert.match(nodes.factoryBatchRecentList.innerHTML,/No active approval batches/);
+  assert.match(nodes.factoryBatchRecentList.innerHTML,/No server-confirmed active approval batches/);
 });
 
 test("completed view renders a terminal per-profile batch as well as a global group", () => {
