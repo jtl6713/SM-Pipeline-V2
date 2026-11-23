@@ -65,3 +65,13 @@ test("failed activity read cannot report an authoritative all-clear", () => {
   assert.match(script, /Checking approval activity/);
   assert.match(script, /No active approval batches\. All clear/);
 });
+
+test("conclusively absent saved request is not a failed Activity GET or fabricated global all-clear", () => {
+  assert.match(script, /row\.unconfirmed && row\.group && value\?\.ok === true/);
+  assert.match(script, /value\.exact_request_id === row\.request_id/);
+  assert.match(script, /verified_absent: true, request_id: row\.request_id/);
+  assert.match(script, /if \(failed\.length\) throw failed\[0\]\.reason/);
+  assert.match(script, /activity_confidence: "saved-requests-only"/);
+  assert.match(script, /Saved submission not accepted; global activity discovery is still unverified/);
+  assert.match(script, /No accepted batch found for saved request IDs/);
+});
