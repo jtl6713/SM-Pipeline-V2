@@ -18902,6 +18902,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               await checkpoint("supabase_approval_started");
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
+                approvedByUserRecordId: job.submitted_by || null,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
@@ -19132,6 +19133,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   try {
     enqueued = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
       profileId: profile.id, requestId, records,
+      submittedBy: String(authorization?.user?.record_id || "").trim(),
       note: String(payload.notes || ""),
     });
   } catch (error) {
@@ -19465,6 +19467,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   try {
     submitted = await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA, {
       requestId, records, maxTotal: policy.max_total, maxPerProfile: policy.max_per_profile,
+      submittedBy: String(authorization?.user?.record_id || "").trim(),
       note: String(payload.notes || ""),
     });
   } catch (error) {
