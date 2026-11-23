@@ -275,7 +275,7 @@
       // If an old accepted/recovery fence outlives the changed canonical state,
       // the unheld RFR stays visible for inspection. The active request fence
       // still disables approval/selection until its receipt is reconciled.
-      if (factoryUnheldReviewCandidate(card)) return true;
+      if (typeof factoryUnheldReviewCandidate === "function" && factoryUnheldReviewCandidate(card)) return true;
       return !submitted.has(String(card.id || "")) && factoryHasHumanReviewAction(card);
     });
   }
