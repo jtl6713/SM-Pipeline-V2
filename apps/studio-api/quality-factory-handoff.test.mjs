@@ -28,7 +28,8 @@ const photo=(number,platform,type)=>({
   do_not_publish:false,
 });
 const video=()=>({
-  ...photo(10858,"YouTube","Short"),render_status:"Rendered",selected_clip_count:0,
+  ...photo(10858,"YouTube","Short"),platform_output_type:"YouTube Short",
+  render_status:"Rendered",selected_clip_count:0,
   final_file_url:"https://media.chicagoshining.com/studio/previews/nyc.mp4",
 });
 const source=()=>[photo(10855,"Instagram","Carousel"),
