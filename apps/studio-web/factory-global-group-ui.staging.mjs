@@ -35,7 +35,7 @@ const policy={enabled:true,stage:"pilot",mode:"global_all_platforms_v2",max_tota
     TikTok:["Video Draft","Story","Single Photo","Multi-Photo"],
     YouTube:["Short","Standard Video","Slideshow Video"],
   }};
-let job=null,started=0,retried=0,unexpected=[],releaseStartReceipt=null,receiptReleased=false;
+let job=null,jobVisible=false,started=0,retried=0,unexpected=[],releaseStartReceipt=null,receiptReleased=false;
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
   res.end(JSON.stringify(value));
@@ -87,7 +87,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
     const filter=url.searchParams.get("factory_profile");
-    const visible=job&&(!filter || job.profile_ids.includes(filter));
+    const visible=jobVisible&&job&&(!filter || job.profile_ids.includes(filter));
     const batch=visible?job:null;
     send(res,{...(batch||{ok:true,batch:true,status:"idle",job_id:null,items:[]}),
       scope:"all",batches:batch?[batch]:[],
@@ -116,6 +116,7 @@ const server=createServer(async(req,res)=>{
       // immediate 0% preview. No flaky 550ms timing race.
       rebuild("queued");
       if(!receiptReleased) await new Promise(resolve => {releaseStartReceipt=resolve});
+      jobVisible=true;
       send(res,job);
       setTimeout(()=>rebuild("failed"),180);return;
     }
