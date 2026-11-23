@@ -12,57 +12,80 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
-      SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - name: Verify deployed source and canonical project before REST
+      - name: Parse read-only PowerShell script before Ops
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-qa-indexed-rest-ops.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw 'indexed_qa_ops_script_parse_invalid'}
+          Write-Output 'indexed_qa_ops_parser=PASS'
+      - name: Check protected Supabase-only Runner and exact indexed source
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_URL" && test -n "$SUPABASE_SERVICE_ROLE_KEY"
-          [[ "${SUPABASE_URL%/}" == "https://vkwvscgisqsbuwagdvtb.supabase.co" ]]
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/indexed-qa-health.json
+          jq -e '.ok==true and .workload_governor_enabled==true and
+            .recovery_read_only==false and .studio_write_source=="supabase" and
+            .supabase_pipeline_writes==true and
+            .airtable_activity.any_activity==false' /tmp/indexed-qa-health.json >/dev/null
           grep -F 'home_failure_candidate=eq.true' apps/studio-api/supabase-pipeline-reads.mjs >/dev/null
-          echo 'indexed_qa_rest_authority=PASS'
-      - name: Replay three formerly failing QA pages as nonpublishing GET
+          echo 'indexed_qa_ops_authority=PASS'
+      - name: Call exact three indexed PostgREST GETs with existing runner secret
         shell: bash
         run: |
           set -Eeuo pipefail
-          umask 077
-          node --input-type=module - <<'JS' > /tmp/indexed-qa-select.txt
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/indexed-qa-catalog.json
+          jq -e '.ok==true' /tmp/indexed-qa-catalog.json >/dev/null
+          node --input-type=module - <<'JS' > /tmp/indexed-qa-b64.txt
           import { QA_CENSUS_OUTPUT_SELECT } from './apps/studio-api/supabase-pipeline-reads.mjs';
           if (!QA_CENSUS_OUTPUT_SELECT || QA_CENSUS_OUTPUT_SELECT.length > 6000) {
-            throw new Error('invalid_indexed_qa_select');
+            throw new Error("indexed_qa_source_select_invalid");
           }
-          process.stdout.write(QA_CENSUS_OUTPUT_SELECT);
+          process.stdout.write(Buffer.from(QA_CENSUS_OUTPUT_SELECT,'utf8').toString('base64'));
           JS
-          select=$(cat /tmp/indexed-qa-select.txt)
-          > /tmp/indexed-qa-ids.txt
-          for offset in 0 100 200; do
-            started=$(date +%s%3N)
-            code=$(curl -sS --max-time 16 -o /tmp/indexed-qa-page.json -w '%{http_code}' \
-              -G "${SUPABASE_URL%/}/rest/v1/platform_outputs" \
-              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-              -H 'Accept: application/json' \
-              --data-urlencode 'test_run_id=is.null' \
-              --data-urlencode 'home_failure_candidate=eq.true' \
-              --data-urlencode "select=$select" \
-              --data-urlencode 'order=output_number.asc.nullslast,airtable_record_id.asc' \
-              --data-urlencode 'limit=100' \
-              --data-urlencode "offset=$offset" || true)
-            [[ "$code" == "200" ]] || { echo "indexed_qa_page_http_$offset=$code"; exit 1; }
-            elapsed=$(( $(date +%s%3N)-started ))
-            jq -e 'type=="array" and all(.[]; (.airtable_record_id|type)=="string")' /tmp/indexed-qa-page.json >/dev/null
-            count=$(jq 'length' /tmp/indexed-qa-page.json)
-            [[ "$count" == 100 ]] || [[ "$offset" == 200 && "$count" == 47 ]]
-            jq -r '.[].airtable_record_id' /tmp/indexed-qa-page.json >> /tmp/indexed-qa-ids.txt
-            echo "indexed_qa_rest_page_offset_$offset=count_$count elapsed_ms_$elapsed"
-            [[ "$elapsed" -lt 16000 ]] || exit 1
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          b64=Path('/tmp/indexed-qa-b64.txt').read_text()
+          source=Path('.github/scripts/incident-2670-qa-indexed-rest-ops.ps1').read_text()
+          source=source.replace('__SELECT_B64__',b64)
+          if not 500<len(source)<8000:
+              raise SystemExit('indexed_qa_script_too_large')
+          Path('/tmp/indexed-qa-ops-body.json').write_text(json.dumps({'command':source,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/indexed-qa-start.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/indexed-qa-ops-body.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]] || { echo "indexed_qa_ops_http=$code"; exit 1; }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/indexed-qa-start.json)
+          test -n "$job"
+          for i in $(seq 1 55); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "$BASE/api/jobs/$job" -o /tmp/indexed-qa-status.json
+            status=$(jq -r '.job.status // empty' /tmp/indexed-qa-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/indexed-qa-status.json |
+                grep '^incident2670_indexed_qa_page_offset_' | tail -3
+              jq -r '.job.log // ""' /tmp/indexed-qa-status.json |
+                grep -x '^incident2670_indexed_qa_three_pages=PASS_247_DISTINCT_NO_WRITES$' >/dev/null
+              echo 'indexed_qa_rest_three_pages=PASS_247_DISTINCT_NO_WRITES'
+              exit 0
+            fi
+            if [[ "$status" == failed ]]; then
+              echo 'indexed_qa_rest_three_pages=FAILED_NO_MUTATIONS'
+              exit 1
+            fi
+            sleep 3
           done
-          [[ $(wc -l </tmp/indexed-qa-ids.txt) == 247 ]]
-          [[ $(sort -u /tmp/indexed-qa-ids.txt | wc -l) == 247 ]]
-          rm -f /tmp/indexed-qa-page.json /tmp/indexed-qa-ids.txt /tmp/indexed-qa-select.txt
-          echo 'indexed_qa_rest_three_pages=PASS_247_DISTINCT_NO_WRITES'
+          echo 'indexed_qa_rest_three_pages=UNCONFIRMED_TIMEOUT'
+          exit 1
