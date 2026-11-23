@@ -9,3 +9,10 @@ via Cloudflare single-secret/versioned binding update after active deployment
 preflight; prove the currently active Worker version contains this binding
 and rollback only the new secret on failure. No automatic test publishing,
 bulk backlog replay or bypass of per-output holds.
+
+Nov 23 2026 guarded activation retry after merged PR #2776: the
+i1-durable-worker-enable.yml now performs an authenticated repository checkout
+before reading the expected runner version. Exactly one protected feature
+binding activation is attempted, with hard live runner/Cloudflare preflight.
+This marker does not enqueue an idea batch, approve media, release DNP,
+schedule or publish. Any preflight failure must stop without mutation.
