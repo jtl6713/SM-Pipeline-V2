@@ -530,3 +530,68 @@ def test_cap_one_python_only_emergency_canary_never_opens_worker_ingress(
     assert claimed and claimed[0] == "recCanarySafe"
     assert g.snapshot()["active_worker_heavy"] == 0
     g.finish_job(*claimed)
+
+
+def test_enabled_global_rpc_denial_requeues_before_canonical_producer_write(
+    isolated_governor, monkeypatch,
+):
+    from studio_produce import processor
+    from studio_produce import global_coordinator
+    from contextlib import contextmanager
+
+    g = isolated_governor
+    g.enqueue("recGlobalDenied")
+    claimed = g.claim_next()
+    assert claimed and claimed[0] == "recGlobalDenied"
+
+    @contextmanager
+    def denied(_request_id):
+        raise global_coordinator.GlobalAdmissionUnavailable(
+            "global_workload_capacity_denied")
+        yield  # pragma: no cover — context manager protocol
+
+    monkeypatch.setattr(global_coordinator, "producer_lease", denied)
+    monkeypatch.setattr(processor, "start_job", lambda *args, **kwargs: (
+        (_ for _ in ()).throw(AssertionError("canonical preparation before global admission"))
+    ))
+    processor._run_governed(*claimed)
+    assert g.snapshot()["queued_jobs"] == 1
+    assert g.snapshot()["active_jobs"] == 0
+    assert g.snapshot()["paused_jobs"] == 0
+
+
+def test_global_producer_lease_loss_requeues_without_claiming_recovery_success(
+    isolated_governor, monkeypatch,
+):
+    from studio_produce import processor, global_coordinator
+    from contextlib import contextmanager
+
+    g = isolated_governor
+    g.enqueue("recGlobalLost")
+    claimed = g.claim_next()
+    assert claimed
+    lost = threading.Event()
+    advanced = []
+
+    class FakeGlobalGuard:
+        def __init__(self):
+            self.lost = lost
+        def mark_progress(self):
+            advanced.append(True)
+
+    @contextmanager
+    def grant(_request_id):
+        yield FakeGlobalGuard()
+
+    monkeypatch.setattr(global_coordinator, "producer_lease", grant)
+    monkeypatch.setattr(processor, "start_job", lambda *a, **kw: {"accepted": True})
+    def lost_during_step(*args, **kwargs):
+        lost.set()
+        return "completed_progressed"
+    monkeypatch.setattr(processor, "_run", lost_during_step)
+    processor._run_governed(*claimed)
+    assert advanced == []  # A stale global owner cannot clear the root circuit.
+    status = g.snapshot()
+    assert status["active_jobs"] == 0
+    assert status["queued_jobs"] == 1
+    assert status["paused_jobs"] == 0
