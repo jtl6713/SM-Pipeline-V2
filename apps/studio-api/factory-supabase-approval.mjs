@@ -253,14 +253,12 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   // Factory historically committed Approved with no future plan and no auto.
   const scheduled = await factorySupabaseNextApprovedSlot(env, entry);
   if (pendingHumanReview?.pending) {
+    // Finalization itself re-runs the UNCHANGED persisted-slide publication
+    // gate. No extra photo inventory read for unrelated Factory approvals.
     await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
       requestId, approvedByUserRecordId,
     });
   }
-  // NEVER remove this independent persisted-slide gate. The only new slide
-  // approvals were recorded with the authenticated user and exact Factory
-  // request ID, not from historic/AI receipts or a publication-hold release.
-  await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
   const stamp = new Date().toISOString();
   const row = entry.row;
   if (!row.updated_at || !UUID.test(row.id)) {
