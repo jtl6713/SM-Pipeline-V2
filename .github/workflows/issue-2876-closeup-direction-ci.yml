@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'services/pipeline-runner/i1/processor.py'
+      - 'services/pipeline-runner/i1/asset_sourcing.py'
       - 'services/pipeline-runner/sai1/prompt.py'
       - 'services/pipeline-runner/studio_produce/closeup_direction.py'
       - 'services/pipeline-runner/studio_produce/thumbnail_prompt.py'
@@ -11,6 +12,7 @@ on:
       - 'services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py'
       - 'services/pipeline-runner/tests/test_profile_creative_prompt_integration.py'
       - 'services/pipeline-runner/tests/test_sai1_market.py'
+      - 'services/pipeline-runner/tests/test_i1_asset_sourcing_2647.py'
       - '.github/workflows/issue-2876-closeup-direction-ci.yml'
   workflow_dispatch:
 
@@ -37,4 +39,5 @@ jobs:
             services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
             services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
             services/pipeline-runner/tests/test_sai1_market.py \
-            services/pipeline-runner/tests/test_i1_candidate_pool.py
+            services/pipeline-runner/tests/test_i1_candidate_pool.py \
+            services/pipeline-runner/tests/test_i1_asset_sourcing_2647.py
