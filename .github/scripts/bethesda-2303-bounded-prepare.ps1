@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$envPath='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
+$envPath=Join-Path (Get-Location).Path 'Services\pipeline-runner\service\.env'
 if(!(Test-Path -LiteralPath $envPath)){throw 'env_missing'}
 function Setting($n){$a=@(Get-Content -LiteralPath $envPath|Where-Object {$_ -match ('^\s*'+[regex]::Escape($n)+'\s*=')});if($a.Count -ne 1){throw 'setting_missing'};return ($a[0] -split '=',2)[1].Trim().Trim('"').Trim("'")}
 $sb=(Setting 'SUPABASE_URL').TrimEnd('/')
