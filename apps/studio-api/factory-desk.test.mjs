@@ -641,3 +641,45 @@ test("incomplete pinned media stays in Needs Assets and gains no final approval"
   assert.equal(part.summary.needs_eyes,0);
   assert.equal(part.lanes.needs_assets[0].do_not_publish,true);
 });
+
+test("#2371 Factory cards carry exact Not Ready publishing status for NYC gallery review history recovery", async () => {
+  // Reproduces authenticated Factory response before this fix: all three
+  // cards were in Needs Eyes, but only #10858 appeared in the browser because
+  // #10855/#10856 had historical approval submission receipts.
+  const input = [10855,10856,10858].map((output_id)=>({
+    id: output_id===10855 ? "recO494MDnQ1Tk51b" :
+        output_id===10856 ? "recWIWOrdflmqyxKW" : "recrmu0sv44I7J2Ks",
+    output_id, kind:"output", content_id:2221,
+    content_item_id:"reclHHAP4oFodMt91",
+    profile_id:"recgtK8Z7eNADNtVy",
+    studio_state:output_id===10858 ? "Ready for Review" : "Scheduling approval ready · Media verified",
+    output_status:"Ready for Review",review_status:"Review Sent",
+    render_status:output_id===10858 ? "Rendered" : "Native Photo Route",
+    publish_status:"Not Ready",do_not_publish:false,
+    auto_publish_enabled:false,review_package_ready:true,
+    scheduled_post_date:null,studio_scheduled_at:null,
+    published_at:null,platform_post_url:null,
+    thumbnail_url:"https://media.chicagoshining.com/studio/previews/example.jpg",
+  }));
+  const cards=partitionFactoryLanes(input).lanes.needs_eyes;
+  assert.deepEqual(cards.map(card=>card.output_id),[10855,10856,10858]);
+  assert.ok(cards.every(card=>card.publish_status==="Not Ready"),
+    "Factory cards must not drop canonical Publish_Status into null");
+  const ui=await readFile(path.join(here,"../studio-web/assets/factory-desk.js"),"utf8");
+  const start=ui.indexOf("function factoryUnheldReviewCandidate(card)");
+  const end=ui.indexOf("\n  }",start);
+  assert.ok(start>=0 && end>start);
+  const candidate=runInNewContext("(" + ui.slice(start,end+4) + ")");
+  assert.equal(candidate(cards[0]),true,
+    "previously submitted Instagram gallery must be visible for new review");
+  assert.equal(candidate(cards[1]),true,
+    "previously submitted Facebook photo set must be visible for new review");
+  assert.equal(candidate({...cards[0],publish_status:null}),false,
+    "confirm missing projection was the actual exclusion condition");
+  assert.equal(candidate({...cards[1],publish_status:"Scheduled"}),false,
+    "a scheduled output must never re-enter Needs Eyes from a stale receipt");
+  assert.equal(candidate({...cards[1],do_not_publish:true}),false,
+    "publishing hold stays authoritative");
+  assert.equal(candidate({...cards[0],review_package_ready:false}),false,
+    "incomplete creative media cannot masquerade as approval ready");
+});
