@@ -15,6 +15,9 @@ def test_only_diagnostic_preflight_without_claim_or_provider_side_effects():
     assert "Probe-Python" in PS
     assert "Get-Process -Name python,python3" in PS
     assert "WindowsApps" in PS
+    assert "PythonCore" in PS
+    assert "Get-CimInstance Win32_Process" in PS
+    assert "incident2670_preflight_python_path_category=" in PS
     assert "global_coordinator as g" in PS
     assert "g.acquire(" not in PS
     assert "Invoke-RestMethod" not in PS
