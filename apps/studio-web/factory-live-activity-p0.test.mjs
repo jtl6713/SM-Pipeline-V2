@@ -94,6 +94,8 @@ test("status path isolates partial failures and never submits again", () => {
   assert.match(polling, /batchActivityPartialError/);
   assert.match(polling, /if \(state\.batchRefreshRequested\)/);
   assert.match(polling, /discoveryAge >= 60000/);
+  assert.match(polling, /batchDiscoveryStartedMs = now/);
+  assert.match(polling, /Math\.max\(\s*state\.lastBatchFullFetchMs/);
   assert.doesNotMatch(polling, /method:\s*["']POST["']/);
   assert.match(source, /factoryShowSubmissionPreview\(clickedCards\);/);
   assert.match(source, /renderFactoryBatchActivity\(state\.batch\);\s*syncFactoryFilterOptions\(\)/);
