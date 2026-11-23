@@ -10,3 +10,5 @@ One-time retry after previous fail-closed Ops shell preflight; expose only allow
 Retry after YAML-indentation correction; existing live I1 flag not modified by invalid workflow attempts.
 
 Read-only diagnostic receipt: disclose only exact unresolved spool job count on safe fail-closed I1 preflight.
+
+Repeat existing exact job spool preflight using known-working Windows temporary Python-file execution (not -c multiline string).
