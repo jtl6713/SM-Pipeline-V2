@@ -1,0 +1,19 @@
+name: Bethesda 2303 recovery fence read-only diagnostics
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/bethesda-2303-recovery-fence-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check current live public recovery policy without credentials or writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://pipeline.chicagoshining.com/health -o /tmp/recovery.json
+          jq -c '{ok, recovery_read_only, recovery_producer_only_enabled, recovery_producer_scope, workload_governor_enabled, studio_write_source, i1_durable_jobs, airtable_activity: {ok: .airtable_activity.ok, any_activity: .airtable_activity.any_activity, any_read: .airtable_activity.any_read, any_write: .airtable_activity.any_write}, remotion_health: .remotion_health}' /tmp/recovery.json
+          echo 'bethesda_public_health_observation=READ_ONLY_NO_MUTATION'
