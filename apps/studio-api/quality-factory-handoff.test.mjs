@@ -43,6 +43,10 @@ const cards=outputs=>outputs.map(row=>({
   id:row.airtable_record_id,output_id:row.output_number,
   publish_status:row.publish_status,review_package_ready:true,
 }));
+const mediaEvidence=outputs=>Object.fromEntries(outputs.map(row=>[String(row.output_number),{
+  cdn_bytes_verified:true,topic_location_verified:true,rights_verified:true,
+  branding_verified:true,aspect_ratio_verified:true,audio_verified:true,
+}]));
 
 test("Quality Agent generic signature is a complete read-only lifecycle playbook",()=>{
   assert.equal(FACTORY_HANDOFF_SIGNATURE,"QA-PRODUCTION-FACTORY-E2E-2846");
@@ -161,7 +165,8 @@ test("active submission remains fenced even with a review-ready card",()=>{
 
 test("full proof stops BEFORE human Factory approval and never approves or publishes",()=>{
   const all=source(),result=assessProductionFactoryHandoff({request:request(),outputs:all,
-    gallerySlides:slides(),factoryCards:cards(all)});
+    gallerySlides:slides(),factoryCards:cards(all),
+    verifiedMediaEvidence:mediaEvidence(all)});
   assert.equal(result.status,"awaiting_human_factory_approval");
   assert.equal(result.findings.length,0);
   assert.equal(result.expected_count,4);
@@ -274,4 +279,23 @@ test("TikTok multi-photo is not forced to invent IG/FB carousel_slides",()=>{
     "typed TikTok media requires separate exact source preflight");
   assert.ok(!result.findings.some(x=>x.output_id===10857
     && x.reason==="canonical_gallery_missing_or_unready"));
+});
+
+test("URLs and gallery count without verified bytes, city, rights, branding and audio stay UNKNOWN",()=>{
+  const all=source();
+  const insufficient=assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:slides(),factoryCards:cards(all)});
+  assert.equal(insufficient.status,"verification_required");
+  const proof=mediaEvidence(all);proof["10858"].audio_verified=false;
+  assert.equal(assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:slides(),factoryCards:cards(all),
+    verifiedMediaEvidence:proof}).status,"verification_required");
+  proof["10858"].audio_verified=true;proof["10855"].topic_location_verified=false;
+  assert.equal(assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:slides(),factoryCards:cards(all),
+    verifiedMediaEvidence:proof}).status,"verification_required");
+  proof["10855"].topic_location_verified=true;
+  assert.equal(assessProductionFactoryHandoff({request:request(),outputs:all,
+    gallerySlides:slides(),factoryCards:cards(all),
+    verifiedMediaEvidence:proof}).status,"awaiting_human_factory_approval");
 });
