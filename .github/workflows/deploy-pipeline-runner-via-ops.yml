@@ -13,6 +13,8 @@ on:
       # Airtable transport retirement and config-only changes are staged.
       # Do not auto-deploy the runner until a reviewed release marker is pushed.
       - 'deploy/i1-durable-runner-release.txt'
+      # #2670: governor changes require an explicit protected release marker.
+      - 'deploy/incident-2670-runner-governor-release.txt'
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
