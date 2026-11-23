@@ -1577,6 +1577,7 @@ export function classifyTesterCatalogAssert() {
 }
 
 export const CLASSIFIER_KINDS = Object.freeze([
+  "production_factory_handoff",
   "produce_clip_mismatch",
   "produce_stamp_422",
   "drive_music_404",
