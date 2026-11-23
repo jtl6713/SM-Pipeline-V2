@@ -3,3 +3,5 @@ Issue #2670 read-only one-time Windows Python coordinator runtime preflight. Tri
 Follow-up after actual host preflight: files, config and python command present, but child Python execution failed without a status receipt. New test distinguishes interpreter launch from requests/module/API errors. No lease or production work.
 
 Second follow-up: `python` command was present but even a trivial hello failed. Probe locally installed venv, running Python process, py launcher, then PATH; only execute verified candidate and never emit executable paths or environment values. No RPC or lease in this diagnostic.
+
+If all Python candidates fail, classify registry PythonCore, LocalAppData/known installation, CIM process executable, launcher and PATH's WindowsApps alias without exposing local paths. No RPC or job mutations.
