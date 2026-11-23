@@ -88,11 +88,15 @@
   }
   function rememberFactoryGroupRequest(batch) {
     const request_id = String(batch?.request_id || "");
-    if (!batch?.group || !/^[A-Za-z0-9_-]{12,128}$/.test(request_id)) return;
-    const profiles = [...new Set((batch.profile_ids || (batch.items || []).map(item => item.profile_id))
+    if (!batch?.job_id || !/^[A-Za-z0-9_-]{12,128}$/.test(request_id)) return;
+    const group = batch.group === true;
+    const profiles = [...new Set((batch.profile_ids ||
+      (group ? (batch.items || []).map(item => item.profile_id) : [batch.profile_id]))
       .map(String).filter(id => /^rec[A-Za-z0-9]+$/.test(id)))];
+    if (!profiles.length) return;
     const previous = recentFactoryGroupRequests();
-    const rows = [{ request_id, profiles, saved_ms: Date.now() },
+    const rows = [{ request_id, group, profile_id: group ? null : batch.profile_id,
+      profiles, saved_ms: Date.now() },
       ...previous.filter(row => row.request_id !== request_id)].slice(0, 24);
     try { localStorage.setItem(FACTORY_RECENT_GROUPS_KEY, JSON.stringify(rows)); } catch {}
   }
@@ -2148,14 +2152,15 @@
       // No POST, approval, scheduling, publishing, or claim mutation occurs.
       const filterId = factoryProfileId() || null;
       const knownGroups = state.batch?.filter_profile_id === filterId
-        ? (state.batch?.batches || []).filter(row => row.group && row.request_id &&
-            factoryBatchActiveRow(row)) : [];
+        ? (state.batch?.batches || []).filter(row => row.request_id &&
+            (row.group || row.profile_id) && factoryBatchActiveRow(row)) : [];
       const knownIds = new Set(knownGroups.map(row => row.request_id));
       // After reload there may be no state.batch yet. An accepted group is
       // recoverable from the same original R2 request without re-submitting.
       const remembered = recentFactoryGroupRequests().filter(row =>
         (!filterId || row.profiles.includes(filterId)) && !knownIds.has(row.request_id))
-        .map(row => ({ group: true, request_id: row.request_id }));
+        .map(row => ({ group: row.group !== false, request_id: row.request_id,
+          profile_id: row.profile_id || row.profiles[0] || null }));
       const window = factoryBatchPollWindow([...knownGroups, ...remembered],
         state.batchPollCursor || 0, 4);
       const fastGroups = window.groups;
@@ -2168,16 +2173,21 @@
       const readExact = async () => {
         const outcomes = await Promise.allSettled(fastGroups.map(async row => {
           const exactParams = new URLSearchParams({
-            scope: "all", request_id: row.request_id, fresh: String(now),
+            request_id: row.request_id, fresh: String(now),
           });
+          if (row.group) exactParams.set("scope", "all");
+          else exactParams.set("content_profile_id", row.profile_id);
           const value = await fetchJson(`/api/factory/approval-batches?${exactParams.toString()}`, {
             cache: "no-store", timeoutMs: 12000,
           });
-          if (value?.ok !== true || value.batches?.length !== 1 ||
-              value.batches[0]?.request_id !== row.request_id) {
+          const verifiedRow = row.group ? (
+            value?.ok === true && value.batches?.length === 1 ? value.batches[0] : null
+          ) : value;
+          if (verifiedRow?.request_id !== row.request_id ||
+              (row.job_id && verifiedRow.job_id !== row.job_id) ||
+              (!row.group && verifiedRow.profile_id !== row.profile_id)) {
             throw new Error("Exact Factory progress is unavailable; retaining prior snapshot");
           }
-          const verifiedRow = value.batches[0];
           // Paint each completed GET as it arrives; one slow sibling status
           // cannot postpone another approved output until the 12s timeout.
           if (factoryProfileId() === filterId) {
@@ -2520,11 +2530,13 @@
       });
       if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
       if (batch.already_running && !batch.already_submitted) {
+        factoryDismissSubmissionPreview();
         renderFactoryBatchActivity(batch);
         setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
         return;
       }
       rememberFactoryAccepted(selectionIds);
+      rememberFactoryGroupRequest(batch);
       state.lastBatchProfile = profiles[0];
       try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
