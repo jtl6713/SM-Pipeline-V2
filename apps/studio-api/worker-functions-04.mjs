@@ -393,7 +393,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { exploreIdeaNeedsApproval, ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -9388,6 +9388,10 @@ export async function studioIdeaStartPhotoListening(env, authorization, createdI
   for (const ideaId of createdIds || []) {
     try {
       let idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+      if (exploreIdeaNeedsApproval({
+        sourcingMode: f(idea, "Asset_Sourcing_Mode"),
+        candidateStatus: f(idea, "Candidate_Status"),
+      })) continue;
       const contentType = ideaPhotoAutoListenContentType(idea);
       let waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
       if (!waitStatus && !ideaHasExplicitPhotoProductionConfig(idea)) {
@@ -9474,7 +9478,10 @@ export async function studioIdeaRunPythonBatch(env, authorization, profile, batc
   const createdIds = Array.isArray(run.created_record_ids)
     ? run.created_record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
     : [];
-  const photoListening = await studioIdeaStartPhotoListening(env, authorization, createdIds);
+  // Explore generates editorial capture tasks, not a batch of automatic
+  // photo searches/production requests. Leave all created Idea IDs intact.
+  const photoListening = sourcingMode === "explore" ? []
+    : await studioIdeaStartPhotoListening(env, authorization, createdIds);
   await studioIdeaUpdateBatch(env, batch.id, {
     Status: "Complete",
     Generated_Count: created,
@@ -13812,6 +13819,10 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
 
 function readyProductionIdeaEligible(idea, requestRecord = null) {
   if (!idea?.id) return false;
+  if (exploreIdeaNeedsApproval({
+    sourcingMode: f(idea, "Asset_Sourcing_Mode"),
+    candidateStatus: f(idea, "Candidate_Status"),
+  })) return false;
   const status = String(f(idea, "Candidate_Status") || "").trim().toLowerCase();
   if (["on hold", "rejected", "promoted", "deleted", "expired"].includes(status)) return false;
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
@@ -13835,6 +13846,7 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
     fields: [
       "Candidate_Title",
       "Candidate_Status",
+      "Asset_Sourcing_Mode",
       "Content_Profile",
       "Content Items",
       "Promoted_Content_Record_ID",
@@ -15439,6 +15451,7 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
       fields: [
         "Candidate_Title",
         "Content_Profile",
+        "Asset_Sourcing_Mode",
         "Studio_Photo_Wait_Status",
         "Promoted_Content_Record_ID",
         "Candidate_Status",
@@ -15467,6 +15480,7 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
       photo_wait_status: String(f(idea, "Studio_Photo_Wait_Status") || "").trim(),
       promoted: Boolean(String(f(idea, "Promoted_Content_Record_ID") || "").trim()),
       candidate_status: String(f(idea, "Candidate_Status") || "").trim(),
+      sourcing_mode: String(f(idea, "Asset_Sourcing_Mode") || "").trim(),
       already_autonomous: isAutonomousOrigin(draft ? f(draft, "Production_Notes") : ""),
       draft,
       matched_ids: ideaMatchedMediaIds(idea),
@@ -15475,7 +15489,12 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
 
   const adopted = [];
   const max = Math.max(1, Number(limit) || 8);
-  for (const idea of dailyIdeasReadyToProduce(plain, enabledIds)) {
+  for (const idea of dailyIdeasReadyToProduce(plain.filter((row) =>
+    !exploreIdeaNeedsApproval({
+      sourcingMode: row.sourcing_mode,
+      candidateStatus: row.candidate_status,
+    })
+  ), enabledIds)) {
     if (adopted.length >= max) break;
     const draft = idea.draft;
     if (!draft?.id) continue;
