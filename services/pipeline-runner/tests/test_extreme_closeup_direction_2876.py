@@ -172,3 +172,76 @@ def test_cover_runner_gets_profile_from_explicit_content_profile(monkeypatch):
     assert "Grand Central's clock" in prompt
     assert "Wrigley Building" not in prompt
     assert received["ratio"] == "9:16"
+
+
+def test_classified_closeup_library_assets_are_suggested_first_without_auto_approval():
+    from i1.asset_sourcing import idea_sourcing_fields
+
+    assets = [
+        {"id": "rec" + "W" * 14, "key": "vizcaya", "shot_type": "Wide"},
+        {"id": "rec" + "D" * 14, "key": "vizcaya", "shot_type": "Detail"},
+        {"id": "rec" + "M" * 14, "key": "vizcaya", "shot_type": "Close-up"},
+        {"id": "rec" + "F" * 14, "key": "centralpark", "shot_type": "Close-up"},
+    ]
+    ctx = {"mode": "existing", "available": True, "assets": assets}
+    macro_idea = {
+        "primary_location": "Vizcaya Museum and Gardens",
+        "suggested_visuals": "Extreme close-up of historic stonework",
+        "required_assets": "Macro stone detail",
+    }
+    fields = idea_sourcing_fields(macro_idea, ctx)
+    assert fields["Suggested_Library_Asset_IDs"] == [
+        "rec" + "D" * 14, "rec" + "M" * 14, "rec" + "W" * 14,
+    ]
+    assert fields["Verified_Library_Asset_IDs"] == []
+    assert "rec" + "F" * 14 not in fields["Suggested_Library_Asset_IDs"]
+
+    ordinary = idea_sourcing_fields({
+        "primary_location": "Vizcaya Museum and Gardens",
+        "suggested_visuals": "Wide garden and building overview",
+    }, ctx)
+    assert ordinary["Suggested_Library_Asset_IDs"] == [
+        "rec" + "W" * 14, "rec" + "D" * 14, "rec" + "M" * 14,
+    ]
+
+
+def test_explicit_macro_intent_only_and_classifier_required():
+    from i1.asset_sourcing import _asks_for_closeup, _classified_closeup
+
+    assert _asks_for_closeup({"suggested_visuals": "Macro clock face"}) is True
+    assert _asks_for_closeup({"required_assets": "Tightly framed skating blade"}) is True
+    assert _asks_for_closeup({"candidate_title": "Ice Skate Closeup"}) is True
+    assert _asks_for_closeup({"suggested_visuals": "Building architectural details"}) is False
+    assert _classified_closeup({"shot_type": "Detail"}) is True
+    assert _classified_closeup({"shot_type": "Close-up"}) is True
+    assert _classified_closeup({"shot_type": "Wide"}) is False
+    assert _classified_closeup({"asset_name": "closeup.jpg"}) is False
+
+
+def test_actual_supabase_source_metadata_drives_only_advisory_shot_type(monkeypatch):
+    from i1 import asset_sourcing as sourcing
+
+    profile_id = "rec" + "M" * 14
+    media = {
+        "airtable_record_id": "rec" + "X" * 14,
+        "asset_name": "Vizcaya-Detail.jpg",
+        "asset_role": "Raw Photo",
+        "media_class": "Image",
+        "asset_status": "Available",
+        "active": True,
+        "do_not_use": False,
+        "google_drive_file_id": "drive-verified",
+        "metadata": {
+            "location": "Vizcaya Museum and Gardens, Miami",
+            "content_profile_airtable_id": profile_id,
+            "rights_status": "Owned",
+            "classification_status": "Classified",
+            "shot_type": "Close-up",
+        },
+    }
+    monkeypatch.setattr(sourcing, "_request",
+                        lambda settings, path: [media] if "asset_role=eq.Raw%20Photo" in path else [])
+    assets = sourcing._read_source_media({"mock": True}, profile_id)
+    assert len(assets) == 1
+    assert assets[0]["shot_type"] == "Close-up"
+    assert assets[0]["id"] == media["airtable_record_id"]
