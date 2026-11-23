@@ -12079,7 +12079,14 @@ function timedScriptAssetLabel(asset, index) {
         action: "recheck",
       };
     }
-    const count = target ? `${ready} of ${target} Google Drive records confirmed.` : "";
+    // During an active batch, item4UploadBatchDone counts acknowledged POSTs,
+    // not Google Drive IDs. Never claim background copies are confirmed from it.
+    const confirmedStorage = item4MasterReadyCount(status);
+    const count = target
+      ? (item4Uploading
+        ? `${ready} of ${target} upload requests saved · ${confirmedStorage} Google Drive/media records confirmed.`
+        : `${ready} of ${target} Google Drive/media records confirmed.`)
+      : "";
     const clipUpload = item4Uploading && ezIsClipRequest();
     return {
       heal: "uploading",
