@@ -121,6 +121,10 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (policy && !factoryGlobalAcceptsOutput(policy, record)) {
     return { eligible: false, reason: "platform/output type is not eligible" };
   }
+  // A media-QA hold remains an independent creative veto even if an operator
+  // accidentally clears the DNP flag before corrected media is re-reviewed.
+  if (row.error_messages?.SM_2618_Creative_QA_Hold?.publishing_permitted === false)
+    return { eligible: false, reason: "unresolved creative QA media correction; no approval permitted" };
   if (satisfied(row)) return { eligible: true, already_satisfied: true };
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
