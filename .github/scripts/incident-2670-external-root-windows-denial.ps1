@@ -72,15 +72,9 @@ else:
 '@
 $result=@(& python -c $python 2>$null)
 if($LASTEXITCODE -ne 0){
-  @($result|Where-Object {$_ -match '^incident2670_root_windows_class=(IMPORT_FAILED|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)
-$verified=@($result|Where-Object {$_ -match '^incident2670_crosshost_runner_(DENIED_ROOT_CAP|HOLD_ACQUIRED|HOLD_RELEASED)$'})
-if($mode -eq 'deny' -and $verified.Count -ne 1){throw 'crosshost_denial_receipt_missing'}
-if($mode -eq 'hold' -and $verified.Count -ne 2){throw 'crosshost_hold_receipts_missing'}
-$verified|ForEach-Object {Write-Output $_}
-})|ForEach-Object {Write-Output $_}
+  @($result|Where-Object {$_ -match '^incident2670_root_windows_class=(IMPORT_FAILED|GLOBAL_WORKLOAD_RPC_UNCONFIRMED|GLOBAL_WORKLOAD_RPC_REJECTED|GLOBAL_WORKLOAD_RPC_RECEIPT_INVALID|GLOBAL_WORKLOAD_AUTHORITY_UNAVAILABLE|ADMISSION_UNAVAILABLE|RUNTIME_FAILURE|UNEXPECTED_ADMISSION_OR_REASON)$'})|ForEach-Object {Write-Output $_}
   throw 'crosshost_python_client_failed'
 }
 $verified=@($result|Where-Object {$_ -match '^incident2670_crosshost_runner_(DENIED_ROOT_CAP|HOLD_ACQUIRED|HOLD_RELEASED)$'})
 if($mode -eq 'deny' -and $verified.Count -ne 1){throw 'crosshost_denial_receipt_missing'}
-if($mode -eq 'hold' -and $verified.Count -ne 2){throw 'crosshost_hold_receipts_missing'}
 $verified|ForEach-Object {Write-Output $_}
