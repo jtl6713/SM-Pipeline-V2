@@ -770,6 +770,7 @@ jobs:
               const reviewQueue = url.pathname === "/$TOKEN/rendering-review-queue";
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
               const factoryDesk = url.pathname === "/$TOKEN/factory-desk";
+              const pilsenPreview = url.pathname === "/$TOKEN/pilsen-photo-preview" && request.method === "GET";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
               const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
               const failedOutputCensus = url.pathname === "/$TOKEN/failed-output-census";
@@ -782,7 +783,7 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated && !qaNativeRun && !qaWorkload) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !pilsenPreview && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated && !qaNativeRun && !qaWorkload) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = qaWorkload ? "/api/admin/qa/workload"
                 : qaNativeRun ? "/api/admin/qa/quality-native-repair/run"
@@ -798,6 +799,7 @@ jobs:
                 : summaryReconcile ? "/api/profiles/overview/summary/reconcile"
                 : summary ? "/api/profiles/overview/summary"
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
+                : pilsenPreview ? "/api/outputs/recaQyj12CzOHjIQp/creative"
                 : factoryDesk ? "/api/factory/desk"
                 : failedOutputCensus ? "/api/factory/approval-batches?scope=all&quality_only=1"
                 : globalCanary ? "/api/factory/approval-batches?scope=all&status_only=1"
@@ -823,6 +825,17 @@ jobs:
                   : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
               const response = await env.STUDIO_API.fetch(internal);
+              if (pilsenPreview) {
+                const d=await response.json().catch(()=>({}));
+                const slides=Array.isArray(d.slides)?d.slides:[];
+                const valid=slides.every((s,i)=>s.order===i+1 && s.include!==false &&
+                  [s.variants?.["9:16"],s.current_image_url,s.preview_url].some(u=>{
+                    try { const p=new URL(u); return p.origin==="https://media.chicagoshining.com" && /[.](jpg|jpeg|png|webp)$/i.test(p.pathname); } catch { return false; }
+                  }));
+                return Response.json({http:response.status,ok:d.ok===true,identity:d.output?.id==="recaQyj12CzOHjIQp",
+                  platform:d.output?.platform==="TikTok",ratio:d.output?.aspect_ratio,count:d.output?.selected_clip_count,
+                  slides:slides.length,orderedTrustedImages:valid},{headers:{"Cache-Control":"no-store"}});
+              }
               if (scriptedFeedbackProbe) {
                 const result = scriptedMulti ? await response.json().catch(()=>({})) : null;
                 return Response.json({
@@ -884,6 +897,28 @@ jobs:
           test "$SESSION_CODE" = "200"
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
+
+      - name: Verify exact live Pilsen TikTok Creative photo package through authenticated service binding
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # One-time rollout acceptance for this exact record, not a perpetual
+          # deployment dependency after the owner approves or retires Pilsen.
+          git fetch --no-tags --depth=1 origin "$BEFORE_SHA"
+          if ! git diff "$BEFORE_SHA" HEAD -- deploy/cloudflare-worker-production.txt | grep -F '+2026-11-24 UTC — #2873 exact Supabase Creative GET' >/dev/null; then
+            echo "Pilsen exact-record rollout gate not requested on this push"
+            exit 0
+          fi
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          curl -fsS --max-time 60 "$BASE/pilsen-photo-preview" -o /tmp/pilsen-preview-proof.json
+          jq -c . /tmp/pilsen-preview-proof.json
+          jq -e '.http==200 and .ok and .identity and .platform and .ratio=="9:16" and .count==19 and .slides==19 and .orderedTrustedImages' /tmp/pilsen-preview-proof.json >/dev/null
+          echo "LIVE_PILSEN_TIKTOK_CREATIVE_19_PHOTOS=PASS"
 
       - name: Verify live QA catalog and bounded Supabase history through protected service binding
         id: qa_http
