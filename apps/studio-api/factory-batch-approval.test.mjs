@@ -218,3 +218,19 @@ test("#2959 Supabase drain awaits profile unlock before invoking the shared elig
   assert.match(source, /factoryBatchCronSelectJobs/);
   assert.match(supabase, /onTiming: checkpoint/);
 });
+
+
+test("#2959 indexed active work precedes history; fallback remains for old ledgers", () => {
+  const start = functions04.indexOf("export async function factoryBatchProcess(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchProcess__*/", start);
+  const source = functions04.slice(start, end);
+  assert.ok(source.indexOf("factoryBatchActiveIndexCandidates(") < source.indexOf("factoryBatchList(env.STUDIO_MEDIA, profileId"));
+  assert.match(source, /fallback = !active\.found \|\| !active\.complete/);
+  const cronStart = functions04.indexOf("export async function factoryBatchCronResume(");
+  const cronEnd = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchCronResume__*/", cronStart);
+  const cron = functions04.slice(cronStart, cronEnd);
+  assert.ok(cron.indexOf("factoryBatchActiveIndexProfiles(") < cron.indexOf("factoryApprovalGroupCronScan("));
+  assert.ok(cron.indexOf("factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx)") < cron.indexOf("factoryApprovalGroupCronScan("));
+  assert.match(cron, /5 - dispatchedProfiles\.size/);
+  assert.match(cron, /factoryBatchIndexRemember\(env\.STUDIO_MEDIA, exact\.job, \{ refresh: false \}\)/);
+});
