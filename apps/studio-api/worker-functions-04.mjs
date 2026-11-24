@@ -86,6 +86,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
+  factoryBatchReadProfileClaim,
   factoryBatchCronSelectJobs, factoryBatchCronReceiptCandidates, factoryBatchFailureRouted, factoryBatchFailure,
   factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
   factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce, factoryBatchRetryOriginalIntentOnce,
@@ -19035,8 +19036,9 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
   const job = requestId
     ? await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId)
     : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
+  const claim = job && factoryBatchNeedsAttention(job) ? await factoryBatchReadProfileClaim(env.STUDIO_MEDIA, profile.id) : null;
   return respond(request, env, {
-    ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
+    ...factoryBatchSummary(job, { claim }), quality_signals: factoryBatchQualitySignals(job, Date.now(), claim),
     approvals_enabled: factoryBatchRolloutPolicy(env, profile.id).enabled,
     rollout: factoryBatchRolloutPolicy(env, profile.id),
   });
@@ -20035,6 +20037,13 @@ export async function factoryBatchCronResume(env, ctx = null) {
         const active = await factoryBatchActiveIndexCandidates(env.STUDIO_MEDIA, profileId);
         if (!active.complete) console.warn("Factory active request index truncated", profileId);
         indexedCandidates.push(...active.candidates);
+        if (active.candidates.length) {
+          const claim = await factoryBatchReadProfileClaim(env.STUDIO_MEDIA, profileId);
+          for (const candidate of active.candidates) {
+            const signatures = factoryBatchQualitySignals(candidate.job, Date.now(), claim);
+            if (signatures.length) console.warn("Factory indexed Quality Agent", candidate.requestId, JSON.stringify(signatures));
+          }
+        }
       } catch (error) {
         console.warn("Factory active profile discovery deferred", profileId, String(error?.message || error).slice(0, 140));
       }

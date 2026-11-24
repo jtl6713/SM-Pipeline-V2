@@ -1010,3 +1010,36 @@ test("#2959 orphan index cannot authorize work and future retry stays ineligible
   assert.equal(factoryBatchCronSelectJobs(found.candidates, { nowMs: 100001 }).length, 0);
   assert.equal(factoryBatchCronSelectJobs(found.candidates, { nowMs: 160001 }).length, 1);
 });
+
+
+test("#2959 output engineering targets are strict, independent, and retry waits are measured separately", () => {
+  const job = factoryBatchBuild({ profileId, requestId:"factory_2959_targets", records: records.slice(0,1), now:"2026-11-24T12:00:00Z" });
+  const item = job.items[0];
+  const e = (state, ms, attempt) => ({state, at:new Date(Date.parse("2026-11-24T12:00:00Z")+ms).toISOString(), attempt});
+  item.timeline = [e("queued",0,0),e("processing",500,1),e("pending",1500,1),e("processing",61500,2),e("review_media_started",61500,2),e("review_media_finished",62500,2),e("mae_occupancy_started",62500,2),e("mae_occupancy_finished",63200,2),e("mae_slot_calculation_started",63200,2),e("mae_slot_calculation_finished",63300,2),e("approved",65500,2)];
+  item.status="approved";
+  const summary=factoryBatchSummary(job);
+  const timing=summary.items[0].timing;
+  assert.equal(timing.durations_ms.retry_wait,60000);
+  assert.equal(timing.durations_ms.worker_processing,5000);
+  assert.equal(timing.engineering_targets.worker_processing.pass,false);
+  assert.equal(timing.engineering_targets.review_media_validation.pass,false);
+  assert.equal(timing.engineering_targets.mae_occupancy_and_slot.pass,true);
+  assert.equal(timing.engineering_targets.supabase_commit_readback.pass,null);
+  assert.equal(summary.timing_report.metrics.worker_processing.engineering_target_miss_count,1);
+});
+
+test("#2959 pending reasons distinguish backoff, active claim, expired claim and unobserved capacity", () => {
+  const now=Date.parse("2026-11-24T12:02:00Z");
+  const job=factoryBatchBuild({profileId,requestId:"factory_2959_pending",records:records.slice(0,2),now:"2026-11-24T12:00:00Z"});
+  const [first,second]=job.items;
+  second.next_attempt_ms=now+10000;
+  assert.equal(factoryBatchItemProgress(first,{nowMs:now}).pending_reason,"awaiting_dispatch_claim_unobserved");
+  assert.equal(factoryBatchItemProgress(first,{nowMs:now,claim:{state:"active"}}).pending_reason,"profile_claim_active");
+  assert.equal(factoryBatchItemProgress(second,{nowMs:now,claim:{state:"expired"}}).pending_reason,"retry_backoff");
+  const signals=factoryBatchQualitySignals(job,now,{state:"expired"}).filter(s=>s.code==="QA-FACTORY-OUTPUT-ELIGIBLE-UNCLAIMED");
+  assert.equal(signals.length,1);
+  assert.equal(signals[0].record_id,first.id);
+  assert.equal(signals[0].safe_auto_recover,false);
+  assert.ok(!factoryBatchQualitySignals(job,now,{state:"active"}).some(s=>s.code==="QA-FACTORY-OUTPUT-ELIGIBLE-UNCLAIMED"));
+});

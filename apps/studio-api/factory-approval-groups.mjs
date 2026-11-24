@@ -10,7 +10,7 @@
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchRetryEligible,
-  factoryBatchItemProgress,
+  factoryBatchItemProgress, factoryBatchReadProfileClaim,
 } from "./factory-approval-queue.mjs";
 import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 
@@ -180,10 +180,11 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
       failed_count:0,pending_count:child.records.length,
     };
     for (const key of Object.keys(totals)) totals[key]+=counts[key];
+    const claim = counts.pending_count ? await factoryBatchReadProfileClaim(bucket, child.profile_id) : null;
     if (job) observedTimings.push(...(job.items || []));
-    if (job) qualitySignals.push(...factoryBatchQualitySignals(job).map(signal=>({
+    if (job) qualitySignals.push(...factoryBatchQualitySignals(job, Date.now(), claim).map(signal=>({
       ...signal,profile_id:child.profile_id,job_id:job.id,
-      output_ids:job.items.map(item=>item.output_id).filter(Boolean),
+      output_ids:signal.output_ids || job.items.map(item=>item.output_id).filter(Boolean),
     })));
     children.push({
       profile_id:child.profile_id,request_id:child.request_id,
@@ -201,7 +202,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
         failure_history: item?.failure_history || [],
         removed_original_error: item?.removed_original_error || null,
         previous_failure_error: item?.previous_failure_error || null,
-        ...factoryBatchItemProgress(item),
+        ...factoryBatchItemProgress(item, { claim }),
         timing: item ? factoryApprovalItemTiming(item) : null });
     }
   }
