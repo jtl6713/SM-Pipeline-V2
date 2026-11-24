@@ -1278,11 +1278,17 @@ export function studioRenderAudioPreflight(row) {
   const voice = mode("Studio_Effective_Voiceover_Mode") === "yes";
   const music = mode("Studio_Effective_Background_Music_Mode") === "yes";
   if (voice) {
-    if (!String(f(row, "Voiceover_URL") || "").trim()) return "voiceover_missing";
+    const missingVoice = !String(f(row, "Voiceover_URL") || "").trim();
+    const story = [f(row, "Studio_Output_Type"), f(row, "Output_Type"), f(row, "Format")]
+      .some(v => /^story$/i.test(String(v || "").trim()));
+    // Only generated Story work may enter R4 to prepare its own narration.
+    // This is admission to preparation, not permission to render silently.
+    const prepareStory = missingVoice && story && String(f(row, "Output_Filename") || "").startsWith("studio-");
+    if (missingVoice && !prepareStory) return "voiceover_missing";
     const seconds = Number(f(row, "Voiceover_Duration_Seconds")
       || f(row, "Studio_Effective_Voiceover_Duration_Seconds") || 0);
     const frames = Number(f(row, "Render_Total_Frames") || 0);
-    if (!(seconds > 0) || !(frames > 0) || frames / 30 < seconds + 0.1)
+    if (!prepareStory && (!(seconds > 0) || !(frames > 0) || frames / 30 < seconds + 0.1))
       return "voiceover_exceeds_video";
   }
   if (music && !String(
