@@ -146,10 +146,10 @@ test("OAuth refresh preserves only known Google error categories and never leaks
   for(const code of ["invalid_client","invalid_grant","unauthorized_client","invalid_scope","invalid_request","unknown-private-error"]){
     await assert.rejects(()=>refreshIssue2618DriveToken(env,async(url,options)=>{
       assert.equal(url,"https://oauth2.googleapis.com/token");
-      assert.equal(options.redirect,"error");
-      assert.equal(options.body.get("grant_type"),"refresh_token");
+      assert.equal(options.redirect,"manual");
+      assert.equal(new URLSearchParams(options.body).get("grant_type"),"refresh_token");
       return Response.json({error:code,error_description:"test-secret"}, {status:400});
-    }),error=>error.message==="FACTORY_2618_DRIVE_OAUTH_"+(code==="unknown-private-error"?"TOKEN_ENDPOINT_FAILED":code.toUpperCase()));
+    }),error=>error.message==="FACTORY_2618_DRIVE_OAUTH_"+(code==="unknown-private-error"?"HTTP_400":code.toUpperCase()));
   }
   assert.equal(await refreshIssue2618DriveToken(env,async()=>Response.json({access_token:"test-access"})),"test-access");
   await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>Response.json({})),/FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING/);
@@ -158,4 +158,17 @@ test("OAuth refresh preserves only known Google error categories and never leaks
     getAccessToken:()=>refreshIssue2618DriveToken(env,async()=>Response.json({error:"invalid_grant"},{status:400})),
     fetchImpl:async()=>{throw Error("Drive must not be contacted on refresh failure");},
   }),/FACTORY_2618_DRIVE_OAUTH_INVALID_GRANT/);
+});
+
+test("OAuth transport, redirect, HTTP status, and quoted dotenv mistakes remain distinguishable",async()=>{
+  const env={GOOGLE_CLIENT_ID:"test-client",GOOGLE_CLIENT_SECRET:"test-secret",GOOGLE_REFRESH_TOKEN:"test-refresh"};
+  let called=0;
+  await assert.rejects(()=>refreshIssue2618DriveToken({...env,GOOGLE_REFRESH_TOKEN:'"test-refresh"'},async()=>{called++;}),/FACTORY_2618_DRIVE_OAUTH_BINDING_QUOTED/);
+  assert.equal(called,0);
+  await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>{throw Error("private runtime details");}),/FACTORY_2618_DRIVE_OAUTH_TRANSPORT_FAILED/);
+  await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>new Response(null,{status:302,headers:{Location:"https://example.invalid"}})),/FACTORY_2618_DRIVE_OAUTH_REDIRECT_REJECTED/);
+  for(const [status,code] of [[400,"400"],[401,"401"],[403,"403"],[429,"429"],[418,"4XX"],[503,"5XX"]]){
+    await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>new Response("private response",{status})),error=>error.message==="FACTORY_2618_DRIVE_OAUTH_HTTP_"+code);
+  }
+  await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>new Response("not JSON",{status:200})),/FACTORY_2618_DRIVE_OAUTH_NON_JSON_SUCCESS/);
 });
