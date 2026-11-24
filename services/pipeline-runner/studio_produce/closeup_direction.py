@@ -130,7 +130,7 @@ def cover_closeup_guidance(*, market: str = "", creation_key: str = "") -> str:
         "Respect the requested aspect ratio, mobile readability, existing "
         "brand lettering, watermarks and top/bottom safe margins; do not "
         "fabricate landmark geometry or invent signs. Do not add fake in-photo "
-        "text, logos or UI. Honor any explicitly requested creator framing; "
+        "text, logos or UI; honor any explicit creator framing. "
         "if a close-up would misrepresent the real location or subject, use "
         "an authentic normal composition for this NEW image instead. "
         "Never substitute, recrop, regenerate or overwrite any existing "
