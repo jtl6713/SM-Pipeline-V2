@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   factorySupabaseApprovalRows, factorySupabaseGroupPreflight,
-  factorySupabaseApprovalDisposition, factorySupabaseApproveOutput,
+  factorySupabaseApprovalDisposition, factorySupabaseApproveOutput, encodedMediaReviewIssue,
 } from "./factory-supabase-approval.mjs";
 import { factoryGlobalPolicy } from "./factory-batch-global-policy.mjs";
 
@@ -403,4 +403,26 @@ test("#2959 Supabase timings separate media, occupancy, MAE computation, commit 
   assert.equal(timings.find(x => x.state === "supabase_commit_started").writes, 0);
   assert.equal(timings.find(x => x.state === "supabase_commit_finished").writes, 1);
   assert.equal(timings.find(x => x.state === "supabase_readback_finished").writes, 1);
+});
+
+
+test("#2970 rejects wrong Story frame totals and stale audio/preview proof", () => {
+  const row = {studio_output_type:"Story", selected_assets:{target_total_frames:300},render_total_frames:1257};
+  assert.match(encodedMediaReviewIssue(row),/Story render duration/);
+  row.render_total_frames=300;
+  row.studio_preview_url="https://media.chicagoshining.com/studio/previews/job.mp4";
+  row.final_file_url="https://drive.google.com/file/d/drive123/view";
+  row.studio_effective_voiceover_mode="Yes";
+  row.studio_effective_background_music_mode="Yes";
+  const proof={version:1,sha256:"a".repeat(64),preview_url:row.studio_preview_url,drive_file_id:"drive123",
+    encoded:{duration_seconds:10},contract:{frames:300,required_audio:{voiceover:true,music:true}}};
+  row.error_messages={Studio_Media_Contract_Receipt_JSON:JSON.stringify(proof)};
+  assert.equal(encodedMediaReviewIssue(row),null);
+  proof.contract.required_audio.voiceover=false;
+  row.error_messages.Studio_Media_Contract_Receipt_JSON=JSON.stringify(proof);
+  assert.match(encodedMediaReviewIssue(row),/audio intent/);
+  proof.contract.required_audio.voiceover=true;
+  proof.preview_url="https://media.chicagoshining.com/studio/previews/old.mp4";
+  row.error_messages.Studio_Media_Contract_Receipt_JSON=JSON.stringify(proof);
+  assert.match(encodedMediaReviewIssue(row),/no longer matches/);
 });
