@@ -1647,3 +1647,4 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 
 2026-11-24 UTC — #2959 protected Worker release: merged #2960 Supabase post-drain continuation and per-output timing, plus exact active-work index. Existing profile/output locks, canonical Supabase CAS and receipt reconciliation, original human approval, all media revision and publishing holds, and #2670 admission/concurrency controls stay unchanged. No test approval, historical replay, publishing, schema or binding change. Require existing release gates and rollback verification, then fresh authenticated real-batch timings; deployment alone is not #2959 acceptance.
 2026-11-24 UTC — #2965 prevent Worker from resetting Supabase runner-owned SMV1 Processing claims; log deferred admission.
+2026-11-24 UTC — #2965 preserve known active SMV1 claims during Prepare retry or plan change.

@@ -1093,6 +1093,7 @@ def process_one(
     production_request_record_id: str | None = None,
     test_run_id: str | None = None,
 ) -> dict[str, Any]:
+    restart_recovery.remember_request(production_request_record_id,test_run_id)
     try:
         with governor.resource_slot("smv1_drain",limit=1,wait_seconds=0):
             return _process_one_admitted(production_request_record_id=production_request_record_id,test_run_id=test_run_id)
@@ -1153,6 +1154,7 @@ def process_drain(
     test_run_id: str | None = None,
     photo_workers: int = 8,
     max_followup: int = 8,
+    _recovery_dispatch: bool = False,
 ) -> dict[str, Any]:
     """Admit one drain before doing any queue reads or launching photo groups.
 
@@ -1160,13 +1162,29 @@ def process_drain(
     runner-wide admission slot coalesces overlap without waiting or changing
     the existing photo-group, transfer or database limits.
     """
+    tracked = restart_recovery.remember_request(production_request_record_id,test_run_id)
     with governor.resource_slot("smv1_drain", limit=1, wait_seconds=0):
-        return _process_drain_admitted(
+        result = _process_drain_admitted(
             production_request_record_id=production_request_record_id,
             test_run_id=test_run_id,
             photo_workers=photo_workers,
             max_followup=max_followup,
         )
+        # Only the restart consumer retires a durable hint, after exact
+        # canonical readback. Ordinary browser/cron pulses need no extra read.
+        if tracked and _recovery_dispatch:
+            client=AirtableClient()
+            rid=airtable_quote(production_request_record_id)
+            outstanding=client.list_records(MEDIA_TRANSFER_QUEUE_TABLE,
+                formula=f'AND({{Production_Request_Record_ID}}="{rid}",{{Test_Run_ID}}=BLANK(),OR({{Transfer_Status}}="Pending",{{Transfer_Status}}="Processing",{{Transfer_Status}}="Drive Uploaded"))',
+                max_records=1)
+            if not isinstance(outstanding,list):
+                raise RuntimeError("SMV1 exact queue readback unavailable")
+            if not outstanding:
+                restart_recovery.finish_request(production_request_record_id)
+            else:
+                restart_recovery.defer_request(production_request_record_id,progressed=bool(result.get("processed_count")))
+        return result
 
 
 def _process_drain_admitted(

@@ -91,3 +91,31 @@ def test_recovery_requires_exact_claim_and_positive_death(monkeypatch):
     assert not rr.recoverable_claim("recLegacy","transfer","2026-11-24T00:00:00Z")
     with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
         assert not rr.recoverable_claim("recCrop","transfer","2026-11-24T00:00:00Z")
+
+def test_restart_queue_is_persistent_bounded_and_admission_aware():
+    assert rr.remember_request("recExact")
+    assert rr.remember_request("recExact")
+    assert not rr.remember_request("recTest","test-only")
+    with g._connect() as db:
+        assert db.execute("SELECT count(*) FROM smv1_pending_requests").fetchone()[0]==1
+        db.execute("UPDATE smv1_pending_requests SET next_at=0")
+    assert rr.next_request()=="recExact"
+    token="c"*32
+    assert g.set_smv1_maintenance(token,begin=True)
+    assert rr.next_request() is None
+    assert g.set_smv1_maintenance(token,begin=False)
+    for _ in range(8): rr.defer_request("recExact")
+    assert rr.next_request() is None
+    with g._connect() as db:
+        assert db.execute("SELECT failures FROM smv1_pending_requests").fetchone()[0]==8
+    rr.finish_request("recExact")
+    with g._connect() as db:
+        assert db.execute("SELECT count(*) FROM smv1_pending_requests").fetchone()[0]==0
+
+def test_deploy_script_fences_before_normal_stop_and_releases():
+    from pathlib import Path
+    script=(Path(__file__).resolve().parents[3]/"deploy/local-services/Deploy-SMService.ps1").read_text(encoding="utf-8")
+    normal=script.split("Write-Step '5/8  Stop only the selected service'",1)[1]
+    assert normal.index("Enter-Smv1DeploymentMaintenance")<normal.index("Stop-LocalService")
+    assert "finally { Exit-Smv1DeploymentMaintenance }" in normal
+    assert "legacy runner busy; defer bootstrap" in script

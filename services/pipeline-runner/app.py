@@ -1504,6 +1504,8 @@ def run_studio_produce_ops_alert():
 
 def main() -> None:
     logging.basicConfig(level=settings.get("log_level", "info").upper())
+    from item4.restart_recovery import start_consumer as start_smv1_recovery_consumer
+    start_smv1_recovery_consumer()
     start_i1_consumer()  # disabled by default; startup fails if the configured spool is not durable
     start_review_dispatch_consumer()  # protected, off by default; bounded and fail-closed
     start_native_gallery_consumer(settings)  # explicitly opt-in C5/C6; fail closed

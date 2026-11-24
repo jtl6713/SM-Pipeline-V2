@@ -241,7 +241,7 @@ def test_stalled_pending_crop_signature_excludes_incomplete_or_active_cases():
     for change in (
         {"confirmed_master_count": 18}, {"plan_status": "Needs Plan"},
         {"ready_crops": 38, "pending_crops": 0}, {"pending_crops": 27},
-        {"pending_attempted_count": 1}, {"request_status": "Cancelled"},
+        {"pending_attempted_count": 29}, {"request_status": "Cancelled"},
         {"test_run_id": "test-only"}, {"last_pending_change_utc": "2026-11-24T17:35:00Z"},
         {"last_pending_change_utc": "2026-11-22T12:48:04"},
         {"last_pending_change_utc": "invalid"},
@@ -259,3 +259,10 @@ def test_creative_image_warning_is_advisory_and_deduplicated():
     assert result["action"] == "return_to_production_for_refinement"
     assert len(result["notes"]) == 1
     assert creative_image_advisory(evidence=[]) is None
+
+def test_stalled_pending_crop_signature_includes_abandoned_attempts():
+    from quality_agent.signatures import detect_stalled_pending_crops
+    result=detect_stalled_pending_crops(**_stalled_crop_fixture(pending_attempted_count=7))
+    assert result["pending_attempted_crops"]==7
+    assert result["pending_unattempted_crops"]==21
+    assert result["auto_repair_safe"] is False

@@ -90,3 +90,94 @@ def reserved_upload(drive, record_id, transfer_id, folder, filename, content):
     if not existing or existing.get("id")!=file_id or existing.get("name")!=filename or existing.get("mimeType")!="image/jpeg" or str(existing.get("size"))!=str(len(content)) or existing.get("md5Checksum")!=digest or folder not in (existing.get("parents") or []) or existing.get("trashed") is not False:
         raise RuntimeError("reserved crop Drive receipt could not be verified")
     return existing,r["media_id"]
+
+# A local durable dispatch hint is written before attempting admission. The
+# canonical queue, not this hint, decides whether work exists after restart.
+import logging
+import re
+import threading
+import time
+
+_log = logging.getLogger("pipeline-runner.smv1-recovery")
+_wake = threading.Event()
+_start_lock = threading.Lock()
+_started = False
+
+
+def remember_request(request_id, test_run_id=None):
+    if not governor.enabled() or test_run_id or not re.fullmatch(r"rec[A-Za-z0-9]{1,64}",str(request_id or "")):
+        return False
+    with governor._connect() as db:
+        changed = db.execute("INSERT OR IGNORE INTO smv1_pending_requests(request_id,next_at) VALUES(?,?)",
+                             (request_id,time.time()+5)).rowcount
+    if changed:
+        _wake.set()
+    return True
+
+
+def next_request():
+    with governor._connect() as db:
+        if governor.admission_paused() or governor.circuit_open(db) or governor.smv1_maintenance_active(db):
+            return None
+        row=db.execute("SELECT request_id FROM smv1_pending_requests WHERE next_at<=? AND failures<8 ORDER BY next_at,request_id LIMIT 1",(time.time(),)).fetchone()
+        return row[0] if row else None
+
+
+def defer_request(request_id, *, admission=False, progressed=False):
+    with governor._connect() as db:
+        governor._transaction(db)
+        row=db.execute("SELECT failures FROM smv1_pending_requests WHERE request_id=?",(request_id,)).fetchone()
+        if row:
+            failures=0 if progressed else row[0]+(0 if admission else 1)
+            delay=5 if admission or progressed else min(120,5*(2**min(failures,5)))
+            db.execute("UPDATE smv1_pending_requests SET failures=?,next_at=? WHERE request_id=?",
+                       (failures,time.time()+delay,request_id))
+            if failures==8:
+                _log.error("SMV1 exact recovery parked after bounded no-progress attempts request=%s",request_id)
+        db.commit()
+
+
+def finish_request(request_id):
+    with governor._connect() as db:
+        db.execute("DELETE FROM smv1_pending_requests WHERE request_id=?",(request_id,))
+
+
+def consume_once():
+    from item4 import processor
+    request_id=next_request()
+    if not request_id:
+        return False
+    try:
+        # One host-wide root remains the admission authority. No blind replay:
+        # the processor reads the existing canonical transfer queue.
+        processor.process_drain(production_request_record_id=request_id,
+                                photo_workers=1,max_followup=1,_recovery_dispatch=True)
+    except governor.AdmissionDeferred:
+        defer_request(request_id,admission=True)
+    except Exception:
+        _log.exception("SMV1 exact restart recovery failed request=%s",request_id)
+        defer_request(request_id)
+    return True
+
+
+def _consume():
+    while True:
+        try:
+            consume_once()
+        except Exception:
+            _log.exception("SMV1 durable recovery consumer failed")
+        _wake.wait(5)
+        _wake.clear()
+
+
+def start_consumer():
+    global _started
+    if not governor.enabled():
+        return
+    with _start_lock:
+        if _started:
+            return
+        with governor._connect() as db:
+            db.execute("SELECT 1")
+        threading.Thread(target=_consume,daemon=True,name="smv1-durable-recovery").start()
+        _started=True

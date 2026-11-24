@@ -495,6 +495,66 @@ function Wait-ServiceHealth {
     }
 }
 
+$script:Smv1Maintenance = $null
+
+function Exit-Smv1DeploymentMaintenance {
+    if (-not $script:Smv1Maintenance) { return }
+    $m=$script:Smv1Maintenance
+    $script:Smv1Maintenance=$null
+    try {
+        $body=@{action='end';token=$m.Token}|ConvertTo-Json -Compress
+        $r=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/admin/workload/smv1-maintenance' -Headers $m.Headers -ContentType 'application/json' -Body $body -TimeoutSec 15
+        if ($r.ok -ne $true) { throw 'maintenance release not acknowledged' }
+        Write-Host 'SMV1 maintenance released.'
+    } catch { Write-Warning 'SMV1 maintenance release not confirmed; bounded gate expires automatically.' }
+}
+
+function Enter-Smv1DeploymentMaintenance([string]$Root) {
+    if (@(Get-NetTCPConnection -LocalPort 3350 -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { return }
+    $lines=@(Get-Content -LiteralPath (Join-Path $Root '.env') | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+    if ($lines.Count -ne 1) { throw 'runner maintenance authentication unavailable' }
+    $secret=([string]($lines[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+    if ($secret.Length -lt 24) { throw 'runner maintenance authentication invalid' }
+    $header=@{'X-Pipeline-Secret'=$secret}
+    $token=[guid]::NewGuid().ToString('N')
+    $body=@{action='begin';token=$token}|ConvertTo-Json -Compress
+    $bootstrap=$false
+    try {
+        $gate=Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:3350/admin/workload/smv1-maintenance' -Headers $header -ContentType 'application/json' -Body $body -TimeoutSec 15
+        if ($gate.ok -ne $true) { throw 'runner maintenance not acknowledged' }
+        $script:Smv1Maintenance=@{Token=$token;Headers=$header}
+    } catch {
+        # One-time compatibility bootstrap ONLY from the exact pre-gate build.
+        # That version cannot atomically fence arrivals. Require positive idle
+        # evidence immediately before stopping; no broad fallback on errors.
+        $status=$null
+        if ($_.Exception.Response) { $status=[int]$_.Exception.Response.StatusCode }
+        if ($status -ne 404) { throw 'runner maintenance gate unavailable; deployment deferred' }
+        $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 15
+        if ($h.version -ne '2026-11-23-2888-private-factory-source-v1') { throw 'unexpected ungated runner; deployment deferred' }
+        $bootstrap=$true
+        Write-Warning 'One-time #2965 bootstrap: legacy runner cannot atomically fence new crop arrivals.'
+    }
+    try {
+        $deadline=(Get-Date).AddSeconds(120)
+        do {
+            $g=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $header -TimeoutSec 15
+            if ($g.ok -ne $true -or $g.enabled -ne $true -or $null -eq $g.active_resource_slots.smv1_drain -or (!$bootstrap -and $g.smv1_maintenance_active -ne $true)) { throw 'runner quiescence unverifiable' }
+            $a=$g.active_resource_slots
+            if ([int]$g.active_jobs -eq 0 -and [int]$a.worker_heavy -eq 0 -and [int]$a.smv1_drain -eq 0 -and [int]$a.photo_group -eq 0 -and [int]$a.transfer -eq 0) {
+                Write-Host 'SMV1 deployment quiescence verified; no active crop or producer claims.'
+                return
+            }
+            if ($bootstrap) { throw 'legacy runner busy; defer bootstrap without interrupting jobs' }
+            Start-Sleep -Seconds 3
+        } while ((Get-Date) -lt $deadline)
+        throw 'runner still processing; deployment deferred without stopping service'
+    } catch {
+        Exit-Smv1DeploymentMaintenance
+        throw
+    }
+}
+
 function Stop-LocalService {
     param([hashtable]$Config)
 
@@ -754,11 +814,16 @@ if ($RollbackLatest) {
         if ($answer -ne 'ROLLBACK') { throw 'Rollback cancelled.' }
     }
 
-    Stop-LocalService -Config $Config
-    Restore-SourceBackup -RuntimeRoot $RuntimeRoot -Config $Config -BackupRoot $latest
-    Install-Dependencies -Config $Config -RuntimeRoot $RuntimeRoot -ForceInstall
-    Start-LocalService -ServiceName $Service -Config $Config -RuntimeRoot $RuntimeRoot
-    Wait-ServiceHealth -Config $Config -Seconds 90
+    try {
+        if ($Service -eq 'pipeline-runner') { Enter-Smv1DeploymentMaintenance $RuntimeRoot }
+        Stop-LocalService -Config $Config
+        Restore-SourceBackup -RuntimeRoot $RuntimeRoot -Config $Config -BackupRoot $latest
+        Install-Dependencies -Config $Config -RuntimeRoot $RuntimeRoot -ForceInstall
+        Start-LocalService -ServiceName $Service -Config $Config -RuntimeRoot $RuntimeRoot
+        Wait-ServiceHealth -Config $Config -Seconds 90
+    } finally {
+        Exit-Smv1DeploymentMaintenance
+    }
 
     $record = @{
         action = 'manual_rollback'
@@ -953,6 +1018,7 @@ try {
 
     try {
         Write-Step '5/8  Stop only the selected service'
+        if ($Service -eq 'pipeline-runner') { Enter-Smv1DeploymentMaintenance $RuntimeRoot }
         Stop-LocalService -Config $Config
         $Stopped = $true
 
@@ -1071,6 +1137,7 @@ try {
 
         throw $deploymentFailure
     }
+    finally { Exit-Smv1DeploymentMaintenance }
 }
 finally {
     if (Test-Path -LiteralPath $TempWorktree) {

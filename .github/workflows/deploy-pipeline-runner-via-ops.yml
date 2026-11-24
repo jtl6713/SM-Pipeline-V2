@@ -95,6 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          (cd services/pipeline-runner && python -m pytest -q tests/test_2965_smv1_restart.py)
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_owner_generation_guidance.py \
             services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
@@ -213,6 +214,31 @@ jobs:
             fi
           done
           test -n "$selected"
+
+          # Sync the guarded deploy script before launching the allowlisted
+          # deployment. A dirty/diverged local checkout fails closed.
+          SYNC=''
+          for attempt in $(seq 1 20); do
+            code=$(curl -sS --max-time 30 -o /tmp/sync.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" -H "Authorization: Bearer $selected" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"sync","confirm":true}' || true)
+            if [[ "$code" == 202 ]] && jq -e '.ok==true and .job.action=="sync"' /tmp/sync.json >/dev/null; then
+              SYNC=$(jq -r '.job.id // empty' /tmp/sync.json); break
+            fi
+            [[ "$code" == 409 ]] || { echo "runner_guard_sync_http=$code"; exit 1; }
+            sleep 3
+          done
+          test -n "$SYNC"
+          SYNC_OK=false
+          for attempt in $(seq 1 40); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$SYNC" -o /tmp/sync-status.json
+            state=$(jq -r '.job.status // empty' /tmp/sync-status.json)
+            if [[ "$state" == ok ]]; then SYNC_OK=true; break; fi
+            [[ "$state" != failed ]] || exit 1
+            sleep 3
+          done
+          test "$SYNC_OK" = true
 
           # Never adopt a 409 busy job — concurrent Speakeasy /api/shell pulses
           # have been mistaken for a successful deploy (health stayed on the
