@@ -2554,7 +2554,8 @@ export async function readSupabaseFactoryGallerySlides(env, outputRecordId) {
   // slide associations from earlier creative-approved source galleries.
   // A pending gallery can be inspected, never described as publication-ready.
   const drafts = slides.filter(slide =>
-    slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.publishing_authorized === false);
+    slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.publishing_authorized === false
+      && slide?.fields?.SM_Native_Gallery_Draft_Repair_2294?.final_creative_approved !== true);
   if (drafts.length) {
     const selected = parent?.selected_assets?.selected_clips;
     const render = parent?.render_clip_list;

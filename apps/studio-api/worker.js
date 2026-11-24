@@ -1,4 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
+import {readFactoryReviewResolve} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
 import {
@@ -4311,6 +4312,10 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Factory slide inventory is read-only");
         requirePermission(authorization, "outputs_review");
         const outputId = url.pathname.split("/")[4];
+        if(url.searchParams.get("resolve")==="1") {
+          try { return respond(request,env,{ok:true,...await readFactoryReviewResolve(env,outputId,authorization)}); }
+          catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
+        }
         const inventory = await readSupabaseFactoryGallerySlides(env, outputId);
         if (!inventory) throw new HttpError(404, "Native gallery output not found");
         return respond(request, env, { ok: true, ...inventory });
