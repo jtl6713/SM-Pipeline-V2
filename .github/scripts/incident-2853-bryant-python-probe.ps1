@@ -1,3 +1,5 @@
+param([switch]$NormalClosedRecovery)
+
 $ErrorActionPreference = 'Stop'
 
 $requestId = 'recbD8PLtJpez8Oz0'
@@ -49,7 +51,7 @@ function Has-Value($value) {
 
 function Assert-NoProviderOrApproval([object]$row) {
   foreach ($name in @(
-    'published_at', 'studio_scheduled_at', 'youtube_scheduled_publish_at',
+    'published_at', 'scheduled_post_date', 'studio_scheduled_at', 'youtube_scheduled_publish_at',
     'platform_post_url', 'platform_publish_response', 'publish_asset_url'
   )) {
     if (Has-Value $row.$name) { throw "incident2853_output_external_state_changed_$name" }
@@ -159,7 +161,7 @@ try {
       $health.supabase_pipeline_writes -ne $true -or
       $health.workload_governor_enabled -ne $true -or
       $health.recovery_read_only -ne $false -or
-      $health.i1_durable_jobs -ne $false -or
+      (-not $NormalClosedRecovery -and $health.i1_durable_jobs -ne $false) -or
       $health.airtable_activity.any_activity -ne $false -or
       $health.studio_native_gallery_companion_2873 -ne $true) {
     throw 'incident2853_runner_health_gate_failed'
@@ -185,18 +187,25 @@ try {
     Start-Sleep -Seconds 5
   }
 
-  if ($work.database_circuit_phase -eq 'closed') {
+  if ($work.database_circuit_phase -eq 'closed' -and -not $NormalClosedRecovery) {
     Write-Output 'incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED'
     exit 0
   }
-  if ($work.database_circuit_phase -ne 'half_open') {
+  if ($NormalClosedRecovery -and $work.database_circuit_phase -ne 'closed') {
+    throw 'incident2853_normal_resume_requires_closed_circuit'
+  }
+  if (-not $NormalClosedRecovery -and $work.database_circuit_phase -ne 'half_open') {
     throw 'incident2853_unexpected_circuit_phase'
   }
 
   $beforeRequest = Get-RequestRow
   $beforeOutputs = @(Get-OutputRows)
   Assert-Baseline $beforeRequest $beforeOutputs
-  Write-Output 'incident2853_probe_preflight=PASS_CAP1_HALF_OPEN_EXACT_BASELINE'
+  if ($NormalClosedRecovery) {
+    Write-Output 'incident2853_probe_preflight=PASS_CAP1_CLOSED_EXACT_BASELINE'
+  } else {
+    Write-Output 'incident2853_probe_preflight=PASS_CAP1_HALF_OPEN_EXACT_BASELINE'
+  }
 
   # Exactly one governed submission. Never retry an accepted or ambiguous POST.
   $body = @{production_request_record_id = $requestId; resume = $true} |
@@ -237,7 +246,11 @@ try {
   $afterRequest = Get-RequestRow
   $afterOutputs = @(Get-OutputRows)
   Assert-Recovered $afterRequest $afterOutputs
-  Write-Output 'incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED'
+  if ($NormalClosedRecovery) {
+    Write-Output 'incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED'
+  } else {
+    Write-Output 'incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED'
+  }
   Write-Output 'incident2853_bryant_factory_packages=PASS_10853_10854_HUMAN_REVIEW_REQUIRED'
   Write-Output 'incident2853_safety=CAP1_ZERO_APPROVAL_SCHEDULE_PUBLISH'
 }
