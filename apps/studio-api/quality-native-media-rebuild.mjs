@@ -1,3 +1,4 @@
+import { manualQualityCanaryTarget } from "./quality-native-manual-canary.mjs";
 /**
  * QA-TIKTOK-STALE-SCHEDULE-RFR-v1: rebuild a documented incorrect native
  * package from an exact, verified same-content Instagram sibling.
@@ -219,9 +220,14 @@ export async function rebuildWrongNativeReview(env,report,{
     }finally{if(pulse)await pulse.stop();await release(source.idea,token).catch(()=>{});}
   });
 }
-export async function recoverNativeReviewWithRebuild(env,report,{recover=recoverOneVerifiedNativeReview,rebuild=rebuildWrongNativeReview}={}){
+export async function recoverNativeReviewWithRebuild(env,report,{recover=recoverOneVerifiedNativeReview,rebuild=rebuildWrongNativeReview,manualCanaryRecordId=null}={}){
+  const manualTarget=manualQualityCanaryTarget(env);
+  const manualEnabled=Boolean(manualTarget&&manualTarget===manualCanaryRecordId
+    &&report?.findings?.length===1&&report.findings[0].record_id===manualTarget
+    &&report.findings[0].reason==="stale_tiktok_waiting_schedule_blocks_review");
+  if(manualCanaryRecordId&&!manualEnabled)return {status:"skipped",reason:"no_exact_rebuild_candidate",approval_actions:0,schedule_actions:0,publish_actions:0};
   const first=await recover(env,report);
-  if(first.status!=="skipped"||env.QUALITY_NATIVE_MEDIA_REBUILD_ENABLED!=="true"
+  if(first.status!=="skipped"||(!manualEnabled&&env.QUALITY_NATIVE_MEDIA_REBUILD_ENABLED!=="true")
     ||!["not_stale_native_review_handoff","missing_protected_exact_variant_receipt","current_revision_does_not_match_protected_receipt"].includes(first.reason))return first;
   return rebuild(env,report);
 }

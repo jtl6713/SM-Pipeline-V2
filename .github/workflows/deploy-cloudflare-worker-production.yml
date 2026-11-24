@@ -105,6 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; import {qualityNativeManualCanary} from "./apps/studio-api/quality-native-manual-canary.mjs"; assert.deepEqual(qualityNativeManualCanary,JSON.parse(fs.readFileSync("deploy/quality-native-rebuild-canary.json","utf8")));'
           if ! jq -e '.enabled==true' deploy/quality-native-rebuild-canary.json >/dev/null; then exit 0; fi
           code=$(curl -sS --max-time 20 -o /tmp/qa-native-route-denied.json -w '%{http_code}' \
             -X POST 'https://pipeline.chicagoshining.com/internal/quality/native-media-rebuild' \
@@ -360,14 +361,15 @@ jobs:
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          if type(qa.get('enabled')) is not bool or type(qa.get('request_revision')) is not int or qa['request_revision'] not in (1,2) or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True,'request_revision':qa['request_revision']}:
+          if type(qa.get('enabled')) is not bool or type(qa.get('request_revision')) is not int or qa['request_revision'] not in (1,2,3) or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True,'request_revision':qa['request_revision']}:
               raise SystemExit('Unknown quality canary manifest')
           if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID'):
               raise SystemExit('Respect existing other Quality Agent canary')
           if qa['enabled'] and active_vars.get('QUALITY_FACTORY_HANDOFF_CRON_DISABLED')=='true':
               raise SystemExit('Respect existing Quality Agent kill switch')
-          active_vars.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true' if qa['enabled'] else 'false',
-            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id'] if qa['enabled'] else ''})
+          # Exact manual policy is bundled source, not new environment variables.
+          # Preserve the entire existing binding contract; do not add canary vars.
+          print('quality_manual_canary_policy=version_controlled_no_new_bindings')
           # Scoped, Git-reviewed publication reconciliation. An unattended
           # status correction is never enabled by inheriting stale Worker vars.
           import re
@@ -515,6 +517,7 @@ jobs:
           codes=sorted(set(re.findall(r'\[code:\s*([0-9]{3,6})\]',data))|
                        set(re.findall(r'"code"\s*:\s*([0-9]{3,6})\b',data)))
           categories=[k for k,v in patterns.items() if any(p in lower for p in v)]
+          if '10055' in codes: categories.append('worker_environment_binding_limit')
           config=json.loads(Path('wrangler.jsonc').read_text())
           result={'cloudflare_error_codes':codes[:12],'categories':categories or ['unclassified'],
                   'plain_var_count':len(config.get('vars',{})),
@@ -605,8 +608,9 @@ jobs:
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          expected.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true' if qa['enabled'] else 'false',
-            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id'] if qa['enabled'] else ''})
+          for name in ('QUALITY_NATIVE_MEDIA_REBUILD_ENABLED','QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID'):
+              if after_plain.get(name)!=prior_plain.get(name):
+                  raise SystemExit('Unexpected canary runtime binding change: '+name)
           expected['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
           expected['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
           recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
