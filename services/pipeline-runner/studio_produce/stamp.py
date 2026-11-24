@@ -426,6 +426,7 @@ def directive_yes(value: Any) -> bool:
 
 def output_effective(output: dict[str, Any], request: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
     voiceover_mode = field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes"
+    story = (field_str(output,"Studio_Output_Type") or field_str(output,"Output_Type")) in STORY_OUTPUT_TYPES
     # Duration fields can be stale after P2 remasures or joins timed-script
     # segments into the final continuous MP3. A shorter cached "effective" value
     # must never truncate the actual narration. Preserve any intentional longer
@@ -433,8 +434,8 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
     duration_candidates = []
     for raw in (
         field(output, "Studio_Effective_Voiceover_Duration_Seconds"),
-        field(parent or {}, "Voiceover_Duration_Seconds"),
-        field(request, "Voiceover_Duration_Seconds"),
+        None if story else field(parent or {}, "Voiceover_Duration_Seconds"),
+        None if story else field(request, "Voiceover_Duration_Seconds"),
     ):
         try:
             value = float(raw or 0)
@@ -443,7 +444,7 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
         if value > 0:
             duration_candidates.append(value)
     voiceover_duration = max(duration_candidates, default=0)
-    if directive_yes(voiceover_mode) and field_str(parent or {}, "Voiceover_URL"):
+    if not story and directive_yes(voiceover_mode) and field_str(parent or {}, "Voiceover_URL"):
         probed = measured_voiceover_seconds(output, parent, probe=True) or 0
         try:
             probed_n = float(probed or 0)
@@ -1585,9 +1586,11 @@ def stamp_fields(
         "Clip_1_Duration_Frames": int(clips[0].get("durationFrames") or per or 0) if clips else 0,
         "Clip_2_Duration_Frames": int(clips[1].get("durationFrames") or per or 0) if len(clips) > 1 else 0,
         "Clip_3_Duration_Frames": int(clips[2].get("durationFrames") or per or 0) if len(clips) > 2 else 0,
-        "Voiceover_URL": field_str(parent or {}, "Voiceover_URL") or None if (
-            directive_yes(package.get("effective", {}).get("voiceover_mode")) and not package.get("story")
-        ) else None,
+        "Voiceover_URL": (
+            (field_str(existing or {}, "Voiceover_URL") or None)
+            if package.get("story")
+            else (field_str(parent or {}, "Voiceover_URL") or None)
+        ) if directive_yes(package.get("effective", {}).get("voiceover_mode")) else None,
         "Music_URL": package.get("effective", {}).get("music_url") or None,
         "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
         # Keep background music below narration. This is 60% of the prior 1.0 mix.
