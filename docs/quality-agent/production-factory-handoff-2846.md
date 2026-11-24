@@ -58,3 +58,18 @@ Phase 1 used on-demand bounded Quality Agent reads when a user opened the panel.
 ### Early no-Content / zero-output pre-promotion signature
 
 Do **not** filter the bounded Quality Agent scan only to Production Requests that already have `Promoted_Content_Item`: that would erase the first and most damaging failure, where a completed/escalated Production Request has a valid plan but no linked Content and therefore no outputs. The #2853 cron includes Ready-plan Submitted/Promoted requests even without a parent. An active Submitted producer is `in_progress`; a terminal/escalated job with no content link is a real `production_content_promotion_not_reconciled` failure. It must reconcile the original Idea, owner, Content, job and plan before any I3/I4 resumption. **No automatic fanout from an unowned request.**
+
+
+## Executable incident signature: QA-TIKTOK-STALE-SCHEDULE-RFR-v1 (#2915)
+
+Proven on #10865: incorrect Waiting for Schedule draft flag caused Pipeline to label a canonical unapproved, unscheduled output Scheduled. Factory therefore omitted it from Needs Eyes. Owner successfully approved after exact guarded flag removal, and Supabase verified the fresh receipt and schedule. PR #2936 independently corrects the read-only classifier.
+
+The new compact detector identifies TikTok Multi-Photo / Native Photo Route / Ready for Review / Review Sent / Not Ready with explicit DNP=false, auto=false, no schedule or publication and the stale draft flag. A finding is a candidate, not write permission. The existing recoverOneVerifiedNativeReview adapter must re-read the exact output, verify its protected current variant receipt, parent/idea/plan/profile and source-sibling ownership, ordered owned 9:16 manifests, fresh CDN hashes, absent hold and provider identity/attempt/response, and admission and approval locks. Older approval receipts are never re-used for corrected creative. If evidence is incomplete, report blocked; no mutation.
+
+Use exact version CAS and per-signature, per-revision durable reservation. Clear only tiktok_draft_status, retain prior value in SM_Quality_Stale_TikTok_Review_Repair_v1, leave every approval, schedule, publish, media, hold and sibling field intact. Read back and verify exact current Factory card, client visibility/selectability and no active batch; stop at human approval. An uncertain write must be reconciled, not retried blindly.
+
+Acceptance: positive repeat, idempotent second pass, provider ID/attempt and hold negative cases, changed bytes and owner/version cases, no provider/scheduling/approval actions; protected production canary, bounded cron integration with one-per-tick admission and kill switch, measured DB cost and actual Factory parity. The adapter is intentionally not enabled by merely merging this change.
+
+### Incident-to-signature standard
+
+For every solved incident, register a stable versioned signature, exact observable predicate, proven deterministic remediation or explicit blocked reason, authorized mutations, ownership/version guards, attempt budget/idempotency key, independent postconditions and stop boundary, regression fixture and source issue/PR. Generalize predicates rather than hard-code record IDs. Reuse existing governed adapters and never grant approval, release a safety hold or create a provider attempt from a signature alone. A runbook entry is not an executable or deployed repair; report detection, adapter readiness, cron wiring, canary and live enablement separately.

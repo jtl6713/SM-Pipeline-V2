@@ -336,3 +336,25 @@ test("approved but failed Story is not treated as a complete Factory handoff (#2
   p.production_job.step="running";
   assert.equal(assessProductionFactoryHandoff({request:p,outputs:all}).stage,"publish");
 });
+
+test("2915 compact handoff scan detects the stale TikTok marker before Factory projection",()=>{
+  const all=source();
+  Object.assign(all[2],{output_number:10865,auto_publish_enabled:false,tiktok_draft_status:"Waiting for Schedule"});
+  const result=assessProductionFactoryHandoff({request:request(),outputs:all});
+  const match=result.findings.filter(x=>x.reason==="stale_tiktok_waiting_schedule_blocks_review");
+  assert.equal(match.length,1);
+  assert.equal(match[0].output_id,10865);
+  assert.equal(match[0].repair_signature,"QA-TIKTOK-STALE-SCHEDULE-RFR-v1");
+  assert.equal(match[0].automatic_action_authorized,false);
+  assert.equal(result.status,"repair_required");
+  for(const fields of [
+    {auto_publish_enabled:true},{auto_publish_enabled:null},{scheduled_post_date:"2026-12-24T03:25Z"},
+    {do_not_publish:true},{tiktok_draft_status:"Draft Delivered"},
+    {output_status:"Approved for Publishing",review_status:"Approved"}
+  ]){
+    const copy=all.map(r=>({...r}));
+    Object.assign(copy[2],fields);
+    const guarded=assessProductionFactoryHandoff({request:request(),outputs:copy});
+    assert.equal(guarded.findings.some(x=>x.reason==="stale_tiktok_waiting_schedule_blocks_review"),false);
+  }
+});

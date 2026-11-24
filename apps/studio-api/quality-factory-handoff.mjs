@@ -236,6 +236,19 @@ export function assessProductionFactoryHandoff({
       report.findings.push(incident({stage:"factory",kind:"production_factory_handoff",reason:"review_handoff_status_mismatch",output:row,remediation:"Run existing pre-Factory review-readiness gate and CAS/readback; do not set approval, schedule or publish fields"}));
       continue;
     }
+    // #2915: candidate only. The bounded executor must reload exact proof,
+    // provider evidence, ownership and current media before changing anything.
+    if(row.platform==="TikTok"&&row.studio_output_type==="Multi-Photo"
+      &&row.render_status==="Native Photo Route"&&row.tiktok_draft_status==="Waiting for Schedule"
+      &&row.auto_publish_enabled===false&&row.do_not_publish===false
+      &&!row.scheduled_post_date&&!row.studio_scheduled_at&&!row.youtube_scheduled_publish_at
+      &&!row.published_at&&!row.platform_post_url) {
+      report.findings.push(incident({stage:"factory",kind:"production_factory_handoff",
+        reason:"stale_tiktok_waiting_schedule_blocks_review",output:row,
+        remediation:"Run guarded verified-native repair: exact owned current media and provider absence, CAS clear only stale TikTok draft flag, read back; verify Factory visibility and stop at human approval",
+        more:{repair_signature:"QA-TIKTOK-STALE-SCHEDULE-RFR-v1",adapter:"recoverOneVerifiedNativeReview"}}));
+      continue;
+    }
     if (cards) {
       const card=cards.get(str(row.airtable_record_id));
       if(!card){
@@ -344,10 +357,10 @@ export async function scanRecentProductionFactoryHandoffs({
   const outputs=await read("platform_outputs?content_item_id=in.("+ids.join(",")+")"
     +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,"
     +"platform,studio_output_type,platform_output_type,output_status,"
-    +"render_status,review_status,publish_status,do_not_publish,"
+    +"render_status,review_status,publish_status,do_not_publish,auto_publish_enabled,tiktok_draft_status,"
     +"output_caption,studio_preview_url,thumbnail_url,final_file_url,"
     +"selected_clip_count,scheduled_post_date,studio_scheduled_at,"
-    +"published_at,platform_post_url,test_run_id"
+    +"published_at,platform_post_url,test_run_id,youtube_scheduled_publish_at"
     +"&order=output_number.desc.nullslast&limit="+outputLimit);
   if(!Array.isArray(outputs)) throw Error("handoff output inventory unavailable");
   if(outputs.length>=outputLimit)
