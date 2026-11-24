@@ -4573,7 +4573,7 @@ export async function readFactoryNativeSlideInventory(env, parents, { read = pat
   const result = new Map();
   const candidates = [...new Map((parents || []).filter(p =>
     p?.do_not_publish !== true && p?.render_status === "Native Photo Route" &&
-    /carousel|multi[\\s-]?image|photo[\\s-]?set/i.test(String(p.studio_output_type || "") + " " + String(p.platform_output_type || "")) &&
+    /carousel|multi[\s-]?image|photo[\s-]?set/i.test(String(p.studio_output_type || "") + " " + String(p.platform_output_type || "")) &&
     ["Ready for Review"].includes(p.output_status) && !p.test_run_id
   ).map(p => [p.airtable_record_id,p])).values()];
   for (let start = 0; start < candidates.length; start += 20) {
