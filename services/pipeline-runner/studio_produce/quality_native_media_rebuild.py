@@ -81,19 +81,25 @@ def download(url, expected, geometry, *, prefix=False):
     return data,digest
 
 
-def compose(data, watermark):
+def compose(data, watermark, geometry=(1080,1920)):
     with Image.open(io.BytesIO(data)) as image:
         if image.format != "JPEG" or image.size != (1080,1350):
             raise RuntimeError("invalid_base_geometry")
-        # Preserve the complete approved source photograph, rather than
-        # cropping away a landmark. Neutral black vertical padding.
-        photo=ImageOps.contain(image.convert("RGB"),(1080,1920),Image.Resampling.LANCZOS)
-        canvas=Image.new("RGBA",(1080,1920),(0,0,0,255))
-        canvas.paste(photo,((1080-photo.width)//2,(1920-photo.height)//2))
+        if geometry == (1080,1350):
+            canvas=image.convert("RGBA")
+        elif geometry == (1080,1920):
+            # Preserve complete approved subject, avoid cropping landmarks.
+            photo=ImageOps.contain(image.convert("RGB"),geometry,Image.Resampling.LANCZOS)
+            canvas=Image.new("RGBA",geometry,(0,0,0,255))
+            canvas.paste(photo,((geometry[0]-photo.width)//2,(geometry[1]-photo.height)//2))
+        else:
+            raise RuntimeError("invalid_target_geometry")
     width=round(1080*0.12)
     mark=watermark.resize((width,round(watermark.height*width/watermark.width)),Image.Resampling.LANCZOS)
-    xy=(1080-30-mark.width,1920-30-mark.height)
-    canvas.alpha_composite(mark,xy)
+    xy=(1080-30-mark.width,geometry[1]-30-mark.height)
+    layer=Image.new("RGBA",canvas.size,(0,0,0,0))
+    layer.paste(mark,xy)
+    canvas=Image.alpha_composite(canvas,layer)
     out=io.BytesIO()
     canvas.convert("RGB").save(out,format="JPEG",quality=95,optimize=True,subsampling=0)
     return out.getvalue()
@@ -121,6 +127,11 @@ def stage(payload, *, drive=None, uploader=None, read=download, renew=None):
         fence()
         read(a["branded_url"],a["branded_sha256"],(1080,1350))
         original,source_sha=read(a["source_url"],a["source_hash_prefix"],(1080,1350),prefix=True)
+        # Reproduce the already approved 4:5 hash from the exact unbranded
+        # bytes and pinned watermark. A matching short URL slug alone is not
+        # sufficient evidence of source identity.
+        if hashlib.sha256(compose(original,mark,(1080,1350))).hexdigest()!=a["branded_sha256"]:
+            raise RuntimeError("source_lineage_reproduction_failed")
         built=compose(original,mark)
         sha=hashlib.sha256(built).hexdigest()
         key=f"studio/previews/watermarked/quality-native-rebuild/{payload['record_id']}/slide-{a['index']:02d}-{sha}.jpg"
