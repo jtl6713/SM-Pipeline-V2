@@ -44,6 +44,8 @@ on:
       - 'services/pipeline-runner/tests/test_2670_review_supabase_store.py'
       - 'repair/scripts/incident-2670-native-gallery-prep.py'
       - '.github/workflows/incident-2670-native-gallery-review-restore.yml'
+      # Last matching rule wins: test-only commits never cause a runner restart.
+      - '!services/pipeline-runner/tests/**'
 
 permissions:
   contents: read
