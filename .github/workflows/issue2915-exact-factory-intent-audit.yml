@@ -1,0 +1,110 @@
+name: Issue 2915 Exact Factory Intent Read-Only Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2915-exact-factory-intent-audit.mjs'
+      - '.github/workflows/issue2915-exact-factory-intent-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2915-exact-factory-intent-audit.mjs'
+      - '.github/workflows/issue2915-exact-factory-intent-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2915-exact-factory-intent-audit
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate read-only source
+        run: |
+          set -euo pipefail
+          node --check repair/scripts/issue2915-exact-factory-intent-audit.mjs
+          ! grep -E '\.(put|delete|fetch)\(' repair/scripts/issue2915-exact-factory-intent-audit.mjs
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {audit} from './repair/scripts/issue2915-exact-factory-intent-audit.mjs';
+          const p='studio/state/factory-approvals/v2/';
+          const group='ac77ba24-1e61-4d16-a528-1deecd3ce704';
+          const profile='recgtK8Z7eNADNtVy', id='recVoFLCOAGHNIkD3', child='fgc_2915_readonly_test';
+          const objects=new Map([
+            [p+'output-claims-v1/'+profile+'.json',{schema:'studio.factory-output-claims.1',profile_id:profile,outputs:{[id]:{request_id:group,at:'2026-11-22T05:44:51Z'}}}],
+            [p+'groups/'+group+'.json',{schema:'studio.factory-approval-group.1',request_id:group,created_at:'2026-11-22T05:44:51Z',submitted_by:'rec12345678901234',records:[{id,profile_id:profile}],children:[{profile_id:profile,request_id:child}]}],
+            [p+'jobs/'+profile+'/'+child+'.json',{profile_id:profile,request_id:child,group_request_id:group,status:'completed',items:[{id,output_id:10863,status:'failed',error:'original intent expired'}]}],
+          ]);
+          const bucket={get:async key=>objects.has(key)?{size:1,text:async()=>JSON.stringify(objects.get(key))}:null,list:async()=>({objects:[],truncated:false})};
+          const result=await audit(bucket);
+          assert.equal(result.read_only,true);
+          assert.equal(result.claims.length,10);
+          assert.equal(result.claims.find(x=>x.n===10863).request_id,group);
+          assert.equal(result.groups[0].children[0].items[0].status,'failed');
+          assert.equal(result.recent_scan.complete,true);
+          console.log('EXACT_FACTORY_READ_ONLY_FIXTURE_PASS');
+          JS
+  protected-read:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.event_name == 'push'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AUDITOR: studio-issue2915-exact-intent-readonly
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read exact current claim owners and recent receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID" && test -n "$CLOUDFLARE_API_TOKEN"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/settings" > /tmp/2915-worker-settings.json
+          BUCKET=$(jq -er '[.result.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | .bucket_name] | if length==1 then .[0] else empty end' /tmp/2915-worker-settings.json)
+          STATUS=$(curl -sS --max-time 20 -H "$AUTH" -o /tmp/2915-audit-exists.json -w '%{http_code}' "$API/workers/scripts/$AUDITOR/settings")
+          [[ "$STATUS" == 404 ]] || { echo "Refusing to overwrite auditor: $STATUS"; exit 1; }
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == 1 ]]; then
+              curl -fsS --max-time 25 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDITOR" >/dev/null || echo "::warning::Audit Worker cleanup needs follow-up"
+            fi
+            rm -f /tmp/2915-audit-meta.json /tmp/2915-worker-settings.json
+          }
+          trap cleanup EXIT
+          TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::$TOKEN"
+          jq -n --arg bucket "$BUCKET" --arg token "$TOKEN" '{main_module:"worker.mjs",compatibility_date:"2026-10-01",bindings:[{type:"r2_bucket",name:"STUDIO_MEDIA",bucket_name:$bucket},{type:"secret_text",name:"AUDIT_TOKEN",text:$token}]}' > /tmp/2915-audit-meta.json
+          curl -fsS --max-time 30 -X PUT -H "$AUTH" "$API/workers/scripts/$AUDITOR/content" -F 'metadata=@/tmp/2915-audit-meta.json;type=application/json' -F 'worker.mjs=@repair/scripts/issue2915-exact-factory-intent-audit.mjs;type=application/javascript+module;filename=worker.mjs' > /tmp/2915-audit-deploy.json
+          jq -e '.success==true' /tmp/2915-audit-deploy.json >/dev/null
+          OWNED=1
+          curl -fsS --max-time 25 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDITOR/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/2915-audit-sub.json
+          jq -e '.success==true' /tmp/2915-audit-sub.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')
+          HTTP=000
+          for attempt in $(seq 1 8); do
+            HTTP=$(curl -sS --max-time 60 -o /tmp/2915-exact-factory-audit.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://$AUDITOR.$SUBDOMAIN.workers.dev/report" || true)
+            [[ "$HTTP" == 200 ]] && break
+            sleep 2
+          done
+          [[ "$HTTP" == 200 ]] || { echo "Exact R2 audit unavailable HTTP $HTTP"; exit 1; }
+          jq -e '.schema=="issue2915.factory-exact-intent-audit.v1" and .read_only==true and (.claims|length)==10' /tmp/2915-exact-factory-audit.json >/dev/null
+          jq -c . /tmp/2915-exact-factory-audit.json
+          echo "ISSUE2915_EXACT_FACTORY_INTENT_READ_ONLY=PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2915-exact-factory-sanitized-audit
+          path: /tmp/2915-exact-factory-audit.json
+          retention-days: 7
+          if-no-files-found: ignore
