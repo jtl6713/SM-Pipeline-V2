@@ -148,8 +148,16 @@ function Get-I1BusyCount {
   if (-not (Test-Path -LiteralPath $dbPath -PathType Leaf)) {
     throw 'incident2853_i1_spool_unavailable'
   }
-  $code = 'import sqlite3,sys; from pathlib import Path; db=sqlite3.connect(Path(sys.argv[1]).resolve().as_uri()+"?mode=ro",uri=True,timeout=3); print(db.execute("SELECT count(*) FROM jobs WHERE status IN (''queued'',''running'')").fetchone()[0]); db.close()'
-  $value = & python -c $code $dbPath
+  $code = @'
+import sqlite3, sys
+from pathlib import Path
+db = sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
+try:
+    print(db.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0])
+finally:
+    db.close()
+'@
+  $value = $code | & python - $dbPath
   if ($LASTEXITCODE -ne 0 -or ([string]$value) -notmatch '^\d+$') {
     throw 'incident2853_i1_spool_read_failed'
   }
