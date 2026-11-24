@@ -8,6 +8,11 @@ from studio_produce import workload_governor as gov
 
 @pytest.fixture
 def isolated_governor(tmp_path, monkeypatch):
+    # Import the producer with its import-time dispatcher disabled before
+    # exposing this test's temporary SQLite queue. Otherwise a daemon from
+    # the first import claims later fixtures' work and defeats isolation.
+    monkeypatch.setenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "false")
+    from studio_produce import processor  # noqa: F401
     monkeypatch.setenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "true")
     monkeypatch.setenv("STUDIO_GOVERNOR_DB_PATH", str(tmp_path / "governor.sqlite3"))
     monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "2")
