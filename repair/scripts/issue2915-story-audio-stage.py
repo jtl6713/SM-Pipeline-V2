@@ -21,6 +21,7 @@ BASE=Path.cwd()/"Services"/"pipeline-runner"/"service"
 def setup():
     if not (BASE/".env").is_file():raise RuntimeError("runner_env_missing")
     load_dotenv(BASE/".env",override=False)
+    if not os.getenv("PORT"): os.environ["PORT"]="3350"
     sys.path.insert(0,str(BASE))
     for k in ("SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","GOOGLE_REFRESH_TOKEN","R2_UPLOAD_WORKER_URL","R2_UPLOAD_WORKER_SECRET"):
         if not os.getenv(k):raise RuntimeError("missing_owner_credential_"+k)
