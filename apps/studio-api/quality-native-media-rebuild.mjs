@@ -115,10 +115,10 @@ async function sourcePackage(read,row) {
   return {idea:idea.airtable_record_id,profile:profile.airtable_record_id,parent_version:p.updated_at,
     source_output:sibling.output_number,source_version:sibling.updated_at,assets};
 }
-async function runnerStage(env,body){
+export async function stageNativeMediaAtRunner(env,body,{transport=fetch}={}){
   const base=String(env.PIPELINE_RUNNER_URL||"").replace(/\/+$/,""),secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"");
   if(!/^https:\/\//.test(base)||!secret)throw Error("rebuild_runner_unconfigured");
-  const res=await fetch(base+"/internal/quality/native-media-rebuild",{method:"POST",redirect:"error",
+  const res=await transport(base+"/internal/quality/native-media-rebuild",{method:"POST",redirect:"manual",
     headers:{"Content-Type":"application/json","X-Pipeline-Secret":secret},body:JSON.stringify(body),signal:AbortSignal.timeout(110000)});
   if(!res.ok)throw Error("rebuild_runner_not_verified");
   return res.json();
@@ -175,7 +175,7 @@ export async function rebuildWrongNativeReview(env,report,{
   read=path=>supabaseRest(env,path),patch=(path,body)=>supabaseRest(env,path,{method:"PATCH",body,headers:{Prefer:"return=representation"}}),
   bucket=env.STUDIO_MEDIA,lock=(id,fn)=>withOutputApprovalLock(bucket,id,fn),
   claim=(idea,token)=>runnerWorkerLease(env,"claim",idea,token),release=(idea,token)=>runnerWorkerLease(env,"release",idea,token),
-  heartbeat=(idea,token)=>startRunnerWorkerLeaseHeartbeat(env,idea,token),stage=body=>runnerStage(env,body),
+  heartbeat=(idea,token)=>startRunnerWorkerLeaseHeartbeat(env,idea,token),stage=body=>stageNativeMediaAtRunner(env,body),
   checkBytes=verifyBytes,claimSafe=(profile,id,version)=>oldClaimSafe(bucket,profile,id,version),now=()=>new Date()
 }={}){
   const finding=report?.status==="ok"&&report.findings?.find(x=>x.reason==="stale_tiktok_waiting_schedule_blocks_review"&&REC.test(x.record_id));

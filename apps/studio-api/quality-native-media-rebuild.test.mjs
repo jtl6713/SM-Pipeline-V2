@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {rebuildCandidate,buildRebuiltPackage,recoverNativeReviewWithRebuild,oldClaimSafe,rebuildWrongNativeReview} from "./quality-native-media-rebuild.mjs";
+import {rebuildCandidate,buildRebuiltPackage,recoverNativeReviewWithRebuild,oldClaimSafe,rebuildWrongNativeReview,stageNativeMediaAtRunner} from "./quality-native-media-rebuild.mjs";
 const id="rec8I104V9gQmiOxf",at="2026-11-23T04:55:01.976Z",later="2026-11-24T15:00:00Z";
 const row={id:"11111111-1111-4111-8111-111111111111",airtable_record_id:id,output_number:10857,
  content_item_id:"22222222-2222-4222-8222-222222222222",content_profile_id:"33333333-3333-4333-8333-333333333333",
@@ -18,6 +18,18 @@ const sha="a".repeat(64),source={source_output:10855,source_version:at,assets:[1
 const stage={verified:true,output:10857,source_output:10855,target_version:at,source_version:at,source_writes:0,provider_writes:0,
  assets:source.assets.map((a,i)=>({...a,source_sha256:sha,sha256:sha,geometry:"1080x1920",cdn_verified:true,
  url:"https://media.chicagoshining.com/studio/previews/watermarked/quality-native-rebuild/"+id+"/slide-0"+(i+1)+"-"+sha+".jpg"}))};
+test("runner media stage uses Cloudflare-supported manual redirect handling",async()=>{
+ const env={PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",PIPELINE_RUNNER_SHARED_SECRET:"test-secret"};
+ let calls=0;
+ const receipt=await stageNativeMediaAtRunner(env,{output:10857},{transport:async(url,options)=>{
+  calls++;assert.equal(url,"https://pipeline.chicagoshining.com/internal/quality/native-media-rebuild");
+  assert.equal(options.redirect,"manual");
+  assert.equal(options.headers["X-Pipeline-Secret"],"test-secret");
+  return Response.json({verified:true});
+ }});
+ assert.equal(calls,1);assert.equal(receipt.verified,true);
+ await assert.rejects(()=>stageNativeMediaAtRunner(env,{output:10857},{transport:async()=>new Response(null,{status:302})}),/rebuild_runner_not_verified/);
+});
 test("only documented wrong-media stale review can rebuild, never real publishing or active holds",()=>{
  assert.equal(rebuildCandidate(row),true);
  for(const patch of [{do_not_publish:true},{auto_publish_enabled:true},{scheduled_post_date:at},{published_at:at},

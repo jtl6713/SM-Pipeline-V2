@@ -24,6 +24,7 @@ test("remote claim requires exact server admission, retains idempotent owner pay
       count++;
       assert.equal(url, "https://runner.example.test/internal/workload/worker-lease");
       assert.equal(options.method, "POST");
+      assert.equal(options.redirect, "manual");
       assert.equal(options.headers["X-Pipeline-Secret"], "unit-test-secret");
       assert.deepEqual(JSON.parse(options.body), { action: "claim", idea_id: idea, token });
       return response(200, { ok: true, admitted: true });
@@ -86,6 +87,7 @@ test("broker diagnostics distinguish explicit capacity refusal from unsafe or un
   for(const [status,body,reason] of [
     [429,{ok:true,admitted:false},"capacity_or_circuit"],
     [429,{},"broker_unavailable"],
+    [302,{},"broker_redirect_rejected"],
     [401,{},"broker_auth_denied"],
     [403,{},"broker_auth_denied"],
     [422,{},"broker_request_rejected"],
@@ -93,7 +95,7 @@ test("broker diagnostics distinguish explicit capacity refusal from unsafe or un
     [200,{ok:true},"broker_receipt_invalid"]
   ]){
     const out=await runnerWorkerLease(env,"claim",idea,token,{transport:async(_url,opts)=>{
-      assert.equal(opts.redirect,"error");
+      assert.equal(opts.redirect,"manual");
       return response(status,body);
     }});
     assert.deepEqual(out,{admitted:false,reason,http_status:status});

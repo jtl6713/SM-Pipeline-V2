@@ -456,6 +456,7 @@ test("Admin workload diagnostics proxy is read-only, bounded and never exposes r
     calls++;
     assert.equal(url,"https://pipeline.chicagoshining.com/internal/workload/snapshot");
     assert.equal(options.method,"GET");
+    assert.equal(options.redirect,"manual");
     assert.equal(options.headers["X-Pipeline-Secret"],secret);
     return new Response(JSON.stringify({
       ok:true,enabled:true,scope:"single_windows_host",

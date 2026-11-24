@@ -1635,3 +1635,4 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 
 2026-11-24 UTC — #2915: exact Vizcaya #5628 revision-bound expired Story generation, authenticated formal release and fresh approval only, archived original attempt evidence and independent due-time fence; verify protected deployment. No provider call or publishing by release/deploy itself.
 2026-11-24 issue2915 held Story approval recovery exact receipt and generation fence
+2026-11-24: Deploy Worker 0.10.1029-quality-native-redirect-2853. Use Cloudflare-supported manual redirect handling for the exact #10857 shared admission, runner staging, workload proof, and immutable media verification; reissue revision 5 while preserving cap1 and all human approval, hold, scheduling, and publishing fences.

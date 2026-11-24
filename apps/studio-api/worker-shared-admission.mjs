@@ -28,7 +28,10 @@ export async function runnerWorkerLease(
   try {
     const response = await transport(`${runnerUrl}/internal/workload/worker-lease`, {
       method: "POST",
-      redirect: "error",
+      // Cloudflare Workers does not implement Fetch redirect mode "error";
+      // constructing that request throws before the broker sees it. Observe
+      // redirects without following them so the secret stays on this host.
+      redirect: "manual",
       headers: { "Content-Type": "application/json", "X-Pipeline-Secret": secret },
       body: JSON.stringify({ action, idea_id: ideaId, token }),
       signal: typeof AbortSignal?.timeout === "function"
@@ -44,6 +47,7 @@ export async function runnerWorkerLease(
       const code = Number(response.status);
       const reason = code === 429 && result?.ok === true && result?.admitted === false
         ? "capacity_or_circuit"
+        : code >= 300 && code <= 399 ? "broker_redirect_rejected"
         : code === 401 || code === 403 ? "broker_auth_denied"
         : code === 400 || code === 413 || code === 422 ? "broker_request_rejected"
         : code >= 500 && code <= 599 ? "broker_http_unavailable"
