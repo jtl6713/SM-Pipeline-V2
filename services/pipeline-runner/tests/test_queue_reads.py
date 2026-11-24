@@ -84,3 +84,42 @@ def test_master_original_source_locator_survives_supabase_queue_read():
     })
     assert row["fields"]["Source_R2_Key"] == "studio/master-assets/recReq/video.mov"
     assert row["fields"]["Source_URL"].endswith("/video.mp4")
+
+
+def test_queue_read_preserves_local_admission_deferral(monkeypatch):
+    import pytest
+    from studio_produce.workload_governor import AdmissionDeferred
+
+    def blocked(*args, **kwargs):
+        raise AdmissionDeferred("supabase_read admission deferred")
+
+    monkeypatch.setattr("queue_reads._rest", blocked)
+    with pytest.raises(AdmissionDeferred, match="supabase_read"):
+        try_list_queue_records(
+            {"studio_phase6_write_source": "supabase", "supabase_url": "https://example.supabase.co", "supabase_service_role_key": "x"},
+            formula=SMV1_PRODUCTION_FORMULA, max_records=5,
+        )
+
+
+def test_overlapping_smv1_drains_defer_before_queue_reads(monkeypatch, tmp_path):
+    import pytest
+    from item4 import processor
+    from studio_produce import workload_governor as governor
+
+    monkeypatch.setenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "true")
+    monkeypatch.setenv("STUDIO_GOVERNOR_DB_PATH", str(tmp_path / "governor.sqlite"))
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "false")
+    seen = []
+
+    def admitted(**kwargs):
+        seen.append(kwargs["production_request_record_id"])
+        return {"processed_count": 1}
+
+    monkeypatch.setattr(processor, "_process_drain_admitted", admitted)
+    with governor.resource_slot("smv1_drain", limit=1, wait_seconds=0):
+        with pytest.raises(governor.AdmissionDeferred, match="smv1_drain"):
+            processor.process_drain(production_request_record_id="recPilsen")
+        assert seen == []
+    assert processor.process_drain(production_request_record_id="recPilsen")["processed_count"] == 1
+    assert seen == ["recPilsen"]
+    assert governor.snapshot()["active_resource_slots"]["smv1_drain"] == 0
