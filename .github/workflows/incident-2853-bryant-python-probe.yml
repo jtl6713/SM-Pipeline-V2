@@ -1,6 +1,15 @@
 name: Incident 2853 exact governed Python producer probe
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-bryant-python-probe.yml'
+      - '.github/scripts/incident-2853-bryant-python-probe.ps1'
+      - 'deploy/incident-2853-bryant-python-probe.txt'
+      - 'services/pipeline-runner/tests/test_2670_workload_governor.py'
+      - 'services/pipeline-runner/tests/test_2853_bryant_probe_contract.py'
+      - 'services/pipeline-runner/tests/test_studio_native_gallery_2873.py'
   push:
     branches: [main]
     paths:
@@ -17,10 +26,6 @@ jobs:
   exact-probe:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
-      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
-      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
@@ -39,6 +44,8 @@ jobs:
           python-version: '3.12'
 
       - name: Test exact gallery recovery and governor before production
+        env:
+          STUDIO_WORKLOAD_GOVERNOR_ENABLED: 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -46,12 +53,14 @@ jobs:
           (cd services/pipeline-runner && python -m pytest -q \
             tests/test_2853_bryant_probe_contract.py \
             tests/test_studio_native_gallery_2873.py \
-            tests/test_2670_workload_governor.py::test_circuit_blocks_new_heavy_jobs_without_discarding_queue \
-            tests/test_2670_workload_governor.py::test_snapshot_reports_no_request_id_or_credentials \
-            tests/test_2670_workload_governor.py::test_worker_claims_pause_on_circuit_half_open_and_one_job_canary \
-            tests/test_2670_workload_governor.py::test_workload_history_reflects_actual_circuit_without_fabricating_recovery)
+            tests/test_2670_workload_governor.py)
 
       - name: Execute exactly one protected nonpublishing governed probe
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
