@@ -560,7 +560,10 @@ test("held but unreviewed RFR media enters Needs Eyes with explicit release opti
   assert.match(ui, /data-factory-release-approval/);
   assert.match(ui, /action: "release_for_approval"/);
   assert.match(server, /withOutputApprovalLock\(env\.STUDIO_MEDIA, id, async \(\) =>/);
-  assert.match(server, /factoryApprovalHoldReleaseEligibility\(current, readiness\)/);
+  const release = await readFile(path.join(here, "factory-hold-release.mjs"), "utf8");
+  assert.match(server, /releaseFactoryHoldInSupabase\(env, id, scoped\)/);
+  assert.match(release, /factoryApprovalHoldReleaseEligibility\(current, readiness\)/);
+  assert.match(release, /auto_publish_enabled:false/);
   assert.match(server, /Auto_Publish_Enabled: false/);
   assert.match(server, /requireAnyPermission\(authorization, \["publishing_control", "tenant_admin"\]\)/);
   assert.match(server, /refresh_required: true/);
