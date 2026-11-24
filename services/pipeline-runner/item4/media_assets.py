@@ -88,6 +88,8 @@ def create_variant_media_asset(
     drive_id: str,
     drive_url: str,
     transfer_id: str,
+    *,
+    reserved_id: str | None = None,
 ) -> dict:
     ratio = str(fields.get("Aspect_Ratio") or "").strip()
     name = str(fields.get("Target_File_Name") or fields.get("Source_Name") or "variant")
@@ -128,6 +130,15 @@ def create_variant_media_asset(
     if not source:
         source = find_by_drive_file_id(client, str(fields.get("Source_Drive_File_ID") or ""))
     body.update(classification_fields_from_source(source))
+    if reserved_id:
+        from supabase_pipeline import commit_phase6_creates
+        if not commit_phase6_creates(client._settings, MEDIA_ASSETS_TABLE,
+                [{"id":reserved_id,"fields":body}]):
+            raise RuntimeError("reserved media identity did not commit")
+        actual = client.get_record(MEDIA_ASSETS_TABLE,reserved_id)
+        if actual.get("id") != reserved_id or (actual.get("fields") or {}).get("Google Drive File ID") != drive_id:
+            raise RuntimeError("reserved media identity did not verify")
+        return actual
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]
 
 
@@ -191,6 +202,7 @@ def ensure_media_asset(
     transfer_id: str,
     *,
     kind: str,
+    reserved_id: str | None = None,
 ) -> str:
     existing = find_by_transfer_id(client, transfer_id)
     if existing:
@@ -198,6 +210,8 @@ def ensure_media_asset(
         # Content_Profile from the queue/handoff fields so Asset Manager scopes them.
         wanted = fields.get("Content_Profile")
         existing_fields = existing.get("fields") if isinstance(existing.get("fields"), dict) else {}
+        if reserved_id and existing_fields.get("Google Drive File ID") != drive_id:
+            raise RuntimeError("existing transfer media receipt conflicts with reserved Drive ID")
         if wanted and not existing_fields.get("Content_Profile"):
             try:
                 client.update_record(MEDIA_ASSETS_TABLE, existing["id"], {"Content_Profile": wanted})
@@ -207,5 +221,5 @@ def ensure_media_asset(
     if kind == "Master Original":
         created = create_master_media_asset(client, fields, drive_id, drive_url, transfer_id)
     else:
-        created = create_variant_media_asset(client, fields, drive_id, drive_url, transfer_id)
+        created = create_variant_media_asset(client, fields, drive_id, drive_url, transfer_id, reserved_id=reserved_id)
     return created["id"]

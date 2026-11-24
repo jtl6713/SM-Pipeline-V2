@@ -42,7 +42,7 @@ def test_current_release_pins_a_verifiable_runner_cutover():
     version = CONFIG.read_text(encoding="utf-8")
     # This release advances the version without removing the #2876 prompt
     # safety tests or the live version comparison in the deploy workflow.
-    assert 'PIPELINE_RUNNER_CODE_VERSION = "2026-11-23-2888-private-factory-source-v1"' in version
+    assert 'PIPELINE_RUNNER_CODE_VERSION = "2026-11-24-2965-smv1-restart-safety-v1"' in version
 
 
 def test_no_workload_settings_or_publish_holds_changed_by_deployment_workflow():

@@ -459,6 +459,25 @@ def workload_diagnostics():
     return jsonify({"ok": True, **snapshot}), 200
 
 
+@app.post("/admin/workload/smv1-maintenance")
+def smv1_maintenance():
+    if not settings.get("pipeline_runner_shared_secret","").strip():
+        return jsonify(ok=False,error="runner_auth_unconfigured"),503
+    denied,code = _require_loopback()
+    if denied is not None:
+        return denied,code
+    denied,code = _verify_secret()
+    if denied is not None:
+        return denied,code
+    body=request.get_json(silent=True) or {}
+    action=body.get("action")
+    token=body.get("token")
+    if action not in {"begin","end"} or not isinstance(token,str) or not re.fullmatch(r"[a-f0-9]{32}",token):
+        return jsonify(ok=False,error="invalid_maintenance_request"),422
+    ok=workload_governor.set_smv1_maintenance(token,begin=action=="begin")
+    return jsonify(ok=ok),200 if ok else 409
+
+
 @app.get("/health")
 def health():
     from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
