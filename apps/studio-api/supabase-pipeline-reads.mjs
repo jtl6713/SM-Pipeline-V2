@@ -4541,6 +4541,63 @@ function matchesOpsQueueRequestFormula(fields = {}) {
 /**
  * Factory desk / Ops Queue pack from Supabase (Airtable-shaped records).
  */
+// #2890: a cover and saved source manifest are not an exact native slide inventory.
+// Read only the review candidates, in bounded sequential chunks; never probe
+// every output or fall back to the retired source. Unknown is not ready.
+export function inspectFactoryNativeSlideInventory(parent, rows) {
+  const expected = Number(parent?.selected_clip_count);
+  const id = String(parent?.airtable_record_id || "");
+  const number = Number(parent?.output_number);
+  const fail = reason => ({ verified: false, reason, expected, count: Array.isArray(rows) ? rows.length : 0 });
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !Number.isSafeInteger(number) || number <= 0 ||
+      !Number.isSafeInteger(expected) || expected < 2 || expected > 10) return fail("Invalid gallery identity or selected slide count");
+  if (!Array.isArray(rows)) return fail("Native slide inventory temporarily unavailable; refresh Factory");
+  if (rows.length !== expected) return fail("Native slide inventory incomplete: " + rows.length + " of " + expected + " linked slides; repair gallery");
+  const seen = new Set();
+  const ordered = [...rows].sort((a,b) => Number(a.current_order) - Number(b.current_order));
+  for (let i = 0; i < ordered.length; i++) {
+    const row = ordered[i], f = row?.fields || {};
+    const image = String(f["Final Image URL"] || "").trim();
+    if (row.deleted_from_carousel !== false || Number(row.current_order) !== i + 1 ||
+        !Array.isArray(f["Platform Output"]) || f["Platform Output"].length !== 1 || f["Platform Output"][0] !== id ||
+        !Array.isArray(f.PO_Output_ID) || f.PO_Output_ID.length !== 1 || f.PO_Output_ID[0] !== number ||
+        !/^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i.test(image) ||
+        seen.has(image) || f.SM_Native_Gallery_Draft_Repair_2294?.publishing_authorized === false) {
+      return fail("Native slide ownership, sequence, image or review evidence is invalid; repair gallery");
+    }
+    seen.add(image);
+  }
+  return { verified: true, expected, count: ordered.length, reason: null };
+}
+export async function readFactoryNativeSlideInventory(env, parents, { read = path => supabaseRest(env, path) } = {}) {
+  const result = new Map();
+  const candidates = [...new Map((parents || []).filter(p =>
+    p?.do_not_publish !== true && p?.render_status === "Native Photo Route" &&
+    /carousel|multi[\\s-]?image|photo[\\s-]?set/i.test(String(p.studio_output_type || "") + " " + String(p.platform_output_type || "")) &&
+    ["Ready for Review"].includes(p.output_status) && !p.test_run_id
+  ).map(p => [p.airtable_record_id,p])).values()];
+  for (let start = 0; start < candidates.length; start += 20) {
+    const chunk = candidates.slice(start,start+20);
+    const numbers = [...new Set(chunk.map(p=>Number(p.output_number)).filter(n=>Number.isSafeInteger(n)&&n>0))];
+    let rows = null;
+    if (numbers.length) {
+      try {
+        const filters = numbers.map(n=>"fields->PO_Output_ID.cs."+encodeURIComponent(JSON.stringify([n]))).join(",");
+        const limit = numbers.length * 12;
+        const response = await read("carousel_slides?deleted_from_carousel=eq.false&or=("+filters+")"+
+          "&select=airtable_record_id,current_order,deleted_from_carousel,fields&order=airtable_record_id.asc&limit="+limit);
+        if (Array.isArray(response) && response.length < limit) rows=response;
+      } catch { /* fail closed for this chunk only */ }
+    }
+    for (const parent of chunk) {
+      const subset = rows === null ? null : rows.filter(r=>Array.isArray(r?.fields?.PO_Output_ID) &&
+        r.fields.PO_Output_ID.includes(Number(parent.output_number)));
+      result.set(parent.airtable_record_id,inspectFactoryNativeSlideInventory(parent,subset));
+    }
+  }
+  return result;
+}
+
 export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requestLimit = 120 } = {}) {
   const outCap = Math.max(50, Math.min(2000, Number(outputLimit) || 800));
   const reqCap = Math.max(20, Math.min(300, Number(requestLimit) || 120));
@@ -4724,11 +4781,14 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   for (const row of [...(outputRows || []), ...(reviewReadyRows || []), ...protectedReworkRows, ...metaRecoveredRows, ...creativeQaRows]) {
     if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
   }
+  const nativeInventory = await readFactoryNativeSlideInventory(env, [...outputById.values()]);
   const rawShapedOutputs = [...outputById.values()]
     .map(flattenOutputRow)
     .filter((row) => !String(row.test_run_id || "").trim())
     .map((row) => {
       const shaped = airtableShapedOutputFromSupabase(row);
+      const inventory = nativeInventory.get(row.airtable_record_id);
+      if (inventory) shaped.fields.SM_Factory_Native_Gallery_Inventory_2890 = inventory;
       const slideIds = candidateGalleryByOutputId.get(row.airtable_record_id);
       if (slideIds?.length) {
         shaped.fields.SM_Factory_Native_Gallery_Candidate_Review_2294 = true;

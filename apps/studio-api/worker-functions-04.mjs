@@ -12087,7 +12087,12 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
-    const readiness = evaluateReviewPackage(record);
+    const packageReadiness = evaluateReviewPackage(record);
+    const inventory = f(record, "SM_Factory_Native_Gallery_Inventory_2890");
+    const readiness = inventory && inventory.verified !== true
+      ? { ...packageReadiness, readiness: "BLOCKED", reason: "native_slide_inventory_unverified",
+          missing_requirements: [...packageReadiness.missing_requirements, inventory.reason] }
+      : packageReadiness;
     const mediaRework = protectedMediaReworkSummary(record);
     const metaRepair = metaReviewRecoverySummary(record);
     // #2618: creative correctness is independent of technical CDN readiness.
@@ -12179,6 +12184,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
         ? "Creative correction required · Publishing held"
         : candidateGalleryReview
         ? "Unverified gallery candidates · Visual review only · Publishing held"
+        : inventory && inventory.verified !== true
+        ? "Native gallery needs repair · Individual slides not verified"
         : schedulingTechnicalReady
         ? "Scheduling approval ready · Media verified"
         : studioState,
