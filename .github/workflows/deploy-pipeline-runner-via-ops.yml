@@ -159,6 +159,7 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_http_transport.py \
             services/pipeline-runner/tests/test_rendering_review_audio_qa.py \
             services/pipeline-runner/tests/test_rendering_review_media_http.py \
+            services/pipeline-runner/tests/test_factory_private_preview.py \
             services/pipeline-runner/tests/test_rendering_review_isolated_render.py \
             services/pipeline-runner/tests/test_rendering_review_isolated_launch.py \
             services/pipeline-runner/tests/test_rendering_review_catalog_render_sources.py \
@@ -296,6 +297,16 @@ jobs:
           jq -e '.ok==false and .error=="review_media_auth_required"' /tmp/review-media-denied.json >/dev/null
           echo "chicago_review_private_google_media_route=PASS auth_required=true no_render=true"
 
+
+      - name: Verify Factory private preview source requires authentication
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS --max-time 15 -o /tmp/factory-private-source-denied.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/jobs/factory/private-preview-source/recaV78on0RSfqb31' || true)
+          test "$status" = "401"
+          jq -e '.ok==false and .error=="factory_preview_auth_required"' /tmp/factory-private-source-denied.json >/dev/null
+          echo 'factory_private_source_live_auth_gate=PASS'
 
       - name: One-time exact oversized ingestion A1S canary (no publish)
         if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'oversized-a1s-canary-20261030:') }}
