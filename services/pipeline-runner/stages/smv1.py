@@ -6,6 +6,7 @@ import threading
 from config import StageRequest, StageResult, load_settings
 from item4.formulas import smv1_exact_request_formula
 from item4.processor import process_drain
+from studio_produce.workload_governor import AdmissionDeferred
 
 
 logger = logging.getLogger("pipeline-runner.smv1")
@@ -85,6 +86,12 @@ def run(request: StageRequest) -> StageResult:
             test_run_id=test_run_id,
             photo_workers=photo_workers,
             max_followup=max_runs,
+        )
+    except AdmissionDeferred as exc:
+        return StageResult(
+            stage="smv1", status="deferred",
+            message=str(exc),
+            details={"reason": "governor_admission_deferred", "processed_count": 0},
         )
     except Exception as exc:
         return StageResult(
