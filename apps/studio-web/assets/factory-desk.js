@@ -797,6 +797,10 @@
   function clearFactoryNativeGalleryControls() {
     $("factoryNativeGalleryControls")?.remove();
   }
+  function isFactoryTikTokPhotoGallery(card) {
+    return card?.kind === "output" && String(card.platform || "").trim().toLowerCase() === "tiktok"
+      && /^(multi[\s-]?photo|(?:tiktok\s+)?slideshow)$/i.test(String(card.studio_output_type || "").trim());
+  }
   function isFactoryNativeGallery(card) {
     return /carousel|multi[\s-]?image|photo[\s-]?set/i.test(
       String(card?.studio_output_type || ""));
@@ -1026,6 +1030,29 @@
         setStatus(`No verified recovery preview for ${cardLabel(card)}`, true);
       }
       backdrop.hidden = false;
+      return;
+    }
+
+    // TikTok native photos are ordered selected media, not a Meta C9 gallery or MP4.
+    // Reuse the exact-output swipe viewer already shipped in Pipeline. Never
+    // fall through to video or the shared cover on missing/unverified data.
+    if (isFactoryTikTokPhotoGallery(card)) {
+      backdrop.hidden = true;
+      video.hidden = true;
+      if (resolve || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id || "")) || !window.StudioPipelineGallery?.open) {
+        empty.hidden = false;
+        empty.textContent = "TikTok photo preview unavailable. No video or cover was substituted.";
+        backdrop.hidden = false;
+        setStatus(empty.textContent, true);
+        return;
+      }
+      const id = String(card.id);
+      void window.StudioPipelineGallery.open({
+        recordId: id, label: cardLabel(card),
+        load: () => fetchJson(`/api/outputs/${encodeURIComponent(id)}/creative`, {timeoutMs: 25000, cache: "no-store"}),
+        isCurrent: () => galleryEpoch === factoryGalleryPreviewEpoch,
+        requireCompleteTikTok: true,
+      });
       return;
     }
 
