@@ -1,0 +1,32 @@
+name: Native gallery companion handoff regression
+on:
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/studio_produce/**'
+      - 'services/pipeline-runner/tests/test_studio_native_gallery_2873.py'
+      - 'apps/studio-api/**'
+      - '.github/workflows/native-gallery-companions-2873.yml'
+permissions:
+  contents: read
+jobs:
+  cover-first-native-gallery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install runner test dependencies
+        run: python -m pip install --disable-pip-version-check -q pytest -r services/pipeline-runner/requirements.txt
+      - name: Test 19 originals into two ten-slide native gallery packages
+        working-directory: services/pipeline-runner
+        env:
+          STUDIO_WORKLOAD_GOVERNOR_ENABLED: 'false'
+          STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: 'false'
+        run: python -m pytest -q tests/test_studio_native_gallery_2873.py tests/test_studio_produce.py tests/test_instagram_native_gallery_preflight_2294.py tests/test_fb0_native_gallery_preflight_2294.py
+      - name: Test Factory linked gallery visibility and fresh human approval fences
+        run: node --test apps/studio-api/studio-native-gallery-companions-2873.test.mjs apps/studio-api/native-gallery-package-guard.test.mjs apps/studio-api/native-gallery-human-final-2371.test.mjs apps/studio-api/factory-supabase-approval.test.mjs apps/studio-api/factory-native-gallery-preview.test.mjs
