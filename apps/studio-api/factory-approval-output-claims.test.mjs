@@ -225,3 +225,40 @@ test("global and profile-local routes share the same canonical output-ID fence",
   assert.match(ui, /FACTORY_WAITING_SELECTION_KEY/,
     "Explicit overlapping submission intent must survive recovery without a second click");
 });
+
+
+test("#2915 a completed mixed failed/approved NYC group does not pin current-review outputs",async()=>{
+  const bucket=new R2();
+  const selected=["recVoFLCOAGHNIkD3","rechOtaxHOwY18A8F","recWq5HIxBT8BCtme"];
+  const request="ac77ba24-1e61-4d16-a528-1deecd3ce704";
+  const child="fgc_2915_historical_child";
+  await factoryOutputClaimReserve(bucket,{profileId:profile,requestId:request,ids:selected});
+  await bucket.put("studio/state/factory-approvals/v2/groups/"+request+".json",JSON.stringify({
+    schema:"studio.factory-approval-group.1",request_id:request,status:"queued",
+    records:selected.map(id=>({id,profile_id:profile})),
+    children:[{profile_id:profile,request_id:child}],
+  }));
+  const key="studio/state/factory-approvals/v2/jobs/"+profile+"/"+child+".json";
+  const history=legacyJob("old",child,selected.map((id,i)=>({id,status:i===1?"approved":"failed",error:i===1?null:"historic hold-release failure"})),"2026-11-22T05:44:51Z",request);
+  history.items.push({id:ids[6],status:"pending"});
+  await bucket.put(key,JSON.stringify({...history,status:"running"}));
+  const blocked=await factoryOutputClaimReclaimIfSafe(bucket,{profileId:profile,requestId:groupB,ids:selected});
+  assert.equal(blocked.ok,false);
+  history.items.pop();
+  await bucket.put(key,JSON.stringify(history));
+  const safe=await factoryOutputClaimReclaimIfSafe(bucket,{profileId:profile,requestId:groupB,ids:selected});
+  assert.equal(safe.ok,true);
+  assert.deepEqual(safe.reclaimed,selected);
+  assert.deepEqual(JSON.parse(await (await bucket.get(key)).text()),history,"historical decisions and failure evidence unchanged");
+  const old=await factoryOutputClaimInspect(bucket,{profileId:profile,requestId:request,ids:selected});
+  assert.equal(old.ok,false);
+  assert.deepEqual(old.owners,[groupB]);
+});
+
+test("#2915 a historical child with missing selected identity cannot authorize claim transfer",async()=>{
+  const bucket=new R2();
+  await factoryOutputClaimReserve(bucket,{profileId:profile,requestId:groupA,ids:ids.slice(0,2)});
+  const key="studio/state/factory-approvals/v2/jobs/"+profile+"/"+groupA+".json";
+  await bucket.put(key,JSON.stringify(legacyJob("incomplete",groupA,[{id:ids[0],status:"failed"}],"2026-11-22T05:44:51Z")));
+  assert.equal((await factoryOutputClaimReclaimIfSafe(bucket,{profileId:profile,requestId:groupB,ids:ids.slice(0,2)})).ok,false);
+});
