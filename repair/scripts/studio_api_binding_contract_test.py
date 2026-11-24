@@ -4,6 +4,7 @@ import unittest
 
 from studio_api_binding_contract import (
     CORE_BINDINGS,
+    GOOGLE_DRIVE_OAUTH_BINDINGS,
     OPTIONAL_BINDINGS,
     RESERVATION_BINDINGS,
     assert_production_supabase_target,
@@ -160,6 +161,28 @@ class StudioApiBindingContractTest(unittest.TestCase):
         got["STUDIO_I1_DURABLE_JOBS_UNSAFE"] = "secret_text"
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unexpected I1 binding")
+
+    def test_google_drive_oauth_tuple_is_exact_and_all_or_none(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        absent = assert_live_contract(got, "initial provisioning pending")
+        self.assertFalse(absent["google_drive_oauth_ready"])
+        self.assertEqual(absent["google_drive_oauth_missing"], {})
+        for name in GOOGLE_DRIVE_OAUTH_BINDINGS:
+            with self.subTest(name=name):
+                partial = dict(got, **{name: "secret_text"})
+                with self.assertRaises(SystemExit):
+                    assert_live_contract(partial, "partial Google OAuth tuple")
+        got.update(GOOGLE_DRIVE_OAUTH_BINDINGS)
+        self.assertTrue(assert_live_contract(got, "provisioned")["google_drive_oauth_ready"])
+        for name in GOOGLE_DRIVE_OAUTH_BINDINGS:
+            with self.subTest(name=name):
+                invalid = dict(got, **{name: "plain_text"})
+                with self.assertRaises(SystemExit):
+                    assert_live_contract(invalid, "Google credentials must be secret_text")
+        got["GOOGLE_DRIVE_OAUTH_UNSAFE"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown Google binding")
 
     def test_dedicated_video_key_is_optional_secret_and_cannot_replace_narration(self):
         got = self.legacy_core()
