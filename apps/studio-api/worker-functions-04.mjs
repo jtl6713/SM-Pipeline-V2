@@ -109,7 +109,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
-import {reviewResolveCandidate,resolveFactoryGalleryReview} from "./factory-review-resolve.mjs";
+import {reviewResolveCandidate,reviewResolvePilotOutput,resolveFactoryGalleryReview} from "./factory-review-resolve.mjs";
 import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
 import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
@@ -13478,7 +13478,12 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       // must instead enter the SAME guarded Supabase R2 group/claim workflow
       // as Submit Approvals, with the new authenticated submitter and timestamp.
       // Do not call a legacy output writer or sidestep independent slide QA.
-      if ((id === "recO494MDnQ1Tk51b" || id === "recWIWOrdflmqyxKW")
+      // #2907: never route a resolved pilot gallery through the retired writer.
+      const resolvedGalleryPilot = reviewResolvePilotOutput(id);
+      if (resolvedGalleryPilot && (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env))) {
+        throw new HttpError(503,"Gallery approval requires canonical Supabase; no legacy approval performed");
+      }
+      if ((id === "recO494MDnQ1Tk51b" || id === "recWIWOrdflmqyxKW" || resolvedGalleryPilot)
           && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
         if (!/^rec[A-Za-z0-9]{14}$/.test(String(authorization?.user?.record_id || ""))) {
           throw new HttpError(403, "Current authenticated Factory user is required for final gallery approval");
@@ -13486,9 +13491,9 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         const resultResponse = await factoryBatchGroupSubmitRoute(
           request, env, authorization, {
             action: "start_group",
-            request_id: "factory-single-nyc-" + crypto.randomUUID(),
+            request_id: (resolvedGalleryPilot ? "factory-single-gallery-" : "factory-single-nyc-") + crypto.randomUUID(),
             record_ids: [id],
-            notes: note || "Owner Factory Approve for four exact verified NYC gallery slides",
+            notes: note || (resolvedGalleryPilot ? "Owner formal Factory approval of reviewed gallery" : "Owner Factory Approve for four exact verified NYC gallery slides"),
           }, ctx,
         );
         const receipt = await resultResponse.json();
@@ -13498,7 +13503,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         return respond(request, env, {
           ok: true, page: "factory-desk", action: "approve",
           result: { id, approval_submitted: true, ...receipt },
-          message: "Governed approval submitted for corrected NYC gallery. Check Factory Activity for the actual verified result.",
+          message: resolvedGalleryPilot ? "Governed gallery approval submitted. Check Factory Activity for the verified result." : "Governed approval submitted for corrected NYC gallery. Check Factory Activity for the actual verified result.",
           refresh_required: true,
         });
       }
