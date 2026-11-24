@@ -658,18 +658,23 @@ test('lost acceptance response is reconciled without another POST or new request
   await h.reconcilePersistedFactoryPending(true);
   assert.equal(posts,1);assert.equal(h.factoryRecoveryEntries().length,0);
 });
-test('validation errors stay visible and do not become silent automatic POST loops',async()=>{
+test('validation errors stay visible; exact absence retires rejected intent after grace without POST loops',async()=>{
   const saved=savedGlobalEnvelope();let posts=0;
   const h=automaticRecoveryHarness(saved,async(url,options)=>{
     if(options.method==='POST'){posts++;throw Object.assign(Error('Output is held'),{status:409});}
     return {ok:true,exact_request_id:saved.batches[0].request_id,batches:[]};
   });
   await h.reconcilePersistedFactoryPending(true);
-  await h.reconcilePersistedFactoryPending(true);
   const row=h.factoryRecoveryEntries()[0];
   assert.equal(posts,1);assert.equal(row.saved.retry_blocked,true);
   assert.equal(row.saved.last_error,'Output is held');
   assert.ok(h.messages.some(message=>message?.includes('Output is held')), 'actual blocker must be displayed, not swallowed');
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts,1);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+  assert.equal(h.state.selectedOutputs.has('recExistingA'),false);
+  assert.deepEqual(h.submitted,[]);
+  assert.ok(h.messages.some(message=>String(message||'').includes('no accepted request')));
 });
 test('past_review recovery is dropped so a new Ready-for-Review selection can submit',async()=>{
   const saved=savedGlobalEnvelope();let posts=0;

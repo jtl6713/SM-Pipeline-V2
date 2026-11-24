@@ -173,3 +173,76 @@ test("gallery mismatch without definitive preflight non-acceptance cannot be dis
   assert.equal(store.has(recoveryKey), true, "ambiguous historical response must retain idempotency fence");
   assert.deepEqual([...state.selectedOutputs], [A, B, C]);
 });
+
+
+// Regression #2371: a rejected archived request may be provably absent even
+// when another historical terminal approval remains in Activity.
+const fenceSource = block("  async function reconcileFactorySubmissionFence(", "\n  let factoryPolicyRequest");
+function rejectedFenceFixture(response, { age = 120000, retryBlocked = true } = {}) {
+  const request = "factory_rejected_2371";
+  const snapshot = {
+    profile_id: "global", ids: [A, B],
+    saved_ms: Date.now() - age, auto_retry: true, retry_blocked: retryBlocked,
+    last_error: "HTTP 409",
+    batches: [{ request_id: request, ids: [A, B], payload: {
+      action: "start_group", request_id: request, record_ids: [A, B],
+    }}],
+  };
+  const store = new Map([[recoveryKey, JSON.stringify(snapshot)], [waitingKey, JSON.stringify([A,B,C])]]);
+  const state = {selectedOutputs:new Set([A,B,C]), desk:null};
+  const calls = { post:0, accepted:[], render:0 };
+  const localStorage = {
+    getItem:key => store.get(key) ?? null,
+    setItem:(key,value) => store.set(key,value),
+    removeItem:key => store.delete(key),
+  };
+  const api = vm.runInNewContext(fenceSource+"\nreconcileFactorySubmissionFence", {
+    state, localStorage, FACTORY_PENDING_MISSING_GRACE_MS:90000,
+    FACTORY_WAITING_SELECTION_KEY:waitingKey, FACTORY_PENDING_REQUEST_KEY:"pending",
+    fetchJson:async (url,options) => {
+      assert.match(url,/request_id=factory_rejected_2371$/);
+      assert.equal(options.cache,"no-store");
+      if (response instanceof Error) throw response;
+      return response;
+    },
+    factoryActivityMatchesPlan:(status,plan) => (status.batches || []).find(row=>row.request_id===plan.request_id),
+    factoryActivityProvesPlanMissing:(status,plan)=>status.ok===true && status.exact_request_id===plan.request_id && Array.isArray(status.batches) && status.batches.length===0,
+    factorySavedPayloadMatchesPlan:()=>true,
+    retrySavedFactoryPlan:async()=>{calls.post++;return null;},
+    factoryTerminalEligibilityError:()=>false, factoryUnrecoverableSubmitError:()=>false,
+    rememberFactoryAccepted:ids=>calls.accepted.push(...ids),
+    waitingFactorySelection:()=>JSON.parse(store.get(waitingKey)||"[]"),
+    saveFactorySelection:()=>{}, setStatus:()=>{}, setBatchSubmissionError:()=>{},
+    factoryRecoveryEntries:()=>[], renderDesk:()=>{calls.render++;},
+    updateFactoryBatchToolbar:()=>{},
+  });
+  return { run:()=>api(snapshot,recoveryKey), store,state,calls };
+}
+const missing2371 = {ok:true,exact_request_id:"factory_rejected_2371",batches:[]};
+test("rejected saved request with exact absence after grace releases fence for fresh human click only", async ()=>{
+  const f = rejectedFenceFixture(missing2371);
+  const result = await f.run();
+  assert.equal(result.resolved,true);
+  assert.equal(f.store.has(recoveryKey),false);
+  assert.equal(f.calls.post,0);
+  assert.deepEqual(f.calls.accepted,[]);
+  assert.deepEqual([...f.state.selectedOutputs],[C]);
+  assert.deepEqual(JSON.parse(f.store.get(waitingKey)),[C]);
+});
+test("rejected saved request without exact proof, or within grace, stays fenced",async()=>{
+  for(const [response,opts] of [[new Error("503"),{}],[{ok:true,batches:[]},{}],[missing2371,{age:1000}]]){
+    const f = rejectedFenceFixture(response,opts);
+    assert.equal((await f.run()).resolved,false);
+    assert.equal(f.store.has(recoveryKey),true);
+    assert.deepEqual([...f.state.selectedOutputs],[A,B,C]);
+  }
+});
+test("an exact committed request retains history and never issues another POST",async()=>{
+  const f=rejectedFenceFixture({ok:true,exact_request_id:"factory_rejected_2371",batches:[{
+    request_id:"factory_rejected_2371",items:[{id:A,status:"failed"},{id:B,status:"approved"}]
+  }]});
+  assert.equal((await f.run()).resolved,true);
+  assert.equal(f.store.has(recoveryKey),false);
+  assert.equal(f.calls.post,0);
+  assert.deepEqual(f.calls.accepted,[A,B]);
+});
