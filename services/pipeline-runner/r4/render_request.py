@@ -141,7 +141,28 @@ def studio_visual_integrity_error(output: dict[str, Any], payload: dict[str, Any
     if not field_str(output, "Output_Filename").startswith("studio-"):
         return None
     kind = field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type")
+    music_mode = field_str(output, "Studio_Effective_Background_Music_Mode").strip().lower()
+    if music_mode in {"yes", "true", "1"}:
+        music = payload.get("music") or {}
+        if not isinstance(music, dict) or not str(music.get("url") or "").strip() or music.get("enabled") is False or _num(music.get("volume"), 0) <= 0:
+            return "Studio render audio integrity guard: requested background music is missing or muted. Resolve the music asset before rendering."
     if kind == "Story" or field_str(output, "Format") == "Story":
+        # Story-specific selected asset timing, never the parent video's speech
+        # duration. Preserve explicit short duration overrides where supported.
+        selected = parse_json_field(field(output, "Selected_Assets_JSON"))
+        selected = selected if isinstance(selected, dict) else {}
+        expected = _num(selected.get("target_total_frames"), 0)
+        fps = _num(payload.get("fps"), 30)
+        if expected <= 0:
+            override = _num(field(output, "Video_Duration_Seconds_Override"), 0)
+            expected = round((min(15, override) if override > 0 else 10) * fps)
+        clips = payload.get("clips")
+        if not isinstance(clips, list) or not clips:
+            return "Studio Story duration integrity guard: missing clip timeline."
+        actual = _num(payload.get("durationInFrames"), 0)
+        clip_frames = sum(_num(clip.get("durationFrames"), 0) for clip in clips if isinstance(clip, dict))
+        if fps <= 0 or expected <= 0 or actual != expected or clip_frames != expected or expected / fps > 15:
+            return f"Studio Story duration integrity guard: expected {expected:g} frames, got {actual:g} (clips {clip_frames:g}). Rebuild the Story-specific package."
         return None
     clips = payload.get("clips")
     if not isinstance(clips, list) or not clips:

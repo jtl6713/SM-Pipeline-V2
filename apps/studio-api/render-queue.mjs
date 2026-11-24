@@ -96,10 +96,56 @@ export function completedRenderRecoveryFields(record, field = (row, name) => row
 }
 
 /** Copy a finished shared 9:16 short onto stranded Reel/Short/Video Draft/Story siblings. */
+// #2970: the desk watchdog must never copy a Reel into a 10-second Story.
+ // Only the independently admitted producer owns Story rendering. Even short
+ // siblings must prove the same actual render inputs, not just parent identity.
+function exactRenderJson(value) {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== "object") return null;
+    const sort = v => Array.isArray(v) ? v.map(sort) : v && typeof v === "object"
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sort(v[k])])) : v;
+    return JSON.stringify(sort(parsed));
+  } catch { return null; }
+}
+
 export function sharedRenderPropagateFields(source, field = (row, name) => row?.fields?.[name], target = null) {
-  if (!source || !String(field(source, "Final_File_URL") || "").trim()) return null;
-  const fields = {
-    Final_File_URL: field(source, "Final_File_URL") || null,
+  if (!source || !target || !isSharedRenderStrandCandidate(target, field)) return null;
+  if (!isSharedRenderEligible(source, field) || !isSharedRenderEligible(target, field)) return null;
+  if (String(field(source, "Render_Status") || "") !== "Rendered") return null;
+  const sourceParent = firstLinkedId(field(source, "Content_Item"));
+  const targetParent = firstLinkedId(field(target, "Content_Item"));
+  if (!sourceParent || sourceParent !== targetParent) return null;
+  if (!String(field(source, "Final_File_URL") || "").trim()) return null;
+  const sourceFrames = Number(field(source, "Render_Total_Frames"));
+  const targetFrames = Number(field(target, "Render_Total_Frames"));
+  if (!Number.isSafeInteger(sourceFrames) || sourceFrames <= 0 || sourceFrames !== targetFrames) return null;
+  let props;
+  try {
+    const raw = field(source, "Remotion_Props_JSON");
+    props = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch { return null; }
+  const expectedClips = exactRenderJson(field(target, "Render_Clip_List_JSON"));
+  if (!props || Number(props.durationInFrames) !== targetFrames || !expectedClips
+      || !Array.isArray(props.clips) || !props.clips.length || exactRenderJson(props.clips) !== expectedClips
+      || !field(target, "Composition_ID") || props.compositionId !== field(target, "Composition_ID")) return null;
+  // Unknown intent, missing source stems, explicit audio mismatch, or zero volume
+  // cannot authorize reuse. This is input provenance, not an encoded-audio probe.
+  for (const [modeKey, audioKey, urlKey] of [
+    ["Studio_Effective_Voiceover_Mode", "voiceover", "Voiceover_URL"],
+    ["Studio_Effective_Background_Music_Mode", "music", "Music_URL"],
+  ]) {
+    const mode = String(field(target, modeKey) || "").trim();
+    if (!["Yes", "No"].includes(mode) || String(field(source, modeKey) || "").trim() !== mode) return null;
+    const audio = props[audioKey] || {};
+    const url = String(audio.url || (audioKey === "voiceover" ? props.voiceoverUrl : "") || "").trim();
+    if (mode === "Yes" && (!url || url !== String(field(target, urlKey) || "").trim()
+        || audio.enabled === false || !Number.isFinite(Number(audio.volume)) || Number(audio.volume) <= 0)) return null;
+    if (mode === "No" && url && audio.enabled !== false && Number(audio.volume) !== 0) return null;
+  }
+  // Never transfer another output's human approval, scheduling, or publish state.
+  return {
+    Final_File_URL: field(source, "Final_File_URL"),
     Final_File_ID: field(source, "Final_File_ID") || null,
     Output_URL: field(source, "Output_URL") || null,
     Studio_Preview_URL: field(source, "Studio_Preview_URL") || null,
@@ -115,55 +161,15 @@ export function sharedRenderPropagateFields(source, field = (row, name) => row?.
     Remotion_Status_URL: "",
     Remotion_Props_JSON: "",
   };
-  // Stories that already carry a schedule should rejoin the armed package, not
-  // bounce back through Ready for Review (FB Story 9422 / Content 1864).
-  const targetSched = target ? String(field(target, "Scheduled_Post_Date") || "").trim() : "";
-  const sourceOut = String(field(source, "Output_Status") || "").trim();
-  const sourceReview = String(field(source, "Review_Status") || "").trim();
-  const sourcePublish = String(field(source, "Publish_Status") || "").trim();
-  if (
-    targetSched
-    && (
-      ["Approved for Publishing", "Published"].includes(sourceOut)
-      || sourceReview === "Approved"
-      || ["Ready to Schedule", "Scheduled", "Published"].includes(sourcePublish)
-    )
-  ) {
-    fields.Output_Status = "Approved for Publishing";
-    fields.Review_Status = "Approved";
-    fields.Publish_Status = sourcePublish || "Ready to Schedule";
-  }
-  const server = field(source, "Render_Server_URL");
-  if (server) fields.Render_Server_URL = server;
-  const clipJson = field(source, "Render_Clip_List_JSON");
-  if (clipJson) fields.Render_Clip_List_JSON = clipJson;
-  const totalFrames = field(source, "Render_Total_Frames");
-  if (totalFrames !== undefined && totalFrames !== null && totalFrames !== "") {
-    fields.Render_Total_Frames = totalFrames;
-  }
-  const thumb = field(source, "Thumbnail_URL");
-  if (thumb && target && /^story$/i.test(String(field(target, "Studio_Output_Type") || field(target, "Format") || ""))) {
-    if (!String(field(target, "Thumbnail_URL") || "").trim()) fields.Thumbnail_URL = thumb;
-  }
-  return fields;
 }
 
 export function isSharedRenderStrandCandidate(record, field = (row, name) => row?.fields?.[name]) {
-  const outputType = String(field(record, "Studio_Output_Type") || field(record, "Output_Type") || "").trim();
-  const isStory = /^story$/i.test(outputType) || /^story$/i.test(String(field(record, "Format") || ""));
-  if (!SHARED_RENDER_OUTPUT_TYPES.has(outputType) && !isStory) return false;
-  if (String(field(record, "Render_Status") || "").trim() === "Native Photo Route") return false;
-  // Blank Aspect_Ratio still heals Reel/Short/Video Draft strands (Adler Point 2127).
-  // Stories are always 9:16 vertical; do not require Aspect_Ratio.
-  if (!isStory) {
-    const ratio = String(field(record, "Aspect_Ratio") || "").trim().replace(/x/gi, ":");
-    if (ratio && ratio !== "9:16") return false;
-  }
+  if (!isSharedRenderEligible(record, field)) return false;
   const output = String(field(record, "Output_Status") || "").trim();
   if (!["In Production", "Rendering"].includes(output)) return false;
-  if (String(field(record, "Final_File_URL") || "").trim()) return false;
-  if (String(field(record, "Test_Run_ID") || "").trim()) return false;
-  if (String(field(record, "Published_At") || "").trim()) return false;
+  for (const key of ["Final_File_URL", "Remotion_Job_ID", "Test_Run_ID", "Published_At", "Scheduled_Post_Date", "Publish_Status"]) {
+    if (String(field(record, key) || "").trim()) return false;
+  }
   if (Boolean(field(record, "Do_Not_Publish"))) return false;
   const review = String(field(record, "Review_Status") || "").trim();
   if (["Approved", "Changes Requested", "Rejected"].includes(review)) return false;

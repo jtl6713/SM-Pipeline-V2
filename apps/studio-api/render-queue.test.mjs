@@ -307,49 +307,70 @@ test("blank Render_Status + Final_File_URL recovers without Remotion job (IG Ree
   });
 });
 
-test("shared-render strand helpers copy finished sibling media", () => {
-  const source = row({
-    Final_File_URL: "https://drive.google.com/file/d/canonical/view",
-    Final_File_ID: "canonical",
-    Studio_Preview_URL: "https://media.chicagoshining.com/preview.mp4",
-    Final_File_Storage_Status: "Uploaded",
-    Render_Clip_List_JSON: "[]",
-    Render_Total_Frames: 900,
-  });
-  const strand = row({
-    Studio_Output_Type: "Reel",
-    Output_Status: "In Production",
-    Aspect_Ratio: "9:16",
-  });
-  assert.equal(isSharedRenderStrandCandidate(strand), true);
-  assert.equal(isSharedRenderStrandCandidate(row({ ...strand.fields, Final_File_URL: "https://x" })), false);
-  const fields = sharedRenderPropagateFields(source);
-  assert.equal(fields.Render_Status, "Rendered");
-  assert.equal(fields.Output_Status, "Ready for Review");
-  assert.equal(fields.Final_File_URL, "https://drive.google.com/file/d/canonical/view");
-  assert.equal(fields.Remotion_Job_ID, "");
+function proofRows() {
+  const clips = [{src:"https://media.example/one.jpg",durationFrames:900}];
+  const common = {
+    Content_Item:["recContent1"], Aspect_Ratio:"9:16", Composition_ID:"ChicagoShiningPhotoSequence",
+    Render_Total_Frames:900, Render_Clip_List_JSON:JSON.stringify(clips),
+    Studio_Effective_Voiceover_Mode:"Yes", Studio_Effective_Background_Music_Mode:"Yes",
+    Voiceover_URL:"https://media.example/vo.mp3", Music_URL:"https://media.example/music.mp3",
+  };
+  const source = row({...common, Studio_Output_Type:"Reel", Render_Status:"Rendered",
+    Output_Status:"Approved for Publishing", Review_Status:"Approved", Publish_Status:"Scheduled",
+    Final_File_URL:"https://drive.google.com/file/d/canonical/view", Final_File_ID:"canonical",
+    Remotion_Props_JSON:JSON.stringify({compositionId:common.Composition_ID,durationInFrames:900,clips,
+      voiceover:{url:common.Voiceover_URL,volume:1},music:{url:common.Music_URL,volume:0.6}}),
+  }, "recMain");
+  const target = row({...common, Studio_Output_Type:"Short", Output_Status:"In Production"}, "recTarget");
+  return {source,target};
+}
+
+test("#2970 exact compatible rendered short can return only to human review", () => {
+  const {source,target}=proofRows();
+  assert.equal(isSharedRenderStrandCandidate(target),true);
+  assert.equal(sharedRenderPropagateFields(source),null);
+  const fields=sharedRenderPropagateFields(source,undefined,target);
+  assert.equal(fields.Final_File_URL,source.fields.Final_File_URL);
+  assert.equal(fields.Output_Status,"Ready for Review");
+  assert.equal(fields.Review_Status,"Review Sent");
+  assert.ok(!("Publish_Status" in fields));
+  assert.ok(!("Render_Total_Frames" in fields));
+  assert.ok(!("Render_Clip_List_JSON" in fields));
 });
 
-test("shared-render strand heals scheduled Story from finished Story sibling", () => {
-  const source = row({
-    Studio_Output_Type: "Story",
-    Output_Status: "Approved for Publishing",
-    Review_Status: "Approved",
-    Publish_Status: "Ready to Schedule",
-    Final_File_URL: "https://drive.google.com/file/d/story/view",
-    Final_File_ID: "story",
-    Thumbnail_URL: "https://media.chicagoshining.com/studio/previews/thumbnails/x/cover-9x16.png",
-  });
-  const strand = row({
-    Studio_Output_Type: "Story",
-    Format: "Story",
-    Output_Status: "In Production",
-    Scheduled_Post_Date: "2026-11-04T20:10:00.000Z",
-  });
-  assert.equal(isSharedRenderStrandCandidate(strand), true);
-  const fields = sharedRenderPropagateFields(source, undefined, strand);
-  assert.equal(fields.Output_Status, "Approved for Publishing");
-  assert.equal(fields.Review_Status, "Approved");
-  assert.equal(fields.Publish_Status, "Ready to Schedule");
-  assert.equal(fields.Final_File_URL, "https://drive.google.com/file/d/story/view");
+test("#2970 never copy a 41.9s Reel into a 10s Story or copy Story approvals", () => {
+  const {source,target}=proofRows();
+  source.fields.Render_Total_Frames=1257;
+  target.fields.Studio_Output_Type="Story";
+  target.fields.Format="Story";
+  target.fields.Render_Total_Frames=300;
+  assert.equal(isSharedRenderStrandCandidate(target),false);
+  assert.equal(sharedRenderPropagateFields(source,undefined,target),null);
+  source.fields.Studio_Output_Type="Story";
+  assert.equal(sharedRenderPropagateFields(source,undefined,target),null);
 });
+
+test("#2970 uncertain or mismatched audio, timeline, owner, active claim and schedule fail closed", () => {
+  for (const mutate of [
+    (s,t)=>{t.fields.Studio_Effective_Voiceover_Mode="No"},
+    (s,t)=>{delete t.fields.Studio_Effective_Background_Music_Mode},
+    (s,t)=>{const p=JSON.parse(s.fields.Remotion_Props_JSON);p.music.url="";s.fields.Remotion_Props_JSON=JSON.stringify(p)},
+    (s,t)=>{const p=JSON.parse(s.fields.Remotion_Props_JSON);p.voiceover.volume=0;s.fields.Remotion_Props_JSON=JSON.stringify(p)},
+    (s,t)=>{t.fields.Render_Total_Frames=300},
+    (s,t)=>{t.fields.Render_Clip_List_JSON='[{"src":"wrong","durationFrames":900}]'},
+    (s,t)=>{t.fields.Content_Item=["recOther"]},
+    (s,t)=>{t.fields.Remotion_Job_ID="active"},
+    (s,t)=>{t.fields.Scheduled_Post_Date="2026-11-25T01:00:00Z"},
+    (s,t)=>{delete s.fields.Remotion_Props_JSON},
+  ]) {
+    const {source,target}=proofRows(); mutate(source,target);
+    assert.equal(sharedRenderPropagateFields(source,undefined,target),null);
+  }
+});
+
+test("#2970 fanout preserves directive fields when Supabase PATCH only echoes changes", () => {
+  assert.match(worker,/requestRecord = await canonicalFanoutRead\("request_directives"/);
+  assert.match(worker,/return \{\.\.\.parentContentItem, fields:\{\.\.\.parentContentItem\.fields, \.\.\.patch, \.\.\.receipt\.fields\}\}/);
+  assert.match(worker,/requestRecord = \{\.\.\.requestRecord, fields:\{\.\.\.requestRecord\.fields, \.\.\.assetPatch, \.\.\.receipt\.fields\}\}/);
+});
+
