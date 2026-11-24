@@ -34,6 +34,7 @@ from item4.media_assets import ensure_media_asset
 from item4.settings import PipelineSettings, field, pipeline_settings
 from item4.sources import resolve_master_source
 from studio_produce import workload_governor as governor
+from item4 import restart_recovery
 
 
 def _now_iso() -> str:
@@ -233,6 +234,24 @@ def requeue_stale_processing(
             # old 90-second timer. A crashed worker's durable resource lease
             # may take 20 minutes to expire. Allow a further recovery margin.
             recovery_age = max(recovery_age, 45 * 60 * 1000)
+        # Newly journaled crops can recover after proven owner exit and the
+        # transfer lease settling interval, not the legacy 45-minute timer.
+        if governor.enabled() and str(fields.get("Asset_Kind") or "")=="Platform Variant":
+            exact = restart_recovery.recoverable_claim(row["id"],str(fields.get("Transfer_ID") or ""),fields.get("Last_Attempt_At"))
+            if exact:
+                from supabase_pipeline import _rest
+                from urllib.parse import quote
+                stamp_filter=quote(str(fields["Last_Attempt_At"]),safe="")
+                status="Error" if int(fields.get("Attempt_Count") or 0)>=6 else "Pending"
+                rows_changed=_rest(client._settings,
+                    f"studio_media_transfer_queue?airtable_record_id=eq.{row['id']}&status=eq.Processing&last_attempt_at=eq.{stamp_filter}&select=airtable_record_id",
+                    "PATCH",{"status":status,"error_message":"Interrupted crop: exact durable receipt recovery"},prefer="return=representation")
+                if isinstance(rows_changed,list) and len(rows_changed)==1 and rows_changed[0].get("airtable_record_id")==row["id"]:
+                    requeued+=1
+                continue
+            # A live/unknown owner or unjournaled upload cannot authorize a
+            # replay. Keep it visible for explicit receipt reconciliation.
+            continue
         if stamp and (now_ms - stamp) < recovery_age:
             continue
         attempts = int(fields.get("Attempt_Count") or 0)
@@ -287,7 +306,7 @@ class TransferClaimConflict(RuntimeError):
     """A different actor already transitioned the same canonical transfer."""
 
 
-def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> None:
+def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> str:
     attempts = int(fields.get("Attempt_Count") or 0) + 1
     patch = {
         "Transfer_Status": "Processing",
@@ -309,6 +328,8 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
         settings = getattr(client, "_settings", None)
         if not isinstance(settings, dict):
             raise RuntimeError("Supabase settings required for atomic transfer claim")
+        if expected=="Pending" and str(fields.get("Asset_Kind") or "")=="Platform Variant":
+            restart_recovery.register_claim(record_id,str(fields.get("Transfer_ID") or ""),patch["Last_Attempt_At"])
         rows = _rest(
             settings,
             f"studio_media_transfer_queue?airtable_record_id=eq.{record_id}"
@@ -326,8 +347,9 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
             raise TransferClaimConflict("canonical transfer state changed before claim")
         if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("airtable_record_id") != record_id:
             raise RuntimeError("atomic transfer claim could not be verified")
-        return
+        return patch["Last_Attempt_At"]
     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id, patch)
+    return patch["Last_Attempt_At"]
 
 
 def select_eligible_rows(
@@ -523,28 +545,36 @@ def _complete_variant_upload(
             brand_watermark_bytes(client),
             output_format="jpeg",
         )
-    uploaded = drive.upload_file(folder_id, filename, rendered, "image/jpeg")
+    reserved_media_id = None
+    claim_at=row.get("_smv1_claim_at")
+    if governor.enabled():
+        restart_recovery.read_claim(client,record_id,transfer_id,claim_at)
+        uploaded,reserved_media_id = restart_recovery.reserved_upload(drive,record_id,transfer_id,folder_id,filename,rendered,claim_at=claim_at)
+    else:
+        uploaded = drive.upload_file(folder_id, filename, rendered, "image/jpeg")
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")
 
     def _write() -> str:
+        if governor.enabled():
+            restart_recovery.read_claim(client,record_id,transfer_id,claim_at)
         media_asset_id = ensure_media_asset(
-            client, fields, drive_id, drive_url, transfer_id, kind="Platform Variant"
+            client, fields, drive_id, drive_url, transfer_id, kind="Platform Variant", reserved_id=reserved_media_id
         )
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            record_id,
-            {
-                "Transfer_Status": "Ready",
-                "Drive_File_ID": drive_id,
-                "Drive_URL": drive_url,
-                "Media_Asset_Record_ID": media_asset_id,
-                "Generated_Media_Asset": [media_asset_id],
-                "Completed_At": _now_iso(),
-                "Error_Message": None,
-                "Preview_Status": "Pending",
-            },
-        )
+        patch = {
+            "Transfer_Status": "Ready",
+            "Drive_File_ID": drive_id,
+            "Drive_URL": drive_url,
+            "Media_Asset_Record_ID": media_asset_id,
+            "Generated_Media_Asset": [media_asset_id],
+            "Completed_At": _now_iso(),
+            "Error_Message": None,
+            "Preview_Status": "Pending",
+        }
+        if governor.enabled():
+            restart_recovery.finish_claim(client,record_id,transfer_id,claim_at,patch)
+        else:
+            client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,record_id,patch)
         return media_asset_id
 
     if airtable_lock:
@@ -646,7 +676,7 @@ def _apply_cached_variant(client: AirtableClient, row: dict, cached: dict) -> di
     media_id = _media_asset_id(prior)
     if not drive_id or not media_id:
         raise ValueError("Incomplete cached variant authority")
-    client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], {
+    patch = {
         "Transfer_Status": "Ready",
         "Drive_File_ID": drive_id,
         "Drive_URL": prior.get("Drive_URL") or f"https://drive.google.com/file/d/{drive_id}/view",
@@ -655,7 +685,11 @@ def _apply_cached_variant(client: AirtableClient, row: dict, cached: dict) -> di
         "Completed_At": _now_iso(),
         "Error_Message": None,
         "Preview_Status": "Pending",
-    })
+    }
+    if governor.enabled():
+        restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),patch)
+    else:
+        client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,row["id"],patch)
     return {
         "route": "variant_persistent_cache_reuse",
         "queue_record_id": row["id"],
@@ -684,13 +718,13 @@ def _process_variant_pending(
     if governor.enabled():
         # A reused/cached asset still needs a canonical claim before writing
         # Ready, otherwise it can race a concurrent crop worker.
-        _claim_row(client, record_id, fields)
+        row["_smv1_claim_at"]=_claim_row(client, record_id, fields)
     if _row_has_authority(fields):
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            record_id,
-            {"Transfer_Status": "Ready", "Error_Message": None},
-        )
+        patch={"Transfer_Status":"Ready","Error_Message":None}
+        if governor.enabled():
+            restart_recovery.finish_claim(client,record_id,str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),patch)
+        else:
+            client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,record_id,patch)
         return {
             "route": "variant_authority_reuse",
             "queue_record_id": record_id,
@@ -701,7 +735,8 @@ def _process_variant_pending(
             "ratio": ratio,
         }
 
-    cached = _find_persistent_variant(client, row)
+    journal = restart_recovery.receipt(record_id) if governor.enabled() else None
+    cached = None if journal and journal.get("drive_id") else _find_persistent_variant(client, row)
     if cached:
         return _apply_cached_variant(client, row, cached)
     if not governor.enabled():
@@ -752,13 +787,14 @@ def process_variant_group(
         if not folder_id or not ratio:
             raise RuntimeError("Platform variant row is missing folder or aspect ratio")
         if _row_has_authority(fields):
+            patch = {"Transfer_Status": "Ready", "Error_Message": None}
             if governor.enabled():
                 try:
-                    _claim_row(client, row["id"], fields)
+                    stamp=_claim_row(client,row["id"],fields)
+                    restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),stamp,patch)
                 except TransferClaimConflict:
                     continue
-            patch = {"Transfer_Status": "Ready", "Error_Message": None}
-            if airtable_lock:
+            elif airtable_lock:
                 with airtable_lock:
                     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], patch)
             else:
@@ -776,9 +812,9 @@ def process_variant_group(
         try:
             if airtable_lock:
                 with airtable_lock:
-                    _claim_row(client, row["id"], fields)
+                    row["_smv1_claim_at"]=_claim_row(client, row["id"], fields)
             else:
-                _claim_row(client, row["id"], fields)
+                row["_smv1_claim_at"]=_claim_row(client, row["id"], fields)
         except TransferClaimConflict:
             # Another owner won the canonical claim. Do not crop or fail it.
             continue
@@ -787,7 +823,8 @@ def process_variant_group(
     # Persistent cross-batch lookup before any source download or variant call.
     still_pending = []
     for row in pending_rows:
-        cached = _find_persistent_variant(client, row)
+        journal = restart_recovery.receipt(row["id"]) if governor.enabled() else None
+        cached = None if journal and journal.get("drive_id") else _find_persistent_variant(client, row)
         if cached:
             try:
                 results.append(_apply_cached_variant(client, row, cached))
@@ -848,7 +885,18 @@ def process_variant_group(
             if reused:
                 result["route"] = "variant_original_frame_reuse"
             return result
+        except governor.AdmissionDeferred:
+            raise
         except Exception as exc:
+            if governor.enabled():
+                # Do not overwrite a Ready receipt after an ambiguous response,
+                # or reset the claim of a replacement owner.
+                try:
+                    restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),
+                        {"Transfer_Status":"Pending" if is_retryable_master_error(exc) else "Error","Error_Message":str(exc)[:10000]})
+                except Exception:
+                    pass
+                raise
             try:
                 if airtable_lock:
                     with airtable_lock:
@@ -1017,6 +1065,9 @@ def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
                 return _process_queue_row_unlocked(client, current)
             except TransferClaimConflict:
                 return {"processed": False, "reason": "claimed_elsewhere", "queue_record_id": row["id"]}
+            finally:
+                if str(fields.get("Asset_Kind") or "")=="Platform Variant" and status=="Pending":
+                    restart_recovery.mark_settled(str(row["id"]))
     return _process_queue_row_unlocked(client, row)
 
 
@@ -1066,6 +1117,19 @@ def process_one(
     production_request_record_id: str | None = None,
     test_run_id: str | None = None,
 ) -> dict[str, Any]:
+    restart_recovery.remember_request(production_request_record_id,test_run_id)
+    try:
+        with governor.resource_slot("smv1_drain",limit=1,wait_seconds=0):
+            return _process_one_admitted(production_request_record_id=production_request_record_id,test_run_id=test_run_id)
+    except governor.AdmissionDeferred:
+        return {"processed":False,"reason":"governor_admission_deferred"}
+
+
+def _process_one_admitted(
+    *,
+    production_request_record_id: str | None = None,
+    test_run_id: str | None = None,
+) -> dict[str, Any]:
     client = AirtableClient()
     if production_request_record_id and test_run_id:
         _assert_test_mode_boundary(client, production_request_record_id, test_run_id)
@@ -1095,16 +1159,17 @@ def process_one(
             str(field(row, "Transfer_Status") or "") == "Ready"
             and str(field(row, "Preview_Status") or "") == "Pending"
         )
-        try:
-            _fail_row(
-                client,
-                row["id"],
-                message,
-                preview=preview,
-                retryable=not preview and is_retryable_master_error(exc),
-            )
-        except Exception:
-            pass
+        if not (governor.enabled() and str(field(row,"Asset_Kind") or "")=="Platform Variant" and not preview):
+            try:
+                _fail_row(
+                    client,
+                    row["id"],
+                    message,
+                    preview=preview,
+                    retryable=not preview and is_retryable_master_error(exc),
+                )
+            except Exception:
+                pass
         raise
 
 
@@ -1114,6 +1179,7 @@ def process_drain(
     test_run_id: str | None = None,
     photo_workers: int = 8,
     max_followup: int = 8,
+    _recovery_dispatch: bool = False,
 ) -> dict[str, Any]:
     """Admit one drain before doing any queue reads or launching photo groups.
 
@@ -1121,13 +1187,29 @@ def process_drain(
     runner-wide admission slot coalesces overlap without waiting or changing
     the existing photo-group, transfer or database limits.
     """
+    tracked = restart_recovery.remember_request(production_request_record_id,test_run_id)
     with governor.resource_slot("smv1_drain", limit=1, wait_seconds=0):
-        return _process_drain_admitted(
+        result = _process_drain_admitted(
             production_request_record_id=production_request_record_id,
             test_run_id=test_run_id,
             photo_workers=photo_workers,
             max_followup=max_followup,
         )
+        # Only the restart consumer retires a durable hint, after exact
+        # canonical readback. Ordinary browser/cron pulses need no extra read.
+        if tracked and _recovery_dispatch:
+            client=AirtableClient()
+            rid=airtable_quote(production_request_record_id)
+            outstanding=client.list_records(MEDIA_TRANSFER_QUEUE_TABLE,
+                formula=f'AND({{Production_Request_Record_ID}}="{rid}",{{Test_Run_ID}}=BLANK(),OR({{Transfer_Status}}="Pending",{{Transfer_Status}}="Processing",{{Transfer_Status}}="Drive Uploaded"))',
+                max_records=1)
+            if not isinstance(outstanding,list):
+                raise RuntimeError("SMV1 exact queue readback unavailable")
+            if not outstanding:
+                restart_recovery.finish_request(production_request_record_id)
+            else:
+                restart_recovery.defer_request(production_request_record_id,progressed=bool(result.get("processed_count")))
+        return result
 
 
 def _process_drain_admitted(
@@ -1187,10 +1269,13 @@ def _process_drain_admitted(
                         current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id)
                         if str((current.get("fields") or {}).get("Transfer_Status") or "") != "Pending":
                             continue
-                        group_results.extend(process_variant_group(
-                            client, GoogleDriveClient(), VariantServiceClient(settings),
-                            [current], airtable_lock=airtable_lock,
-                        ))
+                        try:
+                            group_results.extend(process_variant_group(
+                                client, GoogleDriveClient(), VariantServiceClient(settings),
+                                [current], airtable_lock=airtable_lock,
+                            ))
+                        finally:
+                            restart_recovery.mark_settled(record_id)
                 except Exception:
                     if not group_results:
                         raise
@@ -1214,16 +1299,17 @@ def _process_drain_admitted(
                 str(field(row, "Transfer_Status") or "") == "Ready"
                 and str(field(row, "Preview_Status") or "") == "Pending"
             )
-            try:
-                _fail_row(
-                    client,
-                    row["id"],
-                    str(exc),
-                    preview=preview,
-                    retryable=not preview and is_retryable_master_error(exc),
-                )
-            except Exception:
-                pass
+            if not (governor.enabled() and str(field(row,"Asset_Kind") or "")=="Platform Variant" and not preview):
+                try:
+                    _fail_row(
+                        client,
+                        row["id"],
+                        str(exc),
+                        preview=preview,
+                        retryable=not preview and is_retryable_master_error(exc),
+                    )
+                except Exception:
+                    pass
             return {
                 "processed": False,
                 "route": "leftover_error",
@@ -1282,7 +1368,7 @@ def _process_drain_admitted(
 
     followup = 0
     while followup < max(0, int(max_followup or 0)):
-        nxt = process_one(
+        nxt = _process_one_admitted(
             production_request_record_id=production_request_record_id,
             test_run_id=test_run_id,
         )

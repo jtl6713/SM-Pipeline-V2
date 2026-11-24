@@ -7269,18 +7269,47 @@ export async function syncAirtableTransferQueueRowToSupabase(env, record, option
   }
   // Partial Ready/claim patches must merge densified payload keys. A replace
   // drops Transfer_ID / Production_Request_Record_ID and Frames flip to Error.
-  if (isPlainObject(row.payload) && options.create !== true) {
-    const existing = await supabaseRest(
-      env,
-      `studio_media_transfer_queue?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
-    ).catch(() => []);
-    const prior = isPlainObject(existing?.[0]?.payload) ? existing[0].payload : {};
-    row.payload = { ...prior, ...row.payload };
+  const governed = options.create !== true
+    && (studioWriteSource(env) === "supabase" || studioPhase6WriteSource(env) === "supabase");
+  let observed = null;
+  if (governed) {
+    const current = await supabaseRest(env,
+      `studio_media_transfer_queue?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=status,last_attempt_at,payload&limit=1`);
+    if (!Array.isArray(current)) throw new Error("Transfer claim state unavailable");
+    observed = current[0] || null;
   }
-  await upsertChunk(env, "studio_media_transfer_queue", [{
-    airtable_record_id: record.id,
-    ...row,
-  }]);
+  const isVariant = row.payload?.asset_kind === "Platform Variant"
+    || observed?.payload?.asset_kind === "Platform Variant";
+  let writeMode = "upsert";
+  if (governed && isVariant) {
+    if (!observed || !isPlainObject(observed.payload)) {
+      return {ok:false,reason:"canonical_variant_missing"};
+    }
+    if (observed.status === "Processing" || (observed.status === "Ready" && row.status && row.status !== "Ready")) {
+      console.warn("smv1_worker_claim_preserved", {record_id:record.id,status:observed.status});
+      return {ok:true,mode:"runner-claim-preserved"};
+    }
+    if (row.status === "Processing") return {ok:false,reason:"runner_claim_only"};
+    const prior = observed.payload;
+    if (isPlainObject(row.payload)) row.payload={...prior,...row.payload};
+    const stamp = observed.last_attempt_at == null ? "is.null" : "eq."+encodeURIComponent(observed.last_attempt_at);
+    const query = `studio_media_transfer_queue?airtable_record_id=eq.${encodeURIComponent(record.id)}&status=eq.${encodeURIComponent(observed.status)}&last_attempt_at=${stamp}&payload=eq.${encodeURIComponent(JSON.stringify(prior))}&select=airtable_record_id`;
+    const changed = await supabaseRest(env,query,{method:"PATCH",body:row,headers:{Prefer:"return=representation"}});
+    if (!Array.isArray(changed)) throw new Error("Transfer conditional write unverified");
+    if (changed.length === 0) return {ok:true,mode:"runner-claim-raced"};
+    if (changed.length !== 1 || changed[0]?.airtable_record_id !== record.id) throw new Error("Unexpected transfer write receipt");
+    writeMode="conditional-patch";
+  } else {
+    if (isPlainObject(row.payload) && options.create !== true) {
+      const existing = governed ? [observed] : await supabaseRest(
+        env,
+        `studio_media_transfer_queue?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+      ).catch(() => []);
+      const prior = isPlainObject(existing?.[0]?.payload) ? existing[0].payload : {};
+      row.payload = {...prior,...row.payload};
+    }
+    await upsertChunk(env,"studio_media_transfer_queue",[{airtable_record_id:record.id,...row}]);
+  }
   let targets = { skipped: true, reason: "target_field_absent", ok: true, linked: 0 };
   if (record.fields && "Target_Production_Request_Outputs" in record.fields) {
     try {
@@ -7290,7 +7319,7 @@ export async function syncAirtableTransferQueueRowToSupabase(env, record, option
       targets = { ok: false, error: error?.message || String(error), linked: 0 };
     }
   }
-  return { ok: true, mode: "upsert", studio_media_transfer_targets: targets };
+  return { ok: true, mode: writeMode, studio_media_transfer_targets: targets };
 }
 
 export function studioSideEffectOutboxMissing(error) {

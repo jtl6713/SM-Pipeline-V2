@@ -10192,6 +10192,7 @@ export async function item4PipelineSetting(env, name) {
 
 export async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan, options = {}) {
   const forceRetry = Boolean(options.forceRetry);
+  const runnerOwnsClaims = studioWriteSource(env) === "supabase" || studioPhase6WriteSource(env) === "supabase";
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");
@@ -10232,7 +10233,7 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
       const hasAuthority = current ? item4QueueRowHasAuthority(current) : false;
       const preserveStatus = hasAuthority
         || ["Ready", "Drive Uploaded"].includes(currentStatus)
-        || (currentStatus === "Processing" && !forceRetry);
+        || (currentStatus === "Processing" && (runnerOwnsClaims || !forceRetry));
 
       const fields = {
         Transfer_ID: transferId,
@@ -10281,7 +10282,8 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
         queue_record_id: current?.id || null,
       };
       if (current) {
-        updates.push({ id: current.id, fields });
+        // Never change a known active runner claim, including explicit Retry.
+        if (!(runnerOwnsClaims && currentStatus === "Processing")) updates.push({ id: current.id, fields });
       } else {
         creates.push(fields);
         createMeta.push(meta);
@@ -10305,6 +10307,7 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
     const status = item4QueueStatus(row);
     if (!transferId || keep.has(transferId)) continue;
     if (!["Pending", "Processing"].includes(status)) continue;
+    if (runnerOwnsClaims && status === "Processing") continue;
     dropUpdates.push({
       id: row.id,
       fields: {

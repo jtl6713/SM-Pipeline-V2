@@ -335,7 +335,7 @@ def detect_stalled_pending_crops(
         return None
     if not (master_count > 0 and confirmed_master_count == master_count
             and target_crops > ready_crops and pending_crops == target_crops - ready_crops
-            and pending_attempted_count == 0):
+            and pending_attempted_count <= pending_crops):
         return None
     try:
         last = datetime.fromisoformat(last_pending_change_utc.replace("Z", "+00:00"))
@@ -354,7 +354,8 @@ def detect_stalled_pending_crops(
         "confirmed_originals": confirmed_master_count,
         "ready_crops": ready_crops,
         "target_crops": target_crops,
-        "pending_unattempted_crops": pending_crops,
+        "pending_unattempted_crops": pending_crops - pending_attempted_count,
+        "pending_attempted_crops": pending_attempted_count,
         "age_seconds": int(age),
         "action": "verify_and_drain_exact_existing_crop_queue",
         "auto_repair_safe": False,

@@ -29,6 +29,11 @@ LEASE_SECONDS = 20 * 60
 # conservative settling interval before reclaiming a proven-dead DB owner.
 DB_DEAD_OWNER_GRACE_SECONDS = 120
 _DB_REQUEST_SCOPES = frozenset({"supabase_read", "supabase_write"})
+# Only local SMV1 resources use process-exit recovery. Never apply it to
+# cross-host Worker claims or producer-job tokens.
+_SMV1_LOCAL_SCOPES = frozenset({"smv1_drain", "photo_group", "transfer"})
+SMV1_DEAD_OWNER_GRACE_SECONDS = 120
+SMV1_MAINTENANCE_SECONDS = 1800
 DEFAULT_MAX_JOBS = 2
 DEFAULT_MAX_PHOTO_GROUPS = 4
 DEFAULT_RATIO_WORKERS = 2
@@ -166,6 +171,20 @@ def _connect() -> Iterator[sqlite3.Connection]:
                     init.execute("""CREATE TABLE IF NOT EXISTS governor_control (
                         name TEXT PRIMARY KEY, until_at REAL NOT NULL
                     )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS smv1_maintenance (
+                        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                        token TEXT NOT NULL, until_at REAL NOT NULL
+                    )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS smv1_crop_attempts (
+                        record_id TEXT PRIMARY KEY, transfer_id TEXT NOT NULL,
+                        claim_at TEXT NOT NULL, owner_pid INTEGER NOT NULL, lease_token TEXT NOT NULL,
+                        settled_at REAL, drive_id TEXT, media_id TEXT, digest TEXT, size INTEGER,
+                        folder TEXT, filename TEXT
+                    )""")
+                    init.execute("""CREATE TABLE IF NOT EXISTS smv1_pending_requests (
+                        request_id TEXT PRIMARY KEY, next_at REAL NOT NULL,
+                        failures INTEGER NOT NULL DEFAULT 0
+                    )""")
                     init.execute("""CREATE TABLE IF NOT EXISTS request_metrics (
                         minute INTEGER NOT NULL, operation TEXT NOT NULL,
                         total INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +240,32 @@ def circuit_open(db: sqlite3.Connection | None = None) -> bool:
     return bool(row and float(row[0]) > time.time())
 
 
+def smv1_maintenance_active(db: sqlite3.Connection) -> bool:
+    row = db.execute("SELECT until_at FROM smv1_maintenance WHERE singleton=1").fetchone()
+    return bool(row and float(row[0]) > time.time())
+
+
+def set_smv1_maintenance(token: str, *, begin: bool) -> bool:
+    """Operator-only, token-fenced gate sharing the same admission transaction."""
+    if not enabled() or not re.fullmatch(r"[a-f0-9]{32}", token):
+        return False
+    with _connect() as db:
+        _transaction(db)
+        if begin:
+            current = db.execute("SELECT token,until_at FROM smv1_maintenance WHERE singleton=1").fetchone()
+            if current and current[1] > time.time() and current[0] != token:
+                db.commit()
+                return False
+            db.execute("""INSERT INTO smv1_maintenance(singleton,token,until_at) VALUES(1,?,?)
+                ON CONFLICT(singleton) DO UPDATE SET token=excluded.token,until_at=excluded.until_at""",
+                (token, time.time()+SMV1_MAINTENANCE_SECONDS))
+            changed = True
+        else:
+            changed = bool(db.execute("DELETE FROM smv1_maintenance WHERE singleton=1 AND token=?", (token,)).rowcount)
+        db.commit()
+        return changed
+
+
 def trip_database_circuit(*, cooldown_seconds: float = 90) -> None:
     with _connect() as db:
         _transaction(db)
@@ -261,7 +306,7 @@ def claim_next() -> tuple[str, str] | None:
                 consecutive_yields=consecutive_yields+1, available_at=?
             WHERE state='running' AND lease_until < ?""",
             (MAX_CONSECUTIVE_YIELDS, now + 60, now))
-        if circuit_open(db):
+        if circuit_open(db) or smv1_maintenance_active(db):
             db.commit()
             return None
         # Worker autonomous ready-production and Python producers share the
@@ -324,7 +369,7 @@ def claim_worker_heavy(idea_id: str, token: str) -> bool:
     with _connect() as db:
         _transaction(db)
         now = time.time()
-        if recovery_read_only_active() or circuit_open(db):
+        if recovery_read_only_active() or circuit_open(db) or smv1_maintenance_active(db):
             db.commit()
             return False
         # Half-open database recovery is Python-only until a canonical
@@ -587,6 +632,29 @@ def _reap_dead_db_owners(db: sqlite3.Connection, scope: str, now: float) -> int:
     return removed
 
 
+def _reap_dead_smv1_owners(db: sqlite3.Connection, now: float) -> int:
+    """Only positive local process-exit proof + settling grace permits removal.
+
+    No deletion of live, unknown or legacy owners. Token CAS prevents a
+    previous owner's observation from deleting a replacement claim.
+    """
+    removed = 0
+    for scope, key, token, pid, seen in db.execute("""
+        SELECT scope,lease_key,token,owner_pid,owner_dead_seen_at
+        FROM resource_leases WHERE scope IN ('smv1_drain','photo_group','transfer')
+        AND owner_pid IS NOT NULL AND lease_until>?""", (now,)).fetchall():
+        identity = (scope,key,token,pid)
+        where = " WHERE scope=? AND lease_key=? AND token=? AND owner_pid=?"
+        if not _process_definitely_exited(pid):
+            if seen is not None:
+                db.execute("UPDATE resource_leases SET owner_dead_seen_at=NULL"+where, identity)
+        elif seen is None or seen > now:
+            db.execute("UPDATE resource_leases SET owner_dead_seen_at=?"+where, (now,*identity))
+        elif now-seen >= SMV1_DEAD_OWNER_GRACE_SECONDS:
+            removed += db.execute("DELETE FROM resource_leases"+where, identity).rowcount
+    return removed
+
+
 @contextmanager
 def resource_slot(
     scope: str, *, key: str = "", limit: int = 1,
@@ -617,7 +685,14 @@ def resource_slot(
             active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
             allowed = ((not admission_paused() or recovery_read_allowed)
                        and (allow_during_circuit or not circuit_open(db)))
+            # Freeze only new SMV1 roots; already admitted drains must be
+            # allowed to finish their child transfers during planned quiesce.
+            if scope == "smv1_drain" and smv1_maintenance_active(db):
+                allowed = False
             reaped = 0
+            if allowed and scope in _SMV1_LOCAL_SCOPES:
+                reaped = _reap_dead_smv1_owners(db, now)
+                active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
             if allowed and active >= limit and scope in _DB_REQUEST_SCOPES:
                 reaped = _reap_dead_db_owners(db, scope, now)
                 active -= reaped
@@ -625,12 +700,12 @@ def resource_slot(
                 claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
                     (scope,lease_key,token,lease_until,owner_pid) VALUES(?,?,?,?,?)""",
                     (scope, lease_key, token, now + LEASE_SECONDS,
-                     os.getpid() if scope in _DB_REQUEST_SCOPES else None)).rowcount
+                     os.getpid() if scope in _DB_REQUEST_SCOPES or scope in _SMV1_LOCAL_SCOPES else None)).rowcount
             else:
                 claimed = 0
             db.commit()
         if reaped:
-            logger.warning("reclaimed %s expired-owner DB resource slot(s): %s", reaped, scope)
+            logger.warning("reclaimed %s proven-dead-owner resource slot(s): %s", reaped, scope)
         if claimed:
             break
         if time.monotonic() >= deadline:
@@ -767,6 +842,9 @@ def snapshot() -> dict[str, object]:
             "database_circuit_phase": circuit_phase,
             "database_circuit_until_epoch": float(circuit_row[0]) if circuit_row else None,
             "active_resource_slots": active_resources,
+            "smv1_maintenance_active": smv1_maintenance_active(db),
+            "smv1_recovery_pending": db.execute("SELECT COUNT(*) FROM smv1_pending_requests WHERE failures<8").fetchone()[0],
+            "smv1_recovery_parked": db.execute("SELECT COUNT(*) FROM smv1_pending_requests WHERE failures>=8").fetchone()[0],
             "max_db_reads": max_db_reads(), "max_db_writes": max_db_writes(),
             "supabase_request_metrics": traffic,
             "runner_request_history": history,  # Last 30 min; runner REST only.

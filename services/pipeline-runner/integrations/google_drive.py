@@ -82,20 +82,36 @@ class GoogleDriveClient:
                         out.write(chunk)
         return dest_path, mime
 
+    def generate_file_id(self) -> str:
+        response = requests.get("https://www.googleapis.com/drive/v3/files/generateIds",
+            params={"count":1,"space":"drive","type":"files"},
+            headers={"Authorization":f"Bearer {self.access_token()}"}, timeout=30)
+        response.raise_for_status()
+        ids = response.json().get("ids") or []
+        if len(ids)!=1 or not isinstance(ids[0],str) or not ids[0]:
+            raise RuntimeError("Drive did not return an exact reserved file ID")
+        return ids[0]
+
     def upload_file(
         self,
         folder_id: str,
         filename: str,
         content: bytes,
         mime_type: str,
+        *,
+        reserved_id: str | None = None,
     ) -> dict[str, Any]:
         # Google multipart upload is not reliable for 700+ MB iPhone MOVs:
         # requests buffers the entire file and times out on slow links. Use
         # chunked resumable Drive upload and preserve the original bytes.
         if len(content) > 20 * 1024 * 1024:
+            if reserved_id:
+                raise ValueError("reserved crop exceeds bounded multipart size")
             return self._upload_file_resumable(folder_id, filename, content, mime_type)
         token = self.access_token()
         metadata = {"name": filename, "parents": [folder_id]}
+        if reserved_id:
+            metadata["id"] = reserved_id
         files = {
             "metadata": ("metadata", json.dumps(metadata), "application/json; charset=UTF-8"),
             "file": (filename, content, mime_type),

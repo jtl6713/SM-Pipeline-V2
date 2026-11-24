@@ -53,3 +53,10 @@ jobs:
           STUDIO_WORKLOAD_GOVERNOR_ENABLED: "false"
           STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: "false"
         run: python -m pytest -q tests/test_2670_workload_governor.py -k "database_owner or dead_owner_recovery or local_process_exit_probe or reused_or_unknown_pid or legacy_resource_schema"
+
+      - name: Exercise SMV1 durable owner exit and interrupted upload on Windows (NO PUBLISH)
+        working-directory: services/pipeline-runner
+        env:
+          STUDIO_WORKLOAD_GOVERNOR_ENABLED: "false"
+          STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: "false"
+        run: python -m pytest -q tests/test_2965_smv1_restart.py
