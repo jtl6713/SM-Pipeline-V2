@@ -118,10 +118,12 @@ import { factoryBoundedActiveDiscovery } from "./factory-approval-active-discove
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
+  factoryOutputClaimAssertNotTransferred,
 } from "./factory-approval-output-claims.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
   factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
+  factoryApprovalGroupCanReuseForNewSubmission,
   factoryApprovalGroupList, factoryApprovalGroupCronScan,
 } from "./factory-approval-groups.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -19136,6 +19138,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               // Awaited checkpoints let Factory poll actual in-flight stages
               // without ever triggering an additional approval or publish.
               await checkpoint("supabase_approval_started");
+              await factoryOutputClaimAssertNotTransferred(env.STUDIO_MEDIA, {
+                profileId, requestId: parentId || requestId, id,
+              });
               const intent = originalFactoryIntent(currentJob, originalParent);
               const recoveryItem = currentJob.items.find(row => row.id === id);
               if (recoveryItem?.original_intent_recovery) {
@@ -19644,8 +19649,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   }
   let conflicting = inspections.flatMap(row => row.conflicts);
   if (conflicting.length) {
-    // Exact duplicate selection on another device: return the original
-    // receipt. Partial overlap is a true 409, never silently resubmitted.
+    // Only attach a different request ID to genuinely live exact-set work.
+    // Terminal history is not current consent; continue to the guarded CAS
+    // reclaim path for fresh review instead of returning an obsolete receipt.
     const owners = [...new Set(conflicting.map(row => row.request_id))];
     if (conflicting.length === records.length && owners.length === 1) {
       const existingGroup = await factoryApprovalGroupRead(env.STUDIO_MEDIA, owners[0]);
@@ -19653,7 +19659,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
       if (existingGroup?.records?.length === expected.size &&
           existingGroup.records.every(row => expected.has(row.id))) {
         const canonical = await factoryApprovalGroupStatus(env.STUDIO_MEDIA, owners[0]);
-        if (canonical) return respond(request, env, {
+        if (factoryApprovalGroupCanReuseForNewSubmission(canonical, records, { canonical: supabaseAuthority })) return respond(request, env, {
           ...canonical, accepted: true, already_submitted: true,
           duplicate_prevented: true, original_request_id: owners[0],
         });

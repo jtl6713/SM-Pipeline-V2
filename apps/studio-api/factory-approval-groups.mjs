@@ -221,6 +221,28 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
     children,
   };
 }
+/**
+ * A different request ID can attach to genuinely live exact-set work, never
+ * to a terminal group from an earlier review. If a current canonical output
+ * needs approval and the old member is already terminal, fail closed and let
+ * claim admission reconcile the old owner rather than acknowledge its receipt.
+ */
+export function factoryApprovalGroupCanReuseForNewSubmission(status, records, { canonical = false } = {}) {
+  if (!status || !["running", "enqueuing"].includes(status.status)
+      || !Number.isInteger(status.pending_count) || status.pending_count <= 0
+      || !Array.isArray(status.items) || !Array.isArray(records)
+      || status.items.length !== records.length) return false;
+  const items = new Map(status.items.map(item => [item.id, item]));
+  if (items.size !== records.length) return false;
+  return records.every(record => {
+    const item = items.get(record.id);
+    if (!item || item.profile_id !== record.profile_id) return false;
+    if (["pending", "running", "processing"].includes(item.status)) return true;
+    return ["approved", "already_satisfied"].includes(item.status)
+      && (!canonical || record.requires_current_approval === false);
+  });
+}
+
 /** Reset only terminal failed output entries within their own child ledger. */
 export async function factoryApprovalGroupRetryFailures(bucket,requestId) {
   const status=await factoryApprovalGroupStatus(bucket,requestId);

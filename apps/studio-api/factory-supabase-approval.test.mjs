@@ -143,7 +143,11 @@ test("Supabase preflight accepts visible RFR outputs even if Airtable is unavail
 });
 
 test("mixed already-approved and Ready-for-Review selection accepts and does not reapprove", async t => {
-  const mock = mockSupabase(t, [output(IDS[0], 8946, "Approved for Publishing"), output(IDS[1], 8948)]);
+  const alreadyScheduled = output(IDS[0], 8946, "Approved for Publishing");
+  alreadyScheduled.auto_publish_enabled = true;
+  alreadyScheduled.scheduled_post_date = new Date(Date.now()+86400000).toISOString();
+  alreadyScheduled.studio_scheduled_at = alreadyScheduled.scheduled_post_date;
+  const mock = mockSupabase(t, [alreadyScheduled, output(IDS[1], 8948)]);
   const batch = await factorySupabaseGroupPreflight(env, IDS, policy);
   assert.deepEqual(batch.map(item => item.output_id), [8946, 8948]);
   const already = await factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
@@ -354,4 +358,27 @@ test("#2618: future Factory receipt includes authenticated submission actor; leg
   const legacy = mock.rows[1].error_messages.SM_Factory_Supabase_Approval_Receipt;
   assert.equal(legacy.approval_actor_record_id,null);
   assert.equal(legacy.actor_provenance,"legacy_batch_actor_not_captured");
+});
+
+
+test("#2915 approved labels without current schedule proof cannot report success or trigger a new approval",async t=>{
+  const row=output(IDS[0],8946,"Approved for Publishing");
+  const mock=mockSupabase(t,[row]);
+  const verify=async()=>factorySupabaseApprovalDisposition((await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]),policy);
+  assert.equal((await verify()).eligible,false);
+  mock.rows[0].auto_publish_enabled=true;
+  mock.rows[0].scheduled_post_date=new Date(Date.now()+86400000).toISOString();
+  mock.rows[0].publish_hold_released_at="2026-11-23T04:47:51Z";
+  mock.rows[0].error_messages={SM_Factory_Supabase_Approval_Receipt:{approved_at:"2026-11-21T15:17:15Z"}};
+  assert.equal((await verify()).eligible,false,"pre-release receipt cannot satisfy current approval");
+  mock.rows[0].error_messages.SM_Factory_Supabase_Approval_Receipt.approved_at="2026-11-24T12:00:00Z";
+  assert.equal((await verify()).already_satisfied,true);
+  mock.rows[0].publish_status="Failed";
+  assert.equal((await verify()).eligible,false);
+  await assert.rejects(factorySupabaseApproveOutput(env,IDS[0],PROFILE_ID,{requestId:"factory_2915_failed"}),/reconcile before retrying/);
+  mock.rows[0].output_status="Published";mock.rows[0].publish_status="Published";
+  assert.equal((await verify()).eligible,false);
+  mock.rows[0].published_at="2026-11-24T12:00:00Z";mock.rows[0].platform_post_url="https://example.invalid/post/1";
+  assert.equal((await verify()).already_satisfied,true);
+  assert.equal(mock.calls.filter(c=>c.method==="PATCH").length,0);
 });
