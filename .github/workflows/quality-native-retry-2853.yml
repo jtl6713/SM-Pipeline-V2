@@ -1,0 +1,144 @@
+name: Quality Native Repair 2853 Protected Retry
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/quality-native-retry-2853.mjs'
+      - '.github/workflows/quality-native-retry-2853.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/quality-native-retry-2853.mjs'
+      - '.github/workflows/quality-native-retry-2853.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: quality-native-exact-10857
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify fixed routes, target, authentication and sanitized receipt
+        run: |
+          set -euo pipefail
+          node --check repair/scripts/quality-native-retry-2853.mjs
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import bridge from './repair/scripts/quality-native-retry-2853.mjs';
+          let calls=0;
+          const env={AUDIT_TOKEN:'fixture',STUDIO_API:{fetch:async req=>{
+            calls++;
+            assert.equal(req.url,'https://studio.chicagoshining.com/api/admin/qa/quality-native-repair/run');
+            assert.deepEqual(await req.json(),{record_id:'rec8I104V9gQmiOxf'});
+            return Response.json({status:'checked',repair:{output_id:10857,status:'skipped',reason:'shared_admission_denied',approval_actions:0,schedule_actions:0,publish_actions:0,private:'hidden'},requires_human_approval:true});
+          }}};
+          const call=(path,method='POST',auth='Bearer fixture')=>bridge.fetch(new Request('https://bridge.example'+path,{method,headers:{Authorization:auth}}),env);
+          assert.equal((await call('/run','POST','wrong')).status,401);
+          assert.equal((await call('/run?record_id=other')).status,404);
+          assert.equal((await call('/run','GET')).status,404);
+          assert.equal((await call('/approve')).status,404);
+          assert.equal(calls,0);
+          const result=await (await call('/run')).json();
+          assert.equal(result.repair.reason,'shared_admission_denied');
+          assert.equal(result.repair.private,undefined);
+          assert.equal(result.requires_human_approval,true);
+          assert.equal(calls,1);
+          JS
+  protected:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AUDITOR: studio-quality-2853-exact-retry
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Invoke only existing deployed exact repair under governor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID" && test -n "$CLOUDFLARE_API_TOKEN"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          status=$(curl -sS --max-time 20 -H "$AUTH" -o /tmp/qa-bridge-exists.json -w '%{http_code}' "$API/workers/scripts/$AUDITOR/settings")
+          test "$status" = "404"
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == 1 ]]; then
+              curl -fsS --max-time 25 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDITOR" >/dev/null || echo "::warning::Temporary bridge cleanup needs follow-up"
+            fi
+            rm -f /tmp/qa-retry-meta.json
+          }
+          trap cleanup EXIT
+          TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::$TOKEN"
+          jq -n --arg token "$TOKEN" '{main_module:"worker.mjs",compatibility_date:"2026-10-01",bindings:[{type:"service",name:"STUDIO_API",service:"chicagoshining-studio-api"},{type:"secret_text",name:"AUDIT_TOKEN",text:$token}]}' >/tmp/qa-retry-meta.json
+          curl -fsS --max-time 30 -X PUT -H "$AUTH" "$API/workers/scripts/$AUDITOR/content" -F 'metadata=@/tmp/qa-retry-meta.json;type=application/json' -F 'worker.mjs=@repair/scripts/quality-native-retry-2853.mjs;type=application/javascript+module;filename=worker.mjs' >/tmp/qa-retry-upload.json
+          jq -e '.success==true' /tmp/qa-retry-upload.json >/dev/null
+          OWNED=1
+          curl -fsS --max-time 25 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDITOR/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/qa-retry-sub.json
+          jq -e '.success==true' /tmp/qa-retry-sub.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')
+          BASE="https://$AUDITOR.$SUBDOMAIN.workers.dev"
+          # Read-only routing/health checks may retry. Mutating requests must
+          # never retry an ambiguous response or a consumed revision.
+          code=000
+          for i in $(seq 1 10); do
+            code=$(curl -sS --max-time 15 -o /tmp/qa-retry-workload.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/workload" || true)
+            [[ "$code" == 200 ]] && break
+            sleep 3
+          done
+          test "$code" = 200
+          for i in 1 2 3 4; do
+            if [[ "$i" != 1 ]]; then
+              curl -fsS --max-time 15 -H "Authorization: Bearer $TOKEN" "$BASE/workload" >/tmp/qa-retry-workload.json
+            fi
+            cp /tmp/qa-retry-workload.json "/tmp/qa-retry-workload-$i.json"
+            jq -c . /tmp/qa-retry-workload.json
+            # No work on outage, circuit, missing metrics or recovery pause.
+            jq -e '.ok==true and .scope=="single_windows_host" and .runner.recovery_read_only==false and .runner.admission_paused==false and .runner.database_circuit_phase=="closed" and .worker.circuit_open==false and (.runner.max_jobs|type)=="number" and (.runner.combined_heavy_active|type)=="number" and (.runner.queued_jobs|type)=="number"' /tmp/qa-retry-workload.json >/dev/null
+            if ! jq -e '.runner.combined_heavy_active < .runner.max_jobs and (.runner.max_jobs != 1 or .runner.queued_jobs==0)' /tmp/qa-retry-workload.json >/dev/null; then
+              echo "quality_retry=capacity_busy attempt=$i"
+            else
+              code=$(curl -sS --max-time 150 -X POST -H "Authorization: Bearer $TOKEN" -o "/tmp/qa-retry-result-$i.json" -w '%{http_code}' "$BASE/run" || true)
+              echo "quality_retry_http=$code attempt=$i"
+              test "$code" = 200
+              jq -c . "/tmp/qa-retry-result-$i.json"
+              jq -e '.status=="checked" and .repair.output_id==10857 and .repair.approval_actions==0 and .repair.schedule_actions==0 and .repair.publish_actions==0 and .requires_human_approval==true' "/tmp/qa-retry-result-$i.json" >/dev/null
+              if jq -e '.repair.status=="repaired"' "/tmp/qa-retry-result-$i.json" >/dev/null; then
+                curl -fsS --max-time 60 -H "Authorization: Bearer $TOKEN" "$BASE/factory" >/tmp/qa-retry-factory.json
+                jq -c . /tmp/qa-retry-factory.json
+                jq -e '.ok==true and any(.cards[]; .lane=="needs_eyes" and .review_package_ready==true and .review_status=="Review Sent" and .publish_status=="Not Ready" and .auto_publish_enabled==false)' /tmp/qa-retry-factory.json >/dev/null
+                echo 'QUALITY_NATIVE_REPAIR_AND_FACTORY_PROOF=PASS'
+                exit 0
+              fi
+              # Only the exact pre-reservation denial is demonstrably safe to
+              # retry. No retry on timeout, unknown, stale, or consumed revision.
+              jq -e '.repair.status=="skipped" and .repair.reason=="shared_admission_denied"' "/tmp/qa-retry-result-$i.json" >/dev/null
+            fi
+            [[ "$i" == 4 ]] || sleep 30
+          done
+          echo '::error::Quality repair remains deferred by governed admission; no Factory acceptance'
+          exit 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-native-retry-sanitized
+          path: |
+            /tmp/qa-retry-workload-*.json
+            /tmp/qa-retry-result-*.json
+            /tmp/qa-retry-factory.json
+          if-no-files-found: ignore
+          retention-days: 7
