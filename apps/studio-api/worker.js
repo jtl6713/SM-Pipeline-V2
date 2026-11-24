@@ -42,7 +42,7 @@ import { returnFactoryRevisionToProducer } from "./rendering-review-factory-retu
 import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
-import { serveIssue2618ReviewPreview, issue2618PreviewSpec, fetchIssue2618DriveVideo } from "./factory-2618-review-preview.mjs";
+import { serveIssue2618ReviewPreview, issue2618PreviewSpec, fetchIssue2618DriveVideo, refreshIssue2618DriveToken } from "./factory-2618-review-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -671,7 +671,6 @@ import {
   assertUploadWriteRequest,
   requirePermission,
   requireAnyPermission,
-  item4GoogleAccessToken,
   sleepMs,
   airtableCooldownWaitMs,
   airtableDataWaitMs,
@@ -4335,7 +4334,7 @@ export default {
               "studio_scheduled_at,youtube_scheduled_publish_at,published_at,"+
               "platform_post_url,platform_publish_response,final_file_url,error_messages&limit=2"),
             fetchVideo:fileId=>fetchIssue2618DriveVideo({
-              fileId,getAccessToken:()=>item4GoogleAccessToken(env),
+              fileId,getAccessToken:()=>refreshIssue2618DriveToken(env),
             }),
           });
         }
