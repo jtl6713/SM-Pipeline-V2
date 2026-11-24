@@ -93,6 +93,14 @@ export async function runQualityFactoryHandoffCron({
       // The adapter returns a versioned receipt but no untrusted free-form
       // diagnostic is copied to Worker logs.
       signature:"QA-TIKTOK-STALE-SCHEDULE-RFR-v1",
+      // Report actionable bounded blocker codes, not arbitrary diagnostics.
+      reason: new Set(["no_documented_safe_media_rebuild","source_or_factory_claim_unverified",
+        "shared_admission_denied","exact_rebuild_revision_already_attempted","media_rebuilt_review_required",
+        "hold_or_prior_provider_evidence","hold_test_or_publishing_evidence",
+        "not_stale_native_review_handoff","missing_protected_exact_variant_receipt",
+        "current_revision_does_not_match_protected_receipt","exact_revision_already_attempted",
+        "exact_parent_or_owned_variants_unverified","public_media_hash_unverified",
+        "concurrent_output_revision","concurrent_owner_revision"]).has(outcome?.reason)?outcome.reason:"no_public_blocker_code",
       approval_actions:0,schedule_actions:0,publish_actions:0,
     }};
     logger(result);
