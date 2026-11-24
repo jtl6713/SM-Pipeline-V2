@@ -360,7 +360,7 @@ jobs:
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          if type(qa.get('enabled')) is not bool or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True}:
+          if type(qa.get('enabled')) is not bool or type(qa.get('request_revision')) is not int or qa['request_revision'] not in (1,2) or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True,'request_revision':qa['request_revision']}:
               raise SystemExit('Unknown quality canary manifest')
           if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID'):
               raise SystemExit('Respect existing other Quality Agent canary')
@@ -493,7 +493,37 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/wrangler-production
-          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log 2>&1 || { echo 'Wrangler deploy failed; full log withheld to avoid exposing preserved plaintext binding values'; exit 1; }
+          if ! ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log 2>&1; then
+            # Never emit arbitrary error text, config, tokens, or binding values.
+            # The classifier prints only numeric Cloudflare codes and fixed categories.
+            python - <<'PY'
+          import json, re
+          from pathlib import Path
+          data=Path('/tmp/wrangler-deploy.log').read_text(errors='replace')
+          data=re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', data)
+          lower=data.lower()
+          patterns={
+            'worker_startup_cpu':('startup cpu','startup time limit','startup time exceeded','script startup exceeded'),
+            'worker_size':('script too large','worker size limit','exceeds the maximum script size','worker exceeded the size limit','compressed size limit'),
+            'worker_validation':('validation error','script validation','script evaluation failed','failed to parse','is not defined','no such module'),
+            'binding_conflict':('binding already exists','duplicate binding','binding name','binding limit','invalid binding'),
+            'durable_object_migration':('durable object migration','migration tag','new_sqlite_classes','new_classes'),
+            'authentication_or_permission':('authentication error','not authorized','permission denied','unauthorized','invalid api token'),
+            'rate_or_quota':('rate limit','quota exceeded','too many requests','limit exceeded'),
+            'network_or_service':('fetch failed','service unavailable','connection reset','internal server error','gateway timeout'),
+          }
+          codes=sorted(set(re.findall(r'\[code:\s*([0-9]{3,6})\]',data))|
+                       set(re.findall(r'"code"\s*:\s*([0-9]{3,6})\b',data)))
+          categories=[k for k,v in patterns.items() if any(p in lower for p in v)]
+          config=json.loads(Path('wrangler.jsonc').read_text())
+          result={'cloudflare_error_codes':codes[:12],'categories':categories or ['unclassified'],
+                  'plain_var_count':len(config.get('vars',{})),
+                  'durable_object_count':len(config.get('durable_objects',{}).get('bindings',[]))}
+          Path('/tmp/wrangler-deploy-sanitized.json').write_text(json.dumps(result))
+          print('wrangler_deploy_failure='+json.dumps(result,sort_keys=True))
+          PY
+            exit 1
+          fi
           echo "wrangler_deploy=PASS"
 
       - name: Verify active source and live Supabase binding contract
@@ -1504,5 +1534,6 @@ jobs:
             /tmp/overview-after.json
             /tmp/ready-production-diagnostic.json
             /tmp/rollback-decision.json
+            /tmp/wrangler-deploy-sanitized.json
           if-no-files-found: ignore
           retention-days: 30
