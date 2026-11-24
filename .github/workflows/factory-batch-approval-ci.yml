@@ -55,7 +55,7 @@ jobs:
           node --test apps/studio-web/factory-batch-quality-agent.test.mjs apps/studio-web/ui-release-contract.test.mjs
           node --test apps/studio-api/schedule-occupancy-90-day.test.mjs
           node --test apps/studio-api/factory-approval-output-claims.test.mjs apps/studio-api/factory-submit-http-boundary.test.mjs
-          node --test apps/studio-api/factory-supabase-approval.test.mjs apps/studio-api/factory-hold-release.test.mjs
+          node --test apps/studio-api/factory-supabase-approval.test.mjs apps/studio-api/story-expired-generation-2915.test.mjs apps/studio-api/factory-hold-release.test.mjs
           node --test apps/studio-api/native-gallery-human-final-2371.test.mjs
           node --test apps/studio-api/factory-approval-observed-progress.test.mjs apps/studio-web/factory-progress-canonical.test.mjs apps/studio-web/factory-live-activity-p0.test.mjs apps/studio-web/factory-multi-batch-activity-2622.test.mjs
           node --test apps/studio-web/factory-stale-approval-recovery.test.mjs

@@ -31,6 +31,7 @@ import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
 import { assessFreshSupabasePublish } from "./approved-publish-flow.mjs";
+import { STORY_2915_ID, story2915DispatchFence, verifyStory2915Bytes } from "./story-expired-generation-2915.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -2472,7 +2473,8 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
           const current = await readSupabaseShapedOutput(env, row.id);
           const preflight = assessFreshSupabasePublish(current, { nowMs: Date.now() });
           if (!preflight.eligible) return { id: row.id, skipped: preflight.reason };
-          const key = "studio/state/initial-publish-fence/v1/" + row.id + ".json";
+          const key = row.id===STORY_2915_ID ? story2915DispatchFence(current) : "studio/state/initial-publish-fence/v1/" + row.id + ".json";
+          if(row.id===STORY_2915_ID)await verifyStory2915Bytes();
           if (await env.STUDIO_MEDIA.get(key)) {
             return { id: row.id, skipped: "prior_fenced_dispatch_requires_provider_reconciliation" };
           }
@@ -13441,7 +13443,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (resolvedGalleryPilot && (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env))) {
         throw new HttpError(503,"Gallery approval requires canonical Supabase; no legacy approval performed");
       }
-      if ((id === "recO494MDnQ1Tk51b" || id === "recWIWOrdflmqyxKW" || resolvedGalleryPilot)
+      if ((id === "recO494MDnQ1Tk51b" || id === "recWIWOrdflmqyxKW" || id===STORY_2915_ID || resolvedGalleryPilot)
           && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
         if (!/^rec[A-Za-z0-9]{14}$/.test(String(authorization?.user?.record_id || ""))) {
           throw new HttpError(403, "Current authenticated Factory user is required for final gallery approval");

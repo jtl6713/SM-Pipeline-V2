@@ -18,7 +18,7 @@ test("exact plain hold release writes only Supabase, retains review and no sched
 });
 test("Vizcaya expired provider hold cannot be bypassed by Release for Approval",async()=>{
  const f=fixture({publish_hold_source:"issue2915_review_and_provider_reconciliation",error_messages:{IG_Story_Container_ID:"old",Studio_Publish_Dispatch_Count:2,SM_Issue2915_Story_Audio_Repair:{new_upload_authorized:false}}});
- await assert.rejects(releaseFactoryHoldInSupabase({},id,auth,f.ops),/expired Instagram container/);assert.equal(f.writes.length,0);
+ await assert.rejects(releaseFactoryHoldInSupabase({},id,auth,f.ops),/expired-container recovery/);assert.equal(f.writes.length,0);
 });
 test("denies foreign profile, stale CAS, other provider evidence and creative holds",async()=>{
  let f=fixture();await assert.rejects(releaseFactoryHoldInSupabase({},id,{...auth,authorized_profile_ids:[]},f.ops),/authorized profiles/);assert.equal(f.writes.length,0);

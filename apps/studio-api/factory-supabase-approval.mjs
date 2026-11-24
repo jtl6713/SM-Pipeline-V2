@@ -15,6 +15,7 @@ import {
   preflightNycOwnerGalleryApproval,
   finalizeNycOwnerGalleryOnFactoryClick,
 } from "./native-gallery-package-guard.mjs";
+import { STORY_2915_ID, story2915GenerationValid, story2915NewApprovalValid } from "./story-expired-generation-2915.mjs";
 import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
@@ -31,7 +32,7 @@ const FACTORY_APPROVAL_SELECT = [
   "platform", "format", "studio_output_type", "platform_output_type", "aspect_ratio",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "publish_hold_set_at", "publish_hold_reason", "publish_hold_source", "publish_hold_release_actor", "publish_retry_eligible", "test_run_id", "output_caption", "thumbnail_url",
-  "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
+  "studio_preview_url", "final_file_url", "publish_asset_url", "publish_next_retry_at", "selected_clip_count", "selected_assets", "render_clip_list",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
   "platform_publish_response",
@@ -148,6 +149,7 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (satisfied(row)) return { eligible: true, already_satisfied: true };
   if (priorApprovalState(row)) return { eligible: false, reason: "Existing approval lacks verified current scheduling or publication evidence; reconcile before retrying" };
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
+  if(row.airtable_record_id===STORY_2915_ID&&!story2915GenerationValid(row))return {eligible:false,reason:"Corrected Story replacement generation not verified"};
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
   const readiness = evaluateReviewPackage(record);
   if (!formalFactoryApprovalReady(record, readiness)) {
@@ -270,6 +272,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
   }
+  if(id===STORY_2915_ID&&(!story2915NewApprovalValid(entry.row,approvedByUserRecordId,submittedAt)||originalIntentRecovery))throw Error("Corrected Story requires a fresh authenticated approval after release");
   // Selected clips and covers never authorize publishing. For the exact
   // owner-released NYC pair only, distinguish verified gallery structure from
   // the final decision made by this NEW authenticated human Approve click.
