@@ -33,7 +33,7 @@ jobs:
           assert all(k in w for k in ['req.method!=="PUT"','Date.now()>EXPIRES','crypto.subtle.digest','etagDoesNotMatch:"*"','issue2618-verified-private-review','private, no-store'])
           s=p
           for forbidden in ('requests.patch','requests.delete','requests.post','api.airtable.com','graph.facebook.com'):
-              assert forbidden not in s, forbidden
+              assert forbidden not in s, 'Prohibited provider or mutation reference'
           assert 'env.PRIVATE_MEDIA.get(' not in w and 'env.PRIVATE_MEDIA.delete(' not in w
           print('issue2888_exact_scope_static_safety=PASS')
           PY
