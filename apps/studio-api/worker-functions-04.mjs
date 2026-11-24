@@ -109,6 +109,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import { releaseFactoryHoldInSupabase } from "./factory-hold-release.mjs";
 import {reviewResolveCandidate,reviewResolvePilotOutput,resolveFactoryGalleryReview} from "./factory-review-resolve.mjs";
 import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
 import { assertSupabaseNativeGalleryPublicationPackage, preflightNycOwnerGalleryApproval } from "./native-gallery-package-guard.mjs";
@@ -13381,62 +13382,16 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
  * This is NOT an approval, schedule request or publishing dispatch. The same
  * per-output lease as Factory Approve protects the canonical status recheck.
  */
-async function factoryReleaseOutputForApproval(env, id, actor) {
+async function factoryReleaseOutputForApproval(env, id, authorization) {
+  if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env))
+    throw new HttpError(503, "Formal review release requires canonical Supabase; no hold changed");
+  const scoped = await resolveFactoryReviewResolveAuthorization(env, authorization);
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
-    const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-    const readiness = evaluateReviewPackage(current);
-    const eligibility = factoryApprovalHoldReleaseEligibility(current, readiness);
-    if (!eligibility.eligible) throw new HttpError(409, eligibility.reason);
-    // #2294: "Release for Approval" is itself a publication-hold mutation.
-    // Never clear DNP on a multi-image output based only on Selected_Assets /
-    // render clips. Resolve its exact Supabase-native package and require
-    // final-approved linked slides BEFORE any legacy-shim/Supabase patch.
-    let canonical;
     try {
-      canonical = (await factorySupabaseApprovalRows(env, [id])).get(id)?.row;
-      if (!canonical || canonical.airtable_record_id !== id ||
-          canonical.do_not_publish !== true ||
-          canonical.output_status !== "Ready for Review" ||
-          canonical.scheduled_post_date || canonical.studio_scheduled_at ||
-          canonical.published_at || canonical.platform_post_url) {
-        throw Error("Supabase release identity or publication hold drift");
-      }
-      await assertSupabaseNativeGalleryPublicationPackage(env, canonical);
+      return await releaseFactoryHoldInSupabase(env, id, scoped);
     } catch (error) {
-      throw new HttpError(409, "Cannot release for approval: "
-        + String(error?.message || error) + ". No hold released.");
+      throw new HttpError(error?.status || 409, String(error?.message || error));
     }
-    const verified = await verifyReviewImages(readiness);
-    if (verified.readiness !== "READY") {
-      throw new HttpError(409, "Cannot release for formal review: "
-        + ((verified.missing_requirements || []).join(", ") || verified.reason));
-    }
-    const stamp = new Date().toISOString();
-    const existingNotes = String(f(current, "Review_Notes") || "").trim();
-    const audit = `Factory formal-review release by ${actor || "operator"} at ${stamp}. No approval, scheduling or publication granted.`;
-    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: {
-        Do_Not_Publish: false,
-        Auto_Publish_Enabled: false,
-        Review_Notes: [existingNotes, audit].filter(Boolean).join("\n\n"),
-      }, typecast: false }),
-    });
-    const check = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-    if (f(check, "Do_Not_Publish") === true ||
-        f(check, "Auto_Publish_Enabled") === true ||
-        String(f(check, "Output_Status") || "") !== "Ready for Review" ||
-        !["", "Review Sent", "Pending Review"].includes(String(f(check, "Review_Status") || ""))) {
-      throw new HttpError(409, "Formal review release could not be verified in Airtable; refresh and inspect status");
-    }
-    // Airtable is authoritative. Mirror only the verified record, fail soft on
-    // downstream Supabase errors and never retry this operator decision there.
-    await studioSupabaseWriteThroughOutput(env, check, "factory-formal-review-release")
-      .catch(error => console.warn("Factory release mirror deferred", id, String(error?.message || error).slice(0, 180)));
-    return {
-      id, released: true, auto_publish_enabled: false,
-      message: "Publishing hold released for formal review. Preview again, then separately Approve or Request Changes. Nothing was scheduled or published.",
-    };
   });
 }
 
@@ -13524,7 +13479,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Formal review release is only for platform outputs");
       requirePermission(authorization, "outputs_review");
       requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
-      resultExtra = await factoryReleaseOutputForApproval(env, id, actor);
+      resultExtra = await factoryReleaseOutputForApproval(env, id, authorization);
     } else if (action === "send_back") {
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
