@@ -32,7 +32,7 @@ jobs:
             if(-not $s.Contains($required)){throw ('required_guard_missing: '+$required)}
           }
           foreach($bad in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','api.airtable.com','/media_publish','/media?','airtable.com/v0/','Invoke-Expression')){
-            if($s.Contains($bad)){throw ('prohibited_provider_or_source_mutation: '+$bad)}
+            if($s.Contains($bad)){throw 'prohibited_provider_or_source_mutation'}
           }
           if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_PROFILE_variable_prohibited'}
           Write-Output 'ISSUE2915_STORY_READONLY_STATIC_PASS'
