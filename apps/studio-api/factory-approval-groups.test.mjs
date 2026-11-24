@@ -4,7 +4,7 @@ import {
   FACTORY_GROUP_PREFIX, factoryApprovalGroupPlan, factoryApprovalGroupBuild,
   factoryApprovalGroupEnqueue, factoryApprovalGroupRead, factoryApprovalGroupResume,
   factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
-  factoryApprovalGroupList, factoryApprovalGroupCronScan,
+  factoryApprovalGroupList, factoryApprovalGroupCronScan, factoryApprovalGroupCanReuseForNewSubmission,
 } from "./factory-approval-groups.mjs";
 import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts, factoryBatchMarkExceptionRouted} from "./factory-approval-queue.mjs";
 
@@ -328,4 +328,17 @@ test("#2618: global Factory submission actor survives parent to child and R2 res
   assert.equal(after.submitted_by,actor);
   const legacy = await factoryApprovalGroupBuild(opts);
   assert.equal(legacy.submitted_by,null);
+});
+
+
+test("#2915 new approval must never attach to a terminal historical group",()=>{
+  const records=outputs.slice(0,2).map(row=>({...row,requires_current_approval:true}));
+  const prior={status:"completed",pending_count:0,items:records.map((row,i)=>({...row,status:i?"approved":"failed"}))};
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission(prior,records,{canonical:true}),false);
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission({...prior,status:"failed"},records,{canonical:true}),false);
+  const live={status:"running",pending_count:1,items:[{...records[0],status:"pending"},{...records[1],status:"approved"}]};
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission(live,records,{canonical:true}),false,"reopened terminal member needs current approval");
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission(live,[records[0],{...records[1],requires_current_approval:false}],{canonical:true}),true);
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission({...live,items:[{...records[0],status:"pending"},{...records[1],status:"pending"}]},records,{canonical:true}),true);
+  assert.equal(factoryApprovalGroupCanReuseForNewSubmission({...live,items:[{...records[0],status:"pending"},{...records[1],profile_id:chi,status:"pending"}]},records,{canonical:true}),false);
 });
