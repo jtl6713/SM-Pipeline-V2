@@ -160,3 +160,47 @@ test("scheduled repair is opt-in, exact-ID, signature matched and at most one pe
   assert.equal(uncertain.repair.status,"unverified");
   assert.equal(uncertain.repair.reason,"repair_requires_reconciliation");
 });
+
+test("older exact production canary is detected even outside recent plans",async()=>{
+  const rec="rec8I104V9gQmiOxf";
+  const candidate={airtable_record_id:rec,output_number:10857,
+    content_item_id:"11111111-1111-4111-8111-111111111111",
+    platform:"TikTok",studio_output_type:"Multi-Photo",render_status:"Native Photo Route",
+    output_status:"Ready for Review",review_status:"Review Sent",publish_status:"Not Ready",
+    auto_publish_enabled:false,do_not_publish:false,tiktok_draft_status:"Waiting for Schedule"};
+  const calls=[];
+  let dispatched=0;
+  const result=await runQualityFactoryHandoffCron({
+    canaryRecordId:rec,
+    read:async path=>{
+      calls.push(path);
+      if(path.startsWith("production_requests?"))return [];
+      assert.match(path,/^platform_outputs\?airtable_record_id=eq\.rec8I104V9gQmiOxf&/);
+      assert.match(path,/&limit=2$/);
+      return [candidate];
+    },
+    repair:async report=>{
+      dispatched++;
+      assert.equal(report.findings.length,1);
+      assert.equal(report.findings[0].output_id,10857);
+      assert.equal(report.findings[0].reason,"stale_tiktok_waiting_schedule_blocks_review");
+      // Current real record is missing protected variant proof; this fixture
+      // confirms detection and dispatch, not a successful production mutation.
+      return {status:"skipped",reason:"missing_protected_exact_variant_receipt"};
+    }
+  });
+  assert.equal(calls.length,2);
+  assert.equal(dispatched,1);
+  assert.equal(result.repair.status,"skipped");
+  assert.equal(result.repair.output_id,10857);
+  for(const rows of [null,[candidate,candidate],[{...candidate,scheduled_post_date:"2026-12-01"}],
+    [{...candidate,test_run_id:"synthetic"}],[{...candidate,airtable_record_id:"recOther00000000"}]]){
+    const blocked=await runQualityFactoryHandoffCron({
+      canaryRecordId:rec,
+      read:async path=>path.startsWith("production_requests?")?[]:rows,
+      repair:async()=>{throw Error("must never dispatch");}
+    });
+    assert.notEqual(blocked.repair.reason,"repair_requires_reconciliation");
+    assert.notEqual(blocked.repair.status,"repaired");
+  }
+});
