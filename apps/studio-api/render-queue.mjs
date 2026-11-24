@@ -160,6 +160,7 @@ export function sharedRenderPropagateFields(source, field = (row, name) => row?.
     Remotion_Job_ID: "",
     Remotion_Status_URL: "",
     Remotion_Props_JSON: "",
+    Studio_Media_Contract_Receipt_JSON: field(source, "Studio_Media_Contract_Receipt_JSON") || "",
   };
 }
 

@@ -1650,3 +1650,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-24 UTC — #2965 preserve known active SMV1 claims during Prepare retry or plan change.
 
 2026-11-24 UTC — #2970 stop unsafe shared-render watchdog substitution into Stories, preserve canonical audio intent across sparse Supabase mutation receipts, require matching exact short render package before recovery and never inherit approval. Protected Worker/runner release only; no automatic approval or publishing. Real media recovery and acceptance remain open.
+
+2026-11-24 UTC — #2970 exact Factory Story duration and current encoded media proof checks. Deploy together with R5 actual byte-level validation. Preserve existing approval/hold/provider gates and overload protections.

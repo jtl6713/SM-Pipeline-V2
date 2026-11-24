@@ -176,6 +176,8 @@ def render_equivalence_key(output: dict[str, Any], *, ignore_duration: bool = Fa
         field_str(output, "Composition_ID"),
         field_str(output, "Music_URL"),
         voiceover,
+        field_str(output, "Studio_Effective_Voiceover_Mode"),
+        field_str(output, "Studio_Effective_Background_Music_Mode"),
         str(field(output, "Music_Volume") or ""),
         str(field(output, "Music_Ducked_Volume") or ""),
         str(field(output, "Voiceover_Render_Volume") or ""),
@@ -291,6 +293,11 @@ def propagate_fields_from_source(source: dict[str, Any]) -> dict[str, Any]:
         "Render_Server_URL": field_str(source, "Render_Server_URL") or None,
         **review_fields_after_successful_render(source),
     }
+    # A shared artifact carries its original byte-level receipt, never a
+    # fabricated new proof or approval. The same public preview is retained.
+    proof = field_str(source, "Studio_Media_Contract_Receipt_JSON")
+    if proof:
+        fields["Studio_Media_Contract_Receipt_JSON"] = proof
     clip_json = field_str(source, "Render_Clip_List_JSON")
     if clip_json:
         fields["Render_Clip_List_JSON"] = clip_json
