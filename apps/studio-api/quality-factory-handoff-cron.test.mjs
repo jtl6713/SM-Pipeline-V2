@@ -127,3 +127,36 @@ test("newly Submitted, still-active promotion is not a false failure",async()=>{
   assert.equal(result.finding_count,1,"advisory content owner pending, not an auto repair");
   assert.equal(result.publish_actions,0);
 });
+
+test("scheduled repair is opt-in, exact-ID, signature matched and at most one per tick",async()=>{
+  const contentId="11111111-1111-4111-8111-111111111111";
+  const rec="recFHzU0h4f4mjgrj";
+  const pr={airtable_record_id:"recR4EQcshFZ4fNL0",promoted_content_item_id:contentId,
+    request_status:"Promoted",output_plan:{items:[{platform:"TikTok",output_type:"Multi-Photo"}]},
+    production_job:{step:"done"}};
+  const candidate={airtable_record_id:rec,content_item_id:contentId,content_profile_id:"profile",
+    output_number:12345,platform:"TikTok",studio_output_type:"Multi-Photo",render_status:"Native Photo Route",
+    output_status:"Ready for Review",review_status:"Review Sent",publish_status:"Not Ready",
+    auto_publish_enabled:false,do_not_publish:false,tiktok_draft_status:"Waiting for Schedule",
+    selected_clip_count:3,output_caption:"Verified media",
+    studio_preview_url:"https://media.chicagoshining.com/a.jpg",
+    thumbnail_url:"https://media.chicagoshining.com/a.jpg"};
+  const read=async path=>path.startsWith("production_requests?")?[pr]:[candidate];
+  let actions=0;
+  const repair=async report=>{
+    actions++;assert.equal(report.findings.length,1);assert.equal(report.findings[0].record_id,rec);
+    return {status:"repaired"};
+  };
+  await runQualityFactoryHandoffCron({read,repair});
+  await runQualityFactoryHandoffCron({read,repair,canaryRecordId:"recNotTheTargetABC"});
+  assert.equal(actions,0);
+  const receipt=await runQualityFactoryHandoffCron({read,repair,canaryRecordId:rec});
+  assert.equal(actions,1);
+  assert.equal(receipt.repair.status,"repaired");
+  assert.equal(receipt.repair.approval_actions,0);
+  assert.equal(receipt.repair.schedule_actions,0);
+  assert.equal(receipt.repair.publish_actions,0);
+  const uncertain=await runQualityFactoryHandoffCron({read,canaryRecordId:rec,repair:async()=>{throw Error("uncertain")}});
+  assert.equal(uncertain.repair.status,"unverified");
+  assert.equal(uncertain.repair.reason,"repair_requires_reconciliation");
+});
