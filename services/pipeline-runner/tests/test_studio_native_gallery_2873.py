@@ -106,7 +106,7 @@ def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(mon
             return [asset(a,drives[ids.index(a)])]
         if path.startswith("carousel_slides?deleted"):
             from urllib.parse import unquote
-            number=int(unquote(path.split(".cs.",1)[1].split("&",1)[0]).strip("[]"))
+            number=int(unquote(path.split("=cs.",1)[1].split("&",1)[0]).strip("[]"))
             return [deepcopy(s) for s in stored if s["fields"]["PO_Output_ID"]==[number]]
         if path.startswith("carousel_slides?on_conflict"):
             assert method=="POST"
