@@ -13,6 +13,7 @@ on:
       # Owner authorization 2026-11-23: restore routine runner deploys after
       # source changes on main. No special recovery-era marker is required.
       # Exclude test-only changes; keep all unit/health/publishing safety gates.
+      - 'services/pipeline-runner/*.py'
       - 'services/pipeline-runner/**/*.py'
       - 'services/pipeline-runner/requirements.txt'
       - '!services/pipeline-runner/tests/**'
