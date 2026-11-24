@@ -6081,6 +6081,7 @@ const STUDIO_PIPELINE_OPEN_LEGACY_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_S
 /*__STUDIO_WORKER_EXTRACT:studioApproveAllCandidateFormula__*/
 /*__STUDIO_WORKER_EXTRACT:listContentProfileRecords__*/
 /*__STUDIO_WORKER_EXTRACT:resolveAuthorizedContentProfiles__*/
+/*__STUDIO_WORKER_EXTRACT:resolveFactoryReviewResolveAuthorization__*/
 /*__STUDIO_WORKER_EXTRACT:resolveWorkingContentProfile__*/
 /*__STUDIO_WORKER_EXTRACT:resolveDefaultContentProfile__*/
 /*__STUDIO_WORKER_EXTRACT:listStudioContentProfiles__*/
