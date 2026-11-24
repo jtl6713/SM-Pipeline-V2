@@ -21,7 +21,7 @@
  * migration fails closed, never silently treating an old approved output as new.
  */
 import {
-  FACTORY_BATCH_PREFIX, factoryBatchRead, factoryBatchNeedsAttention,
+  FACTORY_BATCH_PREFIX, factoryBatchRead, factoryBatchCounts,
 } from "./factory-approval-queue.mjs";
 import { factoryApprovalGroupRead } from "./factory-approval-groups.mjs";
 
@@ -215,6 +215,7 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
   if (group?.schema === "studio.factory-approval-group.1" && Array.isArray(group.children)) {
     const wanted = new Set(conflictIds);
     const statuses = [];
+    const seen = new Set();
     const jobs = [];
     for (const child of group.children) {
       const job = await factoryBatchRead(bucket, child.profile_id, child.request_id);
@@ -225,17 +226,23 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
       }
       jobs.push(job);
       for (const item of job.items || []) {
-        if (wanted.has(item.id)) statuses.push(String(item.status || "pending"));
+        if (wanted.has(item.id)) {
+          if (seen.has(item.id)) return { kind: "blocking", parent: group, statuses };
+          seen.add(item.id);
+          statuses.push(String(item.status || "pending"));
+        }
       }
     }
-    if (!statuses.length) return { kind: "group_incomplete", parent: group, statuses };
+    if (seen.size !== wanted.size) return { kind: "blocking", parent: group, statuses };
     if (statuses.every((status) => RECLAIMABLE_ITEM.has(status))) {
       return { kind: "terminal_reclaimable", parent: group, statuses };
     }
     const liveConflict = statuses.some((status) => !TERMINAL_ITEM.has(status));
-    const activeChildren = jobs.some((job) => factoryBatchNeedsAttention(job));
-    // Completed / routed ownership is invisible on Active Approvals. Keeping the
-    // claim forever recreates "overlap" while Activity shows All clear.
+    const activeChildren = jobs.some((job) => !["completed", "failed"].includes(job.status)
+      || factoryBatchCounts(job).pending_count !== 0);
+    // Failed items may remain visible for audit even after all work is terminal.
+    // Attention is not execution: an unrelated terminal failure must not pin
+    // successful members after a new canonical review cycle has begun.
     if (!liveConflict && !activeChildren) {
       return { kind: "terminal_inactive", parent: group, statuses };
     }
@@ -247,12 +254,13 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
     const statuses = job.items
       .filter((item) => wanted.has(item.id))
       .map((item) => String(item.status || "pending"));
-    if (!statuses.length) return { kind: "blocking", job, statuses };
+    if (statuses.length !== wanted.size || new Set(job.items.filter(item => wanted.has(item.id)).map(item => item.id)).size !== wanted.size) return { kind: "blocking", job, statuses };
     if (statuses.every((status) => RECLAIMABLE_ITEM.has(status))) {
       return { kind: "terminal_reclaimable", job, statuses };
     }
     const liveConflict = statuses.some((status) => !TERMINAL_ITEM.has(status));
-    if (!liveConflict && !factoryBatchNeedsAttention(job)) {
+    if (!liveConflict && ["completed", "failed"].includes(job.status)
+        && factoryBatchCounts(job).pending_count === 0) {
       return { kind: "terminal_inactive", job, statuses };
     }
     return { kind: "blocking", job, statuses };
