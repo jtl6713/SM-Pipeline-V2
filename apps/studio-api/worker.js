@@ -4664,7 +4664,7 @@ export default {
           try{
             const response=await fetch(root+"/health",{signal:AbortSignal.timeout(6000)});
             const h=await response.json();
-            return response.ok && h.ok===true && h.studio_native_gallery_companion_2873===true
+            return response.ok && h.ok===true && h.studio_native_gallery_companion_2873===true && h.studio_native_gallery_distinct_recovery_2873===true
               && h.studio_write_source==="supabase" && h.supabase_pipeline_writes===true
               && h.workload_governor_enabled===true && h.recovery_read_only!==true;
           }catch{return false;}
