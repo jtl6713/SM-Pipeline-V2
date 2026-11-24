@@ -6,7 +6,7 @@ import {
   shouldRunQualityFactoryHandoffCron,
   runQualityFactoryHandoffCron,
 } from "./quality-factory-handoff-cron.mjs";
-import { recoverOneVerifiedNativeReview } from "./quality-native-review-repair.mjs";
+import { recoverNativeReviewWithRebuild } from "./quality-native-media-rebuild.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -4577,8 +4577,8 @@ export default {
     // #2853: Proactive, read-only 5-minute Quality Agent check of at most
     // four recent production plans and their platform output identities.
     // Existing zero-output recovery runs independently below. This probe
-    // never creates media, writes a publishing hold, approves, schedules, or
-    // calls a provider; keep it staggered from the 5-minute heartbeat.
+    // is read-only by default; separately enabled exact canary may rebuild media
+    // but never approves, schedules, releases holds or calls a provider.
     if (shouldRunQualityFactoryHandoffCron({
       cron: collectorCron,minute:collectorMinute,
       source: studioWriteSource(env),
@@ -4589,7 +4589,7 @@ export default {
         read: path=>adminHoldSupabaseRest(env,path),
         limit:4,
         canaryRecordId: env.QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID || null,
-        repair: report=>recoverOneVerifiedNativeReview(env,report),
+        repair: report=>recoverNativeReviewWithRebuild(env,report),
         logger: receipt=>console.info("QA_FACTORY_HANDOFF_E2E_2846",
           JSON.stringify(receipt)),
       }).catch(error=>console.warn("QA_FACTORY_HANDOFF_E2E_UNAVAILABLE",
