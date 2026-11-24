@@ -899,9 +899,19 @@ jobs:
           echo "functional_session_check=PASS"
 
       - name: Verify exact live Pilsen TikTok Creative photo package through authenticated service binding
+        if: github.event_name == 'push'
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          # One-time rollout acceptance for this exact record, not a perpetual
+          # deployment dependency after the owner approves or retires Pilsen.
+          git fetch --no-tags --depth=1 origin "$BEFORE_SHA"
+          if ! git diff "$BEFORE_SHA" HEAD -- deploy/cloudflare-worker-production.txt | grep -F '+2026-11-24 UTC — #2873 exact Supabase Creative GET' >/dev/null; then
+            echo "Pilsen exact-record rollout gate not requested on this push"
+            exit 0
+          fi
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
