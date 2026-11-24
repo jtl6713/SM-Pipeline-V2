@@ -46,7 +46,10 @@ jobs:
           (cd services/pipeline-runner && python -m pytest -q \
             tests/test_2853_bryant_probe_contract.py \
             tests/test_studio_native_gallery_2873.py \
-            tests/test_2670_workload_governor.py)
+            tests/test_2670_workload_governor.py::test_circuit_blocks_new_heavy_jobs_without_discarding_queue \
+            tests/test_2670_workload_governor.py::test_snapshot_reports_no_request_id_or_credentials \
+            tests/test_2670_workload_governor.py::test_worker_claims_pause_on_circuit_half_open_and_one_job_canary \
+            tests/test_2670_workload_governor.py::test_workload_history_reflects_actual_circuit_without_fabricating_recovery)
 
       - name: Execute exactly one protected nonpublishing governed probe
         shell: bash

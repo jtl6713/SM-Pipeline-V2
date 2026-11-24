@@ -1,1 +1,2 @@
 2026-11-24: Owner-authorized one exact governed nonpublishing Python producer probe for Bryant Park recbD8PLtJpez8Oz0. Require cap1, idle half-open admission, exact unapproved #10853/#10854 baseline, one submission, canonical progress, circuit closure, and zero approval, scheduling or publishing actions before retrying #10857.
+2026-11-24: Retry the untouched #2853 probe after replacing a racy background-dispatcher assertion with the exact deterministic circuit, snapshot, and recovery-history contracts.
