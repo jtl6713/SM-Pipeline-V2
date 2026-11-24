@@ -2104,6 +2104,7 @@
     const graceExpired = Number(saved.saved_ms) > 0
       && ageMs >= FACTORY_PENDING_MISSING_GRACE_MS;
     const committed = [];
+    const retiredRejected = [];
     for (const plan of plans) {
       const requestId = String(plan.request_id);
       const url = isGlobal
@@ -2144,6 +2145,15 @@
         if (!verifiedMissing) {
           return { resolved: false, message: "Saved approval " + requestId
             + " cannot yet be reconciled. Automatic verification will retry." };
+        }
+        // A definitive POST rejection stops automatic retries. Once an exact
+        // authenticated GET proves this original request never existed and its
+        // commit grace expired, keeping the archived browser fence is a dead end.
+        // Do not replay or automatically select these outputs: fresh human
+        // approval is required; live server admission/overlap checks still apply.
+        if (saved.retry_blocked === true && graceExpired) {
+          retiredRejected.push(...plan.ids);
+          continue;
         }
         if (factorySavedPayloadMatchesPlan(saved, plan)) {
           const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
@@ -2187,17 +2197,25 @@
     catch {
       return { resolved: false, message: "The previous request was verified, but its browser lock could not be released." };
     }
-    if (committed.length) {
-      rememberFactoryAccepted(committed);
-      committed.forEach(id => state.selectedOutputs.delete(id));
+    if (committed.length) rememberFactoryAccepted(committed);
+    if (committed.length || retiredRejected.length) {
+      const released = new Set([...committed, ...retiredRejected]);
+      released.forEach(id => state.selectedOutputs.delete(id));
+      if (retiredRejected.length) {
+        // Prevent the waiting-selection dispatcher from replaying an old click.
+        localStorage.setItem(FACTORY_WAITING_SELECTION_KEY,
+          JSON.stringify(waitingFactorySelection().filter(id => !released.has(id))));
+      }
       saveFactorySelection();
     }
     if (!factoryRecoveryEntries().length) setBatchSubmissionError(null);
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
-    const message = committed.length
-      ? "Verified " + committed.length + " previously submitted outputs. Their original batches remain in history."
-      : "Verified saved approval was never created; submission is unblocked.";
+    const message = retiredRejected.length
+      ? "Verified " + retiredRejected.length + " rejected outputs had no accepted request. Review and select them again; no approval was submitted. Existing batches remain in history."
+      : committed.length
+        ? "Verified " + committed.length + " previously submitted outputs. Their original batches remain in history."
+        : "Verified saved approval was never created; submission is unblocked.";
     setStatus(message);
     return { resolved: true, count: committed.length, message };
   }
