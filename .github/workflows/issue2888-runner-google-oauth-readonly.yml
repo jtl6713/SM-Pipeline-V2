@@ -1,0 +1,127 @@
+name: Issue 2888 runner Google OAuth read-only diagnostic
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue2888-runner-google-oauth-readonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2888-runner-google-oauth-readonly
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Authenticate existing protected runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/2888-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/2888-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo '::error::AUTHORIZED_RUNNER_UNAVAILABLE'
+          exit 1
+      - name: Build read-only credential and exact-file metadata probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json
+          from pathlib import Path
+          src = r'''
+          import json,os
+          from pathlib import Path
+          import requests
+          from dotenv import dotenv_values
+          def run():
+              p=Path.cwd()/"Services"/"pipeline-runner"/"service"/".env"
+              if not p.is_file():
+                  return {"result":"RUNNER_ENV_NOT_FOUND"}
+              config=dotenv_values(p)
+              names=("GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","GOOGLE_REFRESH_TOKEN")
+              values={k:str(config.get(k) or "").strip() for k in names}
+              result={"present":{k:bool(v) for k,v in values.items()}}
+              if not all(values.values()):
+                  return dict(result,result="MISSING_CREDENTIAL")
+              try:
+                  r=requests.post("https://oauth2.googleapis.com/token",data={
+                      "client_id":values[names[0]],"client_secret":values[names[1]],
+                      "refresh_token":values[names[2]],"grant_type":"refresh_token",
+                  },timeout=25,allow_redirects=False)
+              except requests.RequestException:
+                  return dict(result,result="TOKEN_TRANSPORT_FAILURE")
+              result["token_http"]=r.status_code
+              try: payload=r.json()
+              except ValueError: return dict(result,result="TOKEN_NON_JSON")
+              if not isinstance(payload,dict): return dict(result,result="TOKEN_NON_OBJECT")
+              if r.status_code!=200:
+                  code=payload.get("error")
+                  known=("invalid_client","invalid_grant","unauthorized_client","invalid_scope","invalid_request","access_denied","temporarily_unavailable","server_error","deleted_client","disabled_client","org_internal","admin_policy_enforced")
+                  return dict(result,result="TOKEN_REJECTED",category=code if code in known else "OTHER")
+              token=payload.get("access_token")
+              if not isinstance(token,str) or not token:
+                  return dict(result,result="TOKEN_MISSING")
+              files=[("1aWyb-OkXhJ9GwWkg3VWruTaivdms6pTL",2194946),("1KMygA91kqVv2InOcAQbCoy5IvQDjkfgH",895259),("1DlqSVCwMkzUVJ4bFLJDrvals8Bal3imj",17892121)]
+              checks=[]
+              for fid,size in files:
+                  try:
+                      m=requests.get("https://www.googleapis.com/drive/v3/files/"+fid,headers={"Authorization":"Bearer "+token},params={"fields":"size,mimeType,trashed","supportsAllDrives":"true"},timeout=20,allow_redirects=False)
+                      data=m.json() if m.status_code==200 else {}
+                      checks.append({"http":m.status_code,"verified":m.status_code==200 and str(data.get("size"))==str(size) and data.get("mimeType")=="video/mp4" and data.get("trashed") is False})
+                  except (requests.RequestException,ValueError):
+                      checks.append({"http":0,"verified":False})
+              return dict(result,result="TOKEN_OK",files=checks)
+          try:
+              report=run()
+          except Exception:
+              report={"result":"RUNNER_DIAGNOSTIC_FAILED"}
+          print("ISSUE2888_OAUTH_DIAGNOSTIC="+json.dumps(report),flush=True)
+          '''
+          src=src.encode()
+          encoded=base64.b64encode(src).decode()
+          digest=hashlib.sha256(src).hexdigest()
+          command=("$ErrorActionPreference='Stop';"
+              "$tmp=Join-Path $env:TEMP ('issue2888-oauth-'+[guid]::NewGuid()+'.py');"
+              f"[IO.File]::WriteAllBytes($tmp,[Convert]::FromBase64String('{encoded}'));"
+              f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{digest}'){{throw 'diagnostic_hash_mismatch'}};"
+              "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'diagnostic_failed'}}"
+              "finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/2888-diagnostic-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+      - name: Run bounded credential check without disclosing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for attempt in $(seq 1 6); do
+            code=$(curl -sS --max-time 30 -o /tmp/2888-start.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/2888-diagnostic-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then accepted=true; break; fi
+            if [[ "$code" != 409 ]]; then echo "runner_submit_http=$code"; exit 1; fi
+            sleep 6
+          done
+          test "$accepted" = true
+          JOB=$(jq -er '.job.id // .jobId' /tmp/2888-start.json)
+          for tick in $(seq 1 60); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$JOB" -o /tmp/2888-job.json
+            state=$(jq -r '.job.status // empty' /tmp/2888-job.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/2888-job.json | grep '^ISSUE2888_OAUTH_DIAGNOSTIC=' | tail -1 | sed 's/^ISSUE2888_OAUTH_DIAGNOSTIC=//' | jq -c '{result,category,token_http,present,files}' 
+              test "$state" == ok
+              exit 0
+            fi
+            sleep 3
+          done
+          echo '::error::RUNNER_DIAGNOSTIC_NOT_CONFIRMED'
+          exit 1
