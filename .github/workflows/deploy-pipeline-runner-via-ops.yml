@@ -98,7 +98,8 @@ jobs:
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_owner_generation_guidance.py \
             services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
-            services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py
+            services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
+            services/pipeline-runner/tests/test_runner_routine_deploy_2876.py
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py \
             services/pipeline-runner/tests/test_fb0_limits.py \
