@@ -793,6 +793,7 @@
   }
 
   let factoryGalleryPreviewEpoch = 0;
+  let factoryReviewSaveInFlight = false;
   function clearFactoryNativeGalleryControls() {
     $("factoryNativeGalleryControls")?.remove();
   }
@@ -856,22 +857,55 @@
       dialog.appendChild(controls);
       let index = 0;
       const seen=new Set();
-      let reviewButton, checks=[];
-      const updateReview=()=>{if(reviewButton)reviewButton.disabled=seen.size!==slides.length||checks.some(c=>!c.checked);};
+      let reviewButton, checks=[], saving=false, resolved=false, uncertain=false;
+      const updateReview=()=>{if(reviewButton)reviewButton.disabled=saving||resolved||uncertain||seen.size!==slides.length||checks.some(c=>!c.checked);};
       if(resolving){
         const caption=document.createElement("p");caption.style.cssText="flex-basis:100%;white-space:pre-wrap;text-align:left";caption.textContent="Caption: "+data.caption;controls.appendChild(caption);
         for(const label of ["I reviewed all images in order","I reviewed the caption","I confirm branding and applicable image rights"]){
           const wrap=document.createElement("label"),check=document.createElement("input");check.type="checkbox";wrap.append(check,document.createTextNode(" "+label));wrap.style.flexBasis="100%";controls.appendChild(wrap);checks.push(check);check.addEventListener("change",updateReview);
         }
-        reviewButton=document.createElement("button");reviewButton.type="button";reviewButton.className="primary-button";reviewButton.textContent="Verify & Resolve for Approval";reviewButton.disabled=true;controls.appendChild(reviewButton);
-        reviewButton.addEventListener("click",async()=>{
-          if(reviewButton.disabled||epoch!==factoryGalleryPreviewEpoch)return;
-          if(!window.confirm("Record your review of these exact images and caption and release this gallery hold for separate Factory approval? Nothing will be scheduled or published."))return;
-          reviewButton.disabled=true;back.disabled=true;next.disabled=true;
-          try{const result=await mutateDesk({action:"review_resolve",id,kind:"output",package_sha256:data.package_sha256,confirm_images:true,confirm_caption:true,confirm_branding_rights:true});
-            if(result?.result?.review_resolved!==true)throw new Error("Review release not verified. Refresh Factory.");
-            closeFactoryPreview();setStatus(result.message||"Review resolved. Separately click Approve.");
-          }catch(error){setStatus("Review not resolved: "+String(error?.message||error),true);window.alert(String(error?.message||error));back.disabled=index===0;next.disabled=index===slides.length-1;updateReview();}
+        const status=document.createElement("p");status.id="factoryGalleryReviewSaveStatus";status.setAttribute("role","status");status.setAttribute("aria-live","polite");status.style.cssText="flex-basis:100%;font-weight:700;white-space:pre-wrap;overflow-wrap:anywhere";status.textContent="Your review has not been saved. Review every image and confirm all three requirements.";
+        controls.appendChild(status);
+        reviewButton=document.createElement("button");reviewButton.type="button";reviewButton.className="primary-button";reviewButton.textContent="Save review & resolve hold";reviewButton.disabled=true;controls.appendChild(reviewButton);
+        const checkReceipt=document.createElement("button");checkReceipt.type="button";checkReceipt.className="secondary-button";checkReceipt.textContent="Check saved review";checkReceipt.hidden=true;controls.appendChild(checkReceipt);
+        const done=document.createElement("button");done.type="button";done.className="primary-button";done.textContent="Return to Factory for approval";done.hidden=true;controls.appendChild(done);
+        const lock=(active)=>{saving=active;factoryReviewSaveInFlight=active;const close=$("factoryPreviewClose");if(close)close.disabled=active;back.disabled=active||index===0;next.disabled=active||index===slides.length-1;checks.forEach(c=>c.disabled=active||resolved);checkReceipt.disabled=active;updateReview();};
+        const acceptReceipt=(receipt)=>{
+          if(receipt?.review_resolved!==true||receipt.id!==id||receipt.package_sha256!==data.package_sha256||receipt.slide_count!==slides.length||!receipt.saved_at||receipt.released!==true)throw new Error("No matching verified save receipt was returned.");
+          resolved=true;uncertain=false;reviewButton.hidden=true;checkReceipt.hidden=true;done.hidden=false;
+          status.textContent="Review saved and verified: "+receipt.slide_count+" of "+slides.length+" images. Receipt saved at "+receipt.saved_at+". "+(receipt.scheduled||receipt.published?"Factory approval or scheduling has already progressed; check the output status.":"Return to Factory for the separate approval. Nothing has been scheduled or published by this review.");
+          setStatus(status.textContent);
+        };
+        const readReceipt=async()=>{
+          const receipt=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+"/slides?resolve=receipt&package_sha256="+encodeURIComponent(data.package_sha256),{timeoutMs:18000,cache:"no-store"});
+          if(receipt?.review_resolved===true){acceptReceipt(receipt);return true;}
+          if(receipt?.id!==id||receipt.review_resolved!==false||receipt.held!==true)throw new Error("Review status could not be verified.");
+          uncertain=false;status.textContent="No completed review receipt exists. Publishing remains held. You may retry the exact review; the server prevents concurrent saves.";checkReceipt.hidden=false;return false;
+        };
+        checkReceipt.addEventListener("click",async(event)=>{
+          event.preventDefault();event.stopPropagation();if(saving||resolved||epoch!==factoryGalleryPreviewEpoch)return;
+          lock(true);status.textContent="Checking the saved review directly…";
+          try{await readReceipt();}catch(error){uncertain=true;status.textContent="Review status is not verified: "+String(error?.message||error)+". Use Check saved review again; do not assume approval.";checkReceipt.hidden=false;}
+          finally{lock(false);}
+        });
+        reviewButton.addEventListener("click",async(event)=>{
+          event.preventDefault();event.stopPropagation();
+          if(reviewButton.disabled||saving||resolved||epoch!==factoryGalleryPreviewEpoch)return;
+          // Three explicit confirmations plus this click are the user's decision.
+          // Do not depend on a browser-native confirm dialog or dismiss the modal.
+          lock(true);status.textContent="Saving your review and verifying all image bytes. Publishing remains held until the server confirms the save.";
+          try{
+            const result=await fetchJson("/api/factory/desk",{method:"POST",timeoutMs:90000,body:JSON.stringify({action:"review_resolve",id,kind:"output",package_sha256:data.package_sha256,confirm_images:true,confirm_caption:true,confirm_branding_rights:true})});
+            acceptReceipt(result?.result);
+          }catch(error){
+            uncertain=true;const reason=String(error?.message||error);status.textContent="Review not confirmed: "+reason+". Checking the stored receipt…";checkReceipt.hidden=false;
+            try{if(!await readReceipt())status.textContent="Review not saved: "+reason+". No completed receipt exists; publishing remains held. You may retry.";}
+            catch(receiptError){status.textContent="Review outcome unverified: "+reason+". "+String(receiptError?.message||receiptError)+". Use Check saved review before retrying.";}
+          }finally{lock(false);}
+        });
+        done.addEventListener("click",async(event)=>{
+          event.preventDefault();event.stopPropagation();if(!resolved||saving)return;
+          closeFactoryPreview();await loadFactoryDesk(true);setStatus("Review saved and verified. Select the output for separate Factory approval.");
         });
       }
       const show = (nextIndex) => {
@@ -913,6 +947,7 @@
   }
 
   function closeFactoryPreview() {
+    if (factoryReviewSaveInFlight) return;
     factoryGalleryPreviewEpoch += 1;
     clearFactoryNativeGalleryControls();
     clearFactoryRecoveryGalleryControls();
@@ -939,6 +974,7 @@
   }
 
   function openFactoryPreview(card, resolve=false) {
+    if (factoryReviewSaveInFlight) return;
     const galleryEpoch = ++factoryGalleryPreviewEpoch;
     clearFactoryNativeGalleryControls();
     clearFactoryRecoveryGalleryControls();
