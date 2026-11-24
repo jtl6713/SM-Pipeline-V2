@@ -103,7 +103,14 @@ def voiceover_is_disabled(
     return parent_mode in {"no", "false", "0"}
 
 
+def _story_output(record: dict[str, Any] | None) -> bool:
+    return any(field_str(record or {}, key).strip().lower() == 'story'
+               for key in ('Studio_Output_Type', 'Output_Type', 'Format'))
+
+
 def voiceover_url(*records: dict[str, Any] | None) -> str:
+    if records and _story_output(records[0]):
+        records = records[:1]
     for record in records:
         if not record:
             continue
@@ -120,7 +127,7 @@ def measured_voiceover_seconds(
     url: str | None = None,
     probe: bool = True,
 ) -> float | None:
-    records = (output, content_item)
+    records = (output,) if _story_output(output) else (output, content_item)
     if voiceover_is_disabled(output, content_item):
         return None
     target_url = str(url or "").strip() or voiceover_url(*records)
