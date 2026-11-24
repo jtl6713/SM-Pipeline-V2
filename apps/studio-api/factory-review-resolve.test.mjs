@@ -124,9 +124,27 @@ test("authenticated gallery review persists every slide, releases only its hold 
     assert.equal(patches,5);assert.equal(row.do_not_publish,false);assert.equal(row.auto_publish_enabled,false);assert.equal(row.review_status,"Review Sent");assert.equal(row.publish_status,"Not Ready");
     assert.equal(row.scheduled_post_date,undefined);assert.equal(row.published_at,undefined);
     assert.ok(slides.every(slide=>slide.fields["Approved For Final"]===true));
+    const {inspectFactoryNativeSlideInventory}=await import("./supabase-pipeline-reads.mjs");
+    const {classifyFactoryLane}=await import("./factory-desk.mjs");
+    const inventory=inspectFactoryNativeSlideInventory(row,slides);
+    assert.equal(inventory.verified,true,inventory.reason);
+    assert.equal(classifyFactoryLane({id,kind:"output",output_status:row.output_status,review_status:row.review_status,render_status:row.render_status,publish_status:row.publish_status,do_not_publish:row.do_not_publish,auto_publish_enabled:row.auto_publish_enabled,studio_state:"Ready for Review",review_package_ready:inventory.verified}),"needs_eyes");
     const recovered=await readFactoryReviewResolveReceipt(env,id,auth,initial.package_sha256);
     assert.equal(recovered.review_resolved,true);assert.equal(recovered.formal_approval_pending,true);assert.equal(recovered.scheduled,false);assert.equal(recovered.published,false);assert.equal(patches,5);
     await assert.rejects(()=>readFactoryReviewResolveReceipt(env,id,auth,"b".repeat(64)),/does not match/);
     await assert.rejects(()=>readFactoryReviewResolveReceipt(env,id,{...auth,authorized_profile_ids:[]},initial.package_sha256),/authorized reviewer/);
   }finally{globalThis.fetch=original;}
+});
+
+test("exact pilot final approval uses canonical governed group path",async()=>{
+ const {reviewResolvePilotOutput}=await import("./factory-review-resolve.mjs");
+ const {readFileSync}=await import("node:fs");
+ assert.equal(reviewResolvePilotOutput(id),true);
+ assert.equal(reviewResolvePilotOutput("recUnknown00000000"),false);
+ const code=readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+ const route=code.slice(code.indexOf("const resolvedGalleryPilot = reviewResolvePilotOutput(id)"),code.indexOf("resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);",code.indexOf("const resolvedGalleryPilot = reviewResolvePilotOutput(id)")));
+ assert.match(route,/resolvedGalleryPilot && \(studioWriteSource\(env\) !== "supabase"/);
+ assert.match(route,/factoryBatchGroupSubmitRoute\(/);
+ assert.match(route,/record_ids: \[id\]/);
+ assert.match(route,/receipt\?\.accepted !== true/);
 });
