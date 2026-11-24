@@ -70,7 +70,7 @@ jobs:
             local h="/tmp/issue2888/$output_id.headers"
             local b="/tmp/issue2888/$output_id.body"
             local code
-            code=$(curl -sS -L --max-time 105 --max-filesize 4096 \
+            code=$(curl -sS --max-time 105 --max-filesize 4096 \
               -o "$b" -D "$h" -w '%{http_code}' \
               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
@@ -91,19 +91,28 @@ jobs:
             fi
             # Only print a known safe error category, never response contents,
             # cookies, access tokens, Google Drive links, or private video bytes.
-            reason=$(grep -oE 'FACTORY_2618_[A-Z_]+' "$b" | head -1 || true)
+            reason=$(grep -oE 'FACTORY_2618_[A-Z0-9_]+' "$b" | head -1 || true)
+            if [[ -z "$reason" && "$code" == 403 ]]; then
+              if grep -Fq 'Permission required: outputs_review' "$b"; then reason=STUDIO_OUTPUTS_REVIEW_PERMISSION_REQUIRED;
+              elif grep -Fq 'Authenticated identity did not contain an email address' "$b"; then reason=STUDIO_IDENTITY_EMAIL_MISSING;
+              elif grep -Fq 'Studio membership required' "$b"; then reason=STUDIO_MEMBERSHIP_REQUIRED;
+              else reason=ACCESS_DENIED_UNCLASSIFIED; fi
+            fi
             echo "::error::Protected Factory playback FAILED output=$output_id http=$code reason=${reason:-unclassified}"
             return 1
           }
           # Stage one source of each of the three exact SHA-verified Drive
           # videos. First request may populate the PRIVATE R2 review cache;
           # it never edits output, approval, publication or production records.
-          probe rec1PDreUDoe2AcPV 17892121
-          probe recaV78on0RSfqb31 2194946
-          probe recfwDzGh6St6WB9f 895259
+          failures=0
+          probe rec1PDreUDoe2AcPV 17892121 || failures=$((failures+1))
+          probe recaV78on0RSfqb31 2194946 || failures=$((failures+1))
+          probe recfwDzGh6St6WB9f 895259 || failures=$((failures+1))
           # The remaining siblings must replay from the same verified objects.
-          probe rec1kjgusW1fX9BOp 17892121
-          probe recidhGcJSfOlxMsc 17892121
-          probe recgeicEbdlbmQiv5 2194946
-          probe recy1CzV4MJQycBMq 2194946
+          probe rec1kjgusW1fX9BOp 17892121 || failures=$((failures+1))
+          probe recidhGcJSfOlxMsc 17892121 || failures=$((failures+1))
+          probe recgeicEbdlbmQiv5 2194946 || failures=$((failures+1))
+          probe recy1CzV4MJQycBMq 2194946 || failures=$((failures+1))
+          echo "issue2888_failures=$failures/7"
+          test "$failures" -eq 0
           echo 'issue2888_factory_seven_verified_private_mp4_range=PASS'
