@@ -238,6 +238,11 @@ def extend_render_clips_to_cover_voiceover(
     a few frames (Output 2156: 35.76s spoken vs 35.70s / 1071 frames). Returns
     Airtable fields to PATCH, or None when no extension is possible/needed.
     """
+    # Stories have their own duration contract. A too-long narration requires a
+    # separate short voiceover, not expansion to the parent Reel's duration.
+    if any(field_str(output, key).strip().lower() == "story"
+           for key in ("Studio_Output_Type", "Output_Type", "Format")):
+        return None
     if voiceover_is_disabled(output, content_item):
         return None
     url = voiceover_url(output, content_item)
