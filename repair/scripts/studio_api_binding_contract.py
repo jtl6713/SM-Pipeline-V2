@@ -27,7 +27,17 @@ RESERVATION_BINDINGS = {
     "STUDIO_SCHEDULE_RESERVATIONS": "durable_object_namespace",
 }
 
+# Exact, read-only Google Drive preview OAuth credentials. Optional only during
+# initial provisioning; the production deploy already compares pre/post binding
+# names and types, so an installed tuple cannot silently disappear on deploy.
+GOOGLE_DRIVE_OAUTH_BINDINGS = {
+    "GOOGLE_CLIENT_ID": "secret_text",
+    "GOOGLE_CLIENT_SECRET": "secret_text",
+    "GOOGLE_REFRESH_TOKEN": "secret_text",
+}
+
 OPTIONAL_BINDINGS = {
+    **GOOGLE_DRIVE_OAUTH_BINDINGS,
     # Legacy Airtable IDs are accepted during cutover, not required after removal.
     "AIRTABLE_BASE_ID": "plain_text",
     "AIRTABLE_CONTENT_TABLE_ID": "plain_text",
@@ -267,13 +277,20 @@ def evaluate_bindings(got, *, allow_reservation_absent=False):
         for name, expected in OPTIONAL_BINDINGS.items()
         if name in got and got[name] != expected
     }
+    google_present = {name for name in GOOGLE_DRIVE_OAUTH_BINDINGS if name in got}
+    google_missing = {
+        name: expected for name, expected in GOOGLE_DRIVE_OAUTH_BINDINGS.items()
+        if google_present and got.get(name) != expected
+    }
     return {
+        "google_drive_oauth_ready": all(got.get(name) == expected for name, expected in GOOGLE_DRIVE_OAUTH_BINDINGS.items()),
+        "google_drive_oauth_missing": google_missing,
         "contract": CONTRACT_ID,
         "binding_count": len(got),
         "core_ok": not missing,
         "reservation_ok": not effective_reservation_missing,
         "reservation_bootstrap_absent": reservation_bootstrap_absent,
-        "ok": not missing and not effective_reservation_missing and not unexpected and not optional_mismatch,
+        "ok": not missing and not effective_reservation_missing and not unexpected and not optional_mismatch and not google_missing,
         "missing": missing,
         "reservation_missing": effective_reservation_missing,
         "unexpected": unexpected,
@@ -291,7 +308,8 @@ def assert_live_contract(got, label="bindings", *, allow_reservation_absent=Fals
         raise SystemExit(
             f"{label} failed {CONTRACT_ID}: missing={result['missing']} "
             f"reservation_missing={result['reservation_missing']} "
-            f"unexpected={result['unexpected']} optional_mismatch={result['optional_mismatch']}"
+            f"unexpected={result['unexpected']} optional_mismatch={result['optional_mismatch']} "
+            f"google_drive_oauth_missing={result['google_drive_oauth_missing']}"
         )
     return result
 
