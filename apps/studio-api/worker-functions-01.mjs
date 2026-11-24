@@ -13339,12 +13339,13 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
     limit: Math.max(limit * 4, 40),
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Output_Status}="In Production",{Output_Status}="Rendering"),{Final_File_URL}="",OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft",{Studio_Output_Type}="Story"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Output_Status}="In Production",{Output_Status}="Rendering"),{Final_File_URL}="",OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))',
   }).catch(() => []);
   const healed = [];
   const sourceCache = new Map();
+  let proofAttempts = 0;
   for (const record of rows || []) {
-    if (healed.length >= limit) break;
+    if (healed.length >= limit || proofAttempts >= limit) break;
     if (!isSharedRenderStrandCandidate(record, f)) continue;
     const contentLinks = f(record, "Content_Item") || [];
     const contentId = Array.isArray(contentLinks)
@@ -13358,33 +13359,24 @@ export async function studioHealSharedRenderStrand(env, options = {}) {
         sortField: "Output_ID",
         sortDirection: "asc",
         contentAirtableId: contentId,
-        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft",{Studio_Output_Type}="Story"))`,
+        filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${airtableFormulaEscape(contentId)}", ARRAYJOIN({Content_Item})),{Final_File_URL}!="",OR({Render_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Studio_Output_Type}="Video Draft"))`,
       }).catch(() => []);
       sourceCache.set(contentId, sources || []);
     }
-    const destIsStory = /^story$/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim());
-    const source = (sources || []).find((row) => {
-      if (row.id === record.id) return false;
-      const type = String(f(row, "Studio_Output_Type") || f(row, "Output_Type") || "").trim();
-      if (destIsStory) {
-        if (!["Story", "Reel", "Short", "Video Draft"].includes(type)) return false;
-      } else if (!["Reel", "Short", "Video Draft"].includes(type)) {
-        return false;
-      }
-      return Boolean(String(f(row, "Final_File_URL") || "").trim());
-    });
+    const source = (sources || []).find((row) => row.id !== record.id
+      && ["Reel", "Short", "Video Draft"].includes(String(f(row, "Studio_Output_Type") || f(row, "Output_Type") || "").trim())
+      && Boolean(String(f(row, "Final_File_URL") || "").trim()));
     if (!source) continue;
-    // Prefer a finished Story source for Story destinations when both exist.
-    const preferred = destIsStory
-      ? (sources || []).find((row) => (
-        row.id !== record.id
-        && /^story$/i.test(String(f(row, "Studio_Output_Type") || "").trim())
-        && Boolean(String(f(row, "Final_File_URL") || "").trim())
-      )) || source
-      : source;
-    const fields = sharedRenderPropagateFields(preferred, f, record);
-    if (!fields) continue;
+    proofAttempts += 1;
     try {
+      // Lean scan rows do not establish media equivalence. Require fresh exact
+      // canonical source and destination snapshots, bounded by the same cap.
+      const [freshSource, freshTarget] = await Promise.all([
+        airtableFetch(env, outputTable, source.id),
+        airtableFetch(env, outputTable, record.id),
+      ]);
+      const fields = sharedRenderPropagateFields(freshSource, f, freshTarget);
+      if (!fields) continue;
       await airtableFetch(env, outputTable, record.id, {
         method: "PATCH",
         body: JSON.stringify({ fields, typecast: true }),
