@@ -9,6 +9,9 @@ export const FACTORY_BATCH_LEASE_MS = 12 * 60 * 1000;
 const ID = /^rec[A-Za-z0-9]+$/;
 const RID = /^[A-Za-z0-9_-]{12,128}$/;
 const done = new Set(["approved", "already_satisfied", "skipped_removed", "superseded_duplicate", "failed"]);
+const activeJob = job => ["queued", "running"].includes(job?.status);
+const FACTORY_ACTIVE_INDEX_PREFIX = FACTORY_BATCH_PREFIX + "/active-profiles/";
+const INDEX_RESERVATION_GRACE_MS = 5 * 60 * 1000;
 
 function assertBucket(bucket) {
   if (!bucket?.put || !bucket?.get || !bucket?.list) throw Error("STUDIO_MEDIA R2 storage required");
@@ -164,14 +167,106 @@ async function cas(bucket, key, fn, max = 8) {
     if (!old) throw Error("Factory batch record disappeared");
     const next = fn(old.value);
     if (!next) return old.value;
+    if (key.startsWith(FACTORY_BATCH_PREFIX + "/jobs/") && !activeJob(old.value) && activeJob(next)) {
+      // Index reactivation before the authoritative ledger CAS. An orphan hint is harmless.
+      await factoryBatchIndexRemember(bucket, next);
+    }
     if (await putMatch(bucket, key, next, old.etag)) return next;
   }
   throw Error("Concurrent batch update; retry after reading current status");
 }
+
+/** Non-authoritative active-work hints. No new database writes, binding or approval authority. */
+function factoryActiveIndexKey(profileId) {
+  if (!ID.test(String(profileId || ""))) throw Error("Invalid active index profile");
+  return FACTORY_ACTIVE_INDEX_PREFIX + profileId + ".json";
+}
+async function mutateFactoryActiveIndex(bucket, profileId, update) {
+  const key = factoryActiveIndexKey(profileId);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const prior = await get(bucket, key);
+    const old = prior?.value || { schema: "studio.factory-active-index.1", profile_id: profileId, entries: [] };
+    if (old.schema !== "studio.factory-active-index.1" || old.profile_id !== profileId || !Array.isArray(old.entries)) {
+      throw Error("Factory active index identity mismatch");
+    }
+    const entries = update(old.entries);
+    if (!entries) return old;
+    const next = { ...old, entries };
+    const saved = prior ? await putMatch(bucket, key, next, prior.etag) : await putAbsent(bucket, key, next);
+    if (saved) return next;
+  }
+  throw Error("Factory active index CAS contention");
+}
+export async function factoryBatchIndexRemember(bucket, job, { refresh = true, nowMs = Date.now() } = {}) {
+  if (!activeJob(job)) return false;
+  const profileId = job.profile_id, requestId = job.request_id;
+  factoryBatchKey(profileId, requestId);
+  try {
+    const token = crypto.randomUUID();
+    await mutateFactoryActiveIndex(bucket, profileId, entries => {
+      if (!refresh && entries.some(row => row.request_id === requestId)) return null;
+      return entries.filter(row => row.request_id !== requestId).concat({
+        request_id: requestId, token, registered_ms: nowMs,
+      });
+    });
+    return true;
+  } catch (error) {
+    // Preserve historical recovery if the secondary index is unavailable.
+    console.warn("Factory active index registration deferred", requestId, String(error?.message || error).slice(0, 140));
+    return false;
+  }
+}
+export async function factoryBatchActiveIndexProfiles(bucket) {
+  const page = await bucket.list({ prefix: FACTORY_ACTIVE_INDEX_PREFIX, limit: 100 });
+  const profileIds = (page.objects || []).map(row =>
+    String(row.key).slice(FACTORY_ACTIVE_INDEX_PREFIX.length).replace(/\.json$/, ""))
+    .filter(id => ID.test(id));
+  return { profileIds, complete: !page.truncated };
+}
+export async function factoryBatchActiveIndexCandidates(bucket, profileId, { nowMs = Date.now(), maxScan = 100 } = {}) {
+  const index = (await get(bucket, factoryActiveIndexKey(profileId)))?.value;
+  if (!index) return { found: false, complete: true, candidates: [] };
+  if (index.schema !== "studio.factory-active-index.1" || index.profile_id !== profileId || !Array.isArray(index.entries)) {
+    throw Error("Factory active index identity mismatch");
+  }
+  const limit = Math.max(1, Math.min(200, Math.trunc(maxScan) || 100));
+  const entries = [...index.entries].sort((a,b) => a.registered_ms - b.registered_ms ||
+    String(a.request_id).localeCompare(String(b.request_id))).slice(0, limit);
+  const candidates = [], stale = new Map();
+  for (let start = 0; start < entries.length; start += 12) {
+    const rows = await Promise.all(entries.slice(start, start + 12).map(async entry => {
+      if (!RID.test(String(entry.request_id || "")) || !entry.token) return null;
+      const job = await factoryBatchRead(bucket, profileId, entry.request_id);
+      if (!job || (!activeJob(job) && ["completed", "failed"].includes(job.status))) {
+        // A new activation reserves a new token BEFORE its ledger CAS. Grace
+        // protects that in-flight activation; token comparison fences pruning.
+        if (nowMs - Number(entry.registered_ms || 0) >= INDEX_RESERVATION_GRACE_MS) stale.set(entry.request_id, entry.token);
+        return null;
+      }
+      if (!activeJob(job) || job.profile_id !== profileId || job.request_id !== entry.request_id ||
+          !Array.isArray(job.items) || new Set(job.items.map(item => item.id)).size !== job.items.length) return null;
+      return { profileId, requestId: entry.request_id, job };
+    }));
+    candidates.push(...rows.filter(Boolean));
+  }
+  if (stale.size) {
+    try {
+      await mutateFactoryActiveIndex(bucket, profileId, rows => {
+        const remaining = rows.filter(row => stale.get(row.request_id) !== row.token);
+        return remaining.length === rows.length ? null : remaining;
+      });
+    } catch (error) {
+      console.warn("Factory active index cleanup deferred", profileId, String(error?.message || error).slice(0, 140));
+    }
+  }
+  return { found: true, complete: index.entries.length <= limit, candidates };
+}
+
 export async function factoryBatchEnqueue(bucket, options) {
   assertBucket(bucket);
   const job = factoryBatchBuild(options);
   const key = factoryBatchKey(job.profile_id, job.request_id);
+  await factoryBatchIndexRemember(bucket, job);
   const written = await putAbsent(bucket, key, job);
   if (written) return { job, already_submitted: false };
   const prior = await get(bucket, key);

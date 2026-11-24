@@ -8,7 +8,7 @@ import {
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
   factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied, factoryBatchRetryOriginalIntentOnce,
-  factoryBatchItemProgress,
+  factoryBatchItemProgress, factoryBatchActiveIndexProfiles, factoryBatchActiveIndexCandidates, factoryBatchIndexRemember,
   factoryBatchReconcileSupabaseApprovalReceipts, factoryBatchCronReceiptCandidates,
 } from "./factory-approval-queue.mjs";
 
@@ -51,7 +51,8 @@ test("20 requests survive browser close, process via two independent workers, an
   assert.equal(first.already_submitted, false);
   const retrySubmit = await factoryBatchEnqueue(bucket, opts);
   assert.equal(retrySubmit.already_submitted, true);
-  assert.equal(bucket.objects.size, 1);
+  assert.equal([...bucket.objects.keys()].filter(key => key.includes("/jobs/")).length, 1);
+  assert.equal((await factoryBatchActiveIndexCandidates(bucket, profileId)).candidates.length, 1);
   let committed = 0;
   const approve = async () => { committed++; };
   const workerA = await factoryBatchDrain(bucket, { profileId, requestId, approve, maxItems: 8, makeOwner: () => "worker-a" });
@@ -973,4 +974,39 @@ test("#2959 three budget slices 4/4/1 preserve exactly-once output attempts and 
   const job = await factoryBatchRead(bucket, profileId, requestId);
   assert.equal(job.status, "completed");
   assert.ok(job.items.every(i => i.total_attempts === 1 && i.status === "approved"));
+});
+
+
+test("#2959 active index discovers exact retry and pending tail without historical listing", async () => {
+  const bucket = new FakeR2();
+  const old = "factory_index_old_history", live = "factory_index_active_tail";
+  await factoryBatchEnqueue(bucket, { ...opts, requestId: old, records: records.slice(0,1) });
+  await factoryBatchDrain(bucket, { profileId, requestId: old, approve: async () => { throw Error("blocked"); } });
+  await factoryBatchEnqueue(bucket, { ...opts, requestId: live, records: records.slice(1,3) });
+  await factoryBatchDrain(bucket, { profileId, requestId: live, approve: async () => {}, maxItems: 1 });
+  assert.deepEqual((await factoryBatchActiveIndexProfiles(bucket)).profileIds, [profileId]);
+  bucket.list = async () => { throw Error("history unavailable"); };
+  const active = await factoryBatchActiveIndexCandidates(bucket, profileId, { nowMs: Date.now()+360000 });
+  assert.deepEqual(active.candidates.map(x => x.requestId), [live]);
+  assert.equal(active.complete, true);
+  assert.equal(active.candidates[0].job.items.filter(i => i.status === "pending").length, 1);
+  await factoryBatchRetry(bucket, profileId, old);
+  const reopened = await factoryBatchActiveIndexCandidates(bucket, profileId);
+  assert.deepEqual(new Set(reopened.candidates.map(x=>x.requestId)), new Set([old,live]));
+});
+
+test("#2959 orphan index cannot authorize work and future retry stays ineligible", async () => {
+  const bucket = new FakeR2();
+  const orphan = factoryBatchBuild({ ...opts, requestId: "factory_index_orphan_01", records: records.slice(0,1) });
+  await factoryBatchIndexRemember(bucket, orphan, { nowMs: 1 });
+  const retryId = "factory_index_future_01";
+  await factoryBatchEnqueue(bucket, { ...opts, requestId: retryId, records: records.slice(1,2) });
+  await factoryBatchDrain(bucket, {
+    profileId, requestId: retryId, now: () => 100000,
+    approve: async () => { throw Object.assign(Error("timeout"), { status: 503 }); },
+  });
+  const found = await factoryBatchActiveIndexCandidates(bucket, profileId, { nowMs: 100001 });
+  assert.deepEqual(found.candidates.map(x => x.requestId), [retryId]);
+  assert.equal(factoryBatchCronSelectJobs(found.candidates, { nowMs: 100001 }).length, 0);
+  assert.equal(factoryBatchCronSelectJobs(found.candidates, { nowMs: 160001 }).length, 1);
 });
