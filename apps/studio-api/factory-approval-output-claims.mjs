@@ -210,6 +210,22 @@ export async function factoryOutputClaimInspect(bucket, { profileId, requestId, 
     owners: [...new Set(conflicts.map(row => row.request_id))] };
 }
 
+// Historical retries may still exist in the audit ledger after a safe claim
+// transfer. Under the per-output approval lock, fence them from mutating
+// the new review cycle. No migration or write in this check.
+export async function factoryOutputClaimAssertNotTransferred(bucket, { profileId, requestId, id }) {
+  if (!ID.test(String(profileId || "")) || !RID.test(String(requestId || "")) ||
+      !ID.test(String(id || ""))) throw Error("Invalid Factory execution claim identity");
+  const registry = await read(bucket, key(profileId));
+  if (!registry) return;
+  if (registry.value.schema !== SCHEMA || registry.value.profile_id !== profileId ||
+      !registry.value.outputs || typeof registry.value.outputs !== "object")
+    throw Error("Factory execution claim registry invalid");
+  const claim = registry.value.outputs[id];
+  if (claim?.source === "safe_reclaim" && claim.request_id !== requestId)
+    throw Error("Factory approval ownership transferred to a newer request; historical attempt cannot approve");
+}
+
 async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflictIds) {
   const group = await factoryApprovalGroupRead(bucket, ownerRequestId);
   if (group?.schema === "studio.factory-approval-group.1" && Array.isArray(group.children)) {
