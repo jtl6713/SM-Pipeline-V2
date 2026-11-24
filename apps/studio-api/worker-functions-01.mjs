@@ -3606,6 +3606,23 @@ export async function resolveAuthorizedContentProfiles(env, authorization) {
 }
 /*__STUDIO_WORKER_END:resolveAuthorizedContentProfiles__*/
 
+// Review & Resolve requires the actual authenticated session plus profile ACL.
+// Resolve the authoritative profile list before both GET and POST, with no
+// fallback to archived Airtable data and no trust in client-supplied scope.
+export async function resolveFactoryReviewResolveAuthorization(env, authorization) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") {
+    throw new HttpError(503, "Review & Resolve requires canonical Supabase profile authorization");
+  }
+  const profiles = await listSupabaseContentProfiles(env, { limit: 100 });
+  if (!Array.isArray(profiles) || !profiles.length) {
+    throw new HttpError(503, "Supabase Content Profiles unavailable; review remains held");
+  }
+  env.__contentProfilesCache = profiles;
+  const authorized = await resolveAuthorizedContentProfiles(env, authorization);
+  return { ...authorization, authorized_profile_ids: authorized.map(profile => profile.id) };
+}
+/*__STUDIO_WORKER_END:resolveFactoryReviewResolveAuthorization__*/
+
 export async function resolveWorkingContentProfile(env, authorization, profileId) {
   const matches = await resolveAuthorizedContentProfiles(env, authorization);
   if (!matches.length) {
