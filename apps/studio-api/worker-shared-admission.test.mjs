@@ -80,3 +80,24 @@ test("Worker claims shared broker BEFORE durable R2 job; releases token in final
   assert.match(block, /await runnerWorkerLease\(env, "release", lease\.job\.idea_id, owner\)/);
   assert.match(block, /startRunnerWorkerLeaseHeartbeat\(/);
 });
+
+
+test("broker diagnostics distinguish explicit capacity refusal from unsafe or uncertain results",async()=>{
+  for(const [status,body,reason] of [
+    [429,{ok:true,admitted:false},"capacity_or_circuit"],
+    [429,{},"broker_unavailable"],
+    [401,{},"broker_auth_denied"],
+    [403,{},"broker_auth_denied"],
+    [422,{},"broker_request_rejected"],
+    [503,{},"broker_http_unavailable"],
+    [200,{ok:true},"broker_receipt_invalid"]
+  ]){
+    const out=await runnerWorkerLease(env,"claim",idea,token,{transport:async(_url,opts)=>{
+      assert.equal(opts.redirect,"error");
+      return response(status,body);
+    }});
+    assert.deepEqual(out,{admitted:false,reason,http_status:status});
+  }
+  const timeout=await runnerWorkerLease(env,"claim",idea,token,{transport:async()=>{const e=new Error("private");e.name="TimeoutError";throw e;}});
+  assert.deepEqual(timeout,{admitted:false,reason:"broker_timeout"});
+});

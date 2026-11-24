@@ -204,3 +204,19 @@ test("older exact production canary is detected even outside recent plans",async
     assert.notEqual(blocked.repair.status,"repaired");
   }
 });
+
+
+test("exact canary publishes classified admission refusal without raw diagnostic data",async()=>{
+ const rec="rec8I104V9gQmiOxf";
+ const row={airtable_record_id:rec,output_number:10857,content_item_id:"11111111-1111-4111-8111-111111111111",platform:"TikTok",studio_output_type:"Multi-Photo",render_status:"Native Photo Route",output_status:"Ready for Review",review_status:"Review Sent",publish_status:"Not Ready",auto_publish_enabled:false,do_not_publish:false,tiktok_draft_status:"Waiting for Schedule"};
+ for(const [reason,code,want,status] of [["capacity_or_circuit",429,"capacity_or_circuit",429],["broker_auth_denied",401,"broker_auth_denied",401],["untrusted diagnostic",1000,"unknown",null]]){
+   const result=await runQualityFactoryHandoffCron({canaryRecordId:rec,read:async path=>path.startsWith("production_requests?")?[]:[row],
+    repair:async()=>({status:"skipped",reason:"shared_admission_denied",admission_reason:reason,admission_http_status:code,private_data:"never expose"})});
+   assert.equal(result.repair.admission_reason,want);
+   assert.equal(result.repair.admission_http_status,status);
+   assert.equal(result.repair.approval_actions,0);
+   assert.equal(result.repair.schedule_actions,0);
+   assert.equal(result.repair.publish_actions,0);
+   assert.ok(!JSON.stringify(result).includes("never expose"));
+ }
+});

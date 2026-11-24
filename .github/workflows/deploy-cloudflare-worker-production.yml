@@ -361,7 +361,7 @@ jobs:
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          if type(qa.get('enabled')) is not bool or type(qa.get('request_revision')) is not int or qa['request_revision'] not in (1,2,3) or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True,'request_revision':qa['request_revision']}:
+          if type(qa.get('enabled')) is not bool or type(qa.get('request_revision')) is not int or qa['request_revision'] not in (1,2,3,4) or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True,'request_revision':qa['request_revision']}:
               raise SystemExit('Unknown quality canary manifest')
           if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID'):
               raise SystemExit('Respect existing other Quality Agent canary')
@@ -762,6 +762,7 @@ jobs:
               const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
               const scriptedMulti = scriptedFeedbackProbe && url.searchParams.get("mode") === "multi";
               const qaNativeRun = url.pathname === "/$TOKEN/qa-native-run" && request.method === "POST";
+              const qaWorkload = url.pathname === "/$TOKEN/qa-workload" && request.method === "GET";
               const qaCatalog = url.pathname === "/$TOKEN/qa-catalog";
               const qaRuns = url.pathname === "/$TOKEN/qa-runs";
               const qaUnauthenticated = url.pathname === "/$TOKEN/qa-unauthenticated";
@@ -781,9 +782,10 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated && !qaNativeRun) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated && !qaNativeRun && !qaWorkload) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = qaNativeRun ? "/api/admin/qa/quality-native-repair/run"
+              const path = qaWorkload ? "/api/admin/qa/workload"
+                : qaNativeRun ? "/api/admin/qa/quality-native-repair/run"
                 : qaCatalog || qaUnauthenticated ? "/api/admin/qa/catalog"
                 : qaRuns ? "/api/admin/qa/runs?limit=1"
                 : scriptedFeedbackProbe ? "/api/scripted-short/revise"
@@ -1391,7 +1393,8 @@ jobs:
           fi
           jq -c '{multi_profile_job_evidence:[.jobs[]|{idea_id,found,status,stage,attempts,last_error,updated_at,next_attempt_ms}], cron:{status:.heartbeat.status,stage:.heartbeat.stage,claimed:.heartbeat.claimed,discovered:.heartbeat.discovered,results:.heartbeat.results}}' /tmp/ready-production-city-jobs.json
 
-      - name: Run exact authorized Quality Agent canary once and report Factory proof
+      - name: Run exact authorized Quality Agent canary and report independent Factory proof
+        id: quality_canary
         # This is a nonpublishing test, separate from ordinary Worker deployment
         # acceptance. Never retry an ambiguous write or roll back media by
         # rolling back source. The durable revision reservation remains.
@@ -1410,15 +1413,56 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
-          CODE=$(curl -sS --max-time 150 -X POST -o /tmp/qa-native-run.json -w '%{http_code}' "$BASE/qa-native-run" || true)
-          echo "quality_native_manual_run_http=$CODE"
-          test "$CODE" = "200"
-          jq -c '{status,repair,requires_human_approval}' /tmp/qa-native-run.json
+          echo requested=true >> "$GITHUB_OUTPUT"
+          # Read the actual Worker-to-Runner authenticated snapshot rather than
+          # inferring cross-host availability from an unauthenticated probe.
+          snapshot() {
+            local code
+            code=$(curl -sS --max-time 20 -o /tmp/qa-native-workload.json -w '%{http_code}' "$BASE/qa-workload" || true)
+            echo "quality_native_workload_http=$code"
+            if [[ "$code" == 200 ]]; then
+              jq -c '{ok,runner:(.runner|{active_jobs,queued_jobs,paused_jobs,active_worker_heavy,combined_heavy_active,max_jobs,database_circuit_phase,admission_paused,recovery_read_only})}' /tmp/qa-native-workload.json
+            fi
+          }
+          snapshot
+          for attempt in 1 2 3; do
+            CODE=$(curl -sS --max-time 150 -X POST -o /tmp/qa-native-run.json -w '%{http_code}' "$BASE/qa-native-run" || true)
+            echo "quality_native_manual_run_http=$CODE attempt=$attempt"
+            test "$CODE" = "200"
+            jq -c '{status,repair,requires_human_approval}' /tmp/qa-native-run.json
+            # Only an explicitly confirmed server-side refusal, BEFORE staging
+            # or reservation, is safe to defer. No retries of unknown outcomes.
+            if [[ "$attempt" != 3 ]] && jq -e '.repair.reason=="shared_admission_denied" and .repair.admission_reason=="capacity_or_circuit" and .repair.admission_http_status==429' /tmp/qa-native-run.json >/dev/null; then
+              sleep 30
+              snapshot
+              continue
+            fi
+            break
+          done
           jq -e '.repair.status=="repaired" and .repair.output_id==10857 and .repair.approval_actions==0 and .repair.schedule_actions==0 and .repair.publish_actions==0 and .requires_human_approval==true' /tmp/qa-native-run.json >/dev/null
           curl -fsS --max-time 60 "$BASE/factory-desk" -o /tmp/qa-native-factory.json
           jq -c '[.lanes.needs_eyes[]? | select(.output_id==10857) | {output_id,review_package_ready,studio_state,review_status,publish_status,do_not_publish,auto_publish_enabled}]' /tmp/qa-native-factory.json
           jq -e 'any(.lanes.needs_eyes[]?; .output_id==10857 and .review_package_ready==true and .publish_status=="Not Ready" and .auto_publish_enabled==false)' /tmp/qa-native-factory.json >/dev/null
           echo 'quality_native_manual_run_factory_visible=PASS'
+          echo accepted=true >> "$GITHUB_OUTPUT"
+
+      - name: Report Quality Agent acceptance separately from deployment
+        if: always() && steps.quality_canary.outputs.requested == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALITY_ACCEPTED: ${{ steps.quality_canary.outputs.accepted }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          DESCRIPTION="Exact Quality Agent repair or Factory visibility unverified"
+          if [[ "$QUALITY_ACCEPTED" == true ]]; then
+            STATE=success
+            DESCRIPTION="Exact #10857 repair and human Factory review verified"
+          fi
+          PAYLOAD=$(jq -nc --arg state "$STATE" --arg context "production/quality-agent-10857" --arg description "$DESCRIPTION" '{state:$state,context:$context,description:$description}')
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$PAYLOAD" >/dev/null
 
       - name: Delete functional verification bridge
         if: always()
