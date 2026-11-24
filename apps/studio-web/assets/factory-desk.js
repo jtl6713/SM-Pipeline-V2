@@ -1423,8 +1423,7 @@
     // light-weight rendering/test contexts without an active Factory filter.
     if (!batch?.job_id || Array.isArray(batch.batches)) return batch;
     const effectiveProfileFilter = profileFilter === undefined ? (factoryProfileId() || null) : profileFilter;
-    const active = ["queued", "running", "enqueuing"].includes(batch.status)
-      || Number(batch.pending_count || 0) > 0 || Number(batch.failed_count || 0) > 0;
+    const active = factoryBatchActiveRow(batch);
     return {
       ...batch, view: "active", filter_profile_id: effectiveProfileFilter, batches: [batch],
       totals: {
@@ -1438,7 +1437,7 @@
 
   function factoryBatchActiveRow(row) {
     return ["queued", "running", "enqueuing"].includes(String(row?.status || "")) ||
-      Number(row?.pending_count || 0) > 0 || Number(row?.failed_count || 0) > 0;
+      Number(row?.pending_count || 0) > 0;
   }
   function factoryBatchRecountActive(activity, rows) {
     const batches = rows.slice(0, 40);
@@ -1479,7 +1478,8 @@
       prior.get(String(row.request_id || row.job_id || "")) || row);
     const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
-      row?.request_id && (row.group || row.profile_id) && factoryBatchActiveRow(row) &&
+      row?.request_id && (row.group || row.profile_id) &&
+      (factoryBatchActiveRow(row) || Number(row.failed_count || 0) > 0) &&
       !known.has(String(row.request_id)));
     return factoryBatchRecountActive(fetched, [...rows, ...pending]);
   }
@@ -1599,17 +1599,15 @@
     // was on screen; always derive every number from the SAME visible snapshot.
     const totals = {
       batches: batches.length,
-      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status) ||
-        Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length,
+      active: batches.filter(factoryBatchActiveRow).length,
       approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
       pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
     if (count) count.textContent = activityUnknown ? "—" : String(state.completedOpen
-      ? ((state.batch?.batches || []).filter(row => ["queued","running","enqueuing"].includes(row.status) ||
-          Number(row.pending_count || 0) > 0 || Number(row.failed_count || 0) > 0).length)
+      ? ((state.batch?.batches || []).map(factoryBatchDisplayRow).filter(factoryBatchActiveRow).length)
       : totals.active);
-    if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
+    if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals & recent results";
     if (toggle) {
       toggle.hidden = state.completedOpen;
       toggle.textContent = "Completed Batches";
@@ -1650,7 +1648,7 @@
       const pending = Math.max(0, Number(row.pending_count) || 0);
       return sum + Math.min(total, Math.max(0, Number(row.done_count ?? (total - pending)) || 0));
     }, 0);
-    const aggregatePercent = aggregateTotal ? Math.round(100 * aggregateDone / aggregateTotal) : 0;
+    const aggregatePercent = aggregateTotal ? Math.round(100 * totals.approved / aggregateTotal) : 0;
     let overall = $("factoryBatchOverallProgress");
     if (!overall) {
       overall = document.createElement("div");
@@ -1661,8 +1659,9 @@
     // A terminal 100% receipt is still useful until the next completed-history
     // reconciliation. Do not hide the bar at the exact moment the last item finishes.
     overall.hidden = !batches.length;
-    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : totals.active ? "Overall active approval progress" : "Latest completed submission"}</strong><span>${aggregateDone} of ${aggregateTotal} processed · ${aggregatePercent}%</span></div>
-      <progress max="${aggregateTotal || 1}" value="${aggregateDone}" aria-label="Overall approval batch processing progress">${aggregatePercent}%</progress>
+    overall.innerHTML = `<div class="factory-batch-progress-label"><strong>${state.completedOpen ? "Completed batch history" : totals.active ? "Overall active approval progress" : "Latest completed submission"}</strong><span>${aggregatePercent}% approved</span></div>
+      <progress max="${aggregateTotal || 1}" value="${Math.min(aggregateTotal, totals.approved)}" aria-label="Overall successful approvals">${aggregatePercent}%</progress>
+      <small>${aggregateDone} of ${aggregateTotal} processed</small>
       <small>${Number(totals.approved)||0} approved · ${Number(totals.pending)||0} pending · ${Number(totals.failed)||0} failed</small>
       ${factoryLiveSummaryHtml(batches.flatMap(row => row.items || []))}`;
     if (updated && state.completedOpen) updated.textContent =
@@ -1682,13 +1681,13 @@
           : item.output_id ? `Output #${item.output_id}` : `${row.total || 0} outputs`;
         const label = row.group ? `Global approval · ${groupLabel}`
           : item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
-        const active = ["running", "queued", "enqueuing"].includes(row.status);
+        const active = factoryBatchActiveRow(row);
         const stateLabel = row.preview_only
           ? (row.status === "awaiting_acceptance" ? "Checking acceptance" : "Submitting")
           : row.progress_lag ? "Syncing approvals" :
-            active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
+            active ? "Processing" : row.failed_count ? "Completed with failures" : "Completed";
         const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
-        const percent = row.total ? Math.round(100 * completed / row.total) : 0;
+        const percent = row.total ? Math.round(100 * Number(row.approved_count || 0) / row.total) : 0;
         const picked = state.batchDetailsOpen && latest?.job_id === row.job_id;
         return `<button type="button" class="factory-batch-recent-row factory-batch-activity-choice${picked ? " is-selected" : ""}"
           data-factory-activity-key="${esc(row.job_id)}" aria-pressed="${picked}"
@@ -1702,8 +1701,8 @@
             <strong>${esc(stateLabel)}</strong><span>${Number(row.failed_count)||0} failed</span>
           </span>
           ${factoryLiveSummaryHtml(row.items || [])}
-          <span class="factory-batch-progress-caption">${completed} of ${Number(row.total)||0} processed · ${percent}%</span>
-          <progress class="factory-batch-row-progress" max="${Number(row.total)||1}" value="${Math.min(Math.max(0,completed),Number(row.total)||1)}" aria-label="${esc(label)} processing progress">${percent}%</progress>
+          <span class="factory-batch-progress-caption">${percent}% approved · ${completed} of ${Number(row.total)||0} processed</span>
+          <progress class="factory-batch-row-progress" max="${Number(row.total)||1}" value="${Math.min(Math.max(0,Number(row.approved_count)||0),Number(row.total)||1)}" aria-label="${esc(label)} successful approvals">${percent}%</progress>
         </button>`;
       }).join("")
       : '<p class="subtle">' + (state.completedOpen
@@ -1731,13 +1730,13 @@
     const children = Array.isArray(latest?.children) ? latest.children : [];
     const childrenHtml = children.length ? `<div class="factory-batch-child-grid">${children.map(child => {
       const done = Number(child.done_count ?? (Number(child.total||0)-Number(child.pending_count||0)));
-      const percent = child.total ? Math.round(100*done/child.total) : 0;
+      const percent = child.total ? Math.round(100*Number(child.approved_count||0)/child.total) : 0;
       return `<section class="factory-batch-child">
         <strong>${esc(factoryProfileLabel(child.profile_id))}</strong>
         <span>${esc(child.progress_lag ? "Syncing approvals" :
           ["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" :
-          child.failed_count ? "Needs attention" : "Completed")}</span>
-        <progress max="${Number(child.total)||1}" value="${done}">${percent}%</progress>
+          child.failed_count ? "Completed with failures" : "Completed")}</span>
+        <strong>${percent}% approved</strong><progress max="${Number(child.total)||1}" value="${Math.min(Number(child.total)||1,Number(child.approved_count)||0)}" aria-label="Successful approvals">${percent}%</progress><small>${done} of ${Number(child.total)||0} processed</small>
         <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
         ${factoryLiveSummaryHtml(items.filter(item => item.profile_id === child.profile_id))}
       </section>`;
@@ -2285,7 +2284,8 @@
       const filterId = factoryProfileId() || null;
       const knownGroups = state.batch?.filter_profile_id === filterId
         ? (state.batch?.batches || []).filter(row => row.request_id &&
-            (row.group || row.profile_id) && factoryBatchActiveRow(row)) : [];
+            (row.group || row.profile_id) &&
+              (factoryBatchActiveRow(row) || Number(row.failed_count || 0) > 0)) : [];
       const knownIds = new Set(knownGroups.map(row => row.request_id));
       // After reload there may be no state.batch yet. An accepted group is
       // recoverable from the same original R2 request without re-submitting.

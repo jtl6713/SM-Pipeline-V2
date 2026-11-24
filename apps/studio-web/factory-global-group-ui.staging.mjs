@@ -176,7 +176,7 @@ try{
     throw error;
   }
   assert.match(await page.locator("#factoryBatchOverallProgress").innerText(),
-    /0 of 4 processed · 0%/);
+    /0% approved[\s\S]*0 of 4 processed/);
   assert.ok(started<=1,"no duplicate submission during provisional activity");
   await page.request.get(origin+"/__release-start-receipt");
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
