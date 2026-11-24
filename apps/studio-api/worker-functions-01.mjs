@@ -10006,6 +10006,13 @@ export async function item4RequeueFailedVariantsForHeal(env, rows) {
 /*__STUDIO_WORKER_END:item4RequeueFailedVariantsForHeal__*/
 
 export async function item4RequeueStaleProcessing(env, rows) {
+  // #2965: Supabase SMV1 claims are governed by the runner's durable lease.
+  // The Worker has no exact lease token and cannot safely revoke Processing,
+  // even if a browser polls long after the old 90-second timeout.
+  // The runner performs lease-aware stale recovery before its next drain.
+  if (studioWriteSource(env) === "supabase" || studioPhase6WriteSource(env) === "supabase") {
+    return Array.isArray(rows) ? rows : [];
+  }
   const now = Date.now();
   const next = [];
   for (const row of Array.isArray(rows) ? rows : []) {
