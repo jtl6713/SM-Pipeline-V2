@@ -47,6 +47,18 @@ function incident({stage,kind,reason,output,remediation,automatic=false,more={}}
     ...more,
   };
 }
+// Shared compact signature used by the ordinary sampler and exact canary.
+// This is detection only; the repair adapter must independently validate media,
+// ownership, locks, receipts and provider evidence.
+export function matchesStaleTikTokReviewSignature(row) {
+  return Boolean(row && !row.test_run_id
+      &&row.output_status==="Ready for Review"&&row.review_status==="Review Sent"
+      &&row.publish_status==="Not Ready"&&row.platform==="TikTok"&&row.studio_output_type==="Multi-Photo"
+      &&row.render_status==="Native Photo Route"&&row.tiktok_draft_status==="Waiting for Schedule"
+      &&row.auto_publish_enabled===false&&row.do_not_publish===false
+      &&!row.scheduled_post_date&&!row.studio_scheduled_at&&!row.youtube_scheduled_publish_at
+      &&!row.published_at&&!row.platform_post_url);
+}
 function nativePhoto(row) {
   return str(row.render_status)==="Native Photo Route"
     || /carousel|photo set|multi-photo|multi-image|single image/i.test(
@@ -238,11 +250,7 @@ export function assessProductionFactoryHandoff({
     }
     // #2915: candidate only. The bounded executor must reload exact proof,
     // provider evidence, ownership and current media before changing anything.
-    if(row.platform==="TikTok"&&row.studio_output_type==="Multi-Photo"
-      &&row.render_status==="Native Photo Route"&&row.tiktok_draft_status==="Waiting for Schedule"
-      &&row.auto_publish_enabled===false&&row.do_not_publish===false
-      &&!row.scheduled_post_date&&!row.studio_scheduled_at&&!row.youtube_scheduled_publish_at
-      &&!row.published_at&&!row.platform_post_url) {
+    if(matchesStaleTikTokReviewSignature(row)) {
       report.findings.push(incident({stage:"factory",kind:"production_factory_handoff",
         reason:"stale_tiktok_waiting_schedule_blocks_review",output:row,
         remediation:"Run guarded verified-native repair: exact owned current media and provider absence, CAS clear only stale TikTok draft flag, read back; verify Factory visibility and stop at human approval",
