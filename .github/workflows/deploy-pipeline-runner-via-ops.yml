@@ -240,6 +240,15 @@ jobs:
           done
           test "$SYNC_OK" = true
 
+          # Recheck main after sync and tests, before starting any new cutover.
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            git fetch --quiet --depth=1 origin main
+            test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
+              echo "::error::Main changed during preflight; no runner cutover submitted"
+              exit 1
+            }
+          fi
+
           # Never adopt a 409 busy job — concurrent Speakeasy /api/shell pulses
           # have been mistaken for a successful deploy (health stayed on the
           # prior runner version while this step exited 0).
@@ -277,7 +286,8 @@ jobs:
               echo "ops_job_status=$status"
               case "$status" in
                 ok)
-                  jq -e '.job.action=="deploy" and .job.service=="pipeline-runner"' /tmp/job.json >/dev/null
+                  # A version label or green Ops status alone cannot prove the tested source.
+                  python .github/scripts/verify-runner-deployment-receipt.py /tmp/job.json "$JOB" "$GITHUB_SHA"
                   jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
                   exit 0
                   ;;

@@ -51,3 +51,32 @@ def test_no_workload_settings_or_publish_holds_changed_by_deployment_workflow():
     assert "STUDIO_GLOBAL_COORDINATOR_ENABLED=" not in text
     assert "Do_Not_Publish" not in text
     assert '"action":"deploy","service":"pipeline-runner","confirm":true' in text
+
+
+def test_deploy_requires_exact_fresh_ops_commit_receipt():
+    import importlib.util
+    import pytest
+
+    module_path = ROOT / ".github/scripts/verify-runner-deployment-receipt.py"
+    spec = importlib.util.spec_from_file_location("runner_receipt", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sha = "a" * 40
+    job = {"id": "fresh-job", "action": "deploy", "service": "pipeline-runner",
+           "status": "ok", "exitCode": 0,
+           "log": f"Approved commit: {sha}\\nPASS - controlled deployment completed and verified.\\nCommit:  {sha}\\n"}
+    job["log"] = job["log"].replace("\\n", "\n")
+    assert module.verify_receipt({"ok": True, "job": job}, "fresh-job", sha)["deployed_commit"] == sha
+
+    for change in (
+        {"id": "old-job"}, {"service": "other-service"}, {"status": "running"},
+        {"exitCode": 1}, {"log": f"Approved commit: {sha}"},
+        {"log": "PASS - controlled deployment completed and verified.\nCommit: " + "b"*40},
+        {"log": job["log"] + "Commit: " + "b"*40},
+    ):
+        with pytest.raises(ValueError):
+            module.verify_receipt({"ok": True, "job": {**job, **change}}, "fresh-job", sha)
+
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert 'verify-runner-deployment-receipt.py /tmp/job.json "$JOB" "$GITHUB_SHA"' in text
+    assert "Main changed during preflight; no runner cutover submitted" in text
