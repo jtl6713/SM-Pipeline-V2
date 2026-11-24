@@ -198,6 +198,11 @@ def _literal_python_negative_guard_lines(lines: list[str]) -> set[int]:
                 if isinstance(message, ast.Constant):
                     if not isinstance(message.value, str):
                         break
+                elif isinstance(message, ast.Name):
+                    # The exact literal loop variable is a harmless diagnostic
+                    # (e.g. assert forbidden not in s, forbidden).
+                    if message.id != found.group("variable"):
+                        break
                 elif isinstance(message, ast.JoinedStr):
                     if any(
                         not (isinstance(part, ast.Constant)
