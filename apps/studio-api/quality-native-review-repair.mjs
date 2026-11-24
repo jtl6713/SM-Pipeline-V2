@@ -18,6 +18,8 @@ const safeUrl=v=>typeof v==="string"&&v.startsWith(CDN)&&!v.includes("?")&&!v.in
 const blocked=reason=>({eligible:false,reason});
 const ownedProofKey="SM_Quality_Native_Variant_Repair_v1";
 const repairKey="SM_Quality_Factory_Handoff_Repair_v1";
+const staleDraftRepairKey="SM_Quality_Stale_TikTok_Review_Repair_v1";
+export const STALE_TIKTOK_REVIEW_REASON="stale_tiktok_waiting_schedule_blocks_review";
 const MAX_BYTES=8*1024*1024;
 const MAX_IMAGES=10;
 const TARGET_FIELDS=[
@@ -29,7 +31,7 @@ const TARGET_FIELDS=[
   "studio_scheduled_at","youtube_scheduled_publish_at","published_at","platform_post_url",
   "platform_publish_response","platform_publish_response_text","publish_asset_url","tiktok_draft_status","updated_at","error_messages",
 ].join(",");
-const providerKeys=/^(?:Platform_(?:Post|Media)_ID|Publish_(?:Started|Locked)_At|Studio_Publish_Dispatch_(?:At|Count)|IG_Story_(?:Container|Post)_ID|IG_(?:Carousel|Reel)_Container_ID|FB_(?:Post|Video|Reel)_ID|YouTube_(?:Video_ID|Upload_ID)|TikTok_(?:Publish_ID|Draft_ID|Upload_ID)|.*(?:Publish|Draft|Story|Reel|Carousel)_Attempt_Count)$/i;
+const providerKeys=/^(?:Platform_(?:Post|Media)_ID|Publish_(?:Started|Locked)_At|Studio_Publish_Dispatch_(?:At|Count)|IG_Story_(?:Container|Post)_ID|IG_(?:Carousel|Reel)_Container_ID|FB_(?:Post|Video|Reel)_ID|YouTube_(?:Video_ID|Upload_ID)|TikTok_(?:Publish_ID|Draft_ID|Draft_Publish_ID|Upload_ID)|Last_Publish_Attempt_At|.*(?:Publish|Draft|Story|Reel|Carousel)_Attempt_Count)$/i;
 function hasProviderEvidence(bag) {
   return Object.entries(bag).some(([k,v])=>providerKeys.test(k)&&
     v!==null&&v!==undefined&&v!==false&&v!==0&&v!=="0"&&v!=="");
@@ -49,17 +51,20 @@ export function assessVerifiedNativeReviewRepair(row) {
     ||!UUID.test(asString(row.content_item_id))||!UUID.test(asString(row.content_profile_id))
     ||!Number.isSafeInteger(row.output_number)||row.output_number<=0||!row.updated_at)
     return blocked("unverified_output_identity");
+  const staleDraft=row.output_status==="Ready for Review"&&row.review_status==="Review Sent"
+    &&row.publish_status==="Not Ready"&&row.tiktok_draft_status==="Waiting for Schedule";
+  const receiptKey=staleDraft?staleDraftRepairKey:repairKey;
   if(row.platform!=="TikTok"||row.studio_output_type!=="Multi-Photo"||row.aspect_ratio!=="9:16"
-    ||row.output_status!=="In Production"||row.render_status!=="Native Photo Route"
+    ||(!staleDraft&&row.output_status!=="In Production")||row.render_status!=="Native Photo Route"
     ||!["","Pending","Pending Review","Review Sent"].includes(asString(row.review_status))
     ||!["","Not Ready"].includes(asString(row.publish_status)))
     return blocked("not_stale_native_review_handoff");
   if(row.do_not_publish!==false||row.auto_publish_enabled!==false||row.publish_retry_eligible===true
     ||row.test_run_id||row.scheduled_post_date||row.studio_scheduled_at||row.youtube_scheduled_publish_at
-    ||row.published_at||row.platform_post_url||row.platform_publish_response||row.platform_publish_response_text||row.publish_asset_url||row.tiktok_draft_status)
+    ||row.published_at||row.platform_post_url||row.platform_publish_response||row.platform_publish_response_text||row.publish_asset_url||(!staleDraft&&row.tiktok_draft_status))
     return blocked("hold_test_or_publishing_evidence");
   const bag=row.error_messages;
-  if(!bag||typeof bag!=="object"||Array.isArray(bag)||bag[repairKey]
+  if(!bag||typeof bag!=="object"||Array.isArray(bag)||bag[receiptKey]
     ||bag.Studio_Render_Review_Hold_Active||bag.Factory_Review_Handoff_Safety_Hold_At
     ||bag.SM_2618_Creative_QA_Hold?.publishing_permitted===false
     ||bag.SM_Factory_Held_Review_Receipt||hasProviderEvidence(bag))
@@ -89,7 +94,7 @@ export function assessVerifiedNativeReviewRepair(row) {
     ||row.thumbnail_url!==assets[0].url||!clipsMatch(row.selected_assets?.selected_clips,assets)
     ||!clipsMatch(row.render_clip_list,assets))
     return blocked("current_revision_does_not_match_protected_receipt");
-  return {eligible:true,reason:"verified_native_status_handoff",source_output:Number(stage.source_output),assets,proof_at:proof.at};
+  return {eligible:true,reason:staleDraft?STALE_TIKTOK_REVIEW_REASON:"verified_native_status_handoff",staleDraft,receiptKey,source_output:Number(stage.source_output),assets,proof_at:proof.at};
 }
 function exactOne(rows){return Array.isArray(rows)&&rows.length===1?rows[0]:null;}
 const uniqueIds=rows=>new Set(rows.map(x=>x.airtable_record_id)).size===rows.length;
@@ -186,13 +191,13 @@ export async function recoverOneVerifiedNativeReview(env, report, {
 }={}){
   const no=reason=>({status:"skipped",reason,approval_actions:0,schedule_actions:0,publish_actions:0});
   if(report?.status!=="ok"||!Array.isArray(report.findings))return no("detector_unavailable");
-  const finding=report.findings.find(x=>x.reason==="review_handoff_status_mismatch"&&REC.test(asString(x.record_id)));
+  const finding=report.findings.find(x=>["review_handoff_status_mismatch",STALE_TIKTOK_REVIEW_REASON].includes(x.reason)&&REC.test(asString(x.record_id)));
   if(!finding)return no("no_exact_candidate");
   const id=finding.record_id;
   const load=async()=>exactOne(await read("platform_outputs?"+field("airtable_record_id",id)+"&select="+TARGET_FIELDS+"&limit=2"));
   return lock(id,async()=>{
     const row=await load(), decision=assessVerifiedNativeReviewRepair(row);
-    if(!decision.eligible||String(row.content_item_id)!==String(finding.content_item_id)
+    if(!decision.eligible||decision.staleDraft!==(finding.reason===STALE_TIKTOK_REVIEW_REASON)||String(row.content_item_id)!==String(finding.content_item_id)
       ||Number(row.output_number)!==Number(finding.output_id))return no(decision.reason);
     const ownership=await exactOwner(read,row,decision);
     if(!ownership)return no("exact_parent_or_owned_variants_unverified");
@@ -205,34 +210,40 @@ export async function recoverOneVerifiedNativeReview(env, report, {
       if(!await checkBytes(decision.assets))return no("public_media_hash_unverified");
       const latest=await load();
       const again=assessVerifiedNativeReviewRepair(latest);
-      if(!again.eligible||latest.updated_at!==row.updated_at)return no("concurrent_output_revision");
+      if(!again.eligible||again.reason!==decision.reason||latest.updated_at!==row.updated_at)return no("concurrent_output_revision");
       const ownerAgain=await exactOwner(read,latest,again);
       if(!ownerAgain||JSON.stringify(ownerAgain)!==JSON.stringify(ownership))return no("concurrent_owner_revision");
       pulse.assertOwned();
       const rev=decision.assets.map(a=>a.sha256).join(":")+":"+decision.proof_at;
-      const digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(rev))),v=>v.toString(16).padStart(2,"0")).join("");
+      const reservationRev=decision.staleDraft?rev+":"+STALE_TIKTOK_REVIEW_REASON:rev;
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(reservationRev))),v=>v.toString(16).padStart(2,"0")).join("");
       const key="studio/state/quality-factory-handoff/v1/"+row.id+"/"+digest+".json";
       const receipt={schema:"studio.quality.native-review-handoff.1",at:now().toISOString(),
         output_id:row.output_number,proof_at:decision.proof_at,proof_sha256:digest,
-        source_output:decision.source_output,provider_writes:0,approval_actions:0,schedule_actions:0,
+        source_output:decision.source_output,repair_signature:decision.reason,provider_writes:0,approval_actions:0,schedule_actions:0,
         publishing_authorized:false,requires_human_approval:true};
       const reserved=await bucket.put(key,JSON.stringify({...receipt,state:"reserved",owner:token}),{
         onlyIf:new Headers({"If-None-Match":"*"}),httpMetadata:{contentType:"application/json"}});
       if(!reserved)return no("exact_revision_already_attempted");
       pulse.assertOwned();
       const path="platform_outputs?"+field("id",row.id)+"&"+field("airtable_record_id",id)
-        +"&"+field("updated_at",row.updated_at)+"&output_status=eq.In%20Production"
+        +"&"+field("updated_at",row.updated_at)+"&"+field("output_status",row.output_status)
+        +(decision.staleDraft?"&tiktok_draft_status=eq.Waiting%20for%20Schedule":"")
         +"&render_status=eq.Native%20Photo%20Route&do_not_publish=eq.false&auto_publish_enabled=eq.false"
         +"&test_run_id=is.null&published_at=is.null&platform_post_url=is.null"
         +"&scheduled_post_date=is.null&studio_scheduled_at=is.null&youtube_scheduled_publish_at=is.null"
         +"&"+field("review_status",row.review_status)+"&"+field("publish_status",row.publish_status);
-      const changed=await patch(path,{output_status:"Ready for Review",review_status:"Review Sent",
-        error_messages:{...latest.error_messages,[repairKey]:receipt},updated_at:receipt.at});
+      const mutation=decision.staleDraft?{tiktok_draft_status:null}:{output_status:"Ready for Review",review_status:"Review Sent"};
+      if(decision.staleDraft)receipt.prior_tiktok_draft_status=row.tiktok_draft_status;
+      const changed=await patch(path,{...mutation,
+        error_messages:{...latest.error_messages,[decision.receiptKey]:receipt},updated_at:receipt.at});
       if(!Array.isArray(changed)||changed.length!==1)throw Error("native_handoff_commit_unverified");
       const after=await load();
       if(!after||after.output_status!=="Ready for Review"||after.review_status!=="Review Sent"
         ||after.do_not_publish!==false||after.auto_publish_enabled!==false||after.scheduled_post_date
-        ||after.published_at||after.error_messages?.[repairKey]?.proof_sha256!==digest)
+        ||after.published_at||after.publish_status!=="Not Ready"&&decision.staleDraft
+        ||(decision.staleDraft&&after.tiktok_draft_status!==null)
+        ||after.error_messages?.[decision.receiptKey]?.proof_sha256!==digest)
         throw Error("native_handoff_readback_unverified");
       await bucket.put(key,JSON.stringify({...receipt,state:"repaired",owner:token}),{
         onlyIf:{etagMatches:reserved.etag},httpMetadata:{contentType:"application/json"}});
