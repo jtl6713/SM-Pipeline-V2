@@ -1,0 +1,41 @@
+name: Quality Native Media Rebuild CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/quality-native-*.mjs'
+      - 'apps/studio-api/quality-factory-handoff*.mjs'
+      - 'apps/studio-api/scheduling-approval-preflight.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'services/pipeline-runner/studio_produce/quality_native_media_rebuild.py'
+      - 'services/pipeline-runner/tests/test_quality_native_media_rebuild.py'
+      - 'services/pipeline-runner/app.py'
+      - '.github/workflows/quality-native-media-rebuild-ci.yml'
+permissions:
+  contents: read
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test apps/studio-api/quality-native-media-rebuild.test.mjs apps/studio-api/quality-native-review-repair.test.mjs apps/studio-api/quality-factory-handoff.test.mjs apps/studio-api/quality-factory-handoff-cron.test.mjs apps/studio-api/scheduling-approval-preflight.test.mjs
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    defaults:
+      run:
+        working-directory: services/pipeline-runner
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt pytest==8.3.5
+      - run: python -m pytest -q tests/test_quality_native_media_rebuild.py
