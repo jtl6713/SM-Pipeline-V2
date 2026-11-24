@@ -1,0 +1,14 @@
+/* Read-only photo package opened from the exact Pipeline output row. */
+.pipeline-photo-dialog{width:min(92vw,760px);max-height:92dvh;padding:18px;border:1px solid #c3cddd;border-radius:14px;background:#fff;color:#122b4b;overflow:auto;box-sizing:border-box}
+.pipeline-photo-dialog::backdrop{background:rgba(5,19,40,.72)}
+.pipeline-photo-dialog [hidden]{display:none!important}
+.pipeline-photo-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pipeline-photo-title{font-size:18px;margin:0;flex:1 1 200px}
+.pipeline-photo-status,.pipeline-photo-note,.pipeline-photo-name{font-size:13px;margin:12px 0;line-height:1.4}
+.pipeline-photo-frame{display:grid;place-items:center;background:#eef2f7;border-radius:8px;min-height:100px;height:min(58dvh,580px);overflow:hidden;touch-action:pan-y}
+.pipeline-photo-frame img{width:100%;height:100%;min-height:0;object-fit:contain;user-select:none}
+.pipeline-photo-missing{padding:20px;text-align:center;grid-area:1/1}
+.pipeline-photo-controls{margin-top:12px;flex-wrap:nowrap}
+.pipeline-photo-count{font-variant-numeric:tabular-nums;white-space:nowrap}
+.pipeline-photo-dialog button{min-height:36px}
+@media(max-width:520px){.pipeline-photo-dialog{width:95vw;padding:12px}.pipeline-photo-title{font-size:16px}.pipeline-photo-frame{height:50dvh}.pipeline-photo-controls{gap:5px}.pipeline-photo-controls button{padding:6px 9px}}
