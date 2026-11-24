@@ -11,12 +11,13 @@ function Setting([string]$name){
   return ([string](($found[0] -split '=',2)[1])).Trim().Trim('"').Trim([char]39)
 }
 if((Setting 'SUPABASE_URL').TrimEnd('/') -ne 'https://vkwvscgisqsbuwagdvtb.supabase.co'){throw 'metrics_wrong_project'}
-$secret=''
-foreach($name in @('SUPABASE_METRICS_SECRET_KEY','SUPABASE_SECRET_KEY','SUPABASE_SERVICE_ROLE_KEY')){
-  $candidate=Setting $name
-  if($candidate.StartsWith('sb_secret_') -and $candidate.Length -ge 32){$secret=$candidate;break}
+# The owner must provision a dedicated server-side secret on this Windows host.
+# Do NOT fall back to application credentials or legacy service_role keys.
+$secret=Setting 'SUPABASE_METRICS_SECRET_KEY'
+if(-not $secret.StartsWith('sb_secret_') -or $secret.Length -lt 32){
+  Write-Output 'incident2670_metrics=NEEDS_EXISTING_SB_SECRET'
+  throw 'metrics_key_unavailable'
 }
-if(-not $secret){Write-Output 'incident2670_metrics=NEEDS_EXISTING_SB_SECRET';throw 'metrics_key_unavailable'}
 $basic=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('service_role:'+$secret))
 $headers=@{Authorization='Basic '+$basic;Accept='text/plain'}
 $endpoint='https://vkwvscgisqsbuwagdvtb.supabase.co/customer/v1/privileged/metrics'
