@@ -720,16 +720,18 @@ export async function factoryBatchMarkRemoved(
 /** Verify an already-committed Airtable approval and repair only its failed
  * local R2 bookkeeping. No scheduling, publishing, or approval call is made. */
 export async function factoryBatchMarkAlreadySatisfied(bucket, {
-  profileId, requestId, recordId, outputId, verifySatisfied,
+  profileId, requestId, recordId, outputId, verifySatisfied, allowMissingOutputId = false,
 } = {}) {
   assertBucket(bucket);
   if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
       Number(outputId) <= 0 || typeof verifySatisfied !== "function") {
     throw Error("Exact approved output identity and verifier required");
   }
+  const matchesNumber = item => Number(item.output_id) === Number(outputId) ||
+    (allowMissingOutputId === true && item.output_id == null);
   const snapshot = await factoryBatchRead(bucket, profileId, requestId);
-  const matches = (snapshot?.items || []).filter(item =>
-    item.id === recordId && Number(item.output_id) === Number(outputId));
+  const matches = (snapshot?.items || []).filter(item => item.id === recordId);
+  if (matches.some(item => !matchesNumber(item))) throw Error("Approved bookkeeping output number mismatch");
   if (matches.length !== 1) throw Error("Already-approved Factory row not found or ambiguous");
   if (matches[0].status === "already_satisfied") return snapshot;
   if (matches[0].status !== "failed") throw Error("Only failed bookkeeping can be reconciled");
@@ -737,14 +739,15 @@ export async function factoryBatchMarkAlreadySatisfied(bucket, {
     throw Error("Authoritative approval not verified");
   }
   return cas(bucket, factoryBatchKey(profileId, requestId), job => {
-    const current = (job.items || []).filter(item =>
-      item.id === recordId && Number(item.output_id) === Number(outputId));
+    const current = (job.items || []).filter(item => item.id === recordId);
+    if (current.some(item => !matchesNumber(item))) throw Error("Approved bookkeeping output number changed");
     if (current.length !== 1) throw Error("Approved bookkeeping identity changed");
     if (current[0].status === "already_satisfied") return null;
     if (current[0].status !== "failed") throw Error("Failed bookkeeping changed after verification");
     const at = new Date().toISOString();
     const items = job.items.map(item => item.id === recordId ? {
       ...item, status: "already_satisfied", error: null, next_attempt_ms: 0,
+      ...(item.output_id == null ? {output_id:Number(outputId),previous_output_id:null,output_id_recovered_from_authority:true} : {}),
       previous_failure_error: item.error || null,
       approval_verified_at: at,
       timeline: [...(item.timeline || []), {
