@@ -311,6 +311,28 @@ def process_one_output(
 
     try:
         mp4_bytes = remotion.download_render(render_url)
+        from render.media_quality import MediaContractError, verify_rendered_media, RECEIPT_FIELD
+
+        try:
+            media_receipt = verify_rendered_media(output, mp4_bytes, job_id=job_id)
+        except MediaContractError as exc:
+            current, stale_error = _current_or_stale(
+                client, output["id"], expected_job_id=expected_job_id,
+                expected_status_url=expected_status_url,
+            )
+            if stale_error:
+                return {"processed": False, "reason": "stale_render_completion", "error": stale_error, **preview}
+            # Keep the exact failed job for diagnosis; do not upload or admit it.
+            client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {
+                "Render_Status": "Blocked",
+                "Output_Status": "In Production",
+                "Final_File_Storage_Status": "",
+                "Final_File_Error_Message": str(exc),
+                "Remotion_Error_Message": str(exc),
+                RECEIPT_FIELD: "",
+            }, typecast=True)
+            return {"processed": False, "reason": "encoded_media_integrity_blocked",
+                    "error": str(exc), **preview}
         drive = GoogleDriveClient()
         folder_id = get_google_drive_folder_id(client)
         drive_file = drive.upload_file(
@@ -376,6 +398,7 @@ def process_one_output(
                 "Studio_Preview_R2_Key": preview_key,
                 "Studio_Preview_Updated_At": completed_at,
                 "Render_Status": "Rendered",
+                **media_receipt,
                 **review_fields_after_successful_render(current),
             },
         )
