@@ -15,6 +15,7 @@ import {
   preflightNycOwnerGalleryApproval,
   finalizeNycOwnerGalleryOnFactoryClick,
 } from "./native-gallery-package-guard.mjs";
+import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
@@ -27,7 +28,7 @@ const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const FACTORY_APPROVAL_SELECT = [
   "id", "airtable_record_id", "output_number",
   "content_item_id", "content_item_airtable_id", "content_profile_id",
-  "platform", "format", "studio_output_type", "platform_output_type",
+  "platform", "format", "studio_output_type", "platform_output_type", "aspect_ratio",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
@@ -235,7 +236,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
-  approvedByUserRecordId = null, submittedAt = null,
+  approvedByUserRecordId = null, submittedAt = null, originalIntentRecovery = false,
   verifyImages = verifyReviewImages, onStage = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
@@ -255,6 +256,9 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   // owner-released NYC pair only, distinguish verified gallery structure from
   // the final decision made by this NEW authenticated human Approve click.
   const pendingHumanReview = await preflightNycOwnerGalleryApproval(env, entry.row);
+  if (originalIntentRecovery && !originalIntentCoversGallery({requestId,approvedByUserRecordId,submittedAt},entry.row,pendingHumanReview)) {
+    throw Error("Original Factory intent recovery: media or release revision changed; fresh review required");
+  }
   if (!pendingHumanReview?.pending) {
     await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
   }
@@ -269,7 +273,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     // Finalization itself re-runs the UNCHANGED persisted-slide publication
     // gate. No extra photo inventory read for unrelated Factory approvals.
     await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
-      requestId, approvedByUserRecordId, submittedAt,
+      requestId, approvedByUserRecordId, submittedAt, originalIntentRecovery,
     });
   }
   const stamp = new Date().toISOString();

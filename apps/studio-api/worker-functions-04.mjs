@@ -87,7 +87,7 @@ import {
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
   factoryBatchCronSelectJobs, factoryBatchCronReceiptCandidates, factoryBatchFailureRouted, factoryBatchFailure,
   factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
-  factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
+  factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce, factoryBatchRetryOriginalIntentOnce,
   factoryBatchReconcileSupabaseApprovalReceipts,
   factoryBatchLock, factoryBatchUnlock,
 } from "./factory-approval-queue.mjs";
@@ -111,7 +111,8 @@ import {
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
 import {reviewResolveCandidate,reviewResolvePilotOutput,resolveFactoryGalleryReview} from "./factory-review-resolve.mjs";
 import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
-import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
+import { assertSupabaseNativeGalleryPublicationPackage, preflightNycOwnerGalleryApproval } from "./native-gallery-package-guard.mjs";
+import { originalFactoryIntent, originalIntentCoversGallery, isOriginalIntentFailure } from "./factory-original-intent.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
 import { factoryBoundedActiveDiscovery } from "./factory-approval-active-discovery.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
@@ -19102,9 +19103,11 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
   if (!job) return null;
   const globalPolicy=factoryGlobalPolicy(env);
   const parentId=job.group_request_id||null;
+  let originalParent = null;
   if (parentId) {
     if (!globalPolicy.enabled) return null;
     const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,parentId);
+    originalParent = parent;
     const child=parent?.children?.find(row=>row.profile_id===profileId&&row.request_id===requestId);
     if (!child||parent.records.length>globalPolicy.max_total||
         child.records.length>globalPolicy.max_per_profile||
@@ -19133,10 +19136,26 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               // Awaited checkpoints let Factory poll actual in-flight stages
               // without ever triggering an additional approval or publish.
               await checkpoint("supabase_approval_started");
+              const intent = originalFactoryIntent(currentJob, originalParent);
+              const recoveryItem = currentJob.items.find(row => row.id === id);
+              if (recoveryItem?.original_intent_recovery) {
+                const fresh = (await factorySupabaseApprovalRows(env,[id])).get(id);
+                if (!fresh || fresh.profileId !== profileId ||
+                    Number(fresh.row.output_number) !== Number(recoveryItem.output_id)) {
+                  throw Error("Original Factory intent recovery: canonical identity changed");
+                }
+                const disposition = factorySupabaseApprovalDisposition(fresh);
+                if (!disposition.already_satisfied) {
+                  const proof = await preflightNycOwnerGalleryApproval(env,fresh.row);
+                  if (!originalIntentCoversGallery(intent,fresh.row,proof))
+                    throw Error("Original Factory intent recovery: media or release revision changed; fresh review required");
+                }
+              }
               const result = await factorySupabaseApproveOutput(env, id, profileId, {
                 requestId: parentId || requestId,
-                approvedByUserRecordId: job.submitted_by || null,
-                submittedAt: job.created_at || null,
+                approvedByUserRecordId: intent?.approvedByUserRecordId || null,
+                submittedAt: intent?.submittedAt || null,
+                originalIntentRecovery: recoveryItem?.original_intent_recovery === true,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
@@ -19815,8 +19834,10 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
   // A persistently unresolvable first row must not starve subsequent rows.
   // Rotate deterministically by minute; still touch only one exact row per call.
   const item = failed[Math.floor(Date.now() / 60000) % failed.length];
+  const missingNumber = item.output_id == null;
+  const supabaseAuthority = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(item.id || "")) ||
-      !Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) {
+      ((!Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) && !(missingNumber && supabaseAuthority))) {
     return "invalid_identity";
   }
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
@@ -19826,18 +19847,49 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
     let entry;
     try { entry = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id); }
     catch { return "supabase_failure_evidence_unavailable"; }
-    if (!entry || entry.profileId !== profileId
-        || Number(entry.row.output_number) !== Number(item.output_id)) {
+    if (!entry || entry.profileId !== profileId || entry.row.airtable_record_id !== item.id
+        || !Number.isSafeInteger(Number(entry.row.output_number)) || Number(entry.row.output_number) <= 0
+        || (!missingNumber && Number(entry.row.output_number) !== Number(item.output_id))) {
       return "supabase_failure_identity_unverified";
     }
+    const outputId = Number(entry.row.output_number);
+    // A legacy missing display number can be reconstructed only for an exact
+    // canonical success, not used to authorize a new approval or provider call.
+    const verifiedLegacySuccess = value => value?.row?.review_status === "Approved" &&
+      (value.row.output_status === "Published" && (value.row.published_at || value.row.platform_post_url) ||
+       ["Approved for Publishing","Scheduled"].includes(value.row.output_status) &&
+       value.row.do_not_publish === false && Number.isFinite(Date.parse(value.row.scheduled_post_date || "")));
+    if (missingNumber && !verifiedLegacySuccess(entry)) return "supabase_legacy_failure_identity_unverified";
     const status = factorySupabaseApprovalDisposition(entry);
-    if (!status.already_satisfied) return "supabase_failure_requires_manual_review";
+    if (!status.already_satisfied) {
+      if (!status.eligible || !isOriginalIntentFailure(item.error))
+        return "supabase_failure_requires_manual_review";
+      const retried = await factoryBatchRetryOriginalIntentOnce(env.STUDIO_MEDIA,{
+        profileId,requestId,recordId:item.id,outputId:item.output_id,
+        verifyOriginalIntent:async (job, exact) => {
+          const parent=job.group_request_id
+            ? await factoryApprovalGroupRead(env.STUDIO_MEDIA,job.group_request_id) : null;
+          const intent=originalFactoryIntent(job,parent);
+          if (!intent) return false;
+          const fresh=(await factorySupabaseApprovalRows(env,[exact.id])).get(exact.id);
+          if (!fresh || fresh.profileId!==profileId ||
+              Number(fresh.row.output_number)!==Number(exact.output_id) ||
+              !factorySupabaseApprovalDisposition(fresh).eligible) return false;
+          const proof=await preflightNycOwnerGalleryApproval(env,fresh.row);
+          return originalIntentCoversGallery(intent,fresh.row,proof);
+        },
+      });
+      return retried?.items?.find(row=>row.id===item.id)?.status==="pending"
+        ? "verified_original_intent_retry_queued" : "supabase_failure_requires_fresh_review";
+    }
     await factoryBatchMarkAlreadySatisfied(env.STUDIO_MEDIA, {
-      profileId, requestId, recordId: item.id, outputId: item.output_id,
+      profileId, requestId, recordId: item.id, outputId, allowMissingOutputId: missingNumber,
       verifySatisfied: async () => {
         const fresh = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id);
         return fresh?.profileId === profileId
-          && Number(fresh.row.output_number) === Number(item.output_id)
+          && fresh.row.airtable_record_id === item.id
+          && Number(fresh.row.output_number) === outputId
+          && (!missingNumber || verifiedLegacySuccess(fresh))
           && factorySupabaseApprovalDisposition(fresh).already_satisfied === true;
       },
     });

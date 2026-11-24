@@ -4,6 +4,7 @@
  * Carousel Slides inventory. No writes and no Airtable fallback.
  */
 import { supabaseRest } from "./supabase-pipeline-reads.mjs";
+import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
 
 const REC = /^rec[A-Za-z0-9]{14}$/;
 const CDN = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
@@ -158,6 +159,118 @@ export function nycOwnerGalleryApprovalEligible(output) {
     && bag.SM_2618_Creative_QA_Hold?.publishing_permitted !== false;
 }
 
+// Generalized exact-sibling repair evidence, not an output-number allowlist.
+// It only permits fresh human final review; every source/target link and
+// current ownership must independently agree. Legacy #10868 certificate is
+// retained for existing repairs; the versioned key is for future executors.
+const siblingMarker = bag => bag?.SM_Quality_Exact_Sibling_Media_v1 ||
+  bag?.SM_Quality_Exact_Sibling_Media_20261124;
+const sourceQa = bag => bag?.SM_Quality_Gallery_Media_QA_v1 ||
+  bag?.SM_NYC_AI_Creative_QA_20261122;
+const geometryQa = bag => bag?.SM_Quality_Gallery_Geometry_v1 ||
+  bag?.SM_NYC_Shared_Small_Watermark_20261122;
+const slideSha = slide => sourceQa(slide.fields)?.verified_branded_sha256 ||
+  siblingMarker(slide.fields)?.prior_verified_media_evidence?.verified_branded_sha256;
+
+export function siblingGalleryReviewEligible(output) {
+  const bag=output?.error_messages||{},m=siblingMarker(bag);
+  const n=Number(output?.selected_clip_count);
+  return !!m && m.human_approval_required===true && m.provider_writes===0 &&
+    Number.isFinite(Date.parse(m.at||"")) && Number.isSafeInteger(Number(m.source_output)) &&
+    Number(m.source_output)>0 && Number(m.source_output)!==Number(output.output_number) &&
+    REC.test(String(output.airtable_record_id||"")) && UUID.test(String(output.id||"")) &&
+    UUID.test(String(output.content_item_id||"")) && UUID.test(String(output.content_profile_id||"")) &&
+    Number.isInteger(n)&&n>=2&&n<=10 && output.aspect_ratio==="4:5" &&
+    ["Instagram Carousel","Facebook Photo Set"].includes(output.platform_output_type) &&
+    ["Instagram","Facebook"].includes(output.platform) &&
+    output.output_status==="Ready for Review" && output.review_status==="Review Sent" &&
+    output.publish_status==="Not Ready" && output.render_status==="Native Photo Route" &&
+    output.do_not_publish===false && output.auto_publish_enabled===false &&
+    !output.test_run_id && !output.scheduled_post_date && !output.studio_scheduled_at &&
+    !output.published_at && !output.platform_post_url && !output.platform_publish_response &&
+    !bag.Platform_Post_ID && !bag.Platform_Media_ID && !bag.IG_Carousel_Parent_Container_ID &&
+    !bag.Studio_Publish_Dispatch_Count && !bag.Publish_Attempt_Count &&
+    !bag.Publish_Locked_At && !bag.Publish_Started_At &&
+    bag.SM_2618_Creative_QA_Hold?.publishing_permitted!==false;
+}
+
+export function verifySiblingGalleryEvidence(output,source,slides,originalSlides,assets) {
+  const m=siblingMarker(output.error_messages),qa=sourceQa(source?.error_messages);
+  const expected=Number(output.selected_clip_count);
+  if (!siblingGalleryReviewEligible(output) || !source ||
+      Number(source.output_number)!==Number(m.source_output) ||
+      source.content_item_id!==output.content_item_id || source.content_profile_id!==output.content_profile_id ||
+      source.aspect_ratio!=="4:5" || source.platform===output.platform ||
+      source.output_title!==output.output_title || source.output_caption!==output.output_caption ||
+      source.selected_clip_count!==expected || !qa || qa.subject_verified!==true ||
+      qa.caption_and_hashtag_review!=="pass" || qa.output_native_slides_checked!==expected ||
+      qa.publishing_authorized!==false ||
+      JSON.stringify(source.selected_assets?.selected_clips)!==JSON.stringify(output.selected_assets?.selected_clips) ||
+      JSON.stringify(source.render_clip_list)!==JSON.stringify(output.render_clip_list)) return false;
+  const asFinal=rows=>rows.map(s=>({...s,fields:{...s.fields,Shared_Asset_Approved:true,"Approved For Final":true}}));
+  if (!Array.isArray(slides)||!Array.isArray(originalSlides)||slides.length!==expected||originalSlides.length!==expected ||
+      !inspectNativeGalleryPublicationPackage(output,asFinal(slides)).eligible ||
+      !inspectNativeGalleryPublicationPackage(source,asFinal(originalSlides)).eligible) return false;
+  for(let i=0;i<expected;i++){
+    const s=slides[i], f=s.fields||{}, original=originalSlides[i],of=original.fields||{};
+    const p=siblingMarker(f),oq=sourceQa(of),g=geometryQa(of);
+    if(!UUID.test(String(s.id||""))||!s.updated_at||!RECOVERED_SLIDE_RECORD.test(String(s.airtable_record_id||""))||
+       p?.source_output!==Number(source.output_number)||p.source_slide_id!==original.airtable_record_id||
+       p.requires_new_human_approval!==true||p.provider_writes!==0||
+       oq?.brand_verified!==true||oq.source_owner_rights_verified!==true||oq.publishing_authorized!==false||
+       !SHA256.test(String(oq.verified_branded_sha256||""))||
+       p.prior_verified_media_evidence?.verified_branded_sha256!==oq.verified_branded_sha256||
+       g?.geometry!=="1080x1350"||g.cdn_sha256_verified!==true||
+       g.verified_branded_url!==f["Final Image URL"]||g.branded_sha256!==oq.verified_branded_sha256||
+       p.prior_verified_geometry_and_hash?.branded_sha256!==oq.verified_branded_sha256||
+       f["Final Image URL"]!==of["Final Image URL"]||f.Asset_Family_Key!==of.Asset_Family_Key||
+       f["Google Drive File ID"]!==of["Google Drive File ID"]||
+       (f.Shared_Asset_Approved===true)!==(f["Approved For Final"]===true)||
+       !["Review Sent","Final Approved"].includes(f["Review Status"])||
+       (f["Review Status"]==="Final Approved"&&f["Approved For Final"]!==true))return false;
+  }
+  const families=new Set(slides.map(s=>s.fields.Asset_Family_Key));
+  return Array.isArray(assets)&&assets.length===families.size&&
+    new Set(assets.map(a=>a.airtable_record_id)).size===families.size&&
+    assets.every(a=>families.has(a.airtable_record_id)&&a.active===true&&a.do_not_use===false&&
+      a.asset_status==="Available"&&a.metadata?.rights_status==="Owned");
+}
+
+async function preflightSiblingGallery(env,output) {
+  const m=siblingMarker(output.error_messages);
+  const sources=await supabaseRest(env,"platform_outputs?output_number=eq."+Number(m.source_output)
+    +"&select=id,airtable_record_id,output_number,content_item_id,content_profile_id,platform,platform_output_type,studio_output_type,aspect_ratio,selected_clip_count,selected_assets,render_clip_list,output_title,output_caption,error_messages&limit=2");
+  if(!Array.isArray(sources)||sources.length!==1)throw Error("Exact sibling gallery source unavailable");
+  const source=sources[0];
+  const slides=await readNycOwnerGallerySlides(env,output);
+  const originalSlides=await readNycOwnerGallerySlides(env,source);
+  const families=[...new Set(slides.map(s=>s.fields?.Asset_Family_Key))];
+  if(!families.length||families.length>10||families.some(id=>!REC.test(String(id||""))))
+    throw Error("Exact sibling gallery source family invalid");
+  const assets=await supabaseRest(env,"media_assets?airtable_record_id=in.("+families.map(encodeURIComponent).join(",")+")"
+    +"&select=airtable_record_id,active,do_not_use,asset_status,metadata&limit=10");
+  if(!verifySiblingGalleryEvidence(output,source,slides,originalSlides,assets))
+    throw Error("Exact sibling gallery ownership, media revision or rights evidence invalid");
+  return {slides,pending:slides.filter(s=>s.fields["Approved For Final"]!==true).length,siblingRepair:true};
+}
+
+async function verifySiblingGalleryBytes(slide) {
+  const url=slide.fields["Final Image URL"],expected=slideSha(slide),max=8*1024*1024;
+  if(!CDN.test(String(url||""))||!SHA256.test(String(expected||"")))throw Error("Invalid sibling image proof");
+  const response=await fetch(url,{redirect:"manual",signal:AbortSignal.timeout(12000)});
+  if(response.status!==200||String(response.headers.get("Content-Type")||"").split(";")[0].trim().toLowerCase()!=="image/jpeg"||
+      Number(response.headers.get("Content-Length")||0)>max||!response.body){
+    try{await response.body?.cancel();}catch{}throw Error("Sibling image unavailable");
+  }
+  const reader=response.body.getReader(),chunks=[];let total=0;
+  try{while(true){const {done,value}=await reader.read();if(done)break;
+    total+=value.byteLength;if(total>max)throw Error("Sibling image exceeds review limit");chunks.push(value);}}
+  finally{try{await reader.cancel();}catch{}}
+  const bytes=new Uint8Array(total);let at=0;for(const c of chunks){bytes.set(c,at);at+=c.length;}
+  const hash=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(b=>b.toString(16).padStart(2,"0")).join("");
+  if(total<4||bytes[0]!==255||bytes[1]!==216||hash!==expected)throw Error("Sibling image changed since QA; re-review required");
+}
+
 async function readNycOwnerGallerySlides(env, output) {
   const rows = await supabaseRest(env,
     "carousel_slides?deleted_from_carousel=eq.false"
@@ -169,6 +282,7 @@ async function readNycOwnerGallerySlides(env, output) {
 }
 
 export async function preflightNycOwnerGalleryApproval(env, output) {
+  if (siblingGalleryReviewEligible(output)) return preflightSiblingGallery(env,output);
   if (!nycOwnerGalleryApprovalEligible(output)) return null;
   const slides = await readNycOwnerGallerySlides(env, output);
   const asIfFinal = slides.map(slide => ({
@@ -208,9 +322,12 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
  * stays RFR and the unmodified publication gate still requires every expected slide.
  */
 export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
-  requestId, approvedByUserRecordId, submittedAt,
+  requestId, approvedByUserRecordId, submittedAt, originalIntentRecovery = false,
 } = {}) {
   const proof = await preflightNycOwnerGalleryApproval(env, output);
+  if (originalIntentRecovery && !originalIntentCoversGallery({requestId,approvedByUserRecordId,submittedAt},output,proof)) {
+    throw Error("Original Factory intent recovery: gallery revision changed; fresh review required");
+  }
   if (!proof || !proof.pending) return proof;
   // A historic Failed/accepted batch must never silently consent to NEW
   // corrected slides. Require the Factory request itself to postdate the
@@ -219,8 +336,13 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
       || !/^[A-Za-z0-9_-]{8,128}$/.test(String(requestId || ""))
       || !Number.isFinite(Date.parse(String(submittedAt || "")))
       || !Number.isFinite(Date.parse(String(output.publish_hold_released_at || "")))
-      || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)) {
+      || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)
+      || (proof.siblingRepair && Date.parse(submittedAt)<Date.parse(siblingMarker(output.error_messages).at))) {
     throw Error("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
+  }
+  if (proof.siblingRepair) {
+    // Fresh public bytes, bounded to one image at a time; no provider calls.
+    for(const slide of proof.slides) await verifySiblingGalleryBytes(slide);
   }
   const now = new Date().toISOString();
   for (const slide of proof.slides) {
@@ -239,7 +361,7 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
         output_number: output.output_number,
         slide_order: slide.current_order,
         exact_final_image_url: f["Final Image URL"],
-        source_sha256: f.SM_NYC_AI_Creative_QA_20261122.verified_branded_sha256,
+        source_sha256: slideSha(slide),
         provider_writes: 0,
       },
     };

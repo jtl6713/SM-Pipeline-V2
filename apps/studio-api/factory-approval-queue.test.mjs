@@ -7,7 +7,7 @@ import {
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
-  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
+  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied, factoryBatchRetryOriginalIntentOnce,
   factoryBatchItemProgress,
   factoryBatchReconcileSupabaseApprovalReceipts, factoryBatchCronReceiptCandidates,
 } from "./factory-approval-queue.mjs";
@@ -904,4 +904,46 @@ test("#2618: exact submitter persists on Factory batch and cannot be rewritten o
   assert.equal(retry.job.submitted_by, "recAuthUser123456");
   const legacy = factoryBatchBuild({...opts, requestId:"new_legacy_batch_id"});
   assert.equal(legacy.submitted_by, null);
+});
+
+test("#2915 original intent retry is exact, bounded and preserves terminal error evidence",async()=>{
+ const bucket=new FakeR2();
+ await factoryBatchEnqueue(bucket,{...opts,records:records.slice(0,2),submittedBy:"recAuthUser123456"});
+ const message="Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release";
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async(id)=>{if(id===records[0].id)throw Error(message);}});
+ const retry={profileId,requestId,recordId:records[0].id,outputId:records[0].output_id};
+ const denied=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>false});
+ assert.equal(denied.items[0].status,"failed");
+ const allowed=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>true});
+ assert.equal(allowed.items[0].status,"pending");
+ assert.equal(allowed.items[0].auto_retry_count,1);
+ assert.equal(allowed.items[0].failure_history.at(-1).error,message);
+ assert.equal(allowed.items[1].status,"approved");
+ assert.equal(allowed.submitted_by,"recAuthUser123456");
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async()=>{throw Error(message);}});
+ const again=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>true});
+ assert.equal(again.items[0].status,"failed");
+ assert.equal(again.items[0].auto_retry_count,1);
+});
+
+test("#2915 Union Station legacy failed item missing output number recovers only after authoritative confirmation",async()=>{
+ const bucket=new FakeR2(), recordId="rechlV1l1L3vKhiFA", outputId=10735;
+ await factoryBatchEnqueue(bucket,{...opts,records:[{id:recordId,platform:"YouTube",format:"Short"}]});
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async()=>{throw Error("Output approval already in progress; check its current status before retrying");}});
+ const base={profileId,requestId,recordId,outputId,allowMissingOutputId:true};
+ await assert.rejects(factoryBatchMarkAlreadySatisfied(bucket,{...base,verifySatisfied:async()=>false}),/not verified/);
+ assert.equal((await factoryBatchRead(bucket,profileId,requestId)).items[0].output_id,null);
+ const result=await factoryBatchMarkAlreadySatisfied(bucket,{...base,verifySatisfied:async(id,n)=>id===recordId&&n===outputId});
+ assert.equal(result.items[0].output_id,10735);
+ assert.equal(result.items[0].status,"already_satisfied");
+ assert.equal(result.items[0].previous_output_id,null);
+ assert.equal(result.items[0].output_id_recovered_from_authority,true);
+ assert.match(result.items[0].previous_failure_error,/already in progress/);
+});
+test("#2915 missing-number recovery cannot overwrite a different numeric identity",async()=>{
+ const bucket=new FakeR2(), recordId="rechlV1l1L3vKhiFA";
+ await factoryBatchEnqueue(bucket,{...opts,records:[{id:recordId,output_id:10736}]});
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async()=>{throw Error("blocked");}});
+ await assert.rejects(factoryBatchMarkAlreadySatisfied(bucket,{profileId,requestId,recordId,
+ outputId:10735,allowMissingOutputId:true,verifySatisfied:async()=>true}),/number mismatch/);
 });

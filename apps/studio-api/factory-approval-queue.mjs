@@ -555,6 +555,44 @@ export async function factoryBatchRetryTransientOnce(bucket, {
   });
 }
 
+
+/** #2915: one recovery of an exact failed original authenticated intent.
+ * Verification is supplied by the canonical server adapter, and repeated
+ * under the approval lock by the drain. Never change the original actor,
+ * request or accepted time. No human decision or provider action here.
+ */
+export async function factoryBatchRetryOriginalIntentOnce(bucket, {
+  profileId, requestId, recordId, outputId, verifyOriginalIntent,
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0 || typeof verifyOriginalIntent !== "function") return null;
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  const eligible = item => item?.status === "failed" && !factoryBatchFailureRouted(item) &&
+    Number(item.auto_retry_count || 0) === 0 && Number(item.manual_retry_count || 0) === 0 &&
+    String(item.error || "").includes("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
+  if (!["completed", "failed"].includes(snapshot?.status) ||
+      factoryBatchCounts(snapshot).pending_count) return snapshot;
+  const exact = snapshot.items.filter(i => i.id === recordId && Number(i.output_id) === Number(outputId));
+  if (exact.length !== 1 || !eligible(exact[0])) return snapshot;
+  if (await verifyOriginalIntent(snapshot, exact[0]) !== true) return snapshot;
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    if (!["completed", "failed"].includes(job.status) || factoryBatchCounts(job).pending_count ||
+        job.created_at !== snapshot.created_at || job.submitted_by !== snapshot.submitted_by ||
+        job.group_request_id !== snapshot.group_request_id) return null;
+    const found = job.items.filter(i => i.id === recordId && Number(i.output_id) === Number(outputId));
+    if (found.length !== 1 || !eligible(found[0]) || found[0].error !== exact[0].error) return null;
+    const at = new Date().toISOString();
+    return {...job,status:"queued",updated_at:at,items:job.items.map(i=>i.id===recordId ? {
+      ...i,status:"pending",error:null,attempts:0,auto_retry_count:1,next_attempt_ms:0,
+      original_intent_recovery:true,
+      failure_history:[...(i.failure_history||[]),{at,error:i.error}].slice(-10),
+      timeline:[...(i.timeline||[]),{state:"pending",at,attempt:i.total_attempts||0,
+        reason:"verified_original_authenticated_intent_retry"}].slice(-180),
+    }:i)};
+  });
+}
+
 /**
  * Explicit Quality Agent batch signatures. These classify the authoritative
  * stored item ledger; derived counters cannot disagree unless the stored
@@ -601,6 +639,8 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
       detail: "Transient item(s) are scheduled for bounded retry; do not dispatch before backoff expires" });
   }
   if ((job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item))) {
+    const intentFailures = job.items.filter(item => item.status === "failed" && !factoryBatchFailureRouted(item) && String(item.error || "").includes("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release"));
+    if (intentFailures.length) signals.push({code:"QA-FACTORY-ORIGINAL-INTENT-2915",safe_auto_recover:true,detail:"Recover only original authenticated post-release consent when current gallery revision is independently unchanged; otherwise fresh human review",output_ids:intentFailures.map(i=>i.output_id)});
     signals.push({ code: "QA-FACTORY-BATCH-FAILED-ITEM", safe_auto_recover: false,
       detail: "Failed outputs require inspection or Retry Failed; never retry successful rows" });
     // A Factory item may fail before Airtable has any Platform Output row.
@@ -680,16 +720,18 @@ export async function factoryBatchMarkRemoved(
 /** Verify an already-committed Airtable approval and repair only its failed
  * local R2 bookkeeping. No scheduling, publishing, or approval call is made. */
 export async function factoryBatchMarkAlreadySatisfied(bucket, {
-  profileId, requestId, recordId, outputId, verifySatisfied,
+  profileId, requestId, recordId, outputId, verifySatisfied, allowMissingOutputId = false,
 } = {}) {
   assertBucket(bucket);
   if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
       Number(outputId) <= 0 || typeof verifySatisfied !== "function") {
     throw Error("Exact approved output identity and verifier required");
   }
+  const matchesNumber = item => Number(item.output_id) === Number(outputId) ||
+    (allowMissingOutputId === true && item.output_id == null);
   const snapshot = await factoryBatchRead(bucket, profileId, requestId);
-  const matches = (snapshot?.items || []).filter(item =>
-    item.id === recordId && Number(item.output_id) === Number(outputId));
+  const matches = (snapshot?.items || []).filter(item => item.id === recordId);
+  if (matches.some(item => !matchesNumber(item))) throw Error("Approved bookkeeping output number mismatch");
   if (matches.length !== 1) throw Error("Already-approved Factory row not found or ambiguous");
   if (matches[0].status === "already_satisfied") return snapshot;
   if (matches[0].status !== "failed") throw Error("Only failed bookkeeping can be reconciled");
@@ -697,14 +739,15 @@ export async function factoryBatchMarkAlreadySatisfied(bucket, {
     throw Error("Authoritative approval not verified");
   }
   return cas(bucket, factoryBatchKey(profileId, requestId), job => {
-    const current = (job.items || []).filter(item =>
-      item.id === recordId && Number(item.output_id) === Number(outputId));
+    const current = (job.items || []).filter(item => item.id === recordId);
+    if (current.some(item => !matchesNumber(item))) throw Error("Approved bookkeeping output number changed");
     if (current.length !== 1) throw Error("Approved bookkeeping identity changed");
     if (current[0].status === "already_satisfied") return null;
     if (current[0].status !== "failed") throw Error("Failed bookkeeping changed after verification");
     const at = new Date().toISOString();
     const items = job.items.map(item => item.id === recordId ? {
       ...item, status: "already_satisfied", error: null, next_attempt_ms: 0,
+      ...(item.output_id == null ? {output_id:Number(outputId),previous_output_id:null,output_id_recovered_from_authority:true} : {}),
       previous_failure_error: item.error || null,
       approval_verified_at: at,
       timeline: [...(item.timeline || []), {
