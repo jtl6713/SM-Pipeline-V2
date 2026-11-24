@@ -1,0 +1,30 @@
+name: Runner exact deployment receipt regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/verify-runner-deployment-receipt.py'
+      - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
+      - '.github/workflows/runner-release-receipt-regression.yml'
+      - 'services/pipeline-runner/tests/test_runner_routine_deploy_2876.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/runner-release-receipt-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install -q pytest
+          python -m pytest -q services/pipeline-runner/tests/test_runner_routine_deploy_2876.py
