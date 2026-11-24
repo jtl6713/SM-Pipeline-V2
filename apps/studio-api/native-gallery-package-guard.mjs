@@ -4,6 +4,7 @@
  * Carousel Slides inventory. No writes and no Airtable fallback.
  */
 import { supabaseRest } from "./supabase-pipeline-reads.mjs";
+import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
 
 const REC = /^rec[A-Za-z0-9]{14}$/;
 const CDN = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i;
@@ -208,9 +209,12 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
  * stays RFR and the unmodified publication gate still requires every expected slide.
  */
 export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
-  requestId, approvedByUserRecordId, submittedAt,
+  requestId, approvedByUserRecordId, submittedAt, originalIntentRecovery = false,
 } = {}) {
   const proof = await preflightNycOwnerGalleryApproval(env, output);
+  if (originalIntentRecovery && !originalIntentCoversGallery({requestId,approvedByUserRecordId,submittedAt},output,proof)) {
+    throw Error("Original Factory intent recovery: gallery revision changed; fresh review required");
+  }
   if (!proof || !proof.pending) return proof;
   // A historic Failed/accepted batch must never silently consent to NEW
   // corrected slides. Require the Factory request itself to postdate the
