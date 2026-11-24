@@ -101,6 +101,7 @@ def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, du
                     "current_order":i,"deleted_from_carousel":False,"updated_at":"2026-11-22T00:00:00Z",
                     "fields":{"Platform Output":[oid],"PO_Output_ID":[number],"Slide Number":i,
                     "Final Image URL":c["url"],"Asset_4x5_Public_URL":c["url"],
+                    "Asset_4x5_Public_Status":"Ready",
                     "Google Drive File ID":c["google_drive_file_id"],"Asset_Family_Key":c["media_asset_record_id"],
                     "Review Status":"Pending Review","Approved For Final":False,"Shared_Asset_Approved":False,
                     g.LEGACY_DRAFT:{"output_number":number,"slide_order":i,
