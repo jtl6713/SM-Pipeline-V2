@@ -4554,6 +4554,31 @@ export function inspectFactoryNativeSlideInventory(parent, rows) {
       !Number.isSafeInteger(expected) || expected < 2 || expected > 10) return fail("Invalid gallery identity or selected slide count");
   if (!Array.isArray(rows)) return fail("Native slide inventory temporarily unavailable; refresh Factory");
   if (rows.length !== expected) return fail("Native slide inventory incomplete: " + rows.length + " of " + expected + " linked slides; repair gallery");
+  // #2907: an explicit human review resolves the historical draft marker,
+  // NOT publishing authorization. Keep that marker false permanently. The
+  // output receipt and each exact slide receipt must agree before this
+  // read-only visibility projection can recognize a resolved draft.
+  const receipt = parent.error_messages?.SM_Factory_Review_Resolve_2907;
+  const repair = parent.error_messages?.SM_Chicago_Gallery_Repair_2890;
+  const hold = parent.error_messages?.SM_Native_Gallery_Preflight_Hold_2294;
+  const validSha = value => /^[a-f0-9]{64}$/.test(String(value || ""));
+  const validActor = value => /^rec[A-Za-z0-9]{14}$/.test(String(value || ""));
+  const resolvedReview = parent.do_not_publish === false
+    && parent.auto_publish_enabled === false && parent.output_status === "Ready for Review"
+    && parent.review_status === "Review Sent" && parent.publish_status === "Not Ready"
+    && parent.render_status === "Native Photo Route" && !parent.test_run_id
+    && !parent.scheduled_post_date && !parent.studio_scheduled_at
+    && !parent.youtube_scheduled_publish_at && !parent.published_at && !parent.platform_post_url
+    && receipt?.slide_count === expected && receipt.formal_approval_pending === true
+    && receipt.human_images_caption_branding_rights_confirmed === true
+    && receipt.publishing_authorized === false && validSha(receipt.package_sha256)
+    && validActor(receipt.actor_record_id) && Number.isFinite(Date.parse(receipt.at))
+    && repair?.stage === "human_review_verified" && repair.visual_qa_pending === false
+    && repair.publishing_authorized === false
+    && hold?.issue_number === 2294 && hold.verification_status === "resolved_for_formal_factory_review"
+    && hold.publishing_authorized === false
+    && !parent.error_messages?.Studio_Render_Review_Hold_Active
+    && !parent.error_messages?.Factory_Review_Handoff_Safety_Hold_At;
   const seen = new Set();
   const ordered = [...rows].sort((a,b) => Number(a.current_order) - Number(b.current_order));
   for (let i = 0; i < ordered.length; i++) {
@@ -4563,7 +4588,27 @@ export function inspectFactoryNativeSlideInventory(parent, rows) {
         !Array.isArray(f["Platform Output"]) || f["Platform Output"].length !== 1 || f["Platform Output"][0] !== id ||
         !Array.isArray(f.PO_Output_ID) || f.PO_Output_ID.length !== 1 || f.PO_Output_ID[0] !== number ||
         !/^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpg|jpeg|png|webp)$/i.test(image) ||
-        seen.has(image) || f.SM_Native_Gallery_Draft_Repair_2294?.publishing_authorized === false) {
+        seen.has(image)) {
+      return fail("Native slide ownership, sequence, image or review evidence is invalid; repair gallery");
+    }
+    const draft = f.SM_Native_Gallery_Draft_Repair_2294;
+    const slideReceipt = f.SM_Factory_Review_Resolve_2907;
+    const slideRepair = f.SM_Chicago_Gallery_Repair_2890;
+    if (draft?.publishing_authorized === false && !(resolvedReview
+        && row.airtable_record_id === "sb-native:2294:" + number + ":" + String(i + 1).padStart(2, "0")
+        && Number(f["Slide Number"]) === i + 1 && draft.output_number === number && draft.slide_order === i + 1
+        && draft.final_creative_approved === true && f["Approved For Final"] === true
+        && f.Shared_Asset_Approved === true && f["Review Status"] === "Final Approved"
+        && f.Asset_4x5_Public_Status === "Ready" && f.Asset_4x5_Public_URL === image
+        && draft.rights_status === "Owned" && draft.image_http_verified === true
+        && draft.image_geometry_verified === true && draft.verified_dimensions === "1080x1350"
+        && slideRepair?.brand_verified === true && slideRepair.source_owner_rights_verified === true
+        && slideRepair.visual_qa_pending === false && slideRepair.publishing_authorized === false
+        && validSha(draft.public_sha256) && draft.public_sha256 === slideRepair.verified_branded_sha256
+        && slideReceipt?.package_sha256 === receipt.package_sha256
+        && validActor(slideReceipt.actor_record_id) && Number.isFinite(Date.parse(slideReceipt.at))
+        && slideReceipt.human_images_caption_branding_rights_confirmed === true
+        && slideReceipt.publishing_authorized === false && slideReceipt.slide_sha256 === draft.public_sha256)) {
       return fail("Native slide ownership, sequence, image or review evidence is invalid; repair gallery");
     }
     seen.add(image);
