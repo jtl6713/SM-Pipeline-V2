@@ -9,6 +9,7 @@ on:
       - 'services/pipeline-runner/studio_produce/closeup_direction.py'
       - 'services/pipeline-runner/studio_produce/thumbnail_prompt.py'
       - 'services/pipeline-runner/studio_produce/thumbnail.py'
+      - 'services/pipeline-runner/p2/processor.py'
       - 'services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py'
       - 'services/pipeline-runner/tests/test_profile_creative_prompt_integration.py'
       - 'services/pipeline-runner/tests/test_sai1_market.py'

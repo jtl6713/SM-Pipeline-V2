@@ -109,19 +109,32 @@ def ai_slide_closeup_guidance(*, market: str, requested_count: int, creation_key
 
 
 def cover_closeup_guidance(*, market: str = "", creation_key: str = "") -> str:
-    """Stable opt-in for ~1/3 of NEW AI-created covers; never change old covers."""
+    """Stable opt-in: ~1/3 of NEW AI covers are composed as actual close-ups."""
     share = extreme_closeup_share()
     if not share or not _stable_eligible(creation_key, share):
         return ""
     return (
-        "NEW AI COVER FOCAL-DETAIL OPTION (issue #2876): For this brand-new image, "
-        "include one interesting, sharply rendered real-world feature with enough "
-        "natural context that a creator COULD choose a close-up in a later, separate "
-        "creative step. Do not crop or zoom the original, or make an excessive macro "
-        "the default. Relevant real local subjects: "
-        f"{market_closeup_examples(market)}. "
-        "Respect the requested aspect ratio, brand lettering and safe margins, "
-        "avoid fabricated landmark geometry and honor any explicit creator framing. "
-        "Never substitute, recrop, regenerate or overwrite an existing library "
-        "image, finished thumbnail or approved/published image merely for this style."
+        "NEW AI COVER DRAMATIC CLOSE-UP — issue #2876: This is one of the "
+        "approximately one-third of BRAND-NEW AI thumbnails chosen for a "
+        "dramatic extreme close-up composition. GENERATE the photograph "
+        "already tightly framed: one striking, authentic, specific subject "
+        "detail (for example a clock face, gold dome, skate boot/blade, "
+        "ornament or local neon sign) should occupy roughly 70–90% of the "
+        "visible image. This is NOT a wide establishing photograph with a "
+        "small sharp feature that someone might zoom into later. Make the "
+        "close-up the actual finished thumbnail composition at image creation, "
+        "with a compelling camera angle, vivid realistic texture and light. "
+        "Keep just enough genuine surroundings to identify the place; do not "
+        "crop away all recognizable context. Appropriate verified local "
+        f"subject ideas when relevant: {market_closeup_examples(market)}. "
+        "Respect the requested aspect ratio, mobile readability, existing "
+        "brand lettering, watermarks and top/bottom safe margins; do not "
+        "fabricate landmark geometry or invent signs. Do not add fake in-photo "
+        "text, logos or UI; honor any explicit creator framing. "
+        "if a close-up would misrepresent the real location or subject, use "
+        "an authentic normal composition for this NEW image instead. "
+        "Never substitute, recrop, regenerate or overwrite any existing "
+        "library photo, thumbnail or approved/published image to meet this "
+        "creative target. This is generation-time guidance, never an "
+        "automatic crop or post-generation zoom."
     )
