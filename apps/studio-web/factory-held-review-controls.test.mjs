@@ -14,7 +14,10 @@ test("held rendered items have human review and rejection actions while publish 
   assert.match(factory,/function canRejectHeldOutput\(/);
   assert.match(factory,/data-factory-held-review="approve:/);
   assert.match(factory,/data-factory-held-review="reject:/);
-  assert.match(factory,/ready for your review · publishing held/);
+  assert.match(factory,/filter\(c=>!c\.review_resolve_available&&canReviewHeldOutput\(c\)\)/);
+  assert.match(factory,/ready for held creative review/);
+  assert.match(factory,/Publishing safety hold/);
+  assert.match(factory,/Approve creative review only; publishing stays blocked/);
   assert.match(factory,/action: decision === "approve" \? "approve_held_review" : "reject_held_review"/);
 });
 test("held review API is explicitly Supabase-only and never grants publication",()=>{
