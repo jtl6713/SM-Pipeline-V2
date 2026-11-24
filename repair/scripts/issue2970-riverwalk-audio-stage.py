@@ -5,10 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import requests
@@ -139,7 +136,7 @@ def main():
         raw=synthesize_voiceover_by_id(SCRIPT,voice_id=setup["Default_Narration_Voice_ID"])
         # Normalization endpoint is resolved through the existing pipeline settings.
         settings=pipeline_settings(AirtableClient())
-        normalizer_url=settings.value(PIPELINE_SETTING_NORMALIZER_URL)
+        normalizer_url=settings.get(PIPELINE_SETTING_NORMALIZER_URL)
         _,short=normalize_voiceover(raw,filename="issue2970-2306-story.mp3",normalizer_base_url=normalizer_url)
         story=checked_stem(short,"story_narration",2.0,9.8)
         require(signature(before)==signature(preflight()),"canonical_revision_changed")
