@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   factoryOutputClaimReserve, factoryOutputClaimInspect,
-  factoryOutputClaimReclaimIfSafe, FACTORY_OUTPUT_CLAIMS_PREFIX,
+  factoryOutputClaimReclaimIfSafe, factoryOutputClaimAssertNotTransferred, FACTORY_OUTPUT_CLAIMS_PREFIX,
   FACTORY_UNBACKED_CLAIM_GRACE_MS,
 } from "./factory-approval-output-claims.mjs";
 
@@ -253,6 +253,8 @@ test("#2915 a completed mixed failed/approved NYC group does not pin current-rev
   const old=await factoryOutputClaimInspect(bucket,{profileId:profile,requestId:request,ids:selected});
   assert.equal(old.ok,false);
   assert.deepEqual(old.owners,[groupB]);
+  await assert.rejects(factoryOutputClaimAssertNotTransferred(bucket,{profileId:profile,requestId:request,id:selected[0]}),/ownership transferred/);
+  await factoryOutputClaimAssertNotTransferred(bucket,{profileId:profile,requestId:groupB,id:selected[0]});
 });
 
 test("#2915 a historical child with missing selected identity cannot authorize claim transfer",async()=>{
