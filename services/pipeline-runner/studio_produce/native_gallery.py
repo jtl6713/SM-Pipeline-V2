@@ -202,6 +202,7 @@ def _legacy_draft_matches(slide, clip, oid, number, order):
             and f.get("Google Drive File ID") == clip.get("google_drive_file_id")
             and f.get("Approved For Final") is False and f.get("Shared_Asset_Approved") is False
             and f.get("Review Status") == "Pending Review"
+            and f.get("Asset_4x5_Public_Status") == "Ready"
             and not any(f.get(k) for k in ("FB_Photo_ID", "IG_Child_Container_ID", "Platform_Post_ID"))
             and proof.get("output_number") == number and proof.get("slide_order") == order
             and proof.get("source_asset") == clip.get("media_asset_record_id")
@@ -239,14 +240,14 @@ def _retire_legacy_drafts(read, write, row, drafts, request_id, fingerprint):
     A partial interruption is recoverable by the same package SHA. Never
     reactivate or retire another revision, or create duplicate active slides.
     """
+    receipt = {"output_record_id": row["airtable_record_id"], "request_id": request_id,
+               "package_sha256": fingerprint, "human_approval_required": True,
+               "provider_writes": 0}
+    if any(d.get("deleted_from_carousel") is True and d["fields"].get(LEGACY_RETIRED) != receipt for d in drafts):
+        raise RuntimeError("Legacy gallery retirement belongs to a different package")
     for draft in drafts:
         f = draft["fields"]
-        receipt = {"output_record_id": row["airtable_record_id"], "request_id": request_id,
-                   "package_sha256": fingerprint, "human_approval_required": True,
-                   "provider_writes": 0}
         if draft.get("deleted_from_carousel") is True:
-            if f.get(LEGACY_RETIRED) != receipt:
-                raise RuntimeError("Legacy gallery retirement belongs to a different package")
             continue
         latest = _one(read("platform_outputs?airtable_record_id=eq." + row["airtable_record_id"]
                            + "&select=*&limit=2"))
@@ -263,8 +264,8 @@ def _retire_legacy_drafts(read, write, row, drafts, request_id, fingerprint):
 
 
 def _legacy_caption(client, request, parent, row):
-    caption = str(row.get("output_caption") or "").strip()
-    if caption:
+    caption = str(row.get("output_caption") or "")
+    if caption.strip():
         return caption
     bag = row.get("error_messages") or {}
     if bag.get("Studio_Effective_Caption_Mode") != "AI decides":
@@ -328,8 +329,8 @@ def complete_gallery(client, request, parent, output):
     if any((s.get("fields") or {}).get(KEY, {}).get("request_id") != rid
            or s.get("airtable_record_id") != _slide_id(oid,s.get("current_order")) for s in existing):
         raise RuntimeError("Existing gallery belongs to another review revision")
-    caption = _legacy_caption(client, request, parent, row) if legacy else str(row.get("output_caption") or "").strip()
-    if not caption:
+    caption = _legacy_caption(client, request, parent, row) if legacy else str(row.get("output_caption") or "")
+    if not caption.strip():
         raise RuntimeError("Native gallery caption unavailable")
     target_body = len(selected_body(clips))
     # Walk selected sources in order; only skip byte-identical final images.
