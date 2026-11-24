@@ -62,7 +62,8 @@ def ensure_story_voiceover(client,output,parent):
     cap=story_seconds(output)
     existing=field_str(output,"Voiceover_URL")
     parent_url=field_str(parent,"Voiceover_URL")
-    if existing and existing!=parent_url:
+    receipt=parse_json_field(field(output,RECEIPT)) or {}
+    if existing and existing!=parent_url and not receipt:
         # Preserve explicit per-output VO, including exact incident recovery.
         try:
             measured=probe_audio_duration_url(existing)
@@ -114,6 +115,11 @@ def ensure_story_voiceover(client,output,parent):
         else:
             raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt")
         fresh=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
+        from airtable.constants import CONTENT_ITEMS_TABLE
+        live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
+        if fingerprint(parent["id"],resolve_content_voice_id(live_parent),
+                story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest:
+            raise StoryVoiceoverError("Parent script or voice changed before narration binding")
         if not needs_story_voiceover(fresh) or story_seconds(fresh)!=cap or field_str(fresh,"Remotion_Job_ID") or field_str(fresh,"Final_File_URL"):
             raise StoryVoiceoverError("Story changed before narration binding")
         patch={"Voiceover_URL":url,"Voiceover_Duration_Seconds":measured,
