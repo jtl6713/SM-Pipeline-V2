@@ -112,20 +112,63 @@ def test_single_slide_batch_uses_stable_per_creation_key(monkeypatch):
     assert 15 <= sum(results) <= 45
 
 
-def test_new_cover_prompt_one_third_not_every_cover(monkeypatch):
+def test_one_third_of_new_ai_covers_have_true_extreme_closeup_composition(monkeypatch):
     monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
     prompts = [build_finished_thumbnail_prompt(
         {"fields": {"Requested_Title": f"Chicago Feature {i}"}},
         {"fields": {"Market_Name": "Chicago"}},
         aspect_ratio="9:16",
     ) for i in range(90)]
-    selected = [p for p in prompts if "NEW AI COVER FOCAL-DETAIL OPTION" in p]
+    selected = [p for p in prompts if "NEW AI COVER DRAMATIC CLOSE-UP" in p]
     assert 15 <= len(selected) <= 45
     for prompt in selected:
-        assert "could choose a close-up" in prompt.lower()
-        assert "Do not crop or zoom the original" in prompt
+        assert "70–90% of the visible image" in prompt
+        assert "actual finished thumbnail composition at image creation" in prompt
+        assert "NOT a wide establishing photograph" in prompt
+        assert "generation-time guidance, never an automatic crop" in prompt
         assert "Never substitute, recrop, regenerate or overwrite" in prompt
         assert "9:16 platform cover" in prompt
+
+
+def test_p2_new_thumbnail_generation_also_gets_the_one_third_real_closeup_style(monkeypatch):
+    from p2.processor import build_new_p2_thumbnail_prompt
+
+    monkeypatch.delenv(CLOSEUP_SHARE_ENV, raising=False)
+    prompts = [build_new_p2_thumbnail_prompt(
+        {"id": f"recP2thumb{i}", "fields": {
+            "Market_Name": "Chicago", "Thumbnail_URL": "",
+        }},
+        "Original prompt: Wrigley Building clock",
+        aspect_ratio="9:16",
+    ) for i in range(120)]
+    selected = [p for p in prompts if "NEW AI COVER DRAMATIC CLOSE-UP" in p]
+    assert 25 <= len(selected) <= 55
+    for prompt in selected:
+        assert "70–90% of the visible image" in prompt
+        assert "Wrigley Building clock face" in prompt
+        assert "Original prompt: Wrigley Building clock" in prompt
+
+    # The same new creation produces the same guidance across safe retries.
+    sample = {"id": "recP2newThumb", "fields": {"Market_Name": "Chicago"}}
+    assert build_new_p2_thumbnail_prompt(sample, "Original", aspect_ratio="9:16") == (
+        build_new_p2_thumbnail_prompt(sample, "Original", aspect_ratio="9:16")
+    )
+
+
+def test_p2_existing_thumbnail_is_excluded_even_if_prompt_builder_is_called(monkeypatch):
+    from p2.processor import build_new_p2_thumbnail_prompt
+
+    monkeypatch.setenv(CLOSEUP_SHARE_ENV, "1")
+    old = {"id": "recExisting", "fields": {
+        "Market_Name": "Chicago", "Thumbnail_URL": "https://example.com/existing-thumbnail.png",
+    }}
+    prompt = build_new_p2_thumbnail_prompt(
+        old, "Keep original photo", aspect_ratio="9:16",
+    )
+    assert prompt == "Keep original photo"
+    assert "DRAMATIC CLOSE-UP" not in prompt
+    unknown_identity = {"fields": {"Market_Name": "Chicago"}}
+    assert build_new_p2_thumbnail_prompt(unknown_identity, "Original") == "Original"
 
 
 def test_existing_finished_cover_prompt_not_rewritten_for_new_style():
@@ -143,7 +186,7 @@ def test_existing_thumb_with_url_does_not_get_new_focal_direction_even_if_prompt
     }}
     result = build_finished_thumbnail_prompt({}, parent, aspect_ratio="9:16")
     assert "Create a ChicagoShining social thumbnail" in result
-    assert "NEW AI COVER FOCAL-DETAIL OPTION" not in result
+    assert "NEW AI COVER DRAMATIC CLOSE-UP" not in result
 
 
 def test_creators_explicit_framing_and_landmark_accuracy_still_take_priority(monkeypatch):
