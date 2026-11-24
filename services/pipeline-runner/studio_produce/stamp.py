@@ -1679,8 +1679,13 @@ def stamp_fields(
         })
         return fields
     if native:
+        from studio_produce.native_gallery import meta_gallery, AUTHORITY
+        selection = parse_json(field({"fields":{"Selected_Assets_JSON":package.get("selected_assets_json")}}, "Selected_Assets_JSON"), {}) or {}
+        needs_links = (selection.get("authority") == AUTHORITY and meta_gallery(
+            package.get("effective", {}).get("platform"), package.get("effective", {}).get("output_type"),
+            field_str(existing_record, "Platform_Output_Type")))
         fields.update({
-            "Output_Status": "Ready for Review",
+            "Output_Status": "In Production" if needs_links else "Ready for Review",
             "Render_Status": "Native Photo Route",
             "Asset_Selection_Status": None,
             "Studio_Preview_URL": clips[0]["url"] if clips else None,
