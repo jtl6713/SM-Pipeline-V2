@@ -962,7 +962,7 @@ def run_smv1_drain():
     extra.setdefault("max_runs", 8)
     body.extra = extra
     result = smv1.run(body)
-    status_code = 422 if result.status == "error" else 200
+    status_code = 422 if result.status == "error" else 202 if result.status == "deferred" else 200
     logger.info("stage=smv1-drain status=%s message=%s", result.status, result.message)
     return jsonify(result.to_dict()), status_code
 
