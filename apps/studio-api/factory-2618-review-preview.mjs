@@ -28,16 +28,57 @@ const fail=(reason)=>{const error=new Error(reason);error.status=503;throw error
 // that discards the decisive OAuth status and can return an HTML login page.
 const driveFailureReasons=new Set([
   "FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE",
+  "FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_GRANT",
+  "FACTORY_2618_DRIVE_OAUTH_UNAUTHORIZED_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_SCOPE",
+  "FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED",
+  "FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_REQUEST",
   "FACTORY_2618_DRIVE_OAUTH_REJECTED",
   "FACTORY_2618_DRIVE_ACCESS_DENIED",
   "FACTORY_2618_DRIVE_FILE_NOT_VISIBLE",
   "FACTORY_2618_DRIVE_RATE_LIMITED",
   "FACTORY_2618_DRIVE_UPSTREAM_FAILED",
 ]);
+// Keep provider details, credentials, and access tokens out of logs and HTTP errors.
+export async function refreshIssue2618DriveToken(env,fetchImpl=fetch){
+  const clientId=String(env?.GOOGLE_CLIENT_ID||"").trim();
+  const clientSecret=String(env?.GOOGLE_CLIENT_SECRET||"").trim();
+  const refresh=String(env?.GOOGLE_REFRESH_TOKEN||"").trim();
+  if(!clientId||!clientSecret||!refresh)fail("FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY");
+  let response;
+  try{
+    response=await fetchImpl("https://oauth2.googleapis.com/token",{
+      method:"POST",redirect:"error",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,
+        refresh_token:refresh,grant_type:"refresh_token"}),
+    });
+  }catch{fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED");}
+  const payload=await response.json().catch(()=>null);
+  if(!response.ok){
+    const known={
+      invalid_client:"INVALID_CLIENT",invalid_grant:"INVALID_GRANT",
+      unauthorized_client:"UNAUTHORIZED_CLIENT",invalid_scope:"INVALID_SCOPE",
+      invalid_request:"INVALID_REQUEST",
+    };
+    const code=Object.prototype.hasOwnProperty.call(known,payload?.error)?known[payload.error]:null;
+    fail("FACTORY_2618_DRIVE_OAUTH_"+(code||"TOKEN_ENDPOINT_FAILED"));
+  }
+  const token=typeof payload?.access_token==="string"?payload.access_token.trim():"";
+  if(!token)fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING");
+  return token;
+}
+
 export async function fetchIssue2618DriveVideo({fileId,getAccessToken,fetchImpl=fetch}){
   if(!entries.some(([,id])=>id===fileId))fail("FACTORY_2618_PROTECTED_SOURCE_UNAVAILABLE");
   let token;
-  try{token=await getAccessToken();}catch{fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");}
+  try{token=await getAccessToken();}catch(error){
+    if(driveFailureReasons.has(error?.message))fail(error.message);
+    fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");
+  }
   if(!token)fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");
   let response;
   try{
