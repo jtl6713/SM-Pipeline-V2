@@ -23,14 +23,20 @@ try {
   $o=$rows[0];$e=$o.error_messages
   if($o.airtable_record_id -ne 'rec1Zg5eEJjQKzUDO' -or $o.content_profile_id -ne '65e9071a-d2fd-4898-88a4-111bf8a3bfb5' -or $o.platform_output_type -ne 'Instagram Story' -or $o.output_status -ne 'Ready for Review' -or $o.review_status -ne 'Review Sent' -or $o.publish_status -ne 'Not Ready' -or $o.do_not_publish -ne $true -or $o.auto_publish_enabled -ne $false -or $o.publish_retry_eligible -ne $false -or $o.published_at -or $o.platform_post_url -or $e.IG_Story_Post_ID -or $e.Platform_Post_ID -or [string]$e.IG_Story_Container_ID -ne '18116418158139610' -or [int]$e.IG_Story_Attempt_Count -ne 2 -or $o.studio_preview_url -ne 'https://media.chicagoshining.com/studio/previews/repairs/issue2915/miami-1018/po5628-e9f4ad61913fe88a.mp4'){throw 'source_state_changed'}
   $report.stage='owner_settings'
-  $settings=@(ReadS '/rest/v1/engagement_settings?select=payload&limit=500')
+  # Query each exact setting using the same service authorization. Do not
+  # rely on PowerShell pipeline enumeration of a REST array or a wide scan.
   $cfg=@{}
   $needed=@('MIAMI_INSTAGRAM_BUSINESS_ACCOUNT_ID','MIAMI_META_GRAPH_API_ACCESS_TOKEN','META_GRAPH_API_VERSION')
-  foreach($row in $settings){
-    $p=$row.payload
-    if($null -eq $p -or [string]$p.source -ne 'pipeline' -or [string]$p.Active -ne 'True'){continue}
-    $name=[string]$p.Setting_Name
-    if($needed -contains $name){if($cfg.ContainsKey($name)){throw 'duplicate_owner_setting'};$cfg[$name]=[string]$p.Setting_Value}
+  foreach($name in $needed){
+    $route='/rest/v1/engagement_settings?select=payload&payload->>Setting_Name=eq.'+[Uri]::EscapeDataString($name)+'&payload->>source=eq.pipeline&payload->>Active=eq.true&limit=2'
+    $raw=Invoke-WebRequest ($su+$route) -Headers $h -Method Get -UseBasicParsing -TimeoutSec 30
+    $parsed=ConvertFrom-Json -InputObject ([string]$raw.Content)
+    $matches=@($parsed | ForEach-Object { $_ })
+    if($matches.Count -ne 1){$report.setting_name=$name;$report.setting_count=$matches.Count;throw 'owner_setting_not_unique'}
+    $p=$matches[0].payload
+    if([string]$p.Setting_Name -ne $name -or [string]$p.source -ne 'pipeline' -or [string]$p.Active -ne 'True'){throw 'owner_setting_identity_mismatch'}
+    $cfg[$name]=([string]$p.Setting_Value).Trim()
+    if(-not $cfg[$name]){$report.setting_name=$name;throw 'owner_credentials_unavailable'}
   }
   $ver=[string]$cfg.META_GRAPH_API_VERSION
   if($ver -notmatch '^v\d{1,2}\.\d$'){$ver='v26.0'}
@@ -79,7 +85,7 @@ try {
   $report.reason='exact_account_and_expired_container_verified_current_stories_only_no_historical_absence_claim'
 }catch{
   $msg=[string]$_.Exception.Message
-  $known=@('authority_unverified','runner_configuration_missing','source_identity_mismatch','source_state_changed','duplicate_owner_setting','owner_credentials_unavailable','owner_account_mismatch','container_identity_mismatch','container_not_expired','untrusted_pagination','story_inventory_missing','story_inventory_invalid','story_inventory_truncated')
+  $known=@('authority_unverified','runner_configuration_missing','source_identity_mismatch','source_state_changed','duplicate_owner_setting','owner_setting_not_unique','owner_setting_identity_mismatch','owner_credentials_unavailable','owner_account_mismatch','container_identity_mismatch','container_not_expired','untrusted_pagination','story_inventory_missing','story_inventory_invalid','story_inventory_truncated')
   $report.reason=if($known -contains $msg){$msg}else{'protected_read_unavailable'}
 }
 Write-Output ('ISSUE2915_STORY_OWNER_GETONLY='+($report|ConvertTo-Json -Compress -Depth 5))
