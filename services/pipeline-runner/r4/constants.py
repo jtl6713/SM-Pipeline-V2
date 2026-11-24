@@ -8,6 +8,7 @@ R4_CLEAR_FIELDS = {
     "Final_File_ID": "",
     "Final_File_Name": "",
     "Remotion_Props_JSON": "",
+    "Studio_Media_Contract_Receipt_JSON": "",
     "Final_File_Storage_Status": None,
     "Render_Server_URL": "",
     "Output_URL": "",
