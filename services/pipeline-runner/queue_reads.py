@@ -229,8 +229,11 @@ def try_list_queue_records(settings: dict | None, *, formula: str | None, max_re
     try:
         payload = _rest(settings or {}, path, "GET")
     except Exception as error:
-        logger.warning("supabase queue list failed; using Airtable: %s", error)
-        return None
+        from studio_produce.workload_governor import AdmissionDeferred
+        if isinstance(error, AdmissionDeferred):
+            raise
+        logger.warning("Supabase queue read failed; no Airtable fallback (%s)", type(error).__name__)
+        raise RuntimeError("Supabase media-transfer queue read failed: " + type(error).__name__) from error
     if not isinstance(payload, list):
         return None
     if not payload:
