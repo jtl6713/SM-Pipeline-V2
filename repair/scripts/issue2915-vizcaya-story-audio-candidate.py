@@ -26,7 +26,7 @@ def require(ok, reason):
 def _setup():
     require((BASE/".env").is_file(),"runner_env_missing")
     load_dotenv(BASE/".env",override=False)
-    os.environ.setdefault("PORT","3350")
+    if not os.getenv("PORT"): os.environ["PORT"]="3350"
     sys.path.insert(0,str(BASE))
     require(os.getenv("SUPABASE_URL","").rstrip("/")==PROJECT,"wrong_supabase_project")
     for n in ("SUPABASE_SERVICE_ROLE_KEY","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","GOOGLE_REFRESH_TOKEN","R2_UPLOAD_WORKER_URL","R2_UPLOAD_WORKER_SECRET"):
