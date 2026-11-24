@@ -46,3 +46,54 @@ def test_no_stage_without_current_worker_lease():
             raise AssertionError("no I/O without lease")
     with pytest.raises(RuntimeError,match="lease"):
         stage(payload(),drive=NoIO(),uploader=NoIO(),renew=lambda *_:False)
+
+
+def test_stage_reproduces_verified_source_then_builds_and_checks_vertical(monkeypatch):
+    import studio_produce.quality_native_media_rebuild as mod
+    mark=Image.new("RGBA",(1024,1536),(250,0,0,255))
+    buf=io.BytesIO()
+    mark.save(buf,format="PNG")
+    watermark=buf.getvalue().ljust(2075758,b"\x00")
+    monkeypatch.setattr(mod,"WATERMARK_SHA",hashlib.sha256(watermark).hexdigest())
+    original=jpeg()
+    orig_sha=hashlib.sha256(original).hexdigest()
+    branded=compose(original,mark,(1080,1350))
+    branded_sha=hashlib.sha256(branded).hexdigest()
+    p=payload()
+    for a in p["assets"]:
+        i=a["index"]
+        a["source_hash_prefix"]=orig_sha[:16]
+        a["source_url"]=f"{mod.BASE}studio/previews/repairs/issue2371/nyc-2221/slide-{i:02d}-{orig_sha[:16]}.jpg"
+        a["branded_sha256"]=branded_sha
+        a["branded_url"]=f"{mod.BASE}studio/previews/repairs/issue2371/nyc-2221/shared-small-bottom-right/slide-{i:02d}-{branded_sha[:16]}.jpg"
+    class Drive:
+        def download_file(self,file_id):
+            assert file_id==mod.WATERMARK_ID
+            return watermark,"image/png"
+    uploads={}
+    class Uploader:
+        def put_object(self,key,data,mime):
+            assert key.startswith("studio/previews/watermarked/quality-native-rebuild/")
+            assert mime=="image/jpeg"
+            uploads[mod.BASE+key]=data
+    def read(url,expected,geometry,*,prefix=False):
+        data=uploads[url] if url in uploads else (branded if "shared-small-bottom-right" in url else original)
+        sha=hashlib.sha256(data).hexdigest()
+        assert sha.startswith(expected) if prefix else sha==expected
+        with Image.open(io.BytesIO(data)) as im: assert im.size==geometry
+        return data,sha
+    result=stage(p,drive=Drive(),uploader=Uploader(),read=read,renew=lambda *_:True)
+    assert result["verified"] is True
+    assert result["provider_writes"]==result["source_writes"]==0
+    assert len(result["assets"])==len(uploads)==2
+    assert all(a["cdn_verified"] and a["geometry"]=="1080x1920" for a in result["assets"])
+    uploads.clear()
+    # Supply genuinely different pixels while pretending the source prefix
+    # matched; full reproduction must still block before any R2 write.
+    altered=io.BytesIO()
+    Image.new("RGB",(1080,1350),(5,20,40)).save(altered,format="JPEG")
+    def mismatched_pixels(url,expected,geometry,*,prefix=False):
+        return (altered.getvalue(),orig_sha) if prefix else read(url,expected,geometry)
+    with pytest.raises(RuntimeError,match="source_lineage_reproduction_failed"):
+        stage(p,drive=Drive(),uploader=Uploader(),read=mismatched_pixels,renew=lambda *_:True)
+    assert not uploads
