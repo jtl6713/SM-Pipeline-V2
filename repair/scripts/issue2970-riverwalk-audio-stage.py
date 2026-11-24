@@ -112,25 +112,28 @@ def fit_owned_music(data, target_seconds=42.2):
     if seconds>=target_seconds and peak>=-18:
         return data,{"original_seconds":round(seconds,3),"looped":False}
     with tempfile.TemporaryDirectory(prefix="issue2970-music-") as tmp:
-        source=Path(tmp)/"source.mp3"; dest=Path(tmp)/"music.mp3"
+        source=Path(tmp)/"source.mp3"; pcm=Path(tmp)/"source.wav"; dest=Path(tmp)/"music.mp3"
         source.write_bytes(data)
-        command=[ffmpeg_bin(),"-nostdin","-v","error","-y","-stream_loop","-1","-i",str(source),
-                 "-t",str(target_seconds),"-af","loudnorm=I=-20:TP=-2:LRA=9,afade=t=out:st=41.2:d=1",
-                 "-c:a","libmp3lame","-b:a","192k",str(dest)]
+        # Decode once to sample-clocked PCM before looping. MP3 packet timestamps
+        # and loudnorm filter latency can otherwise shorten the encoded result.
+        decode=[ffmpeg_bin(),"-nostdin","-v","error","-y","-i",str(source),
+                "-ar","48000","-ac","2","-c:a","pcm_s16le",str(pcm)]
+        result=subprocess.run(decode,capture_output=True,timeout=90,check=False)
+        require(result.returncode==0 and pcm.is_file(),"music_pcm_decode_failed")
+        gain=min(24, max(-24, -12-peak))
+        command=[ffmpeg_bin(),"-nostdin","-v","error","-y","-stream_loop","-1","-i",str(pcm),
+                 "-t",str(target_seconds),"-af",f"volume={gain:.3f}dB,afade=t=out:st={target_seconds-1:.3f}:d=1",
+                 "-ar","48000","-c:a","libmp3lame","-b:a","192k",str(dest)]
         result=subprocess.run(command,capture_output=True,timeout=90,check=False)
-        require(result.returncode==0 and dest.is_file(),"music_loop_normalization_failed")
+        require(result.returncode==0 and dest.is_file(),"music_loop_encoding_failed")
         fitted=dest.read_bytes()
+        fitted_seconds=probe_audio_duration_bytes(fitted)
         fitted_peak=probe_max_volume_db(fitted)
-        require(fitted_peak is not None and fitted_peak>-45,"normalized_music_invalid")
-        if fitted_peak < -17:
-            gain=min(24,-12-fitted_peak)
-            amplified=Path(tmp)/"music-gain.mp3"
-            result=subprocess.run([ffmpeg_bin(),"-nostdin","-v","error","-y","-i",str(dest),
-                "-af",f"volume={gain:.3f}dB","-c:a","libmp3lame","-b:a","192k",str(amplified)],
-                capture_output=True,timeout=90,check=False)
-            require(result.returncode==0 and amplified.is_file(),"music_gain_failed")
-            fitted=amplified.read_bytes()
+        print("ISSUE2970_MUSIC_FITTED="+json.dumps({"duration_seconds":fitted_seconds,"peak_db":fitted_peak}),flush=True)
+        require(target_seconds-0.05<=fitted_seconds<=target_seconds+0.15
+                and fitted_peak is not None and -18<=fitted_peak<-1,"fitted_music_contract_failed")
     return fitted,{"original_seconds":round(seconds,3),"looped":seconds<target_seconds}
+
 
 def stage(r2, data, name):
     digest=hashlib.sha256(data).hexdigest()
