@@ -118,6 +118,7 @@ import { factoryBoundedActiveDiscovery } from "./factory-approval-active-discove
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
+  factoryOutputClaimAssertNotTransferred,
 } from "./factory-approval-output-claims.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
@@ -19137,6 +19138,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
               // Awaited checkpoints let Factory poll actual in-flight stages
               // without ever triggering an additional approval or publish.
               await checkpoint("supabase_approval_started");
+              await factoryOutputClaimAssertNotTransferred(env.STUDIO_MEDIA, {
+                profileId, requestId: parentId || requestId, id,
+              });
               const intent = originalFactoryIntent(currentJob, originalParent);
               const recoveryItem = currentJob.items.find(row => row.id === id);
               if (recoveryItem?.original_intent_recovery) {
