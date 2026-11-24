@@ -1,0 +1,186 @@
+name: Issue 2888 exact private R2 preview cache repair
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2888-private-cache-stage.py'
+      - 'repair/scripts/issue2888-private-cache-stage-worker.mjs'
+      - '.github/workflows/issue2888-private-cache-stage.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2888-private-cache-stage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2888-exact-private-cache-stage
+  cancel-in-progress: false
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify source syntax and scope
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/issue2888-private-cache-stage.py
+          node --check repair/scripts/issue2888-private-cache-stage-worker.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('repair/scripts/issue2888-private-cache-stage.py').read_text()
+          w=Path('repair/scripts/issue2888-private-cache-stage-worker.mjs').read_text()
+          assert all(k in p for k in ['CANONICAL_STATE_OR_SOURCE_CHANGED','ORIGINAL_HASH_SIZE_OR_MP4_MISMATCH','database_writes=0','provider_writes=0'])
+          assert all(k in w for k in ['req.method!=="PUT"','Date.now()>EXPIRES','crypto.subtle.digest','etagDoesNotMatch:"*"','issue2618-verified-private-review','private, no-store'])
+          s=p
+          for forbidden in ('requests.patch','requests.delete','requests.post','api.airtable.com','graph.facebook.com'):
+              assert forbidden not in s, 'Prohibited provider or mutation reference'
+          assert 'env.PRIVATE_MEDIA.get(' not in w and 'env.PRIVATE_MEDIA.delete(' not in w
+          print('issue2888_exact_scope_static_safety=PASS')
+          PY
+  stage:
+    if: github.event_name != 'pull_request'
+    needs: safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+      BRIDGE: chicagoshining-2888-stage-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Audit active Worker OAuth binding names and fail closed unless cache bucket is private
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/deployments" -o /tmp/2888-deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/2888-deployments.json)
+          curl -fsS --max-time 25 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/versions/$VERSION" -o /tmp/2888-version.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          bindings=json.loads(Path('/tmp/2888-version.json').read_text())['result']['resources']['bindings']
+          names={b['name'] for b in bindings}
+          print('issue2888_worker_oauth_binding_presence='+json.dumps({k:k in names for k in ['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REFRESH_TOKEN']}))
+          bucket=next(b for b in bindings if b['name']=='STUDIO_MEDIA')
+          value=bucket.get('bucket_name') or bucket.get('bucket')
+          assert isinstance(value,str) and value
+          Path('/tmp/2888-bucket').write_text(value)
+          PY
+          BUCKET=$(cat /tmp/2888-bucket)
+          curl -fsS --max-time 25 -H "$AUTH" "$API/r2/buckets/$BUCKET/domains/managed" -o /tmp/2888-managed.json
+          curl -fsS --max-time 25 -H "$AUTH" "$API/r2/buckets/$BUCKET/domains/custom" -o /tmp/2888-custom.json
+          jq -e '.success==true and .result.enabled==false' /tmp/2888-managed.json >/dev/null || { echo '::error::PRIVATE_CACHE_MANAGED_DOMAIN_NOT_PROVEN_DISABLED'; exit 1; }
+          jq -e '.success==true and (.result.domains|type=="array") and all(.result.domains[]; .enabled==false)' /tmp/2888-custom.json >/dev/null || { echo '::error::PRIVATE_CACHE_CUSTOM_DOMAIN_NOT_PROVEN_DISABLED'; exit 1; }
+          echo issue2888_private_bucket_gate=PASS
+      - name: Authenticate existing protected runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/2888-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" https://ops.chicagoshining.com/api/catalog || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/2888-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo '::error::AUTHORIZED_RUNNER_UNAVAILABLE'
+          exit 1
+      - name: Build short-lived write-only R2 bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,secrets,time
+          from pathlib import Path
+          token=secrets.token_urlsafe(40)
+          Path('/tmp/2888-stage-token').write_text(token)
+          src=Path('repair/scripts/issue2888-private-cache-stage-worker.mjs').read_text()
+          src=src.replace('__TOKEN__',json.dumps(token)).replace('__EXPIRES__',str(int((time.time()+720)*1000)))
+          Path('/tmp/2888-stage.mjs').write_text(src)
+          bucket=Path('/tmp/2888-bucket').read_text()
+          Path('/tmp/2888-stage-meta.json').write_text(json.dumps({"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"r2_bucket","name":"PRIVATE_MEDIA","bucket_name":bucket}]}))
+          PY
+          TOKEN=$(cat /tmp/2888-stage-token)
+          echo "::add-mask::$TOKEN"
+          node --check /tmp/2888-stage.mjs
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 45 -X PUT "$API/workers/scripts/$BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/2888-stage-meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/2888-stage.mjs;type=application/javascript+module;filename=worker.js' \
+            -o /tmp/2888-stage-upload.json
+          jq -e '.success==true' /tmp/2888-stage-upload.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API/workers/scripts/$BRIDGE/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/2888-stage-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/2888-stage-enabled.json >/dev/null
+          curl -fsS --max-time 30 -H "$AUTH" "$API/workers/subdomain" -o /tmp/2888-stage-subdomain.json
+          DOMAIN=$(jq -er '.result.subdomain' /tmp/2888-stage-subdomain.json)
+          printf '%s' "https://$BRIDGE.$DOMAIN.workers.dev" > /tmp/2888-stage-endpoint
+      - name: Send only verified originals from the authorized runner to private R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json
+          from pathlib import Path
+          src=Path('repair/scripts/issue2888-private-cache-stage.py').read_bytes()
+          digest=hashlib.sha256(src).hexdigest()
+          encoded=base64.b64encode(src).decode()
+          endpoint=Path('/tmp/2888-stage-endpoint').read_text()
+          token=Path('/tmp/2888-stage-token').read_text()
+          assert "'" not in endpoint+token
+          command=(
+              "$ErrorActionPreference='Stop';"
+              "$tmp=Join-Path $env:TEMP ('issue2888-stage-'+[guid]::NewGuid()+'.py');"
+              f"[IO.File]::WriteAllBytes($tmp,[Convert]::FromBase64String('{encoded}'));"
+              f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{digest}'){{throw 'stage_script_hash_mismatch'}};"
+              f"$env:ISSUE2888_STAGE_ENDPOINT='{endpoint}';"
+              f"$env:ISSUE2888_STAGE_TOKEN='{token}';"
+              "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'private_stage_failed'}}"
+              "finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue;Remove-Item Env:ISSUE2888_STAGE_TOKEN -ErrorAction SilentlyContinue;Remove-Item Env:ISSUE2888_STAGE_ENDPOINT -ErrorAction SilentlyContinue}"
+          )
+          Path('/tmp/2888-ops-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          accepted=false
+          for attempt in $(seq 1 10); do
+            code=$(curl -sS --max-time 30 -o /tmp/2888-ops-start.json -w '%{http_code}' \
+              -X POST https://ops.chicagoshining.com/api/shell \
+              -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/2888-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then accepted=true; break; fi
+            if [[ "$code" != 409 ]]; then echo "runner_stage_submit_http=$code"; exit 1; fi
+            sleep 8
+          done
+          test "$accepted" = true
+          JOB=$(jq -er '.job.id // .jobId' /tmp/2888-ops-start.json)
+          for tick in $(seq 1 100); do
+            curl -fsS --max-time 25 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$JOB" -o /tmp/2888-ops-job.json
+            state=$(jq -r '.job.status // empty' /tmp/2888-ops-job.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/2888-ops-job.json | grep -E '^ISSUE2888_(ORIGINALS_VERIFIED=3|STAGE_RECEIPT=\{|STAGE_BLOCKED=[A-Z0-9_]+|PRIVATE_CACHE_STAGE=PASS)' || true
+              test "$state" == ok
+              jq -er '.job.log' /tmp/2888-ops-job.json | grep -Fq 'ISSUE2888_PRIVATE_CACHE_STAGE=PASS originals=3 outputs=7 database_writes=0 provider_writes=0'
+              exit 0
+            fi
+            sleep 4
+          done
+          echo '::error::RUNNER_STAGE_NOT_CONFIRMED'
+          exit 1
+      - name: Delete temporary write-only bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 30 -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE" -o /tmp/2888-stage-delete.json -w '%{http_code}')
+          if [[ "$code" == 404 ]]; then exit 0; fi
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/2888-stage-delete.json >/dev/null

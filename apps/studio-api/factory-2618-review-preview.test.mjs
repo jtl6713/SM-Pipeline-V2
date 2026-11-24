@@ -1,7 +1,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import {issue2618PreviewSpec,issue2618PreviewEligible,serveIssue2618ReviewPreview}
+import {issue2618PreviewSpec,issue2618PreviewEligible,serveIssue2618ReviewPreview,fetchIssue2618DriveVideo,refreshIssue2618DriveToken}
   from "./factory-2618-review-preview.mjs";
 
 const ids=["recaV78on0RSfqb31","recgeicEbdlbmQiv5","recy1CzV4MJQycBMq",
@@ -106,4 +106,56 @@ test("source hash mismatch never writes a cache, and publication changes veto a 
   await assert.rejects(()=>serveIssue2618ReviewPreview({...deps,readRows:async()=>[
     {...row(id),studio_scheduled_at:"2026-12-02T00:00:00Z"}]}),
     /FACTORY_2618_SOURCE_CHANGED_OR_UNVERIFIED/);
+});
+
+test("private Drive fetch requires OAuth and preserves safe upstream categories without anonymous fallback",async()=>{
+  const fileId=issue2618PreviewSpec(ids[0]).fileId;
+  let calls=0;
+  const never=async()=>{calls++;throw Error("unexpected network call");};
+  await assert.rejects(()=>fetchIssue2618DriveVideo({fileId,getAccessToken:async()=>"",fetchImpl:never}),/FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE/);
+  await assert.rejects(()=>fetchIssue2618DriveVideo({fileId:"unrelated",getAccessToken:async()=>"test-token",fetchImpl:never}),/FACTORY_2618_PROTECTED_SOURCE_UNAVAILABLE/);
+  assert.equal(calls,0);
+  for(const [status,reason] of [[401,"OAUTH_REJECTED"],[403,"ACCESS_DENIED"],[404,"FILE_NOT_VISIBLE"],[429,"RATE_LIMITED"],[502,"UPSTREAM_FAILED"]]){
+    const before=calls;
+    await assert.rejects(()=>fetchIssue2618DriveVideo({fileId,getAccessToken:async()=>"test-token",fetchImpl:async(url,opts)=>{
+      calls++;
+      assert.equal(new URL(url).hostname,"www.googleapis.com");
+      assert.equal(opts.headers.Authorization,"Bearer test-token");
+      return new Response("private upstream detail",{status});
+    }}),new RegExp("FACTORY_2618_DRIVE_"+reason));
+    assert.equal(calls,before+1);
+  }
+  const success=await fetchIssue2618DriveVideo({fileId,getAccessToken:async()=>"test-token",fetchImpl:async()=>new Response(new Uint8Array([1]),{headers:{"Content-Type":"video/mp4"}})});
+  assert.equal(success.status,200);
+});
+test("classified private Drive failure reaches caller without caching anything",async()=>{
+  const id=ids[0],s=issue2618PreviewSpec(id),STUDIO_MEDIA=makeStorage();
+  await assert.rejects(()=>serveIssue2618ReviewPreview({
+    request:new Request("https://studio.chicagoshining.com/api/factory/outputs/"+id+"/preview"),
+    env:{STUDIO_MEDIA},outputId:id,readRows:async()=>[row(id)],
+    fetchVideo:()=>fetchIssue2618DriveVideo({fileId:s.fileId,getAccessToken:async()=>"test-token",fetchImpl:async()=>new Response(null,{status:403})}),
+  }),error=>error.status===503&&error.message==="FACTORY_2618_DRIVE_ACCESS_DENIED");
+  assert.equal(STUDIO_MEDIA.counts.put,0);
+});
+
+test("OAuth refresh preserves only known Google error categories and never leaks details",async()=>{
+  const env={GOOGLE_CLIENT_ID:"test-client",GOOGLE_CLIENT_SECRET:"test-secret",GOOGLE_REFRESH_TOKEN:"test-refresh"};
+  let called=0;
+  await assert.rejects(()=>refreshIssue2618DriveToken({},async()=>{called++;}),/FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY/);
+  assert.equal(called,0);
+  for(const code of ["invalid_client","invalid_grant","unauthorized_client","invalid_scope","invalid_request","unknown-private-error"]){
+    await assert.rejects(()=>refreshIssue2618DriveToken(env,async(url,options)=>{
+      assert.equal(url,"https://oauth2.googleapis.com/token");
+      assert.equal(options.redirect,"error");
+      assert.equal(options.body.get("grant_type"),"refresh_token");
+      return Response.json({error:code,error_description:"test-secret"}, {status:400});
+    }),error=>error.message==="FACTORY_2618_DRIVE_OAUTH_"+(code==="unknown-private-error"?"TOKEN_ENDPOINT_FAILED":code.toUpperCase()));
+  }
+  assert.equal(await refreshIssue2618DriveToken(env,async()=>Response.json({access_token:"test-access"})),"test-access");
+  await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>Response.json({})),/FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING/);
+  const fileId=issue2618PreviewSpec(ids[0]).fileId;
+  await assert.rejects(()=>fetchIssue2618DriveVideo({fileId,
+    getAccessToken:()=>refreshIssue2618DriveToken(env,async()=>Response.json({error:"invalid_grant"},{status:400})),
+    fetchImpl:async()=>{throw Error("Drive must not be contacted on refresh failure");},
+  }),/FACTORY_2618_DRIVE_OAUTH_INVALID_GRANT/);
 });

@@ -42,7 +42,7 @@ import { returnFactoryRevisionToProducer } from "./rendering-review-factory-retu
 import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
-import { serveIssue2618ReviewPreview, issue2618PreviewSpec } from "./factory-2618-review-preview.mjs";
+import { serveIssue2618ReviewPreview, issue2618PreviewSpec, fetchIssue2618DriveVideo, refreshIssue2618DriveToken } from "./factory-2618-review-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -1427,7 +1427,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1026-factory-bounded-r2-activity",
+          version: "0.10.1027-factory-native-inventory-2890",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4325,7 +4325,7 @@ export default {
         // approves; it supports Safari byte-range requests.
         if(issue2618PreviewSpec(outputId)){
           requirePermission(authorization,"outputs_review");
-          return serveIssue2618ReviewPreview({
+          return await serveIssue2618ReviewPreview({
             request,env,outputId,
             readRows:id=>adminHoldSupabaseRest(env,
               "platform_outputs?airtable_record_id=eq."+encodeURIComponent(id)+
@@ -4333,8 +4333,9 @@ export default {
               "do_not_publish,auto_publish_enabled,scheduled_post_date,"+
               "studio_scheduled_at,youtube_scheduled_publish_at,published_at,"+
               "platform_post_url,platform_publish_response,final_file_url,error_messages&limit=2"),
-            fetchVideo:(fileId,finalUrl,probe)=>
-              fetchGoogleDriveVideo(fileId,finalUrl,probe,env),
+            fetchVideo:fileId=>fetchIssue2618DriveVideo({
+              fileId,getAccessToken:()=>refreshIssue2618DriveToken(env),
+            }),
           });
         }
         // Only saved exact-output sessions activate protected revision preview.

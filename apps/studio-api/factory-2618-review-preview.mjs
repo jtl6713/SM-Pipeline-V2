@@ -23,6 +23,76 @@ const byOutput=new Map(entries.flatMap(([ids,fileId,sha256,bytes])=>
   ids.map(id=>[id,{id,fileId,sha256,bytes,
     key:"studio/review-previews/issue2618/sha256-"+sha256+".mp4"}])));
 const fail=(reason)=>{const error=new Error(reason);error.status=503;throw error;};
+
+// The corrected originals are private. Do not retry with anonymous Drive URLs:
+// that discards the decisive OAuth status and can return an HTML login page.
+const driveFailureReasons=new Set([
+  "FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE",
+  "FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_GRANT",
+  "FACTORY_2618_DRIVE_OAUTH_UNAUTHORIZED_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_SCOPE",
+  "FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED",
+  "FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING",
+  "FACTORY_2618_DRIVE_OAUTH_INVALID_REQUEST",
+  "FACTORY_2618_DRIVE_OAUTH_REJECTED",
+  "FACTORY_2618_DRIVE_ACCESS_DENIED",
+  "FACTORY_2618_DRIVE_FILE_NOT_VISIBLE",
+  "FACTORY_2618_DRIVE_RATE_LIMITED",
+  "FACTORY_2618_DRIVE_UPSTREAM_FAILED",
+]);
+// Keep provider details, credentials, and access tokens out of logs and HTTP errors.
+export async function refreshIssue2618DriveToken(env,fetchImpl=fetch){
+  const clientId=String(env?.GOOGLE_CLIENT_ID||"").trim();
+  const clientSecret=String(env?.GOOGLE_CLIENT_SECRET||"").trim();
+  const refresh=String(env?.GOOGLE_REFRESH_TOKEN||"").trim();
+  if(!clientId||!clientSecret||!refresh)fail("FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY");
+  let response;
+  try{
+    response=await fetchImpl("https://oauth2.googleapis.com/token",{
+      method:"POST",redirect:"error",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,
+        refresh_token:refresh,grant_type:"refresh_token"}),
+    });
+  }catch{fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED");}
+  const payload=await response.json().catch(()=>null);
+  if(!response.ok){
+    const known={
+      invalid_client:"INVALID_CLIENT",invalid_grant:"INVALID_GRANT",
+      unauthorized_client:"UNAUTHORIZED_CLIENT",invalid_scope:"INVALID_SCOPE",
+      invalid_request:"INVALID_REQUEST",
+    };
+    const code=Object.prototype.hasOwnProperty.call(known,payload?.error)?known[payload.error]:null;
+    fail("FACTORY_2618_DRIVE_OAUTH_"+(code||"TOKEN_ENDPOINT_FAILED"));
+  }
+  const token=typeof payload?.access_token==="string"?payload.access_token.trim():"";
+  if(!token)fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING");
+  return token;
+}
+
+export async function fetchIssue2618DriveVideo({fileId,getAccessToken,fetchImpl=fetch}){
+  if(!entries.some(([,id])=>id===fileId))fail("FACTORY_2618_PROTECTED_SOURCE_UNAVAILABLE");
+  let token;
+  try{token=await getAccessToken();}catch(error){
+    if(driveFailureReasons.has(error?.message))fail(error.message);
+    fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");
+  }
+  if(!token)fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");
+  let response;
+  try{
+    response=await fetchImpl("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true",{
+      method:"GET",headers:{Authorization:"Bearer "+token,Accept:"video/mp4,application/octet-stream"},redirect:"follow",
+    });
+  }catch{fail("FACTORY_2618_DRIVE_UPSTREAM_FAILED");}
+  if(response.ok)return response;
+  try{await response.body?.cancel();}catch{}
+  const reason={401:"FACTORY_2618_DRIVE_OAUTH_REJECTED",403:"FACTORY_2618_DRIVE_ACCESS_DENIED",
+    404:"FACTORY_2618_DRIVE_FILE_NOT_VISIBLE",429:"FACTORY_2618_DRIVE_RATE_LIMITED"}[response.status];
+  fail(reason||"FACTORY_2618_DRIVE_UPSTREAM_FAILED");
+}
+
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value||{},key);
 export const issue2618PreviewSpec=id=>byOutput.get(String(id||""))||null;
 
@@ -100,7 +170,8 @@ export async function serveIssue2618ReviewPreview({
       const get=new Request("https://studio.chicagoshining.com/api/internal/issue2618-cache",{
         method:"GET",headers:{"Accept":"video/mp4"}});
       source=await fetchVideo(spec.fileId,rows[0].final_file_url,get);
-    }catch{
+    }catch(error){
+      if(driveFailureReasons.has(error?.message))fail(error.message);
       fail("FACTORY_2618_DRIVE_SOURCE_NOT_ACCESSIBLE_TO_WORKER");
     }
     const type=String(source?.headers?.get("Content-Type")||"").toLowerCase();
