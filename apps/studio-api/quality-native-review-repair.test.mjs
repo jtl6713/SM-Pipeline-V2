@@ -23,8 +23,8 @@ const row=()=>({id:rid,airtable_record_id:id,output_number:10865,content_item_id
     stage_receipt:{verified:true,source_writes:0,provider_writes:0,output:10865,source_output:10863,
       target_updated_at:before,assets:structuredClone(assets)}}}});
 const report={status:"ok",findings:[{reason:"review_handoff_status_mismatch",record_id:id,output_id:10865,content_item_id:content}]};
-function harness({modify=()=>{},deny=false,bytes=true,stale=false,cas=false,reserved=false,badRights=false}={}){
-  let state=row();modify(state);
+function harness({modify=()=>{},deny=false,bytes=true,stale=false,cas=false,reserved=false,badRights=false,staleDraft=false}={}){
+  let state=row();if(staleDraft)Object.assign(state,{output_status:"Ready for Review",review_status:"Review Sent",tiktok_draft_status:"Waiting for Schedule"});modify(state);
   const counts={reads:0,patches:0,claims:0,releases:0,reservations:0,checks:0};
   let targetReads=0;
   const siblingClips=[1,2].map(i=>({mediaAssetRecordId:"recSource0000000"+i,googleDriveFileId:"drive-source-"+i}));
@@ -58,7 +58,7 @@ function harness({modify=()=>{},deny=false,bytes=true,stale=false,cas=false,rese
       assert.match(path,/updated_at=eq\./);
       assert.match(path,/do_not_publish=eq.false/);
       assert.match(path,/scheduled_post_date=is.null/);
-      assert.deepEqual(Object.keys(body).sort(),["error_messages","output_status","review_status","updated_at"]);
+      assert.deepEqual(Object.keys(body).sort(),staleDraft?["error_messages","tiktok_draft_status","updated_at"]:["error_messages","output_status","review_status","updated_at"]);
       if(cas)return [];
       state={...state,...body};return [structuredClone(state)];
     },
@@ -76,7 +76,7 @@ function harness({modify=()=>{},deny=false,bytes=true,stale=false,cas=false,rese
     }},
     now:()=>new Date("2026-11-24T13:00:00Z"),
   };
-  return {run:()=>recoverOneVerifiedNativeReview(env,report,opts),counts,state:()=>state};
+  return {run:()=>recoverOneVerifiedNativeReview(env,staleDraft?{...report,findings:[{...report.findings[0],reason:"stale_tiktok_waiting_schedule_blocks_review"}]}:report,opts),counts,state:()=>state};
 }
 test("review-ready transition accepts only protected exact ordered current media",()=>{
   assert.equal(assessVerifiedNativeReviewRepair(row()).eligible,true);
@@ -114,4 +114,37 @@ test("uncertain conditional write remains fenced; no automatic approval or retry
   await assert.rejects(h.run(),/commit_unverified/);
   assert.equal(h.counts.reservations,1);
   assert.equal(h.counts.releases,1);
+});
+
+test("2915 exact repeatable signature: repair only stale draft marker, preserve current review",async()=>{
+  const h=harness({staleDraft:true});
+  const result=await h.run();
+  assert.equal(result.status,"repaired");
+  assert.equal(h.state().tiktok_draft_status,null);
+  assert.equal(h.state().output_status,"Ready for Review");
+  assert.equal(h.state().review_status,"Review Sent");
+  assert.equal(h.state().publish_status,"Not Ready");
+  assert.equal(h.state().auto_publish_enabled,false);
+  assert.equal(result.approval_actions,0);
+  assert.equal(result.schedule_actions,0);
+  assert.equal(result.provider_writes,0);
+  assert.equal(h.state().error_messages.SM_Quality_Stale_TikTok_Review_Repair_v1.prior_tiktok_draft_status,"Waiting for Schedule");
+  assert.equal((await h.run()).status,"skipped");
+  assert.equal(h.counts.patches,1);
+});
+test("2915 stale marker does not justify mutation on missing proof, real provider attempt, hold or active schedule",async()=>{
+  for(const modify of [
+    r=>{r.error_messages.TikTok_Draft_Publish_ID="prior-provider-id";},
+    r=>{r.error_messages.TikTok_Draft_Attempt_Count=1;},
+    r=>{r.error_messages.Last_Publish_Attempt_At=at;},
+    r=>{r.error_messages.SM_Quality_Native_Variant_Repair_v1=null;},
+    r=>{r.do_not_publish=true;},
+    r=>{r.auto_publish_enabled=true;},
+    r=>{r.scheduled_post_date=at;},
+    r=>{r.review_status="Approved";},
+  ]){
+    const h=harness({staleDraft:true,modify});
+    assert.equal((await h.run()).status,"skipped");
+    assert.equal(h.counts.patches,0);
+  }
 });
