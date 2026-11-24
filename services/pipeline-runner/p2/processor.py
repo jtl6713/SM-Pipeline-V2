@@ -43,6 +43,7 @@ from p2.formulas import (
 from p2.normalizer_client import normalization_details, normalize_voiceover
 from p2.stale_clears import stale_media_run_clears
 from p2.thumbnail_client import generate_thumbnail_png
+from studio_produce.closeup_direction import cover_closeup_guidance
 from studio_produce.creative_guidance import load_profile_creative_guidance, creative_prompt_suffix
 from render.fields import field_str, first_linked_id, linked_ids
 
@@ -202,6 +203,29 @@ def _voiceover_fields_ready(item: dict[str, Any]) -> bool:
     )
 
 
+def build_new_p2_thumbnail_prompt(
+    item: dict[str, Any],
+    prompt: str,
+    *,
+    aspect_ratio: str = "9:16",
+    creative_guidance: dict[str, Any] | None = None,
+) -> str:
+    """Apply close-up composition only to NEW P2 AI thumbnail generation.
+
+    Existing media and previously generated thumbnail URLs never qualify.
+    P2 does not need to mutate the saved Thumbnail_Prompt to use this.
+    """
+    suffix = creative_prompt_suffix(creative_guidance, mode="thumbnail")
+    if field_str(item, "Thumbnail_URL"):
+        return prompt + suffix
+    identity = str(item.get("id") or field_str(item, "Content_ID") or "").strip()
+    composition = cover_closeup_guidance(
+        market=field_str(item, "Market_Name"),
+        creation_key=f"p2|{identity}|{aspect_ratio}" if identity else "",
+    )
+    return prompt + ("\n\n" + composition if composition else "") + suffix
+
+
 def item_wants_ai_thumbnail(item: dict[str, Any]) -> bool:
     if field_str(item, "Include_Thumbnail") == "No":
         return False
@@ -353,7 +377,9 @@ def process_request(
 
     def _branded_thumbnail(prompt: str, *, aspect_ratio: str = "9:16") -> bytes:
         guidance = load_profile_creative_guidance(client, item)
-        enhanced = prompt + creative_prompt_suffix(guidance, mode="thumbnail")
+        enhanced = build_new_p2_thumbnail_prompt(
+            item, prompt, aspect_ratio=aspect_ratio, creative_guidance=guidance,
+        )
         raw = generate_thumbnail_png(enhanced, aspect_ratio=aspect_ratio)
         return apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")
 
