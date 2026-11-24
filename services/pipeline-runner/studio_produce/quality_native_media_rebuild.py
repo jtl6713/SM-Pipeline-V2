@@ -61,8 +61,31 @@ def validate(payload):
             raise ValueError("invalid_branded_source")
 
 
-def download(url, expected, geometry, *, prefix=False):
-    with requests.get(url, stream=True, timeout=(5,10), allow_redirects=False, headers={"Cache-Control":"no-cache"}) as res:
+# Only object keys from the two explicit media namespaces may reach HTTP.
+# No caller-controlled scheme, authority, port, query, fragment or escapes.
+OBJECT_KEY = re.compile(
+    r"(?:studio/previews/repairs/issue[0-9]+/[A-Za-z0-9_-]+/"
+    r"(?:shared-small-bottom-right/)?slide-[0-9]+-[a-f0-9]{16}\.jpg"
+    r"|studio/previews/watermarked/quality-native-rebuild/rec[A-Za-z0-9]{14}/"
+    r"slide-[0-9]+-[a-f0-9]{64}\.jpg)"
+)
+
+
+def cdn_object_key(value):
+    if not isinstance(value,str) or not value.startswith(BASE):
+        raise ValueError("invalid_media_origin")
+    key=value[len(BASE):]
+    if not OBJECT_KEY.fullmatch(key):
+        raise ValueError("invalid_media_object_key")
+    return key
+
+
+def download(key, expected, geometry, *, prefix=False):
+    # Enforce the allowlist again at the network boundary, even for direct
+    # internal calls. The literal HTTPS origin cannot be influenced by input.
+    if not isinstance(key,str) or not OBJECT_KEY.fullmatch(key):
+        raise ValueError("invalid_media_object_key")
+    with requests.get("https://media.chicagoshining.com/" + key, stream=True, timeout=(5,10), allow_redirects=False, headers={"Cache-Control":"no-cache"}) as res:
         if res.status_code != 200 or res.headers.get("Content-Type","").split(";")[0].lower() != "image/jpeg":
             raise RuntimeError("source_media_unavailable")
         chunks = bytearray()
@@ -125,8 +148,8 @@ def stage(payload, *, drive=None, uploader=None, read=download, renew=None):
     assets=[]
     for a in payload["assets"]:
         fence()
-        read(a["branded_url"],a["branded_sha256"],(1080,1350))
-        original,source_sha=read(a["source_url"],a["source_hash_prefix"],(1080,1350),prefix=True)
+        read(cdn_object_key(a["branded_url"]),a["branded_sha256"],(1080,1350))
+        original,source_sha=read(cdn_object_key(a["source_url"]),a["source_hash_prefix"],(1080,1350),prefix=True)
         # Reproduce the already approved 4:5 hash from the exact unbranded
         # bytes and pinned watermark. A matching short URL slug alone is not
         # sufficient evidence of source identity.
@@ -137,7 +160,7 @@ def stage(payload, *, drive=None, uploader=None, read=download, renew=None):
         key=f"studio/previews/watermarked/quality-native-rebuild/{payload['record_id']}/slide-{a['index']:02d}-{sha}.jpg"
         fence()
         uploader.put_object(key,built,"image/jpeg")
-        read(BASE+key,sha,(1080,1920))
+        read(key,sha,(1080,1920))
         fence()
         assets.append({**a,"source_sha256":source_sha,"sha256":sha,"geometry":"1080x1920","url":BASE+key,"cdn_verified":True})
     return {"verified":True,"output":payload["output"],"source_output":payload["source_output"],
