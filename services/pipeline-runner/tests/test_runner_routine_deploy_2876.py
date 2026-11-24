@@ -38,9 +38,11 @@ def test_deploy_still_requires_tests_supabase_only_and_actual_live_version():
         assert critical in text, critical
 
 
-def test_new_closeup_version_pins_a_verifyable_runner_cutover():
+def test_current_release_pins_a_verifiable_runner_cutover():
     version = CONFIG.read_text(encoding="utf-8")
-    assert 'PIPELINE_RUNNER_CODE_VERSION = "2026-11-23-2876-new-ai-closeups-v1"' in version
+    # This release advances the version without removing the #2876 prompt
+    # safety tests or the live version comparison in the deploy workflow.
+    assert 'PIPELINE_RUNNER_CODE_VERSION = "2026-11-23-2888-private-factory-source-v1"' in version
 
 
 def test_no_workload_settings_or_publish_holds_changed_by_deployment_workflow():
