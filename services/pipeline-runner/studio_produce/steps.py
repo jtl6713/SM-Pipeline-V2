@@ -27,6 +27,7 @@ from studio_produce.queue import (
     upsert_variant_queue,
 )
 from studio_produce.stamp import directive_yes, is_native_photo, stamp_outputs
+from studio_produce.native_gallery import pending_gallery, complete_gallery
 from studio_produce.thumbnail import is_designed_cover_url, needs_grid_cover
 from vibe_cut import is_vibe_cut_notes
 
@@ -275,6 +276,9 @@ def pick_resume_step(
     route: str | None = None,
 ) -> str:
     rows = outputs or []
+    # A terminal legacy producer may still have missing native associations.
+    if any(pending_gallery(row) for row in rows):
+        return "render"
     if rows and all(_output_file_ready(row) for row in rows):
         if any(_output_missing_review_cover(row) for row in rows):
             return "stamp"
@@ -1037,6 +1041,8 @@ def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def _output_file_ready(output: dict[str, Any]) -> bool:
+    if pending_gallery(output):
+        return False
     status = field_str(output, "Output_Status")
     if status in {"Ready for Review", "Approved for Publishing", "Published"}:
         if field_str(output, "Final_File_URL") or field_str(output, "Studio_Preview_URL"):
@@ -1182,6 +1188,11 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     )
     for output in ordered_outputs:
         fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+        # Native companion galleries must finish their real linked review
+        # package before the shared producer can call this output complete.
+        if pending_gallery(fresh):
+            complete_gallery(client, ctx["request"], ctx["parent"], fresh)
+            continue
         meta = shared_plan.get(fresh["id"], {"role": "solo", "canonical_id": fresh["id"], "sibling_ids": []})
         if meta.get("role") == "sibling":
             canonical = client.get_record(PLATFORM_OUTPUTS_TABLE, meta["canonical_id"])
