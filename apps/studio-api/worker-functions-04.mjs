@@ -109,6 +109,7 @@ import {
   factorySupabaseGroupPreflight, factorySupabaseApproveOutput,
 } from "./factory-supabase-approval.mjs";
 import { factoryHeldReviewDecision } from "./factory-held-review.mjs";
+import {reviewResolveCandidate,resolveFactoryGalleryReview} from "./factory-review-resolve.mjs";
 import { assertFactoryCreativeQaDeleteSafe } from "./factory-creative-qa-delete-gate.mjs";
 import { assertSupabaseNativeGalleryPublicationPackage } from "./native-gallery-package-guard.mjs";
 import { factoryObservedApprovalProgress } from "./factory-approval-observed-progress.mjs";
@@ -12107,7 +12108,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     // #2294: an exact pending draft-slide inventory can be offered for
     // inspection while its formal media/package review remains incomplete.
     // Never convert this inspection-only marker into approval readiness.
-    const candidateGalleryReview = f(record, "SM_Factory_Native_Gallery_Candidate_Review_2294") === true
+    const resolveCandidate = reviewResolveCandidate(record.id,f(record,"Output_ID"),f(record,"Do_Not_Publish"),f(record,"SM_Chicago_Gallery_Repair_2890"));
+    const candidateGalleryReview = (f(record, "SM_Factory_Native_Gallery_Candidate_Review_2294") === true || resolveCandidate)
       && f(record, "Do_Not_Publish") === true
       && f(record, "Auto_Publish_Enabled") !== true
       && f(record, "Output_Status") === "Ready for Review"
@@ -12261,6 +12263,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
       candidate_gallery_review: candidateGalleryReview,
+      review_resolve_available: resolveCandidate && candidateGalleryReview,
       // One shared review-package validator governs Factory counts/eligibility.
       // This is metadata validation; the approval route probes actual CDN bytes.
       // Never let recovered source images turn a Changes Requested item into
@@ -12271,7 +12274,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       review_package_missing: creativeQa
         ? [creativeQaReason || "Source artwork requires verified creative correction"]
         : candidateGalleryReview
-        ? ["Source artwork awaits human review, branding/rights verification and final creative approval"]
+        ? [resolveCandidate ? "Human review required — use Review & Resolve" : "Studio must verify source artwork, branding and rights before final review"]
         : readiness.missing_requirements,
       review_package_reason: creativeQa
         ? "creative_qa_hold_2618"
@@ -13448,7 +13451,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "review_resolve" || action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -13486,6 +13489,12 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         });
       }
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "review_resolve") {
+      if(kind!=="output") throw new HttpError(400,"Exact platform output required");
+      requirePermission(authorization,"outputs_review");
+      requireAnyPermission(authorization,["publishing_control","tenant_admin"]);
+      try { resultExtra=await resolveFactoryGalleryReview(env,id,authorization,payload); }
+      catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
     } else if (action === "approve_held_review" || action === "reject_held_review") {
       if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
       requirePermission(authorization, "outputs_review");
@@ -13545,7 +13554,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
-  if (action === "approve_held_review" || action === "reject_held_review") {
+  if (action === "review_resolve" || action === "approve_held_review" || action === "reject_held_review") {
     return respond(request, env, { ok: true, page: "factory-desk", action,
       result: resultExtra, message: resultExtra.message, refresh_required: true });
   }

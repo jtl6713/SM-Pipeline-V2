@@ -386,6 +386,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     creative_qa_hold: row.creative_qa_hold === true,
     creative_qa_reason: row.creative_qa_hold === true ? (row.creative_qa_reason || null) : null,
     candidate_gallery_review: row.candidate_gallery_review === true,
+    review_resolve_available: row.review_resolve_available === true,
     meta_repair_required: row.meta_repair_required === true,
     meta_repair_reason: row.meta_repair_required === true ? (row.meta_repair_reason || "Studio recovery") : null,
     meta_repair_next_step: row.meta_repair_required === true ? (row.meta_repair_next_step || "Studio must inspect the exact record before proceeding.") : null,

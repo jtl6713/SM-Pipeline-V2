@@ -11,7 +11,7 @@ test("owner reversal #2876: Factory contains no manual crop UI, asset, or event 
   assert.doesNotMatch(html, /factoryCloseup|factory-closeup-quality|Show estimated center crop/i);
   assert.doesNotMatch(desk, /factoryCloseup|show estimated center crop|StudioFactoryCloseupQuality/);
   assert.match(html, /id="factoryPreviewImage"/);
-  assert.match(desk, /function openFactoryPreview\(card\)/);
+  assert.match(desk, /function openFactoryPreview\(card,\s*resolve\s*=\s*false\)/);
   assert.match(desk, /showFactoryNativeGallery/);
   assert.match(desk, /clearFactoryNativeGalleryControls/);
   assert.match(desk, /function closeFactoryPreview\(\)/);

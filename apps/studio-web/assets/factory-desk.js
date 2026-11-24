@@ -802,15 +802,18 @@
   }
   // Never infer a complete gallery from its one cover. Load the exact active
   // native Carousel Slides inventory through the authorized Supabase-only API.
-  async function showFactoryNativeGallery(card, image, dialog, epoch) {
+  async function showFactoryNativeGallery(card, image, dialog, epoch, resolve=false) {
     try {
       const id = String(card?.id || "");
       if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new Error("Invalid gallery output identity");
-      const data = await fetchJson(`/api/factory/outputs/${encodeURIComponent(id)}/slides`, {
+      const data = await fetchJson(`/api/factory/outputs/${encodeURIComponent(id)}/slides${resolve ? "?resolve=1" : ""}`, {
         timeoutMs: 18000,
       });
       if (epoch !== factoryGalleryPreviewEpoch) return;
       const slides = data?.slides;
+      const resolving = resolve && data?.review_resolve_available===true && data?.source==="verified-held-gallery-review"
+        && data?.do_not_publish===true && data?.publication_authorized===false && /^[a-f0-9]{64}$/.test(data?.package_sha256||"");
+      if(resolve&&!resolving) throw new Error("Review resolution is not verified; Studio must repair the package.");
       const draftOnly = data?.provisional === true
         && ["unverified-selected-source-images", "unverified-native-draft-slides"].includes(data?.source)
         && data?.do_not_publish === true && data?.publication_authorized === false;
@@ -852,6 +855,25 @@
       }
       dialog.appendChild(controls);
       let index = 0;
+      const seen=new Set();
+      let reviewButton, checks=[];
+      const updateReview=()=>{if(reviewButton)reviewButton.disabled=seen.size!==slides.length||checks.some(c=>!c.checked);};
+      if(resolving){
+        const caption=document.createElement("p");caption.style.cssText="flex-basis:100%;white-space:pre-wrap;text-align:left";caption.textContent="Caption: "+data.caption;controls.appendChild(caption);
+        for(const label of ["I reviewed all images in order","I reviewed the caption","I confirm branding and applicable image rights"]){
+          const wrap=document.createElement("label"),check=document.createElement("input");check.type="checkbox";wrap.append(check,document.createTextNode(" "+label));wrap.style.flexBasis="100%";controls.appendChild(wrap);checks.push(check);check.addEventListener("change",updateReview);
+        }
+        reviewButton=document.createElement("button");reviewButton.type="button";reviewButton.className="primary-button";reviewButton.textContent="Verify & Resolve for Approval";reviewButton.disabled=true;controls.appendChild(reviewButton);
+        reviewButton.addEventListener("click",async()=>{
+          if(reviewButton.disabled||epoch!==factoryGalleryPreviewEpoch)return;
+          if(!window.confirm("Record your review of these exact images and caption and release this gallery hold for separate Factory approval? Nothing will be scheduled or published."))return;
+          reviewButton.disabled=true;back.disabled=true;next.disabled=true;
+          try{const result=await mutateDesk({action:"review_resolve",id,kind:"output",package_sha256:data.package_sha256,confirm_images:true,confirm_caption:true,confirm_branding_rights:true});
+            if(result?.result?.review_resolved!==true)throw new Error("Review release not verified. Refresh Factory.");
+            closeFactoryPreview();setStatus(result.message||"Review resolved. Separately click Approve.");
+          }catch(error){setStatus("Review not resolved: "+String(error?.message||error),true);window.alert(String(error?.message||error));back.disabled=index===0;next.disabled=index===slides.length-1;updateReview();}
+        });
+      }
       const show = (nextIndex) => {
         index = nextIndex;
         image.src = slides[index].image_url;
@@ -868,8 +890,9 @@
           ? `UNVERIFIED source preview only — missing linked slides · ${cardLabel(card)}`
           : `Viewing native slide ${index + 1} of ${slides.length} · ${cardLabel(card)}`, draftOnly);
       };
-      image.onerror = () => setStatus(
-        `Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);
+      image.onload=()=>{if(resolving&&epoch===factoryGalleryPreviewEpoch&&image.getAttribute("src")===slides[index].image_url){seen.add(index);updateReview();}};
+      image.onerror = () => {seen.delete(index);updateReview();setStatus(
+        `Native gallery slide ${index + 1} could not load · ${cardLabel(card)}`, true);};
       back.addEventListener("click", () => show(index - 1));
       next.addEventListener("click", () => show(index + 1));
       show(0);
@@ -911,7 +934,7 @@
     if (backdrop) backdrop.hidden = true;
   }
 
-  function openFactoryPreview(card) {
+  function openFactoryPreview(card, resolve=false) {
     const galleryEpoch = ++factoryGalleryPreviewEpoch;
     clearFactoryNativeGalleryControls();
     clearFactoryRecoveryGalleryControls();
@@ -976,7 +999,7 @@
       }
       backdrop.hidden = false;
       setStatus(`Loading verified native gallery slides · ${cardLabel(card)}`);
-      void showFactoryNativeGallery(card, image, dialog, galleryEpoch);
+      void showFactoryNativeGallery(card, image, dialog, galleryEpoch, resolve);
       return;
     }
 
@@ -2954,8 +2977,9 @@
     const batchReason = reviewActionOutput ? factoryBatchSelectionReason(card) : "";
     const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
     if (card.kind === "output" && (reviewAllowed || reviewActionOutput)) {
+      if(card.review_resolve_available===true) actions.push(`<button type="button" class="primary-button" data-factory-review-resolve="${esc(card.id)}">Review &amp; Resolve</button>`);
       // Remediation outputs do not offer a disabled or unsafe approval action.
-      if (reviewAllowed || needsEyesOutput) {
+      if (reviewAllowed || (needsEyesOutput && card.review_resolve_available!==true)) {
         actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
       }
       if(reviewActionOutput && card.review_hold_active===true && card.do_not_publish===true) {
@@ -3199,10 +3223,14 @@
       bits.push(`${ready.length} publishing-approvable`);
       bits.push("Publishing safety hold");
     } else {
-      const heldForReview = (group.cards || []).filter(canRejectHeldOutput);
-      if (ready.length) bits.push(`${ready.length} ready`);
-      if (heldForReview.length) bits.push(`${heldForReview.length} ready for your review · publishing held`);
-      if (!ready.length && !heldForReview.length) bits.push("0 approvable · inspect hold or render status");
+      const needsResolve=(group.cards||[]).filter(c=>c.review_resolve_available===true);
+      const heldForReview=(group.cards||[]).filter(c=>!c.review_resolve_available&&canReviewHeldOutput(c));
+      const blocked=(group.cards||[]).filter(c=>c.candidate_gallery_review===true&&!c.review_resolve_available);
+      if(ready.length)bits.push(`${ready.length} ready to approve`);
+      if(needsResolve.length)bits.push(`${needsResolve.length} require Review & Resolve`);
+      if(heldForReview.length)bits.push(`${heldForReview.length} ready for held creative review`);
+      if(blocked.length)bits.push(`${blocked.length} Studio repair required`);
+      if(!ready.length)bits.push("0 approvable");
     }
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
@@ -4107,6 +4135,10 @@
         } finally { button.disabled = false; }
       });
     });
+    root.querySelectorAll("[data-factory-review-resolve]").forEach(button=>button.addEventListener("click",()=>{
+      const card=byId.get(button.getAttribute("data-factory-review-resolve"));
+      if(card?.review_resolve_available===true)openFactoryPreview(card,true);
+    }));
     root.querySelectorAll("[data-factory-preview]").forEach((button) => {
       button.addEventListener("click", () => {
         const card = byId.get(button.getAttribute("data-factory-preview"));

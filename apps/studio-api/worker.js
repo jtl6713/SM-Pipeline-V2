@@ -1,4 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
+import {readFactoryReviewResolve} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
 import {
@@ -1427,7 +1428,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1027-factory-native-inventory-2890",
+          version: "0.10.1028-factory-review-resolve-2907",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4311,6 +4312,10 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Factory slide inventory is read-only");
         requirePermission(authorization, "outputs_review");
         const outputId = url.pathname.split("/")[4];
+        if(url.searchParams.get("resolve")==="1") {
+          try { return respond(request,env,{ok:true,...await readFactoryReviewResolve(env,outputId,authorization)}); }
+          catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
+        }
         const inventory = await readSupabaseFactoryGallerySlides(env, outputId);
         if (!inventory) throw new HttpError(404, "Native gallery output not found");
         return respond(request, env, { ok: true, ...inventory });
