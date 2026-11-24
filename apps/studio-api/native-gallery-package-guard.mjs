@@ -258,7 +258,7 @@ async function verifySiblingGalleryBytes(slide) {
   const url=slide.fields["Final Image URL"],expected=slideSha(slide),max=8*1024*1024;
   if(!CDN.test(String(url||""))||!SHA256.test(String(expected||"")))throw Error("Invalid sibling image proof");
   const response=await fetch(url,{redirect:"manual",signal:AbortSignal.timeout(12000)});
-  if(response.status!==200||!/^image\\/jpeg(?:;|$)/i.test(response.headers.get("Content-Type")||"")||
+  if(response.status!==200||String(response.headers.get("Content-Type")||"").split(";")[0].trim().toLowerCase()!=="image/jpeg"||
       Number(response.headers.get("Content-Length")||0)>max||!response.body){
     try{await response.body?.cancel();}catch{}throw Error("Sibling image unavailable");
   }
