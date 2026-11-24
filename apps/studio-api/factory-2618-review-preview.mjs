@@ -27,6 +27,11 @@ const fail=(reason)=>{const error=new Error(reason);error.status=503;throw error
 // The corrected originals are private. Do not retry with anonymous Drive URLs:
 // that discards the decisive OAuth status and can return an HTML login page.
 const driveFailureReasons=new Set([
+  "FACTORY_2618_RUNNER_UNCONFIGURED",
+  "FACTORY_2618_RUNNER_UNAVAILABLE",
+  "FACTORY_2618_RUNNER_SOURCE_CHANGED",
+  "FACTORY_2618_RUNNER_BUSY",
+  "FACTORY_2618_RUNNER_SOURCE_UNVERIFIED",
   "FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE",
   "FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY",
   "FACTORY_2618_DRIVE_OAUTH_INVALID_CLIENT",
@@ -121,6 +126,36 @@ export async function fetchIssue2618DriveVideo({fileId,getAccessToken,fetchImpl=
   fail(reason||"FACTORY_2618_DRIVE_UPSTREAM_FAILED");
 }
 
+// Private authenticated server-to-server transport; the runner independently
+// resolves the exact output and checks canonical Supabase source + full MP4 hash.
+export async function fetchIssue2618RunnerVideo({env,outputId,fileId,fetchImpl=fetch}){
+  const spec=issue2618PreviewSpec(outputId);
+  if(!spec||fileId!==spec.fileId)fail("FACTORY_2618_PROTECTED_SOURCE_UNAVAILABLE");
+  const base=String(env?.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+  const secret=String(env?.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+  if(base!=="https://pipeline.chicagoshining.com"||secret.length<24)
+    fail("FACTORY_2618_RUNNER_UNCONFIGURED");
+  let response;
+  try{
+    response=await fetchImpl(base+"/jobs/factory/private-preview-source/"+encodeURIComponent(outputId),{
+      method:"GET",redirect:"manual",headers:{"X-Pipeline-Secret":secret,"Accept":"video/mp4"},
+      signal:AbortSignal.timeout(90000),
+    });
+  }catch{fail("FACTORY_2618_RUNNER_UNAVAILABLE");}
+  if(response.status!==200){
+    try{await response.body?.cancel();}catch{}
+    fail(response.status===409?"FACTORY_2618_RUNNER_SOURCE_CHANGED":
+      response.status===429?"FACTORY_2618_RUNNER_BUSY":"FACTORY_2618_RUNNER_UNAVAILABLE");
+  }
+  if(response.headers.get("X-Factory-Source-Sha256")!==spec.sha256||
+     Number(response.headers.get("Content-Length"))!==spec.bytes||
+     response.headers.get("Content-Type")!=="video/mp4"){
+    try{await response.body?.cancel();}catch{}
+    fail("FACTORY_2618_RUNNER_SOURCE_UNVERIFIED");
+  }
+  return response;
+}
+
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value||{},key);
 export const issue2618PreviewSpec=id=>byOutput.get(String(id||""))||null;
 
@@ -191,8 +226,8 @@ export async function serveIssue2618ReviewPreview({
   let head=await env.STUDIO_MEDIA.head(spec.key);
   if(head&&!validCache(head,spec))fail("FACTORY_2618_CACHE_PROVENANCE_INVALID");
   if(!head){
-    // Only the configured Studio OAuth identity may fetch the corrected Drive
-    // source. Never fall back to another output's old cached R5 MP4.
+    // Use the runner's verified private source transport, never another
+    // output's old R5 MP4 or an anonymous/public Drive URL.
     let source;
     try{
       const get=new Request("https://studio.chicagoshining.com/api/internal/issue2618-cache",{
@@ -212,7 +247,13 @@ export async function serveIssue2618ReviewPreview({
     if(bytes.byteLength!==spec.bytes)fail("FACTORY_2618_FILE_SIZE_MISMATCH");
     const hash=await digest(bytes);
     if(hash!==spec.sha256)fail("FACTORY_2618_FILE_HASH_MISMATCH");
+    // The source may change while the runner is fetching it. Recheck before
+    // persisting an immutable private cache object; never overwrite a winner.
+    const current=await readRows(outputId);
+    if(!Array.isArray(current)||current.length!==1||!issue2618PreviewEligible(current[0],spec))
+      fail("FACTORY_2618_SOURCE_CHANGED_OR_UNVERIFIED");
     await env.STUDIO_MEDIA.put(spec.key,bytes,{
+      onlyIf:{etagDoesNotMatch:"*"},
       httpMetadata:{contentType:"video/mp4",cacheControl:"private, no-store"},
       customMetadata:{role:"issue2618-verified-private-review",
         sourceDriveFileId:spec.fileId,sha256:spec.sha256},
