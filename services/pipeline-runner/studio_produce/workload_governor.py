@@ -33,7 +33,7 @@ _DB_REQUEST_SCOPES = frozenset({"supabase_read", "supabase_write"})
 # cross-host Worker claims or producer-job tokens.
 _SMV1_LOCAL_SCOPES = frozenset({"smv1_drain", "photo_group", "transfer"})
 SMV1_DEAD_OWNER_GRACE_SECONDS = 120
-SMV1_MAINTENANCE_SECONDS = 900
+SMV1_MAINTENANCE_SECONDS = 1800
 DEFAULT_MAX_JOBS = 2
 DEFAULT_MAX_PHOTO_GROUPS = 4
 DEFAULT_RATIO_WORKERS = 2
@@ -177,7 +177,7 @@ def _connect() -> Iterator[sqlite3.Connection]:
                     )""")
                     init.execute("""CREATE TABLE IF NOT EXISTS smv1_crop_attempts (
                         record_id TEXT PRIMARY KEY, transfer_id TEXT NOT NULL,
-                        claim_at TEXT NOT NULL, owner_pid INTEGER NOT NULL,
+                        claim_at TEXT NOT NULL, owner_pid INTEGER NOT NULL, lease_token TEXT NOT NULL,
                         drive_id TEXT, media_id TEXT, digest TEXT, size INTEGER,
                         folder TEXT, filename TEXT
                     )""")

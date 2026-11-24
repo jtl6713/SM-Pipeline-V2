@@ -69,20 +69,27 @@ class Drive:
         return self.files[reserved_id]
 
 def test_upload_commit_then_lost_response_uses_same_id_and_media_identity():
-    rr.register_claim("recCrop","transfer","2026-11-24T00:00:00+00:00")
+    first="2026-11-24T00:00:00+00:00"
+    second="2026-11-24T00:01:00+00:00"
     drive=Drive()
-    with pytest.raises(requests.Timeout):
-        rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"bytes")
-    prior=rr.receipt("recCrop")
-    rr.register_claim("recCrop","transfer","2026-11-24T00:01:00+00:00")
-    f,m=rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"bytes")
-    assert f["id"]==prior["drive_id"] and m==prior["media_id"]
-    assert drive.uploads==1 and drive.ids==1
-    with pytest.raises(RuntimeError,match="bytes or destination changed"):
-        rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"changed")
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","transfer",first)
+        with pytest.raises(requests.Timeout):
+            rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"bytes",claim_at=first)
+        prior=rr.receipt("recCrop")
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","transfer",second)
+        with pytest.raises(g.AdmissionDeferred):
+            rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"bytes",claim_at=first)
+        f,m=rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"bytes",claim_at=second)
+        assert f["id"]==prior["drive_id"] and m==prior["media_id"]
+        assert drive.uploads==1 and drive.ids==1
+        with pytest.raises(RuntimeError,match="bytes or destination changed"):
+            rr.reserved_upload(drive,"recCrop","transfer","folder","photo.jpg",b"changed",claim_at=second)
 
 def test_recovery_requires_exact_claim_and_positive_death(monkeypatch):
-    rr.register_claim("recCrop","transfer","2026-11-24T00:00:00+00:00")
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","transfer","2026-11-24T00:00:00+00:00")
     assert not rr.recoverable_claim("recCrop","transfer","2026-11-24T00:00:00Z")
     monkeypatch.setattr(g,"_process_definitely_exited",lambda pid:True)
     assert rr.recoverable_claim("recCrop","transfer","2026-11-24T00:00:00Z")
@@ -91,6 +98,25 @@ def test_recovery_requires_exact_claim_and_positive_death(monkeypatch):
     assert not rr.recoverable_claim("recLegacy","transfer","2026-11-24T00:00:00Z")
     with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
         assert not rr.recoverable_claim("recCrop","transfer","2026-11-24T00:00:00Z")
+
+def test_completion_is_exact_claim_cas_and_preserves_payload(monkeypatch):
+    import supabase_pipeline
+    stamp="2026-11-24T00:00:00+00:00"
+    class Client: _settings={}
+    calls=[]
+    def rest(settings,path,method,body=None,**kw):
+        calls.append((path,method,body))
+        if method=="GET": return [{"airtable_record_id":"recCrop","payload":{"transfer_id":"tid","source_asset_id":"original"}}]
+        return [{"airtable_record_id":"recCrop","status":"Ready","payload":body["payload"]}]
+    monkeypatch.setattr(supabase_pipeline,"_rest",rest)
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","tid",stamp)
+        result=rr.finish_claim(Client(),"recCrop","tid",stamp,{"Transfer_Status":"Ready","Drive_File_ID":"reserved"})
+        assert result["payload"]=={"transfer_id":"tid","source_asset_id":"original","drive_file_id":"reserved"}
+        assert calls[1][1]=="PATCH" and "status=eq.Processing" in calls[1][0] and "last_attempt_at=eq." in calls[1][0] and "payload=eq." in calls[1][0]
+    with pytest.raises(g.AdmissionDeferred):
+        rr.finish_claim(Client(),"recCrop","tid",stamp,{"Transfer_Status":"Ready"})
+    assert len(calls)==2
 
 def test_restart_queue_is_persistent_bounded_and_admission_aware():
     assert rr.remember_request("recExact")

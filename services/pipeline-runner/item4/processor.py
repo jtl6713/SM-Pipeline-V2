@@ -306,7 +306,7 @@ class TransferClaimConflict(RuntimeError):
     """A different actor already transitioned the same canonical transfer."""
 
 
-def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> None:
+def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> str:
     attempts = int(fields.get("Attempt_Count") or 0) + 1
     patch = {
         "Transfer_Status": "Processing",
@@ -347,8 +347,9 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
             raise TransferClaimConflict("canonical transfer state changed before claim")
         if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("airtable_record_id") != record_id:
             raise RuntimeError("atomic transfer claim could not be verified")
-        return
+        return patch["Last_Attempt_At"]
     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id, patch)
+    return patch["Last_Attempt_At"]
 
 
 def select_eligible_rows(
@@ -545,31 +546,35 @@ def _complete_variant_upload(
             output_format="jpeg",
         )
     reserved_media_id = None
+    claim_at=row.get("_smv1_claim_at")
     if governor.enabled():
-        uploaded,reserved_media_id = restart_recovery.reserved_upload(drive,record_id,transfer_id,folder_id,filename,rendered)
+        restart_recovery.read_claim(client,record_id,transfer_id,claim_at)
+        uploaded,reserved_media_id = restart_recovery.reserved_upload(drive,record_id,transfer_id,folder_id,filename,rendered,claim_at=claim_at)
     else:
         uploaded = drive.upload_file(folder_id, filename, rendered, "image/jpeg")
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")
 
     def _write() -> str:
+        if governor.enabled():
+            restart_recovery.read_claim(client,record_id,transfer_id,claim_at)
         media_asset_id = ensure_media_asset(
             client, fields, drive_id, drive_url, transfer_id, kind="Platform Variant", reserved_id=reserved_media_id
         )
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            record_id,
-            {
-                "Transfer_Status": "Ready",
-                "Drive_File_ID": drive_id,
-                "Drive_URL": drive_url,
-                "Media_Asset_Record_ID": media_asset_id,
-                "Generated_Media_Asset": [media_asset_id],
-                "Completed_At": _now_iso(),
-                "Error_Message": None,
-                "Preview_Status": "Pending",
-            },
-        )
+        patch = {
+            "Transfer_Status": "Ready",
+            "Drive_File_ID": drive_id,
+            "Drive_URL": drive_url,
+            "Media_Asset_Record_ID": media_asset_id,
+            "Generated_Media_Asset": [media_asset_id],
+            "Completed_At": _now_iso(),
+            "Error_Message": None,
+            "Preview_Status": "Pending",
+        }
+        if governor.enabled():
+            restart_recovery.finish_claim(client,record_id,transfer_id,claim_at,patch)
+        else:
+            client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,record_id,patch)
         return media_asset_id
 
     if airtable_lock:
@@ -671,7 +676,7 @@ def _apply_cached_variant(client: AirtableClient, row: dict, cached: dict) -> di
     media_id = _media_asset_id(prior)
     if not drive_id or not media_id:
         raise ValueError("Incomplete cached variant authority")
-    client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], {
+    patch = {
         "Transfer_Status": "Ready",
         "Drive_File_ID": drive_id,
         "Drive_URL": prior.get("Drive_URL") or f"https://drive.google.com/file/d/{drive_id}/view",
@@ -680,7 +685,11 @@ def _apply_cached_variant(client: AirtableClient, row: dict, cached: dict) -> di
         "Completed_At": _now_iso(),
         "Error_Message": None,
         "Preview_Status": "Pending",
-    })
+    }
+    if governor.enabled():
+        restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),patch)
+    else:
+        client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,row["id"],patch)
     return {
         "route": "variant_persistent_cache_reuse",
         "queue_record_id": row["id"],
@@ -709,7 +718,7 @@ def _process_variant_pending(
     if governor.enabled():
         # A reused/cached asset still needs a canonical claim before writing
         # Ready, otherwise it can race a concurrent crop worker.
-        _claim_row(client, record_id, fields)
+        row["_smv1_claim_at"]=_claim_row(client, record_id, fields)
     if _row_has_authority(fields):
         client.update_record(
             MEDIA_TRANSFER_QUEUE_TABLE,
@@ -802,9 +811,9 @@ def process_variant_group(
         try:
             if airtable_lock:
                 with airtable_lock:
-                    _claim_row(client, row["id"], fields)
+                    row["_smv1_claim_at"]=_claim_row(client, row["id"], fields)
             else:
-                _claim_row(client, row["id"], fields)
+                row["_smv1_claim_at"]=_claim_row(client, row["id"], fields)
         except TransferClaimConflict:
             # Another owner won the canonical claim. Do not crop or fail it.
             continue
@@ -875,7 +884,18 @@ def process_variant_group(
             if reused:
                 result["route"] = "variant_original_frame_reuse"
             return result
+        except governor.AdmissionDeferred:
+            raise
         except Exception as exc:
+            if governor.enabled():
+                # Do not overwrite a Ready receipt after an ambiguous response,
+                # or reset the claim of a replacement owner.
+                try:
+                    restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),
+                        {"Transfer_Status":"Pending" if is_retryable_master_error(exc) else "Error","Error_Message":str(exc)[:10000]})
+                except Exception:
+                    pass
+                raise
             try:
                 if airtable_lock:
                     with airtable_lock:
