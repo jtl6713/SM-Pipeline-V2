@@ -396,3 +396,115 @@ export async function scanRecentProductionFactoryHandoffs({
     note:"Native slide/CDN byte and Factory browser visibility require exact second-stage verification; they are not treated as clear from a compact scan",
   };
 }
+
+
+// #2873: distinguish an already staged legacy draft gallery from a missing
+// gallery. The old #2294 receipts are candidate-media records, NOT proof of
+// bytes, rights, branding, creative suitability, or human approval.
+export const LEGACY_NATIVE_DRAFT_SIGNATURE = "QA-NATIVE-GALLERY-LEGACY-DRAFT-INCOMPLETE-v1";
+const recordId = /^rec[A-Za-z0-9]{14}$/;
+const nativeCdn = /^https:\/\/media\.chicagoshining\.com\/studio\/previews\/[A-Za-z0-9_./-]+\.(?:jpe?g|png|webp)$/i;
+const linkEquals = (link,value) => Array.isArray(link) && link.length===1 && link[0]===value;
+const clipUrl = clip => str(clip?.url || clip?.src);
+
+export function assessLegacyNativeDraft(row, slides, request) {
+  const unavailable = reason => ({matched:false,reason,automatic_action_authorized:false});
+  const n=Number(row?.selected_clip_count), bag=row?.error_messages||{};
+  const selected=row?.selected_assets, source=selected?.selected_clips, render=row?.render_clip_list;
+  const expectedType=row?.platform==="Facebook"?"Facebook Photo Set":
+    row?.platform==="Instagram"?"Instagram Carousel":null;
+  if(!expectedType||row.platform_output_type!==expectedType||!recordId.test(str(row.airtable_record_id))
+     ||!recordId.test(str(request?.airtable_record_id))||request.request_status!=="Promoted"
+     ||request.production_job?.step!=="done"||request.variant_status!=="Ready"
+     ||request.variant_manifest?.complete!==true||row.content_item_id!==request.promoted_content_item_id
+     ||selected?.authority!=="studio_owner_uploaded_exact_source"
+     ||selected?.production_request_record_id!==request.airtable_record_id
+     ||selected?.aspect_ratio!=="4:5"||!["", "4:5"].includes(str(row.aspect_ratio))
+     ||row.output_status!=="Ready for Review"||row.render_status!=="Native Photo Route"
+     ||!["","Pending","Pending Review","Review Sent"].includes(str(row.review_status))
+     ||!["","Not Ready"].includes(str(row.publish_status))
+     ||row.do_not_publish!==false||row.auto_publish_enabled!==false
+     ||["test_run_id","scheduled_post_date","studio_scheduled_at","youtube_scheduled_publish_at",
+         "published_at","platform_post_url","platform_publish_response","platform_publish_response_text",
+         "publish_asset_url"].some(k=>Boolean(row[k]))
+     ||["Studio_Render_Review_Hold_Active","Factory_Review_Handoff_Safety_Hold_At",
+         "SM_2618_Creative_QA_Hold","SM_Factory_Supabase_Approval_Receipt",
+         "Publish_Locked_At","Publish_Started_At","Platform_Post_ID","Platform_Media_ID",
+         "IG_Carousel_Parent_Container_ID","Publish_Attempt_Count","Studio_Publish_Attempt_Count",
+         "Studio_Publish_Dispatch_Count","Studio_Publish_Dispatch_At"].some(k=>Boolean(bag[k])))
+    return unavailable("legacy_draft_exact_identity_or_safety_unverified");
+  const old=bag.SM_Native_Gallery_Preflight_Hold_2294;
+  if(old?.issue_number!==2294||old?.verification_status!=="not_yet_verified"
+     ||old?.publishing_authorized!==false)
+    return unavailable("no_unverified_legacy_receipt");
+  if(!Number.isSafeInteger(n)||n<2||n>10||!Array.isArray(source)||source.length!==n
+     ||!Array.isArray(render)||render.length!==n||!Array.isArray(slides)||slides.length!==n)
+    return unavailable("legacy_draft_count_mismatch");
+  const imageIds=new Set(), mediaIds=new Set(), slideIds=new Set();
+  for(let i=0;i<n;i++) {
+    const c=source[i], r=render[i], s=slides[i], f=s?.fields||{};
+    const receipt=f.SM_Native_Gallery_Draft_Repair_2294;
+    const url=clipUrl(c), media=str(c?.media_asset_record_id), drive=str(c?.google_drive_file_id);
+    if(s?.deleted_from_carousel!==false||!str(s.airtable_record_id)||slideIds.has(s.airtable_record_id)
+       ||Number(s.current_order)!==i+1||Number(f["Slide Number"])!==i+1
+       ||!linkEquals(f["Platform Output"],row.airtable_record_id)
+       ||!linkEquals(f.PO_Output_ID,row.output_number)
+       ||Number(c?.order)!==i+1||Number(r?.order)!==i+1
+       ||c?.aspect_ratio!=="4:5"||!nativeCdn.test(url)||clipUrl(r)!==url
+       ||f["Final Image URL"]!==url||f.Asset_4x5_Public_URL!==url
+       ||!recordId.test(media)||!drive||f.Asset_Family_Key!==media||f["Google Drive File ID"]!==drive
+       ||f["Approved For Final"]!==false||f.Shared_Asset_Approved!==false
+       ||f["Review Status"]==="Final Approved"||f.Asset_4x5_Public_Status!=="Ready"
+       ||receipt?.output_number!==row.output_number||receipt?.slide_order!==i+1
+       ||receipt?.source_asset!==media||receipt?.variant_drive_file_id!==drive
+       ||receipt?.publishing_authorized!==false||receipt?.final_creative_approved!==false
+       ||imageIds.has(url)||mediaIds.has(media))
+      return unavailable("legacy_draft_order_provenance_or_approval_changed");
+    slideIds.add(s.airtable_record_id);imageIds.add(url);mediaIds.add(media);
+  }
+  return {matched:true,signature:LEGACY_NATIVE_DRAFT_SIGNATURE,
+    output_id:row.output_number,record_id:row.airtable_record_id,existing_draft_slides:n,
+    missing_caption:!nonempty(row.output_caption),missing_typed_aspect_ratio:!nonempty(row.aspect_ratio),
+    review_handoff_missing:row.review_status!=="Review Sent",
+    legacy_media_proof_unverified:true,automatic_action_authorized:false,
+    next_action:"verify_existing_draft_media_and_reconcile_exact_revision",
+    preserve_existing_slides:true,requires_human_approval:true,publishing_authorized:false};
+}
+
+// Protected/server-only exact diagnostic, independent of recent-scan order.
+// The caller supplies authenticated read access. No database or media writes.
+export async function scanExactLegacyNativeDraft({read,requestId}={}) {
+  if(typeof read!=="function"||!recordId.test(str(requestId)))throw Error("exact native draft request required");
+  const requests=await read("production_requests?airtable_record_id=eq."+requestId
+    +"&select=airtable_record_id,promoted_content_item_id,request_status,variant_status,variant_manifest,production_job,output_plan&limit=2");
+  if(!Array.isArray(requests)||requests.length!==1||requests[0].airtable_record_id!==requestId)
+    throw Error("exact native draft request inventory unavailable");
+  const request=requests[0],contentId=str(request.promoted_content_item_id);
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contentId))throw Error("exact content owner unavailable");
+  const rows=await read("platform_outputs?content_item_id=eq."+contentId
+    +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,platform,studio_output_type,platform_output_type,"
+    +"output_status,render_status,review_status,publish_status,do_not_publish,auto_publish_enabled,test_run_id,"
+    +"scheduled_post_date,studio_scheduled_at,youtube_scheduled_publish_at,published_at,platform_post_url,"
+    +"platform_publish_response,platform_publish_response_text,publish_asset_url,aspect_ratio,output_caption,"
+    +"selected_clip_count,selected_assets,render_clip_list,error_messages,studio_preview_url,thumbnail_url&limit=25");
+  if(!Array.isArray(rows)||rows.length>=25||rows.some(row=>row.content_item_id!==contentId))
+    throw Error("exact output inventory unavailable");
+  const plan=planItems(request);
+  if(!plan||!unique(plan)||plan.length!==rows.length
+     ||new Set(rows.map(row=>key(row.platform,row.studio_output_type))).size!==rows.length
+     ||rows.some(row=>!plan.some(item=>key(item.platform,item.type)===key(row.platform,row.studio_output_type)))
+     ||new Set(rows.map(row=>str(row.content_profile_id))).size!==1
+     ||rows.some(row=>!str(row.content_profile_id)))
+    throw Error("exact output plan or profile mismatch");
+  const results=[];
+  for(const row of rows) {
+    if(!["Facebook","Instagram"].includes(row.platform)||!validNumber(row.output_number)) continue;
+    const slides=await read("carousel_slides?deleted_from_carousel=eq.false&fields->PO_Output_ID=cs."
+      +encodeURIComponent(JSON.stringify([row.output_number]))
+      +"&select=airtable_record_id,current_order,deleted_from_carousel,fields&order=current_order.asc&limit=12");
+    if(!Array.isArray(slides))throw Error("exact slide inventory unavailable");
+    results.push(assessLegacyNativeDraft(row,slides,request));
+  }
+  return {request_id:requestId,content_item_id:contentId,results,
+    approval_actions:0,schedule_actions:0,publish_actions:0};
+}

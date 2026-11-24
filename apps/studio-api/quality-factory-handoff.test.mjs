@@ -358,3 +358,68 @@ test("2915 compact handoff scan detects the stale TikTok marker before Factory p
     assert.equal(guarded.findings.some(x=>x.reason==="stale_tiktok_waiting_schedule_blocks_review"),false);
   }
 });
+
+
+test("Bryant Park legacy draft signature diagnoses existing slides, missing caption and ratio without granting write authority",async()=>{
+  const {assessLegacyNativeDraft,scanExactLegacyNativeDraft,LEGACY_NATIVE_DRAFT_SIGNATURE}=await import("./quality-factory-handoff.mjs");
+  const req={airtable_record_id:"recbD8PLtJpez8Oz0",request_status:"Promoted",
+    promoted_content_item_id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    variant_status:"Ready",variant_manifest:{complete:true,ready_count:4,target_count:4},
+    production_job:{step:"done"},
+    output_plan:{items:[{platform:"Facebook",output_type:"Multi-Image Post"},
+      {platform:"Instagram",output_type:"Carousel"}]}};
+  const make=(number,id,platform,type,mapping)=>{
+    const clips=Array.from({length:4},(_,i)=>({order:i+1,aspect_ratio:"4:5",
+      url:"https://media.chicagoshining.com/studio/previews/lettered/"+id+"/"+i+".jpg",
+      media_asset_record_id:"rec"+String(i).padStart(14,"A"),google_drive_file_id:"drive"+i}));
+    const row={airtable_record_id:id,output_number:number,content_item_id:req.promoted_content_item_id,
+      content_profile_id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      platform,studio_output_type:type,platform_output_type:mapping,
+      output_status:"Ready for Review",render_status:"Native Photo Route",review_status:null,publish_status:"Not Ready",
+      do_not_publish:false,auto_publish_enabled:false,output_caption:null,aspect_ratio:null,selected_clip_count:4,
+      selected_assets:{authority:"studio_owner_uploaded_exact_source",production_request_record_id:req.airtable_record_id,
+        aspect_ratio:"4:5",selected_clips:clips},render_clip_list:structuredClone(clips),
+      error_messages:{SM_Native_Gallery_Preflight_Hold_2294:{issue_number:2294,verification_status:"not_yet_verified",publishing_authorized:false}}};
+    const slides=clips.map(c=>({airtable_record_id:"sb-native:2294:"+number+":"+c.order,current_order:c.order,
+      deleted_from_carousel:false,fields:{"Slide Number":c.order,"Platform Output":[id],PO_Output_ID:[number],
+        "Final Image URL":c.url,Asset_4x5_Public_URL:c.url,"Google Drive File ID":c.google_drive_file_id,
+        Asset_Family_Key:c.media_asset_record_id,Asset_4x5_Public_Status:"Ready","Approved For Final":false,
+        Shared_Asset_Approved:false,"Review Status":"Pending Review",
+        SM_Native_Gallery_Draft_Repair_2294:{output_number:number,slide_order:c.order,source_asset:c.media_asset_record_id,
+          variant_drive_file_id:c.google_drive_file_id,publishing_authorized:false,final_creative_approved:false}}}));
+    return {row,slides};
+  };
+  const fb=make(10853,"rectw2pvgnBzK3wCN","Facebook","Multi-Image Post","Facebook Photo Set");
+  const ig=make(10854,"recJ8jTynJDxsN0hl","Instagram","Carousel","Instagram Carousel");
+  const result=assessLegacyNativeDraft(fb.row,fb.slides,req);
+  assert.equal(result.matched,true);
+  assert.equal(result.signature,LEGACY_NATIVE_DRAFT_SIGNATURE);
+  assert.equal(result.existing_draft_slides,4);
+  assert.equal(result.missing_caption,true);
+  assert.equal(result.missing_typed_aspect_ratio,true);
+  assert.equal(result.review_handoff_missing,true);
+  assert.equal(result.preserve_existing_slides,true);
+  assert.equal(result.automatic_action_authorized,false);
+  assert.equal(result.publishing_authorized,false);
+  for(const change of [{published_at:"2026-11-23T00:00:00Z"},{do_not_publish:true},
+    {studio_scheduled_at:"2026-12-01T00:00:00Z"},{aspect_ratio:"9:16"},
+    {error_messages:{...fb.row.error_messages,Publish_Attempt_Count:1}}])
+    assert.equal(assessLegacyNativeDraft({...fb.row,...change},fb.slides,req).matched,false);
+  assert.equal(assessLegacyNativeDraft(fb.row,fb.slides.slice(1),req).matched,false);
+  const approved=structuredClone(fb.slides);approved[0].fields["Approved For Final"]=true;
+  assert.equal(assessLegacyNativeDraft(fb.row,approved,req).matched,false);
+  const changed=structuredClone(fb.slides);changed[0].fields["Final Image URL"]=changed[1].fields["Final Image URL"];
+  assert.equal(assessLegacyNativeDraft(fb.row,changed,req).matched,false);
+  const calls=[];
+  const exact=await scanExactLegacyNativeDraft({requestId:req.airtable_record_id,read:async path=>{
+    calls.push(path);
+    if(path.startsWith("production_requests?"))return [req];
+    if(path.startsWith("platform_outputs?"))return [fb.row,ig.row];
+    if(path.includes("%5B10853%5D"))return fb.slides;
+    if(path.includes("%5B10854%5D"))return ig.slides;
+    throw Error("unexpected read");
+  }});
+  assert.equal(calls.length,4);
+  assert.ok(exact.results.every(x=>x.matched&&x.existing_draft_slides===4));
+  assert.equal(exact.approval_actions+exact.schedule_actions+exact.publish_actions,0);
+});
