@@ -480,7 +480,7 @@ export async function scanExactLegacyNativeDraft({read,requestId}={}) {
   if(!Array.isArray(requests)||requests.length!==1||requests[0].airtable_record_id!==requestId)
     throw Error("exact native draft request inventory unavailable");
   const request=requests[0],contentId=str(request.promoted_content_item_id);
-  if(!/^[0-9a-f]{8}-[0-9a-f]{27,}$/i.test(contentId))throw Error("exact content owner unavailable");
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contentId))throw Error("exact content owner unavailable");
   const rows=await read("platform_outputs?content_item_id=eq."+contentId
     +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,platform,studio_output_type,platform_output_type,"
     +"output_status,render_status,review_status,publish_status,do_not_publish,auto_publish_enabled,test_run_id,"
