@@ -311,3 +311,28 @@ test("cross-profile leakage among children is held even without parent profile p
   assert.equal(result.status,"blocked");
   assert.equal(result.findings[0].reason,"wrong_content_or_profile_ownership");
 });
+
+test("approved but failed Story is not treated as a complete Factory handoff (#2915 / #5628)",()=>{
+  const all=source().map(x=>({...x,output_status:"Approved for Publishing",
+    review_status:"Approved",publish_status:"Scheduled"}));
+  const p=request();
+  p.output_plan.items[0]={platform:"Instagram",output_type:"Story"};
+  all[0]={...all[0],output_number:5628,studio_output_type:"Story",
+    platform_output_type:"Instagram Story",render_status:"Rendered",
+    publish_status:"Failed",do_not_publish:true};
+  const result=assessProductionFactoryHandoff({request:p,outputs:all});
+  assert.equal(result.status,"repair_required");
+  assert.equal(result.stage,"publish");
+  assert.equal(result.findings.length,1);
+  assert.equal(result.findings[0].output_id,5628);
+  assert.equal(result.findings[0].reason,"approved_publication_failed_requires_reconciliation");
+  assert.equal(result.findings[0].automatic_action_authorized,false);
+  assert.equal(result.publish_actions,0);
+  assert.equal(result.schedule_actions,0);
+  // Prior receipt is reconciliation evidence, never a new provider attempt.
+  all[0].platform_post_url="https://example.com/already-published";
+  assert.equal(assessProductionFactoryHandoff({request:p,outputs:all}).findings[0].reason,
+    "approved_publication_failed_requires_reconciliation");
+  p.production_job.step="running";
+  assert.equal(assessProductionFactoryHandoff({request:p,outputs:all}).stage,"publish");
+});
