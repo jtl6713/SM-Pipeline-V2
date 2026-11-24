@@ -116,6 +116,16 @@ const NYC_FACTORY_FINAL_REVIEW = new Map([
   ["recUIDBjcY6RgSy0n", { number: 10870, platform: "Facebook", type: "Facebook Photo Set", slides: 4 }],
   ["recWq5HIxBT8BCtme", { number: 10875, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
 ]);
+// #2890: exact six branded Chicago galleries. This is not an AI creative approval.
+const CHICAGO_FACTORY_FINAL_REVIEW = new Map([
+  ["recbzkRN1wyWoBjOn", { number: 11129, content: 2297, platform: "Instagram", type: "Instagram Carousel", slides: 4 }],
+  ["recpycdsTXLBTD5s6", { number: 11130, content: 2297, platform: "Facebook", type: "Facebook Photo Set", slides: 4 }],
+  ["rec9hMlB2fBjbdHED", { number: 11131, content: 2298, platform: "Instagram", type: "Instagram Carousel", slides: 5 }],
+  ["rec7ZBwpvup8CDp7x", { number: 11132, content: 2298, platform: "Facebook", type: "Facebook Photo Set", slides: 5 }],
+  ["recxl6v6xS9hJGuh3", { number: 11136, content: 2299, platform: "Instagram", type: "Instagram Carousel", slides: 10 }],
+  ["recg1e2fiwy8wnPpG", { number: 11137, content: 2299, platform: "Facebook", type: "Facebook Photo Set", slides: 10 }],
+]);
+const chicagoReviewEntry = output => CHICAGO_FACTORY_FINAL_REVIEW.get(String(output?.airtable_record_id || ""));
 const USER_RECORD = /^rec[A-Za-z0-9]{14}$/;
 // #2371 recovered Supabase-native slides have rec + 16 hex (19 chars),
 // unlike authenticated Factory user IDs which remain strict rec + 14 chars.
@@ -126,13 +136,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export function nycOwnerGalleryApprovalEligible(output) {
-  const exact = NYC_FACTORY_FINAL_REVIEW.get(String(output?.airtable_record_id || ""));
+  const chicago = chicagoReviewEntry(output);
+  const exact = chicago || NYC_FACTORY_FINAL_REVIEW.get(String(output?.airtable_record_id || ""));
   if (!exact) return false;
   const bag = output.error_messages || {};
-  const qa = bag.SM_NYC_AI_Creative_QA_20261122 || {};
+  const qa = chicago ? (bag.SM_Chicago_Gallery_Repair_2890 || {}) : (bag.SM_NYC_AI_Creative_QA_20261122 || {});
   return output.output_number === exact.number
     && output.selected_clip_count === exact.slides
-    && qa.output_native_slides_checked === exact.slides
+    && (chicago
+      ? output.content_number === exact.content
+        && output.aspect_ratio === "4:5"
+        && qa.stage === "owned_branded_review_ready"
+        && qa.workflow_run === 45321546557
+        && qa.slide_count === exact.slides
+        && qa.visual_qa_pending === true
+        && qa.caption_and_hashtag_review === "pass"
+      : qa.output_native_slides_checked === exact.slides)
     && output.platform === exact.platform
     && output.platform_output_type === exact.type
     && output.output_status === "Ready for Review"
@@ -151,8 +170,8 @@ export function nycOwnerGalleryApprovalEligible(output) {
     && !bag.IG_Carousel_Parent_Container_ID
     && !bag.Studio_Publish_Dispatch_Count
     && !bag.Publish_Attempt_Count
-    && qa.subject_verified === true
-    && qa.caption_and_hashtag_review === "pass"
+    && (chicago ? qa.source_location_metadata_verified === true
+      : qa.subject_verified === true && qa.caption_and_hashtag_review === "pass")
     && qa.factory_final_approval === false
     && qa.publishing_authorized === false
     && bag.SM_2618_Creative_QA_Hold?.publishing_permitted !== false;
@@ -178,7 +197,8 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
   // Verify ALL independent exact link, order, 4:5 CDN, selected/render
   // manifest, source lineage and READY guards without declaring human approval.
   const technical = inspectNativeGalleryPublicationPackage(output, asIfFinal);
-  const expected = NYC_FACTORY_FINAL_REVIEW.get(String(output.airtable_record_id)).slides;
+  const chicago = chicagoReviewEntry(output);
+  const expected = (chicago || NYC_FACTORY_FINAL_REVIEW.get(String(output.airtable_record_id))).slides;
   if (!technical.eligible || technical.slide_count !== expected) {
     throw Error("Native gallery preapproval blocked: "
       + (technical.eligible ? "native_gallery_verified_slide_count_mismatch" : technical.reason)
@@ -186,9 +206,16 @@ export async function preflightNycOwnerGalleryApproval(env, output) {
   }
   for (const slide of slides) {
     const f = slide.fields || {};
-    const qa = f.SM_NYC_AI_Creative_QA_20261122 || {};
+    const qa = chicago ? (f.SM_Chicago_Gallery_Repair_2890 || {}) : (f.SM_NYC_AI_Creative_QA_20261122 || {});
+    const chicagoId = "sb-native:2294:" + output.output_number + ":" + String(slide.current_order).padStart(2,"0");
+    const chicagoUrl = "https://media.chicagoshining.com/studio/previews/repairs/issue2890/chicago-"
+      + chicago?.content + "/slide-" + String(slide.current_order).padStart(2,"0")
+      + "-" + String(qa.verified_branded_sha256 || "").slice(0,16) + ".jpg";
     if (!UUID.test(String(slide.id || "")) || !slide.updated_at
-        || !RECOVERED_SLIDE_RECORD.test(String(slide.airtable_record_id || ""))
+        || (chicago ? slide.airtable_record_id !== chicagoId
+          || f["Aspect Ratio"] !== "4:5" || f["Final Image URL"] !== chicagoUrl
+          || qa.visual_qa_pending !== true || f.SM_Native_Gallery_Draft_Repair_2294 != null
+          : !RECOVERED_SLIDE_RECORD.test(String(slide.airtable_record_id || "")))
         || qa.brand_verified !== true || qa.source_owner_rights_verified !== true
         || qa.publishing_authorized !== false
         || !SHA256.test(String(qa.verified_branded_sha256 || ""))
@@ -223,6 +250,7 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
     throw Error("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
   }
   const now = new Date().toISOString();
+  const chicago = chicagoReviewEntry(output);
   for (const slide of proof.slides) {
     const f = slide.fields;
     if (f["Approved For Final"] === true && f.Shared_Asset_Approved === true) continue;
@@ -231,7 +259,7 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
       "Approved For Final": true,
       Shared_Asset_Approved: true,
       "Review Status": "Final Approved",
-      SM_Factory_NYC_Final_Slide_Approval_2371: {
+      [chicago ? "SM_Factory_Chicago_Final_Slide_Approval_2890" : "SM_Factory_NYC_Final_Slide_Approval_2371"]: {
         at: now,
         actor_record_id: approvedByUserRecordId,
         actor_provenance: "new_authenticated_factory_approve_click",
@@ -239,7 +267,7 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
         output_number: output.output_number,
         slide_order: slide.current_order,
         exact_final_image_url: f["Final Image URL"],
-        source_sha256: f.SM_NYC_AI_Creative_QA_20261122.verified_branded_sha256,
+        source_sha256: (chicago ? f.SM_Chicago_Gallery_Repair_2890 : f.SM_NYC_AI_Creative_QA_20261122).verified_branded_sha256,
         provider_writes: 0,
       },
     };

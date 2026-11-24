@@ -1616,3 +1616,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-23 #2890 protected Worker release 0.10.1027-factory-native-inventory-2890: exact bounded Supabase native gallery slide inventory required for Factory approval eligibility; no writes, no provider actions, preserve existing approval gates, all publishing holds and #2670 safeguards. Missing/invalid inventory stays in repair; do not claim six galleries repaired. Protected deployment and read-only live verification required.
 
 2026-11-24 UTC — #2888: exact Google OAuth transport/HTTP diagnostics and explicit form encoding, after independent runner OAuth and three original file checks passed. Trigger protected release only after PR safety checks; preserve all three Google secret bindings and production rollback gates.
+
+2026-11-24 #2890 protected Worker release 0.10.1028: exact six Chicago gallery human approval bridge. 19 branded source derivatives/38 pending exact slide associations proven in workflow 45321546557; new authenticated Factory request after hold release only. Never auto-approve, schedule or publish on deployment. Preserve all existing safeguards.

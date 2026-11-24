@@ -84,8 +84,9 @@ function wire(t,slides,{conflictAt=0}={}) {
     const body=JSON.parse(opts.body);
     assert.equal(u.searchParams.get("updated_at"),"eq."+target.updated_at);
     assert.equal(u.searchParams.get("airtable_record_id"),"eq."+target.airtable_record_id);
-    assert.equal(body.fields.SM_Factory_NYC_Final_Slide_Approval_2371.actor_record_id,actor);
-    assert.equal(body.fields.SM_Factory_NYC_Final_Slide_Approval_2371.provider_writes,0);
+    const approval=body.fields.SM_Factory_NYC_Final_Slide_Approval_2371 || body.fields.SM_Factory_Chicago_Final_Slide_Approval_2890;
+    assert.equal(approval.actor_record_id,actor);
+    assert.equal(approval.provider_writes,0);
     if(conflictAt===target.current_order)return Response.json([]);
     target.fields=structuredClone(body.fields);
     target.updated_at=body.updated_at;
@@ -220,5 +221,57 @@ test("#2371 historic Factory batch predating owner hold release cannot final-app
     requestId:"old-failed-factory-request",approvedByUserRecordId:actor,
     submittedAt:"2026-11-22T05:44:56Z",
   }),/AFTER the owner hold release/);
+  assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+});
+
+const chicagoPairs = [["recbzkRN1wyWoBjOn",11129,"Instagram","Instagram Carousel",4,2297],["recpycdsTXLBTD5s6",11130,"Facebook","Facebook Photo Set",4,2297],["rec9hMlB2fBjbdHED",11131,"Instagram","Instagram Carousel",5,2298],["rec7ZBwpvup8CDp7x",11132,"Facebook","Facebook Photo Set",5,2298],["recxl6v6xS9hJGuh3",11136,"Instagram","Instagram Carousel",10,2299],["recg1e2fiwy8wnPpG",11137,"Facebook","Facebook Photo Set",10,2299]];
+function chicagoFixture(pair){
+  const {output,slides}=fixture(pair);
+  output.content_number=pair[5]; output.aspect_ratio="4:5";
+  output.error_messages={SM_Chicago_Gallery_Repair_2890:{
+    stage:"owned_branded_review_ready",workflow_run:45321546557,
+    slide_count:pair[4],visual_qa_pending:true,source_location_metadata_verified:true,
+    caption_and_hashtag_review:"pass",factory_final_approval:false,publishing_authorized:false,
+  }};
+  for(const slide of slides){
+    const n=slide.current_order,hash=String(n).padStart(64,"a");
+    const href="https://media.chicagoshining.com/studio/previews/repairs/issue2890/chicago-"+pair[5]+"/slide-"+String(n).padStart(2,"0")+"-"+hash.slice(0,16)+".jpg";
+    slide.airtable_record_id="sb-native:2294:"+pair[1]+":"+String(n).padStart(2,"0");
+    slide.fields["Aspect Ratio"]="4:5";
+    slide.fields["Final Image URL"]=href;slide.fields.Asset_4x5_Public_URL=href;
+    delete slide.fields.SM_NYC_AI_Creative_QA_20261122;
+    slide.fields.SM_Chicago_Gallery_Repair_2890={brand_verified:true,source_owner_rights_verified:true,publishing_authorized:false,visual_qa_pending:true,verified_branded_sha256:hash};
+    output.selected_assets.selected_clips[n-1].url=href;
+    output.render_clip_list[n-1].url=href;
+  }
+  return {output,slides};
+}
+for(const pair of chicagoPairs){
+  test("#2890 "+pair[1]+" exact technically verified gallery awaits new human Factory approval",async t=>{
+    const {output,slides}=chicagoFixture(pair);
+    const calls=wire(t,slides);
+    assert.equal(nycOwnerGalleryApprovalEligible(output),true);
+    assert.equal((await preflightNycOwnerGalleryApproval(env,output)).pending,pair[4]);
+    assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+    await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{requestId:"factory-old-2890",approvedByUserRecordId:actor,submittedAt:"2026-11-22T04:00:00Z"}),/AFTER the owner hold release/);
+    assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+    const result=await finalizeNycOwnerGalleryOnFactoryClick(env,output,{requestId:"factory-new-2890",approvedByUserRecordId:actor,submittedAt:"2026-11-23T04:45:00Z"});
+    assert.equal(result.eligible,true);
+    assert.equal(calls.filter(c=>c.method==="PATCH").length,pair[4]);
+    assert.equal(output.auto_publish_enabled,false);
+    assert.equal(output.output_status,"Ready for Review");
+  });
+}
+test("#2890 held draft cannot be approved; a stale draft marker or forged SHA path fails closed",async t=>{
+  const {output,slides}=chicagoFixture(chicagoPairs[0]);
+  const calls=wire(t,slides);
+  output.do_not_publish=true;
+  assert.equal(await preflightNycOwnerGalleryApproval(env,output),null);
+  output.do_not_publish=false;
+  slides[0].fields.SM_Native_Gallery_Draft_Repair_2294={publishing_authorized:false};
+  await assert.rejects(preflightNycOwnerGalleryApproval(env,output),/independent slide evidence/);
+  delete slides[0].fields.SM_Native_Gallery_Draft_Repair_2294;
+  slides[0].fields.SM_Chicago_Gallery_Repair_2890.verified_branded_sha256="b".repeat(64);
+  await assert.rejects(preflightNycOwnerGalleryApproval(env,output),/independent slide evidence/);
   assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
 });

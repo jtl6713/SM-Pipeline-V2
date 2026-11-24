@@ -25,7 +25,7 @@ const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 // Exact Factory read: avoid downloading multi-MB Remotion props, media manifests
 // and analytics for every item in a 20-output approval batch.
 const FACTORY_APPROVAL_SELECT = [
-  "id", "airtable_record_id", "output_number",
+  "id", "airtable_record_id", "output_number", "content_number", "aspect_ratio",
   "content_item_id", "content_item_airtable_id", "content_profile_id",
   "platform", "format", "studio_output_type", "platform_output_type",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
