@@ -1,0 +1,75 @@
+name: Weekly Issue Closure Review
+
+on:
+  schedule:
+    # Mondays 15:00 UTC = 09:00 CST / 10:00 CDT in Chicago.
+    - cron: '0 15 * * 1'
+  workflow_dispatch:
+    inputs:
+      apply_verified_closures:
+        description: 'Close ONLY opt-in, owner-accepted issues with verified release evidence'
+        type: boolean
+        default: false
+        required: false
+  pull_request:
+    paths:
+      - 'scripts/weekly_issue_closure_review.py'
+      - 'scripts/test_weekly_issue_closure_review.py'
+      - '.github/workflows/weekly-issue-closure-review.yml'
+  push:
+    branches: [main]
+    paths:
+      # One post-install dry run for auditable first-run report. Production
+      # changes later still trigger dry-run, not automatic issue closure.
+      - 'scripts/weekly_issue_closure_review.py'
+      - 'scripts/test_weekly_issue_closure_review.py'
+      - '.github/workflows/weekly-issue-closure-review.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-issue-closure-review-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  closure-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Ensure auto-closure policy fails closed on incomplete or unverified work
+        run: python -m unittest discover -s scripts -p 'test_weekly_issue_closure_review.py' -v
+
+  weekly-review:
+    needs: closure-unit-tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      CLOSURE_APPROVERS: 'jtl6713'
+      APPLY_VERIFIED: ${{ github.event_name == 'schedule' || inputs.apply_verified_closures == true }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Audit all open issues and write the permanent weekly report
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$APPLY_VERIFIED" == "true" ]]; then
+            args+=(--apply)
+          fi
+          python scripts/weekly_issue_closure_review.py --report-issue 2885 "${args[@]}"
