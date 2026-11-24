@@ -150,126 +150,7 @@ function Get-I1BusyCount {
   }
   $code = 'import sqlite3,sys; from pathlib import Path; db=sqlite3.connect(Path(sys.argv[1]).resolve().as_uri()+"?mode=ro",uri=True,timeout=3); print(db.execute("SELECT count(*) FROM jobs WHERE status IN (''queued'',''running'')").fetchone()[0]); db.close()'
   $value = & python -c $code $dbPath
-  if ($LASTEXITCODE -ne 0 -or ([string]$value) -notmatch '^\d+
-  return Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' `
-    -Headers $script:runnerHeaders -TimeoutSec 20
-}
-
-if (-not (Test-Path -LiteralPath $envPath)) { throw 'incident2853_runner_env_missing' }
-$secret = Read-Setting 'PIPELINE_RUNNER_SHARED_SECRET'
-$script:sb = (Read-Setting 'SUPABASE_URL').TrimEnd('/')
-$sbKey = Read-Setting 'SUPABASE_SERVICE_ROLE_KEY'
-$script:runnerHeaders = @{'X-Pipeline-Secret' = $secret}
-$script:sbHeaders = @{apikey = $sbKey; Authorization = "Bearer $sbKey"}
-
-try {
-  $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
-  if ($health.ok -ne $true -or $health.service -ne 'pipeline-runner' -or
-      $health.studio_write_source -ne 'supabase' -or
-      $health.supabase_pipeline_writes -ne $true -or
-      $health.workload_governor_enabled -ne $true -or
-      $health.recovery_read_only -ne $false -or
-      (-not $NormalClosedRecovery -and $health.i1_durable_jobs -ne $false) -or
-      $health.airtable_activity.any_activity -ne $false -or
-      $health.studio_native_gallery_companion_2873 -ne $true) {
-    throw 'incident2853_runner_health_gate_failed'
-  }
-
-  # Wait for existing crop/producer work to leave every shared slot. Nothing is
-  # submitted while the protected runner is active or while its circuit is open.
-  $work = $null
-  for ($attempt = 1; $attempt -le 60; $attempt++) {
-    $work = Get-Workload
-    $resourceTotal = 0
-    foreach ($property in $work.active_resource_slots.PSObject.Properties) {
-      $resourceTotal += [int]$property.Value
-    }
-    $i1Busy = 0
-    if ($NormalClosedRecovery -and $health.i1_durable_jobs -eq $true) {
-      $i1Busy = Get-I1BusyCount
-    }
-    if ($i1Busy -eq 0 -and $work.enabled -eq $true -and $work.max_jobs -eq 1 -and
-        $work.active_jobs -eq 0 -and $work.queued_jobs -eq 0 -and
-        $work.paused_jobs -eq 0 -and $work.active_worker_heavy -eq 0 -and
-        $resourceTotal -eq 0 -and $work.database_circuit_phase -ne 'open' -and
-        $work.admission_paused -eq $false) {
-      break
-    }
-    if ($attempt -eq 60) { throw 'incident2853_governor_not_idle' }
-    Start-Sleep -Seconds 5
-  }
-
-  if ($work.database_circuit_phase -eq 'closed' -and -not $NormalClosedRecovery) {
-    Write-Output 'incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED'
-    exit 0
-  }
-  if ($NormalClosedRecovery -and $work.database_circuit_phase -ne 'closed') {
-    throw 'incident2853_normal_resume_requires_closed_circuit'
-  }
-  if (-not $NormalClosedRecovery -and $work.database_circuit_phase -ne 'half_open') {
-    throw 'incident2853_unexpected_circuit_phase'
-  }
-
-  $beforeRequest = Get-RequestRow
-  $beforeOutputs = @(Get-OutputRows)
-  Assert-Baseline $beforeRequest $beforeOutputs
-  if ($NormalClosedRecovery) {
-    Write-Output 'incident2853_probe_preflight=PASS_CAP1_CLOSED_EXACT_BASELINE'
-  } else {
-    Write-Output 'incident2853_probe_preflight=PASS_CAP1_HALF_OPEN_EXACT_BASELINE'
-  }
-
-  # Exactly one governed submission. Never retry an accepted or ambiguous POST.
-  $body = @{production_request_record_id = $requestId; resume = $true} |
-    ConvertTo-Json -Compress
-  $answer = Invoke-RestMethod -Method POST `
-    -Uri 'http://127.0.0.1:3350/jobs/studio-produce/resume' `
-    -Headers $script:runnerHeaders -ContentType 'application/json' `
-    -Body $body -TimeoutSec 60
-  if ($answer.ok -ne $true -or $answer.accepted -ne $true -or
-      $answer.production_request_record_id -ne $requestId -or
-      $answer.queued -ne $true) {
-    throw 'incident2853_exact_probe_not_accepted'
-  }
-  Write-Output 'incident2853_probe_submit=ACCEPTED_ONCE'
-
-  $settled = $false
-  for ($attempt = 1; $attempt -le 150; $attempt++) {
-    Start-Sleep -Seconds 5
-    $work = Get-Workload
-    if ($work.max_jobs -ne 1 -or $work.active_jobs -gt 1 -or
-        $work.active_worker_heavy -gt 0 -or $work.database_circuit_phase -eq 'open') {
-      throw 'incident2853_post_submit_safety_gate_failed'
-    }
-    $requestRow = Get-RequestRow
-    $step = [string]$requestRow.production_job.step
-    if ($step -in @('blocked', 'escalated')) {
-      throw "incident2853_probe_terminal_failure_$step"
-    }
-    if ($work.database_circuit_phase -eq 'closed' -and
-        $work.active_jobs -eq 0 -and $work.queued_jobs -eq 0 -and
-        $work.paused_jobs -eq 0 -and $step -eq 'done') {
-      $settled = $true
-      break
-    }
-  }
-  if (-not $settled) { throw 'incident2853_probe_settle_timeout_no_retry' }
-
-  $afterRequest = Get-RequestRow
-  $afterOutputs = @(Get-OutputRows)
-  Assert-Recovered $afterRequest $afterOutputs
-  if ($NormalClosedRecovery) {
-    Write-Output 'incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED'
-  } else {
-    Write-Output 'incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED'
-  }
-  Write-Output 'incident2853_bryant_factory_packages=PASS_10853_10854_HUMAN_REVIEW_REQUIRED'
-  Write-Output 'incident2853_safety=CAP1_ZERO_APPROVAL_SCHEDULE_PUBLISH'
-}
-finally {
-  Remove-Variable secret, sbKey, runnerHeaders, sbHeaders -Scope Script -ErrorAction SilentlyContinue
-}
-) {
+  if ($LASTEXITCODE -ne 0 -or ([string]$value) -notmatch '^\d+$') {
     throw 'incident2853_i1_spool_read_failed'
   }
   return [int]$value
@@ -309,7 +190,11 @@ try {
     foreach ($property in $work.active_resource_slots.PSObject.Properties) {
       $resourceTotal += [int]$property.Value
     }
-    if ($work.enabled -eq $true -and $work.max_jobs -eq 1 -and
+    $i1Busy = 0
+    if ($NormalClosedRecovery -and $health.i1_durable_jobs -eq $true) {
+      $i1Busy = Get-I1BusyCount
+    }
+    if ($i1Busy -eq 0 -and $work.enabled -eq $true -and $work.max_jobs -eq 1 -and
         $work.active_jobs -eq 0 -and $work.queued_jobs -eq 0 -and
         $work.paused_jobs -eq 0 -and $work.active_worker_heavy -eq 0 -and
         $resourceTotal -eq 0 -and $work.database_circuit_phase -ne 'open' -and
