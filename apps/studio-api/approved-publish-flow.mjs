@@ -3,6 +3,7 @@
  * This is deliberately NOT the backlog recovery gate: any ambiguous historical
  * dispatch must be verified against its provider before it can be retried.
  */
+import { STORY_2915_ID, story2915DispatchFence } from "./story-expired-generation-2915.mjs";
 const field = (r, name, snake) => r?.fields?.[name] ?? r?.[snake] ?? r?.error_messages?.[name] ?? null;
 const str = v => String(v ?? "").trim();
 const checked = v => v === true || v === 1 || str(v).toLowerCase() === "true";
@@ -27,6 +28,7 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
       present(read("Platform_Post_URL", "platform_post_url")) ||
       present(read("Manual_Published_URL", "manual_published_url"))) return block("existing_publication_receipt");
 
+  if(row.id===STORY_2915_ID){try{story2915DispatchFence(row)}catch{return block("expired_story_replacement_generation_unverified")}}
   // An old approval-time "scheduled-hold" was incorrectly counted as
   // dispatch #1 before the due time. Do not erase that historical marker.
   // Only explicit, immutable, per-output reconciliation proof may admit that
