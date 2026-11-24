@@ -343,7 +343,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1090-factory-rejected-fence-2371";
+  const BUILD_ID = "item4-0.6.1091-pipeline-photo-preview-2873";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23463,10 +23463,13 @@ function timedScriptAssetLabel(asset, index) {
       const publishNowButton = pipelineCanPublishNow(r)
         ? `<button type="button" class="primary-button pipeline-publish-now" data-pipeline-publish-now="${escapeHtml(r.id)}" title="Publish this output now. This overrides its scheduled time. Instagram, Facebook, and YouTube may go public. TikTok stays a draft."${pipelinePublishNowPending.has(r.id) ? " disabled" : ""}>Publish Now</button>`
         : "";
+      const galleryPreviewButton = canOpen && window.StudioPipelineGallery?.isGallery(r)
+        ? `<button type="button" class="creative-button pipeline-photo-preview-button" data-pipeline-photo-preview="${escapeHtml(r.id)}" title="Review ordered photos in this exact output">View photos</button>`
+        : "";
       const rowOpen = canOpen
         ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
         : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
-      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell">${publishNowButton}<button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
+      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell">${publishNowButton}<button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${galleryPreviewButton}${moreMenu}</td></tr>`;
     };
 
     const body = (() => {
@@ -23600,6 +23603,23 @@ function timedScriptAssetLabel(asset, index) {
         });
       });
       refreshPipelineScheduleSuggestions(source);
+      target.querySelectorAll("[data-pipeline-photo-preview]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = button.dataset.pipelinePhotoPreview;
+          const record = (pipelineOutputs || []).find(row => row.id === id);
+          if (!record || !window.StudioPipelineGallery?.isGallery(record)) return;
+          const profileAtRequest = selectedProfileId;
+          const revisionAtRequest = profileFeedbackRevision;
+          void window.StudioPipelineGallery.open({
+            recordId: id,
+            label: `${record.platform} · ${record.output_title || record.content_title || "Photo package"} · #${record.output_id || ""}`,
+            load: () => api(`/api/outputs/${encodeURIComponent(id)}/creative`, { timeoutMs: 25000, retries: 0 }),
+            isCurrent: () => selectedProfileId === profileAtRequest && profileFeedbackRevision === revisionAtRequest,
+          });
+        });
+      });
       target.querySelectorAll("[data-pipeline-thumb-open]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.preventDefault();
@@ -23627,7 +23647,7 @@ function timedScriptAssetLabel(asset, index) {
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {
-          if (event.target.closest("input, select, textarea, details, summary, .pipeline-content-thumb-button")) return;
+          if (event.target.closest("input, select, textarea, details, summary, .pipeline-content-thumb-button, [data-pipeline-photo-preview]")) return;
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           openCreativeEditor(row.dataset.openOutputId);
