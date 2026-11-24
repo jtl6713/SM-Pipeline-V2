@@ -1478,7 +1478,8 @@
       prior.get(String(row.request_id || row.job_id || "")) || row);
     const known = new Set(rows.map(row => String(row.request_id || row.job_id || "")));
     const pending = (previous.batches || []).filter(row =>
-      row?.request_id && (row.group || row.profile_id) && factoryBatchActiveRow(row) &&
+      row?.request_id && (row.group || row.profile_id) &&
+      (factoryBatchActiveRow(row) || Number(row.failed_count || 0) > 0) &&
       !known.has(String(row.request_id)));
     return factoryBatchRecountActive(fetched, [...rows, ...pending]);
   }
@@ -2283,7 +2284,8 @@
       const filterId = factoryProfileId() || null;
       const knownGroups = state.batch?.filter_profile_id === filterId
         ? (state.batch?.batches || []).filter(row => row.request_id &&
-            (row.group || row.profile_id) && factoryBatchActiveRow(row)) : [];
+            (row.group || row.profile_id) &&
+              (factoryBatchActiveRow(row) || Number(row.failed_count || 0) > 0)) : [];
       const knownIds = new Set(knownGroups.map(row => row.request_id));
       // After reload there may be no state.batch yet. An accepted group is
       // recoverable from the same original R2 request without re-submitting.
