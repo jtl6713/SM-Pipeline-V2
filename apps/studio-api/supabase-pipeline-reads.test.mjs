@@ -2117,7 +2117,7 @@ test("phase 6 queue write-through keeps status and a Drive id and drops source U
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
-    return { ok: true, async text() { return ""; } };
+    return { ok: true, async text() { return (init?.method || "GET") === "GET" ? "[]" : ""; } };
   };
   try {
     const result = await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
@@ -6721,7 +6721,7 @@ test("Master Original queue write-through retains R2 locator without copying vid
   const prior = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
-    return { ok: true, async text() { return ""; } };
+    return { ok: true, async text() { return (init?.method || "GET") === "GET" ? "[]" : ""; } };
   };
   try {
     await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
