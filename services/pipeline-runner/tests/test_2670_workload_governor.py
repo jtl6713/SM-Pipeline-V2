@@ -606,6 +606,14 @@ def test_dead_database_owner_reclaimed_without_waiting_twenty_minutes(isolated_g
             ("supabase_write", "dead", "old", now + g.LEASE_SECONDS - g.DB_DEAD_OWNER_GRACE_SECONDS - 1, 99999),
         )
     monkeypatch.setattr(g, "_process_definitely_exited", lambda pid: pid == 99999)
+    with pytest.raises(g.AdmissionDeferred):
+        with g.resource_slot("supabase_write", limit=1, wait_seconds=0):
+            pytest.fail("first observed death must start grace, not reclaim")
+    with g._connect() as db:
+        seen = db.execute("SELECT owner_dead_seen_at FROM resource_leases WHERE lease_key='dead'").fetchone()
+        assert seen[0] is not None
+        db.execute("UPDATE resource_leases SET owner_dead_seen_at=? WHERE lease_key='dead'",
+                   (time.time() - g.DB_DEAD_OWNER_GRACE_SECONDS - 1,))
     with g.resource_slot("supabase_write", key="replacement", limit=1, wait_seconds=0):
         assert g.resource_active("supabase_write", "replacement")
         assert not g.resource_active("supabase_write", "dead")
@@ -670,3 +678,18 @@ def test_legacy_resource_schema_migration_preserves_existing_leases(isolated_gov
         row = db.execute("SELECT lease_key,owner_pid FROM resource_leases").fetchone()
     assert row == ("legacy", None)
     assert g.resource_active("supabase_read", "legacy")
+
+
+def test_reused_or_unknown_pid_clears_dead_observation(isolated_governor, monkeypatch):
+    g = isolated_governor
+    with g._connect() as db:
+        db.execute(
+            "INSERT INTO resource_leases(scope,lease_key,token,lease_until,owner_pid,owner_dead_seen_at) VALUES(?,?,?,?,?,?)",
+            ("supabase_read", "prior", "old", time.time() + 500, 99999, time.time() - 200),
+        )
+    monkeypatch.setattr(g, "_process_definitely_exited", lambda pid: False)
+    with pytest.raises(g.AdmissionDeferred):
+        with g.resource_slot("supabase_read", limit=1, wait_seconds=0):
+            pytest.fail("unknown or reused live PID is not death evidence")
+    with g._connect() as db:
+        assert db.execute("SELECT owner_dead_seen_at FROM resource_leases WHERE lease_key='prior'").fetchone() == (None,)
