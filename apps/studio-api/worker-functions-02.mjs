@@ -5733,18 +5733,12 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
   );
 
   const companionStory = String(f(outputRow, "Output_Type") || "").trim() === "Story";
-  const hasVoiceOverride = ["Yes", "No", "Use Profile Default"].includes(
-    String(f(outputRow, "Voiceover_Mode_Override") || "").trim()
-  );
-  const hasMusicOverride = ["Yes", "No", "Use Profile Default"].includes(
-    String(f(outputRow, "Background_Music_Mode_Override") || "").trim()
-  );
   const effective = {
     platform: String(f(outputRow, "Platform") || "").trim(),
     output_type: String(f(outputRow, "Output_Type") || "").trim(),
     route,
 
-    voiceover_mode: companionStory && !hasVoiceOverride ? "No" : resolvedOutputTriState(
+    voiceover_mode: resolvedOutputTriState(
       outputRow,
       "Voiceover_Mode_Override",
       requestRecord,
@@ -5752,7 +5746,7 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
       profileDefaults.include_voiceover,
       f(parentContentItem, "Include_Voiceover")
     ),
-    background_music_mode: companionStory && !hasMusicOverride ? "Yes" : resolvedOutputTriState(
+    background_music_mode: resolvedOutputTriState(
       outputRow,
       "Background_Music_Mode_Override",
       requestRecord,
@@ -7213,7 +7207,7 @@ export function item4StudioSourcePackageForOutput(requestRecord, outputRow, effe
     brand_text: brandText,
     music_url: String(effective?.music?.url || "").trim(),
     music_volume: String(effective?.music?.url || "").trim() ? STUDIO_DEFAULT_MUSIC_VOLUME : 0,
-    voiceover_url: item4StudioDirectiveYes(effective?.voiceover_mode)
+    voiceover_url: !storyTeaser && item4StudioDirectiveYes(effective?.voiceover_mode)
       ? String(f(parentContentItem, "Voiceover_URL") || "").trim()
       : "",
     render_total_frames: totalFrames,
@@ -7522,7 +7516,7 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Output_Notes: [
       `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
       effective.output_type === "Story"
-        ? `Companion 10-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
+        ? `Companion 10-second Story teaser from the first photo, slight zoom, independently timed audio per requested defaults. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
         : "",
     ].filter(Boolean).join(" "),
     Asset_Need_Status: "Not Needed",
@@ -7579,8 +7573,7 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Requested_Carousel_Slide_Count_Max: effective.carousel_slide_count_mode === "Target range" ? effective.carousel_slide_count_max : null,
     Studio_Effective_Carousel_Image_Mode: effective.carousel_image_mode,
     Preferred_Music_Media_Asset_ID: effective.music?.record_id || null,
-    // Companion Stories intentionally have no narration but MUST retain music.
-    // Only finished-video passthrough forbids a new soundtrack overlay.
+    // Respect per-output audio intent; finished-video passthrough keeps its separate policy.
     Preferred_Music_URL: studioIsFinishedPassthrough(requestRecord)
       ? null : (effective.music?.url || null),
     Music_URL: studioIsFinishedPassthrough(requestRecord)
@@ -7591,7 +7584,7 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
       ? null : (effective.music?.record_id || null),
     Music_Volume: studioIsFinishedPassthrough(requestRecord)
       ? 0 : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
-    Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
+    Voiceover_URL: effective.output_type !== "Story" && item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
     ...(sourcePackage?.story_teaser ? {} : studioFinishedSeedOverlay(requestRecord, clips, nativeReady)),
