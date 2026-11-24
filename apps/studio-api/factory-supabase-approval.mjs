@@ -37,9 +37,24 @@ const FACTORY_APPROVAL_SELECT = [
   "platform_publish_response",
 ].join(",");
 const UUID = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
-const satisfied = row => ["Approved for Publishing", "Published"].includes(String(row?.output_status || ""))
+const priorApprovalState = row => ["Approved for Publishing", "Published"].includes(String(row?.output_status || ""))
   || String(row?.review_status || "") === "Approved"
   || String(row?.publish_status || "") === "Published";
+// An old approval label alone is not evidence of current completion. Fail
+// closed for contradictory/held/unscheduled states, without reapproving or
+// changing the existing schedule/provider receipt.
+const satisfied = row => {
+  if (row?.output_status === "Published" && row.publish_status === "Published")
+    return Number.isFinite(Date.parse(String(row.published_at || ""))) && Boolean(row.platform_post_url);
+  if (row?.output_status !== "Approved for Publishing" || row.review_status !== "Approved"
+      || !["Ready to Schedule", "Ready to Publish", "Publishing"].includes(row.publish_status)
+      || row.do_not_publish !== false || row.auto_publish_enabled !== true
+      || !Number.isFinite(Date.parse(String(row.scheduled_post_date || "")))) return false;
+  const release = Date.parse(String(row.publish_hold_released_at || ""));
+  const receipt = row.error_messages?.SM_Factory_Supabase_Approval_Receipt;
+  return !Number.isFinite(release) || (Number.isFinite(Date.parse(String(receipt?.approved_at || "")))
+    && Date.parse(receipt.approved_at) >= release);
+};
 const validIds = ids => {
   const unique = [...new Set((ids || []).map(id => String(id || "").trim()))];
   if (!unique.length || unique.length > 20 || unique.some(id => !RECORD_ID.test(id))) {
@@ -131,6 +146,7 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (row.error_messages?.SM_2618_Creative_QA_Hold?.publishing_permitted === false)
     return { eligible: false, reason: "unresolved creative QA media correction; no approval permitted" };
   if (satisfied(row)) return { eligible: true, already_satisfied: true };
+  if (priorApprovalState(row)) return { eligible: false, reason: "Existing approval lacks verified current scheduling or publication evidence; reconcile before retrying" };
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
   const readiness = evaluateReviewPackage(record);
