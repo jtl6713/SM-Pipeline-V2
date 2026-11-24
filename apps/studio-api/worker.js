@@ -2353,6 +2353,30 @@ export default {
       if (isQaRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "POST") assertWriteRequest(request, env);
+        // Exact operator-triggered Quality Agent canary. Same detector and
+        // fenced repair adapter as cron; never a human approval operation.
+        if(url.pathname==="/api/admin/qa/quality-native-repair/run"&&request.method==="POST"){
+          if(env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED==="true"||env.QUALITY_NATIVE_MEDIA_REBUILD_ENABLED!=="true"
+            ||studioWriteSource(env)!=="supabase"||!studioSupabaseConfigured(env))
+            throw new HttpError(503,"Quality native repair is disabled");
+          const target=String(env.QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID||"");
+          if(!/^rec[A-Za-z0-9]{14}$/.test(target))throw new HttpError(503,"Exact canary is not configured");
+          if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+            throw new HttpError(415,"JSON required");
+          if(request.headers.get("Content-Length")&&Number(request.headers.get("Content-Length"))>256)
+            throw new HttpError(413,"Request too large");
+          const raw=await request.text();
+          if(raw.length>256)throw new HttpError(413,"Request too large");
+          let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+          if(!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body).length!==1||body.record_id!==target)
+            throw new HttpError(400,"Exact configured record required");
+          const result=await runQualityFactoryHandoffCron({
+            read:path=>adminHoldSupabaseRest(env,path),limit:4,canaryRecordId:target,
+            repair:report=>recoverNativeReviewWithRebuild(env,report),
+            logger:receipt=>console.info("QA_FACTORY_HANDOFF_MANUAL_2853",JSON.stringify(receipt)),
+          });
+          return respond(request,env,{...result,requires_human_approval:true});
+        }
         return await handleQaApi({request,url,env,authorization,airtableFetch,respond});
       }
 
