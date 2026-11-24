@@ -267,6 +267,21 @@ class NegativeOnlyWorkflowTest(unittest.TestCase):
         self.write(name, guard)
         self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
 
+    def test_literal_loop_variable_message_is_safe_but_other_names_are_not(self):
+        name = "issue2915-native-variant-stage.yml"
+        guard = (
+            "for forbidden in ('__AIRT_HOST__','graph.facebook.com','media_publish','requests.post'):\n"
+            "    assert forbidden not in s, forbidden\n"
+        )
+        self.write(name, guard)
+        self.assertEqual(unexpected_references(self.root, (AIRT_HOST,)), [])
+        self.write(name, guard + "curl https://__AIRT_HOST__/v0/data\n")
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        self.write(name, guard.replace(", forbidden", ", other"))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+        self.write(name, guard.replace(", forbidden", ", requests.post()"))
+        self.assertTrue(unexpected_references(self.root, (AIRT_HOST,)))
+
     def test_unknown_workflow_is_never_exempt(self):
         self.write("new-provider-hook.yml", "curl https://__AIRT_HOST__/v0/foo\n")
         self.assertGreaterEqual(len(unexpected_references(self.root, (AIRT_HOST,))), 1)
