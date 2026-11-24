@@ -1681,6 +1681,17 @@ def stamp_fields(
     if native:
         from studio_produce.native_gallery import meta_gallery, AUTHORITY
         selection = parse_json(field({"fields":{"Selected_Assets_JSON":package.get("selected_assets_json")}}, "Selected_Assets_JSON"), {}) or {}
+        # The selected platform variant is authoritative for owned native stills.
+        # Persist its ratio on the output itself; Creative GET reads this typed
+        # field, not the manifest's ratio (#2873 TikTok 19-photo regression).
+        ratio = str(package.get("ratio") or "").strip()
+        if (selection.get("authority") == AUTHORITY
+                and ratio in {"9:16", "4:5", "1:1", "16:9"}
+                and selection.get("aspect_ratio") == ratio
+                and clips and len(clips) == package.get("clip_count")
+                and all(c.get("aspect_ratio") == ratio and c.get("media_kind") == "photo" for c in clips)
+                and not field_str(existing_record, "Aspect_Ratio")):
+            fields["Aspect_Ratio"] = ratio
         needs_links = (selection.get("authority") == AUTHORITY and meta_gallery(
             package.get("effective", {}).get("platform"), package.get("effective", {}).get("output_type"),
             field_str(existing_record, "Platform_Output_Type")))

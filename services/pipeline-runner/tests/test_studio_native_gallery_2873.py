@@ -151,3 +151,23 @@ def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(mon
     assert all("scheduled_post_date" not in p and "published_at" not in p for p in patches)
     assert [s["fields"]["Final Image URL"] for s in stored[:10]]==[s["fields"]["Final Image URL"] for s in stored[10:]]
     assert len(clips)==19 and len(crop_rows)==19
+
+
+def test_native_tiktok_stamps_missing_typed_ratio_without_truncating_photos():
+    from studio_produce.stamp import stamp_fields
+    clips = [{"order": i+1, "url": f"https://media.chicagoshining.com/studio/previews/item4/example/{i}.jpg",
+              "media_asset_record_id": f"rec{i:014d}", "aspect_ratio": "9:16",
+              "media_kind": "photo", "durationFrames": 30} for i in range(19)]
+    package = {"native": True, "ratio": "9:16", "clips": clips, "clip_count": 19,
+               "total_frames": 570, "effective": {"platform": "TikTok", "output_type": "Multi-Photo"},
+               "selected_assets_json": json.dumps({"authority": g.AUTHORITY, "aspect_ratio": "9:16",
+                                                    "selected_clips": clips}),
+               "render_clip_list_json": json.dumps(clips)}
+    fields = stamp_fields(package, None, existing={"fields": {"Platform": "TikTok", "Studio_Output_Type": "Multi-Photo"}})
+    assert fields["Aspect_Ratio"] == "9:16"
+    assert fields["Selected_Clip_Count"] == 19
+    assert fields["Output_Status"] == "Ready for Review"
+    assert len(json.loads(fields["Selected_Assets_JSON"])["selected_clips"]) == 19
+    assert "Aspect_Ratio" not in stamp_fields(package, None, existing={"fields": {"Aspect_Ratio": "9:16"}})
+    conflicting = {**package, "clips": [{**clips[0], "aspect_ratio": "4:5"}, *clips[1:]]}
+    assert "Aspect_Ratio" not in stamp_fields(conflicting, None)
