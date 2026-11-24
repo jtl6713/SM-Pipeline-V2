@@ -187,7 +187,11 @@ export async function rebuildWrongNativeReview(env,report,{
     const source=await sourcePackage(read,row);
     if(!source||!await claimSafe(source.profile,id,row.updated_at))return no("source_or_factory_claim_unverified");
     const token=crypto.randomUUID(),admission=await claim(source.idea,token);
-    if(!admission.admitted){await release(source.idea,token).catch(()=>{});return no("shared_admission_denied");}
+    if(!admission.admitted){
+      await release(source.idea,token).catch(()=>{});
+      return {...no("shared_admission_denied"),admission_reason:admission.reason||"unknown",
+        admission_http_status:admission.http_status??null};
+    }
     let pulse;
     try{
       pulse=heartbeat(source.idea,token);
