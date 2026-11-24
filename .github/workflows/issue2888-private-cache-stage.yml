@@ -31,7 +31,9 @@ jobs:
           w=Path('repair/scripts/issue2888-private-cache-stage-worker.mjs').read_text()
           assert all(k in p for k in ['CANONICAL_STATE_OR_SOURCE_CHANGED','ORIGINAL_HASH_SIZE_OR_MP4_MISMATCH','database_writes=0','provider_writes=0'])
           assert all(k in w for k in ['req.method!=="PUT"','Date.now()>EXPIRES','crypto.subtle.digest','etagDoesNotMatch:"*"','issue2618-verified-private-review','private, no-store'])
-          assert all(k not in p for k in ['requests.patch','requests.delete','requests.post','api.airtable.com','graph.facebook.com'])
+          s=p
+          for forbidden in ('requests.patch','requests.delete','requests.post','api.airtable.com','graph.facebook.com'):
+              assert forbidden not in s, forbidden
           assert 'env.PRIVATE_MEDIA.get(' not in w and 'env.PRIVATE_MEDIA.delete(' not in w
           print('issue2888_exact_scope_static_safety=PASS')
           PY
