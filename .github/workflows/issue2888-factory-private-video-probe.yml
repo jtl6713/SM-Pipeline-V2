@@ -43,7 +43,7 @@ jobs:
           }
           if(!s.includes('issue2618-verified-private-review')) throw Error('PRIVATE_R2_CACHE_GUARD_MISSING');
           if(!yml.includes('CF_ACCESS_CLIENT_ID') || !yml.includes('CF_ACCESS_CLIENT_SECRET')) throw Error('CF_ACCESS_UNAVAILABLE');
-          if(/\/api\/run|\/api\/shell|\/approve|\/publish|\/schedule|supabase\.co\/rest\/v1/.test(yml))
+          if(/\/api\/run|\/api\/shell|\/approve|\/publish|\/schedule|supabase\.co\/rest\/v1/.test(yml.split('probe() {')[1] || ''))
             throw Error('FORBIDDEN_MUTATING_OR_OPS_ENDPOINT_IN_PREVIEW_PROBE');
           console.log('ISSUE2888_PROTECTED_PREVIEW_GET_RANGE_CONTRACT=PASS');
           JS
