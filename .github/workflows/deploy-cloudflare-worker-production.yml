@@ -105,6 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if ! jq -e '.enabled==true' deploy/quality-native-rebuild-canary.json >/dev/null; then exit 0; fi
           code=$(curl -sS --max-time 20 -o /tmp/qa-native-route-denied.json -w '%{http_code}' \
             -X POST 'https://pipeline.chicagoshining.com/internal/quality/native-media-rebuild' \
             -H 'Content-Type: application/json' --data '{}')
@@ -359,12 +360,14 @@ jobs:
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          if qa!={'schema':'quality-native-manual-canary-v1','enabled':True,'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True}:
+          if type(qa.get('enabled')) is not bool or qa!={'schema':'quality-native-manual-canary-v1','enabled':qa['enabled'],'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True}:
               raise SystemExit('Unknown quality canary manifest')
-          if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID') or active_vars.get('QUALITY_FACTORY_HANDOFF_CRON_DISABLED')=='true':
-              raise SystemExit('Respect existing Quality Agent disable/other canary')
-          active_vars.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true',
-            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id']})
+          if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID'):
+              raise SystemExit('Respect existing other Quality Agent canary')
+          if qa['enabled'] and active_vars.get('QUALITY_FACTORY_HANDOFF_CRON_DISABLED')=='true':
+              raise SystemExit('Respect existing Quality Agent kill switch')
+          active_vars.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true' if qa['enabled'] else 'false',
+            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id'] if qa['enabled'] else ''})
           # Scoped, Git-reviewed publication reconciliation. An unattended
           # status correction is never enabled by inheriting stale Worker vars.
           import re
@@ -572,8 +575,8 @@ jobs:
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
           qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
-          expected.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true',
-            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id']})
+          expected.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true' if qa['enabled'] else 'false',
+            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id'] if qa['enabled'] else ''})
           expected['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
           expected['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
           recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
@@ -1364,8 +1367,9 @@ jobs:
           set -euo pipefail
           # Only the dedicated activation commit triggers this mutation, not
           # unrelated later production deployments.
+          if ! jq -e '.enabled==true' deploy/quality-native-rebuild-canary.json >/dev/null; then exit 0; fi
           git fetch --quiet --depth=2 origin "$GITHUB_SHA"
-          if ! git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -Fxq 'deploy/quality-native-rebuild-canary.json'; then
+          if ! git diff --name-only "$GITHUB_SHA^1" "$GITHUB_SHA" -- deploy/quality-native-rebuild-canary.json | grep -Fxq 'deploy/quality-native-rebuild-canary.json'; then
             echo 'quality_native_manual_run=not_requested_by_this_release'
             exit 0
           fi
