@@ -21,6 +21,9 @@ const DRAFT="SM_Native_Gallery_Draft_Repair_2294";
 const RECEIPT="SM_Factory_Review_Resolve_2907";
 const deny=(message,status=409)=>{throw Object.assign(Error(message),{status});};
 const enc=encodeURIComponent;
+export function reviewResolvePilotOutput(id) {
+  return REC.test(String(id||"")) && Object.hasOwn(EXACT,id);
+}
 export function reviewResolveCandidate(id,number,held,marker) {
   return held===true && EXACT[id]?.[0]===Number(number)
     && marker?.stage==="owned_branded_draft_materialized"
