@@ -1,3 +1,4 @@
+import "./factory-native-inventory-2890.test.mjs";
 import { combineHomeContributions, homeOutputContribution, homeIdeaContribution } from "./profile-summary-classification.mjs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
