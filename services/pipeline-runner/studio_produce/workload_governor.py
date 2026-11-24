@@ -157,6 +157,8 @@ def _connect() -> Iterator[sqlite3.Connection]:
                         resource_columns = {row[1] for row in init.execute("PRAGMA table_info(resource_leases)")}
                         if "owner_pid" not in resource_columns:
                             init.execute("ALTER TABLE resource_leases ADD COLUMN owner_pid INTEGER")
+                        if "owner_dead_seen_at" not in resource_columns:
+                            init.execute("ALTER TABLE resource_leases ADD COLUMN owner_dead_seen_at REAL")
                         init.commit()
                     except BaseException:
                         init.rollback()
@@ -560,15 +562,28 @@ def _reap_dead_db_owners(db: sqlite3.Connection, scope: str, now: float) -> int:
     """
     if scope not in _DB_REQUEST_SCOPES:
         return 0
-    rows = db.execute("""SELECT lease_key,token,owner_pid FROM resource_leases
-        WHERE scope=? AND owner_pid IS NOT NULL AND lease_until<=?""",
-        (scope, now + LEASE_SECONDS - DB_DEAD_OWNER_GRACE_SECONDS)).fetchall()
+    rows = db.execute("""SELECT lease_key,token,owner_pid,owner_dead_seen_at
+        FROM resource_leases WHERE scope=? AND owner_pid IS NOT NULL""",
+        (scope,)).fetchall()
     removed = 0
-    for key, token, pid in rows:
-        if _process_definitely_exited(pid):
+    for key, token, pid, dead_seen in rows:
+        identity = (scope, key, token, pid)
+        if not _process_definitely_exited(pid):
+            # PID reuse or inconclusive evidence invalidates the observation.
+            if dead_seen is not None:
+                db.execute("""UPDATE resource_leases SET owner_dead_seen_at=NULL
+                    WHERE scope=? AND lease_key=? AND token=? AND owner_pid=?""", identity)
+            continue
+        if dead_seen is None or dead_seen > now:
+            # Start the settling interval at observed death, NOT acquisition.
+            db.execute("""UPDATE resource_leases SET owner_dead_seen_at=?
+                WHERE scope=? AND lease_key=? AND token=? AND owner_pid=?""",
+                (now, *identity))
+            continue
+        if now - dead_seen >= DB_DEAD_OWNER_GRACE_SECONDS:
             removed += db.execute("""DELETE FROM resource_leases
                 WHERE scope=? AND lease_key=? AND token=? AND owner_pid=?""",
-                (scope, key, token, pid)).rowcount
+                identity).rowcount
     return removed
 
 
