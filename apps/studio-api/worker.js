@@ -6,6 +6,7 @@ import {
   shouldRunQualityFactoryHandoffCron,
   runQualityFactoryHandoffCron,
 } from "./quality-factory-handoff-cron.mjs";
+import { recoverOneVerifiedNativeReview } from "./quality-native-review-repair.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -4587,6 +4588,8 @@ export default {
       ctx.waitUntil(runQualityFactoryHandoffCron({
         read: path=>adminHoldSupabaseRest(env,path),
         limit:4,
+        canaryRecordId: env.QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID || null,
+        repair: report=>recoverOneVerifiedNativeReview(env,report),
         logger: receipt=>console.info("QA_FACTORY_HANDOFF_E2E_2846",
           JSON.stringify(receipt)),
       }).catch(error=>console.warn("QA_FACTORY_HANDOFF_E2E_UNAVAILABLE",
