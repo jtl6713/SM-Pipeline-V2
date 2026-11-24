@@ -1,0 +1,97 @@
+name: Incident 2853 exact prior-probe receipt reconciliation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-probe-readonly-receipt.yml'
+      - '.github/scripts/incident-2853-probe-receipt-readonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-probe-readonly-receipt.yml'
+permissions:
+  contents: read
+concurrency:
+  group: incident-2853-readonly-receipt
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse read-only diagnostic
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2853-probe-receipt-readonly.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw 'readonly_script_parse_invalid'}
+          if((Get-Content '.github/scripts/incident-2853-probe-receipt-readonly.ps1' -Raw).Length -gt 7800){throw 'readonly_script_too_large'}
+  reconcile:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve previous exact shell job without retrying the producer
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' .github/scripts/incident-2853-probe-receipt-readonly.ps1 > /tmp/readonly.json
+          job=''
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/readonly.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "readonly_ops_launch_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          for attempt in $(seq 1 25); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/readonly-status.json
+            state=$(jq -r '.job.status' /tmp/readonly-status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 2
+          done
+          # Only extract the actual anchored diagnostic stdout, not its command.
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          data=json.loads(Path('/tmp/readonly-status.json').read_text())
+          log=data['job'].get('log','')
+          out=log.partition('\n\n')[2]
+          ids=re.findall(r'^incident2853_previous_job_id=([0-9a-f-]{36})\s*$',out,re.M)
+          if len(ids)!=1: raise SystemExit('exact_previous_job_id_unavailable')
+          Path('/tmp/prior-job-id').write_text(ids[0])
+          for line in out.splitlines():
+              if re.fullmatch(r'incident2853_workload=\{[a-zA-Z0-9":, _-]+\}',line): print(line)
+          print('readonly_diagnostic_status='+data['job']['status'])
+          PY
+          prior=$(cat /tmp/prior-job-id)
+          curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$prior" -o /tmp/prior.json
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          data=json.loads(Path('/tmp/prior.json').read_text())
+          job=data['job']
+          if job['id']!=Path('/tmp/prior-job-id').read_text() or job['action']!='shell': raise SystemExit('prior_job_identity_mismatch')
+          out=job.get('log','').partition('\n\n')[2]
+          print(json.dumps({'prior_job_id':job['id'],'prior_status':job['status'],'exit_code':job.get('exitCode'),
+             'incident_codes':sorted(set(re.findall(r'incident2853_[a-zA-Z0-9_]+',out))),
+             'accepted_marker_present':'incident2853_probe_submit=ACCEPTED_ONCE' in out,
+             'error_types':sorted(set(re.findall(r'\b(?:ParameterBindingException|MethodInvocationException|ParserError|RuntimeException|InvalidOperation|CommandNotFoundException|ArgumentException|WebException|InvalidDataException|InvalidArgument|NewObjectConstructorException|UnauthorizedAccessException)\b',out)))},sort_keys=True))
+          PY
