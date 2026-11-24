@@ -212,6 +212,9 @@ def studio_visual_integrity_error(output: dict[str, Any], payload: dict[str, Any
 
 
 def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
+    from studio_produce.story_voiceover import is_story
+    if is_story(output):
+        return field_str(output, "Voiceover_URL")
     return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
 
 
