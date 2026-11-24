@@ -30,7 +30,15 @@ const statusName = value => str(value).toLowerCase();
 const terminalOutput = row => /^(approved for publishing|scheduled|published|skipped|cancelled|rejected)$/i.test(str(row.output_status))
   || /^(scheduled|publishing|published)$/i.test(str(row.publish_status))
   || row.published_at || row.platform_post_url;
-const unresolved = row => !terminalOutput(row);
+// An approval receipt is not a successful provider publication. Keep the
+// original approval and provider evidence; route failure to reconciliation,
+// never to production fanout or an automatic provider retry.
+const approvedPublishFailure = row =>
+  /^(failed|error)$/i.test(str(row.publish_status))
+  && (str(row.output_status)==="Approved for Publishing"
+    || str(row.review_status)==="Approved"
+    || Boolean(row.published_at || row.platform_post_url));
+const unresolved = row => !terminalOutput(row) || approvedPublishFailure(row);
 function incident({stage,kind,reason,output,remediation,automatic=false,more={}}) {
   return {
     kind,signature:FACTORY_HANDOFF_SIGNATURE,stage,reason,
@@ -159,7 +167,8 @@ export function assessProductionFactoryHandoff({
   // arrived while its OWN verified execution claim remains active.
   if (activeJob(request) && canonical.some(row => !terminalOutput(row))
       && !canonical.some(row => /^(failed|error|blocked)$/i.test(str(row.output_status))
-        || /^(failed|error|blocked)$/i.test(str(row.render_status)))) {
+        || /^(failed|error|blocked)$/i.test(str(row.render_status))
+        || approvedPublishFailure(row))) {
     report.stage="produce";report.status="in_progress";return report;
   }
   const cards=Array.isArray(factoryCards) ? new Map(factoryCards.map(x=>[str(x.id||x.airtable_record_id),x])) : null;
@@ -167,6 +176,12 @@ export function assessProductionFactoryHandoff({
   let missingProof=false, alreadyPastFactory=0;
   for (const dest of plan) {
     const row=byKey.get(key(dest.platform,dest.type))[0];
+    if(approvedPublishFailure(row)) {
+      report.findings.push(incident({stage:"publish",kind:"production_factory_handoff",
+        reason:"approved_publication_failed_requires_reconciliation",output:row,
+        remediation:"Reconcile exact provider attempt, existing publication evidence, rights and current media revision via the guarded publishing recovery path; preserve original approval and any hold; no blind retry or new production fanout"}));
+      continue;
+    }
     if(terminalOutput(row)) {
       alreadyPastFactory++;
       continue; // do not rewind approved/published siblings
@@ -249,7 +264,7 @@ export function assessProductionFactoryHandoff({
     report.ready_count++;
   }
   if(report.findings.length){
-    const order=["produce","media","holds","factory"];
+    const order=["produce","media","holds","factory","publish"];
     report.findings.sort((a,b)=>order.indexOf(a.stage)-order.indexOf(b.stage));
     report.stage=report.findings[0].stage;report.status="repair_required";
   } else if (missingProof) {
