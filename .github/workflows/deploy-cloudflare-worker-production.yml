@@ -37,6 +37,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/cloudflare-worker-production.txt'
+      - 'deploy/quality-native-rebuild-canary.json'
       - 'deploy/issue2593-ferry-typed-resume.txt'
       - 'deploy/issue2532-owner-global-prompt.txt'
       - 'deploy/issue2532-worker-retry.txt'
@@ -100,6 +101,17 @@ jobs:
           test "$snapshot_code" = "401"
           jq -e '.error=="Invalid pipeline secret"' /tmp/governor-snapshot-denied.json >/dev/null
           echo 'qa_runner_workload_snapshot_live_and_auth_gated=PASS'
+      - name: Verify exact Quality Agent runner route and focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/qa-native-route-denied.json -w '%{http_code}' \
+            -X POST 'https://pipeline.chicagoshining.com/internal/quality/native-media-rebuild' \
+            -H 'Content-Type: application/json' --data '{}')
+          test "$code" = "401"
+          jq -e '.error=="Invalid pipeline secret"' /tmp/qa-native-route-denied.json >/dev/null
+          node --test apps/studio-api/quality-native-media-rebuild.test.mjs apps/studio-api/quality-factory-handoff-cron.test.mjs apps/studio-api/quality-native-review-repair.test.mjs
+          echo 'quality_native_runner_auth_gate=PASS'
       - name: Owner-global generation guidance API regression #2532
         shell: bash
         run: |
@@ -346,6 +358,13 @@ jobs:
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
+          qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
+          if qa!={'schema':'quality-native-manual-canary-v1','enabled':True,'record_id':'rec8I104V9gQmiOxf','output_number':10857,'human_approval_required':True}:
+              raise SystemExit('Unknown quality canary manifest')
+          if active_vars.get('QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID') or active_vars.get('QUALITY_FACTORY_HANDOFF_CRON_DISABLED')=='true':
+              raise SystemExit('Respect existing Quality Agent disable/other canary')
+          active_vars.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true',
+            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id']})
           # Scoped, Git-reviewed publication reconciliation. An unattended
           # status correction is never enabled by inheriting stale Worker vars.
           import re
@@ -552,6 +571,9 @@ jobs:
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
+          qa=json.loads(Path('deploy/quality-native-rebuild-canary.json').read_text())
+          expected.update({'QUALITY_NATIVE_MEDIA_REBUILD_ENABLED':'true',
+            'QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID':qa['record_id']})
           expected['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
           expected['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
           recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
@@ -702,6 +724,7 @@ jobs:
               const url = new URL(request.url);
               const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
               const scriptedMulti = scriptedFeedbackProbe && url.searchParams.get("mode") === "multi";
+              const qaNativeRun = url.pathname === "/$TOKEN/qa-native-run" && request.method === "POST";
               const qaCatalog = url.pathname === "/$TOKEN/qa-catalog";
               const qaRuns = url.pathname === "/$TOKEN/qa-runs";
               const qaUnauthenticated = url.pathname === "/$TOKEN/qa-unauthenticated";
@@ -721,9 +744,10 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated && !qaNativeRun) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = qaCatalog || qaUnauthenticated ? "/api/admin/qa/catalog"
+              const path = qaNativeRun ? "/api/admin/qa/quality-native-repair/run"
+                : qaCatalog || qaUnauthenticated ? "/api/admin/qa/catalog"
                 : qaRuns ? "/api/admin/qa/runs?limit=1"
                 : scriptedFeedbackProbe ? "/api/scripted-short/revise"
                 : reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
@@ -740,14 +764,14 @@ jobs:
                 : globalCanary ? "/api/factory/approval-batches?scope=all&status_only=1"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
-              const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) ? "POST" : "GET";
+              const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe || qaNativeRun) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
               if (qaUnauthenticated) delete headers["Cf-Access-Authenticated-User-Email"];
-              if (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) headers["Content-Type"] = "application/json";
+              if (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe || qaNativeRun) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: scriptedFeedbackProbe ? (scriptedMulti ? JSON.stringify({
+                body: qaNativeRun ? '{"record_id":"rec8I104V9gQmiOxf"}' : scriptedFeedbackProbe ? (scriptedMulti ? JSON.stringify({
                   creative_brief:"An uplifting urban night walk",
                   profile_id:"recT2rbKX3MF7cVFU",
                   timeline:{duration_seconds:28,segments:Array.from({length:7},(_,i)=>({
@@ -1329,6 +1353,34 @@ jobs:
             exit 1
           fi
           jq -c '{multi_profile_job_evidence:[.jobs[]|{idea_id,found,status,stage,attempts,last_error,updated_at,next_attempt_ms}], cron:{status:.heartbeat.status,stage:.heartbeat.stage,claimed:.heartbeat.claimed,discovered:.heartbeat.discovered,results:.heartbeat.results}}' /tmp/ready-production-city-jobs.json
+
+      - name: Run exact authorized Quality Agent canary once and report Factory proof
+        # This is a nonpublishing test, separate from ordinary Worker deployment
+        # acceptance. Never retry an ambiguous write or roll back media by
+        # rolling back source. The durable revision reservation remains.
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the dedicated activation commit triggers this mutation, not
+          # unrelated later production deployments.
+          git fetch --quiet --depth=2 origin "$GITHUB_SHA"
+          if ! git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -Fxq 'deploy/quality-native-rebuild-canary.json'; then
+            echo 'quality_native_manual_run=not_requested_by_this_release'
+            exit 0
+          fi
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          CODE=$(curl -sS --max-time 150 -X POST -o /tmp/qa-native-run.json -w '%{http_code}' "$BASE/qa-native-run" || true)
+          echo "quality_native_manual_run_http=$CODE"
+          test "$CODE" = "200"
+          jq -c '{status,repair,requires_human_approval}' /tmp/qa-native-run.json
+          jq -e '.repair.status=="repaired" and .repair.output_id==10857 and .repair.approval_actions==0 and .repair.schedule_actions==0 and .repair.publish_actions==0 and .requires_human_approval==true' /tmp/qa-native-run.json >/dev/null
+          curl -fsS --max-time 60 "$BASE/factory-desk" -o /tmp/qa-native-factory.json
+          jq -c '[.lanes.needs_eyes[]? | select(.output_id==10857) | {output_id,review_package_ready,studio_state,review_status,publish_status,do_not_publish,auto_publish_enabled}]' /tmp/qa-native-factory.json
+          jq -e 'any(.lanes.needs_eyes[]?; .output_id==10857 and .review_package_ready==true and .publish_status=="Not Ready" and .auto_publish_enabled==false)' /tmp/qa-native-factory.json >/dev/null
+          echo 'quality_native_manual_run_factory_visible=PASS'
 
       - name: Delete functional verification bridge
         if: always()
