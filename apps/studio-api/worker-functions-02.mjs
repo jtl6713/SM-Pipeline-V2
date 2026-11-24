@@ -1,3 +1,4 @@
+import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
 import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
@@ -1871,27 +1872,36 @@ export async function item4DrainAllPendingWork(env, options = {}) {
   const started = Date.now();
   const requestIds = await item4ListPendingQueueRequestIds(env);
   const drained = [];
+  const deferred = [];
   for (const recordId of requestIds) {
     if (Date.now() - started >= maxMs) break;
-    const remaining = Math.max(4000, maxMs - (Date.now() - started));
-    const rows = await item4VariantQueueRows(env, recordId);
-    const outstanding = rows.filter(item4QueueRowIsOutstanding);
-    if (!outstanding.length) {
+    try {
+      const remaining = Math.max(4000, maxMs - (Date.now() - started));
+      const rows = await item4VariantQueueRows(env, recordId);
+      const outstanding = rows.filter(item4QueueRowIsOutstanding);
+      if (!outstanding.length) {
+        try { await item4ReconcileMasterAuthority(env, recordId); } catch {}
+        try { await item4ReconcileVariants(env, recordId); } catch {}
+        continue;
+      }
+      const executionIds = await item4DrainVariantWorker(
+        env,
+        recordId,
+        Math.min(20, outstanding.length + 2),
+        { maxMs: remaining }
+      );
       try { await item4ReconcileMasterAuthority(env, recordId); } catch {}
       try { await item4ReconcileVariants(env, recordId); } catch {}
-      continue;
+      const result = { record_id: recordId, outstanding: outstanding.length, executions: executionIds.length };
+      if (executionIds.length) drained.push(result);
+      else deferred.push({ ...result, reason: "no_execution_reported" });
+    } catch (error) {
+      // An individual request failure must not starve all later requests.
+      deferred.push({ record_id: recordId, reason: "drain_or_reconcile_error" });
+      console.warn("Item 4 scheduled drain deferred", recordId, error);
     }
-    const executionIds = await item4DrainVariantWorker(
-      env,
-      recordId,
-      Math.min(20, outstanding.length + 2),
-      { maxMs: remaining }
-    );
-    try { await item4ReconcileMasterAuthority(env, recordId); } catch {}
-    try { await item4ReconcileVariants(env, recordId); } catch {}
-    drained.push({ record_id: recordId, outstanding: outstanding.length, executions: executionIds.length });
   }
-  return { request_ids: requestIds, drained };
+  return { request_ids: requestIds, drained, deferred };
 }
 /*__STUDIO_WORKER_END:item4DrainAllPendingWork__*/
 
@@ -2600,6 +2610,7 @@ export async function getItem4Variants(request, env, url, authorization, ctx = n
   if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil((async () => {
       try {
+        if (!await claimItem4PollResume(env.STUDIO_MEDIA, recordId)) return;
         // Crop queue creation requires ALL masters to have Drive + Media Asset
         // authority. A failed original previously blocked every later crop,
         // while /variants polling only retried variants (not the missing master).
@@ -3061,6 +3072,7 @@ export async function getItem4WorkspaceStatus(request, env, url, authorization, 
       if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
         ctx.waitUntil((async () => {
           try {
+            if (!await claimItem4PollResume(env.STUDIO_MEDIA, recordId)) return;
             await item4ResumePendingVariants(env, recordId, reconciled.record);
           } catch (error) {
             console.warn("Item 4 workspace variant resume deferred", error);
