@@ -1,0 +1,63 @@
+name: Issue 2965 - fenced crop recovery and lease evidence
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/issue-2965-smv1-fenced-recovery.txt']
+permissions:
+  contents: read
+concurrency:
+  group: issue-2965-exact-smv1
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse exact recovery script
+        shell: pwsh
+        run: |
+          $t=$null;$e=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.github/scripts/issue-2965-smv1-fenced-recovery.ps1'),[ref]$t,[ref]$e)
+          if($e.Count -gt 0){throw 'PowerShell parse failed'}
+      - name: Confirm live authority and run one governed existing crop drain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/health.json
+          jq -e '.ok==true and .studio_write_source=="supabase" and .supabase_pipeline_writes==true and .workload_governor_enabled==true and .recovery_read_only==false and .airtable_activity.any_activity==false' /tmp/health.json >/dev/null
+          BASE=https://ops.chicagoshining.com
+          TOKEN=''
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null; then TOKEN="$candidate"; break; fi
+          done
+          test -n "$TOKEN" || { echo 'ops_auth_unavailable'; exit 1; }
+          echo "::add-mask::$TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cmd=Path('.github/scripts/issue-2965-smv1-fenced-recovery.ps1').read_text()
+          assert len(cmd)<8000
+          Path('/tmp/launch.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/launch.json || true)
+          [[ "$code" == 202 || "$code" == 200 ]] || { echo "ops_admission_http=$code"; exit 1; }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json)
+          test -n "$job"
+          for n in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $TOKEN" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status // empty' /tmp/status.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/status.json | grep -E '^smv1_2965_(probe_exit=[0-9]+$|lease_evidence=\[|before=\{|after=\{|failure_phase=[a-z_]+$|existing_drain_active=1$|stage=(ok|skipped|deferred|error);processed=[0-9]+$|exact_drain_progress=PASS$)' || true
+              [[ "$state" == ok ]] && jq -e '.job.log|contains("smv1_2965_exact_drain_progress=PASS")' /tmp/status.json >/dev/null
+              exit $?
+            fi
+            sleep 3
+          done
+          echo 'ops_result_unconfirmed_do_not_retry'; exit 1

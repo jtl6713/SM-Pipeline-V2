@@ -952,6 +952,12 @@ export async function item4PulseSmv1Python(env, recordId, maxRuns) {
       payload?.message || payload?.error || `Python SMV1 drain failed (${response.status})`
     );
   }
+  if (response.status === 202 || payload?.status === "deferred") {
+    console.warn("smv1_drain_admission_deferred", { request_id: recordId,
+      reason: payload?.details?.reason === "governor_admission_deferred"
+        ? "governor_admission_deferred" : "runner_deferred" });
+    return [];
+  }
   const processed = Number(payload?.details?.processed_count || 0);
   return processed > 0 ? [`python:smv1:${recordId}`] : [];
 }
