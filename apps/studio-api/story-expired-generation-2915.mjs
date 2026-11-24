@@ -23,6 +23,35 @@ export function story2915ReleaseReady(row) {
  &&(p.historical_nonpublication_proven===true||p.owner_previously_reported_not_published===true)
  &&Number.isFinite(Date.parse(p.verified_at))&&b.IG_Story_Container_ID===OLD&&b.IG_Story_Status==="Failed"&&b.Studio_Publish_Dispatch_Count===2&&b.IG_Story_Attempt_Count===2&&!b[KEY]&&!unsafe.some(k=>!!b[k]);
 }
+// Exact owner-directed reconciliation of the already-authenticated held review.
+// It is NOT a new Factory click. Only this pinned incident, revision and review
+// receipt can enter this alternate generation. The recovery audit is retained.
+const HELD_AT="2026-11-24T13:19:27.223Z";
+const AUTH_REF="https://github.com/jtl6713/SM-Pipeline-V2/issues/2915#issuecomment-7132839239";
+const OWNER="recaKAksAFrEv21RO";
+export function story2915HeldApprovalRecoveryReady(row) {
+ const b=row?.error_messages||{},h=b.SM_Factory_Held_Review_Receipt;
+ if(row?.output_status!=="Approved for Publishing"||row.review_status!=="Approved"||
+    h?.decision!=="approve"||h.at!==HELD_AT||!String(h.actor||"").includes("@")||
+    h.publishing_authorized!==false||h.publishing_hold_preserved!==true||
+    h.incident_creative_only!==false||h.publish_state_at_decision!=="Not Ready"||
+    b.SM_Factory_Supabase_Approval_Receipt||b.SM_Issue2915_Held_Approval_Recovery)return false;
+ const withoutReceipt={...b};delete withoutReceipt.SM_Factory_Held_Review_Receipt;
+ return story2915ReleaseReady({...row,output_status:"Ready for Review",review_status:"Review Sent",error_messages:withoutReceipt});
+}
+export function story2915HeldRecoveryReceiptValid(record) {
+ if(!story2915GenerationValid(record))return false;
+ const f=record.fields||record.error_messages||{},g=f[KEY],h=f.SM_Factory_Held_Review_Receipt,
+  a=f.SM_Factory_Supabase_Approval_Receipt,r=f.SM_Issue2915_Held_Approval_Recovery;
+ return h?.decision==="approve"&&h.at===HELD_AT&&typeof h.actor==="string"&&h.actor.includes("@")&&
+  h.publishing_authorized===false&&h.publishing_hold_preserved===true&&h.incident_creative_only===false&&h.publish_state_at_decision==="Not Ready"&&
+  r?.authorization_ref===AUTH_REF&&r.authority==="owner_directed_recovery"&&r.actor_record_id===OWNER&&r.original_held_review_at===HELD_AT&&
+  r.asset_sha256===SHA&&r.original_container_id===OLD&&r.reconciled_at===g.released_at&&r.no_new_factory_submission===true&&
+  g.release_actor===OWNER&&g.release_actor_provenance==="owner_directed_recovery"&&
+  a?.actor_provenance==="authenticated_held_review_owner_directed_recovery"&&a.approval_actor_record_id===OWNER&&
+  a.original_held_review_at===HELD_AT&&a.approved_at===r.reconciled_at&&
+  a.request_id==="issue2915-held-review-recovery-5628"&&a.profile_record_id==="recpNlNn6U6eq0M9r";
+}
 export async function verifyStory2915Bytes(fetchImpl=fetch) {
  const res=await fetchImpl(URL,{method:"GET",redirect:"error",signal:AbortSignal.timeout(20000)});
  if(!res.ok||!/^video\/mp4(?:;|$)/i.test(res.headers.get("content-type")||"")||Number(res.headers.get("content-length"))!==8368028)throw Error("Corrected Story media verification failed");
@@ -54,6 +83,6 @@ export function story2915NewApprovalValid(record,actor,submittedAt) {
 export function story2915DispatchFence(record) {
  if(!story2915GenerationValid(record))throw Error("Expired Story generation invalid");
  const f=record.fields,g=f[KEY],a=f.SM_Factory_Supabase_Approval_Receipt;
- if(a?.authority!=="supabase"||a.output_record_id!==STORY_2915_ID||a.output_number!==5628||a.actor_provenance!=="authenticated_factory_submission"||a.scheduled!==true||!REC.test(a.approval_actor_record_id||"")||!(Date.parse(a.approved_at)>=Date.parse(g.released_at))||Date.parse(a.scheduled_for)!==Date.parse(f.Scheduled_Post_Date))throw Error("Fresh authenticated Story approval/schedule required");
+ if(a?.authority!=="supabase"||a.output_record_id!==STORY_2915_ID||a.output_number!==5628||(a.actor_provenance!=="authenticated_factory_submission"&&!story2915HeldRecoveryReceiptValid(record))||a.scheduled!==true||!REC.test(a.approval_actor_record_id||"")||!(Date.parse(a.approved_at)>=Date.parse(g.released_at))||Date.parse(a.scheduled_for)!==Date.parse(f.Scheduled_Post_Date))throw Error("Fresh authenticated Story approval/schedule required");
  return "studio/state/initial-publish-fence/v1/"+STORY_2915_ID+"/"+g.generation+".json";
 }

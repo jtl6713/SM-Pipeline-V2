@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {STORY_2915_ID as id,story2915ReleaseReady,story2915ReleasePatch,story2915GenerationValid,story2915NewApprovalValid,story2915DispatchFence} from "./story-expired-generation-2915.mjs";
+import {STORY_2915_ID as id,story2915ReleaseReady,story2915ReleasePatch,story2915GenerationValid,story2915NewApprovalValid,story2915DispatchFence,story2915HeldApprovalRecoveryReady,story2915HeldRecoveryReceiptValid} from "./story-expired-generation-2915.mjs";
 import {assessFreshSupabasePublish} from "./approved-publish-flow.mjs";
 import {releaseFactoryHoldInSupabase} from "./factory-hold-release.mjs";
 const sha="e9f4ad61913fe88aad28bcf6df5643bd8586c74c34ab0b2fe1c9b2d37c3a747f",old="18116418158139610",url="https://media.chicagoshining.com/studio/previews/repairs/issue2915/miami-1018/po5628-e9f4ad61913fe88a.mp4",drive="https://drive.google.com/file/d/1y_6ekGu08A5Z9U75NSzZFXShFWhGRrSV/view",actor="rec12345678901234",at="2026-11-24T13:10:00Z",profile="recpNlNn6U6eq0M9r",schedule="2026-12-01T13:30:00Z";
@@ -42,4 +42,26 @@ test("authenticated release verifies media before CAS and leaves review pending"
  const result=await releaseFactoryHoldInSupabase({},id,auth,ops);
  assert.equal(writes,1);assert.equal(r.do_not_publish,false);assert.equal(r.auto_publish_enabled,false);assert.equal(r.review_status,"Review Sent");assert.equal(result.approved,false);assert.equal(result.published,false);assert.equal(r.publish_asset_url,url);
  r=row();writes=0;ops.verifyStory=async()=>{throw Error("hash mismatch")};await assert.rejects(releaseFactoryHoldInSupabase({},id,auth,ops),/hash mismatch/);assert.equal(writes,0);
+});
+
+test("existing held approval recovered only with exact owner authorization, no invented Factory submission",()=>{
+ const reviewed=row(),heldAt="2026-11-24T13:19:27.223Z",reconciledAt="2026-11-24T13:30:00Z",owner="recaKAksAFrEv21RO",authRef="https://github.com/jtl6713/SM-Pipeline-V2/issues/2915#issuecomment-7132839239";
+ reviewed.output_status="Approved for Publishing";reviewed.review_status="Approved";
+ reviewed.error_messages.SM_Factory_Held_Review_Receipt={at:heldAt,actor:"owner@example.test",decision:"approve",publishing_authorized:false,publishing_hold_preserved:true,incident_creative_only:false,publish_state_at_decision:"Not Ready"};
+ assert.equal(story2915ReleaseReady(reviewed),false);
+ assert.equal(story2915HeldApprovalRecoveryReady(reviewed),true);
+ const altered=structuredClone(reviewed);altered.error_messages.SM_Factory_Held_Review_Receipt.decision="reject";
+ assert.equal(story2915HeldApprovalRecoveryReady(altered),false);
+ const p=story2915ReleasePatch(row(),owner,reconciledAt);
+ const next={...reviewed,...p,do_not_publish:false,auto_publish_enabled:true,publish_status:"Ready to Schedule",scheduled_post_date:schedule};
+ const b=next.error_messages;
+ b.SM_Factory_Held_Review_Receipt=reviewed.error_messages.SM_Factory_Held_Review_Receipt;
+ b.SM_Issue2915_Story_Replacement_Generation.release_actor_provenance="owner_directed_recovery";
+ b.SM_Issue2915_Held_Approval_Recovery={authorization_ref:authRef,authority:"owner_directed_recovery",actor_record_id:owner,original_held_review_at:heldAt,asset_sha256:sha,original_container_id:old,reconciled_at:reconciledAt,no_new_factory_submission:true};
+ b.SM_Factory_Supabase_Approval_Receipt={authority:"supabase",output_record_id:id,output_number:5628,actor_provenance:"authenticated_held_review_owner_directed_recovery",approval_actor_record_id:owner,original_held_review_at:heldAt,approved_at:reconciledAt,scheduled:true,scheduled_for:schedule,request_id:"issue2915-held-review-recovery-5628",profile_record_id:"recpNlNn6U6eq0M9r"};
+ const rec=record(next);assert.equal(story2915HeldRecoveryReceiptValid(rec),true);assert.equal(assessFreshSupabasePublish(rec,{nowMs:Date.parse(schedule)}).eligible,true);
+ assert.equal(assessFreshSupabasePublish(rec,{nowMs:Date.parse(schedule)-1}).reason,"future_schedule");
+ for(const mutate of [f=>{delete f.SM_Factory_Held_Review_Receipt},f=>{f.SM_Issue2915_Held_Approval_Recovery.authorization_ref="wrong"},f=>{f.SM_Factory_Supabase_Approval_Receipt.approval_actor_record_id=actor},f=>{f.SM_Issue2915_Story_Replacement_Generation.release_actor_provenance="unknown"},f=>{f.SM_Factory_Held_Review_Receipt.at=at},f=>{f.IG_Story_Container_ID=old}]){
+  const bad=structuredClone(rec);mutate(bad.fields);assert.equal(assessFreshSupabasePublish(bad,{nowMs:Date.parse(schedule)}).eligible,false);
+ }
 });

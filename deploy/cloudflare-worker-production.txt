@@ -1634,3 +1634,4 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-24 UTC — #2915: Factory formal-review hold release now exact canonical Supabase CAS with authorized profile and actor, protected media/provider hold safeguards and authoritative readback. No automatic release, approval, schedule or provider dispatch on deployment. Verify protected Worker gates.
 
 2026-11-24 UTC — #2915: exact Vizcaya #5628 revision-bound expired Story generation, authenticated formal release and fresh approval only, archived original attempt evidence and independent due-time fence; verify protected deployment. No provider call or publishing by release/deploy itself.
+2026-11-24 issue2915 held Story approval recovery exact receipt and generation fence

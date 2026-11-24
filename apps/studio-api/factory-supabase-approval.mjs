@@ -15,7 +15,7 @@ import {
   preflightNycOwnerGalleryApproval,
   finalizeNycOwnerGalleryOnFactoryClick,
 } from "./native-gallery-package-guard.mjs";
-import { STORY_2915_ID, story2915GenerationValid, story2915NewApprovalValid } from "./story-expired-generation-2915.mjs";
+import { STORY_2915_ID, story2915GenerationValid, story2915NewApprovalValid, story2915HeldRecoveryReceiptValid } from "./story-expired-generation-2915.mjs";
 import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
@@ -53,6 +53,12 @@ const satisfied = row => {
       || !Number.isFinite(Date.parse(String(row.scheduled_post_date || "")))) return false;
   const release = Date.parse(String(row.publish_hold_released_at || ""));
   const receipt = row.error_messages?.SM_Factory_Supabase_Approval_Receipt;
+  // This receipt records a real prior held review plus a separate owner-directed
+  // reconciliation. The DB hold-release trigger stamps physical release after
+  // the logical reconciliation timestamp; do not mistake that for stale review.
+  if (row.airtable_record_id === STORY_2915_ID && story2915HeldRecoveryReceiptValid(row))
+    return Number.isFinite(release) && Math.abs(release-Date.parse(receipt.approved_at))<5000 &&
+      Date.parse(receipt.scheduled_for)===Date.parse(row.scheduled_post_date);
   return !Number.isFinite(release) || (Number.isFinite(Date.parse(String(receipt?.approved_at || "")))
     && Date.parse(receipt.approved_at) >= release);
 };
