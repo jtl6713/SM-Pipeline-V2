@@ -7,6 +7,7 @@ import {
   runQualityFactoryHandoffCron,
 } from "./quality-factory-handoff-cron.mjs";
 import { recoverNativeReviewWithRebuild } from "./quality-native-media-rebuild.mjs";
+import { manualQualityCanaryTarget } from "./quality-native-manual-canary.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -2356,10 +2357,9 @@ export default {
         // Exact operator-triggered Quality Agent canary. Same detector and
         // fenced repair adapter as cron; never a human approval operation.
         if(url.pathname==="/api/admin/qa/quality-native-repair/run"&&request.method==="POST"){
-          if(env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED==="true"||env.QUALITY_NATIVE_MEDIA_REBUILD_ENABLED!=="true"
-            ||studioWriteSource(env)!=="supabase"||!studioSupabaseConfigured(env))
+          if(studioWriteSource(env)!=="supabase"||!studioSupabaseConfigured(env))
             throw new HttpError(503,"Quality native repair is disabled");
-          const target=String(env.QUALITY_NATIVE_MEDIA_REBUILD_MANUAL_RECORD_ID||"");
+          const target=manualQualityCanaryTarget(env);
           if(!/^rec[A-Za-z0-9]{14}$/.test(target))throw new HttpError(503,"Exact canary is not configured");
           if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
             throw new HttpError(415,"JSON required");
@@ -2372,7 +2372,7 @@ export default {
             throw new HttpError(400,"Exact configured record required");
           const result=await runQualityFactoryHandoffCron({
             read:path=>adminHoldSupabaseRest(env,path),limit:4,canaryRecordId:target,
-            repair:report=>recoverNativeReviewWithRebuild(env,report),
+            repair:report=>recoverNativeReviewWithRebuild(env,report,{manualCanaryRecordId:target}),
             logger:receipt=>console.info("QA_FACTORY_HANDOFF_MANUAL_2853",JSON.stringify(receipt)),
           });
           return respond(request,env,{...result,requires_human_approval:true});
