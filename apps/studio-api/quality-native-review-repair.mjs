@@ -22,7 +22,7 @@ const staleDraftRepairKey="SM_Quality_Stale_TikTok_Review_Repair_v1";
 export const STALE_TIKTOK_REVIEW_REASON="stale_tiktok_waiting_schedule_blocks_review";
 const MAX_BYTES=8*1024*1024;
 const MAX_IMAGES=10;
-const TARGET_FIELDS=[
+export const TARGET_FIELDS=[
   "id","airtable_record_id","output_number","content_item_id","content_profile_id",
   "platform","studio_output_type","platform_output_type","aspect_ratio","output_status",
   "review_status","render_status","publish_status","output_caption","selected_clip_count",
@@ -32,7 +32,7 @@ const TARGET_FIELDS=[
   "platform_publish_response","platform_publish_response_text","publish_asset_url","tiktok_draft_status","updated_at","error_messages",
 ].join(",");
 const providerKeys=/^(?:Platform_(?:Post|Media)_ID|Publish_(?:Started|Locked)_At|Studio_Publish_Dispatch_(?:At|Count)|IG_Story_(?:Container|Post)_ID|IG_(?:Carousel|Reel)_Container_ID|FB_(?:Post|Video|Reel)_ID|YouTube_(?:Video_ID|Upload_ID)|TikTok_(?:Publish_ID|Draft_ID|Draft_Publish_ID|Upload_ID)|Last_Publish_Attempt_At|.*(?:Publish|Draft|Story|Reel|Carousel)_Attempt_Count)$/i;
-function hasProviderEvidence(bag) {
+export function hasProviderEvidence(bag) {
   return Object.entries(bag).some(([k,v])=>providerKeys.test(k)&&
     v!==null&&v!==undefined&&v!==false&&v!==0&&v!=="0"&&v!=="");
 }
@@ -154,7 +154,7 @@ async function exactOwner(read,row,decision){
   if(!stemsMatch)return null;
   return {ideaRecord:idea.airtable_record_id,parentVersion:p.updated_at,siblingVersion:sibling.updated_at};
 }
-async function verifyBytes(assets,transport=fetch){
+export async function verifyBytes(assets,transport=fetch){
   for(const a of assets){
     const response=await transport(a.url,{method:"GET",redirect:"error",headers:{"Cache-Control":"no-cache"},
       signal:AbortSignal.timeout(12000)});
