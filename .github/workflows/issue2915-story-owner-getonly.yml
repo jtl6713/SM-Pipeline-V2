@@ -1,0 +1,125 @@
+name: Issue 2915 exact Miami Story owner/container GET-only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2915-story-owner-getonly.yml'
+      - 'repair/scripts/issue2915-story-owner-getonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2915-story-owner-getonly.yml'
+      - 'repair/scripts/issue2915-story-owner-getonly.ps1'
+permissions:
+  contents: read
+concurrency:
+  group: issue2915-story-owner-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell syntax and provider mutation exclusion
+        shell: pwsh
+        run: |
+          $f='repair/scripts/issue2915-story-owner-getonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($required in @('vkwvscgisqsbuwagdvtb','rec1Zg5eEJjQKzUDO','18116418158139610','historical_nonpublication_proven=$false','ISSUE2915_STORY_OWNER_GETONLY=','source_writes=0','provider_writes=0')) {
+            if(-not $s.Contains($required)){throw ('required_guard_missing: '+$required)}
+          }
+          foreach($bad in @('-Method Post','-Method Patch','-Method Delete','Invoke-Sqlcmd','api.airtable.com','/media_publish','/media?','airtable.com/v0/','Invoke-Expression')){
+            if($s.Contains($bad)){throw 'prohibited_provider_or_source_mutation'}
+          }
+          if($s -match '(?im)^\s*\$profile\s*='){throw 'reserved_PROFILE_variable_prohibited'}
+          Write-Output 'ISSUE2915_STORY_READONLY_STATIC_PASS'
+  authenticated-original-receipts:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate protected Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/issue2915-story-auth.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/issue2915-story-auth.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "STORY_OPS=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops credential unavailable; source and provider unchanged'; exit 1
+      - name: Pin the exact audited script bytes to this merged commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          file=pathlib.Path('repair/scripts/issue2915-story-owner-getonly.ps1')
+          digest=hashlib.sha256(file.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(c in '0123456789abcdef' for c in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{file.as_posix()}'
+          command=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$sha=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($sha -ne '{digest}'){{throw 'immutable_script_hash_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/issue2915-story-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+      - name: Verify exact Miami owner and expired original container, no provider mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for n in $(seq 1 15); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2915-story-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $STORY_OPS" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/issue2915-story-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then accepted=true; break; fi
+            if [[ "$code" != 409 ]]; then echo "Ops read-only job rejected (HTTP $code)";exit 2;fi
+            sleep 6
+          done
+          if [[ "$accepted" != true ]]; then echo 'Ops busy; provider not queried'; exit 2; fi
+          job=$(jq -er '.job.id // .jobId' /tmp/issue2915-story-start.json)
+          for n in $(seq 1 150); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $STORY_OPS" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue2915-story-status.json
+            status=$(jq -r '.job.status // empty' /tmp/issue2915-story-status.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/issue2915-story-status.json | grep '^ISSUE2915_STORY_OWNER_GETONLY=' | tail -1 | sed 's/^[^=]*=//' > /tmp/issue2915-story-evidence.json
+              jq -e '.provider_writes==0 and .source_writes==0 and .output==5628 and .provider_gets>=3' /tmp/issue2915-story-evidence.json >/dev/null
+              jq -c '{output,state,stage,reason,account_owned,owner_username,container_status,current_story_scan_complete,current_story_count,original_window_matches,historical_nonpublication_proven,provider_gets,provider_writes,source_writes}' /tmp/issue2915-story-evidence.json
+              jq -e '.state=="expired_original_verified" and .account_owned==true and .container_status=="EXPIRED" and .current_story_scan_complete==true and .historical_nonpublication_proven==false' /tmp/issue2915-story-evidence.json >/dev/null
+              echo 'ISSUE2915_STORY_OWNER_CONTAINER=PASS'
+              exit 0
+            elif [[ "$status" == failed ]]; then
+              echo 'Original Meta receipt GET-only audit failed closed; no publishing or source changes'
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'Meta GET-only receipt audit incomplete; no publishing or source changes';exit 4
+      - name: Preserve sanitized exact-provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2915-story-owner-evidence
+          path: /tmp/issue2915-story-evidence.json
+          retention-days: 30
+          if-no-files-found: warn

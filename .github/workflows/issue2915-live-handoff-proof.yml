@@ -1,0 +1,68 @@
+name: Issue 2915 live Factory and Production exact-ID read-only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2915-live-handoff-proof.yml'
+      - 'repair/scripts/issue2915-live-handoff-proof.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2915-live-handoff-proof.yml'
+      - 'repair/scripts/issue2915-live-handoff-proof.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: issue2915-live-handoff-proof
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: node --check repair/scripts/issue2915-live-handoff-proof.mjs
+  live-read:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.event_name == 'push'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read live assets and exact queue data using configured service identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET"
+          BASE=https://studio.chicagoshining.com
+          HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          get() {
+            local route="$1" destination="$2" status
+            status=$(curl -sS --max-time 110 -o "$destination" -w '%{http_code}' "${HEADERS[@]}" -H 'Cache-Control: no-cache' "$BASE$route")
+            if [[ "$status" != 200 ]]; then
+              echo "::error::Authenticated service GET unavailable: $route HTTP $status; no owner identity spoofing"
+              exit 2
+            fi
+          }
+          get / /tmp/2915-index.html
+          FACTORY=$(node -e 'const s=require("fs").readFileSync("/tmp/2915-index.html","utf8");const m=s.match(/\/assets\/factory-desk\.js\?v=[A-Za-z0-9.-]+/);if(!m)throw Error("no Factory build");console.log(m[0])')
+          APP=$(node -e 'const s=require("fs").readFileSync("/tmp/2915-index.html","utf8");const m=s.match(/\/assets\/app-item4-1008\.js\?v=[A-Za-z0-9.-]+/);if(!m)throw Error("no Production build");console.log(m[0])')
+          get "$FACTORY" /tmp/2915-factory.js
+          get "$APP" /tmp/2915-production.js
+          get '/api/factory/desk' /tmp/2915-desk.json
+          get '/api/factory/approval-batches?scope=all&status_only=1' /tmp/2915-policy.json
+          get '/api/factory/approval-batches?scope=all&view=active' /tmp/2915-active.json
+          get '/api/content?limit=100&profile=recgtK8Z7eNADNtVy' /tmp/2915-content.json
+          node repair/scripts/issue2915-live-handoff-proof.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2915-exact-live-handoff-sanitized
+          path: /tmp/2915-report.json
+          retention-days: 14
+          if-no-files-found: warn
