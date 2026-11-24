@@ -6749,3 +6749,28 @@ test("Master Original queue write-through retains R2 locator without copying vid
 // Supabase 5xx stubs in one test must not leave this module's circuit open
 // when the next independent test starts.
 afterEach(() => resetSupabaseCircuitForTests());
+
+test("#2965 Supabase variant mutations preserve active and newly raced runner claims",async()=>{
+  const originalFetch=globalThis.fetch;
+  const env={...supabaseEnv,STUDIO_PHASE6_WRITE_SOURCE:"supabase",STUDIO_WRITE_SOURCE:"supabase"};
+  const record={id:"recQueue1",fields:{Transfer_Status:"Pending",Asset_Kind:"Platform Variant"}};
+  let status="Processing", writes=0, urls=[];
+  globalThis.fetch=async(url,init)=>{
+    const method=init?.method||"GET";
+    urls.push(String(url));
+    if(method==="GET") return {ok:true,async text(){return JSON.stringify([{status,last_attempt_at:"2026-11-24T00:00:00Z",payload:{asset_kind:"Platform Variant",transfer_id:"tid"}}])}};
+    writes++;
+    assert.equal(method,"PATCH");
+    return {ok:true,async text(){return "[]"}};
+  };
+  try{
+    const held=await syncAirtableTransferQueueRowToSupabase(env,record);
+    assert.equal(held.mode,"runner-claim-preserved");
+    assert.equal(writes,0);
+    status="Error";
+    const raced=await syncAirtableTransferQueueRowToSupabase(env,record);
+    assert.equal(raced.mode,"runner-claim-raced");
+    assert.equal(writes,1);
+    assert.ok(urls.some(u=>u.includes("status=eq.Error")&&u.includes("last_attempt_at=eq.")&&u.includes("payload=eq.")));
+  }finally{globalThis.fetch=originalFetch}
+});

@@ -26,7 +26,7 @@ def register_claim(record_id, transfer_id, stamp):
             raise RuntimeError("crop transfer identity changed")
         db.execute("""INSERT INTO smv1_crop_attempts(record_id,transfer_id,claim_at,owner_pid,lease_token)
             VALUES(?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET
-            claim_at=excluded.claim_at,owner_pid=excluded.owner_pid,lease_token=excluded.lease_token""",
+            claim_at=excluded.claim_at,owner_pid=excluded.owner_pid,lease_token=excluded.lease_token,settled_at=NULL""",
             (record_id,transfer_id,stamp,os.getpid(),lease[0]))
         db.commit()
 
@@ -50,7 +50,16 @@ def recoverable_claim(record_id, transfer_id, stamp):
         exact = _instant(r["claim_at"]) == _instant(stamp)
     except (TypeError, ValueError):
         return False
-    return exact and governor._process_definitely_exited(r["owner_pid"]) and not governor.resource_active("transfer",record_id)
+    return exact and (r["settled_at"] is not None or governor._process_definitely_exited(r["owner_pid"])) and not governor.resource_active("transfer",record_id)
+
+
+def mark_settled(record_id):
+    """Called after all child futures returned, while the same transfer slot is held."""
+    with governor._connect() as db:
+        db.execute("""UPDATE smv1_crop_attempts SET settled_at=?
+            WHERE record_id=? AND owner_pid=? AND lease_token IN
+            (SELECT token FROM resource_leases WHERE scope='transfer' AND lease_key=? AND owner_pid=?)""",
+            (time.time(),record_id,os.getpid(),record_id,os.getpid()))
 
 
 def assert_current_claim(record_id,transfer_id,claim_at):
@@ -97,7 +106,7 @@ def finish_claim(client,record_id,transfer_id,claim_at,fields):
         "PATCH",patch,prefer="return=representation")
     if not isinstance(rows,list) or len(rows)!=1 or rows[0].get("airtable_record_id")!=record_id:
         raise governor.AdmissionDeferred("canonical crop completion claim changed")
-    if rows[0].get("status")!=patch.get("status"):
+    if rows[0].get("status")!=patch.get("status") or (isinstance(patch.get("payload"),dict) and rows[0].get("payload")!=patch["payload"]):
         raise RuntimeError("canonical crop completion did not verify")
     return rows[0]
 

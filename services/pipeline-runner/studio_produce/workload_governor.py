@@ -178,7 +178,7 @@ def _connect() -> Iterator[sqlite3.Connection]:
                     init.execute("""CREATE TABLE IF NOT EXISTS smv1_crop_attempts (
                         record_id TEXT PRIMARY KEY, transfer_id TEXT NOT NULL,
                         claim_at TEXT NOT NULL, owner_pid INTEGER NOT NULL, lease_token TEXT NOT NULL,
-                        drive_id TEXT, media_id TEXT, digest TEXT, size INTEGER,
+                        settled_at REAL, drive_id TEXT, media_id TEXT, digest TEXT, size INTEGER,
                         folder TEXT, filename TEXT
                     )""")
                     init.execute("""CREATE TABLE IF NOT EXISTS smv1_pending_requests (
@@ -843,6 +843,8 @@ def snapshot() -> dict[str, object]:
             "database_circuit_until_epoch": float(circuit_row[0]) if circuit_row else None,
             "active_resource_slots": active_resources,
             "smv1_maintenance_active": smv1_maintenance_active(db),
+            "smv1_recovery_pending": db.execute("SELECT COUNT(*) FROM smv1_pending_requests WHERE failures<8").fetchone()[0],
+            "smv1_recovery_parked": db.execute("SELECT COUNT(*) FROM smv1_pending_requests WHERE failures>=8").fetchone()[0],
             "max_db_reads": max_db_reads(), "max_db_writes": max_db_writes(),
             "supabase_request_metrics": traffic,
             "runner_request_history": history,  # Last 30 min; runner REST only.

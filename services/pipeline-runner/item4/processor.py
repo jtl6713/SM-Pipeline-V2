@@ -720,11 +720,11 @@ def _process_variant_pending(
         # Ready, otherwise it can race a concurrent crop worker.
         row["_smv1_claim_at"]=_claim_row(client, record_id, fields)
     if _row_has_authority(fields):
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            record_id,
-            {"Transfer_Status": "Ready", "Error_Message": None},
-        )
+        patch={"Transfer_Status":"Ready","Error_Message":None}
+        if governor.enabled():
+            restart_recovery.finish_claim(client,record_id,str(fields.get("Transfer_ID") or ""),row.get("_smv1_claim_at"),patch)
+        else:
+            client.update_record(MEDIA_TRANSFER_QUEUE_TABLE,record_id,patch)
         return {
             "route": "variant_authority_reuse",
             "queue_record_id": record_id,
@@ -787,13 +787,14 @@ def process_variant_group(
         if not folder_id or not ratio:
             raise RuntimeError("Platform variant row is missing folder or aspect ratio")
         if _row_has_authority(fields):
+            patch = {"Transfer_Status": "Ready", "Error_Message": None}
             if governor.enabled():
                 try:
-                    _claim_row(client, row["id"], fields)
+                    stamp=_claim_row(client,row["id"],fields)
+                    restart_recovery.finish_claim(client,row["id"],str(fields.get("Transfer_ID") or ""),stamp,patch)
                 except TransferClaimConflict:
                     continue
-            patch = {"Transfer_Status": "Ready", "Error_Message": None}
-            if airtable_lock:
+            elif airtable_lock:
                 with airtable_lock:
                     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], patch)
             else:
@@ -1064,6 +1065,9 @@ def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
                 return _process_queue_row_unlocked(client, current)
             except TransferClaimConflict:
                 return {"processed": False, "reason": "claimed_elsewhere", "queue_record_id": row["id"]}
+            finally:
+                if str(fields.get("Asset_Kind") or "")=="Platform Variant" and status=="Pending":
+                    restart_recovery.mark_settled(str(row["id"]))
     return _process_queue_row_unlocked(client, row)
 
 
@@ -1155,16 +1159,17 @@ def _process_one_admitted(
             str(field(row, "Transfer_Status") or "") == "Ready"
             and str(field(row, "Preview_Status") or "") == "Pending"
         )
-        try:
-            _fail_row(
-                client,
-                row["id"],
-                message,
-                preview=preview,
-                retryable=not preview and is_retryable_master_error(exc),
-            )
-        except Exception:
-            pass
+        if not (governor.enabled() and str(field(row,"Asset_Kind") or "")=="Platform Variant" and not preview):
+            try:
+                _fail_row(
+                    client,
+                    row["id"],
+                    message,
+                    preview=preview,
+                    retryable=not preview and is_retryable_master_error(exc),
+                )
+            except Exception:
+                pass
         raise
 
 
@@ -1264,10 +1269,13 @@ def _process_drain_admitted(
                         current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id)
                         if str((current.get("fields") or {}).get("Transfer_Status") or "") != "Pending":
                             continue
-                        group_results.extend(process_variant_group(
-                            client, GoogleDriveClient(), VariantServiceClient(settings),
-                            [current], airtable_lock=airtable_lock,
-                        ))
+                        try:
+                            group_results.extend(process_variant_group(
+                                client, GoogleDriveClient(), VariantServiceClient(settings),
+                                [current], airtable_lock=airtable_lock,
+                            ))
+                        finally:
+                            restart_recovery.mark_settled(record_id)
                 except Exception:
                     if not group_results:
                         raise
@@ -1291,16 +1299,17 @@ def _process_drain_admitted(
                 str(field(row, "Transfer_Status") or "") == "Ready"
                 and str(field(row, "Preview_Status") or "") == "Pending"
             )
-            try:
-                _fail_row(
-                    client,
-                    row["id"],
-                    str(exc),
-                    preview=preview,
-                    retryable=not preview and is_retryable_master_error(exc),
-                )
-            except Exception:
-                pass
+            if not (governor.enabled() and str(field(row,"Asset_Kind") or "")=="Platform Variant" and not preview):
+                try:
+                    _fail_row(
+                        client,
+                        row["id"],
+                        str(exc),
+                        preview=preview,
+                        retryable=not preview and is_retryable_master_error(exc),
+                    )
+                except Exception:
+                    pass
             return {
                 "processed": False,
                 "route": "leftover_error",

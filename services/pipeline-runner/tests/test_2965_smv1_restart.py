@@ -145,3 +145,14 @@ def test_deploy_script_fences_before_normal_stop_and_releases():
     assert normal.index("Enter-Smv1DeploymentMaintenance")<normal.index("Stop-LocalService")
     assert "finally { Exit-Smv1DeploymentMaintenance }" in normal
     assert "legacy runner busy; defer bootstrap" in script
+
+def test_settled_local_failure_recovers_without_process_exit():
+    stamp="2026-11-24T00:00:00+00:00"
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","tid",stamp)
+        rr.mark_settled("recCrop")
+        assert not rr.recoverable_claim("recCrop","tid",stamp)
+    assert rr.recoverable_claim("recCrop","tid",stamp)
+    with g.resource_slot("transfer",key="recCrop",wait_seconds=0):
+        rr.register_claim("recCrop","tid","2026-11-24T00:01:00+00:00")
+        assert rr.receipt("recCrop")["settled_at"] is None
