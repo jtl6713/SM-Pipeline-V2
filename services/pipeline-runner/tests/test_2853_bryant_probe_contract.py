@@ -58,3 +58,14 @@ def test_human_review_and_external_action_fences_are_verified():
         "wrangler deploy",
     ):
         assert forbidden not in lowered
+
+
+def test_ops_launch_preserves_exact_script_under_command_limit():
+    for required in (
+        "gzip.compress(script, compresslevel=9, mtime=0)",
+        "base64.b64encode",
+        "[ScriptBlock]::Create($script)",
+        "if len(command) > 7800:",
+        "'command': command, 'confirm': True",
+    ):
+        assert required in WORKFLOW
