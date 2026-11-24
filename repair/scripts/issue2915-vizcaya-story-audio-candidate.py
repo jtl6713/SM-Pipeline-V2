@@ -145,16 +145,25 @@ def main():
         vi=probe(ffprobe,voice);vas=stream_of(vi,"audio")
         require(len(vas)==1 and not stream_of(vi,"video"),"narration_not_separate_audio")
         vo_seconds=duration(vi,vas[0])
-        require(1<vo_seconds<=seconds+0.02,"narration_does_not_fit_story_no_truncation")
+        # Preserve every word. Mild pitch-preserving speech tempo, then
+        # retime original encoded picture packets only when necessary.
+        # Never create a >60-second replacement or severely slow the picture.
+        print("ISSUE2915_STORY_TIMING="+json.dumps({"source_seconds":seconds,"narration_seconds":vo_seconds}),flush=True)
+        require(1<vo_seconds,"narration_duration_invalid")
+        tempo=min(1.15,max(1.0,vo_seconds/max(1.0,seconds-0.18)))
+        target=max(seconds,vo_seconds/tempo+0.18)
+        scale=target/seconds
+        require(target<=60.0 and scale<=1.5,"narration_fit_requires_new_story_render")
+        require(vo_seconds/tempo<=target,"narration_would_be_truncated")
         vo_stats=pcm_stats(ffmpeg,voice)
         require(vo_stats["rms"]>=0.008 and vo_stats["peak"]>0.03,"narration_silent_or_invalid")
-        original_score(score,seconds)
+        original_score(score,target)
         # Input 0 contributes video ONLY: no old mixed audio or commercial song.
-        filters="[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.85,apad[vo];[2:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[bg];[vo][bg]amix=inputs=2:duration=shortest:normalize=0,alimiter=limit=0.88:level=0:latency=1[a]"
-        command([ffmpeg,"-nostdin","-v","error","-y","-i",str(source),"-i",str(voice),"-i",str(score),"-filter_complex",filters,"-map","0:v:0","-map","[a]","-c:v","copy","-c:a","aac","-b:a","192k","-map_metadata","-1","-map_chapters","-1","-movflags","+faststart","-t",str(seconds),str(candidate)])
+        filters="[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.85,atempo="+format(tempo,".8f")+",apad[vo];[2:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[bg];[vo][bg]amix=inputs=2:duration=shortest:normalize=0,alimiter=limit=0.88:level=0:latency=1[a]"
+        command([ffmpeg,"-nostdin","-v","error","-y","-itsscale",format(scale,".8f"),"-i",str(source),"-i",str(voice),"-i",str(score),"-filter_complex",filters,"-map","0:v:0","-map","[a]","-c:v","copy","-c:a","aac","-b:a","192k","-map_metadata","-1","-map_chapters","-1","-movflags","+faststart","-t",str(target),str(candidate)])
         ci=probe(ffprobe,candidate);cvs=stream_of(ci,"video");cas=stream_of(ci,"audio")
         require(len(cvs)==len(cas)==1 and cas[0]["codec_name"]=="aac" and cvs[0]["codec_name"]=="h264" and (cvs[0]["width"],cvs[0]["height"])==(vs[0]["width"],vs[0]["height"]),"candidate_format_invalid")
-        require(abs(duration(ci,cvs[0])-seconds)<0.15 and abs(duration(ci,cas[0])-seconds)<0.2,"candidate_duration_changed")
+        require(abs(duration(ci,cvs[0])-target)<0.2 and abs(duration(ci,cas[0])-target)<0.2,"candidate_duration_changed")
         require(video_hash(ffmpeg,source)==video_hash(ffmpeg,candidate),"original_picture_stream_changed")
         command([ffmpeg,"-v","error","-xerror","-i",str(candidate),"-map","0:v:0","-map","0:a:0","-f","null","-"],120)
         mixed=pcm_stats(ffmpeg,candidate);require(0.008<=mixed["rms"]<=0.35 and 0.03<mixed["peak"]<0.99,"candidate_audio_silent_or_clipped")
@@ -166,7 +175,7 @@ def main():
         r2.put_object(key,payload,"video/mp4")
         url="https://media.chicagoshining.com/"+key
         require(download_bounded(url,d/"readback.mp4")==sha,"cdn_sha256_mismatch")
-        print("ISSUE2915_STORY_AUDIO_CANDIDATE="+json.dumps({"verified":True,"output":5628,"content":1018,"source_updated_at":r["updated_at"],"parent_updated_at":p["updated_at"],"original_sha256":original_sha,"narration_sha256":voice_sha,"narration_source":"canonical_generated_parent","narration_seconds":vo_seconds,"music_origin":"new_procedural_original_no_samples","music_sha256":hashlib.sha256(score.read_bytes()).hexdigest(),"original_mixed_audio_reused":False,"picture_stream_identical":True,"video_seconds":seconds,"geometry":str(vs[0]["width"])+"x"+str(vs[0]["height"]),"audio":mixed,"url":url,"sha256":sha,"cdn_verified":True,"human_audio_review_required":True,"source_writes":0,"provider_writes":0,"factory_approvals":0},separators=(",",":")),flush=True)
+        print("ISSUE2915_STORY_AUDIO_CANDIDATE="+json.dumps({"verified":True,"output":5628,"content":1018,"source_updated_at":r["updated_at"],"parent_updated_at":p["updated_at"],"original_sha256":original_sha,"narration_sha256":voice_sha,"narration_source":"canonical_generated_parent","narration_seconds":vo_seconds,"music_origin":"new_procedural_original_no_samples","music_sha256":hashlib.sha256(score.read_bytes()).hexdigest(),"original_mixed_audio_reused":False,"picture_stream_identical":True,"source_video_seconds":seconds,"narration_tempo":tempo,"picture_timing_scale":scale,"video_seconds":target,"geometry":str(vs[0]["width"])+"x"+str(vs[0]["height"]),"audio":mixed,"url":url,"sha256":sha,"cdn_verified":True,"human_audio_review_required":True,"source_writes":0,"provider_writes":0,"factory_approvals":0},separators=(",",":")),flush=True)
 
 if __name__=="__main__":
     main()
