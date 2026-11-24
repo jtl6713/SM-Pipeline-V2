@@ -953,3 +953,5 @@ Deploy Studio UI 0.6.1079 Factory bounded Activity R2 pagination #1013/#2847; pr
 Deploy Studio UI 0.6.1082-approval-success-2622 after protected CI: separate approval success from attempted processing, count only pending/running batches as active; preserve failed results and retry. Verify custom-domain BUILD_ID. No approval/publishing mutations.
 
 2026-11-24 UTC — #2907: protected Studio Pages release of merged PR #2908 (46567c1). Deploy Review & Resolve exact-six gallery pilot and accurate Factory group counts. Verify UI build/cache contract, existing approval safeguards and authenticated production assets. No review, approval, scheduling or publishing data changes during deployment.
+
+2026-11-24 UTC — #2907 follow-up: wire authenticated canonical Supabase profile scope into both gallery Review & Resolve routes, preserve exact-output and role/hold checks; expose actionable modal error and deploy UI 0.6.1084. No human review, approval, scheduling, publishing or hold mutation during release. Verify protected deployment and exact review packages before closure.
