@@ -7,6 +7,7 @@ import {
   runQualityFactoryHandoffCron,
 } from "./quality-factory-handoff-cron.mjs";
 import { recoverNativeReviewWithRebuild } from "./quality-native-media-rebuild.mjs";
+import { resumePilsenNativeCompanions } from "./studio-native-gallery-companion-recovery.mjs";
 import { manualQualityCanaryTarget } from "./quality-native-manual-canary.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
@@ -1430,7 +1431,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1030-item4-poll-resume-2873",
+          version: "0.10.1031-native-gallery-companions-2873",
           airtable_activity: airtableActivity,
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
@@ -4618,6 +4619,28 @@ export default {
           JSON.stringify(receipt)),
       }).catch(error=>console.warn("QA_FACTORY_HANDOFF_E2E_UNAVAILABLE",
         String(error?.message||error).slice(0,200))));
+    }
+    // #2873 exact owner-authorized native sibling repair. This one-shot only
+    // queues the normal durable producer AFTER its new capability is live.
+    if (collectorCron === "* * * * *" && collectorMinute % 5 === 3
+        && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+        && env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true") {
+      ctx.waitUntil(resumePilsenNativeCompanions({
+        read:path=>adminHoldSupabaseRest(env,path),bucket:env.STUDIO_MEDIA,
+        runnerReady:async()=>{
+          const root=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+          if(!root)return false;
+          try{
+            const response=await fetch(root+"/health",{signal:AbortSignal.timeout(6000)});
+            const h=await response.json();
+            return response.ok && h.ok===true && h.studio_native_gallery_companion_2873===true
+              && h.studio_write_source==="supabase" && h.supabase_pipeline_writes===true
+              && h.workload_governor_enabled===true && h.recovery_read_only!==true;
+          }catch{return false;}
+        },
+        resume:id=>enqueueStudioProductionJob(env,id,{resume:true}),
+      }).then(result=>{if(!result.skipped)console.info("QA_NATIVE_GALLERY_COMPANIONS_2873",JSON.stringify(result));})
+        .catch(()=>console.warn("QA_NATIVE_GALLERY_COMPANIONS_2873 unavailable")));
     }
     // #2618: Old R3 records can have a complete render package in the JSON bag
     // while R4's typed filename/frame selectors are null. Recover only exact
