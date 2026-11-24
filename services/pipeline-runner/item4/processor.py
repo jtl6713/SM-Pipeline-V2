@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1139,20 +1138,48 @@ def process_drain(
 
     def _run_group(group_rows: list[dict]) -> list[dict[str, Any]]:
         with governor.resource_slot("photo_group", limit=governor.max_photo_groups()):
-            with ExitStack() as locks:
-                current_rows = []
-                for selected in sorted(group_rows, key=lambda row: str(row["id"])):
-                    locks.enter_context(governor.resource_slot("transfer", key=str(selected["id"]), limit=1))
-                    current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, str(selected["id"])) if governor.enabled() else selected
-                    if str((current.get("fields") or {}).get("Transfer_Status") or "") == "Pending":
-                        current_rows.append(current)
+            if not governor.enabled():
+                # Retain the original batching optimization when no lease is required.
+                current_rows = [
+                    row for row in group_rows
+                    if str((row.get("fields") or {}).get("Transfer_Status") or "") == "Pending"
+                ]
                 if not current_rows:
                     return []
-                drive = GoogleDriveClient()
-                variant = VariantServiceClient(settings)
                 return process_variant_group(
-                    client, drive, variant, current_rows, airtable_lock=airtable_lock,
+                    client, GoogleDriveClient(), VariantServiceClient(settings),
+                    current_rows, airtable_lock=airtable_lock,
                 )
+
+            # The transfer limit is scope-wide, not per key. Holding one
+            # transfer while requesting the next at limit=1 self-deadlocks
+            # multi-ratio photos before their canonical Pending->Processing CAS.
+            # Process one exact transfer at a time; never raise the cap or
+            # drop the unique per-transfer fence. Retain completed receipts
+            # if a later sibling fails or must defer.
+            group_results: list[dict[str, Any]] = []
+            for selected in sorted(group_rows, key=lambda row: str(row["id"])):
+                record_id = str(selected["id"])
+                try:
+                    with governor.resource_slot("transfer", key=record_id, limit=1):
+                        current = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id)
+                        if str((current.get("fields") or {}).get("Transfer_Status") or "") != "Pending":
+                            continue
+                        group_results.extend(process_variant_group(
+                            client, GoogleDriveClient(), VariantServiceClient(settings),
+                            [current], airtable_lock=airtable_lock,
+                        ))
+                except Exception:
+                    if not group_results:
+                        raise
+                    # Preserve verified earlier successes; defer the remainder
+                    # to the normal durable queue and keep the error visible.
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        "SMV1 transfer group partially completed; remaining work deferred"
+                    )
+                    break
+            return group_results
 
     def _safe_leftover(row: dict) -> dict[str, Any] | None:
         try:

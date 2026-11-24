@@ -181,3 +181,68 @@ def test_persistent_cache_skips_transform_and_source_download(monkeypatch):
     result = process_variant_group(client, FakeDrive(), FakeVariant(), [row])
     assert result[0]["route"] == "variant_persistent_cache_reuse"
     assert result[0]["drive_file_id"] == "cachedDrive"
+
+
+def test_governed_multi_ratio_group_drains_without_nested_transfer_leases(monkeypatch, tmp_path):
+    """#2873: exercise the real SQLite cap=1 with two ratios of one source."""
+    from item4 import processor as p
+    from studio_produce import workload_governor as g
+
+    monkeypatch.setenv("STUDIO_WORKLOAD_GOVERNOR_ENABLED", "true")
+    monkeypatch.setenv("STUDIO_GOVERNOR_DB_PATH", str(tmp_path / "governor.sqlite"))
+    monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "1")
+    monkeypatch.setenv("STUDIO_MAX_PHOTO_GROUPS", "2")
+    monkeypatch.setenv("PIPELINE_RUNNER_RECOVERY_READ_ONLY", "false")
+    # Fail immediately on unexpected nested acquisition instead of waiting 60s.
+    # The real context manager is still used for every admitted lease.
+    from contextlib import contextmanager
+    real_slot = g.resource_slot
+
+    @contextmanager
+    def checked_slot(scope, **kwargs):
+        if scope == "transfer":
+            assert g.snapshot()["active_resource_slots"]["transfer"] == 0
+            assert kwargs["limit"] == 1
+        with real_slot(scope, **kwargs):
+            yield
+
+    monkeypatch.setattr(g, "resource_slot", checked_slot)
+    rows = {
+        rid: _variant_row(rid, "same-drive", ratio)
+        for rid, ratio in [("recCropA", "4:5"), ("recCropB", "9:16")]
+    }
+
+    class FakeClient:
+        def get_record(self, _table, rid):
+            return rows[rid]
+
+    monkeypatch.setattr(p, "AirtableClient", FakeClient)
+    monkeypatch.setattr(p, "requeue_stale_processing", lambda *a, **kw: 0)
+    monkeypatch.setattr(p, "pipeline_settings", lambda *a: None)
+    monkeypatch.setattr(p, "GoogleDriveClient", lambda: object())
+    monkeypatch.setattr(p, "VariantServiceClient", lambda *a: object())
+    monkeypatch.setattr(p, "select_eligible_rows", lambda *a, **kw: [
+        row for row in rows.values() if row["fields"]["Transfer_Status"] == "Pending"
+    ])
+    processed = []
+
+    def process(client, drive, variant, batch, **kwargs):
+        assert len(batch) == 1
+        row = batch[0]
+        assert g.resource_active("transfer", row["id"])
+        assert g.snapshot()["active_resource_slots"]["transfer"] == 1
+        row["fields"]["Transfer_Status"] = "Ready"
+        processed.append(row["id"])
+        return [{"queue_record_id": row["id"], "route": "variant"}]
+
+    monkeypatch.setattr(p, "process_variant_group", process)
+    result = p.process_drain(production_request_record_id="recPilsen",
+                             photo_workers=1, max_followup=0)
+    assert result["processed_count"] == 2
+    assert processed == ["recCropA", "recCropB"]
+    assert g.snapshot()["active_resource_slots"]["transfer"] == 0
+    assert g.snapshot()["active_resource_slots"]["photo_group"] == 0
+    assert g.snapshot()["max_jobs"] == 1
+    # A repeated drain must not process the same canonical Ready rows again.
+    assert p.process_drain(production_request_record_id="recPilsen",
+                           photo_workers=1, max_followup=0)["processed_count"] == 0
