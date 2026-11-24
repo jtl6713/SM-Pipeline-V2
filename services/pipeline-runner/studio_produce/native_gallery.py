@@ -156,6 +156,137 @@ def _same_slide(actual, desired):
             and f.get("Approved For Final") is False and f.get("Shared_Asset_Approved") is False)
 
 
+LEGACY_HOLD = "SM_Native_Gallery_Preflight_Hold_2294"
+LEGACY_DRAFT = "SM_Native_Gallery_Draft_Repair_2294"
+LEGACY_RETIRED = "SM_Native_Gallery_Legacy_Superseded_2873"
+
+
+def _legacy_candidate(row, clips):
+    """Only an exact unapproved legacy inventory can be migrated.
+
+    Never infer approval from a historical draft or remove an independent hold.
+    """
+    bag = row.get("error_messages") or {}
+    proof = bag.get(LEGACY_HOLD)
+    return (isinstance(proof, dict) and proof.get("issue_number") == 2294
+            and proof.get("verification_status") == "not_yet_verified"
+            and proof.get("publishing_authorized") is False
+            and 2 <= len(clips) <= 9
+            and row.get("selected_clip_count") == len(clips)
+            and row.get("auto_publish_enabled") is False
+            and not any(row.get(k) for k in ("scheduled_post_date", "publish_asset_url",
+                      "platform_publish_response_text", "publish_retry_eligible"))
+            and not any(bag.get(k) for k in ("SM_Factory_Supabase_Approval_Receipt",
+                      "SM_Factory_Held_Review_Receipt", "Platform_Publish_Response",
+                      "FB_Photo_ID", "IG_Child_Container_ID")))
+
+
+def _legacy_id(number, order):
+    return f"sb-native:2294:{number}:{order:02d}"
+
+
+def _legacy_draft_matches(slide, clip, oid, number, order):
+    f = slide.get("fields") or {}
+    proof = f.get(LEGACY_DRAFT) or {}
+    # A retired row retains its original source/order/receipt. No new receipt
+    # or existing slide approval can be manufactured by this predicate.
+    return (slide.get("airtable_record_id") == _legacy_id(number, order)
+            and slide.get("current_order") == order and bool(slide.get("id"))
+            and bool(slide.get("updated_at"))
+            and f.get("Platform Output") == [oid] and f.get("PO_Output_ID") == [number]
+            and f.get("Slide Number") == order
+            and f.get("Final Image URL") == (clip.get("url") or clip.get("src"))
+            and f.get("Asset_4x5_Public_URL") == f.get("Final Image URL")
+            and str(f.get("Final Image URL") or "").startswith(CDN + "studio/previews/")
+            and f.get("Asset_Family_Key") == clip.get("media_asset_record_id")
+            and f.get("Google Drive File ID") == clip.get("google_drive_file_id")
+            and f.get("Approved For Final") is False and f.get("Shared_Asset_Approved") is False
+            and f.get("Review Status") == "Pending Review"
+            and not any(f.get(k) for k in ("FB_Photo_ID", "IG_Child_Container_ID", "Platform_Post_ID"))
+            and proof.get("output_number") == number and proof.get("slide_order") == order
+            and proof.get("source_asset") == clip.get("media_asset_record_id")
+            and proof.get("variant_drive_file_id") == clip.get("google_drive_file_id")
+            and proof.get("publishing_authorized") is False
+            and proof.get("final_creative_approved") is False)
+
+
+def _load_legacy_drafts(read, row, clips):
+    expected = [_legacy_id(row["output_number"], i) for i in range(1, len(clips)+1)]
+    rows = read("carousel_slides?airtable_record_id=in.(" + ",".join(quote(x) for x in expected)
+                + ")&select=id,airtable_record_id,current_order,deleted_from_carousel,fields,updated_at&limit=10")
+    if not isinstance(rows, list) or len(rows) != len(expected):
+        raise RuntimeError("Legacy gallery exact draft inventory unavailable")
+    by_id = {s["airtable_record_id"]: s for s in rows}
+    if set(by_id) != set(expected):
+        raise RuntimeError("Legacy gallery draft identity mismatch")
+    ordered = [by_id[x] for x in expected]
+    for i, (s, c) in enumerate(zip(ordered, clips), 1):
+        if not _legacy_draft_matches(s, c, row["airtable_record_id"], row["output_number"], i):
+            raise RuntimeError("Legacy gallery draft source or human approval changed")
+        if s.get("deleted_from_carousel") is not False:
+            retired = s.get("fields", {}).get(LEGACY_RETIRED) or {}
+            if (s.get("deleted_from_carousel") is not True
+                    or retired.get("output_record_id") != row["airtable_record_id"]
+                    or retired.get("request_id") != row["selected_assets"]["production_request_record_id"]
+                    or retired.get("human_approval_required") is not True):
+                raise RuntimeError("Legacy gallery deletion not owned by this recovery")
+    return ordered
+
+
+def _retire_legacy_drafts(read, write, row, drafts, request_id, fingerprint):
+    """Retire only exact old unapproved rows, retaining immutable history.
+
+    A partial interruption is recoverable by the same package SHA. Never
+    reactivate or retire another revision, or create duplicate active slides.
+    """
+    for draft in drafts:
+        f = draft["fields"]
+        receipt = {"output_record_id": row["airtable_record_id"], "request_id": request_id,
+                   "package_sha256": fingerprint, "human_approval_required": True,
+                   "provider_writes": 0}
+        if draft.get("deleted_from_carousel") is True:
+            if f.get(LEGACY_RETIRED) != receipt:
+                raise RuntimeError("Legacy gallery retirement belongs to a different package")
+            continue
+        latest = _one(read("platform_outputs?airtable_record_id=eq." + row["airtable_record_id"]
+                           + "&select=*&limit=2"))
+        if latest.get("updated_at") != row.get("updated_at") or not _safe_output(latest):
+            raise RuntimeError("Legacy gallery output revision changed before retirement")
+        changed = write("carousel_slides?id=eq." + quote(str(draft["id"]))
+                        + "&airtable_record_id=eq." + quote(draft["airtable_record_id"])
+                        + "&updated_at=eq." + quote(draft["updated_at"])
+                        + "&deleted_from_carousel=eq.false", "PATCH",
+                        {"deleted_from_carousel": True, "fields": {**f,
+                         "Deleted From Carousel": True, LEGACY_RETIRED: receipt}, "updated_at": _now()})
+        if not isinstance(changed, list) or len(changed) != 1:
+            raise RuntimeError("Legacy gallery retirement CAS unverified")
+
+
+def _legacy_caption(client, request, parent, row):
+    caption = str(row.get("output_caption") or "").strip()
+    if caption:
+        return caption
+    bag = row.get("error_messages") or {}
+    if bag.get("Studio_Effective_Caption_Mode") != "AI decides":
+        raise RuntimeError("Legacy gallery missing user-controlled caption")
+    from studio_produce.steps import studio_market_for_request, theme_title, caption_locked
+    from sai1.processor import process_request
+    from p3.helpers import caption_with_hashtags
+    if caption_locked(request):
+        raise RuntimeError("Legacy gallery requires exact user caption")
+    title = theme_title(request, parent)
+    if not title:
+        raise RuntimeError("Legacy gallery caption subject unavailable")
+    result = process_request(title=title, market=studio_market_for_request(client, request, parent),
+        covered_text="Unverified scene/season: write destination-planning copy, not claims about what the selected photos depict or current operating details.",
+        needed=0, total=0)
+    themes = result.get("themes") or {}
+    text = str(themes.get("post_caption") or "").strip()
+    if not result.get("processed") or not text or text.casefold() == title.strip().casefold():
+        raise RuntimeError("Legacy gallery AI caption unavailable")
+    return caption_with_hashtags(text, str(themes.get("hashtags") or ""))
+
+
 def complete_gallery(client, request, parent, output):
     """Rebuild exact unapproved owner-uploaded gallery; retry uses fixed slide IDs."""
     cfg = client._settings
@@ -167,7 +298,7 @@ def complete_gallery(client, request, parent, output):
     if not all(REC.fullmatch(x) for x in (oid, pid, rid)):
         raise RuntimeError("Native gallery identity invalid")
     row = _one(read(f"platform_outputs?airtable_record_id=eq.{oid}&select=*&limit=2"))
-    if not _safe_output(row) or not str(row.get("output_caption") or "").strip():
+    if not _safe_output(row):
         raise RuntimeError("Native gallery not an unapproved safe production output")
     selected = row.get("selected_assets") or {}
     if selected.get("authority") != AUTHORITY or selected.get("production_request_record_id") != rid:
@@ -185,13 +316,21 @@ def complete_gallery(client, request, parent, output):
     selector = ("carousel_slides?deleted_from_carousel=eq.false&fields->PO_Output_ID=cs."
                 + quote(json.dumps([number])) + "&select=airtable_record_id,current_order,deleted_from_carousel,fields&limit=12")
     existing = read(selector)
-    if not isinstance(existing, list) or any((s.get("fields") or {}).get(KEY, {}).get("request_id") != rid
-                                             or s.get("airtable_record_id") != _slide_id(oid,s.get("current_order"))
-                                             for s in existing):
-        raise RuntimeError("Existing gallery belongs to another review revision")
     clips = selected.get("selected_clips")
-    if not isinstance(clips, list) or not clips:
-        raise RuntimeError("Native gallery selected photos unavailable")
+    if not isinstance(clips, list) or not clips or not isinstance(existing, list):
+        raise RuntimeError("Native gallery selected photos or slides unavailable")
+    legacy = _legacy_candidate(row, clips)
+    drafts = _load_legacy_drafts(read, row, clips) if legacy else []
+    legacy_ids = {s["airtable_record_id"] for s in drafts if s.get("deleted_from_carousel") is False}
+    if not legacy_ids.issubset({s["airtable_record_id"] for s in existing}):
+        raise RuntimeError("Legacy gallery active inventory changed")
+    existing = [s for s in existing if s["airtable_record_id"] not in legacy_ids]
+    if any((s.get("fields") or {}).get(KEY, {}).get("request_id") != rid
+           or s.get("airtable_record_id") != _slide_id(oid,s.get("current_order")) for s in existing):
+        raise RuntimeError("Existing gallery belongs to another review revision")
+    caption = _legacy_caption(client, request, parent, row) if legacy else str(row.get("output_caption") or "").strip()
+    if not caption:
+        raise RuntimeError("Native gallery caption unavailable")
     target_body = len(selected_body(clips))
     # Walk selected sources in order; only skip byte-identical final images.
     # Preserve the original inventory and never pull unrelated assets.
@@ -261,6 +400,8 @@ def complete_gallery(client, request, parent, output):
         asset = _one(read(f"media_assets?airtable_record_id=eq.{asset_id}&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=2"))
         if not _owned(asset, profile, drive_id):
             raise RuntimeError("Native gallery source is unavailable or rights unverified")
+        if legacy and drive_id != clip.get("google_drive_file_id"):
+            raise RuntimeError("Legacy gallery crop Drive provenance changed")
         raw, _ = drive.download_file(drive_id, timeout=60)
         _image_proof(raw)
         jpeg = letter_jpeg_bytes(raw, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
@@ -302,6 +443,10 @@ def complete_gallery(client, request, parent, output):
     if any(s["airtable_record_id"] not in desired or not _same_slide(s, desired[s["airtable_record_id"]]) for s in existing):
         raise RuntimeError("Native gallery retry encountered a different or approved revision")
     missing = [s for s in slides if s["airtable_record_id"] not in {e["airtable_record_id"] for e in existing}]
+    if legacy:
+        if skipped_duplicates or len(prepared) != len(clips)+1:
+            raise RuntimeError("Legacy gallery exact source order cannot be preserved")
+        _retire_legacy_drafts(read, write, row, drafts, rid, fingerprint)
     if missing:
         write("carousel_slides?on_conflict=airtable_record_id","POST",missing,
               "resolution=ignore-duplicates,return=representation")
@@ -320,7 +465,7 @@ def complete_gallery(client, request, parent, output):
     # The full media byte check above is stronger than the ordinary technical
     # header probe. Use its exact signature so siblings do not wait on cron.
     sig = [oid,row["platform"],row.get("studio_output_type"),"Native Photo Route",
-           row.get("final_file_url"),prepared[0]["url"],prepared[0]["url"],len(prepared),row.get("output_caption")]
+           row.get("final_file_url"),prepared[0]["url"],prepared[0]["url"],len(prepared),caption]
     bag["SM_Scheduling_Approval_Preflight_v1"] = {
         "version":1,"status":"verified","checked_at":at,
         "signature":json.dumps(sig,ensure_ascii=False,separators=(",",":")),
@@ -329,11 +474,16 @@ def complete_gallery(client, request, parent, output):
         "requires_human_approval":True,"scheduling_authorized":False,"publishing_authorized":False,
     }
     bag[KEY] = marker
+    if legacy:
+        bag[LEGACY_HOLD] = {**bag[LEGACY_HOLD], "verification_status":"verified_for_human_review",
+                            "reconciled_at":at, "package_sha256":fingerprint,
+                            "publishing_authorized":False}
     # CAS on exact output revision. Never change the user's proposed date or any provider state.
     changed = write(f"platform_outputs?id=eq.{row['id']}&updated_at=eq."+quote(row["updated_at"])
                     +"&do_not_publish=eq.false&published_at=is.null&studio_scheduled_at=is.null",
                     "PATCH",{"selected_assets":package,"render_clip_list":prepared,"selected_clip_count":len(prepared),
                              "aspect_ratio":"4:5","thumbnail_url":prepared[0]["url"],"studio_preview_url":prepared[0]["url"],
+                             "output_caption":caption,
                              "output_status":"Ready for Review","review_status":"Review Sent","publish_status":"Not Ready",
                              "auto_publish_enabled":False,"error_messages":bag,"updated_at":at})
     if not isinstance(changed,list) or len(changed)!=1:
