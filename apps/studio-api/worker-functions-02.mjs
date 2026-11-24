@@ -10963,9 +10963,15 @@ export async function studioSweepSimilarAccountTimes(env, options = {}) {
 export async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
   const cleaned = String(f(parentContentItem,"Internal_Notes")||"")
     .split("\n").filter(line => !line.includes("Studio master/umbrella Content Item.")).join("\n").trim();
-  return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentContentItem.id, {
-    method:"PATCH", body:JSON.stringify({fields:{Do_Not_Produce:false,Internal_Notes:cleaned||null},typecast:false})
+  const patch = {Do_Not_Produce:false,Internal_Notes:cleaned||null};
+  const receipt = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentContentItem.id, {
+    method:"PATCH", body:JSON.stringify({fields:patch,typecast:false})
   });
+  if (receipt?.id !== parentContentItem.id) throw new Error("Studio parent restore identity mismatch");
+  // Supabase-only writes echo the changed fields, not the complete row.
+  // Losing Include_Voiceover, Include_Background_Music and Content_Profile
+  // here falsely converts enabled defaults into silent output directives.
+  return {...parentContentItem, fields:{...parentContentItem.fields, ...patch, ...receipt.fields}};
 }
 /*__STUDIO_WORKER_END:restoreParentContentItemFromStudioUmbrella__*/
 
@@ -11044,6 +11050,13 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     wrapped.recoveryStage = "fanout_" + label;
     throw wrapped;
   };
+  // A preceding Supabase PATCH may have returned only changed fields.
+  // Read the exact authoritative request once before resolving output intent.
+  const requestId = requestRecord?.id;
+  if (!requestId) throw new Error("Studio fanout requires an exact production request");
+  requestRecord = await canonicalFanoutRead("request_directives",
+    () => airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId));
+  if (requestRecord?.id !== requestId) throw new Error("Studio fanout request identity mismatch");
   const onlyMissing = Boolean(options.onlyMissing);
   if (String(f(requestRecord, "Request_Status") || "").trim() === "Cancelled") return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true,discarded_request:true};
   const limit = Number(options.limit);
@@ -11085,10 +11098,13 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
   if (String(f(parent, "Content_Status") || "").trim() === "Archived") return {enabled_output_count:outputRows.length,routed_count:0,blocked_count:candidates.length,remaining:0,work_items:[],single_parent_mode:true,discarded_archived_parent:true};
   const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
-    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+    const assetPatch = { Studio_Master_Assets_JSON: JSON.stringify(filledAssets) };
+    const receipt = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
       method: "PATCH",
-      body: JSON.stringify({ fields: { Studio_Master_Assets_JSON: JSON.stringify(filledAssets) }, typecast: false }),
+      body: JSON.stringify({ fields: assetPatch, typecast: false }),
     });
+    if (receipt?.id !== requestRecord.id) throw new Error("Studio fanout master asset identity mismatch");
+    requestRecord = {...requestRecord, fields:{...requestRecord.fields, ...assetPatch, ...receipt.fields}};
   }
   parent=await restoreParentContentItemFromStudioUmbrella(env,parent);
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
