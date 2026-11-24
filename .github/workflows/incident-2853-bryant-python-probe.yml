@@ -1,0 +1,98 @@
+name: Incident 2853 exact governed Python producer probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/incident-2853-bryant-python-probe.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-2853-exact-python-probe
+  cancel-in-progress: false
+
+jobs:
+  exact-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Parse exact protected script and validate source contracts
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2853-bryant-python-probe.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw 'incident2853_probe_script_parse_invalid'}
+          Write-Output 'incident2853_probe_script_parse=PASS'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test exact gallery recovery and governor before production
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest -r services/pipeline-runner/requirements.txt
+          (cd services/pipeline-runner && python -m pytest -q \
+            tests/test_2853_bryant_probe_contract.py \
+            tests/test_studio_native_gallery_2873.py \
+            tests/test_2670_workload_governor.py)
+
+      - name: Execute exactly one protected nonpublishing governed probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' \
+            .github/scripts/incident-2853-bryant-python-probe.ps1 > /tmp/probe.json
+          job=''
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS --max-time 30 -o /tmp/start.json -w '%{http_code}' \
+              -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/probe.json || true)
+            if [[ "$code" == 202 || "$code" == 200 ]]; then
+              job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json)
+              [[ -n "$job" ]] && break
+            fi
+            [[ "$code" == 409 ]] || { echo "incident2853_ops_submit_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          for attempt in $(seq 1 500); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" \
+              "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status // empty' /tmp/status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/status.json | grep '^incident2853_' | tail -12
+              jq -e '.job.log|contains("incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED") or contains("incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED")' /tmp/status.json >/dev/null
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then
+              echo 'incident2853_protected_probe=FAILED_NO_RETRY'
+              jq -r '.job.log // ""' /tmp/status.json | grep '^incident2853_' | tail -12 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'incident2853_protected_probe=TIMEOUT_NO_RETRY'
+          exit 1
