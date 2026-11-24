@@ -1,0 +1,109 @@
+name: Issue 2888 Factory Corrected Video Preview Probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue2888-factory-private-video-probe.yml'
+      - 'apps/studio-api/factory-2618-review-preview.mjs'
+      - 'apps/studio-api/factory-2618-review-preview.test.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2888-factory-private-video-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue2888-factory-preview-safe-cache
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate exact protected #2618 preview authorization/Range behavior
+        run: node --test apps/studio-api/factory-2618-review-preview.test.mjs
+      - name: Verify no approval, publishing, Supabase mutation or public Drive sharing
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          const s = fs.readFileSync('apps/studio-api/factory-2618-review-preview.mjs', 'utf8');
+          const yml = fs.readFileSync('.github/workflows/issue2888-factory-private-video-probe.yml', 'utf8');
+          for (const id of ['rec1PDreUDoe2AcPV','recaV78on0RSfqb31','recfwDzGh6St6WB9f']) {
+            if(!s.includes(id) || !yml.includes(id)) throw Error('EXACT_PROTECTED_PREVIEW_ID_MISSING');
+          }
+          if(!s.includes('issue2618-verified-private-review')) throw Error('PRIVATE_R2_CACHE_GUARD_MISSING');
+          if(!yml.includes('CF_ACCESS_CLIENT_ID') || !yml.includes('CF_ACCESS_CLIENT_SECRET')) throw Error('CF_ACCESS_UNAVAILABLE');
+          if(/\/api\/run|\/api\/shell|\/approve|\/publish|\/schedule|supabase\.co\/rest\/v1/.test(yml))
+            throw Error('FORBIDDEN_MUTATING_OR_OPS_ENDPOINT_IN_PREVIEW_PROBE');
+          console.log('ISSUE2888_PROTECTED_PREVIEW_GET_RANGE_CONTRACT=PASS');
+          JS
+
+  live:
+    if: github.event_name != 'pull_request'
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Exercise exact 3 source videos and 4 sibling previews with Range 0-0
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID}" && test -n "${CF_ACCESS_CLIENT_SECRET}"
+          base="https://studio.chicagoshining.com"
+          mkdir -p /tmp/issue2888
+          probe() {
+            local output_id="$1" expected="$2"
+            local url="$base/api/factory/outputs/$output_id/preview"
+            local h="/tmp/issue2888/$output_id.headers"
+            local b="/tmp/issue2888/$output_id.body"
+            local code
+            code=$(curl -sS -L --max-time 105 --max-filesize 4096 \
+              -o "$b" -D "$h" -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H 'Accept: video/mp4' -H 'Range: bytes=0-0' "$url") || {
+                echo "::error::Preview request failed (transport, time, or response too large) for $output_id"
+                return 1
+              }
+            local type range source reason
+            type=$(grep -i '^content-type:' "$h" | tail -1 | cut -d: -f2- | tr -d '\r' | xargs || true)
+            range=$(grep -i '^content-range:' "$h" | tail -1 | cut -d: -f2- | tr -d '\r' | xargs || true)
+            source=$(grep -i '^x-studio-preview-source:' "$h" | tail -1 | cut -d: -f2- | tr -d '\r' | xargs || true)
+            echo "issue2888_output=$output_id http=$code mime=$type source=$source byte_range=$range"
+            if [[ "$code" == 206 && "$type" == "video/mp4" &&
+                  "$source" == "issue2618-verified-private-r2" && "$range" == "bytes 0-0/$expected" &&
+                  $(wc -c < "$b" | tr -d ' ') == 1 ]]; then
+              echo "issue2888_exact_output_range=PASS_$output_id"
+              return 0
+            fi
+            # Only print a known safe error category, never response contents,
+            # cookies, access tokens, Google Drive links, or private video bytes.
+            reason=$(grep -oE 'FACTORY_2618_[A-Z_]+' "$b" | head -1 || true)
+            echo "::error::Protected Factory playback FAILED output=$output_id http=$code reason=${reason:-unclassified}"
+            return 1
+          }
+          # Stage one source of each of the three exact SHA-verified Drive
+          # videos. First request may populate the PRIVATE R2 review cache;
+          # it never edits output, approval, publication or production records.
+          probe rec1PDreUDoe2AcPV 17892121
+          probe recaV78on0RSfqb31 2194946
+          probe recfwDzGh6St6WB9f 895259
+          # The remaining siblings must replay from the same verified objects.
+          probe rec1kjgusW1fX9BOp 17892121
+          probe recidhGcJSfOlxMsc 17892121
+          probe recgeicEbdlbmQiv5 2194946
+          probe recy1CzV4MJQycBMq 2194946
+          echo 'issue2888_factory_seven_verified_private_mp4_range=PASS'
