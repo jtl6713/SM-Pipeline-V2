@@ -4,7 +4,7 @@ import {
   inspectNativeGalleryPublicationPackage,
   nycOwnerGalleryApprovalEligible,
   preflightNycOwnerGalleryApproval,
-  finalizeNycOwnerGalleryOnFactoryClick,
+  finalizeNycOwnerGalleryOnFactoryClick, siblingGalleryReviewEligible, verifySiblingGalleryEvidence,
 } from "./native-gallery-package-guard.mjs";
 
 const env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" };
@@ -221,4 +221,76 @@ test("#2371 historic Factory batch predating owner hold release cannot final-app
     submittedAt:"2026-11-22T05:44:56Z",
   }),/AFTER the owner hold release/);
   assert.equal(calls.filter(c=>c.method==="PATCH").length,0);
+});
+
+function siblingFixture(){
+ const {output:source,slides:originalSlides}=fixture(pairs[4]);
+ const content="86536e0c-aa7a-4b43-86e9-0a56bc1b19d8",profile="63c2e81b-0cd1-423d-a033-11366e69bdee";
+ Object.assign(source,{id:"d2151602-797a-4df5-b256-0ba4e8dc8b34",content_item_id:content,
+ content_profile_id:profile,aspect_ratio:"4:5",output_title:"Gantry Plaza Sunset",output_caption:"Queens waterfront"});
+ const marker={at:"2026-11-24T11:52:58Z",source_output:10867,human_approval_required:true,provider_writes:0};
+ const output={...structuredClone(source),id:"abeab297-98df-4546-8ad0-c34415bbe5a2",
+ airtable_record_id:"recCdLDCXYXKZr13y",output_number:10868,platform:"Facebook",
+ platform_output_type:"Facebook Photo Set",studio_output_type:"Multi-Image Post",
+ error_messages:{SM_Quality_Exact_Sibling_Media_20261124:marker}};
+ const slides=originalSlides.map((row,i)=>{
+   const q=row.fields.SM_NYC_AI_Creative_QA_20261122;
+   const g={geometry:"1080x1350",cdn_sha256_verified:true,verified_branded_url:row.fields["Final Image URL"],
+     branded_sha256:q.verified_branded_sha256};
+   row.fields.SM_NYC_Shared_Small_Watermark_20261122=g;
+   return {...structuredClone(row),id:"b0000000-0000-4000-8000-"+String(i+1).padStart(12,"0"),
+     airtable_record_id:"rec"+String(i+1).padStart(16,"b"),fields:{...row.fields,
+       "Platform Output":[output.airtable_record_id],PO_Output_ID:[10868],
+       SM_NYC_AI_Creative_QA_20261122:undefined,
+       SM_Quality_Exact_Sibling_Media_20261124:{source_output:10867,source_slide_id:row.airtable_record_id,
+         prior_verified_media_evidence:q,prior_verified_geometry_and_hash:g,
+         requires_new_human_approval:true,provider_writes:0}}};
+ });
+ const assets=slides.map(row=>({airtable_record_id:row.fields.Asset_Family_Key,active:true,do_not_use:false,
+ asset_status:"Available",metadata:{rights_status:"Owned"}}));
+ return {output,source,slides,originalSlides,assets};
+}
+test("#2915 verified sibling repair is not limited to historical output-number allowlist",()=>{
+ const {output,source,slides,originalSlides,assets}=siblingFixture();
+ assert.equal(nycOwnerGalleryApprovalEligible(output),false);
+ assert.equal(siblingGalleryReviewEligible(output),true);
+ assert.equal(verifySiblingGalleryEvidence(output,source,slides,originalSlides,assets),true);
+ // A new repair may use the same versioned certificate without adding IDs to source.
+ output.error_messages.SM_Quality_Exact_Sibling_Media_v1=output.error_messages.SM_Quality_Exact_Sibling_Media_20261124;
+ delete output.error_messages.SM_Quality_Exact_Sibling_Media_20261124;
+ assert.equal(verifySiblingGalleryEvidence(output,source,slides,originalSlides,assets),true);
+});
+test("#2915 sibling evidence fails on profile, caption, source identity, rights and changed byte proof",()=>{
+ const {output,source,slides,originalSlides,assets}=siblingFixture();
+ for(const wrong of [{...source,content_profile_id:"foreign"},{...source,output_caption:"different"},
+ {...source,content_item_id:"wrong"},{...source,output_number:99999},{...source,aspect_ratio:"9:16"}]){
+  assert.equal(verifySiblingGalleryEvidence(output,wrong,slides,originalSlides,assets),false);
+ }
+ assert.equal(verifySiblingGalleryEvidence(output,source,slides,originalSlides,
+  [{...assets[0],do_not_use:true},...assets.slice(1)]),false);
+ const wrong=structuredClone(slides);wrong[0].fields.SM_Quality_Exact_Sibling_Media_20261124.source_slide_id="wrong";
+ assert.equal(verifySiblingGalleryEvidence(output,source,wrong,originalSlides,assets),false);
+ assert.equal(siblingGalleryReviewEligible({...output,do_not_publish:true}),false);
+ assert.equal(siblingGalleryReviewEligible({...output,error_messages:{...output.error_messages,Publish_Attempt_Count:1}}),false);
+});
+test("#2915 old click cannot approve a newly repaired sibling revision even after earlier release",async t=>{
+ const {output,source,slides,originalSlides,assets}=siblingFixture();
+ const original=globalThis.fetch;let writes=0;
+ t.after(()=>{globalThis.fetch=original});
+ globalThis.fetch=async(url,opts={})=>{
+  const u=new URL(url);
+  if(opts.method==="PATCH"){writes++;throw Error("must not write");}
+  if(u.pathname.endsWith("/platform_outputs"))return Response.json([source]);
+  if(u.pathname.endsWith("/media_assets"))return Response.json(assets);
+  if(u.pathname.endsWith("/carousel_slides"))return Response.json(
+    u.searchParams.get("fields->PO_Output_ID").includes("10868")?slides:originalSlides);
+  throw Error("unexpected "+u.pathname);
+ };
+ const proof=await preflightNycOwnerGalleryApproval(env,output);
+ assert.equal(proof.pending,4);
+ assert.equal(proof.siblingRepair,true);
+ await assert.rejects(finalizeNycOwnerGalleryOnFactoryClick(env,output,{
+ requestId:"old-failed-factory-request",approvedByUserRecordId:actor,submittedAt:"2026-11-23T05:00:00Z"
+ }),/AFTER the owner hold release/);
+ assert.equal(writes,0);
 });
