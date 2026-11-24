@@ -28,7 +28,7 @@ const RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const FACTORY_APPROVAL_SELECT = [
   "id", "airtable_record_id", "output_number",
   "content_item_id", "content_item_airtable_id", "content_profile_id",
-  "platform", "format", "studio_output_type", "platform_output_type",
+  "platform", "format", "studio_output_type", "platform_output_type", "aspect_ratio",
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "selected_clip_count", "selected_assets", "render_clip_list",
