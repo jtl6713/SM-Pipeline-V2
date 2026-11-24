@@ -1,0 +1,31 @@
+name: Pipeline native photo preview regression
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/assets/pipeline-photo-preview.*'
+      - 'apps/studio-web/assets/app-item4-1008.js'
+      - 'apps/studio-web/pipeline-photo-preview.*'
+      - 'apps/studio-web/index.html'
+      - '.github/workflows/pipeline-photo-preview.yml'
+permissions:
+  contents: read
+jobs:
+  native-gallery-viewer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test exact output identity, release contract and cover preservation
+        run: |
+          node --check apps/studio-web/assets/pipeline-photo-preview.js
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/pipeline-photo-preview.test.mjs apps/studio-web/pipeline-content-cover.test.mjs apps/studio-web/pipeline-thumb-no-stories.test.mjs
+      - name: Verify real browser native gallery navigation without backend writes
+        run: |
+          npm install --prefix "$RUNNER_TEMP/studio-gallery" --no-save playwright@1.56.1
+          "$RUNNER_TEMP/studio-gallery/node_modules/.bin/playwright" install chromium
+          NODE_PATH="$RUNNER_TEMP/studio-gallery/node_modules" node apps/studio-web/pipeline-photo-preview.browser.cjs
