@@ -15,7 +15,7 @@ export async function verifiedRunnerVersion(env,requester){
   if(origin!=="https://pipeline.chicagoshining.com")return "unverified";
   try{
     const response=await requester(origin+"/health",{
-      method:"GET",redirect:"error",headers:{Accept:"application/json"},
+      method:"GET",redirect:"manual",headers:{Accept:"application/json"},
       signal:AbortSignal.timeout(4500)
     });
     if(!response.ok)return "unverified";
@@ -243,7 +243,7 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
     let response,payload;
     try{
       response=await fetchHealth(origin+"/internal/workload/snapshot",{
-        method:"GET",redirect:"error",
+        method:"GET",redirect:"manual",
         headers:{"X-Pipeline-Secret":secret,Accept:"application/json"},
         signal:AbortSignal.timeout(4500)
       });
@@ -458,7 +458,7 @@ export async function handleQaApi({request,url,env,authorization,qaLedger=null,r
     const observers={
       workerHealth:async({signal})=>{
         const target=new URL("/api/health",url.origin);
-        const response=await fetchHealth(target.toString(),{method:"GET",redirect:"error",
+        const response=await fetchHealth(target.toString(),{method:"GET",redirect:"manual",
           headers:{Accept:"application/json"},signal});
         const health=await response.json();
         return {httpStatus:response.status,

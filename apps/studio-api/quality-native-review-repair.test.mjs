@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assessVerifiedNativeReviewRepair,recoverOneVerifiedNativeReview } from "./quality-native-review-repair.mjs";
+import { assessVerifiedNativeReviewRepair,recoverOneVerifiedNativeReview,verifyBytes } from "./quality-native-review-repair.mjs";
 
 const id="recFHzU0h4f4mjgrj",content="11111111-1111-4111-8111-111111111111",
   profile="22222222-2222-4222-8222-222222222222",pr="33333333-3333-4333-8333-333333333333",
@@ -10,6 +10,15 @@ const sha="a".repeat(64), at="2026-11-24T12:27:50Z",before="2026-11-24T12:20:00Z
 const assets=[1,2].map(i=>({index:i,media_asset_id:"recVariant000000"+i,asset_name:"variant"+i+".jpg",
   drive_id:"drive-variant-"+i,transfer_id:"source-"+i+"-9x16",url:"https://media.chicagoshining.com/variant"+i+".jpg",
   sha256:sha,geometry:"1080x1920",cdn_verified:true}));
+test("media byte verification never follows redirects in Cloudflare",async()=>{
+ const bytes=new Uint8Array([255,216,255,217]);
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),v=>v.toString(16).padStart(2,"0")).join("");
+ const ok=await verifyBytes([{url:"https://media.chicagoshining.com/exact.jpg",sha256:digest}],async(url,options)=>{
+  assert.equal(url,"https://media.chicagoshining.com/exact.jpg");assert.equal(options.redirect,"manual");
+  return new Response(bytes,{status:200,headers:{"Content-Type":"image/jpeg","Content-Length":"4"}});
+ });
+ assert.equal(ok,true);
+});
 const clips=assets.map(a=>({order:a.index,url:a.url,google_drive_file_id:a.drive_id,
   media_asset_record_id:a.media_asset_id,verified_media_sha256:a.sha256,source_transfer_id:a.transfer_id,
   watermarked:true,lettered:false,aspect_ratio:"9:16"}));

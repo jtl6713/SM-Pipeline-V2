@@ -156,7 +156,7 @@ async function exactOwner(read,row,decision){
 }
 export async function verifyBytes(assets,transport=fetch){
   for(const a of assets){
-    const response=await transport(a.url,{method:"GET",redirect:"error",headers:{"Cache-Control":"no-cache"},
+    const response=await transport(a.url,{method:"GET",redirect:"manual",headers:{"Cache-Control":"no-cache"},
       signal:AbortSignal.timeout(12000)});
     const size=Number(response.headers.get("Content-Length"));
     if(!response.ok||!/^image\/jpeg(?:;|$)/i.test(response.headers.get("Content-Type")||"")
