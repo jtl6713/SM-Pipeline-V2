@@ -4591,6 +4591,19 @@ export function inspectFactoryNativeSlideInventory(parent, rows) {
         seen.has(image)) {
       return fail("Native slide ownership, sequence, image or review evidence is invalid; repair gallery");
     }
+    const studio = parent.error_messages?.SM_Studio_Native_Gallery_2873;
+    const studioSlide = f.SM_Studio_Native_Gallery_2873;
+    if (studio || studioSlide) {
+      if (studio?.complete !== true || studio.human_approval_required !== true
+          || studio.provider_writes !== 0 || studio.slide_count !== expected
+          || !validSha(studio.package_sha256) || studioSlide?.package_sha256 !== studio.package_sha256
+          || studioSlide?.request_id !== studio.request_id || !validSha(studioSlide?.sha256)
+          || studioSlide.owned_media_verified !== true || studioSlide.human_approval_required !== true
+          || f["Is Cover"] !== (i === 0) || f.Asset_4x5_Public_Status !== "Ready"
+          || f.Asset_4x5_Public_URL !== image) {
+        return fail("Studio native gallery prepared revision incomplete; repair gallery");
+      }
+    }
     const draft = f.SM_Native_Gallery_Draft_Repair_2294;
     const slideReceipt = f.SM_Factory_Review_Resolve_2907;
     const slideRepair = f.SM_Chicago_Gallery_Repair_2890;
