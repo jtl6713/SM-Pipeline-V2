@@ -41,6 +41,11 @@ jobs:
           python -m unittest discover -s repair/scripts -p 'airtable_coverage_baseline_test.py' -v
           python -m unittest discover -s repair/scripts -p 'airtable_standalone_egress_test.py' -v
 
+      - name: Quality Agent native-media rebuild and human review boundary
+        run: |
+          node --test apps/studio-api/quality-native-review-repair.test.mjs apps/studio-api/quality-factory-handoff-cron.test.mjs apps/studio-api/quality-native-media-rebuild.test.mjs
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_quality_native_media_rebuild.py
+
       - name: Hermetic packs
         shell: bash
         run: |
