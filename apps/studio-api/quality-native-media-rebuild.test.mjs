@@ -103,3 +103,32 @@ test("complete worker adapter: proven source -> staged bytes -> CAS -> human Fac
   if(fault==="uncertain")assert.equal(reservations,1,"unknown commit remains reserved");
  }
 });
+
+
+test("exact source policy adds no bindings and manual rebuild cannot widen cron or target scope",async()=>{
+ const {qualityNativeManualCanary,manualQualityCanaryTarget}=await import("./quality-native-manual-canary.mjs");
+ const target=qualityNativeManualCanary.record_id;
+ assert.equal(manualQualityCanaryTarget({}),target);
+ assert.equal(manualQualityCanaryTarget({QUALITY_FACTORY_HANDOFF_CRON_DISABLED:"true"}),null);
+ assert.equal(manualQualityCanaryTarget({QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID:"recOther00000000"}),null);
+ const report={status:"ok",findings:[{record_id:target,reason:"stale_tiktok_waiting_schedule_blocks_review"}]};
+ let rebuilt=0,recovered=0;
+ const recover=async()=>{recovered++;return {status:"skipped",reason:"not_stale_native_review_handoff"}};
+ const rebuild=async()=>{rebuilt++;return {status:"repaired"}};
+ assert.equal((await recoverNativeReviewWithRebuild({},report,{recover,rebuild})).status,"skipped");
+ assert.equal(rebuilt,0,"normal cron remains default off");
+ assert.equal((await recoverNativeReviewWithRebuild({},report,{recover,rebuild,manualCanaryRecordId:target})).status,"repaired");
+ assert.equal(rebuilt,1);
+ for(const [env,r,id] of [
+  [{QUALITY_FACTORY_HANDOFF_CRON_DISABLED:"true"},report,target],
+  [{QUALITY_FACTORY_HANDOFF_REPAIR_CANARY_RECORD_ID:target},report,target],
+  [{},report,"recOther00000000"],
+  [{},{...report,findings:[{...report.findings[0],record_id:"recOther00000000"}]},target],
+  [{},{...report,findings:[report.findings[0],report.findings[0]]},target],
+ ]){
+  const before=recovered;
+  assert.equal((await recoverNativeReviewWithRebuild(env,r,{recover,rebuild,manualCanaryRecordId:id})).status,"skipped");
+  assert.equal(recovered,before,"must not enter even the status repair adapter");
+ }
+ assert.equal(rebuilt,1);
+});
