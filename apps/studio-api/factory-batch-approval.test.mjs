@@ -203,3 +203,18 @@ test("Global Factory group submit authorizes Airtable before claiming output IDs
   assert.match(functions04, /factoryResolveGroupOwnershipIds\(env, byId, ids, \{\s*allowIndividualFallback: false/);
   assert.match(functions04, /Factory submit timed out verifying outputs before accept/);
 });
+
+
+test("#2959 Supabase drain awaits profile unlock before invoking the shared eligible continuation", () => {
+  const start = functions04.indexOf("export async function factoryBatchProcess(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchProcess__*/", start);
+  const source = functions04.slice(start, end);
+  const supabase = source.slice(source.indexOf('if (studioWriteSource(env) === "supabase"'), source.indexOf("approve: async (id, currentJob, checkpoint", source.indexOf("return continueAfterDrain(result);", source.indexOf('if (studioWriteSource(env) === "supabase"'))));
+  assert.match(supabase, /const result = await factoryBatchDrain/);
+  assert.match(supabase, /return continueAfterDrain\(result\)/);
+  assert.doesNotMatch(supabase, /return factoryBatchDrain/);
+  assert.match(source, /const exact = await factoryBatchRead\(env\.STUDIO_MEDIA, profileId, requestId\)/);
+  assert.match(source, /if \(exact\) candidates\.set\(requestId, exact\)/);
+  assert.match(source, /factoryBatchCronSelectJobs/);
+  assert.match(supabase, /onTiming: checkpoint/);
+});

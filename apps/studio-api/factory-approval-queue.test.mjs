@@ -947,3 +947,30 @@ test("#2915 missing-number recovery cannot overwrite a different numeric identit
  await assert.rejects(factoryBatchMarkAlreadySatisfied(bucket,{profileId,requestId,recordId,
  outputId:10735,allowMissingOutputId:true,verifySatisfied:async()=>true}),/number mismatch/);
 });
+
+
+test("#2959 three budget slices 4/4/1 preserve exactly-once output attempts and immediate eligibility", async () => {
+  const bucket = new FakeR2();
+  let clock = Date.parse("2026-11-24T21:32:00Z");
+  await factoryBatchEnqueue(bucket, { ...opts, records: records.slice(0, 9), now: new Date(clock).toISOString() });
+  const attempts = [];
+  const slices = [];
+  for (let slice = 0; slice < 3; slice++) {
+    const result = await factoryBatchDrain(bucket, {
+      profileId, requestId, now: () => clock, maxItems: 25, maxElapsedMs: 20000,
+      makeOwner: () => "worker-" + slice,
+      approve: async id => { attempts.push(id); clock += 5500; },
+    });
+    assert.equal(result.claimed, true);
+    slices.push(result.processed);
+    const next = factoryBatchCronSelectJobs([{ profileId, requestId, job: result.job }], { nowMs: clock });
+    assert.equal(next.length, slice === 2 ? 0 : 1);
+    // A subsequent immediate claim must succeed; no cron advance needed.
+  }
+  assert.deepEqual(slices, [4, 4, 1]);
+  assert.equal(new Set(attempts).size, 9);
+  assert.equal(attempts.length, 9);
+  const job = await factoryBatchRead(bucket, profileId, requestId);
+  assert.equal(job.status, "completed");
+  assert.ok(job.items.every(i => i.total_attempts === 1 && i.status === "approved"));
+});
