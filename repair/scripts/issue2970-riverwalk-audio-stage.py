@@ -120,6 +120,16 @@ def fit_owned_music(data, target_seconds=42.2):
         result=subprocess.run(command,capture_output=True,timeout=90,check=False)
         require(result.returncode==0 and dest.is_file(),"music_loop_normalization_failed")
         fitted=dest.read_bytes()
+        fitted_peak=probe_max_volume_db(fitted)
+        require(fitted_peak is not None and fitted_peak>-45,"normalized_music_invalid")
+        if fitted_peak < -17:
+            gain=min(24,-12-fitted_peak)
+            amplified=Path(tmp)/"music-gain.mp3"
+            result=subprocess.run([ffmpeg_bin(),"-nostdin","-v","error","-y","-i",str(dest),
+                "-af",f"volume={gain:.3f}dB","-c:a","libmp3lame","-b:a","192k",str(amplified)],
+                capture_output=True,timeout=90,check=False)
+            require(result.returncode==0 and amplified.is_file(),"music_gain_failed")
+            fitted=amplified.read_bytes()
     return fitted,{"original_seconds":round(seconds,3),"looped":seconds<target_seconds}
 
 def stage(r2, data, name):
