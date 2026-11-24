@@ -5873,6 +5873,11 @@ export async function buildOutputWorkItemEffective(env, outputRow, requestRecord
     scheduled_at: f(outputRow, "Scheduled_At") || null,
   };
 
+  // A companion Story gets a separately measured narration at R4.
+  if (companionStory) {
+    effective.voiceover_duration_seconds = 0;
+    effective.voiceover_tail_seconds = 0;
+  }
   // Exact original narration wins over an earlier 30s request plan. Keep all
   // six approved scenes, never cut off the end of spoken audio.
   if (effective.voiceover_mode === "Yes" && !companionStory) {
