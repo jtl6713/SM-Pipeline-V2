@@ -64,6 +64,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Ensure explicit closure opt-in/hold labels exist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          labels="$(gh label list --repo "$GH_REPO" --limit 1000 --json name --jq '.[].name')"
+          if ! printf '%s\n' "$labels" | grep -Fqx 'closure:auto'; then
+            gh label create closure:auto --repo "$GH_REPO" --color 228B64 --description 'Explicit opt-in for verified automated issue closure'
+            echo "closure_auto_label=CREATED"
+          else
+            echo "closure_auto_label=AVAILABLE"
+          fi
+          if ! printf '%s\n' "$labels" | grep -Fqx 'closure:hold'; then
+            gh label create closure:hold --repo "$GH_REPO" --color BF4040 --description 'Block automated issue closure until manually cleared'
+            echo "closure_hold_label=CREATED"
+          else
+            echo "closure_hold_label=AVAILABLE"
+          fi
       - name: Audit all open issues and write the permanent weekly report
         shell: bash
         run: |
