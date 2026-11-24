@@ -110,6 +110,33 @@ export async function readFactoryReviewResolve(env,id,authorization){
     caption:p.row.output_caption,package_sha256:p.sha,review_resolve_available:true,do_not_publish:true,
     publication_authorized:false,source:"verified-held-gallery-review"};
 }
+// Read-only recovery of a receipt after a lost response. Never release a hold
+// or infer a successful human review from a stale UI/card or from image proof.
+export async function readFactoryReviewResolveReceipt(env,id,authorization,packageSha){
+  if(!SHA.test(String(packageSha||""))||!EXACT[id])deny("Exact gallery review package required.",400);
+  const entry=(await factorySupabaseApprovalRows(env,[id])).get(id);
+  const row=entry?.row,actor=actorFor(authorization,entry?.profileId);
+  if(!row||row.output_number!==EXACT[id][0])deny("Gallery output identity changed.");
+  const receipt=row.error_messages?.[RECEIPT];
+  if(!receipt){
+    if(row.do_not_publish!==true)deny("Review receipt is missing for this output; Studio must inspect it.");
+    return {id,review_resolved:false,held:true,message:"No completed review receipt exists. Publishing remains held. Reopen the gallery if you need to retry."};
+  }
+  if(receipt.actor_record_id!==actor||receipt.package_sha256!==packageSha||
+    receipt.slide_count!==EXACT[id][1]||receipt.human_images_caption_branding_rights_confirmed!==true||
+    receipt.publishing_authorized!==false||!receipt.at||row.do_not_publish!==false)
+    deny("Saved review does not match this reviewer or exact gallery package.");
+  const slides=await readSlides(env,row);
+  if(!inspectNativeGalleryPublicationPackage(row,slides).eligible||
+    slides.length!==receipt.slide_count||
+    !slides.every(s=>s.fields?.[RECEIPT]?.package_sha256===packageSha&&s.fields?.["Approved For Final"]===true))
+    deny("Saved slide review evidence is incomplete. Studio must reconcile.");
+  return {id,output_number:row.output_number,package_sha256:packageSha,slide_count:slides.length,
+    saved_at:receipt.at,review_resolved:true,released:true,formal_approval_pending:row.review_status!=="Approved",
+    scheduled:!!(row.scheduled_post_date||row.studio_scheduled_at||row.youtube_scheduled_publish_at),
+    published:!!(row.published_at||row.platform_post_url),
+    message:"Human gallery review receipt verified."};
+}
 async function verifyBytes(image,fetchImpl){
   const response=await fetchImpl(image.image_url,{method:"GET",redirect:"manual",signal:AbortSignal.timeout(12000)});
   const max=8*1024*1024;
@@ -172,7 +199,7 @@ export async function resolveFactoryGalleryReview(env,id,authorization,payload,{
       ||check.review_status!=="Review Sent"||check.publish_status!=="Not Ready"||check.scheduled_post_date
       ||check.studio_scheduled_at||check.published_at||check.error_messages?.[RECEIPT]?.package_sha256!==p.sha)
       deny("Review release readback unavailable. Refresh Factory; do not repeat blindly.",503);
-    return {id,review_resolved:true,released:true,formal_approval_pending:true,scheduled:false,published:false,
+    return {id,output_number:row.output_number,package_sha256:p.sha,slide_count:p.images.length,saved_at:check.error_messages[RECEIPT].at,review_resolved:true,released:true,formal_approval_pending:true,scheduled:false,published:false,
       message:"Human gallery review recorded. Ready for your separate Factory Approve decision. Nothing scheduled or published."};
   });
 }

@@ -71,3 +71,62 @@ test("review resolve GET and POST derive the same server-side authorized profile
   assert.match(scope,/authorized_profile_ids: authorized\.map\(profile => profile\.id\)/);
   assert.doesNotMatch(scope,/airtableFetch\(|listRecords\(/);
 });
+
+test("authenticated gallery review persists every slide, releases only its hold and recovers the exact receipt", async()=>{
+  const {readFactoryReviewResolve,resolveFactoryGalleryReview,readFactoryReviewResolveReceipt}=await import("./factory-review-resolve.mjs");
+  const {row,slides}=fixture();
+  const profile="recAAAAAAAAAAAAAA", actor="recBBBBBBBBBBBBBB";
+  const profileUuid="00000000-0000-0000-0000-000000000099";
+  Object.assign(row,{id:"00000000-0000-0000-0000-000000000098",content_profile_id:profileUuid,platform:"Instagram",review_status:null});
+  const bytes=Uint8Array.from([255,216,255,217]);
+  const digest=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(b=>b.toString(16).padStart(2,"0")).join("");
+  for(const slide of slides){
+    slide.fields.SM_Native_Gallery_Draft_Repair_2294.public_sha256=digest;
+    slide.fields.SM_Chicago_Gallery_Repair_2890.verified_branded_sha256=digest;
+  }
+  const assets=slides.map(slide=>({airtable_record_id:slide.fields.Asset_Family_Key,active:true,do_not_use:false,asset_status:"Available",metadata:{rights_status:"Owned"}}));
+  const auth={authenticated:true,authorized:true,user:{record_id:actor},permissions:{outputs_review:true,publishing_control:true},authorized_profile_ids:[profile]};
+  const locks=new Map(); let etag=0,patches=0;
+  const bucket={async get(key){const value=locks.get(key);return value?{etag:value.etag,text:async()=>value.body}:null;},async put(key,body){locks.set(key,{body,etag:String(++etag)});return {etag:String(etag)};}};
+  const env={SUPABASE_URL:"https://example.supabase.co",SUPABASE_SERVICE_ROLE_KEY:"test-only",STUDIO_MEDIA:bucket};
+  const original=globalThis.fetch;
+  globalThis.fetch=async(input,init={})=>{
+    const url=new URL(input),table=url.pathname.split("/").at(-1),method=init.method||"GET";
+    let result;
+    if(method==="GET"){
+      if(table==="platform_outputs")result=[row];
+      else if(table==="content_profiles")result=[{id:profileUuid,airtable_record_id:profile,market_name:"Chicago",platform_setup:{}}];
+      else if(table==="carousel_slides")result=slides;
+      else if(table==="media_assets")result=assets;
+      else throw new Error("Unexpected GET "+table);
+    }else if(method==="PATCH"){
+      const patch=JSON.parse(init.body);
+      if(table==="carousel_slides"){
+        const slide=slides.find(s=>url.searchParams.get("id")==="eq."+s.id);
+        assert.ok(slide);assert.equal(url.searchParams.get("updated_at"),"eq."+slide.updated_at);
+        Object.assign(slide,patch);result=[slide];
+      }else if(table==="platform_outputs"){
+        assert.equal(url.searchParams.get("do_not_publish"),"eq.true");
+        assert.equal(url.searchParams.get("updated_at"),"eq."+row.updated_at);
+        Object.assign(row,patch);result=[row];
+      }else throw new Error("Unexpected PATCH "+table);
+      patches++;
+    }else throw new Error("Unexpected method "+method);
+    return new Response(JSON.stringify(result),{headers:{"content-type":"application/json"}});
+  };
+  try{
+    const initial=await readFactoryReviewResolve(env,id,auth);
+    const pending=await readFactoryReviewResolveReceipt(env,id,auth,initial.package_sha256);
+    assert.equal(pending.review_resolved,false);assert.equal(patches,0);
+    const payload={package_sha256:initial.package_sha256,confirm_images:true,confirm_caption:true,confirm_branding_rights:true};
+    const saved=await resolveFactoryGalleryReview(env,id,auth,payload,{fetchImpl:async()=>new Response(bytes,{headers:{"content-type":"image/jpeg"}})});
+    assert.equal(saved.review_resolved,true);assert.equal(saved.id,id);assert.equal(saved.slide_count,4);assert.equal(saved.package_sha256,initial.package_sha256);assert.ok(saved.saved_at);
+    assert.equal(patches,5);assert.equal(row.do_not_publish,false);assert.equal(row.auto_publish_enabled,false);assert.equal(row.review_status,"Review Sent");assert.equal(row.publish_status,"Not Ready");
+    assert.equal(row.scheduled_post_date,undefined);assert.equal(row.published_at,undefined);
+    assert.ok(slides.every(slide=>slide.fields["Approved For Final"]===true));
+    const recovered=await readFactoryReviewResolveReceipt(env,id,auth,initial.package_sha256);
+    assert.equal(recovered.review_resolved,true);assert.equal(recovered.formal_approval_pending,true);assert.equal(recovered.scheduled,false);assert.equal(recovered.published,false);assert.equal(patches,5);
+    await assert.rejects(()=>readFactoryReviewResolveReceipt(env,id,auth,"b".repeat(64)),/does not match/);
+    await assert.rejects(()=>readFactoryReviewResolveReceipt(env,id,{...auth,authorized_profile_ids:[]},initial.package_sha256),/authorized reviewer/);
+  }finally{globalThis.fetch=original;}
+});

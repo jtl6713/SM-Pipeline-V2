@@ -13442,6 +13442,19 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const action = String(payload?.action || "").trim().toLowerCase();
   const actor = authorization?.user?.email || authorization?.email || null;
+  // Exact gallery review must not depend on unrelated Desk control reads.
+  if (action === "review_resolve") {
+    const id = String(payload?.id || "").trim();
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id) || payload?.kind !== "output") throw new HttpError(400,"Exact platform output required");
+    requirePermission(authorization,"outputs_review");
+    requireAnyPermission(authorization,["publishing_control","tenant_admin"]);
+    let resultExtra;
+    try {
+      const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
+      resultExtra=await resolveFactoryGalleryReview(env,id,scopedAuthorization,payload);
+    } catch(error) { throw new HttpError(error?.status||409,String(error?.message||error)); }
+    return respond(request,env,{ok:true,page:"factory-desk",action,result:resultExtra,message:resultExtra.message,refresh_required:true});
+  }
   const controls = await readFactoryDeskControls(env);
   let next = controls;
   let resultExtra = {};
@@ -13452,7 +13465,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "review_resolve" || action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "approve" || action === "approve_held_review" || action === "reject_held_review" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -13490,15 +13503,6 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         });
       }
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
-    } else if (action === "review_resolve") {
-      if(kind!=="output") throw new HttpError(400,"Exact platform output required");
-      requirePermission(authorization,"outputs_review");
-      requireAnyPermission(authorization,["publishing_control","tenant_admin"]);
-      try {
-        const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
-        resultExtra=await resolveFactoryGalleryReview(env,id,scopedAuthorization,payload);
-      }
-      catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
     } else if (action === "approve_held_review" || action === "reject_held_review") {
       if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
       requirePermission(authorization, "outputs_review");
@@ -13558,7 +13562,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
-  if (action === "review_resolve" || action === "approve_held_review" || action === "reject_held_review") {
+  if (action === "approve_held_review" || action === "reject_held_review") {
     return respond(request, env, { ok: true, page: "factory-desk", action,
       result: resultExtra, message: resultExtra.message, refresh_required: true });
   }
