@@ -3925,11 +3925,18 @@ export async function readSupabaseShapedOutput(env, airtableId) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
   const rows = await supabaseRest(
     env,
-    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=${OUTPUT_SELECT}&limit=1`,
+    `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=${OUTPUT_SELECT},selected_assets&limit=1`,
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row?.airtable_record_id) return null;
-  return shapeDeskHealRecord(row);
+  const shaped = shapeDeskHealRecord(row);
+  // Exact Creative reads need the canonical typed selection, not the old
+  // error_messages copy. Keep the heavy manifest off list/census projections.
+  if (row.selected_assets != null) {
+    shaped.fields.Selected_Assets_JSON = typeof row.selected_assets === "string"
+      ? row.selected_assets : JSON.stringify(row.selected_assets);
+  }
+  return shaped;
 }
 
 /**
