@@ -595,3 +595,78 @@ def test_global_producer_lease_loss_requeues_without_claiming_recovery_success(
     assert status["active_jobs"] == 0
     assert status["queued_jobs"] == 1
     assert status["paused_jobs"] == 0
+
+
+def test_dead_database_owner_reclaimed_without_waiting_twenty_minutes(isolated_governor, monkeypatch):
+    g = isolated_governor
+    now = time.time()
+    with g._connect() as db:
+        db.execute(
+            "INSERT INTO resource_leases(scope,lease_key,token,lease_until,owner_pid) VALUES(?,?,?,?,?)",
+            ("supabase_write", "dead", "old", now + g.LEASE_SECONDS - g.DB_DEAD_OWNER_GRACE_SECONDS - 1, 99999),
+        )
+    monkeypatch.setattr(g, "_process_definitely_exited", lambda pid: pid == 99999)
+    with g.resource_slot("supabase_write", key="replacement", limit=1, wait_seconds=0):
+        assert g.resource_active("supabase_write", "replacement")
+        assert not g.resource_active("supabase_write", "dead")
+        with g._connect() as db:
+            row = db.execute("SELECT owner_pid FROM resource_leases WHERE lease_key='replacement'").fetchone()
+        assert row == (g.os.getpid(),)
+
+
+@pytest.mark.parametrize("owner,age,dead", [(None, 500, True), (99999, 10, True), (99999, 500, False)])
+def test_database_owner_recovery_preserves_legacy_recent_and_live_slots(isolated_governor, monkeypatch, owner, age, dead):
+    g = isolated_governor
+    with g._connect() as db:
+        db.execute(
+            "INSERT INTO resource_leases(scope,lease_key,token,lease_until,owner_pid) VALUES(?,?,?,?,?)",
+            ("supabase_write", "protected", "old", time.time() + g.LEASE_SECONDS - age, owner),
+        )
+    monkeypatch.setattr(g, "_process_definitely_exited", lambda pid: dead)
+    with pytest.raises(g.AdmissionDeferred):
+        with g.resource_slot("supabase_write", limit=1, wait_seconds=0):
+            pytest.fail("must not take a live or unverified slot")
+    assert g.resource_active("supabase_write", "protected")
+
+
+def test_dead_owner_recovery_does_not_reap_media_or_bypass_circuit(isolated_governor, monkeypatch):
+    g = isolated_governor
+    with g._connect() as db:
+        for scope in ("photo_group", "supabase_write"):
+            db.execute(
+                "INSERT INTO resource_leases(scope,lease_key,token,lease_until,owner_pid) VALUES(?,?,?,?,?)",
+                (scope, "protected", "old", time.time() + g.LEASE_SECONDS - 500, 99999),
+            )
+    monkeypatch.setattr(g, "_process_definitely_exited", lambda pid: True)
+    g.trip_database_circuit()
+    for scope in ("photo_group", "supabase_write"):
+        with pytest.raises(g.AdmissionDeferred):
+            with g.resource_slot(scope, limit=1, wait_seconds=0):
+                pytest.fail("must preserve admission protection")
+        assert g.resource_active(scope, "protected")
+
+
+def test_local_process_exit_probe_does_not_treat_current_or_live_child_as_dead():
+    import subprocess
+    import sys
+
+    assert not gov._process_definitely_exited(gov.os.getpid())
+    assert not gov._process_definitely_exited(0)
+    with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1)"]) as child:
+        assert not gov._process_definitely_exited(child.pid)
+        child.wait(timeout=10)
+        assert gov._process_definitely_exited(child.pid)
+
+
+def test_legacy_resource_schema_migration_preserves_existing_leases(isolated_governor):
+    g = isolated_governor
+    import sqlite3
+
+    with sqlite3.connect(str(g.database_path())) as db:
+        db.execute("CREATE TABLE resource_leases(scope TEXT NOT NULL, lease_key TEXT NOT NULL, token TEXT NOT NULL, lease_until REAL NOT NULL, PRIMARY KEY(scope,lease_key))")
+        db.execute("INSERT INTO resource_leases VALUES(?,?,?,?)",
+                   ("supabase_read", "legacy", "old", time.time() + 500))
+    with g._connect() as db:
+        row = db.execute("SELECT lease_key,owner_pid FROM resource_leases").fetchone()
+    assert row == ("legacy", None)
+    assert g.resource_active("supabase_read", "legacy")
