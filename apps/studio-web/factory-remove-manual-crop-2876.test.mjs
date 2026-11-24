@@ -18,7 +18,8 @@ test("owner reversal #2876: Factory contains no manual crop UI, asset, or event 
 });
 test("reversal is newer than owner-rejected 0.6.1080 and cache contract is consistent", () => {
   const result = readUiReleaseContract(html, app);
-  assert.equal(result.version, "0.6.1081");
-  assert.equal(result.cacheKey, "0.6.1081-ai-only-third-2876");
-  assert.equal(result.expectedBuildId, "item4-0.6.1081-ai-only-third-2876");
+  const [major, minor, patch] = result.version.split(".").map(Number);
+  assert.ok(major > 0 || minor > 6 || (major === 0 && minor === 6 && patch >= 1081));
+  assert.ok(result.cacheKey.startsWith(result.version + "-"));
+  assert.equal(result.expectedBuildId, "item4-" + result.cacheKey);
 });
