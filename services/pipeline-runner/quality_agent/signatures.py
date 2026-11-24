@@ -300,3 +300,88 @@ def reconcile_ig_stale_upload(
              "reservation_id": result.get("reservation_id")}
     append_audit(event)
     return event
+
+
+STALLED_PENDING_CROPS = "QA-PRODUCTION-STALLED-PENDING-CROPS-v1"
+CREATIVE_IMAGE_ADVISORY = "QA-CREATIVE-IMAGE-ADVISORY-v1"
+PENDING_CROP_STALL_SECONDS = 30 * 60
+
+
+def detect_stalled_pending_crops(
+    *, request_id: str, request_status: str, master_status: str,
+    plan_status: str, master_count: int, confirmed_master_count: int,
+    ready_crops: int, target_crops: int, pending_crops: int,
+    pending_attempted_count: int, last_pending_change_utc: str,
+    now_utc: str, test_run_id: str | None = None,
+    threshold_seconds: int = PENDING_CROP_STALL_SECONDS,
+) -> dict[str, Any] | None:
+    """Classify a stalled exact-request crop queue, not a failed photo upload.
+
+    Counts must come from the same canonical request, current plan revision,
+    and unique linked transfers. A detector result never grants write authority.
+    Use actual transfer timestamps, not a regenerated manifest timestamp.
+    """
+    from datetime import datetime
+
+    if not request_id.startswith("rec") or test_run_id:
+        return None
+    if request_status not in {"Draft", "Ready", "Promoted"}:
+        return None
+    if master_status != "Ready" or plan_status != "Ready":
+        return None
+    counts = (master_count, confirmed_master_count, ready_crops, target_crops,
+              pending_crops, pending_attempted_count)
+    if any(type(n) is not int or n < 0 for n in counts):
+        return None
+    if not (master_count > 0 and confirmed_master_count == master_count
+            and target_crops > ready_crops and pending_crops == target_crops - ready_crops
+            and pending_attempted_count == 0):
+        return None
+    try:
+        last = datetime.fromisoformat(last_pending_change_utc.replace("Z", "+00:00"))
+        now = datetime.fromisoformat(now_utc.replace("Z", "+00:00"))
+        if last.tzinfo is None or now.tzinfo is None:
+            return None
+        age = (now - last).total_seconds()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if age < max(60, threshold_seconds):
+        return None
+    return {
+        "id": STALLED_PENDING_CROPS,
+        "stage": "SMV1_PLATFORM_VARIANTS",
+        "record_id": request_id,
+        "confirmed_originals": confirmed_master_count,
+        "ready_crops": ready_crops,
+        "target_crops": target_crops,
+        "pending_unattempted_crops": pending_crops,
+        "age_seconds": int(age),
+        "action": "verify_and_drain_exact_existing_crop_queue",
+        "auto_repair_safe": False,
+        "requires": [
+            "fresh_exact_request_plan_and_transfer_identity",
+            "no_live_or_ambiguous_transfer_claim",
+            "governor_and_database_admission",
+            "bounded_existing_smv1_drain",
+            "canonical_variant_readback",
+        ],
+    }
+
+
+def creative_image_advisory(*, evidence: list[str] | None) -> dict[str, Any] | None:
+    """Creative suspicion is a human-review note, not an approval gate.
+
+    This does not clear an existing independent hold or certify missing bytes,
+    rights, tenant identity or technical package integrity.
+    """
+    notes = list(dict.fromkeys(_clean_ids(evidence)))[:20]
+    if not notes:
+        return None
+    return {
+        "id": CREATIVE_IMAGE_ADVISORY,
+        "severity": "warning",
+        "title": "Potential incorrect images identified",
+        "notes": [note[:450] for note in notes],
+        "blocks_approval": False,
+        "action": "return_to_production_for_refinement",
+    }
