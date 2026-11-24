@@ -46,7 +46,7 @@ function harness({modify=()=>{},deny=false,bytes=true,stale=false,cas=false,rese
         return [structuredClone(state)];
       }
       if(path.startsWith("content_items?"))return [{id:content,content_profile_id:profile,production_request_id:pr}];
-      if(path.startsWith("production_requests?"))return [{id:pr,promoted_content_item_id:content,idea_candidate_id:idea,request_status:"Promoted",output_plan_status:"Ready",output_plan:{items:[{platform:"TikTok",output_type:"Multi-Photo"}]},production_job:{step:"done"},updated_at:at}];
+      if(path.startsWith("production_requests?"))return [{id:pr,promoted_content_item_id:content,idea_candidate_id:idea,request_status:"Promoted",output_plan_status:"Ready",output_plan:{items:[{platform:"TikTok",output_type:"Multi-Photo"},{platform:"Instagram",output_type:"Carousel"}]},production_job:{step:"done"},updated_at:at}];
       if(path.startsWith("idea_candidates?"))return [{id:idea,airtable_record_id:ideaRecord,content_profile_id:profile}];
       if(path.startsWith("content_profiles?"))return [{id:profile,airtable_record_id:profileRecord}];
       if(path.startsWith("platform_outputs?output_number="))return [{content_item_id:content,content_profile_id:profile,platform:"Instagram",studio_output_type:"Carousel",selected_clip_count:2,selected_assets:{selected_clips:siblingClips},updated_at:at}];
