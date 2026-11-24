@@ -91,6 +91,7 @@ import {
   factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce, factoryBatchRetryOriginalIntentOnce,
   factoryBatchReconcileSupabaseApprovalReceipts,
   factoryBatchLock, factoryBatchUnlock,
+  factoryBatchActiveIndexProfiles, factoryBatchActiveIndexCandidates, factoryBatchIndexRemember,
 } from "./factory-approval-queue.mjs";
 import {
   READY_PRODUCTION_MAX_CONCURRENCY,
@@ -19093,11 +19094,20 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           await new Promise((resolve) => setTimeout(resolve, 300));
           // Preserve existing oldest-eligible sibling fairness. Always include
           // the exact just-drained child, even if bounded history misses it.
-          let siblings = [];
+          let siblings = [], fallback = true;
           try {
-            siblings = await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 });
+            const active = await factoryBatchActiveIndexCandidates(env.STUDIO_MEDIA, profileId);
+            siblings = active.candidates.map(row => row.job);
+            fallback = !active.found || !active.complete;
           } catch (error) {
-            console.warn("Factory batch sibling discovery unavailable", requestId, error);
+            console.warn("Factory active sibling index unavailable", requestId, error);
+          }
+          if (fallback) {
+            try {
+              siblings.push(...await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 }));
+            } catch (error) {
+              console.warn("Factory batch sibling discovery unavailable", requestId, error);
+            }
           }
           const exact = await factoryBatchRead(env.STUDIO_MEDIA, profileId, requestId);
           const candidates = new Map(siblings.map(job => [job.request_id, job]));
@@ -20013,6 +20023,42 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
 export async function factoryBatchCronResume(env, ctx = null) {
   if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true" && !factoryGlobalPolicy(env).enabled) return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
+  // Dispatch exact indexed active work before walking historical ledgers.
+  // Preserve the existing cap of at most five profiles per cron event.
+  const indexedCandidates = [];
+  const dispatchedProfiles = new Set();
+  try {
+    const { profileIds, complete } = await factoryBatchActiveIndexProfiles(env.STUDIO_MEDIA);
+    if (!complete) console.warn("Factory active profile index truncated; historical recovery remains enabled");
+    for (const profileId of profileIds) {
+      try {
+        const active = await factoryBatchActiveIndexCandidates(env.STUDIO_MEDIA, profileId);
+        if (!active.complete) console.warn("Factory active request index truncated", profileId);
+        indexedCandidates.push(...active.candidates);
+      } catch (error) {
+        console.warn("Factory active profile discovery deferred", profileId, String(error?.message || error).slice(0, 140));
+      }
+    }
+    if (studioSupabaseConfigured(env)) {
+      for (const candidate of factoryBatchCronReceiptCandidates(indexedCandidates)) {
+        try {
+          const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(env.STUDIO_MEDIA, {
+            profileId: candidate.profileId, requestId: candidate.requestId,
+            loadRecords: ids => factorySupabaseApprovalRows(env, ids),
+          });
+          if (repaired) candidate.job = repaired;
+        } catch (error) {
+          console.warn("Factory active Supabase receipt reconciliation deferred", candidate.requestId, String(error?.message || error).slice(0,140));
+        }
+      }
+    }
+    for (const candidate of factoryBatchCronSelectJobs(indexedCandidates, { maxProfiles: 5 })) {
+      await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
+      dispatchedProfiles.add(candidate.profileId);
+    }
+  } catch (error) {
+    console.warn("Factory active index recovery unavailable", String(error?.message || error).slice(0, 140));
+  }
   // Parent group ledgers are a second, authoritative index for newly accepted
   // global approvals. Discover a bounded set of pending children here instead
   // of relying exclusively on the rotating, history-heavy child-key scan.
@@ -20098,7 +20144,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // studioWriteSource setting (which can still be Airtable during migration).
   // No R2 item changes without the original-request Supabase receipt checks.
   if (studioSupabaseConfigured(env)) {
-    const receiptCandidates = factoryBatchCronReceiptCandidates(distinct);
+    const receiptCandidates = factoryBatchCronReceiptCandidates(distinct.filter(row => !dispatchedProfiles.has(row.profileId)));
     for (const candidate of receiptCandidates) {
       try {
         const repaired = await factoryBatchReconcileSupabaseApprovalReceipts(env.STUDIO_MEDIA, {
@@ -20112,8 +20158,10 @@ export async function factoryBatchCronResume(env, ctx = null) {
       }
     }
   }
-  const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
+  const selected = factoryBatchCronSelectJobs(distinct.filter(row => !dispatchedProfiles.has(row.profileId)), { maxProfiles: Math.max(0, 5 - dispatchedProfiles.size) });
   for (const candidate of selected) {
+    const exact = distinct.find(row => row.profileId === candidate.profileId && row.requestId === candidate.requestId);
+    if (exact?.job) await factoryBatchIndexRemember(env.STUDIO_MEDIA, exact.job, { refresh: false });
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
   }
   // Do not let completed-with-failures accumulate forever on the active desk.
@@ -20146,7 +20194,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
       oldest_wait_seconds: Math.round(Math.max(0, Date.now() - selected[0].orderMs) / 1000),
     });
   }
-  return selected.length;
+  return selected.length + dispatchedProfiles.size;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
 
