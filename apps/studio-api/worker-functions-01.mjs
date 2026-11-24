@@ -12675,6 +12675,8 @@ export async function studioResetPrivateDriveWatermarkRender(env, row) {
 /*__STUDIO_WORKER_END:studioResetPrivateDriveWatermarkRender__*/
 
 export function studioExtendClipsToCoverVoiceover(row) {
+  // A Story must receive duration-fitting narration, never a longer master.
+  if ([f(row, "Studio_Output_Type"), f(row, "Output_Type"), f(row, "Format")].some(v => /^story$/i.test(String(v || "").trim()))) return null;
   // Output 2156: spoken VO slightly longer than stamped render duration after
   // round(VO×fps). Extend the last clip to ceil(VO×fps) and requeue R4.
   const err = String(f(row, "Remotion_Error_Message") || "").trim();
