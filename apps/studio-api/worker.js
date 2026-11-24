@@ -42,7 +42,7 @@ import { returnFactoryRevisionToProducer } from "./rendering-review-factory-retu
 import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
-import { serveIssue2618ReviewPreview, issue2618PreviewSpec } from "./factory-2618-review-preview.mjs";
+import { serveIssue2618ReviewPreview, issue2618PreviewSpec, fetchIssue2618DriveVideo } from "./factory-2618-review-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -671,6 +671,7 @@ import {
   assertUploadWriteRequest,
   requirePermission,
   requireAnyPermission,
+  item4GoogleAccessToken,
   sleepMs,
   airtableCooldownWaitMs,
   airtableDataWaitMs,
@@ -4325,7 +4326,7 @@ export default {
         // approves; it supports Safari byte-range requests.
         if(issue2618PreviewSpec(outputId)){
           requirePermission(authorization,"outputs_review");
-          return serveIssue2618ReviewPreview({
+          return await serveIssue2618ReviewPreview({
             request,env,outputId,
             readRows:id=>adminHoldSupabaseRest(env,
               "platform_outputs?airtable_record_id=eq."+encodeURIComponent(id)+
@@ -4333,8 +4334,9 @@ export default {
               "do_not_publish,auto_publish_enabled,scheduled_post_date,"+
               "studio_scheduled_at,youtube_scheduled_publish_at,published_at,"+
               "platform_post_url,platform_publish_response,final_file_url,error_messages&limit=2"),
-            fetchVideo:(fileId,finalUrl,probe)=>
-              fetchGoogleDriveVideo(fileId,finalUrl,probe,env),
+            fetchVideo:fileId=>fetchIssue2618DriveVideo({
+              fileId,getAccessToken:()=>item4GoogleAccessToken(env),
+            }),
           });
         }
         // Only saved exact-output sessions activate protected revision preview.

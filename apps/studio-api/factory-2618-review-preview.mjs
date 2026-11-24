@@ -23,6 +23,35 @@ const byOutput=new Map(entries.flatMap(([ids,fileId,sha256,bytes])=>
   ids.map(id=>[id,{id,fileId,sha256,bytes,
     key:"studio/review-previews/issue2618/sha256-"+sha256+".mp4"}])));
 const fail=(reason)=>{const error=new Error(reason);error.status=503;throw error;};
+
+// The corrected originals are private. Do not retry with anonymous Drive URLs:
+// that discards the decisive OAuth status and can return an HTML login page.
+const driveFailureReasons=new Set([
+  "FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE",
+  "FACTORY_2618_DRIVE_OAUTH_REJECTED",
+  "FACTORY_2618_DRIVE_ACCESS_DENIED",
+  "FACTORY_2618_DRIVE_FILE_NOT_VISIBLE",
+  "FACTORY_2618_DRIVE_RATE_LIMITED",
+  "FACTORY_2618_DRIVE_UPSTREAM_FAILED",
+]);
+export async function fetchIssue2618DriveVideo({fileId,getAccessToken,fetchImpl=fetch}){
+  if(!entries.some(([,id])=>id===fileId))fail("FACTORY_2618_PROTECTED_SOURCE_UNAVAILABLE");
+  let token;
+  try{token=await getAccessToken();}catch{fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");}
+  if(!token)fail("FACTORY_2618_DRIVE_OAUTH_UNAVAILABLE");
+  let response;
+  try{
+    response=await fetchImpl("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media&supportsAllDrives=true",{
+      method:"GET",headers:{Authorization:"Bearer "+token,Accept:"video/mp4,application/octet-stream"},redirect:"follow",
+    });
+  }catch{fail("FACTORY_2618_DRIVE_UPSTREAM_FAILED");}
+  if(response.ok)return response;
+  try{await response.body?.cancel();}catch{}
+  const reason={401:"FACTORY_2618_DRIVE_OAUTH_REJECTED",403:"FACTORY_2618_DRIVE_ACCESS_DENIED",
+    404:"FACTORY_2618_DRIVE_FILE_NOT_VISIBLE",429:"FACTORY_2618_DRIVE_RATE_LIMITED"}[response.status];
+  fail(reason||"FACTORY_2618_DRIVE_UPSTREAM_FAILED");
+}
+
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value||{},key);
 export const issue2618PreviewSpec=id=>byOutput.get(String(id||""))||null;
 
@@ -100,7 +129,8 @@ export async function serveIssue2618ReviewPreview({
       const get=new Request("https://studio.chicagoshining.com/api/internal/issue2618-cache",{
         method:"GET",headers:{"Accept":"video/mp4"}});
       source=await fetchVideo(spec.fileId,rows[0].final_file_url,get);
-    }catch{
+    }catch(error){
+      if(driveFailureReasons.has(error?.message))fail(error.message);
       fail("FACTORY_2618_DRIVE_SOURCE_NOT_ACCESSIBLE_TO_WORKER");
     }
     const type=String(source?.headers?.get("Content-Type")||"").toLowerCase();
