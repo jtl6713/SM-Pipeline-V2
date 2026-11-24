@@ -90,11 +90,19 @@ test("Pilsen exact repair never queues the old runner and is one-shot once accep
   const rows=ids.map((id,i)=>({airtable_record_id:id,output_number:11157+i,content_item_id:content,content_profile_id:uuid(9),
     output_status:"Ready for Review",render_status:"Native Photo Route",do_not_publish:false,selected_clip_count:19,
     selected_assets:{authority:"studio_owner_uploaded_exact_source",production_request_record_id:PILSEN_REQUEST}}));
-  const read=async path=>path.startsWith("production_requests")?[{airtable_record_id:PILSEN_REQUEST,promoted_content_item_id:content,request_status:"Promoted",variant_status:"Ready",variant_manifest:{complete:true,ready_count:38},production_job:{step:"done"}}]:path.startsWith("platform_outputs")?rows:[];
+  let job={step:"done"};
+  const read=async path=>path.startsWith("production_requests")?[{airtable_record_id:PILSEN_REQUEST,promoted_content_item_id:content,request_status:"Promoted",variant_status:"Ready",variant_manifest:{complete:true,ready_count:38},production_job:job}]:path.startsWith("platform_outputs")?rows:[];
   let launches=0;const resume=async id=>{assert.equal(id,PILSEN_REQUEST);launches++;return {payload:{accepted:true}};};
   assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>false})).skipped,"new_runner_not_verified");
   assert.equal(launches,0);
   assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>true})).status,"producer_accepted");
   assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>true})).skipped,"one_shot_receipt_exists");
   assert.equal(launches,1);
+  job={step:"blocked",job_id:"spj-ca8542b8795e",error:"unrelated error"};
+  assert.notEqual((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>true})).status,"producer_accepted");
+  job={step:"blocked",job_id:"spj-ca8542b8795e",error:"Native gallery contains duplicate final images"};
+  assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>false})).skipped,"new_runner_not_verified");
+  assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>true})).revision,2);
+  assert.equal((await resumePilsenNativeCompanions({bucket,read,resume,runnerReady:async()=>true})).skipped,"one_shot_receipt_exists");
+  assert.equal(launches,2);
 });

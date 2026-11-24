@@ -487,6 +487,7 @@ def health():
             "service": "pipeline-runner",
             "version": settings["service_version"],
             "studio_native_gallery_companion_2873": True,
+            "studio_native_gallery_distinct_recovery_2873": True,
             "airtable_activity": airtable_activity,
             "studio_write_source": settings.get("studio_write_source") or "airtable",
             "studio_phase6_write_source": settings.get("studio_phase6_write_source") or "airtable",

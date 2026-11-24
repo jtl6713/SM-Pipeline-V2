@@ -1,5 +1,6 @@
 import io
 import json
+import pytest
 
 from PIL import Image
 from studio_produce import native_gallery as g
@@ -53,7 +54,8 @@ def test_linked_slide_identity_is_deterministic_and_cannot_reuse_approved_or_for
     assert not g._same_slide({**row,"fields":{**f,"Platform Output":[id2]}},row)
 
 
-def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(monkeypatch):
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(monkeypatch, duplicate):
     from copy import deepcopy
     rid="rec"+"r"*14
     pid="rec"+"p"*14
@@ -119,7 +121,7 @@ def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(mon
         raise AssertionError(path)
     class Drive:
         def download_file(self, file_id, **kwargs):
-            return file_id.encode(), "image/jpeg"
+            return (drives[0] if duplicate and file_id == drives[1] else file_id).encode(), "image/jpeg"
     monkeypatch.setattr(g,"_rest",rest)
     monkeypatch.setattr(g,"GoogleDriveClient",Drive)
     monkeypatch.setattr(g,"R2UploadClient",lambda:object())
@@ -136,7 +138,10 @@ def test_build_both_19_photo_siblings_as_exact_unapproved_ten_slide_packages(mon
         assert marker["slide_count"]==10 and marker["human_approval_required"]
         result=outputs[oid]["selected_assets"]["selected_clips"]
         assert result[0]["is_cover"] is True
-        assert [x["source_asset_id"] for x in result[1:]]==source_ids[:9]
+        expected = [source_ids[0], *source_ids[2:10]] if duplicate else source_ids[:9]
+        assert [x["source_asset_id"] for x in result[1:]]==expected
+        assert len(marker["skipped_exact_duplicate_sources"]) == int(duplicate)
+        assert len({x["sha256"] for x in result}) == 10
         assert outputs[oid]["selected_clip_count"]==10
         assert outputs[oid]["review_status"]=="Review Sent"
         assert outputs[oid]["auto_publish_enabled"] is False

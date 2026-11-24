@@ -192,9 +192,9 @@ def complete_gallery(client, request, parent, output):
     clips = selected.get("selected_clips")
     if not isinstance(clips, list) or not clips:
         raise RuntimeError("Native gallery selected photos unavailable")
-    body = selected_body(clips)
-    if any(c.get("media_kind") != "photo" or not c.get("source_asset_id") for c in body):
-        raise RuntimeError("Native gallery must contain exact selected stills")
+    target_body = len(selected_body(clips))
+    # Walk selected sources in order; only skip byte-identical final images.
+    # Preserve the original inventory and never pull unrelated assets.
     sources = request_row.get("master_assets") or []
     source_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
     crop_rows = read(f"studio_media_transfer_queue?payload->>production_request_record_id=eq.{rid}"
@@ -208,8 +208,6 @@ def complete_gallery(client, request, parent, output):
         if key in crop_map:
             raise RuntimeError("Native gallery crop identity ambiguous")
         crop_map[key] = crop
-    if len({c["source_asset_id"] for c in body}) != len(body):
-        raise RuntimeError("Native gallery duplicate source")
     cover_drive = (parent_row.get("extras") or {}).get("Thumbnail_Google_Drive_File_ID")
     cover_url = str(parent_row.get("thumbnail_url") or "")
     if (not cover_drive or not cover_url.startswith(CDN + "studio/previews/thumbnails/" + pid + "/")
@@ -243,8 +241,18 @@ def complete_gallery(client, request, parent, output):
     prepared = []
     url, sha = _stage(uploader, _cover_jpeg(cover_raw), pid)
     prepared.append(_clip({"asset_name":"Generated cover"}, 1, cover_id, cover_drive, url, sha, True))
-    for index, clip in enumerate(body, 2):
+    skipped_duplicates = []
+    seen_sources = set()
+    final_hashes = {sha}
+    for clip in clips:
+        if len(prepared) == target_body + 1:
+            break
+        if not isinstance(clip, dict) or clip.get("media_kind") != "photo" or not clip.get("source_asset_id"):
+            raise RuntimeError("Native gallery must contain exact selected stills")
         source_id = clip["source_asset_id"]
+        if source_id in seen_sources:
+            raise RuntimeError("Native gallery duplicate source identity")
+        seen_sources.add(source_id)
         crop = crop_map.get(source_id) or {}
         asset_id, drive_id = crop.get("media_asset_record_id"), crop.get("drive_file_id")
         if (source_id not in source_ids or not REC.fullmatch(str(asset_id or ""))
@@ -257,11 +265,23 @@ def complete_gallery(client, request, parent, output):
         _image_proof(raw)
         jpeg = letter_jpeg_bytes(raw, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
         final = apply_watermark_bytes(jpeg, watermark, output_format="jpeg")
+        # Exact final JPEG hash, not filename or a fuzzy similarity guess.
+        final_sha = hashlib.sha256(final).hexdigest()
+        if asset_id in ids:
+            raise RuntimeError("Native gallery duplicate media asset identity")
+        if final_sha in final_hashes:
+            skipped_duplicates.append({"source_asset_id": source_id, "sha256": final_sha})
+            continue
         url, sha = _stage(uploader, final, pid)
-        prepared.append(_clip(clip, index, asset_id, drive_id, url, sha))
+        if sha != final_sha:
+            raise RuntimeError("Native gallery staged final SHA mismatch")
+        final_hashes.add(sha)
+        prepared.append(_clip(clip, len(prepared)+1, asset_id, drive_id, url, sha))
         ids.append(asset_id)
+    if len(prepared) != target_body + 1:
+        raise RuntimeError(f"Native gallery insufficient distinct verified images: {len(prepared)} of {target_body+1}; {len(skipped_duplicates)} exact duplicates")
     if len(set(ids)) != len(ids) or len({c["url"] for c in prepared}) != len(prepared):
-        raise RuntimeError("Native gallery contains duplicate final images")
+        raise RuntimeError("Native gallery identity or final URL collision")
     fingerprint = hashlib.sha256(json.dumps([[c["order"],c["media_asset_record_id"],c["google_drive_file_id"],c["url"],c["sha256"]]
                                              for c in prepared], separators=(",",":")).encode()).hexdigest()
     slides = []
@@ -291,7 +311,8 @@ def complete_gallery(client, request, parent, output):
         raise RuntimeError("Native gallery persisted slide readback incomplete")
     at = _now()
     marker = {"complete":True,"request_id":rid,"package_sha256":fingerprint,"prepared_at":at,
-              "slide_count":len(prepared),"human_approval_required":True,"provider_writes":0}
+              "slide_count":len(prepared),"human_approval_required":True,"provider_writes":0,
+              "skipped_exact_duplicate_sources":skipped_duplicates}
     package = {**selected, "selected_clips":prepared, "aspect_ratio":"4:5", "target_total_frames":len(prepared),
                "render_prep":{**(selected.get("render_prep") or {}),"render_total_frames":len(prepared),
                               "render_clip_list_json":json.dumps(prepared)}, KEY:marker}

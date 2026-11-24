@@ -5,7 +5,8 @@
 export const PILSEN_REQUEST = "recWBnwtDCy49LTxv";
 const EXACT = new Map([[11157,"recaQyj12CzOHjIQp"],[11158,"recFmEG6KLrEHvyHk"],[11159,"rec5QpFiGL7IzkPuy"]]);
 const KEY = "SM_Studio_Native_Gallery_2873";
-const receiptKey = "studio/recovery/2873/pilsen-native-companions-v1.json";
+const originalReceiptKey = "studio/recovery/2873/pilsen-native-companions-v1.json";
+const retryReceiptKey = "studio/recovery/2873/pilsen-native-companions-v2-exact-duplicates.json";
 const safe = row => row?.output_status==="Ready for Review" && row.render_status==="Native Photo Route"
   && ["","Review Sent","Pending","Pending Review"].includes(row.review_status||"")
   && ["","Not Ready"].includes(row.publish_status||"")
@@ -19,14 +20,18 @@ const safe = row => row?.output_status==="Ready for Review" && row.render_status
 export async function resumePilsenNativeCompanions({read,bucket,runnerReady,resume,clock=()=>new Date()}={}) {
   if(!bucket?.get||!bucket?.put||typeof read!=="function"||typeof runnerReady!=="function"||typeof resume!=="function")
     return {skipped:"recovery_not_configured"};
-  if(await bucket.get(receiptKey))return {skipped:"one_shot_receipt_exists"};
   if(!await runnerReady())return {skipped:"new_runner_not_verified"};
   const requests=await read("production_requests?airtable_record_id=eq."+PILSEN_REQUEST+
     "&select=airtable_record_id,promoted_content_item_id,request_status,variant_status,variant_manifest,production_job&limit=2");
   const req=requests?.length===1?requests[0]:null;
+  const job=req?.production_job;
+  const retry=job?.step==="blocked" && job.job_id==="spj-ca8542b8795e" && job.error==="Native gallery contains duplicate final images";
+  const receiptKey=retry?retryReceiptKey:originalReceiptKey;
+  if(await bucket.get(receiptKey))return {skipped:"one_shot_receipt_exists"};
+  if(retry && !await bucket.get(originalReceiptKey))return {skipped:"original_resume_receipt_missing"};
   if(req?.airtable_record_id!==PILSEN_REQUEST||req.request_status!=="Promoted"||req.variant_status!=="Ready"
       ||req.variant_manifest?.complete!==true||req.variant_manifest?.ready_count!==38
-      ||req.production_job?.step!=="done"||!req.promoted_content_item_id)return {skipped:"exact_production_not_ready"};
+      ||(job?.step!=="done"&&!retry)||!req.promoted_content_item_id)return {skipped:"exact_production_not_ready"};
   const rows=await read("platform_outputs?content_item_id=eq."+encodeURIComponent(req.promoted_content_item_id)
     +"&select=airtable_record_id,output_number,content_item_id,content_profile_id,platform,platform_output_type,output_status,render_status,"
     +"review_status,publish_status,do_not_publish,auto_publish_enabled,test_run_id,studio_scheduled_at,youtube_scheduled_publish_at,"
@@ -39,7 +44,7 @@ export async function resumePilsenNativeCompanions({read,bucket,runnerReady,resu
   const slides=await read("carousel_slides?deleted_from_carousel=eq.false&or=(fields->PO_Output_ID.cs.%5B11158%5D,fields->PO_Output_ID.cs.%5B11159%5D)&select=airtable_record_id&limit=1");
   if(!Array.isArray(slides)||slides.length!==0)return {skipped:"existing_slide_revision_requires_reconciliation"};
   const receipt={signature:"QA-PRODUCTION-NATIVE-GALLERY-MISSING-LINKS-v1",request_id:PILSEN_REQUEST,
-    output_numbers:[11158,11159],at:clock().toISOString(),status:"reserved",approval_actions:0,schedule_actions:0,publish_actions:0};
+    output_numbers:[11158,11159],revision:retry?2:1,at:clock().toISOString(),status:"reserved",approval_actions:0,schedule_actions:0,publish_actions:0};
   if(!await bucket.put(receiptKey,JSON.stringify(receipt),{onlyIf:{etagDoesNotMatch:"*"},httpMetadata:{contentType:"application/json"}}))
     return {skipped:"already_reserved"};
   try {
