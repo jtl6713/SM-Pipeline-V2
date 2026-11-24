@@ -163,7 +163,7 @@ def complete_gallery(client, request, parent, output):
     if not all(REC.fullmatch(x) for x in (oid, pid, rid)):
         raise RuntimeError("Native gallery identity invalid")
     row = _one(read(f"platform_outputs?airtable_record_id=eq.{oid}&select=*&limit=2"))
-    if not _safe_output(row):
+    if not _safe_output(row) or not str(row.get("output_caption") or "").strip():
         raise RuntimeError("Native gallery not an unapproved safe production output")
     selected = row.get("selected_assets") or {}
     if selected.get("authority") != AUTHORITY or selected.get("production_request_record_id") != rid:
@@ -215,12 +215,24 @@ def complete_gallery(client, request, parent, output):
     uploader = R2UploadClient()
     watermark = brand_watermark_bytes(client)
     cover_raw, _ = drive.download_file(cover_drive)
-    cover_asset, _ = client.upsert_record(MEDIA_ASSETS_TABLE, {
-        "Asset Name": f"Studio generated cover {pid}", "Google Drive File ID": cover_drive,
-        "Media_Class": "Image", "Asset_Status": "Available", "Active": True, "Do_Not_Use": False,
-        "Rights_Status": "Owned", "Content_Profile": [profile],
-    }, merge_field="Google Drive File ID")
-    cover_id = cover_asset["id"]
+    prior_cover = read("media_assets?google_drive_file_id=eq."+quote(cover_drive)
+                       +"&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=2")
+    if not isinstance(prior_cover, list) or len(prior_cover)>1:
+        raise RuntimeError("Native cover media identity ambiguous")
+    if prior_cover:
+        if not _owned(prior_cover[0], profile, cover_drive):
+            raise RuntimeError("Existing cover rights or profile unverified")
+        cover_id = prior_cover[0]["airtable_record_id"]
+    else:
+        cover_asset, _ = client.upsert_record(MEDIA_ASSETS_TABLE, {
+            "Asset Name": f"Studio generated cover {pid}", "Google Drive File ID": cover_drive,
+            "Media_Class": "Image", "Asset_Status": "Available", "Active": True, "Do_Not_Use": False,
+            "Rights_Status": "Owned", "Content_Profile": [profile],
+        }, merge_field="Google Drive File ID")
+        cover_id = cover_asset["id"]
+        stored_cover = _one(read(f"media_assets?airtable_record_id=eq.{cover_id}&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=2"))
+        if not _owned(stored_cover, profile, cover_drive):
+            raise RuntimeError("Native cover media authority not verified")
     ids = [cover_id]
     prepared = []
     url, sha = _stage(uploader, _cover_jpeg(cover_raw), pid)
@@ -278,7 +290,17 @@ def complete_gallery(client, request, parent, output):
                "render_prep":{**(selected.get("render_prep") or {}),"render_total_frames":len(prepared),
                               "render_clip_list_json":json.dumps(prepared)}, KEY:marker}
     bag = dict(row.get("error_messages") or {})
-    bag.pop("SM_Scheduling_Approval_Preflight_v1",None)
+    # The full media byte check above is stronger than the ordinary technical
+    # header probe. Use its exact signature so siblings do not wait on cron.
+    sig = [oid,row["platform"],row.get("studio_output_type"),"Native Photo Route",
+           row.get("final_file_url"),prepared[0]["url"],prepared[0]["url"],len(prepared),row.get("output_caption")]
+    bag["SM_Scheduling_Approval_Preflight_v1"] = {
+        "version":1,"status":"verified","checked_at":at,
+        "signature":json.dumps(sig,ensure_ascii=False,separators=(",",":")),
+        "evidence":"public_media_full_bytes_and_geometry_verified",
+        "native_source_count":len(prepared),"scope":"technical_media_only",
+        "requires_human_approval":True,"scheduling_authorized":False,"publishing_authorized":False,
+    }
     bag[KEY] = marker
     # CAS on exact output revision. Never change the user's proposed date or any provider state.
     changed = write(f"platform_outputs?id=eq.{row['id']}&updated_at=eq."+quote(row["updated_at"])
