@@ -8,6 +8,7 @@ import { TARGET_FIELDS,hasProviderEvidence,verifyBytes,recoverOneVerifiedNativeR
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { runnerWorkerLease,startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
 import { supabaseRest } from "./supabase-pipeline-reads.mjs";
+import { assessSchedulingPreflight,verifiedSchedulingPreflight,PREFLIGHT_KEY } from "./scheduling-approval-preflight.mjs";
 
 const REC=/^rec[A-Za-z0-9]{14}$/;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -157,8 +158,17 @@ export function buildRebuiltPackage(row,source,stage,at){
   bag.Render_Total_Frames=clips.length*150;
   const selected={...row.selected_assets,aspect_ratio:"9:16",fps:30,target_total_frames:clips.length*150,selected_clips:clips,
     render_prep:{...row.selected_assets?.render_prep,render_status:"Native Photo Route",render_total_frames:clips.length*150,render_clip_list_json:JSON.stringify(clips)}};
-  return {aspect_ratio:"9:16",selected_clip_count:clips.length,selected_assets:selected,render_clip_list:clips,
+  const mutation={aspect_ratio:"9:16",selected_clip_count:clips.length,selected_assets:selected,render_clip_list:clips,
     studio_preview_url:clips[0].url,thumbnail_url:clips[0].url,tiktok_draft_status:null,error_messages:bag,updated_at:at};
+  // This receipt becomes durable ONLY after the caller independently checks
+  // every staged byte/hash and the exact version CAS succeeds. Compact Factory
+  // projection requires this current technical receipt, not the stale one.
+  const preflight=assessSchedulingPreflight({...row,...mutation});
+  if(!preflight.ready)return null;
+  bag[PREFLIGHT_KEY]={version:1,status:"verified",checked_at:at,signature:preflight.signature,
+    evidence:"owned_sibling_lineage_and_full_media_sha256_verified",native_source_count:clips.length,
+    scope:"technical_media_only",requires_human_approval:true,scheduling_authorized:false,publishing_authorized:false};
+  return mutation;
 }
 export async function rebuildWrongNativeReview(env,report,{
   read=path=>supabaseRest(env,path),patch=(path,body)=>supabaseRest(env,path,{method:"PATCH",body,headers:{Prefer:"return=representation"}}),
@@ -202,7 +212,7 @@ export async function rebuildWrongNativeReview(env,report,{
       const after=await load();
       if(!after||after.tiktok_draft_status!==null||after.review_status!=="Review Sent"||after.output_status!=="Ready for Review"||after.publish_status!=="Not Ready"
         ||after.auto_publish_enabled!==false||after.do_not_publish!==false||after.scheduled_post_date||after.studio_scheduled_at||after.published_at
-        ||after.error_messages?.[MARK]?.target_version!==row.updated_at||stable(after.render_clip_list)!==stable(mutation.render_clip_list)
+        ||!verifiedSchedulingPreflight(after)||after.error_messages?.[MARK]?.target_version!==row.updated_at||stable(after.render_clip_list)!==stable(mutation.render_clip_list)
         ||stable(after.selected_assets?.selected_clips)!==stable(after.render_clip_list))throw Error("rebuild_readback_unverified");
       await bucket.put(key,JSON.stringify({state:"repaired",token,at:now().toISOString(),output:row.output_number,requires_human_approval:true}),{onlyIf:{etagMatches:reserved.etag}});
       return {status:"repaired",reason:"media_rebuilt_review_required",provider_writes:0,approval_actions:0,schedule_actions:0,publish_actions:0};
