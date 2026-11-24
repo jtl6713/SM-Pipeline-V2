@@ -1,4 +1,5 @@
 /** Explicit authorized formal-review release. No approval or provider action. */
+import {story2915ReleaseReady,story2915ReleasePatch,verifyStory2915Bytes} from "./story-expired-generation-2915.mjs";
 import {factorySupabaseApprovalRows} from "./factory-supabase-approval.mjs";
 import {supabaseRest} from "./supabase-pipeline-reads.mjs";
 import {classifyAdminPublishingHold} from "./admin-publishing-holds.mjs";
@@ -15,13 +16,13 @@ export function formalReleaseBlock(row) {
   if(row.auto_publish_enabled===true||!noSchedule(row)||row.platform_publish_response)return "Existing schedule or provider evidence requires reconciliation";
   const bag=row.error_messages||{};
   if(row.publish_hold_source==="issue2915_review_and_provider_reconciliation"||bag.SM_Issue2915_Story_Audio_Repair?.new_upload_authorized===false)
-    return "Corrected Story: the expired Instagram container and account must be reconciled before release. Creative review can be recorded while held.";
+    return story2915ReleaseReady(row)?null:"Corrected Story: exact expired-container recovery or corrected-media evidence is incomplete. No hold released.";
   if(bag.SM_2618_Creative_QA_Hold?.publishing_permitted===false)return "Unresolved creative QA media correction";
   const decision=classifyAdminPublishingHold(row);
   return decision.releasable?null:decision.block_reason;
 }
 export async function releaseFactoryHoldInSupabase(env,id,auth,{
-  read=factorySupabaseApprovalRows,rest=supabaseRest,verifyImages=verifyReviewImages,verifyGallery=assertSupabaseNativeGalleryPublicationPackage,
+  read=factorySupabaseApprovalRows,rest=supabaseRest,verifyImages=verifyReviewImages,verifyGallery=assertSupabaseNativeGalleryPublicationPackage,verifyStory=verifyStory2915Bytes,
 }={}) {
   if(!REC.test(String(id||"")))deny("Exact platform output required",400);
   if(!auth?.authenticated||!auth.authorized||auth.permissions?.outputs_review!==true||
@@ -37,6 +38,8 @@ export async function releaseFactoryHoldInSupabase(env,id,auth,{
   const verified=await verifyImages(readiness);
   if(verified?.readiness!=="READY")deny("Review media could not be verified; no hold released");
   if(!row.id||!row.updated_at)deny("Output revision missing");
+  const storyReplacement=story2915ReleaseReady(row);
+  if(storyReplacement)await verifyStory();
   const stamp=new Date().toISOString();
   const note="Factory formal-review release. No approval, schedule or publication authorized.";
   const selector="platform_outputs?"+[
@@ -48,13 +51,15 @@ export async function releaseFactoryHoldInSupabase(env,id,auth,{
   const changed=await rest(env,selector,{method:"PATCH",headers:{Prefer:"return=representation"},body:{
     do_not_publish:false,auto_publish_enabled:false,publish_retry_eligible:false,updated_at:stamp,
     publish_hold_release_actor:actor,publish_hold_release_note:note,
+    ...(storyReplacement?story2915ReleasePatch(row,actor,stamp):{}),
   }});
   if(!Array.isArray(changed)||changed.length!==1||changed[0].airtable_record_id!==id)deny("Hold revision changed; no release confirmed");
   const after=(await read(env,[id])).get(id)?.row;
   if(!after||after.id!==row.id||after.do_not_publish!==false||after.auto_publish_enabled!==false||
     after.publish_retry_eligible!==false||!noSchedule(after)||after.output_status!==row.output_status||
     after.review_status!==row.review_status||after.publish_status!==row.publish_status||
-    after.publish_hold_release_actor!==actor||!after.publish_hold_released_at)
+    after.publish_hold_release_actor!==actor||!after.publish_hold_released_at||
+    (storyReplacement&&(!after.error_messages?.SM_Issue2915_Story_Replacement_Generation||after.error_messages?.IG_Story_Container_ID||after.publish_asset_url!==row.studio_preview_url)))
     deny("Supabase release readback incomplete; inspect status before retrying",503);
   return {id,released:true,auto_publish_enabled:false,approved:false,scheduled:false,published:false,
     message:"Publishing hold released for formal review in Supabase. Preview and separately approve. Nothing was scheduled or published."};
