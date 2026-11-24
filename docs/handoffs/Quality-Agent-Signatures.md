@@ -2,6 +2,31 @@
 
 This file is the machine-readable/text companion to `docs/handoffs/Quality-Agent.docx`. Quality Agent checks should consult this catalog when scanning failed, retry-pending, or soon-to-publish outputs.
 
+## QA-PRODUCTION-STALLED-PENDING-CROPS-v1 — Originals saved; platform crops never attempted (#2873)
+
+**Exact evidence:** Pilsen Mural Stroll, Chicago, production request `recWBnwtDCy49LTxv`, Nov 24, 2026. All 19 originals have both Drive and Media Asset IDs; master and plan Ready; variants Preparing; 10 of 38 crops Ready, 28 Pending, zero attempts on pending rows since Nov 22 12:48 UTC. No linked platform outputs yet. A newly generated manifest timestamp does not establish crop progress.
+
+### Detection and recovery
+
+1. Read the exact canonical Supabase parent, active plan revision, original manifest and unique linked SMV1 transfers. A complete save is not an incomplete upload. Match when all originals are confirmed, the plan is Ready, required crop count exceeds ready count, all missing crops are still Pending with zero attempts, and their latest genuine transfer update is at least 30 minutes old (initial conservative threshold, configurable after operational validation). Do not confuse test, cancelled, in-flight, stale Processing or attempted Error rows with this exact signature.
+2. Distinguish dispatcher/selector failure, governor capacity or circuit denial, runner transport/auth and actual crop failure. Read the current runner workload and transfer leases; do not infer cause from a stale count or from HTTP 200 alone. No direct SQL updates, queue resets, duplicate transfer creation, reupload, or circuit override.
+3. If exact ownership, current plan, source authority and no active/ambiguous claim are proven and admission permits, invoke the existing authenticated `/stages/smv1/drain` path with the exact production request ID, one photo worker and bounded follow-up; use the processor's normal durable claims. The stage may drain multiple existing crops; it is not the one governed producer probe that can clear the half-open circuit. Do not retry ambiguous requests; re-read actual receipts and transfer states first. Never trigger a global drain to heal this single request.
+4. Verify all required ratios and actual Drive/media receipts, rebuild/reconcile the canonical variant manifest through the existing Studio path, and confirm crop readiness. Preserve the selected source assets and order. For a Draft, stop at the normal Production authorization boundary unless the owner authorized this exact submission; for an already authorized production, continue through the ordinary governed producer and verify the actual Factory preview/selectability. Stop at human Factory approval. No provider publish, schedule, approval or independent hold release.
+5. Surface truthful stages: originals saved N/N, crops ready M/T, pending/failed counts and real last progress timestamp, exact reason and actionable in-page retry/Quality Agent repair. Use bounded periodic detection and idempotent repair; retain distinct immutable evidence of unsuccessful admission and verified success. Do not count attempted dispatch as progress.
+
+Implementation status: pure detector and regression fixtures in `services/pipeline-runner/quality_agent/signatures.py`. Live detector wiring, automatic recovery adapter, UI recheck/dead-end remediation and production acceptance still require implementation/verification. Related #2853, #2670, #2874.
+
+## QA-CREATIVE-IMAGE-ADVISORY-v1 — Potential incorrect images, warning only
+
+**Owner policy Nov 24, 2026:** Subjective or suspected creative image issues (location, season, relevance, repetition, visual quality, composition) must NEVER by themselves block Production, Factory visibility, selection or ordinary human approval. This policy supersedes older creative-only hold recommendations in the catalog. Do not silently substitute, remove, regenerate or reorder an owner's images just to eliminate a warning.
+
+- Create a revision-scoped, nonblocking advisory with a yellow warning icon at the Factory content header, title **Potential incorrect images identified**, and concrete evidence in each affected output's details (e.g., exact slide/asset name, expected subject and observed mismatch, confidence if known).
+- Provide **Return to Production for refinement** through the existing exact content revision workflow, with the warning notes available to the producer. Keep ordinary Approve/selection available if technical readiness and other legitimate guards permit. The human may accept as-is; the advisory does not imply approval and must not set a publishing or review hold.
+- Separate missing or unreadable required media, invalid ownership, rights/copyright restrictions and existing independent safety/provider holds from aesthetic/creative concerns. Do not misrepresent an unrendered package as reviewable, release existing holds without verified authority, or automatically publish. An earlier creative-only hold requires exact reason/owner reconciliation and normal human approval, not a blanket release.
+- Acceptance: a flagged but technically ready output is selectable in Needs Eyes individually and in batch, displays header and exact output notes, can be accepted normally or returned to Production, and preserves unrelated safety gates. Pilsen example: several selected images are labeled Wicker Park Murals and one shows a skyline; these are advisory evidence, not a reason to prevent crop completion or Factory delivery.
+
+Implementation status: pure warning contract and regression fixture only in this PR. Factory projection/persistence, warning header/detail UI, return action wiring, and migration of legacy creative-only holds remain to be implemented and tested.
+
 ## QA-TT-DUPLICATE-SLIDES — TikTok duplicate carousel slide links
 
 **First observed:** Platform Output 997, Content 226, October 5, 2026.
