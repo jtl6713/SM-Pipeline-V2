@@ -445,3 +445,41 @@ def test_studio_render_guard_rejects_missing_sources_but_allows_legacy_render():
     assert studio_visual_integrity_error(
         {"fields": {"Output_Filename": "legacy-reel.mp4"}}, payload
     ) is None
+
+
+def test_2970_story_rejects_parent_reel_duration_and_missing_music():
+    from r4.render_request import studio_visual_integrity_error
+
+    story = {"fields": {
+        "Output_Filename": "studio-riverwalk-instagram-story.mp4",
+        "Studio_Output_Type": "Story",
+        "Studio_Effective_Background_Music_Mode": "Yes",
+        "Selected_Assets_JSON": '{"target_total_frames":300}',
+    }}
+    payload = {
+        "fps": 30, "durationInFrames": 1257,
+        "clips": [{"src": "https://media.example/first.jpg", "durationFrames": 300}],
+        "music": {"url": "https://media.example/song.mp3", "volume": 0.6},
+    }
+    assert "Story duration integrity guard" in studio_visual_integrity_error(story, payload)
+    payload["durationInFrames"] = 300
+    assert studio_visual_integrity_error(story, payload) is None
+    payload["music"]["volume"] = 0
+    assert "audio integrity guard" in studio_visual_integrity_error(story, payload)
+    payload["music"] = {"url": "", "volume": 0.6}
+    assert "audio integrity guard" in studio_visual_integrity_error(story, payload)
+    story["fields"]["Studio_Effective_Background_Music_Mode"] = "No"
+    assert studio_visual_integrity_error(story, payload) is None
+
+
+def test_2970_voiceover_healing_never_extends_story(monkeypatch):
+    from audio import voiceover_duration as vd
+
+    monkeypatch.setattr(vd, "measured_voiceover_seconds", lambda *a, **kw: 41.889)
+    story = {"fields": {
+        "Studio_Output_Type": "Story",
+        "Studio_Effective_Voiceover_Mode": "Yes",
+        "Voiceover_URL": "https://media.example/long.mp3",
+        "Render_Clip_List_JSON": '[{"durationFrames":300,"startFrame":0}]',
+    }}
+    assert vd.extend_render_clips_to_cover_voiceover(story, probe=False) is None
