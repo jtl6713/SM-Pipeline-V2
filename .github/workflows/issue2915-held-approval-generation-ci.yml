@@ -1,0 +1,50 @@
+name: Issue 2915 held Story generation SQL and media proof
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/migrations/20261124_story_5628_held_approval_generation.sql'
+      - 'repair/sql/issue2915_held_approval_generation_test.sql'
+      - '.github/workflows/issue2915-held-approval-generation-ci.yml'
+      - 'apps/studio-api/story-expired-generation-2915*'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-api/migrations/20261124_story_5628_held_approval_generation.sql'
+      - 'repair/sql/issue2915_held_approval_generation_test.sql'
+      - '.github/workflows/issue2915-held-approval-generation-ci.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-sql-and-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fixture"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Execute isolated SQL positive and negative fixtures
+        env:
+          PGPASSWORD: fixture-only
+        run: psql -h localhost -U postgres -d fixture -v ON_ERROR_STOP=1 -f repair/sql/issue2915_held_approval_generation_test.sql
+      - name: Independently verify exact current corrected video bytes
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 45 --output /tmp/5628.mp4 'https://media.chicagoshining.com/studio/previews/repairs/issue2915/miami-1018/po5628-e9f4ad61913fe88a.mp4'
+          test "$(wc -c </tmp/5628.mp4)" -eq 8368028
+          echo 'e9f4ad61913fe88aad28bcf6df5643bd8586c74c34ab0b2fe1c9b2d37c3a747f  /tmp/5628.mp4' | sha256sum --check -
+          rm /tmp/5628.mp4
+          echo ISSUE2915_CORRECTED_MEDIA_READONLY=PASS
