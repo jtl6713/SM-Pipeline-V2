@@ -1115,6 +1115,28 @@ def process_drain(
     photo_workers: int = 8,
     max_followup: int = 8,
 ) -> dict[str, Any]:
+    """Admit one drain before doing any queue reads or launching photo groups.
+
+    Browser polling, cron and direct runner callers may overlap. The durable
+    runner-wide admission slot coalesces overlap without waiting or changing
+    the existing photo-group, transfer or database limits.
+    """
+    with governor.resource_slot("smv1_drain", limit=1, wait_seconds=0):
+        return _process_drain_admitted(
+            production_request_record_id=production_request_record_id,
+            test_run_id=test_run_id,
+            photo_workers=photo_workers,
+            max_followup=max_followup,
+        )
+
+
+def _process_drain_admitted(
+    *,
+    production_request_record_id: str | None = None,
+    test_run_id: str | None = None,
+    photo_workers: int = 8,
+    max_followup: int = 8,
+) -> dict[str, Any]:
     """Process pending variant photos in parallel (one Drive download per photo).
 
     Unfinished Platform Variant crops are selected before Ready+Preview rows so
