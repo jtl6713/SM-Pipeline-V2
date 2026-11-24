@@ -18,6 +18,7 @@ const PREFIX="studio/state/factory-approvals/v2/";
 const one=x=>Array.isArray(x)&&x.length===1?x[0]:null;
 const f=(k,v)=>k+"="+(v==null?"is.null":"eq."+encodeURIComponent(String(v)));
 const clone=x=>JSON.parse(JSON.stringify(x));
+const stable=x=>JSON.stringify(x,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
 const no=reason=>({status:"skipped",reason,approval_actions:0,schedule_actions:0,publish_actions:0});
 const terminalJob=s=>["completed","failed","cancelled","canceled"].includes(s);
 const terminalItem=s=>["approved","already_satisfied","failed","skipped","rejected","cancelled","canceled"].includes(s);
@@ -189,7 +190,7 @@ export async function rebuildWrongNativeReview(env,report,{
       const mutation=buildRebuiltPackage(row,source,receipt,now().toISOString());
       if(!mutation||!await checkBytes(receipt.assets))throw Error("rebuild_media_proof_unverified");
       const latest=await load();
-      if(!rebuildCandidate(latest)||latest.updated_at!==row.updated_at||JSON.stringify(await sourcePackage(read,latest))!==JSON.stringify(source)
+      if(!rebuildCandidate(latest)||latest.updated_at!==row.updated_at||stable(await sourcePackage(read,latest))!==stable(source)
         ||!await claimSafe(source.profile,id,row.updated_at))throw Error("rebuild_revision_or_claim_changed");
       pulse.assertOwned();
       const path="platform_outputs?"+f("id",row.id)+"&"+f("updated_at",row.updated_at)+"&"+f("airtable_record_id",id)
@@ -201,16 +202,16 @@ export async function rebuildWrongNativeReview(env,report,{
       const after=await load();
       if(!after||after.tiktok_draft_status!==null||after.review_status!=="Review Sent"||after.output_status!=="Ready for Review"||after.publish_status!=="Not Ready"
         ||after.auto_publish_enabled!==false||after.do_not_publish!==false||after.scheduled_post_date||after.studio_scheduled_at||after.published_at
-        ||after.error_messages?.[MARK]?.target_version!==row.updated_at||JSON.stringify(after.render_clip_list)!==JSON.stringify(mutation.render_clip_list)
-        ||JSON.stringify(after.selected_assets?.selected_clips)!==JSON.stringify(after.render_clip_list))throw Error("rebuild_readback_unverified");
+        ||after.error_messages?.[MARK]?.target_version!==row.updated_at||stable(after.render_clip_list)!==stable(mutation.render_clip_list)
+        ||stable(after.selected_assets?.selected_clips)!==stable(after.render_clip_list))throw Error("rebuild_readback_unverified");
       await bucket.put(key,JSON.stringify({state:"repaired",token,at:now().toISOString(),output:row.output_number,requires_human_approval:true}),{onlyIf:{etagMatches:reserved.etag}});
       return {status:"repaired",reason:"media_rebuilt_review_required",provider_writes:0,approval_actions:0,schedule_actions:0,publish_actions:0};
     }finally{if(pulse)await pulse.stop();await release(source.idea,token).catch(()=>{});}
   });
 }
-export async function recoverNativeReviewWithRebuild(env,report){
-  const first=await recoverOneVerifiedNativeReview(env,report);
+export async function recoverNativeReviewWithRebuild(env,report,{recover=recoverOneVerifiedNativeReview,rebuild=rebuildWrongNativeReview}={}){
+  const first=await recover(env,report);
   if(first.status!=="skipped"||env.QUALITY_NATIVE_MEDIA_REBUILD_ENABLED!=="true"
     ||!["not_stale_native_review_handoff","missing_protected_exact_variant_receipt","current_revision_does_not_match_protected_receipt"].includes(first.reason))return first;
-  return rebuildWrongNativeReview(env,report);
+  return rebuild(env,report);
 }
