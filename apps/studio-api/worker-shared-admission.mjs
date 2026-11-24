@@ -28,6 +28,7 @@ export async function runnerWorkerLease(
   try {
     const response = await transport(`${runnerUrl}/internal/workload/worker-lease`, {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/json", "X-Pipeline-Secret": secret },
       body: JSON.stringify({ action, idea_id: ideaId, token }),
       signal: typeof AbortSignal?.timeout === "function"
@@ -38,13 +39,22 @@ export async function runnerWorkerLease(
       return { released: response.ok && result?.released === true };
     }
     if (!response.ok || result?.ok !== true || result?.admitted !== true) {
-      return { admitted: false, reason: response.status === 429 ? "capacity_or_circuit" : "broker_unavailable" };
+      // Fixed diagnostic codes only. No response text, URL, secret or
+      // remote exception is exposed. Retry only explicit, valid 429 denial.
+      const code = Number(response.status);
+      const reason = code === 429 && result?.ok === true && result?.admitted === false
+        ? "capacity_or_circuit"
+        : code === 401 || code === 403 ? "broker_auth_denied"
+        : code === 400 || code === 413 || code === 422 ? "broker_request_rejected"
+        : code >= 500 && code <= 599 ? "broker_http_unavailable"
+        : response.ok ? "broker_receipt_invalid" : "broker_unavailable";
+      return { admitted: false, reason, http_status: Number.isInteger(code) && code >= 100 && code <= 599 ? code : null };
     }
     return { admitted: true };
-  } catch {
+  } catch (error) {
     // A timeout, 502, invalid JSON or uncertain claim outcome must not
     // start new work; token-only release can be attempted by the caller.
-    return { admitted: false, reason: "broker_unavailable" };
+    return { admitted: false, reason: ["TimeoutError","AbortError"].includes(error?.name) ? "broker_timeout" : "broker_transport_unavailable" };
   }
 }
 
