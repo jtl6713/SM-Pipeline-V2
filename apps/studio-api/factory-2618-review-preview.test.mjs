@@ -1,7 +1,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import {issue2618PreviewSpec,issue2618PreviewEligible,serveIssue2618ReviewPreview,fetchIssue2618DriveVideo,refreshIssue2618DriveToken}
+import {issue2618PreviewSpec,issue2618PreviewEligible,serveIssue2618ReviewPreview,fetchIssue2618DriveVideo,refreshIssue2618DriveToken,fetchIssue2618RunnerVideo}
   from "./factory-2618-review-preview.mjs";
 
 const ids=["recaV78on0RSfqb31","recgeicEbdlbmQiv5","recy1CzV4MJQycBMq",
@@ -171,4 +171,42 @@ test("OAuth transport, redirect, HTTP status, and quoted dotenv mistakes remain 
     await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>new Response("private response",{status})),error=>error.message==="FACTORY_2618_DRIVE_OAUTH_HTTP_"+code);
   }
   await assert.rejects(()=>refreshIssue2618DriveToken(env,async()=>new Response("not JSON",{status:200})),/FACTORY_2618_DRIVE_OAUTH_NON_JSON_SUCCESS/);
+});
+
+test("private runner transport uses only exact output, existing secret, no Google OAuth and no redirects",async()=>{
+  const outputId=ids[0],s=issue2618PreviewSpec(outputId);
+  const env={PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",PIPELINE_RUNNER_SHARED_SECRET:"test-runner-secret-at-least-24-characters"};
+  const receipt={"Content-Type":"video/mp4","Content-Length":String(s.bytes),"X-Factory-Source-Sha256":s.sha256};
+  let calls=0;
+  const fetchImpl=async(url,opts)=>{
+    calls++;
+    assert.equal(url,"https://pipeline.chicagoshining.com/jobs/factory/private-preview-source/"+outputId);
+    assert.equal(opts.method,"GET");
+    assert.equal(opts.redirect,"manual");
+    assert.equal(opts.headers["X-Pipeline-Secret"],env.PIPELINE_RUNNER_SHARED_SECRET);
+    assert.equal(opts.headers.Authorization,undefined);
+    return new Response(new Uint8Array([1]),{headers:receipt});
+  };
+  await assert.rejects(()=>fetchIssue2618RunnerVideo({env,outputId,fileId:"unrelated",fetchImpl}),/PROTECTED_SOURCE_UNAVAILABLE/);
+  await assert.rejects(()=>fetchIssue2618RunnerVideo({env:{...env,PIPELINE_RUNNER_URL:"https://unexpected.example"},outputId,fileId:s.fileId,fetchImpl}),/RUNNER_UNCONFIGURED/);
+  assert.equal(calls,0);
+  assert.equal((await fetchIssue2618RunnerVideo({env,outputId,fileId:s.fileId,fetchImpl})).status,200);
+  for(const [status,reason] of [[302,"UNAVAILABLE"],[401,"UNAVAILABLE"],[409,"SOURCE_CHANGED"],[429,"BUSY"],[503,"UNAVAILABLE"]]){
+    await assert.rejects(()=>fetchIssue2618RunnerVideo({env,outputId,fileId:s.fileId,
+      fetchImpl:async()=>new Response(null,{status})}),new RegExp("RUNNER_"+reason));
+  }
+  await assert.rejects(()=>fetchIssue2618RunnerVideo({env,outputId,fileId:s.fileId,
+    fetchImpl:async()=>new Response(null,{headers:{"Content-Type":"video/mp4"}})}),/RUNNER_SOURCE_UNVERIFIED/);
+});
+test("canonical state is rechecked after source bytes and before private cache write",async()=>{
+  const id=ids[0],s=issue2618PreviewSpec(id),STUDIO_MEDIA=makeStorage();
+  let reads=0;
+  await assert.rejects(()=>serveIssue2618ReviewPreview({
+    request:new Request("https://studio.chicagoshining.com/api/factory/outputs/"+id+"/preview"),
+    env:{STUDIO_MEDIA},outputId:id,
+    readRows:async()=>[++reads===1?row(id):{...row(id),do_not_publish:true}],
+    fetchVideo:async()=>new Response(new Uint8Array(s.bytes),{headers:{"Content-Type":"video/mp4"}}),
+    digest:async()=>s.sha256,
+  }),/SOURCE_CHANGED_OR_UNVERIFIED/);
+  assert.equal(STUDIO_MEDIA.counts.put,0);
 });
