@@ -502,6 +502,7 @@ def image_classification_recovery_window() -> Iterator[None]:
 def resource_slot(
     scope: str, *, key: str = "", limit: int = 1,
     allow_during_circuit: bool = False, allow_during_recovery: bool = False,
+    wait_seconds: float | None = None,
 ) -> Iterator[None]:
     """Atomic, expiring single-host claims for photo-group and transfer work."""
     if not enabled():
@@ -516,8 +517,9 @@ def resource_slot(
         raise AdmissionDeferred("runner recovery read-only: resource admission paused")
     token = uuid.uuid4().hex
     lease_key = key or token
-    wait_seconds = 30.0 if scope.startswith("supabase_") else 60.0
-    deadline = time.monotonic() + wait_seconds
+    if wait_seconds is None:
+        wait_seconds = 30.0 if scope.startswith("supabase_") else 60.0
+    deadline = time.monotonic() + max(0.0, wait_seconds)
     while True:
         with _connect() as db:
             _transaction(db)
@@ -613,7 +615,7 @@ def snapshot() -> dict[str, object]:
         permitted_resource_names = (
             "photo_group", "ratio", "transfer", "supabase_read",
             "supabase_write", "worker_heavy", "library_image_upload",
-            "library_image_classify",
+            "library_image_classify", "smv1_drain",
         )
         active_resources = {
             scope: int(active_resources.get(scope, 0))
