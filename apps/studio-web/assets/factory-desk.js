@@ -902,7 +902,11 @@
       const empty = $("factoryPreviewEmpty");
       if (empty) {
         empty.hidden = false;
-        empty.textContent = "Cannot verify the individual native slides in Factory. Do not approve this output until the slide inventory loads.";
+        const status = Number(error?.status || 0);
+        const message = String(error?.message || "");
+        const safeDetail = /^(Review & Resolve requires|Supabase Content Profiles unavailable|Studio must |This output has a different|A prior partial review|Review resolution is not verified|Full verified native gallery|Invalid gallery output identity|Untrusted candidate gallery)/.test(message)
+          ? message.slice(0, 300) : status ? "Gallery request failed (HTTP " + status + ")." : "Gallery inventory could not be loaded.";
+        empty.textContent = "Cannot verify the individual native slides in Factory. " + safeDetail + " Publishing remains held; use Request Changes or contact Studio if the condition persists.";
       }
       image.hidden = true;
     }
