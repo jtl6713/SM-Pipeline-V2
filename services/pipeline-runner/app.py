@@ -396,6 +396,32 @@ def worker_shared_workload_lease():
     return response, 200 if granted else 429
 
 
+@app.post("/internal/quality/native-media-rebuild")
+def quality_native_media_rebuild():
+    """Authenticated, governed, immutable CDN stage only."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify(ok=False, error="runner_auth_unconfigured"), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    if request.content_length is not None and request.content_length > 24576:
+        return jsonify(ok=False, error="rebuild_payload_too_large"), 413
+    raw = request.get_data(cache=True)
+    if not raw or len(raw) > 24576:
+        return jsonify(ok=False, error="rebuild_payload_too_large"), 413
+    from studio_produce.quality_native_media_rebuild import stage, validate
+    payload = request.get_json(silent=True)
+    try:
+        validate(payload)
+    except ValueError:
+        return jsonify(ok=False, error="invalid_rebuild_request"), 422
+    try:
+        return jsonify(stage(payload)), 200
+    except Exception:
+        logger.warning("quality native media rebuild blocked or incomplete")
+        return jsonify(ok=False, error="rebuild_unverified"), 503
+
+
 @app.get("/internal/workload/snapshot")
 def shared_workload_readonly_snapshot():
     """Authenticated and bounded Worker QA proxy; no queue/Supabase writes."""
