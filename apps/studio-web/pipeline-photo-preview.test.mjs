@@ -62,3 +62,21 @@ test("Pipeline viewer is an explicit exact-row read; no initial media fetch or a
   assert.ok(html.indexOf('"/assets/pipeline-photo-preview.js?')<html.indexOf('"/assets/app-item4-1008.js?'));
   assert.match(html,/pipeline-photo-preview\.css\?v=/);
 });
+
+const factory = read("./assets/factory-desk.js");
+test("Factory native TikTok routes to exact Creative photo viewer, never video or Meta slide API",()=>{
+  const start=factory.indexOf("  function isFactoryTikTokPhotoGallery(");
+  const end=factory.indexOf("  function isFactoryNativeGallery(",start);
+  const scope={}; vm.runInNewContext(factory.slice(start,end)+"\nthis.classify=isFactoryTikTokPhotoGallery;",scope);
+  assert.equal(scope.classify({kind:"output",platform:"TikTok",studio_output_type:"Multi-Photo"}),true);
+  assert.equal(scope.classify({kind:"output",platform:"TikTok",studio_output_type:"TikTok Slideshow"}),true);
+  for(const c of [{platform:"TikTok",studio_output_type:"Video Draft"},{platform:"Facebook",studio_output_type:"Multi-Photo"},{platform:"Instagram",studio_output_type:"Carousel"}]) assert.equal(scope.classify({kind:"output",...c}),false);
+  const route=factory.slice(factory.indexOf("    if (isFactoryTikTokPhotoGallery(card))"),factory.indexOf("    if (isFactoryNativeGallery(card))"));
+  assert.match(route,/requireCompleteTikTok: true/);
+  assert.match(route,/\/creative`/); assert.doesNotMatch(route,/video\.src\s*=|\/slides/);
+  const good=payload("TikTok","Multi-Photo","9:16");
+  assert.equal(viewer.readSlides(good,id,{requireCompleteTikTok:true}).slides.length,19);
+  for(const change of [d=>d.slides.pop(),d=>d.slides[0].order=20,d=>d.output.platform="Facebook",d=>d.output.aspect_ratio="4:5",d=>{d.slides[0].variants={};d.slides[0].preview_url="https://bad.example/a.jpg";}]) {
+    const d=payload("TikTok","Multi-Photo","9:16"); change(d); assert.throws(()=>viewer.readSlides(d,id,{requireCompleteTikTok:true}));
+  }
+});

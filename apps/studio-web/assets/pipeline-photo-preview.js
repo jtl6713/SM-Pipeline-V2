@@ -19,7 +19,7 @@
       return url.href;
     } catch { return ""; }
   }
-  function readSlides(data, recordId) {
+  function readSlides(data, recordId, {requireCompleteTikTok = false} = {}) {
     if (data?.ok !== true || !recordPattern.test(recordId)
         || data.output?.id !== recordId || !isGallery(data.output)
         || !Array.isArray(data.slides)) throw Error("The exact photo package could not be verified.");
@@ -41,6 +41,11 @@
       return { order, image, sourceOnly: !final, label: String(slide.name || "Photo").slice(0, 160) };
     }).sort((a, b) => a.order - b.order);
     const expected = Number(data.output.selected_clip_count || 0);
+    if (requireCompleteTikTok && (String(data.output.platform || "").toLowerCase() !== "tiktok"
+        || ratio !== "9:16" || !Number.isSafeInteger(expected) || expected < 2
+        || expected !== slides.length || slides.some((slide,i) => slide.order !== i+1 || !slide.image))) {
+      throw Error("The complete ordered TikTok photo package could not be verified.");
+    }
     return { slides, sourceOnly: slides.some(slide => slide.sourceOnly),
       expected: Number.isSafeInteger(expected) && expected > 0 ? expected : null };
   }
@@ -58,7 +63,7 @@
     node.addEventListener("click", action);
     return node;
   }
-  async function open({ recordId, label, load, isCurrent = () => true }) {
+  async function open({ recordId, label, load, isCurrent = () => true, requireCompleteTikTok = false }) {
     if (!recordPattern.test(recordId) || typeof load !== "function") return;
     if (activeDialog) activeDialog.close();
     const dialog = element("dialog", "", "pipeline-photo-dialog");
@@ -155,12 +160,12 @@
       try {
         const data = await load();
         if (!current(version)) return;
-        const result = readSlides(data, recordId);
+        const result = readSlides(data, recordId, {requireCompleteTikTok});
         inventory = result.slides;
         status.textContent = !inventory.length
           ? "No linked or selected photos are available yet."
           : result.sourceOnly
-            ? "Saved photo previews — final gallery verification may still be pending."
+            ? requireCompleteTikTok ? "Saved TikTok photo sequence — review only; not a final publishing receipt." : "Saved photo previews — final gallery verification may still be pending."
             : "Linked gallery slide previews — review only.";
         if (result.expected && result.expected !== inventory.length) {
           status.textContent += " " + inventory.length + " of " + result.expected + " expected photos available.";
