@@ -4620,28 +4620,6 @@ export default {
       }).catch(error=>console.warn("QA_FACTORY_HANDOFF_E2E_UNAVAILABLE",
         String(error?.message||error).slice(0,200))));
     }
-    // #2873 exact owner-authorized native sibling repair. This one-shot only
-    // queues the normal durable producer AFTER its new capability is live.
-    if (collectorCron === "* * * * *" && collectorMinute % 5 === 3
-        && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
-        && env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true") {
-      ctx.waitUntil(resumePilsenNativeCompanions({
-        read:path=>adminHoldSupabaseRest(env,path),bucket:env.STUDIO_MEDIA,
-        runnerReady:async()=>{
-          const root=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
-          if(!root)return false;
-          try{
-            const response=await fetch(root+"/health",{signal:AbortSignal.timeout(6000)});
-            const h=await response.json();
-            return response.ok && h.ok===true && h.studio_native_gallery_companion_2873===true
-              && h.studio_write_source==="supabase" && h.supabase_pipeline_writes===true
-              && h.workload_governor_enabled===true && h.recovery_read_only!==true;
-          }catch{return false;}
-        },
-        resume:id=>enqueueStudioProductionJob(env,id,{resume:true}),
-      }).then(result=>{if(!result.skipped)console.info("QA_NATIVE_GALLERY_COMPANIONS_2873",JSON.stringify(result));})
-        .catch(()=>console.warn("QA_NATIVE_GALLERY_COMPANIONS_2873 unavailable")));
-    }
     // #2618: Old R3 records can have a complete render package in the JSON bag
     // while R4's typed filename/frame selectors are null. Recover only exact
     // unheld, pre-render, no-provider-attempt rows with a verified parent.
@@ -4672,6 +4650,28 @@ export default {
           if (result && !result.skipped) console.info("issue2593 ferry held fanout", result);
         })
         .catch((error) => console.error("issue2593 ferry fanout failed closed", String(error?.message || error))));
+    }
+    // #2873 exact owner-authorized native sibling repair. This one-shot only
+    // queues the normal durable producer AFTER its new capability is live.
+    if (collectorCron === "* * * * *" && collectorMinute % 5 === 3
+        && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)
+        && env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true") {
+      ctx.waitUntil(resumePilsenNativeCompanions({
+        read:path=>adminHoldSupabaseRest(env,path),bucket:env.STUDIO_MEDIA,
+        runnerReady:async()=>{
+          const root=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+          if(!root)return false;
+          try{
+            const response=await fetch(root+"/health",{signal:AbortSignal.timeout(6000)});
+            const h=await response.json();
+            return response.ok && h.ok===true && h.studio_native_gallery_companion_2873===true
+              && h.studio_write_source==="supabase" && h.supabase_pipeline_writes===true
+              && h.workload_governor_enabled===true && h.recovery_read_only!==true;
+          }catch{return false;}
+        },
+        resume:id=>enqueueStudioProductionJob(env,id,{resume:true}),
+      }).then(result=>{if(!result.skipped)console.info("QA_NATIVE_GALLERY_COMPANIONS_2873",JSON.stringify(result));})
+        .catch(()=>console.warn("QA_NATIVE_GALLERY_COMPANIONS_2873 unavailable")));
     }
     // Issue #2593: after Runner music-view fix, resume only the already-
     // recovered C2239's exact, no-publish-held Studio Produce job once.
