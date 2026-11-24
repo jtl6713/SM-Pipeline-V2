@@ -19084,20 +19084,52 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
     let profile = null;
     let timeZone = null;
     let horizonDays = null;
+    // Both authorities must hand off only after factoryBatchDrain releases
+    // its profile lease. A future retry is not eligible continuation work.
+    const continueAfterDrain = (result) => {
+      const processed = Number(result?.processed || 0);
+      if (result?.claimed && processed > 0 && continueSlice < 8 && ctx?.waitUntil) {
+        ctx.waitUntil((async () => {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          // Preserve existing oldest-eligible sibling fairness. Always include
+          // the exact just-drained child, even if bounded history misses it.
+          let siblings = [];
+          try {
+            siblings = await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 });
+          } catch (error) {
+            console.warn("Factory batch sibling discovery unavailable", requestId, error);
+          }
+          const exact = await factoryBatchRead(env.STUDIO_MEDIA, profileId, requestId);
+          const candidates = new Map(siblings.map(job => [job.request_id, job]));
+          if (exact) candidates.set(requestId, exact);
+          const next = factoryBatchCronSelectJobs(
+            [...candidates.values()].map(job => ({ profileId, requestId: job.request_id, job })),
+            { maxProfiles: 1 },
+          )[0];
+          if (!next) return null;
+          return factoryBatchProcess(env, profileId, next.requestId, ctx, { continueSlice: continueSlice + 1 });
+        })().catch((error) => console.warn("Factory batch continue", requestId, error)));
+      }
+      return result;
+    };
     try {
       // Once Outputs are Supabase SoR, Factory must never use the legacy
       // Airtable canonical reread, scheduling occupancy, or approval writer.
       if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-        return factoryBatchDrain(env.STUDIO_MEDIA, {
+        const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
           profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
-          approve: (id, currentJob, checkpoint = () => {}) =>
-            withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+          approve: async (id, currentJob, checkpoint = () => {}) => {
+            await checkpoint("approval_lease_wait_started");
+            return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+              await checkpoint("approval_lease_acquired");
               // Awaited checkpoints let Factory poll actual in-flight stages
               // without ever triggering an additional approval or publish.
               await checkpoint("supabase_approval_started");
+              await checkpoint("output_claim_check_started");
               await factoryOutputClaimAssertNotTransferred(env.STUDIO_MEDIA, {
                 profileId, requestId: parentId || requestId, id,
               });
+              await checkpoint("output_claim_check_finished");
               const intent = originalFactoryIntent(currentJob, originalParent);
               const recoveryItem = currentJob.items.find(row => row.id === id);
               if (recoveryItem?.original_intent_recovery) {
@@ -19121,11 +19153,14 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
+                onTiming: checkpoint,
               });
               await checkpoint("supabase_approval_finished");
               return result;
-            }),
+            });
+          },
         });
+        return continueAfterDrain(result);
       }
       const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
         profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
@@ -19209,28 +19244,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           return result;
         },
       });
-      // Global Miami/LA submits schedule every child waitUntil at once; only one
-      // claims the profile lock for ~20s. Without chaining, the other children
-      // exit empty-handed and the 1-minute cron can skip while Airtable cools —
-      // Activity then sits at "3 approved / 57 pending" for many minutes.
-       const processed = Number(result?.processed || 0);
-      if (result?.claimed && processed > 0 && continueSlice < 8 && ctx?.waitUntil) {
-        ctx.waitUntil((async () => {
-          // Local delay avoids a circular sleepMs import from worker.js.
-          await new Promise((resolve) => setTimeout(resolve, 300));
-          // Fairly hand off to the oldest eligible child of this profile, not
-          // necessarily the child that just used the profile lock. This avoids
-          // leaving sibling submissions stranded until cron recovery.
-          const siblings = await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 });
-          const next = factoryBatchCronSelectJobs(
-            siblings.map((job) => ({ profileId, requestId: job.request_id, job })),
-            { maxProfiles: 1 },
-          )[0];
-          if (!next) return null;
-          return factoryBatchProcess(env, profileId, next.requestId, ctx, { continueSlice: continueSlice + 1 });
-        })().catch((error) => console.warn("Factory batch continue", requestId, error)));
-      }
-      return result;
+      return continueAfterDrain(result);
     } finally {
       studioInvalidateOccupiedScheduleCache();
     }

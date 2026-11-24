@@ -382,3 +382,25 @@ test("#2915 approved labels without current schedule proof cannot report success
   assert.equal((await verify()).already_satisfied,true);
   assert.equal(mock.calls.filter(c=>c.method==="PATCH").length,0);
 });
+
+
+test("#2959 Supabase timings separate media, occupancy, MAE computation, commit and readback", async t => {
+  const mock = mockSupabase(t, [output(IDS[0], 8946)]);
+  const phases = [], timings = [];
+  await factorySupabaseApproveOutput(env, IDS[0], PROFILE_ID, {
+    requestId: "factory_timing_2959",
+    verifyImages: async readiness => readiness,
+    onStage: async phase => phases.push(phase),
+    onTiming: async state => timings.push({ state, writes: mock.calls.filter(c => c.method === "PATCH").length }),
+  });
+  assert.deepEqual(phases, ["validating", "approving", "verifying"]);
+  const expected = ["canonical_read", "disposition", "gallery_preflight", "review_media", "mae_occupancy", "mae_slot_calculation", "supabase_commit", "supabase_readback"];
+  for (const stage of expected) {
+    const start = timings.findIndex(x => x.state === stage + "_started");
+    const finish = timings.findIndex(x => x.state === stage + "_finished");
+    assert.ok(start >= 0 && finish > start, stage);
+  }
+  assert.equal(timings.find(x => x.state === "supabase_commit_started").writes, 0);
+  assert.equal(timings.find(x => x.state === "supabase_commit_finished").writes, 1);
+  assert.equal(timings.find(x => x.state === "supabase_readback_finished").writes, 1);
+});

@@ -15,6 +15,17 @@ export const FACTORY_APPROVAL_TIMING_PAIRS = Object.freeze([
   ["airtable_schedule_commit", "schedule_write_started", "schedule_write_finished"],
   ["schedule_verification", "schedule_verify_started", "schedule_verify_finished"],
   ["supabase_sync", "supabase_sync_started", "supabase_sync_finished"],
+  ["output_claim_check","output_claim_check_started","output_claim_check_finished"],
+  ["supabase_canonical_read","canonical_read_started","canonical_read_finished"],
+  ["approval_disposition","disposition_started","disposition_finished"],
+  ["gallery_preflight","gallery_preflight_started","gallery_preflight_finished"],
+  ["gallery_package_validation","gallery_package_started","gallery_package_finished"],
+  ["review_media_validation","review_media_started","review_media_finished"],
+  ["mae_occupancy_read","mae_occupancy_started","mae_occupancy_finished"],
+  ["mae_slot_calculation","mae_slot_calculation_started","mae_slot_calculation_finished"],
+  ["gallery_finalization","gallery_finalize_started","gallery_finalize_finished"],
+  ["supabase_approval_commit","supabase_commit_started","supabase_commit_finished"],
+  ["supabase_commit_readback","supabase_readback_started","supabase_readback_finished"],
 ]);
 
 const millis = value => {
@@ -88,9 +99,7 @@ export function factoryApprovalItemTiming(item = {}) {
 }
 export function factoryApprovalTimingReport(items = []) {
   const measurements = (items || []).map(factoryApprovalItemTiming).filter(Boolean);
-  const keys = ["queue_wait", "preflight_airtable_fetch", "profile_ownership_check",
-    "canonical_approval", "approval_lease_wait", "schedule_slot_selection",
-    "airtable_schedule_commit", "schedule_verification", "supabase_sync",
+  const keys = [...FACTORY_APPROVAL_TIMING_PAIRS.map(([metric]) => metric),
     "worker_processing", "max_single_attempt_processing",
     "waiting_and_retry", "enqueue_to_terminal"];
   const metrics = {};

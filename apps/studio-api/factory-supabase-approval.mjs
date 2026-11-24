@@ -215,7 +215,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
  * The Factory batch drain's per-profile R2 claim serializes Factory siblings.
  * All occupancy is read from Supabase; failed/incomplete reads block approval.
  */
-async function factorySupabaseNextApprovedSlot(env, entry) {
+async function factorySupabaseNextApprovedSlot(env, entry, onTiming = async () => {}) {
   const row = entry.row;
   if (!entry.profileUuid || !UUID.test(entry.profileUuid)) {
     throw Error("Cannot approve: source profile identity unavailable for scheduling");
@@ -229,6 +229,7 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
   const now = new Date();
   const zone = maeNormalizeTimeZone(entry.profileTimeZone);
   const until = new Date(now.getTime() + (MAE_SUGGEST_HORIZON_DAYS + 2) * 86400000);
+  await onTiming("mae_occupancy_started");
   const occupancy = [];
   const pageSize = 500;
   let complete = false;
@@ -249,10 +250,13 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
     if (existing.length < pageSize) { complete = true; break; }
   }
   if (!complete) throw Error("Cannot approve: future scheduling occupancy cannot be verified completely");
+  await onTiming("mae_occupancy_finished");
+  await onTiming("mae_slot_calculation_started");
   const slot = maeScheduleNextSlot({
     timeZone: zone, now, occupiedMs: occupancy, platformOccupiedMs: occupancy,
     horizonDays: MAE_SUGGEST_HORIZON_DAYS,
   });
+  await onTiming("mae_slot_calculation_finished");
   const at = Date.parse(String(slot.iso || ""));
   if (!slot.ok || !Number.isFinite(at) || at <= now.getTime()) {
     throw Error("Cannot approve: no verified future MAE publishing slot is available");
@@ -263,17 +267,21 @@ async function factorySupabaseNextApprovedSlot(env, entry) {
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
   approvedByUserRecordId = null, submittedAt = null, originalIntentRecovery = false,
-  verifyImages = verifyReviewImages, onStage = async () => {},
+  verifyImages = verifyReviewImages, onStage = async () => {}, onTiming = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
   // read, hold check, CAS write and readback remain the approval authority.
   await onStage("validating");
+  await onTiming("canonical_read_started");
   const entries = await factorySupabaseApprovalRows(env, [id]);
+  await onTiming("canonical_read_finished");
   const entry = entries.get(id);
   if (!entry || entry.profileId !== profileId) {
     throw Error("Factory output ownership changed; no approval committed");
   }
+  await onTiming("disposition_started");
   const state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
+  await onTiming("disposition_finished");
   if (!state.eligible) throw Error("Cannot approve: " + state.reason);
   if (state.already_satisfied) {
     return { id, already_approved: true, message: "Already approved or published in Supabase" };
@@ -282,26 +290,34 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   // Selected clips and covers never authorize publishing. For the exact
   // owner-released NYC pair only, distinguish verified gallery structure from
   // the final decision made by this NEW authenticated human Approve click.
+  await onTiming("gallery_preflight_started");
   const pendingHumanReview = await preflightNycOwnerGalleryApproval(env, entry.row);
+  await onTiming("gallery_preflight_finished");
   if (originalIntentRecovery && !originalIntentCoversGallery({requestId,approvedByUserRecordId,submittedAt},entry.row,pendingHumanReview)) {
     throw Error("Original Factory intent recovery: media or release revision changed; fresh review required");
   }
   if (!pendingHumanReview?.pending) {
+    await onTiming("gallery_package_started");
     await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+    await onTiming("gallery_package_finished");
   }
+  await onTiming("review_media_started");
   const verified = await verifyImages(state.readiness);
+  await onTiming("review_media_finished");
   if (verified?.readiness !== "READY") {
     throw Error("Cannot approve: public review media could not be verified");
   }
   // Slot must be proven BEFORE the single status+schedule CAS; otherwise the
   // Factory historically committed Approved with no future plan and no auto.
-  const scheduled = await factorySupabaseNextApprovedSlot(env, entry);
+  const scheduled = await factorySupabaseNextApprovedSlot(env, entry, onTiming);
   if (pendingHumanReview?.pending) {
     // Finalization itself re-runs the UNCHANGED persisted-slide publication
     // gate. No extra photo inventory read for unrelated Factory approvals.
+    await onTiming("gallery_finalize_started");
     await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
       requestId, approvedByUserRecordId, submittedAt, originalIntentRecovery,
     });
+    await onTiming("gallery_finalize_finished");
   }
   const stamp = new Date().toISOString();
   const row = entry.row;
@@ -352,18 +368,23 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     + "&do_not_publish=eq.false"
     + "&" + valueFilter("test_run_id", row.test_run_id);
   await onStage("approving");
+  await onTiming("supabase_commit_started");
   const updated = await supabaseRest(env, selector, {
     method: "PATCH", body: fields, headers: { Prefer: "return=representation" },
   });
+  await onTiming("supabase_commit_finished");
   await onStage("verifying");
+  await onTiming("supabase_readback_started");
   if (!Array.isArray(updated) || updated.length !== 1) {
     const fresh = (await factorySupabaseApprovalRows(env, [id])).get(id);
+    await onTiming("supabase_readback_finished");
     if (fresh?.profileId === profileId && satisfied(fresh.row)) {
       return { id, already_approved: true, message: "Concurrent Supabase approval already satisfied" };
     }
     throw Error("Output changed during Supabase approval; no approval was committed by this attempt");
   }
   const check = (await factorySupabaseApprovalRows(env, [id])).get(id);
+  await onTiming("supabase_readback_finished");
   if (check?.profileId !== profileId
     || check.row.output_status !== "Approved for Publishing"
     || check.row.review_status !== "Approved"
