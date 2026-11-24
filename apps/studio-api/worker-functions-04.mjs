@@ -19834,8 +19834,10 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
   // A persistently unresolvable first row must not starve subsequent rows.
   // Rotate deterministically by minute; still touch only one exact row per call.
   const item = failed[Math.floor(Date.now() / 60000) % failed.length];
+  const missingNumber = item.output_id == null;
+  const supabaseAuthority = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(item.id || "")) ||
-      !Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) {
+      ((!Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) && !(missingNumber && supabaseAuthority))) {
     return "invalid_identity";
   }
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
@@ -19845,10 +19847,19 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
     let entry;
     try { entry = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id); }
     catch { return "supabase_failure_evidence_unavailable"; }
-    if (!entry || entry.profileId !== profileId
-        || Number(entry.row.output_number) !== Number(item.output_id)) {
+    if (!entry || entry.profileId !== profileId || entry.row.airtable_record_id !== item.id
+        || !Number.isSafeInteger(Number(entry.row.output_number)) || Number(entry.row.output_number) <= 0
+        || (!missingNumber && Number(entry.row.output_number) !== Number(item.output_id))) {
       return "supabase_failure_identity_unverified";
     }
+    const outputId = Number(entry.row.output_number);
+    // A legacy missing display number can be reconstructed only for an exact
+    // canonical success, not used to authorize a new approval or provider call.
+    const verifiedLegacySuccess = value => value?.row?.review_status === "Approved" &&
+      (value.row.output_status === "Published" && (value.row.published_at || value.row.platform_post_url) ||
+       ["Approved for Publishing","Scheduled"].includes(value.row.output_status) &&
+       value.row.do_not_publish === false && Number.isFinite(Date.parse(value.row.scheduled_post_date || "")));
+    if (missingNumber && !verifiedLegacySuccess(entry)) return "supabase_legacy_failure_identity_unverified";
     const status = factorySupabaseApprovalDisposition(entry);
     if (!status.already_satisfied) {
       if (!status.eligible || !isOriginalIntentFailure(item.error))
@@ -19872,11 +19883,13 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
         ? "verified_original_intent_retry_queued" : "supabase_failure_requires_fresh_review";
     }
     await factoryBatchMarkAlreadySatisfied(env.STUDIO_MEDIA, {
-      profileId, requestId, recordId: item.id, outputId: item.output_id,
+      profileId, requestId, recordId: item.id, outputId, allowMissingOutputId: missingNumber,
       verifySatisfied: async () => {
         const fresh = (await factorySupabaseApprovalRows(env, [item.id])).get(item.id);
         return fresh?.profileId === profileId
-          && Number(fresh.row.output_number) === Number(item.output_id)
+          && fresh.row.airtable_record_id === item.id
+          && Number(fresh.row.output_number) === outputId
+          && (!missingNumber || verifiedLegacySuccess(fresh))
           && factorySupabaseApprovalDisposition(fresh).already_satisfied === true;
       },
     });
