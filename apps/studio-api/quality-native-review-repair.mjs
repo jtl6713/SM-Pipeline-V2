@@ -27,7 +27,7 @@ const TARGET_FIELDS=[
   "selected_assets","render_clip_list","studio_preview_url","thumbnail_url","do_not_publish",
   "auto_publish_enabled","publish_retry_eligible","test_run_id","scheduled_post_date",
   "studio_scheduled_at","youtube_scheduled_publish_at","published_at","platform_post_url",
-  "platform_publish_response","updated_at","error_messages",
+  "platform_publish_response","platform_publish_response_text","publish_asset_url","tiktok_draft_status","updated_at","error_messages",
 ].join(",");
 const providerKeys=/^(?:Platform_(?:Post|Media)_ID|Publish_(?:Started|Locked)_At|Studio_Publish_Dispatch_(?:At|Count)|IG_Story_(?:Container|Post)_ID|IG_(?:Carousel|Reel)_Container_ID|FB_(?:Post|Video|Reel)_ID|YouTube_(?:Video_ID|Upload_ID)|TikTok_(?:Publish_ID|Draft_ID|Upload_ID)|.*(?:Publish|Draft|Story|Reel|Carousel)_Attempt_Count)$/i;
 function hasProviderEvidence(bag) {
@@ -56,7 +56,7 @@ export function assessVerifiedNativeReviewRepair(row) {
     return blocked("not_stale_native_review_handoff");
   if(row.do_not_publish!==false||row.auto_publish_enabled!==false||row.publish_retry_eligible===true
     ||row.test_run_id||row.scheduled_post_date||row.studio_scheduled_at||row.youtube_scheduled_publish_at
-    ||row.published_at||row.platform_post_url||row.platform_publish_response)
+    ||row.published_at||row.platform_post_url||row.platform_publish_response||row.platform_publish_response_text||row.publish_asset_url||row.tiktok_draft_status)
     return blocked("hold_test_or_publishing_evidence");
   const bag=row.error_messages;
   if(!bag||typeof bag!=="object"||Array.isArray(bag)||bag[repairKey]
@@ -86,7 +86,7 @@ export function assessVerifiedNativeReviewRepair(row) {
     unique.add(a.media_asset_id);
   }
   if(!asString(row.output_caption)||row.studio_preview_url!==assets[0].url
-    ||!safeUrl(row.thumbnail_url)||!clipsMatch(row.selected_assets?.selected_clips,assets)
+    ||row.thumbnail_url!==assets[0].url||!clipsMatch(row.selected_assets?.selected_clips,assets)
     ||!clipsMatch(row.render_clip_list,assets))
     return blocked("current_revision_does_not_match_protected_receipt");
   return {eligible:true,reason:"verified_native_status_handoff",source_output:Number(stage.source_output),assets,proof_at:proof.at};
@@ -114,7 +114,7 @@ async function exactOwner(read,row,decision){
     ||p.production_job?.step!=="done"||!UUID.test(p.idea_candidate_id))return null;
   const plan=p.output_plan?.items;
   if(!Array.isArray(plan)||plan.filter(x=>x?.enabled!==false&&x?.platform==="TikTok"
-    &&(x.output_type||x.studio_output_type)==="Multi-Photo").length!==1)return null;
+    &&(x.output_type||x.studio_output_type)==="Multi-Photo").length!==1||plan.filter(x=>x?.enabled!==false&&x?.platform==="Instagram"&&(x.output_type||x.studio_output_type)==="Carousel").length!==1)return null;
   const idea=exactOne(await read("idea_candidates?"+field("id",p.idea_candidate_id)
     +"&select=id,airtable_record_id,content_profile_id&limit=2"));
   const profile=exactOne(await read("content_profiles?"+field("id",row.content_profile_id)
