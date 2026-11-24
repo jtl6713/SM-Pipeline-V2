@@ -710,6 +710,7 @@ import {
   studioApproveAllCandidateFormula,
   listContentProfileRecords,
   resolveAuthorizedContentProfiles,
+  resolveFactoryReviewResolveAuthorization,
   resolveWorkingContentProfile,
   outputRowsForProductionRequest,
   item4SyncPlanOutputs,
@@ -13493,7 +13494,10 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if(kind!=="output") throw new HttpError(400,"Exact platform output required");
       requirePermission(authorization,"outputs_review");
       requireAnyPermission(authorization,["publishing_control","tenant_admin"]);
-      try { resultExtra=await resolveFactoryGalleryReview(env,id,authorization,payload); }
+      try {
+        const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
+        resultExtra=await resolveFactoryGalleryReview(env,id,scopedAuthorization,payload);
+      }
       catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
     } else if (action === "approve_held_review" || action === "reject_held_review") {
       if (kind !== "output") throw new HttpError(400, "Held review is only for platform outputs");
