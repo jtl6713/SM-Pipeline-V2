@@ -432,8 +432,10 @@ def test_studio_render_guard_allows_diverse_stills_and_single_footage():
     one_video = {**two, "clips": [{"src": "https://media.example/clip.mp4", "mediaKind": "video"}]}
     output["fields"]["Selected_Clip_Count"] = 1
     assert studio_visual_integrity_error(output, one_video) is None
+    # A single-still Story is legitimate, but must carry its own 10s timeline.
     assert studio_visual_integrity_error(
-        {**output, "fields": {**output["fields"], "Studio_Output_Type": "Story"}}, {**two, "clips": two["clips"][:1]}
+        {**output, "fields": {**output["fields"], "Studio_Output_Type": "Story"}},
+        {**two, "durationInFrames": 300, "clips": [{**two["clips"][0], "durationFrames": 300}]},
     ) is None
 
 
