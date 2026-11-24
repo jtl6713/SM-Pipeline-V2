@@ -33,6 +33,7 @@ const FACTORY_APPROVAL_SELECT = [
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "publish_hold_set_at", "publish_hold_reason", "publish_hold_source", "publish_hold_release_actor", "publish_retry_eligible", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "publish_asset_url", "publish_next_retry_at", "selected_clip_count", "selected_assets", "render_clip_list",
+  "render_total_frames", "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
   "platform_publish_response",
@@ -138,6 +139,32 @@ export async function factorySupabaseApprovalRows(env, ids) {
   return result;
 }
 
+export function encodedMediaReviewIssue(row) {
+  const type = String(row?.studio_output_type || row?.format || "").toLowerCase();
+  const expected = Number(row?.selected_assets?.target_total_frames);
+  const frames = Number(row?.render_total_frames);
+  if (type === "story" && expected > 0 && frames > 0 && frames !== expected)
+    return "Story render duration differs from its planned package; rebuild before approval";
+  const raw = row?.error_messages?.Studio_Media_Contract_Receipt_JSON;
+  // Historic rows without a receipt retain their old eligibility rules; the
+  // new R5 path verifies bytes before creating a Ready for Review receipt.
+  if (!raw) return null;
+  let proof;
+  try { proof=typeof raw==="string"?JSON.parse(raw):raw; } catch { return "Encoded media proof invalid"; }
+  if (proof?.version!==1 || !/^[a-f0-9]{64}$/.test(String(proof?.sha256||""))
+      || proof.preview_url!==row.studio_preview_url || !proof.drive_file_id
+      || !String(row.final_file_url||"").includes("/"+proof.drive_file_id+"/")
+      || !proof.encoded || !proof.contract)
+    return "Encoded media proof no longer matches the current preview; re-render before approval";
+  if (frames>0 && Number(proof.contract.frames)!==frames)
+    return "Encoded media proof frame count no longer matches the current render";
+  for (const [mode,key] of [[row.studio_effective_voiceover_mode,"voiceover"],[row.studio_effective_background_music_mode,"music"]]) {
+    if (["Yes","No"].includes(mode) && proof.contract.required_audio?.[key] !== (mode==="Yes"))
+      return "Encoded media proof audio intent no longer matches the current output";
+  }
+  return null;
+}
+
 export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRollout = null) {
   const row = entry?.row;
   const record = entry?.record;
@@ -157,6 +184,8 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
   if(row.airtable_record_id===STORY_2915_ID&&!story2915GenerationValid(row))return {eligible:false,reason:"Corrected Story replacement generation not verified"};
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
+  const mediaIssue = encodedMediaReviewIssue(row);
+  if (mediaIssue) return { eligible: false, reason: mediaIssue };
   const readiness = evaluateReviewPackage(record);
   if (!formalFactoryApprovalReady(record, readiness)) {
     return { eligible: false, reason: (readiness.missing_requirements || []).join(", ")
