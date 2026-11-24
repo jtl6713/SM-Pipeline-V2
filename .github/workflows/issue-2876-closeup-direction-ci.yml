@@ -11,6 +11,9 @@ on:
       - 'services/pipeline-runner/studio_produce/thumbnail.py'
       - 'services/pipeline-runner/p2/processor.py'
       - 'services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py'
+      - 'services/pipeline-runner/tests/test_runner_routine_deploy_2876.py'
+      - 'services/pipeline-runner/config.py'
+      - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
       - 'services/pipeline-runner/tests/test_profile_creative_prompt_integration.py'
       - 'services/pipeline-runner/tests/test_sai1_market.py'
       - 'services/pipeline-runner/tests/test_i1_asset_sourcing_2647.py'
@@ -38,6 +41,7 @@ jobs:
         run: |
           python -m pytest -q \
             services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
+            services/pipeline-runner/tests/test_runner_routine_deploy_2876.py \
             services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
             services/pipeline-runner/tests/test_sai1_market.py \
             services/pipeline-runner/tests/test_i1_candidate_pool.py \

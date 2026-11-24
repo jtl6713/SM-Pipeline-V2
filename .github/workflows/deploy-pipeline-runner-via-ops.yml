@@ -10,11 +10,17 @@ on:
   push:
     branches: [main]
     paths:
-      # Airtable transport retirement and config-only changes are staged.
-      # Do not auto-deploy the runner until a reviewed release marker is pushed.
+      # Owner authorization 2026-11-23: restore routine runner deploys after
+      # source changes on main. No special recovery-era marker is required.
+      # Exclude test-only changes; keep all unit/health/publishing safety gates.
+      - 'services/pipeline-runner/*.py'
+      - 'services/pipeline-runner/**/*.py'
+      - 'services/pipeline-runner/requirements.txt'
+      - '!services/pipeline-runner/tests/**'
+      # Legacy explicit release markers still work for intentional redeploys.
       - 'deploy/i1-durable-runner-release.txt'
-      # #2670: governor changes require an explicit protected release marker.
       - 'deploy/incident-2670-runner-governor-release.txt'
+      # Original narrow paths retained for operational compatibility.
       - 'services/pipeline-runner/ap0/eligibility.py'
       - 'services/pipeline-runner/ap0/public_mp4.py'
       - 'services/pipeline-runner/tests/test_ap0_final_drive_url_fallback.py'
@@ -39,10 +45,18 @@ on:
       - 'services/pipeline-runner/tests/test_2670_review_supabase_store.py'
       - 'repair/scripts/incident-2670-native-gallery-prep.py'
       - '.github/workflows/incident-2670-native-gallery-review-restore.yml'
+      # Last matching rule wins: test-only commits never cause a runner restart.
+      - '!services/pipeline-runner/tests/**'
 
 permissions:
   contents: read
   statuses: write
+
+# Serialization prevents overlapping runner cutovers after adjacent merges.
+# Do not cancel a deployment partway through and leave its state ambiguous.
+concurrency:
+  group: production-pipeline-runner
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -62,6 +76,17 @@ jobs:
         run: |
           set -euo pipefail
           test "$CUTOVER_CONFIRMATION" = "DEPLOY-SUPABASE-RUNNER"
+      - name: Refuse deployment from an obsolete main commit
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet --depth=1 origin main
+          actual=$(git rev-parse origin/main)
+          if [[ "$actual" != "$GITHUB_SHA" ]]; then
+            echo "::error::Newer main commit exists; refuse obsolete runner deploy"
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -70,7 +95,11 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
-          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_owner_generation_guidance.py services/pipeline-runner/tests/test_profile_creative_prompt_integration.py
+          PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_owner_generation_guidance.py \
+            services/pipeline-runner/tests/test_profile_creative_prompt_integration.py \
+            services/pipeline-runner/tests/test_extreme_closeup_direction_2876.py \
+            services/pipeline-runner/tests/test_runner_routine_deploy_2876.py
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_fb0_manifest_link_recovery_2556.py \
             services/pipeline-runner/tests/test_fb0_limits.py \
