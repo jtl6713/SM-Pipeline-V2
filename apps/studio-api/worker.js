@@ -49,7 +49,7 @@ import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./ren
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
 import { persistReadyReviewPlan } from "./rendering-review-plan-persist.mjs";
 import { prepareReviewLibraryStills } from "./rendering-review-library-prepare.mjs";
-import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles, studioSupabaseWriteThroughOutput as reviewFactorySyncOutput } from "./worker-functions-01.mjs";
+import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles, resolveFactoryReviewResolveAuthorization, studioSupabaseWriteThroughOutput as reviewFactorySyncOutput } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
@@ -4313,7 +4313,10 @@ export default {
         requirePermission(authorization, "outputs_review");
         const outputId = url.pathname.split("/")[4];
         if(url.searchParams.get("resolve")==="1") {
-          try { return respond(request,env,{ok:true,...await readFactoryReviewResolve(env,outputId,authorization)}); }
+          try {
+            const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
+            return respond(request,env,{ok:true,...await readFactoryReviewResolve(env,outputId,scopedAuthorization)});
+          }
           catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
         }
         const inventory = await readSupabaseFactoryGallerySlides(env, outputId);
@@ -6078,6 +6081,7 @@ const STUDIO_PIPELINE_OPEN_LEGACY_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_S
 /*__STUDIO_WORKER_EXTRACT:studioApproveAllCandidateFormula__*/
 /*__STUDIO_WORKER_EXTRACT:listContentProfileRecords__*/
 /*__STUDIO_WORKER_EXTRACT:resolveAuthorizedContentProfiles__*/
+/*__STUDIO_WORKER_EXTRACT:resolveFactoryReviewResolveAuthorization__*/
 /*__STUDIO_WORKER_EXTRACT:resolveWorkingContentProfile__*/
 /*__STUDIO_WORKER_EXTRACT:resolveDefaultContentProfile__*/
 /*__STUDIO_WORKER_EXTRACT:listStudioContentProfiles__*/

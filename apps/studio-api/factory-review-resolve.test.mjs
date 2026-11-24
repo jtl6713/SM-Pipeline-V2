@@ -57,3 +57,17 @@ test("foreign output, wrong source hash, missing rights, or missing geometry fai
  s=>{s.fields["Approved For Final"]=true;}
  ]){const {row,slides}=fixture();change(slides[0]);assert.throws(()=>inspectResolveSlides(row,slides));}
 });
+
+test("review resolve GET and POST derive the same server-side authorized profile scope", async () => {
+  const {readFileSync}=await import("node:fs");
+  const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  const mutations=readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+  const profiles=readFileSync(new URL("./worker-functions-01.mjs",import.meta.url),"utf8");
+  assert.match(worker,/const scopedAuthorization = await resolveFactoryReviewResolveAuthorization\(env, authorization\);\s*return respond\(request,env,\{ok:true,\.\.\.await readFactoryReviewResolve\(env,outputId,scopedAuthorization\)\}\)/);
+  assert.match(mutations,/const scopedAuthorization = await resolveFactoryReviewResolveAuthorization\(env, authorization\);\s*resultExtra=await resolveFactoryGalleryReview\(env,id,scopedAuthorization,payload\)/);
+  const scope=profiles.split("export async function resolveFactoryReviewResolveAuthorization")[1].split("/*__STUDIO_WORKER_END:")[0];
+  assert.match(scope,/listSupabaseContentProfiles\(env, \{ limit: 100 \}\)/);
+  assert.match(scope,/resolveAuthorizedContentProfiles\(env, authorization\)/);
+  assert.match(scope,/authorized_profile_ids: authorized\.map\(profile => profile\.id\)/);
+  assert.doesNotMatch(scope,/airtableFetch\(|listRecords\(/);
+});
