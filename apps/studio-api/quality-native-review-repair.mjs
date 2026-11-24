@@ -203,7 +203,11 @@ export async function recoverOneVerifiedNativeReview(env, report, {
     if(!ownership)return no("exact_parent_or_owned_variants_unverified");
     const token=crypto.randomUUID();
     const admission=await claim(ownership.ideaRecord,token);
-    if(!admission.admitted){await release(ownership.ideaRecord,token).catch(()=>{});return no("shared_admission_denied");}
+    if(!admission.admitted){
+      await release(ownership.ideaRecord,token).catch(()=>{});
+      return {...no("shared_admission_denied"),admission_reason:admission.reason||"unknown",
+        admission_http_status:admission.http_status??null};
+    }
     let pulse;
     try{
       pulse=heartbeat(ownership.ideaRecord,token);
