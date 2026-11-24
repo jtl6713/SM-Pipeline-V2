@@ -169,7 +169,9 @@ const sourceQa = bag => bag?.SM_Quality_Gallery_Media_QA_v1 ||
   bag?.SM_NYC_AI_Creative_QA_20261122;
 const geometryQa = bag => bag?.SM_Quality_Gallery_Geometry_v1 ||
   bag?.SM_NYC_Shared_Small_Watermark_20261122;
-const slideSha = slide => sourceQa(slide.fields)?.verified_branded_sha256 ||
+const STUDIO_GALLERY = "SM_Studio_Native_Gallery_2873";
+const STUDIO_APPROVAL = "SM_Factory_Studio_Gallery_Approval_2873";
+const slideSha = slide => slide.fields?.[STUDIO_GALLERY]?.sha256 || sourceQa(slide.fields)?.verified_branded_sha256 ||
   siblingMarker(slide.fields)?.prior_verified_media_evidence?.verified_branded_sha256;
 
 export function siblingGalleryReviewEligible(output) {
@@ -281,7 +283,74 @@ async function readNycOwnerGallerySlides(env, output) {
   return rows;
 }
 
+// General owner-uploaded Studio production path. Technical preparation is
+// never human consent. Only the authenticated Factory click finalizes slides.
+export async function preflightStudioOwnerGallery(env, output) {
+  const marker = output?.error_messages?.[STUDIO_GALLERY];
+  if (!marker) return null;
+  const selected = output.selected_assets;
+  const clips = selected?.selected_clips;
+  const count = output.selected_clip_count;
+  const deny = reason => { throw Error("Native gallery publication blocked: native_gallery_studio_" + reason + " (output #" + output.output_number + ")"); };
+  if (marker.complete !== true || marker.human_approval_required !== true || marker.provider_writes !== 0
+      || !REC.test(String(marker.request_id || "")) || !SHA256.test(String(marker.package_sha256 || ""))
+      || !Number.isFinite(Date.parse(marker.prepared_at))
+      || selected?.authority !== "studio_owner_uploaded_exact_source"
+      || selected.production_request_record_id !== marker.request_id
+      || selected[STUDIO_GALLERY]?.package_sha256 !== marker.package_sha256
+      || selected[STUDIO_GALLERY]?.prepared_at !== marker.prepared_at
+      || !Array.isArray(clips) || !Number.isInteger(count) || count < 2 || count > 10
+      || marker.slide_count !== count || clips.length !== count
+      || clips[0]?.is_cover !== true || clips.slice(1).some(c=>c.is_cover===true)
+      || output.aspect_ratio !== "4:5" || output.do_not_publish !== false
+      || output.auto_publish_enabled !== false || output.output_status !== "Ready for Review"
+      || output.review_status !== "Review Sent" || output.publish_status !== "Not Ready"
+      || output.render_status !== "Native Photo Route" || output.test_run_id || output.published_at
+      || output.studio_scheduled_at || output.youtube_scheduled_publish_at || output.platform_post_url
+      || output.platform_publish_response || output.error_messages?.Studio_Render_Review_Hold_Active
+      || output.error_messages?.Factory_Review_Handoff_Safety_Hold_At
+      || output.error_messages?.SM_2618_Creative_QA_Hold?.publishing_permitted === false) deny("review_identity_invalid");
+  const fingerprint = [...new Uint8Array(await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(JSON.stringify(clips.map(c=>[c.order,c.media_asset_record_id,c.google_drive_file_id,c.url,c.sha256])))))]
+    .map(b=>b.toString(16).padStart(2,"0")).join("");
+  if (fingerprint !== marker.package_sha256) deny("revision_mismatch");
+  const slides = await readNycOwnerGallerySlides(env, output);
+  const technical = inspectNativeGalleryPublicationPackage(output, slides.map(slide=>({
+    ...slide, fields:{...slide.fields, Shared_Asset_Approved:true,"Approved For Final":true}
+  })));
+  if (!technical.eligible) deny("linked_package_invalid");
+  for (let i=0;i<slides.length;i++) {
+    const slide=slides[i], f=slide.fields||{}, proof=f[STUDIO_GALLERY], receipt=f[STUDIO_APPROVAL];
+    if (!UUID.test(String(slide.id||"")) || !slide.updated_at
+        || !REC.test(String(slide.airtable_record_id||""))
+        || proof?.request_id!==marker.request_id || proof.package_sha256!==marker.package_sha256
+        || proof.owned_media_verified!==true || proof.human_approval_required!==true
+        || !SHA256.test(String(proof.sha256||"")) || proof.sha256!==clips[i].sha256
+        || f["Is Cover"] !== (i===0) || f.Asset_4x5_Public_Status!=="Ready"
+        || f.IG_Public_Asset_Status!=="Ready" || f.IG_Public_Asset_URL!==clips[i].url
+        || f.FB_Photo_ID || f.IG_Child_Container_ID) deny("slide_evidence_invalid");
+    const pending=f["Approved For Final"]===false && f.Shared_Asset_Approved===false && f["Review Status"]==="Review Sent";
+    const approved=f["Approved For Final"]===true && f.Shared_Asset_Approved===true && f["Review Status"]==="Final Approved"
+      && receipt?.package_sha256===marker.package_sha256 && receipt.source_sha256===proof.sha256
+      && USER_RECORD.test(String(receipt.actor_record_id||"")) && receipt.provider_writes===0;
+    if (!(pending||approved)) deny("slide_review_state_invalid");
+  }
+  const profiles=await supabaseRest(env,"content_profiles?id=eq."+encodeURIComponent(output.content_profile_id)
+    +"&select=airtable_record_id&limit=2");
+  if (!Array.isArray(profiles)||profiles.length!==1||!REC.test(String(profiles[0].airtable_record_id||""))) deny("profile_invalid");
+  const assets=await supabaseRest(env,"media_assets?airtable_record_id=in.("+clips.map(c=>encodeURIComponent(c.media_asset_record_id)).join(",")+")"
+    +"&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=11");
+  if (!Array.isArray(assets)||assets.length!==count || clips.some(c=>{
+    const a=assets.find(v=>v.airtable_record_id===c.media_asset_record_id);
+    return !a||a.active!==true||a.do_not_use!==false||a.asset_status!=="Available"
+      ||a.google_drive_file_id!==c.google_drive_file_id||a.metadata?.rights_status!=="Owned"
+      ||a.metadata?.content_profile_airtable_id!==profiles[0].airtable_record_id;
+  })) deny("source_rights_or_identity_invalid");
+  return {slides,pending:slides.filter(s=>s.fields["Approved For Final"]!==true).length,studioOwned:true};
+}
+
 export async function preflightNycOwnerGalleryApproval(env, output) {
+  if (output?.error_messages?.[STUDIO_GALLERY]) return preflightStudioOwnerGallery(env, output);
   if (siblingGalleryReviewEligible(output)) return preflightSiblingGallery(env,output);
   if (!nycOwnerGalleryApprovalEligible(output)) return null;
   const slides = await readNycOwnerGallerySlides(env, output);
@@ -335,12 +404,14 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
   if (!USER_RECORD.test(String(approvedByUserRecordId || ""))
       || !/^[A-Za-z0-9_-]{8,128}$/.test(String(requestId || ""))
       || !Number.isFinite(Date.parse(String(submittedAt || "")))
-      || !Number.isFinite(Date.parse(String(output.publish_hold_released_at || "")))
-      || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)
+      || (proof.studioOwned
+        ? Date.parse(submittedAt) < Date.parse(output.error_messages[STUDIO_GALLERY].prepared_at)
+        : (!Number.isFinite(Date.parse(String(output.publish_hold_released_at || "")))
+          || Date.parse(submittedAt) < Date.parse(output.publish_hold_released_at)))
       || (proof.siblingRepair && Date.parse(submittedAt)<Date.parse(siblingMarker(output.error_messages).at))) {
     throw Error("Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release");
   }
-  if (proof.siblingRepair) {
+  if (proof.siblingRepair || proof.studioOwned) {
     // Fresh public bytes, bounded to one image at a time; no provider calls.
     for(const slide of proof.slides) await verifySiblingGalleryBytes(slide);
   }
@@ -353,7 +424,8 @@ export async function finalizeNycOwnerGalleryOnFactoryClick(env, output, {
       "Approved For Final": true,
       Shared_Asset_Approved: true,
       "Review Status": "Final Approved",
-      SM_Factory_NYC_Final_Slide_Approval_2371: {
+      [proof.studioOwned ? STUDIO_APPROVAL : "SM_Factory_NYC_Final_Slide_Approval_2371"]: {
+        ...(proof.studioOwned ? {package_sha256:output.error_messages[STUDIO_GALLERY].package_sha256} : {}),
         at: now,
         actor_record_id: approvedByUserRecordId,
         actor_provenance: "new_authenticated_factory_approve_click",
