@@ -42,7 +42,11 @@ def selected_body(clips):
 
 
 def pending_gallery(output):
-    if field_str(output, "Output_Status") in {"Approved for Publishing", "Published", "Cancelled", "Skipped"}:
+    if (field_str(output, "Output_Status") not in {"In Production", "Ready for Review"}
+            or field_str(output, "Render_Status") != "Native Photo Route"
+            or field(output, "Do_Not_Publish") is True
+            or field_str(output, "Review_Status") not in {"", "Pending", "Review Sent", "Pending Review"}
+            or field_str(output, "Publish_Status") not in {"", "Not Ready"}):
         return False
     selected = parse_json_field(field(output, "Selected_Assets_JSON"))
     return (meta_gallery(field_str(output, "Platform"), field_str(output, "Studio_Output_Type"),
@@ -186,7 +190,7 @@ def complete_gallery(client, request, parent, output):
                                              for s in existing):
         raise RuntimeError("Existing gallery belongs to another review revision")
     clips = selected.get("selected_clips")
-    if not isinstance(clips, list) or not clips or len(clips) > 100:
+    if not isinstance(clips, list) or not clips:
         raise RuntimeError("Native gallery selected photos unavailable")
     body = selected_body(clips)
     if any(c.get("media_kind") != "photo" or not c.get("source_asset_id") for c in body):
@@ -214,7 +218,9 @@ def complete_gallery(client, request, parent, output):
     drive = GoogleDriveClient()
     uploader = R2UploadClient()
     watermark = brand_watermark_bytes(client)
-    cover_raw, _ = drive.download_file(cover_drive)
+    cover_raw, _ = drive.download_file(cover_drive, timeout=60)
+    if len(cover_raw) > 16 * 1024 * 1024:
+        raise RuntimeError("Native cover byte budget exceeded")
     prior_cover = read("media_assets?google_drive_file_id=eq."+quote(cover_drive)
                        +"&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=2")
     if not isinstance(prior_cover, list) or len(prior_cover)>1:
@@ -247,7 +253,7 @@ def complete_gallery(client, request, parent, output):
         asset = _one(read(f"media_assets?airtable_record_id=eq.{asset_id}&select=airtable_record_id,active,do_not_use,asset_status,google_drive_file_id,metadata&limit=2"))
         if not _owned(asset, profile, drive_id):
             raise RuntimeError("Native gallery source is unavailable or rights unverified")
-        raw, _ = drive.download_file(drive_id)
+        raw, _ = drive.download_file(drive_id, timeout=60)
         _image_proof(raw)
         jpeg = letter_jpeg_bytes(raw, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
         final = apply_watermark_bytes(jpeg, watermark, output_format="jpeg")
@@ -310,7 +316,8 @@ def complete_gallery(client, request, parent, output):
                              "output_status":"Ready for Review","review_status":"Review Sent","publish_status":"Not Ready",
                              "auto_publish_enabled":False,"error_messages":bag,"updated_at":at})
     if not isinstance(changed,list) or len(changed)!=1:
-        raise RuntimeError("Native gallery changed during production; retry safely")
+        from studio_produce.workload_governor import AdmissionDeferred
+        raise AdmissionDeferred("Native gallery changed during production; retry safely")
     check = _one(read(f"platform_outputs?airtable_record_id=eq.{oid}&select=selected_assets,selected_clip_count,error_messages,output_status&limit=2"))
     if check.get("selected_clip_count") != len(slides) or check.get("error_messages",{}).get(KEY) != marker:
         raise RuntimeError("Native gallery output readback failed")
