@@ -1,0 +1,137 @@
+name: Issue 2890 Stage Six Chicago Gallery Replacement Candidates
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2890-chicago-gallery-r2-stage.py'
+      - '.github/workflows/issue2890-chicago-gallery-r2-stage.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2890-chicago-gallery-r2-stage.py'
+      - '.github/workflows/issue2890-chicago-gallery-r2-stage.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2371-eight-nyc-gallery-owned-r2-stage
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile stage script and enforce exact unpublished cohort and no provider write
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/issue2890-chicago-gallery-r2-stage.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('repair/scripts/issue2890-chicago-gallery-r2-stage.py')
+          s=p.read_text()
+          for required in ['STORIES=','OUTPUTS=','len(receipts)!=19','"source_writes":0','"provider_writes":0','"factory_approvals":0','studio_write_source','do_not_publish','auto_publish_enabled','WATERMARK_SHA256','visual_qa_pending','R2UploadClient','GoogleDriveClient','_confirm(url,sha)']:
+              assert required in s, required
+          for prohibited in ['api.airtable.com','AIRTABLE_PAT','graph.facebook.com',
+                             'facebook.com/me','/media_publish','/feed?','requests.post',
+                             'requests.patch','requests.delete','requests.put',
+                             '.update_file(', 'supabase.create', 'Invoke-RestMethod -Method Post']:
+              assert prohibited not in s, f'unsafe stage operation {prohibited}'
+          print('CHICAGO2890_GALLERY_STAGE_STATIC_SAFE')
+          PY
+  stage-owned-media:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing Ops runner without exposing credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C";do
+            [[ -n "$candidate" ]] || continue
+            http=$(curl -sS --max-time 20 -o /tmp/chicago2890-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/chicago2890-ops-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "CHICAGO2890_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Owned R2 staging blocked: Ops unavailable; no media state changed'; exit 1
+      - name: Build pinned SHA256 source execution request for original owner runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          src=pathlib.Path('repair/scripts/issue2890-chicago-gallery-r2-stage.py')
+          expected=hashlib.sha256(src.read_bytes()).hexdigest()
+          sha=os.environ['GITHUB_SHA']
+          assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{src.as_posix()}'
+          command=(
+              "$ErrorActionPreference='Stop';"
+              "$py=Get-Command python -ErrorAction SilentlyContinue;"
+              "if(-not $py){throw 'ops_python_missing'};"
+              "$tmp=Join-Path $env:TEMP 'chicago2890-owned-gallery-stage.py';"
+              f"$srcUrl='{url}';"
+              "Invoke-WebRequest -Uri $srcUrl -Method Get -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+              "$actual=(Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant();"
+              f"if($actual -ne '{expected}'){{throw 'exact_stage_source_checksum_mismatch'}};"
+              "try{& python $tmp;"
+              "if($LASTEXITCODE -ne 0){throw ('chicago_gallery_python_stage_exit_'+$LASTEXITCODE)}}"
+              "finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}"
+          )
+          pathlib.Path('/tmp/chicago2890-ops-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          print('IMMUTABLE_CHICAGO2890_STAGE_SOURCE_PINNED')
+          PY
+      - name: Stage exactly 19 owned branded candidate images to existing R2 CDN, no output writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for slot in $(seq 1 32);do
+            code=$(curl -sS --max-time 30 -o /tmp/chicago2890-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $CHICAGO2890_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/chicago2890-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "R2 owner runner returned $code";exit 2;fi
+            sleep 12
+          done
+          [[ "$accepted" == true ]] || { echo 'Ops shell busy; no second stage scheduled';exit 2; }
+          job=$(jq -er '.job.id // .jobId' /tmp/chicago2890-ops-start.json)
+          for tick in $(seq 1 480);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $CHICAGO2890_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/chicago2890-ops-job.json
+            status=$(jq -r '.job.status // empty' /tmp/chicago2890-ops-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/chicago2890-ops-job.json | grep '^CHICAGO_GALLERY_STAGE=' | tail -1 \
+                | sed 's/^CHICAGO_GALLERY_STAGE=//' > /tmp/chicago2890-gallery-stage.json
+              jq -e '.verified==true and .unique_assets==19 and .source_writes==0 and .provider_writes==0 and .airtable_reads==0 and .factory_approvals==0 and (.assets|length)==19 and all(.assets[]; .cdn_verified==true and .geometry=="1080x1350")' /tmp/chicago2890-gallery-stage.json >/dev/null
+              jq -c '{verified,unique_assets,source_writes,provider_writes,assets:[.assets[]|{content,index,media_asset_id,drive_id,url,sha256,geometry,cdn_verified}]}' /tmp/chicago2890-gallery-stage.json
+              exit 0
+            elif [[ "$status" == failed ]];then
+              echo 'Owned R2 image stage failed; no automatic source/approval/provider changes'
+              jq -r '.job.log // ""' /tmp/chicago2890-ops-job.json | tail -n 23 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g' \
+                | grep -Ev 'Authorization:|Bearer |SUPABASE_SERVICE_ROLE_KEY|R2_UPLOAD_WORKER_SECRET|GOOGLE_REFRESH_TOKEN' || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'R2 staging job incomplete; do not set public statuses Ready'; exit 4
+      - name: Preserve exact public CDN hash and ownership receipts for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2371-eight-nyc-owned-gallery-r2-stage
+          path: /tmp/chicago2890-gallery-stage.json
+          retention-days: 30
+          if-no-files-found: warn
