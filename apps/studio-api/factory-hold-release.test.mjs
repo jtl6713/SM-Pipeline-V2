@@ -27,3 +27,12 @@ test("denies foreign profile, stale CAS, other provider evidence and creative ho
  assert.match(formalReleaseBlock({...base,error_messages:{Copyright_Hold:true}}),/Protected/);
  assert.match(formalReleaseBlock({...base,scheduled_post_date:"2026-12-01"}),/schedule/);
 });
+
+test("a rejected native gallery or failed media probe causes zero release writes",async()=>{
+  const f=fixture();f.ops.verifyGallery=async()=>{throw Error("native gallery final slides missing");};
+  await assert.rejects(releaseFactoryHoldInSupabase({},id,auth,f.ops),/final slides missing/);
+  assert.equal(f.writes.length,0);
+  f.ops.verifyGallery=async()=>{};f.ops.verifyImages=async()=>({readiness:"BLOCKED"});
+  await assert.rejects(releaseFactoryHoldInSupabase({},id,auth,f.ops),/media could not be verified/);
+  assert.equal(f.writes.length,0);
+});
