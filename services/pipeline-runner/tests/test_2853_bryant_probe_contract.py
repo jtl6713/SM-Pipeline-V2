@@ -69,3 +69,13 @@ def test_ops_launch_preserves_exact_script_under_command_limit():
         "'command': command, 'confirm': True",
     ):
         assert required in WORKFLOW
+
+
+def test_exact_preflight_runs_on_pr_but_production_access_does_not():
+    assert "pull_request:" in WORKFLOW
+    test_pos = WORKFLOW.index("Test exact gallery recovery and governor before production")
+    exec_pos = WORKFLOW.index("Execute exactly one protected nonpublishing governed probe")
+    assert test_pos < exec_pos
+    assert "tests/test_2670_workload_governor.py" in WORKFLOW[test_pos:exec_pos]
+    assert "OPS_TOKEN_A:" not in WORKFLOW[:exec_pos]
+    assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in WORKFLOW[exec_pos:]
