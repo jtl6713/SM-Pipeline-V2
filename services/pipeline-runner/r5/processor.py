@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -383,6 +384,10 @@ def process_one_output(
             }
 
         completed_at = _now_iso()
+        if media_receipt:
+            proof = json.loads(media_receipt[RECEIPT_FIELD])
+            proof.update(preview_url=preview_url, drive_file_id=file_id)
+            media_receipt[RECEIPT_FIELD] = json.dumps(proof, separators=(",", ":"))
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             output["id"],
