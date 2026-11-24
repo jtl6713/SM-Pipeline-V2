@@ -25,6 +25,10 @@ MAX_REQUEUE_DELAY_SECONDS = 15 * 60
 MAX_CONSECUTIVE_YIELDS = 8
 HEARTBEAT_INTERVAL = 30.0
 LEASE_SECONDS = 20 * 60
+# A dead client can leave a server-side HTTP request in flight. Preserve a
+# conservative settling interval before reclaiming a proven-dead DB owner.
+DB_DEAD_OWNER_GRACE_SECONDS = 120
+_DB_REQUEST_SCOPES = frozenset({"supabase_read", "supabase_write"})
 DEFAULT_MAX_JOBS = 2
 DEFAULT_MAX_PHOTO_GROUPS = 4
 DEFAULT_RATIO_WORKERS = 2
@@ -146,6 +150,17 @@ def _connect() -> Iterator[sqlite3.Connection]:
                         token TEXT NOT NULL, lease_until REAL NOT NULL,
                         PRIMARY KEY (scope, lease_key)
                     )""")
+                    # Serialize the additive migration across runner processes.
+                    # Legacy leases have no owner evidence and retain normal expiry.
+                    init.execute("BEGIN IMMEDIATE")
+                    try:
+                        resource_columns = {row[1] for row in init.execute("PRAGMA table_info(resource_leases)")}
+                        if "owner_pid" not in resource_columns:
+                            init.execute("ALTER TABLE resource_leases ADD COLUMN owner_pid INTEGER")
+                        init.commit()
+                    except BaseException:
+                        init.rollback()
+                        raise
                     init.execute("""CREATE TABLE IF NOT EXISTS governor_control (
                         name TEXT PRIMARY KEY, until_at REAL NOT NULL
                     )""")
@@ -498,6 +513,65 @@ def image_classification_recovery_window() -> Iterator[None]:
             _A3_METADATA_WRITES.reset(token)
 
 
+def _process_definitely_exited(pid: int) -> bool:
+    """Local host only: unknown, inaccessible and reused live PIDs fail closed."""
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    if os.name == "nt":
+        # os.kill(pid, 0) is NOT a safe Windows liveness probe.
+        # Wait on a process handle with zero timeout, never terminate it.
+        import ctypes
+        from ctypes import wintypes
+
+        try:
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if not handle:
+                # ERROR_INVALID_PARAMETER: no process with this positive PID.
+                # Access denied and every other error are not death evidence.
+                return ctypes.get_last_error() == 87
+            try:
+                return kernel.WaitForSingleObject(handle, 0) == 0
+            finally:
+                kernel.CloseHandle(handle)
+        except (OSError, ValueError, OverflowError):
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, ValueError, OverflowError):
+        return False
+    return False
+
+
+def _reap_dead_db_owners(db: sqlite3.Connection, scope: str, now: float) -> int:
+    """Reclaim only DB slots with positive local process-exit evidence.
+
+    Called within the same SQLite admission transaction. Never reclaim
+    media/producer/Worker leases or legacy DB leases lacking owner metadata.
+    A reused live PID is conservative: the slot expires normally.
+    """
+    if scope not in _DB_REQUEST_SCOPES:
+        return 0
+    rows = db.execute("""SELECT lease_key,token,owner_pid FROM resource_leases
+        WHERE scope=? AND owner_pid IS NOT NULL AND lease_until<=?""",
+        (scope, now + LEASE_SECONDS - DB_DEAD_OWNER_GRACE_SECONDS)).fetchall()
+    removed = 0
+    for key, token, pid in rows:
+        if _process_definitely_exited(pid):
+            removed += db.execute("""DELETE FROM resource_leases
+                WHERE scope=? AND lease_key=? AND token=? AND owner_pid=?""",
+                (scope, key, token, pid)).rowcount
+    return removed
+
+
 @contextmanager
 def resource_slot(
     scope: str, *, key: str = "", limit: int = 1,
@@ -523,19 +597,25 @@ def resource_slot(
     while True:
         with _connect() as db:
             _transaction(db)
-            db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (time.time(),))
+            now = time.time()
+            db.execute("DELETE FROM resource_leases WHERE lease_until < ?", (now,))
             active = db.execute("SELECT COUNT(*) FROM resource_leases WHERE scope=?", (scope,)).fetchone()[0]
-            if (
-                (not admission_paused() or recovery_read_allowed)
-                and (allow_during_circuit or not circuit_open(db))
-                and active < limit
-            ):
+            allowed = ((not admission_paused() or recovery_read_allowed)
+                       and (allow_during_circuit or not circuit_open(db)))
+            reaped = 0
+            if allowed and active >= limit and scope in _DB_REQUEST_SCOPES:
+                reaped = _reap_dead_db_owners(db, scope, now)
+                active -= reaped
+            if allowed and active < limit:
                 claimed = db.execute("""INSERT OR IGNORE INTO resource_leases
-                    (scope,lease_key,token,lease_until) VALUES(?,?,?,?)""",
-                    (scope, lease_key, token, time.time() + LEASE_SECONDS)).rowcount
+                    (scope,lease_key,token,lease_until,owner_pid) VALUES(?,?,?,?,?)""",
+                    (scope, lease_key, token, now + LEASE_SECONDS,
+                     os.getpid() if scope in _DB_REQUEST_SCOPES else None)).rowcount
             else:
                 claimed = 0
             db.commit()
+        if reaped:
+            logger.warning("reclaimed %s expired-owner DB resource slot(s): %s", reaped, scope)
         if claimed:
             break
         if time.monotonic() >= deadline:
