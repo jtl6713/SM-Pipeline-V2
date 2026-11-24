@@ -101,6 +101,14 @@ export async function runQualityFactoryHandoffCron({
         "current_revision_does_not_match_protected_receipt","exact_revision_already_attempted",
         "exact_parent_or_owned_variants_unverified","public_media_hash_unverified",
         "concurrent_output_revision","concurrent_owner_revision"]).has(outcome?.reason)?outcome.reason:"no_public_blocker_code",
+      ...(outcome?.reason==="shared_admission_denied" ? {
+        admission_reason:new Set(["capacity_or_circuit","broker_auth_denied","broker_request_rejected",
+          "broker_http_unavailable","broker_receipt_invalid","broker_unavailable","broker_timeout",
+          "broker_transport_unavailable","invalid_lease_identity","shared_admission_not_configured"]).has(outcome.admission_reason)
+          ? outcome.admission_reason : "unknown",
+        admission_http_status:Number.isInteger(outcome.admission_http_status)&&outcome.admission_http_status>=100&&outcome.admission_http_status<=599
+          ? outcome.admission_http_status : null,
+      } : {}),
       approval_actions:0,schedule_actions:0,publish_actions:0,
     }};
     logger(result);
