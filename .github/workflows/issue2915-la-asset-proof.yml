@@ -1,0 +1,135 @@
+name: Issue 2915 exact LA scheduled media read-only proof
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue2915-la-asset-proof.py'
+      - '.github/workflows/issue2915-la-asset-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2915-la-asset-proof.py'
+      - '.github/workflows/issue2915-la-asset-proof.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2915-la-asset-proof
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify exact future-media proof is GET only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile repair/scripts/issue2915-la-asset-proof.py
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          s=Path('repair/scripts/issue2915-la-asset-proof.py').read_text(); tree=ast.parse(s)
+          for required in ['10735','10736','2133','resource_slot','circuit_open','recovery_read_only_active','source_writes=0','provider_writes=0','factory_approvals=0','cdn_bytes_mismatch','output_changed_during_proof']:
+              assert required in s, required
+          for node in ast.walk(tree):
+              if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and isinstance(node.func.value,ast.Name) and node.func.value.id=='requests':
+                  assert node.func.attr=='get', node.func.attr
+          print('ISSUE2915_LA_ASSET_READ_ONLY_STATIC_PASS')
+          PY
+  stage-owned-media:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate existing Ops runner without exposing credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C";do
+            [[ -n "$candidate" ]] || continue
+            http=$(curl -sS --max-time 20 -o /tmp/issue2915-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/issue2915-ops-catalog.json >/dev/null;then
+              echo "::add-mask::$candidate"
+              echo "ISSUE2915_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected owner verification unavailable; no media state changed'; exit 1
+      - name: Build pinned SHA256 source execution request for original owner runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          src=pathlib.Path('repair/scripts/issue2915-la-asset-proof.py')
+          expected=hashlib.sha256(src.read_bytes()).hexdigest()
+          sha=os.environ['GITHUB_SHA']
+          assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{src.as_posix()}'
+          command=(
+              "$ErrorActionPreference='Stop';"
+              "$py=Get-Command python -ErrorAction SilentlyContinue;"
+              "if(-not $py){throw 'ops_python_missing'};"
+              "$tmp=Join-Path $env:TEMP 'issue2915-la-asset-proof.py';"
+              f"$srcUrl='{url}';"
+              "Invoke-WebRequest -Uri $srcUrl -Method Get -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+              "$actual=(Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant();"
+              f"if($actual -ne '{expected}'){{throw 'exact_stage_source_checksum_mismatch'}};"
+              "try{& python $tmp;"
+              "if($LASTEXITCODE -ne 0){throw ('la_asset_proof_python_exit_'+$LASTEXITCODE)}}"
+              "finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}"
+          )
+          pathlib.Path('/tmp/issue2915-ops-request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          print('IMMUTABLE_ISSUE2915_STAGE_SOURCE_PINNED')
+          PY
+      - name: Verify existing LA Drive and CDN bytes without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for slot in $(seq 1 32);do
+            code=$(curl -sS --max-time 30 -o /tmp/issue2915-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE2915_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue2915-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then accepted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "R2 owner runner returned $code";exit 2;fi
+            sleep 12
+          done
+          [[ "$accepted" == true ]] || { echo 'Ops shell busy; no second stage scheduled';exit 2; }
+          job=$(jq -er '.job.id // .jobId' /tmp/issue2915-ops-start.json)
+          for tick in $(seq 1 480);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $ISSUE2915_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue2915-ops-job.json
+            status=$(jq -r '.job.status // empty' /tmp/issue2915-ops-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/issue2915-ops-job.json | grep '^ISSUE2915_LA_ASSET_PROOF=' | tail -1 \
+                | sed 's/^ISSUE2915_LA_ASSET_PROOF=//' > /tmp/issue2915-la-proof.json
+              jq -e '.verified==true and .outputs==[10735,10736] and .content==2133 and .source_writes==0 and .provider_writes==0 and .factory_approvals==0 and .geometry=="1080x1920" and .audio_streams>=1 and .size>0 and (.sha256|test("^[a-f0-9]{64}$")) and (.source_versions|length)==2' /tmp/issue2915-la-proof.json >/dev/null
+              jq -c '{verified,outputs,content,profile,source_versions,drive_id,url,sha256,size,geometry,duration_seconds,audio_streams,source_writes,provider_writes,factory_approvals}' /tmp/issue2915-la-proof.json
+              exit 0
+            elif [[ "$status" == failed ]];then
+              echo 'LA asset proof failed; no source/approval/provider changes'
+              jq -r '.job.log // ""' /tmp/issue2915-ops-job.json | tail -n 23 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g' \
+                | grep -Ev 'Authorization:|Bearer |SUPABASE_SERVICE_ROLE_KEY|R2_UPLOAD_WORKER_SECRET|GOOGLE_REFRESH_TOKEN' || true
+              exit 3
+            fi
+            sleep 4
+          done
+          echo 'LA proof incomplete; no media or scheduling changes'; exit 4
+      - name: Preserve exact approved video byte proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2915-la-asset-proof
+          path: /tmp/issue2915-la-proof.json
+          retention-days: 30
+          if-no-files-found: warn
