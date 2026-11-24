@@ -53,7 +53,9 @@ test("Needs Attention provides diagnostics and exact-output remediation without 
   assert.match(js, /await openStudioTarget\(card\)/);
   assert.match(js, /const manualCards = \[\.\.\.\(desk\.lanes\?\.manual \|\| \[\]\)\]/);
   assert.match(js, /if \(!inManual\.has\(String\(card\.id \|\| ""\)\)\) manualCards\.push\(card\)/);
-  assert.match(js, /if \(reviewAllowed \|\| needsEyesOutput\)/);
+  assert.match(js, /if \(card\.kind === "output" && \(reviewAllowed \|\| reviewActionOutput\)\)/);
+  assert.match(js, /if \(reviewAllowed \|\| \(needsEyesOutput && card\.review_resolve_available!==true\)\)/);
+  assert.match(js, /card\.review_resolve_available===true\).*data-factory-review-resolve/);
   assert.match(js, /if\(reviewActionOutput && card\.review_hold_active===true/);
   assert.match(js, /reviewActionOutput && canReviewHeldOutput\(card\)/);
   assert.match(js, /reviewActionOutput && canRejectHeldOutput\(card\)/);
