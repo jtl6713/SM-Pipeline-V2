@@ -6,7 +6,7 @@ import {
   factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
   factoryApprovalGroupList, factoryApprovalGroupCronScan, factoryApprovalGroupCanReuseForNewSubmission,
 } from "./factory-approval-groups.mjs";
-import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts, factoryBatchMarkExceptionRouted} from "./factory-approval-queue.mjs";
+import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts, factoryBatchMarkExceptionRouted, factoryBatchLockKey} from "./factory-approval-queue.mjs";
 
 class FakeR2 {
   constructor() {this.objects=new Map();this.version=0;this.rejectOnce=false;}
@@ -274,7 +274,9 @@ test("active history scans hundreds of terminal groups with bounded parallel rea
   }
   const originalGet = bucket.get.bind(bucket);
   let current = 0, peak = 0, gets = 0;
+  const claimReads = [];
   bucket.get = async key => {
+    if (key.includes("/locks/")) claimReads.push(key);
     current++; gets++; peak = Math.max(peak, current);
     await new Promise(resolve => setImmediate(resolve));
     try { return await originalGet(key); } finally { current--; }
@@ -282,7 +284,8 @@ test("active history scans hundreds of terminal groups with bounded parallel rea
   const live = await factoryApprovalGroupList(bucket, { mode: "active", maxScan: 1000 });
   assert.deepEqual(live.groups.map(row => row.request_id), ["history_latency_0179"]);
   assert.equal(live.scanned, 180);
-  assert.equal(gets, 360);
+  assert.equal(gets, 361, "one extra read for the sole pending group claim snapshot");
+  assert.deepEqual(claimReads, [factoryBatchLockKey(chi)], "never read claims for terminal groups");
   assert.equal(peak, 6, "history work overlaps but never starts unbounded storage calls");
 });
 
