@@ -76,7 +76,9 @@ def test_stage_reproduces_verified_source_then_builds_and_checks_vertical(monkey
             assert key.startswith("studio/previews/watermarked/quality-native-rebuild/")
             assert mime=="image/jpeg"
             uploads[mod.BASE+key]=data
-    def read(url,expected,geometry,*,prefix=False):
+    def read(key,expected,geometry,*,prefix=False):
+        assert mod.OBJECT_KEY.fullmatch(key)
+        url=mod.BASE+key
         data=uploads[url] if url in uploads else (branded if "shared-small-bottom-right" in url else original)
         sha=hashlib.sha256(data).hexdigest()
         assert sha.startswith(expected) if prefix else sha==expected
@@ -97,3 +99,55 @@ def test_stage_reproduces_verified_source_then_builds_and_checks_vertical(monkey
     with pytest.raises(RuntimeError,match="source_lineage_reproduction_failed"):
         stage(p,drive=Drive(),uploader=Uploader(),read=mismatched_pixels,renew=lambda *_:True)
     assert not uploads
+
+
+@pytest.mark.parametrize("value",[
+    "http://media.chicagoshining.com/studio/previews/repairs/issue2371/nyc-2221/slide-01-aaaaaaaaaaaaaaaa.jpg",
+    "https://media.chicagoshining.com.evil.example/a.jpg",
+    "https://media.chicagoshining.com@evil.example/a.jpg",
+    "https://media.chicagoshining.com:443/a.jpg",
+    "https://media.chicagoshining.com//evil.example/a.jpg",
+    "https://media.chicagoshining.com/studio/previews/repairs/issue2371/../slide-01-aaaaaaaaaaaaaaaa.jpg",
+    "https://media.chicagoshining.com/studio/previews/repairs/issue2371/%2e%2e/slide-01-aaaaaaaaaaaaaaaa.jpg",
+    "https://media.chicagoshining.com/studio/previews/repairs/issue2371/nyc-2221/slide-01-aaaaaaaaaaaaaaaa.jpg?redirect=1",
+    "https://media.chicagoshining.com/studio/previews/repairs/issue2371/nyc-2221/slide-01-aaaaaaaaaaaaaaaa.jpg#x",
+    "http://127.0.0.1/a.jpg",
+    "http://169.254.169.254/a.jpg",
+])
+def test_ssrf_full_urls_and_unsafe_keys_rejected_before_network(monkeypatch,value):
+    import studio_produce.quality_native_media_rebuild as mod
+    def no_network(*args,**kwargs):
+        pytest.fail("invalid input must never cause a network request")
+    monkeypatch.setattr(mod.requests,"get",no_network)
+    with pytest.raises(ValueError): mod.cdn_object_key(value)
+    with pytest.raises(ValueError): mod.download(value,"a"*64,(1080,1350))
+    if value.startswith(mod.BASE):
+        with pytest.raises(ValueError): mod.download(value[len(mod.BASE):],"a"*64,(1080,1350))
+
+
+def test_download_constructs_fixed_origin_and_never_follows_redirect(monkeypatch):
+    import studio_produce.quality_native_media_rebuild as mod
+    key="studio/previews/repairs/issue2371/nyc-2221/slide-01-aaaaaaaaaaaaaaaa.jpg"
+    assert mod.cdn_object_key(mod.BASE+key)==key
+    data=jpeg()
+    class Response:
+        status_code=200
+        headers={"Content-Type":"image/jpeg"}
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+        def iter_content(self,_size): yield data
+    response=Response()
+    calls=[]
+    def get(url,**kwargs):
+        calls.append(url)
+        assert url=="https://media.chicagoshining.com/"+key
+        assert kwargs["allow_redirects"] is False
+        return response
+    monkeypatch.setattr(mod.requests,"get",get)
+    digest=hashlib.sha256(data).hexdigest()
+    assert mod.download(key,digest,(1080,1350))==(data,digest)
+    response.status_code=302
+    response.headers["Location"]="http://127.0.0.1/"
+    with pytest.raises(RuntimeError,match="source_media_unavailable"):
+        mod.download(key,digest,(1080,1350))
+    assert len(calls)==2
