@@ -7,7 +7,7 @@ import {
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
-  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
+  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied, factoryBatchRetryOriginalIntentOnce,
   factoryBatchItemProgress,
   factoryBatchReconcileSupabaseApprovalReceipts, factoryBatchCronReceiptCandidates,
 } from "./factory-approval-queue.mjs";
@@ -904,4 +904,24 @@ test("#2618: exact submitter persists on Factory batch and cannot be rewritten o
   assert.equal(retry.job.submitted_by, "recAuthUser123456");
   const legacy = factoryBatchBuild({...opts, requestId:"new_legacy_batch_id"});
   assert.equal(legacy.submitted_by, null);
+});
+
+test("#2915 original intent retry is exact, bounded and preserves terminal error evidence",async()=>{
+ const bucket=new FakeR2();
+ await factoryBatchEnqueue(bucket,{...opts,records:records.slice(0,2),submittedBy:"recAuthUser123456"});
+ const message="Native gallery final approval requires a new authenticated Factory submitter and request AFTER the owner hold release";
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async(id)=>{if(id===records[0].id)throw Error(message);}});
+ const retry={profileId,requestId,recordId:records[0].id,outputId:records[0].output_id};
+ const denied=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>false});
+ assert.equal(denied.items[0].status,"failed");
+ const allowed=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>true});
+ assert.equal(allowed.items[0].status,"pending");
+ assert.equal(allowed.items[0].auto_retry_count,1);
+ assert.equal(allowed.items[0].failure_history.at(-1).error,message);
+ assert.equal(allowed.items[1].status,"approved");
+ assert.equal(allowed.submitted_by,"recAuthUser123456");
+ await factoryBatchDrain(bucket,{profileId,requestId,approve:async()=>{throw Error(message);}});
+ const again=await factoryBatchRetryOriginalIntentOnce(bucket,{...retry,verifyOriginalIntent:async()=>true});
+ assert.equal(again.items[0].status,"failed");
+ assert.equal(again.items[0].auto_retry_count,1);
 });
