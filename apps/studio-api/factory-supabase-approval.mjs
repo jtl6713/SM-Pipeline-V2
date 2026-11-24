@@ -178,6 +178,8 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
       output_id: entry.row.output_number, platform: entry.row.platform,
       format: entry.row.studio_output_type || entry.row.format,
       title: entry.row.output_title || "", content_id: entry.row.content_item_airtable_id || null,
+      // Internal current-review evidence, never trusted from browser payloads.
+      requires_current_approval: !state.already_satisfied,
     };
   }));
 }
