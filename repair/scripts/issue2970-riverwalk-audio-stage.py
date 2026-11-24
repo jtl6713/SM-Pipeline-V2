@@ -106,6 +106,10 @@ def stage(r2, data, name):
 def main():
     require((BASE/".env").is_file(),"runner_env_missing")
     load_dotenv(BASE/".env",override=False)
+    # Ops shell may export PORT as an empty string; match the established
+    # protected repair bootstrap without changing the runner service config.
+    if not os.getenv("PORT", "").strip():
+        os.environ["PORT"] = "3350"
     sys.path.insert(0,str(BASE))
     require(os.getenv("SUPABASE_URL","").rstrip("/")==PROJECT,"wrong_project")
     from studio_produce.workload_governor import enabled,resource_slot,recovery_read_only_active,circuit_open
