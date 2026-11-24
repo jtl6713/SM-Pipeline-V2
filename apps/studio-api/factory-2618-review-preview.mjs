@@ -34,6 +34,23 @@ const driveFailureReasons=new Set([
   "FACTORY_2618_DRIVE_OAUTH_UNAUTHORIZED_CLIENT",
   "FACTORY_2618_DRIVE_OAUTH_INVALID_SCOPE",
   "FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED",
+  "FACTORY_2618_DRIVE_OAUTH_BINDING_QUOTED",
+  "FACTORY_2618_DRIVE_OAUTH_TRANSPORT_FAILED",
+  "FACTORY_2618_DRIVE_OAUTH_REDIRECT_REJECTED",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_400",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_401",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_403",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_429",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_4XX",
+  "FACTORY_2618_DRIVE_OAUTH_HTTP_5XX",
+  "FACTORY_2618_DRIVE_OAUTH_NON_JSON_SUCCESS",
+  "FACTORY_2618_DRIVE_OAUTH_DELETED_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_DISABLED_CLIENT",
+  "FACTORY_2618_DRIVE_OAUTH_ACCESS_DENIED",
+  "FACTORY_2618_DRIVE_OAUTH_ADMIN_POLICY_ENFORCED",
+  "FACTORY_2618_DRIVE_OAUTH_ORG_INTERNAL",
+  "FACTORY_2618_DRIVE_OAUTH_TEMPORARILY_UNAVAILABLE",
+  "FACTORY_2618_DRIVE_OAUTH_SERVER_ERROR",
   "FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING",
   "FACTORY_2618_DRIVE_OAUTH_INVALID_REQUEST",
   "FACTORY_2618_DRIVE_OAUTH_REJECTED",
@@ -48,25 +65,36 @@ export async function refreshIssue2618DriveToken(env,fetchImpl=fetch){
   const clientSecret=String(env?.GOOGLE_CLIENT_SECRET||"").trim();
   const refresh=String(env?.GOOGLE_REFRESH_TOKEN||"").trim();
   if(!clientId||!clientSecret||!refresh)fail("FACTORY_2618_DRIVE_OAUTH_BINDING_EMPTY");
+  // A pasted .env literal may include delimiters that dotenv removes on the runner.
+  if([clientId,clientSecret,refresh].some(value=>/^["']|["']$/.test(value)))
+    fail("FACTORY_2618_DRIVE_OAUTH_BINDING_QUOTED");
   let response;
   try{
     response=await fetchImpl("https://oauth2.googleapis.com/token",{
-      method:"POST",redirect:"error",
-      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      method:"POST",redirect:"manual",
+      headers:{"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"},
       body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,
-        refresh_token:refresh,grant_type:"refresh_token"}),
+        refresh_token:refresh,grant_type:"refresh_token"}).toString(),
     });
-  }catch{fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_ENDPOINT_FAILED");}
+  }catch{fail("FACTORY_2618_DRIVE_OAUTH_TRANSPORT_FAILED");}
+  // Never forward the credential-bearing request to a redirect location.
+  if(response.status>=300&&response.status<400)fail("FACTORY_2618_DRIVE_OAUTH_REDIRECT_REJECTED");
   const payload=await response.json().catch(()=>null);
   if(!response.ok){
     const known={
       invalid_client:"INVALID_CLIENT",invalid_grant:"INVALID_GRANT",
       unauthorized_client:"UNAUTHORIZED_CLIENT",invalid_scope:"INVALID_SCOPE",
-      invalid_request:"INVALID_REQUEST",
+      invalid_request:"INVALID_REQUEST",deleted_client:"DELETED_CLIENT",
+      disabled_client:"DISABLED_CLIENT",access_denied:"ACCESS_DENIED",
+      admin_policy_enforced:"ADMIN_POLICY_ENFORCED",org_internal:"ORG_INTERNAL",
+      temporarily_unavailable:"TEMPORARILY_UNAVAILABLE",server_error:"SERVER_ERROR",
     };
     const code=Object.prototype.hasOwnProperty.call(known,payload?.error)?known[payload.error]:null;
-    fail("FACTORY_2618_DRIVE_OAUTH_"+(code||"TOKEN_ENDPOINT_FAILED"));
+    const statusCode=[400,401,403,429].includes(response.status)?"HTTP_"+response.status:
+      response.status>=500?"HTTP_5XX":response.status>=400?"HTTP_4XX":"TOKEN_ENDPOINT_FAILED";
+    fail("FACTORY_2618_DRIVE_OAUTH_"+(code||statusCode));
   }
+  if(payload===null)fail("FACTORY_2618_DRIVE_OAUTH_NON_JSON_SUCCESS");
   const token=typeof payload?.access_token==="string"?payload.access_token.trim():"";
   if(!token)fail("FACTORY_2618_DRIVE_OAUTH_TOKEN_MISSING");
   return token;
