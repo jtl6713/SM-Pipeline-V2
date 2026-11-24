@@ -45,6 +45,22 @@ jobs:
                   assert (f.getnchannels(),f.getframerate(),f.getnframes())==(2,48000,96000)
                   data=array.array('h');data.frombytes(f.readframes(96000))
                   assert 0<max(abs(x) for x in data)<5000
+          # Windows Ops can provide PORT="" even when the default is known.
+          # Execute the exact setup guard in isolation for blank/unset/valid cases.
+          import os
+          setup=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_setup')
+          port_guard=next(n for n in setup.body if isinstance(n,ast.If) and 'PORT' in ast.unparse(n.test))
+          guard=compile(ast.Module(body=[port_guard],type_ignores=[]),'port-guard','exec')
+          saved=os.environ.get('PORT')
+          try:
+              for before,expected in [(None,'3350'),('','3350'),('  ','3350'),('3350','3350'),('3351','3351')]:
+                  if before is None: os.environ.pop('PORT',None)
+                  else: os.environ['PORT']=before
+                  exec(guard,{'os':os})
+                  assert os.environ['PORT']==expected
+          finally:
+              if saved is None: os.environ.pop('PORT',None)
+              else: os.environ['PORT']=saved
           assert '"-map","0:v:0","-map","[a]"' in s
           print('ISSUE2915_STORY_AUDIO_STATIC_PASS')
           PY
