@@ -1,5 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
-import {readFactoryReviewResolve} from "./factory-review-resolve.mjs";
+import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
 import {
@@ -4312,6 +4312,12 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Factory slide inventory is read-only");
         requirePermission(authorization, "outputs_review");
         const outputId = url.pathname.split("/")[4];
+        if(url.searchParams.get("resolve")==="receipt") {
+          try {
+            const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
+            return respond(request,env,{ok:true,...await readFactoryReviewResolveReceipt(env,outputId,scopedAuthorization,url.searchParams.get("package_sha256"))});
+          } catch(error){throw new HttpError(error?.status||409,String(error?.message||error));}
+        }
         if(url.searchParams.get("resolve")==="1") {
           try {
             const scopedAuthorization = await resolveFactoryReviewResolveAuthorization(env, authorization);
