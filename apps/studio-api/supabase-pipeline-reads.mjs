@@ -1136,10 +1136,12 @@ export async function listSupabaseAssetLibraryRecords(env, {
   const skipRaw = String(offset || "").trim();
   const skip = /^\d+$/.test(skipRaw) ? Number(skipRaw) : 0;
   const fetchLimit = capped + 1;
+  if (Array.isArray(searchTokens)) order += ",airtable_record_id.asc";
   const path = `media_assets?${filters.join("&")}&select=${MEDIA_LIBRARY_SELECT}`
     + `&order=${order}&limit=${fetchLimit}&offset=${skip}`;
   const rows = await supabaseRest(env, path);
-  const page = (rows || []).filter((row) => row?.airtable_record_id).slice(0, capped);
+  if (!Array.isArray(rows)) throw new Error("Invalid media asset library response");
+  const page = rows.filter((row) => row?.airtable_record_id).slice(0, capped);
   const hasMore = (rows || []).length > capped;
   const records = page.map(airtableShapedLibraryAssetFromSupabase);
   return {
