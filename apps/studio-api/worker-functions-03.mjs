@@ -1750,7 +1750,8 @@ export async function listContent(request, env, url, authorization) {
           const activeRows = [];
           for (const output of outputRecords) {
             if (f(output, "Test_Run_ID")) continue;
-            if (homeOutputInProduction(mapOutput(output))) activeRows.push(mapOutput(output));
+            const mapped = mapOutput(output);
+            if (homeOutputInProduction(mapped)) activeRows.push(mapped);
           }
           productionDiagnosticsByContent.set(contentId, productionDiagnosticsSummary(activeRows, outputRecords.length));
         }
