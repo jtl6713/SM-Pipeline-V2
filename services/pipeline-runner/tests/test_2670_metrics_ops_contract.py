@@ -39,3 +39,18 @@ def test_owner_runbook_has_privilege_warning_and_does_not_store_secret():
     assert "SUPABASE_METRICS_SECRET_KEY=sb_secret_..." in guide
     assert "metrics key configured" in guide
     assert "GitHub Actions Secrets" in guide
+
+
+def test_failure_receipts_are_sanitized_and_fail_closed():
+    assert "incident2670_key_length=" in PS
+    assert "incident2670_key_prefix_valid=" in PS
+    assert "incident2670_metrics_http_status=" in PS
+    assert "ENV_PROJECT_OR_DUPLICATE" in PS and "ENV_KEY_DUPLICATE_OR_UNREADABLE" in PS
+    assert "MaximumRedirection 0" in PS
+    assert "Write-Output ('incident2670_metrics='+$script:phase)" in PS
+    assert "key_length=[0-9]{1,4}" in WF
+    assert "metrics_http_status=[0-9]{1,3}" in WF
+    assert "grep -x 'incident2670_metrics=PASS_TWO_READONLY_SAMPLES'" in WF
+    assert "UNVERIFIED_NO_CHANGES" in WF
+    assert "Write-Output $secret" not in PS
+    assert "Write-Output $headers" not in PS
