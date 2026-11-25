@@ -471,6 +471,20 @@ def process_one_output(
         existing_url = field_str(current, "Final_File_URL")
         same_job = field_str(current, "Remotion_Job_ID") == job_id
         if existing_url and "404" in message.lower() and same_job:
+            from render.media_quality import committed_render_receipt_matches
+            if not committed_render_receipt_matches(current, job_id=job_id):
+                # An old URL is not evidence that the current render passed QA.
+                # Do not turn an unavailable new render into a reviewable item.
+                reason = "R5 final artifact unavailable; exact committed media proof missing or stale"
+                if field_str(current, "Review_Status").lower() != "approved" and not (
+                        field_str(current, "Published_At") or field_str(current, "Platform_Post_URL")):
+                    client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {
+                        "Render_Status": "Blocked",
+                        "Output_Status": "In Production",
+                        "Final_File_Error_Message": reason,
+                    }, typecast=True)
+                return {"processed": False, "reason": "encoded_media_receipt_unverified",
+                        "error": reason, **preview}
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 output["id"],
