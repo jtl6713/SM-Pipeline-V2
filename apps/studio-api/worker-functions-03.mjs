@@ -54,7 +54,9 @@ import {
   listSupabasePipelineOutputs,
   listSupabasePipelineHistoryPage,
   listSupabasePipelineContentPage,
+  listSupabasePipelineGlobalSearch,
   listSupabasePipelineTitleSearch,
+  pipelineSearchNumericId,
   pipelineTitleSearchTokens,
   listSupabaseManualActionOutputs,
   listSupabaseFocusedExceptionOutputs,
@@ -2819,6 +2821,66 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
       complete: rows.length < 500,
       scanned_at: new Date(observedAt).toISOString(),
       mode: focusedMode,
+    });
+  }
+  // Profile-wide Pipeline search: content ID, output ID, or title. Always
+  // returns the full content package (every platform sibling), never a page slice.
+  if (url.searchParams.get("mode") === "pipeline_search") {
+    const query = String(url.searchParams.get("q") || "");
+    const hasId = pipelineSearchNumericId(query) != null;
+    const tokens = pipelineTitleSearchTokens(query);
+    if (!hasId && !tokens.length) {
+      return respond(request, env, {
+        ok: true,
+        records: [],
+        count: 0,
+        content_ids: [],
+        content_groups: [],
+        mode: "pipeline_search",
+        scope: "profile",
+        matched_by: null,
+        profile: mapStudioContentProfile(profile),
+      });
+    }
+    if (studioPipelineReadSource(env) !== "supabase" || !studioSupabaseConfigured(env)) {
+      throw new HttpError(503, "Supabase Pipeline search unavailable");
+    }
+    const packed = await listSupabasePipelineGlobalSearch(env, {
+      profileAirtableId: profile.id,
+      query,
+      limit: 40,
+    });
+    if (packed.profileMissing) {
+      return respond(request, env, {
+        ok: true,
+        records: [],
+        count: 0,
+        content_ids: [],
+        content_groups: [],
+        mode: "pipeline_search",
+        scope: "profile",
+        matched_by: null,
+        profile: mapStudioContentProfile(profile),
+        read_source: "supabase",
+      });
+    }
+    const records = stripDeletedDuplicateOutputRecords(packed.records.map((record) => mapOutput(
+      record,
+      null,
+      null,
+      packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    )));
+    return respond(request, env, {
+      ok: true,
+      records,
+      count: records.length,
+      content_ids: packed.content_ids || [],
+      content_groups: packed.content_groups || [],
+      mode: "pipeline_search",
+      scope: "profile",
+      matched_by: packed.matched_by || null,
+      profile: mapStudioContentProfile(profile),
+      read_source: "supabase",
     });
   }
   // Scheduled search ignores the calendar's 7-day window. A title from another
