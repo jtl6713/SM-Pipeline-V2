@@ -1,15 +1,6 @@
 name: Real Remotion audio regression
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'services/remotion-renderer/**'
-      - 'services/pipeline-runner/r4/**'
-      - 'services/pipeline-runner/r5/**'
-      - 'services/pipeline-runner/render/**'
-      - 'services/pipeline-runner/studio_produce/**'
-      - '.github/scripts/test-real-remotion-audio.py'
-      - '.github/workflows/real-remotion-audio-regression.yml'
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
