@@ -1006,13 +1006,16 @@ function encodePostgrestValue(value) {
   return encodeURIComponent(String(value ?? ""));
 }
 
-function libraryAssetSearchOrFilter(query) {
+export function libraryAssetSearchOrFilter(query, searchTokens = null) {
   const raw = String(query || "").trim().toLowerCase();
-  if (!raw) return null;
+  if (!raw && !Array.isArray(searchTokens)) return null;
   const quoted = raw.match(/^"([^"]+)"$/);
-  const tokens = quoted
-    ? [quoted[1].trim()].filter(Boolean)
-    : raw.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean).slice(0, 10);
+  // Structured idea keys may be multiword neighborhoods. Preserve them as
+  // one retrieval clause rather than expanding "Brooklyn Heights" to city-wide ORs.
+  const tokens = Array.isArray(searchTokens)
+    ? [...new Set(searchTokens.map(part => String(part || "").trim().toLowerCase()).filter(Boolean))].slice(0, 10)
+    : (quoted ? [quoted[1].trim()].filter(Boolean)
+      : raw.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean).slice(0, 10));
   if (!tokens.length) return null;
   const columns = [
     "asset_name",
@@ -1023,10 +1026,11 @@ function libraryAssetSearchOrFilter(query) {
     "metadata->>topic",
     "metadata->>subtopic",
     "metadata->>asset_description",
+    "metadata->>visible_subjects",
   ];
   const clauses = [];
   for (const token of tokens) {
-    const pattern = `*${token.replace(/[*]/g, "")}*`;
+    const pattern = `*${token.replace(/[*]/g, "").replace(/\s+/g, Array.isArray(searchTokens) ? "*" : " ")}*`;
     if (pattern === "**") continue;
     for (const column of columns) {
       clauses.push(`${column}.ilike.${encodePostgrestValue(pattern)}`);
@@ -1047,6 +1051,7 @@ export async function listSupabaseAssetLibraryRecords(env, {
   offset = null,
   ids = null,
   query = "",
+  searchTokens = null,
   kind = "",
   needsProfile = false,
   profileId = "",
@@ -1116,7 +1121,7 @@ export async function listSupabaseAssetLibraryRecords(env, {
   if (addedTo) {
     filters.push(`metadata->>added_at=lte.${encodePostgrestValue(`${addedTo}T23:59:59.999Z`)}`);
   }
-  const searchFilter = libraryAssetSearchOrFilter(query);
+  const searchFilter = libraryAssetSearchOrFilter(query, searchTokens);
   if (searchFilter) filters.push(searchFilter);
 
   const sortKey = String(sortField || "Added_At");
