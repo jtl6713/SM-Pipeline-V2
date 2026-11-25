@@ -289,7 +289,7 @@ def is_database_overload(error: BaseException) -> bool:
 
 
 def claim_next() -> tuple[str, str] | None:
-    """Atomic FIFO claim and cross-process concurrency check."""
+    """Atomic FIFO by runnable time, retaining original enqueue age and fencing."""
     # The HTTP recovery gate does not protect the autonomous dispatcher.
     # Do not read/recover/release any claims while startup is in read-only mode.
     if admission_paused():
@@ -325,15 +325,18 @@ def claim_next() -> tuple[str, str] | None:
             return None
         target = producer_only_recovery_target() if producer_only_recovery_enabled() else "ALL"
         if target == "ALL":
+            # A yielded job rejoins at its delayed available_at, rather than
+            # jumping ahead of requests that have been continuously runnable.
+            # Retain original enqueued_at for age/audit and deterministic ties.
             row = db.execute(
                 "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? "
-                "ORDER BY enqueued_at, request_id LIMIT 1", (now,)
+                "ORDER BY available_at, enqueued_at, request_id LIMIT 1", (now,)
             ).fetchone()
         else:
             # Never drain unrelated persisted requests during an exact-ID canary.
             row = db.execute(
                 "SELECT request_id FROM producer_jobs WHERE state='queued' AND available_at<=? "
-                "AND request_id=? ORDER BY enqueued_at, request_id LIMIT 1", (now, target)
+                "AND request_id=? ORDER BY available_at, enqueued_at, request_id LIMIT 1", (now, target)
             ).fetchone()
         if not row:
             db.commit()
