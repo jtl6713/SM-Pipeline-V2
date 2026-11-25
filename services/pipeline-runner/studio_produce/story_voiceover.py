@@ -301,11 +301,13 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         provenance = {}
         if claims:
             if not known and history and current["id"] in history["outputs"]:
-                # Only the two owner-authorized held pairs, exact original
-                # failed receipt and independently verified provider bytes.
+                # Only explicitly audited exact pairs, their original failed
+                # receipt and independently verified provider bytes. Default
+                # remains held for the earlier incident; Echo Park is unheld.
+                expected_hold = history.get("held", True)
                 if (digest != history["fingerprint"] or len(claims)!=1
                         or claims[0].get("state")!="failed"
-                        or field(current,"Do_Not_Publish") is not True
+                        or field(current,"Do_Not_Publish") is not expected_hold
                         or not story_sentence_recovery_candidate(current,live_parent,cached_only=True)):
                     raise StoryVoiceoverError("Story history recovery identity changed")
                 try:
@@ -320,7 +322,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                     latest=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
                     latest_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
                     if (not story_sentence_recovery_candidate(latest,latest_parent,cached_only=True)
-                            or field(latest,"Do_Not_Publish") is not True
+                            or field(latest,"Do_Not_Publish") is not expected_hold
                             or exact_story_snapshot(latest,parent["id"])!=snapshot
                             or fingerprint(parent["id"],resolve_content_voice_id(latest_parent),
                                 story_text(field_str(latest_parent,"Voiceover_Script")),cap)!=digest

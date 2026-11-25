@@ -11,6 +11,15 @@ from config import load_settings
 # Parent, original fingerprint, provider creation second, original raw checksum,
 # and exact held sibling identities. No fuzzy or nearest-date selection.
 HISTORY_RECOVERY = {
+    # Exact unique provider entry within the independently observed no-receipt
+    # to failed-receipt window (18:43–19:58 UTC), proof run 45690917326.
+    "recnsuB2LUYKwygWI": {
+        "fingerprint": "74db136af97d9f28c27cc8f95fc8248d316546b35bd54b0649c295eb5446c293",
+        "created_at": 1795633269,
+        "sha256": "58f4f2d485d0131a77f8beadcaebe1749a0c0dd3a7bbd844fdfe3229d22f76f7",
+        "outputs": {"recuqi61cNXruBSlf", "recfaTw6FikZZzNg5"},
+        "held": False,
+    },
     "reccVyNLdmJJeI8hG": {
         "fingerprint": "b55b795ffb32c1bf079705ddf7ad1248762847b0c5600b76c88df8e7401f6260",
         "created_at": 1795576594,
