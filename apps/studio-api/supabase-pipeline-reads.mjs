@@ -10142,6 +10142,47 @@ async function readReviewLedger(env, tableId, { id="", formula="", limit=30, off
   return rows.map(reviewLedgerRow);
 }
 
+// Exact title-history compatibility for the 365-day Idea create/update guard.
+// A PostgreSQL regex matches the same ASCII normalized prefix without sending
+// every annual idea/content record to the Worker. Never interpret arbitrary formulas.
+export function studioTitleHistoryPrefix(kind, formula) {
+  if (kind !== "idea" && kind !== "content") return null;
+  const field = kind === "idea" ? "Candidate_Title" : "Content_Title";
+  const testOnly = kind === "idea" ? "{Test_Run_ID}=BLANK()," : "";
+  const start = 'AND(' + testOnly + 'IS_AFTER(CREATED_TIME(),DATEADD(TODAY(),-365,"days")),REGEX_MATCH(REGEX_REPLACE(LOWER({' + field + '}&""),"[^a-z0-9]",""),"^';
+  const end = '"))';
+  if (!formula.startsWith(start) || !formula.endsWith(end)) return null;
+  const prefix = formula.slice(start.length, -end.length);
+  return /^[a-z0-9]{1,8}$/.test(prefix) ? prefix : null;
+}
+
+async function readStudioTitleHistoryPage(env, kind, prefix, limit, offset) {
+  const isIdea = kind === "idea";
+  const table = isIdea ? "idea_candidates" : "content_items";
+  const column = isIdea ? "candidate_title" : "content_title";
+  const field = isIdea ? "Candidate_Title" : "Content_Title";
+  // Build the original LOWER/REGEX_REPLACE prefix test using an anchored
+  // case-insensitive regex; each ASCII letter may be separated by punctuation.
+  const pattern = "^[^a-z0-9]*" + prefix.split("").join("[^a-z0-9]*");
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - 365);
+  const query = new URLSearchParams({
+    select: "airtable_record_id," + column,
+    created_at: "gt." + date.toISOString(),
+    [column]: "imatch." + pattern,
+    order: "created_at.asc,airtable_record_id.asc",
+    limit: String(limit), offset: String(offset),
+  });
+  if (isIdea) query.set("and", "(or(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.),or(payload->>test_run_id.is.null,payload->>test_run_id.eq.))");
+  const rows = await supabaseRest(env, table + "?" + query.toString());
+  if (!Array.isArray(rows) || rows.some(row => !row?.airtable_record_id || typeof row[column] !== "string")) {
+    throw new Error("Canonical title history query returned invalid rows");
+  }
+  const records = rows.map(row => ({ id: row.airtable_record_id, fields: { [field]: row[column] } }));
+  return { records, ...(records.length === limit ? { offset: String(offset + records.length) } : {}) };
+}
+
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
   const kind = sideTableKind(env, tableId);
@@ -10210,6 +10251,17 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
+  const titlePrefix = studioTitleHistoryPrefix(kind, formula);
+  if (titlePrefix !== null) {
+    const query = sideQuery(pathOrParams);
+    if (query.get("view")) return null;
+    const offset = Number(query.get("offset") || 0);
+    const pageSize = Math.max(1, Math.min(100, Number(query.get("pageSize") || limit)));
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1001 || !Number.isSafeInteger(pageSize)) {
+      throw new Error("Invalid canonical title-history pagination");
+    }
+    return readStudioTitleHistoryPage(env, kind, titlePrefix, pageSize, offset);
+  }
   if (kind === "review_ledger") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
     const records = await readReviewLedger(env, tableId, { formula, limit, offset });
