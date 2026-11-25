@@ -290,6 +290,10 @@
   let pipelineScheduledSearchTimer = 0;
   let pipelineScheduledSearchGeneration = 0;
   let pipelineScheduledSearchActive = false;
+  let pipelineGlobalSearchTimer = 0;
+  let pipelineGlobalSearchGeneration = 0;
+  let pipelineGlobalSearchActive = false;
+  let pipelineGlobalSearchMatchedBy = null;
   const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
   const pipelineScheduleVisiblePlatforms = new Set(PIPELINE_SCHEDULE_PLATFORM_KEYS);
   let pipelineScheduleDragOutputId = "";
@@ -343,7 +347,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1097-factory-immediate-hide-2959";
+  const BUILD_ID = "item4-0.6.1098-pipeline-global-search";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22949,6 +22953,9 @@ function timedScriptAssetLabel(asset, index) {
 
   function filteredPipelineRecords(records) {
     const all = records || [];
+    // Server already returned the full matched content packages. Do not re-slice
+    // them through the current tab or the page-local title filter.
+    if (pipelineGlobalSearchActive) return all;
     // Home exception totals and Rendering count outputs, not package siblings.
     // Sibling expansion on Rendering pulled Ready for Review / future-dated rows
     // into the tab whenever one stranded Preparing Assets sibling remained
@@ -22999,13 +23006,21 @@ function timedScriptAssetLabel(asset, index) {
     if (!bar) return;
     const columnBits = pipelineColumnFilterSummary();
     const viewActive = pipelineViewFilter && pipelineViewFilter !== "all";
-    if (!viewActive && !columnBits.length) {
+    if (!viewActive && !columnBits.length && !pipelineGlobalSearchActive && !pipelineScheduledSearchActive) {
       bar.hidden = true;
       return;
     }
     bar.hidden = false;
     const parts = [];
-    if (viewActive) parts.push(pipelineFilterLabel());
+    if (pipelineGlobalSearchActive) {
+      const kind = pipelineGlobalSearchMatchedBy === "content_id" ? "content ID"
+        : pipelineGlobalSearchMatchedBy === "output_id" ? "output ID"
+          : pipelineGlobalSearchMatchedBy === "title" ? "title"
+            : "search";
+      parts.push(`Pipeline ${kind}`);
+    } else if (viewActive) {
+      parts.push(pipelineFilterLabel());
+    }
     if (pipelineScheduledSearchActive) parts.push("all weeks");
     parts.push(...columnBits);
     if (label) label.textContent = `Showing ${parts.join(" · ")} · ${visibleCount}`;
@@ -23421,11 +23436,16 @@ function timedScriptAssetLabel(asset, index) {
     // not the sibling-expanded package size.
     const countFilter = ["attention", "manual", "approved_past_due", "approved_missing_date"].includes(pipelineViewFilter);
     updatePipelineFilterBar(countFilter ? matchingCount : source.length);
-    const showEmptyContentGroups = pipelineViewFilter === "all" && !pipelineColumnFiltersActive();
+    const showEmptyContentGroups = (pipelineViewFilter === "all" && !pipelineColumnFiltersActive())
+      || (pipelineGlobalSearchActive && (pipelineContentRecords || []).length > 0);
     if (!source.length && !(showEmptyContentGroups && pipelineContentRecords.length)) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty
-        ? `<div class="empty pipeline-compact-empty">${pipelineScheduledSearchActive ? "No scheduled outputs match that search in any week." : "No outputs match the current filters."}</div>`
+        ? `<div class="empty pipeline-compact-empty">${pipelineGlobalSearchActive
+          ? "No pipeline entries match that content ID, output ID, or title."
+          : pipelineScheduledSearchActive
+            ? "No scheduled outputs match that search in any week."
+            : "No outputs match the current filters."}</div>`
         : '<div class="empty pipeline-compact-empty">No Platform Output records were returned.</div>';
       return;
     }
@@ -24621,13 +24641,15 @@ function timedScriptAssetLabel(asset, index) {
     const next = $("pipelineContentNext");
     const label = $("pipelineContentPageLabel");
     const timezone = $("pipelineContentTimezoneHint");
-    if (previous) previous.disabled = focused || pipelineContentPageOffset <= 0;
-    if (next) next.disabled = focused || !pipelineContentHasMore;
+    if (previous) previous.disabled = focused || pipelineGlobalSearchActive || pipelineContentPageOffset <= 0;
+    if (next) next.disabled = focused || pipelineGlobalSearchActive || !pipelineContentHasMore;
     if (label) {
       const count = pipelineContentVisibleIds.length;
-      label.textContent = focused ? "Exception view (all matching records)"
-        : count ? "Content IDs " + (pipelineContentPageOffset + 1) + "–"
-          + (pipelineContentPageOffset + count) : "No content IDs on this page";
+      label.textContent = pipelineGlobalSearchActive
+        ? (`Search results · ${count || 0} content ID${count === 1 ? "" : "s"}`)
+        : focused ? "Exception view (all matching records)"
+          : count ? "Content IDs " + (pipelineContentPageOffset + 1) + "–"
+            + (pipelineContentPageOffset + count) : "No content IDs on this page";
     }
     if (timezone) timezone.textContent = "Creation dates use " + workingStudioTimeZone();
   }
@@ -24680,6 +24702,10 @@ function timedScriptAssetLabel(asset, index) {
       // Manual / attention share Home's Manual Action Required predicate. Those
       // rows age out of newest-250 and open-1000, so they need the same focused
       // drill-down as Failed / past-due (not a client filter on a short page).
+      if (pipelineGlobalSearchActive && silent && !force) {
+        pipelinePollInFlight = false;
+        return;
+      }
       const focusedView = ["approved_past_due", "approved_missing_date", "failed", "manual", "attention"].includes(pipelineViewFilter);
       if (focusedView) {
         const focusedMode = pipelineViewFilter; // Same explicit Home bucket on the server.
@@ -29093,9 +29119,19 @@ function timedScriptAssetLabel(asset, index) {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
       window.clearTimeout(pipelineScheduledSearchTimer);
+      window.clearTimeout(pipelineGlobalSearchTimer);
       if (pipelineViewFilter !== "scheduled") {
         pipelineScheduledSearchGeneration += 1;
         pipelineScheduledSearchActive = false;
+      }
+      const leavingGlobalSearch = pipelineGlobalSearchActive;
+      if (leavingGlobalSearch) {
+        pipelineGlobalSearchGeneration += 1;
+        pipelineGlobalSearchActive = false;
+        pipelineGlobalSearchMatchedBy = null;
+        clearPipelineColumnFilters();
+        const search = $("pipelineQuickSearch");
+        if (search) search.value = "";
       }
       const searchNeedle = pipelineSearchNeedle($("pipelineQuickSearch")?.value);
       if (pipelineViewFilter === "scheduled" && searchNeedle.length >= 2) {
@@ -29106,11 +29142,12 @@ function timedScriptAssetLabel(asset, index) {
       // Never reuse those rows for All, other profile tabs, or another
       // exception view: that was making navigation silently drop outputs.
       const needsFreshScope = ["approved_missing_date", "approved_past_due", "failed", "manual", "attention"].includes(pipelineViewFilter)
-        || pipelineListExceptionScope === true;
+        || pipelineListExceptionScope === true
+        || leavingGlobalSearch;
       if (needsFreshScope) {
         pipelineListExceptionScope = false;
         pipelineOutputs = [];
-        clearPipelineColumnFilters();
+        if (!leavingGlobalSearch) clearPipelineColumnFilters();
         refreshPipelineOutputs({ force: true });
         return;
       }
@@ -29163,12 +29200,58 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  function pipelineSearchLooksNumeric(raw) {
+    const text = pipelineSearchNeedle(raw);
+    return /^(?:#|content(?:\s*id)?\s*|ci\s*|output(?:\s*id)?\s*|po\s*|platform(?:\s*output)?\s*)?\d{1,9}$/i.test(text);
+  }
+
+  async function refreshPipelineGlobalSearch(needle) {
+    const generation = ++pipelineGlobalSearchGeneration;
+    const target = $("outputsList");
+    try {
+      const result = await api(`/api/outputs?mode=pipeline_search&q=${encodeURIComponent(needle)}`, {
+        timeoutMs: 20000,
+        retries: 1,
+      });
+      if (generation !== pipelineGlobalSearchGeneration || !pipelineGlobalSearchActive) return;
+      const records = Array.isArray(result?.records) ? result.records : [];
+      const contentGroups = Array.isArray(result?.content_groups) ? result.content_groups : [];
+      pipelineOutputs = records;
+      pipelineContentRecords = contentGroups;
+      pipelineContentVisibleIds = Array.isArray(result?.content_ids) ? result.content_ids : [];
+      pipelineContentHasMore = false;
+      pipelineGlobalSearchMatchedBy = String(result?.matched_by || "").trim() || null;
+      pipelineListExceptionScope = false;
+      updatePipelineContentControls();
+      if (target) renderOutputsTable(target, records);
+      const packages = pipelineContentVisibleIds.length || contentGroups.length;
+      const kind = pipelineGlobalSearchMatchedBy === "content_id" ? "content ID"
+        : pipelineGlobalSearchMatchedBy === "output_id" ? "output ID"
+          : pipelineGlobalSearchMatchedBy === "title" ? "title"
+            : "search";
+      setPipelineLiveHint(packages
+        ? `Pipeline ${kind} search · ${packages} content package${packages === 1 ? "" : "s"} · ${records.length} output${records.length === 1 ? "" : "s"}`
+        : `No pipeline ${kind} matches for “${needle}”`);
+    } catch (error) {
+      if (generation !== pipelineGlobalSearchGeneration) return;
+      pipelineGlobalSearchActive = true;
+      if (target) {
+        target.innerHTML = `<div class="error" role="alert">${escapeHtml(error?.message || "Could not search the pipeline database.")}</div>`;
+      }
+      setPipelineLiveHint(error?.message || "Could not search the pipeline database.");
+    }
+  }
+
   function applyPipelineQuickSearch(raw) {
     const needle = pipelineSearchNeedle(raw);
     pipelineColumnFilters.output = needle;
     pipelineOpenSingleOnLoad = false;
     window.clearTimeout(pipelineScheduledSearchTimer);
+    window.clearTimeout(pipelineGlobalSearchTimer);
     if (pipelineViewFilter === "scheduled" && needle.length >= 2) {
+      pipelineGlobalSearchGeneration += 1;
+      pipelineGlobalSearchActive = false;
+      pipelineGlobalSearchMatchedBy = null;
       pipelineScheduledSearchActive = true;
       const target = $("outputsList");
       const label = $("pipelineFilterLabel");
@@ -29185,6 +29268,35 @@ function timedScriptAssetLabel(asset, index) {
     }
     pipelineScheduledSearchGeneration += 1;
     pipelineScheduledSearchActive = false;
+    const readyForGlobal = needle.length >= 2 || pipelineSearchLooksNumeric(needle);
+    if (readyForGlobal) {
+      // Global DB search must not stay trapped under Rendering / page filters.
+      pipelineViewFilter = "all";
+      pipelineGlobalSearchActive = true;
+      pipelineGlobalSearchMatchedBy = null;
+      const target = $("outputsList");
+      const label = $("pipelineFilterLabel");
+      const bar = $("pipelineFilterBar");
+      if (bar) bar.hidden = false;
+      if (label) label.textContent = `Searching the pipeline database for “${needle}”…`;
+      if (target) target.innerHTML = '<div class="empty pipeline-compact-empty">Searching the pipeline database…</div>';
+      updatePipelineQuickTabs(pipelineOutputs);
+      updatePipelineContentControls();
+      pipelineGlobalSearchTimer = window.setTimeout(() => {
+        refreshPipelineGlobalSearch(needle).catch((error) => {
+          setPipelineLiveHint(error?.message || "Could not search the pipeline database.");
+        });
+      }, 250);
+      return;
+    }
+    const wasGlobal = pipelineGlobalSearchActive;
+    pipelineGlobalSearchGeneration += 1;
+    pipelineGlobalSearchActive = false;
+    pipelineGlobalSearchMatchedBy = null;
+    if (wasGlobal) {
+      refreshPipelineOutputs({ force: true }).finally(schedulePipelinePoll);
+      return;
+    }
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
   }
@@ -29196,11 +29308,20 @@ function timedScriptAssetLabel(asset, index) {
     pipelineViewFilter = "all";
     clearPipelineColumnFilters();
     window.clearTimeout(pipelineScheduledSearchTimer);
+    window.clearTimeout(pipelineGlobalSearchTimer);
     pipelineScheduledSearchGeneration += 1;
     pipelineScheduledSearchActive = false;
+    const wasGlobal = pipelineGlobalSearchActive;
+    pipelineGlobalSearchGeneration += 1;
+    pipelineGlobalSearchActive = false;
+    pipelineGlobalSearchMatchedBy = null;
     const search = $("pipelineQuickSearch");
     if (search) search.value = "";
     pipelineOpenSingleOnLoad = false;
+    if (wasGlobal) {
+      refreshPipelineOutputs({ force: true }).finally(schedulePipelinePoll);
+      return;
+    }
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
   });
