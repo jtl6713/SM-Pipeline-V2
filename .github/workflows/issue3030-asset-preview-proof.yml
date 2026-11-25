@@ -1,0 +1,130 @@
+name: Issue 3030 protected exact Asset Manager image proof
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3030-asset-preview-proof.yml'
+      - 'scripts/issue3030-preview-proof*.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3030-asset-preview-proof.yml'
+      - 'scripts/issue3030-preview-proof*.mjs'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: issue3030-exact-asset-preview-proof
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/issue3030-preview-proof.test.mjs
+  verify:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_RUN: '45553840139'
+      DEPLOY_SHA: c11a1192cd7f5dec61b06855ed96ed787499d229
+      VERIFY_BRIDGE: chicagoshining-3030-verify-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require successful exact production Worker release
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DEPLOY_RUN" -o /tmp/3030-deploy.json
+            jq -e --arg sha "$DEPLOY_SHA" '.head_sha==$sha and .name=="Deploy Studio API Worker Production"' /tmp/3030-deploy.json >/dev/null
+            if [[ "$(jq -r .status /tmp/3030-deploy.json)" == completed ]]; then
+              jq -e '.conclusion=="success"' /tmp/3030-deploy.json >/dev/null
+              echo issue3030_exact_production_release=PASS
+              exit 0
+            fi
+            sleep 8
+          done
+          exit 1
+      - name: Create short-lived exact-scope verification bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          import json,re,secrets,time
+          from pathlib import Path
+          deployment=Path('.github/workflows/deploy-cloudflare-worker-production.yml').read_text()
+          m=re.search(r'"Cf-Access-Authenticated-User-Email":"([^"]+)"',deployment)
+          assert m and '@' in m.group(1)
+          token=secrets.token_urlsafe(40)
+          Path('/tmp/3030-token').write_text(token)
+          config=dict(token=token,expires=int((time.time()+900)*1000),reviewUser=m.group(1),expectedVersion='0.10.1036-drive-photo-preview-3030')
+          source=Path('scripts/issue3030-preview-proof.mjs').read_text()
+          Path('/tmp/3030-bridge.mjs').write_text(source+'\nexport default createPreviewProofBridge('+json.dumps(config)+');\n')
+          Path('/tmp/3030-metadata.json').write_text(json.dumps({"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}))
+          PY
+          TOKEN=$(cat /tmp/3030-token)
+          echo "::add-mask::$TOKEN"
+          node --check /tmp/3030-bridge.mjs
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 45 -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/3030-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/3030-bridge.mjs;type=application/javascript+module;filename=worker.js' -o /tmp/3030-upload.json
+          jq -e '.success==true' /tmp/3030-upload.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/3030-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/3030-subdomain.json >/dev/null
+          curl -fsS --max-time 30 -H "$AUTH" "$API_ROOT/workers/subdomain" -o /tmp/3030-account.json
+      - name: Verify exact live version and all five private image response envelopes
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/3030-account.json)
+          TOKEN=$(cat /tmp/3030-token)
+          echo "::add-mask::$TOKEN"
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/probe"
+          code=000
+          for i in $(seq 1 20); do
+            code=$(curl -sS --max-time 30 --max-filesize 4096 -o /tmp/3030-health.json -w '%{http_code}' "$BASE/health" || true)
+            if [[ "$code" == 200 ]]; then break; fi
+            if [[ "$code" == 404 ]] && grep -Fq 'error code: 1042' /tmp/3030-health.json; then sleep 3; continue; fi
+            break
+          done
+          test "$code" = 200
+          jq -e '.ok==true and .version_matches==true' /tmp/3030-health.json >/dev/null
+          echo issue3030_live_worker_version=PASS
+          failures=0
+          for id in recLCL4QBOuOEJ1s4 rec9eKU4Asdo2jyx3 recdAAkJ6fRrNY9el recbetLNTbLcxWcMJ reclA5AWAy0UWCx6f; do
+            code=$(curl -sS --max-time 75 --max-filesize 4096 -o /tmp/3030-result.json -w '%{http_code}' "$BASE/$id" || true)
+            if [[ "$code" == 200 ]] && jq -e --arg id "$id" '.asset==$id and (.ok|type=="boolean")' /tmp/3030-result.json >/dev/null; then
+              jq -c '{asset,ok,status,source,type,byte_count,envelope_verified,original_size_verified,private_cache,reason}' /tmp/3030-result.json
+              if ! jq -e '.ok==true' /tmp/3030-result.json >/dev/null; then failures=$((failures+1)); fi
+            else
+              echo "issue3030_bridge_probe_failed asset=$id http=$code"
+              failures=$((failures+1))
+            fi
+          done
+          echo "issue3030_failed_assets=$failures/5"
+          test "$failures" -eq 0
+      - name: Delete short-lived verification bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 30 -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$VERIFY_BRIDGE" \
+            -o /tmp/3030-delete.json -w '%{http_code}')
+          if [[ "$code" == 404 ]]; then exit 0; fi
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/3030-delete.json >/dev/null
