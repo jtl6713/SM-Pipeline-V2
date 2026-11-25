@@ -62,6 +62,25 @@ class R2UploadClient:
             headers.update(extra)
         return headers
 
+    def story_audio_missing(self, key: str) -> bool:
+        import re
+
+        if not re.fullmatch(r"studio/previews/story-voiceover/rec[A-Za-z0-9]{14}/[a-f0-9]{64}\.mp3", key):
+            raise ValueError("invalid exact Story audio key")
+        url = self._upload_url()
+        if not url.startswith("https://"):
+            raise RuntimeError("Story audio requires HTTPS upload transport")
+        response = requests.get(url+"/lifecycle/object", params={"key":key},
+                                headers=self._headers(), timeout=(5,20), allow_redirects=False)
+        if response.status_code != 200:
+            raise RuntimeError(f"Story audio exact head HTTP {response.status_code}")
+        data = response.json()
+        if data.get("ok") is False and data.get("error") == "Not found" and data.get("key") == key:
+            return True
+        if data.get("ok") is True and (data.get("object") or {}).get("key") == key:
+            return False
+        raise RuntimeError("Story audio exact head ambiguous")
+
     def get_story_audio(self, key: str, sha256: str) -> bytes:
         import hashlib
         import re
