@@ -1,0 +1,117 @@
+name: Incident 2670 Cross-Host JS and Windows Python Lease Canary
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-crosshost-runtime-canary.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2670-crosshost-synthetic-client
+  cancel-in-progress: false
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse the Windows Python client wrapper offline before any RPC
+        shell: pwsh
+        run: |
+          $tokens=$null;$parseErrors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2670-crosshost-python-canary.ps1'),
+            [ref]$tokens,[ref]$parseErrors)
+          if($parseErrors.Count -ne 0){throw 'crosshost_python_ps_parser_invalid'}
+          Write-Output 'crosshost_windows_wrapper_parse=PASS'
+      - name: Prove JS GitHub host vs real Windows Python Runner code
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_SERVICE_ROLE_KEY" && test -n "$OPS_TOKEN"
+          [[ "${SUPABASE_URL%/}" == "https://vkwvscgisqsbuwagdvtb.supabase.co" ]]
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/global-runner-health.json
+          jq -e '.ok==true and .recovery_read_only==false and
+            .workload_governor_enabled==true and .studio_write_source=="supabase" and
+            .airtable_activity.ok==true and .airtable_activity.any_activity==false' /tmp/global-runner-health.json >/dev/null
+          code=$(curl -sS --max-time 15 -o /tmp/global-root.json -w '%{http_code}' \
+            -G "${SUPABASE_URL%/}/rest/v1/studio_global_workload_scopes" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --data-urlencode 'scope=eq.database' --data-urlencode 'select=scope,max_active,circuit_until')
+          [[ "$code" == 200 ]]
+          jq -e 'length==1 and .[0].max_active==1 and .[0].circuit_until==null' /tmp/global-root.json >/dev/null
+          echo 'crosshost_global_database_root_1=PASS'
+          BASE='https://ops.chicagoshining.com'
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/catalog" -o /tmp/ops-catalog.json
+          jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null
+          cleanup(){
+            local rc="$1"
+            trap - EXIT
+            if [[ -f /tmp/incident2670-crosshost-node-lease.json ]]; then
+              node .github/scripts/incident-2670-crosshost-node-client.mjs release ||
+                echo 'crosshost_node_lease_cleanup=UNCONFIRMED_TTL180'
+            fi
+            exit "$rc"
+          }
+          trap 'cleanup $?' EXIT
+          submit_windows(){
+            local mode="$1"
+            python3 - "$mode" <<'PY'
+          import sys,json
+          from pathlib import Path
+          mode=sys.argv[1]
+          if mode not in {"deny","hold"}: raise SystemExit("crosshost_mode_invalid")
+          command=Path('.github/scripts/incident-2670-crosshost-python-canary.ps1').read_text()
+          command=command.replace('__MODE__',mode)
+          assert len(command)<8000
+          Path('/tmp/crosshost-ops-start-body.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+            local http
+            http=$(curl -sS --max-time 30 -o /tmp/crosshost-ops-start.json -w '%{http_code}' \
+              -X POST "$BASE/api/shell" -H "Authorization: Bearer $OPS_TOKEN" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/crosshost-ops-start-body.json || true)
+            [[ "$http" == 202 || "$http" == 200 ]] || { echo "crosshost_ops_http=$http"; return 1; }
+            jq -er '.job.id // .jobId // empty' /tmp/crosshost-ops-start.json
+          }
+          check_windows(){
+            local id="$1" mode="$2" status
+            for i in $(seq 1 55); do
+              curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+                "$BASE/api/jobs/$id" -o /tmp/crosshost-ops-status.json
+              status=$(jq -r '.job.status // empty' /tmp/crosshost-ops-status.json)
+              if [[ "$status" == ok ]]; then
+                if [[ "$mode" == deny ]]; then
+                  jq -r '.job.log // ""' /tmp/crosshost-ops-status.json |
+                    grep -x 'incident2670_crosshost_runner_DENIED_ROOT_CAP' >/dev/null
+                else
+                  jq -r '.job.log // ""' /tmp/crosshost-ops-status.json |
+                    grep -x 'incident2670_crosshost_runner_HOLD_RELEASED' >/dev/null
+                fi
+                echo "crosshost_windows_$mode=PASS"
+                return 0
+              fi
+              [[ "$status" == failed ]] && { echo 'crosshost_windows_client=FAILED_NO_PUBLISH'; return 1; }
+              sleep 2
+            done
+            echo 'crosshost_windows_client=TIMEOUT'
+            return 1
+          }
+          # Client A: execute the real source JavaScript RPC client on a
+          # separate GitHub Actions Linux host (not production Cloudflare).
+          node .github/scripts/incident-2670-crosshost-node-client.mjs acquire
+          id=$(submit_windows deny)
+          check_windows "$id" deny
+          node .github/scripts/incident-2670-crosshost-node-client.mjs release
+          # Client B: the actually deployed Python module on Windows acquires
+          # and holds a distinct scope while Node tries another root admission.
+          id=$(submit_windows hold)
+          sleep 8
+          node .github/scripts/incident-2670-crosshost-node-client.mjs probe
+          check_windows "$id" hold
+          echo 'incident2670_crosshost_synthetic_two_clients=PASS_NO_PRODUCTION_JOBS'
