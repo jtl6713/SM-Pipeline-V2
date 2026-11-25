@@ -46,7 +46,7 @@ test("an expired lock can be reclaimed after a worker crash", async () => {
   const before = await acquireOutputApprovalLock(bucket, "recOutput456", "dead-worker", 1000);
   await assert.rejects(
     () => acquireOutputApprovalLock(bucket, "recOutput456", "premature", 1001),
-    e => e.status === 409,
+    e => e.status === 409 && e.code === "OUTPUT_APPROVAL_LOCK_BUSY" && e.retry_at_ms === 1000 + OUTPUT_APPROVAL_LOCK_MS,
   );
   const after = await acquireOutputApprovalLock(bucket, "recOutput456", "recovered", 1000 + OUTPUT_APPROVAL_LOCK_MS + 1);
   await releaseOutputApprovalLock(bucket, before); // stale owner cannot release newer owner's lease

@@ -159,7 +159,7 @@ test("one-minute Factory recovery discovers global children even when the rotati
   assert.match(cron, /Factory child recovery scan unavailable/);
   assert.match(cron, /new Map\(candidates\.map/);
   assert.match(cron, /factoryBatchCronSelectJobs\(distinct/);
-  assert.match(cron, /factoryBatchProcess\(env, candidate\.profileId, candidate\.requestId, ctx\)/);
+  assert.match(cron, /factoryBatchProcess\(env, candidate\.profileId, candidate\.requestId, ctx, \{ scheduled: true \}\)/);
 });
 
 test("Factory strict occupancy is per profile and platform, once per platform in the claimed drain", () => {
@@ -230,7 +230,18 @@ test("#2959 indexed active work precedes history; fallback remains for old ledge
   const cronEnd = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchCronResume__*/", cronStart);
   const cron = functions04.slice(cronStart, cronEnd);
   assert.ok(cron.indexOf("factoryBatchActiveIndexProfiles(") < cron.indexOf("factoryApprovalGroupCronScan("));
-  assert.ok(cron.indexOf("factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx)") < cron.indexOf("factoryApprovalGroupCronScan("));
+  assert.ok(cron.indexOf("factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx, { scheduled: true })") < cron.indexOf("factoryApprovalGroupCronScan("));
   assert.match(cron, /5 - dispatchedProfiles\.size/);
   assert.match(cron, /factoryBatchIndexRemember\(env\.STUDIO_MEDIA, exact\.job, \{ refresh: false \}\)/);
+});
+
+test("2959: Supabase HTTP and scheduled drains retain one absolute admission budget and one tracked continuation", () => {
+  const start=functions04.indexOf("export async function factoryBatchProcess(");
+  const end=functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchProcess__*/",start);
+  const source=functions04.slice(start,end);
+  assert.match(source,/Date\.now\(\) \+ \(scheduled \? 120000 : 16000\)/);
+  assert.match(source,/maxElapsedMs: scheduled \? 20000 : 8000,\s*startDeadlineMs/);
+  assert.match(source,/continueSlice: continueSlice \+ 1, scheduled, deadlineMs, inline: supabaseDrain/);
+  assert.match(source,/if \(supabaseDrain\) await continuation/);
+  assert.match(source,/ctx\?\.waitUntil && !options\.inline/);
 });

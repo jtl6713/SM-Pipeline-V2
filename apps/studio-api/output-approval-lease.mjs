@@ -27,7 +27,12 @@ export async function acquireOutputApprovalLock(bucket, id, owner, nowMs = Date.
   for (let i = 0; i < 5; i++) {
     const old = await readLock(bucket, key);
     if (old?.data?.owner && Number(old.data.expires_ms) > nowMs) {
-      throw approvalError(409, "Output approval already in progress; check its current status before retrying");
+      const error = approvalError(409, "Output approval already in progress; check its current status before retrying");
+      // Only this verified, unexpired shared lease is a retryable contention.
+      // Do not classify unrelated 409 validation failures as transient.
+      error.code = "OUTPUT_APPROVAL_LOCK_BUSY";
+      error.retry_at_ms = Number(old.data.expires_ms);
+      throw error;
     }
     const value = { owner, expires_ms: nowMs + OUTPUT_APPROVAL_LOCK_MS };
     const result = await bucket.put(key, JSON.stringify(value), {

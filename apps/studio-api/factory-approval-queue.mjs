@@ -494,15 +494,17 @@ export function factoryBatchFailure(error) {
   const code = Number(error?.status || error?.statusCode || 0);
   const message = String(error?.message || error || "Approval failed").slice(0, 450);
   const waitRender = /rendering is incomplete|waiting in render queue|still rendering/i.test(message);
-  const transient = waitRender || [408, 429].includes(code) || code >= 500
+  const waitApprovalLock = error?.code === "OUTPUT_APPROVAL_LOCK_BUSY" && Number.isFinite(Number(error.retry_at_ms));
+  const transient = waitApprovalLock || waitRender || [408, 429].includes(code) || code >= 500
     || /timeout|rate limit|temporarily unavailable|network error/i.test(message);
-  return { message, transient, waitRender };
+  return { message, transient, waitRender, waitApprovalLock, retryAtMs: waitApprovalLock ? Number(error.retry_at_ms) : null };
 }
 export async function factoryBatchDrain(bucket, options) {
   assertBucket(bucket);
-  const { profileId, requestId, approve, maxItems = 6, maxElapsedMs = Infinity } = options;
+  const { profileId, requestId, approve, maxItems = 6, maxElapsedMs = Infinity, startDeadlineMs = Infinity } = options;
   const now = options.now || (() => Date.now());
   const startedAt = now();
+  if (startedAt >= startDeadlineMs) return { claimed: false, processed: 0, job: await factoryBatchRead(bucket, profileId, requestId) };
   const owner = (options.makeOwner || (() => crypto.randomUUID()))();
   const lock = await factoryBatchLock(bucket, profileId, owner, now());
   if (!lock) return { claimed: false, job: await factoryBatchRead(bucket, profileId, requestId) };
@@ -519,7 +521,7 @@ export async function factoryBatchDrain(bucket, options) {
       // HTTP waitUntil has a bounded lifetime. Finish as many approvals as
       // the budget allows rather than hard-stopping after only five.
       // Remaining work stays durable for cron recovery after the client leaves.
-      if (processed >= maxItems || (processed > 0 && now() - startedAt >= maxElapsedMs)) break;
+      if (now() >= startDeadlineMs || processed >= maxItems || (processed > 0 && now() - startedAt >= maxElapsedMs)) break;
       if (done.has(item.status) || item.next_attempt_ms > now()) continue;
       const stamp = new Date(now()).toISOString();
       job = await cas(bucket, key, value => ({
@@ -572,12 +574,14 @@ export async function factoryBatchDrain(bucket, options) {
         const failure = factoryBatchFailure(error);
         const attempts = job.items.find(x => x.id === item.id)?.attempts || 1;
         outcome = {
-          status: failure.transient && !job.items.find(x => x.id === item.id)?.auto_retry_count
-             && (failure.waitRender || attempts < 5) ? "pending" : "failed",
+          status: failure.waitApprovalLock || (failure.transient && !job.items.find(x => x.id === item.id)?.auto_retry_count
+             && (failure.waitRender || attempts < 5)) ? "pending" : "failed",
           error: failure.message,
-          next_attempt_ms: failure.transient
-            ? now() + (failure.waitRender ? 300000 : Math.min(600000, 30000 * Math.pow(2, attempts)))
-            : 0,
+          next_attempt_ms: failure.waitApprovalLock
+            ? Math.max(now() + 1000, failure.retryAtMs + 1000)
+            : failure.transient
+              ? now() + (failure.waitRender ? 300000 : Math.min(600000, 30000 * Math.pow(2, attempts)))
+              : 0,
         };
       }
       const completedAt = new Date(now()).toISOString();
