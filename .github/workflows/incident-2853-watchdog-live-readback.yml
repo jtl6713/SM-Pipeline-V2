@@ -27,8 +27,20 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path '.github/scripts/incident-2853-watchdog-live-readback.ps1'),
             [ref]$tokens,[ref]$errors)
-          if($errors.Count -ne 0){throw 'readonly_script_parse_invalid'}
+          if($errors.Count -ne 0){$errors | ForEach-Object {Write-Output ('parse_error='+$_.ErrorId+' line='+$_.Extent.StartLineNumber)};throw 'readonly_script_parse_invalid'}
           if((Get-Content '.github/scripts/incident-2853-watchdog-live-readback.ps1' -Raw).Length -gt 7800){throw 'readonly_script_too_large'}
+      - name: Compile both embedded read-only Python probes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          s=Path('.github/scripts/incident-2853-watchdog-live-readback.ps1').read_text()
+          probes=re.findall(r"(?m)^\$(?:code|probe)\s*=\s*@'\n([\s\S]*?)\n'@$",s)
+          assert len(probes)==2
+          for i, source in enumerate(probes):
+              compile(source, f"read_only_probe_{i}", "exec")
+          PY
   readback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
