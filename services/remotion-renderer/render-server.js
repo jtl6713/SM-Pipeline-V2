@@ -5,6 +5,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const {decodeStoryAudio} = require('./story-audio-payload');
 const { spawn } = require('child_process');
 const { registerRemotionCleanup } = require('./remotion-cleanup');
 const { authoritativeRenderPlan } = require('./authoritative-duration');
@@ -129,6 +130,7 @@ app.get('/health', (req, res) => {
         service: 'SM Pipeline V2 Remotion Render Server',
         version: SERVICE_VERSION,
         voiceoverSupport: true,
+        checksumBoundStoryAudio: true,
         voiceoverAwareDuration: true,
         defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
         postVoiceoverMusicBoost: true,
@@ -969,6 +971,19 @@ function normalizeVoiceover(body) {
 async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
     if (!voiceover) {
         return undefined;
+    }
+
+    if (voiceover.storyAudio) {
+        // Bytes are accepted only as a bounded, verified source for this job.
+        // Never persist inline bytes in logs, public status or saved props.
+        const data = decodeStoryAudio(voiceover.storyAudio);
+        const destination = path.join(jobAssetDir, 'voiceover.mp3');
+        await fsp.writeFile(destination, data);
+        const rewrittenVoiceover = {...voiceover, src: toPublicSrc(destination)};
+        delete rewrittenVoiceover.storyAudio;
+        delete rewrittenVoiceover.url;
+        appendLog(job, 'Localized checksum-verified Story narration');
+        return rewrittenVoiceover;
     }
 
     if (isHttpUrl(voiceover.url)) {
