@@ -65,3 +65,5 @@ jobs:
               raise SystemExit('readonly_incomplete')
           print('story2853_proof=READONLY_COMPLETE')
           PY
+
+# Repeat protected diagnostic after isolated dotenv parsing correction.

@@ -10,20 +10,25 @@ sys.path.insert(0,sys.argv[1])
 phase="import"
 try:
     import requests
-    from config import load_settings
-    from integrations.r2_upload import R2UploadClient
     phase="configuration"
-    runtime=load_settings()
-    url=str(runtime.get("r2_upload_worker_url") or "").strip()
-    secret=str(runtime.get("r2_upload_worker_secret") or "").strip()
+    from pathlib import Path
+    from dotenv import dotenv_values
+    values=dotenv_values(Path(sys.argv[1])/".env")
+    url=str(values.get("R2_UPLOAD_WORKER_URL") or "").strip()
+    secret=str(values.get("R2_UPLOAD_WORKER_SECRET") or "").strip()
     expected="chicagoshining-r2-upload.joseph-t-logan.workers.dev"
-    origin=urlsplit(url)
-    allowed=origin.scheme=="https" and origin.hostname==expected and not origin.username and not origin.password and origin.port in (None,443)
-    print("story2853_config="+json.dumps({"url_present":bool(url),"secret_present":bool(secret),"expected_origin":allowed},separators=(",",":")))
+    allowed=False
+    try:
+        origin=urlsplit(url)
+        allowed=origin.scheme=="https" and origin.hostname==expected and not origin.username and not origin.password and origin.port in (None,443)
+    except ValueError:
+        pass
+    print("story2853_config="+json.dumps({"url_present":bool(url),"secret_present":bool(secret),"expected_origin":allowed},separators=(",",":")),flush=True)
     if not allowed or not secret:
         raise ValueError("configuration")
-    storage=R2UploadClient()
     base="https://"+expected
+    # Isolate the storage authority from unrelated service configuration errors.
+    # No secret is sent to a URL supplied by the environment.
     phase="health"
     health=requests.get(base+"/health",timeout=(5,15),allow_redirects=False)
     version=health.json().get("version","") if health.status_code==200 else ""
@@ -33,7 +38,7 @@ try:
           "synthetic":"studio/previews/story-voiceover/recAAAAAAAAAAAAAA/"+"0"*64+".mp3"}
     for name,key in keys.items():
         try:
-            with requests.get(storage._story_endpoint("/lifecycle/object",key),params={"key":key},headers=storage._headers(),timeout=(5,20),allow_redirects=False) as response:
+            with requests.get(base+"/lifecycle/object",params={"key":key},headers={"x-pipeline-secret":secret},timeout=(5,20),allow_redirects=False) as response:
                 result="unverified"
                 try:
                     body=response.json()
