@@ -29,6 +29,8 @@ import {
   listAutonomousResumeDrafts,
   pickAutonomousMusicAssetId,
   pickNarrationVoiceFromProfiles,
+  resolveRequiredProfileNarrationVoice,
+  resolveProductionNarrationVoice,
   resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
@@ -1002,4 +1004,23 @@ test("P0 #907 platform suggestions cannot produce zero Item4 outputs", () => {
   // Operator explicitly requesting only an unsupported destination should
   // fail validation instead of being silently expanded to four platforms.
   assert.deepEqual(autonomousItem4Platforms(["X"], { fallback: false }), []);
+});
+
+
+test("profile defaults are authoritative for missing and legacy-placeholder narration IDs", () => {
+  const kate = "fixture-kate", briony = "fixture-briony";
+  const miami = { Default_Narration_Voice_ID: briony, Default_Narration_Voice_Name: "Briony" };
+  const chicago = { Default_Narration_Voice_ID: kate, Default_Narration_Voice_Name: "Kate" };
+  for (const stored of [null, "", kate]) {
+    assert.deepEqual(resolveProductionNarrationVoice(stored, "Kate", miami, kate),
+      { voice_id: briony, voice_name: "Briony" });
+    assert.deepEqual(resolveProductionNarrationVoice(stored, "", chicago, kate),
+      { voice_id: kate, voice_name: "Kate" });
+  }
+  assert.deepEqual(resolveRequiredProfileNarrationVoice({default_narration_voice_id:"new-default"}),
+    {voice_id:"new-default",voice_name:"new-default"});
+  assert.deepEqual(resolveProductionNarrationVoice("explicit-id","Explicit",miami,kate),
+    {voice_id:"explicit-id",voice_name:"Explicit"});
+  assert.throws(() => resolveRequiredProfileNarrationVoice({}), /no configured default/);
+  assert.throws(() => resolveProductionNarrationVoice("", "", null, kate), /no configured default/);
 });
