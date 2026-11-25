@@ -75,7 +75,7 @@ test("production fanout gates atomic seed writes by exact profile/platform lane"
   );
   assert.match(worker02, /import \{ scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled \} from/);
   assert.match(fanout, /const seedProfileId = studioFirstLinkedId\(f\(parent, "Content_Profile"\)\)/);
-  assert.match(fanout, /if \(scheduleReservationLaneEnabled\(env, seedProfileId, effective\.platform\)/);
+  assert.match(fanout, /if \(options\.recoveryReviewOnly !== true\s*&& scheduleReservationLaneEnabled\(env, seedProfileId, effective\.platform\)\s*&& Object\.prototype\.hasOwnProperty\.call\(seed, "Scheduled_Post_Date"\)\)/);
   assert.doesNotMatch(fanout, /if \(scheduleReservationAuthorityEnabled\(env\)/);
 });
 
