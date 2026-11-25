@@ -399,6 +399,19 @@ def process_one(
             "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
+    # Renderer localizes the exact receipt through the existing private
+    # Runner transport; the public media hostname is not an access grant.
+    if needs_story_voiceover(output) and not dry_run:
+        from studio_produce.story_voiceover import RECEIPT
+        from render.fields import parse_json_field
+        receipt = parse_json_field(field(output, RECEIPT)) or {}
+        if receipt.get("state") == "verified" and receipt.get("url") == vo:
+            import re
+            sha = str(receipt.get("sha256") or "")
+            if not re.fullmatch(r"[a-f0-9]{64}", sha) or not isinstance(payload.get("voiceover"), dict):
+                return {"processed":False,"reason":"story_audio_receipt_invalid","output_record_id":output["id"]}
+            payload["voiceover"]["storyAudioSha256"] = sha
+
     expected_revision = manifest_studio_revision(output)
     expected_snapshot = render_snapshot_identity(output)
     watermark_url = render_watermark_url(client, output, content_item)
