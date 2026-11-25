@@ -2650,6 +2650,7 @@ export const PRO_AUDIO_OVERRIDE_FIELDS = Object.freeze([
   "Video_Duration_Seconds_Override", "Voiceover_Duration_Seconds",
   "Music_Start_Seconds", "Voiceover_Tail_Seconds_Override",
   "Selected_Music_Asset_Override",
+  "Pipeline_Family", "Pipeline_Route_Status", "Pipeline_Route_Notes", "Routed_At",
 ]);
 
 export function mapPlanScheduleRow(record, { partial = false } = {}) {
