@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessFreshSupabasePublish } from "./approved-publish-flow.mjs";
+import { assessFreshSupabasePublish, planAuditedEarlyHoldMaeReschedule } from "./approved-publish-flow.mjs";
 
 const nowMs = Date.parse("2026-11-20T19:00:00Z");
 const fresh = () => ({
@@ -80,7 +80,15 @@ const reconciledEarlyHold = () => {
   record.fields.Studio_Publish_Dispatch_At = "2026-11-18T10:30:00Z";
   record.fields.Studio_Early_Hold_Recovery_Proof = "issue-2340-scheduled-hold-v1";
   record.fields.Studio_Early_Hold_Original_Dispatch_At = record.fields.Studio_Publish_Dispatch_At;
-  record.fields.Studio_Early_Hold_Original_Scheduled_At = record.fields.Scheduled_Post_Date;
+  record.fields.Studio_Early_Hold_Original_Scheduled_At = "2026-11-19T18:30:00Z";
+  record.fields.Studio_Overdue_MAE_Recovery_Receipt = {
+    version: "issue-3096-mae-v1", output_record_id: record.id,
+    platform: record.fields.Platform, output_type: record.fields.Platform_Output_Type,
+    original_dispatch_at: record.fields.Studio_Publish_Dispatch_At,
+    original_scheduled_at: record.fields.Studio_Early_Hold_Original_Scheduled_At,
+    planned_at: "2026-11-20T10:00:00Z", scheduled_for: record.fields.Scheduled_Post_Date,
+    time_zone: "America/New_York",
+  };
   return record;
 };
 
@@ -170,4 +178,39 @@ test("#3096 native provider response survives reset general counters and forbids
  }
  const row=fresh();row.fields.FB_Slideshow_Response_JSON="{}";
  assert.equal(check(row).eligible,true);
+});
+
+test("#3096 expired audited hold requires a new MAE slot, not immediate publication", () => {
+  const row = reconciledEarlyHold();
+  row.fields.Scheduled_Post_Date = row.fields.Studio_Early_Hold_Original_Scheduled_At;
+  delete row.fields.Studio_Overdue_MAE_Recovery_Receipt;
+  assert.equal(check(row).reason, "overdue_recovery_requires_mae_reschedule");
+  const options = { nowMs, timeZone:"America/New_York", horizonDays:30,
+    laneOccupiedMs:[], platformOccupiedMs:[Date.parse("2026-11-20T21:30:00Z")], occupancyComplete:true };
+  const plan = planAuditedEarlyHoldMaeReschedule(row, options);
+  assert.equal(plan.ok, true);
+  assert.equal(plan.scheduled_for, "2026-11-21T10:30:00.000Z");
+  assert.equal(row.fields.Studio_Publish_Dispatch_Count, 1);
+  assert.equal(row.fields.Scheduled_Post_Date, "2026-11-19T18:30:00Z");
+  assert.equal(plan.receipt.original_scheduled_at, "2026-11-19T18:30:00.000Z");
+  row.fields.Scheduled_Post_Date = plan.scheduled_for;
+  row.fields.Studio_Overdue_MAE_Recovery_Receipt = plan.receipt;
+  assert.equal(check(row).reason, "future_schedule");
+  assert.equal(assessFreshSupabasePublish(row, { nowMs: Date.parse(plan.scheduled_for) }).eligible, true);
+  row.fields.Studio_Overdue_MAE_Recovery_Receipt = {...plan.receipt, output_record_id:"rec00000000000000"};
+  assert.equal(assessFreshSupabasePublish(row, { nowMs: Date.parse(plan.scheduled_for) }).eligible, false);
+});
+test("#3096 MAE plan fails closed on incomplete occupancy, receipt or prior provider evidence", () => {
+  const original = () => {const r=reconciledEarlyHold();
+    r.fields.Scheduled_Post_Date=r.fields.Studio_Early_Hold_Original_Scheduled_At;
+    delete r.fields.Studio_Overdue_MAE_Recovery_Receipt; return r;};
+  const options={nowMs,timeZone:"America/New_York",horizonDays:30,laneOccupiedMs:[],platformOccupiedMs:[],occupancyComplete:true};
+  assert.equal(planAuditedEarlyHoldMaeReschedule(original(),{...options,occupancyComplete:false}).ok,false);
+  assert.equal(planAuditedEarlyHoldMaeReschedule(original(),{...options,timeZone:"bad-zone"}).ok,false);
+  for (const key of ["Platform_Post_ID","YouTube_Upload_Job_ID","Publish_Locked_By","IG_Story_Last_Attempt_At"]) {
+    const row=original();row.fields[key]="existing";
+    assert.equal(planAuditedEarlyHoldMaeReschedule(row,options).ok,false,key);
+  }
+  const row=original();row.fields.Do_Not_Publish=true;
+  assert.equal(planAuditedEarlyHoldMaeReschedule(row,options).ok,false);
 });
