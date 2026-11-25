@@ -106,6 +106,29 @@ async function childRequestId(requestId, profileId) {
   const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",bytes));
   return "fgc_"+[...digest].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
+// Observational timestamps from the authenticated server route, never from
+// the browser payload. Missing legacy stages stay unknown.
+function originalSubmissionTiming(input, createdAt) {
+  const keys=["route_entered_at","preflight_finished_at","claims_reserved_at"];
+  const values=keys.map(key=>Date.parse(String(input?.[key]||"")));
+  const created=Date.parse(createdAt);
+  if(!values.every(Number.isFinite)||values[0]>values[1]||values[1]>values[2]||values[2]>created)return null;
+  return Object.fromEntries(keys.map((key,i)=>[key,new Date(values[i]).toISOString()]));
+}
+export function factoryApprovalSubmissionTiming(parent) {
+  const prior=parent?.submission_timing;
+  if(!prior)return null;
+  const elapsed=(start,end)=>{
+    const a=Date.parse(String(start||"")),b=Date.parse(String(end||""));
+    return Number.isFinite(a)&&Number.isFinite(b)&&b>=a?b-a:null;
+  };
+  return {...prior,
+    route_preflight_ms:elapsed(prior.route_entered_at,prior.preflight_finished_at),
+    output_claims_ms:elapsed(prior.preflight_finished_at,prior.claims_reserved_at),
+    route_to_children_durable_ms:elapsed(prior.route_entered_at,prior.children_durable_at),
+    parent_created_to_children_durable_ms:elapsed(parent.created_at,prior.children_durable_at),
+  };
+}
 export async function factoryApprovalGroupBuild(options) {
   const plan=factoryApprovalGroupPlan(options);
   const children=await Promise.all(plan.children.map(async ({profile_id,items})=>({
@@ -117,6 +140,8 @@ export async function factoryApprovalGroupBuild(options) {
     schema:FACTORY_GROUP_SCHEMA, id:"fg_"+plan.request_id,
     request_id:plan.request_id, status:"enqueuing",
     created_at:now, updated_at:now,
+    ...(originalSubmissionTiming(options.submissionTiming,now)
+      ? {submission_timing:originalSubmissionTiming(options.submissionTiming,now)} : {}),
     submitted_by:/^rec[A-Za-z0-9]{14}$/.test(String(options.submittedBy||""))
       ? options.submittedBy : null,
     notes:String(options.note||"").slice(0,3000),
@@ -144,8 +169,13 @@ export async function factoryApprovalGroupResume(bucket, requestId) {
       submittedBy: parent.submitted_by || null,
     });
   }
+  // All child ledgers have returned durable acknowledgements. Include this
+  // observation in the EXISTING parent CAS; do not create a telemetry write.
+  const childrenDurableAt=new Date().toISOString();
   await mutate(bucket,key,old => old.status === "enqueuing"
-    ? {...old,status:"queued",updated_at:new Date().toISOString()} : null);
+    ? {...old,status:"queued",updated_at:new Date().toISOString(),
+      ...(old.submission_timing?{submission_timing:{...old.submission_timing,children_durable_at:childrenDurableAt}}:{})}
+    : null);
   return factoryApprovalGroupStatus(bucket,requestId);
 }
 export async function factoryApprovalGroupEnqueue(bucket,options) {
@@ -218,6 +248,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
     created_at:parent.created_at,updated_at:parent.updated_at,
     status,...totals,done_count:totals.total-totals.pending_count,
     timing_report:factoryApprovalTimingReport(observedTimings),
+    submission_timing:factoryApprovalSubmissionTiming(parent),
     can_retry:!totals.pending_count && items.some(factoryBatchRetryEligible),
     children,
   };
