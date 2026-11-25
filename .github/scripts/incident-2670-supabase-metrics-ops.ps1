@@ -3,6 +3,8 @@
 $ErrorActionPreference='Stop'
 $script:phase='RUNNER_ENV_UNAVAILABLE'
 $script:httpStatus=0
+$script:keyHttpStatus=0
+$script:alternate=$false
 try {
 $file='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
 if(-not(Test-Path -LiteralPath $file)){Write-Output 'incident2670_metrics=RUNNER_ENV_UNAVAILABLE';throw 'metrics_preflight'}
@@ -28,9 +30,39 @@ if(-not $secret.StartsWith('sb_secret_') -or $secret.Length -lt 32){
 $basic=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('service_role:'+$secret))
 $headers=@{Authorization='Basic '+$basic;Accept='text/plain'}
 $endpoint='https://vkwvscgisqsbuwagdvtb.supabase.co/customer/v1/privileged/metrics'
+# One bounded independent authentication check, only after a 401.
+# The same dedicated key is used; never send it to another host or log it.
+function Check-KeyAuth {
+  $code=0
+  try {
+    $keyProbe=Invoke-WebRequest -Method Get -Uri 'https://vkwvscgisqsbuwagdvtb.supabase.co/rest/v1/studio_global_workload_scopes?scope=eq.database&select=scope&limit=1' -Headers @{apikey=$secret;Accept='application/json'} -TimeoutSec 15 -MaximumRedirection 0 -UseBasicParsing
+    $code=[int]$keyProbe.StatusCode
+  } catch {
+    if($_.Exception.Response){try{$code=[int]$_.Exception.Response.StatusCode}catch{}}
+  }
+  $script:keyHttpStatus=$code
+}
+# An independent .NET HTTP client avoids any PowerShell web-cmdlet header quirks.
+function Scrape-Alternate {
+  Add-Type -AssemblyName System.Net.Http
+  $handler=New-Object System.Net.Http.HttpClientHandler
+  $handler.AllowAutoRedirect=$false
+  $client=New-Object System.Net.Http.HttpClient($handler)
+  $client.Timeout=[TimeSpan]::FromSeconds(15)
+  try {
+    $client.DefaultRequestHeaders.Authorization=New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Basic',$basic)
+    $response=$client.GetAsync($endpoint).GetAwaiter().GetResult()
+    try {
+      $script:httpStatus=[int]$response.StatusCode
+      if($script:httpStatus -ne 200){throw 'metrics_alternate_not_200'}
+      return $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    } finally { $response.Dispose() }
+  } finally { $client.Dispose() }
+}
 function Scrape {
   try {
     $script:phase='API_UNAVAILABLE'
+    if($script:alternate){return (Scrape-Alternate)}
     $reply=Invoke-WebRequest -Method Get -Uri $endpoint -Headers $headers -TimeoutSec 20 -MaximumRedirection 0 -UseBasicParsing
     $script:httpStatus=[int]$reply.StatusCode
     if($reply.StatusCode -ne 200){throw 'metrics_http_not_200'}
@@ -38,6 +70,12 @@ function Scrape {
   } catch {
     if($_.Exception.Response){try{$script:httpStatus=[int]$_.Exception.Response.StatusCode}catch{}}
     $script:phase='API_UNAVAILABLE'
+    if($script:httpStatus -eq 401 -and -not $script:alternate){
+      Check-KeyAuth
+      $script:alternate=$true
+      try {return (Scrape-Alternate)} catch {}
+      $script:phase=if($script:keyHttpStatus -eq 200){'METRICS_AUTH_REJECTED'}elseif($script:keyHttpStatus -eq 401){'PROJECT_KEY_REJECTED'}else{'METRICS_AUTH_UNVERIFIED'}
+    }
     throw 'metrics_read_failed'
   }
 }
@@ -72,10 +110,12 @@ Write-Output ('incident2670_memory_used_pct='+[math]::Round($used,1))
 Write-Output ('incident2670_swap_total_mb='+[math]::Round($second.SwapTotal/1048576,1))
 Write-Output ('incident2670_swap_used_pct='+[math]::Round($swapUsed,1))
 Write-Output ('incident2670_memory_available_delta_mb='+[math]::Round(($second.Available-$first.Available)/1048576,1))
+Write-Output ('incident2670_key_http_status='+$script:keyHttpStatus)
 Write-Output 'incident2670_metrics=PASS_TWO_READONLY_SAMPLES'
 
 } catch {
   # Never emit exception text, headers, response body, or secret material.
+  Write-Output ('incident2670_key_http_status='+$script:keyHttpStatus)
   Write-Output ('incident2670_metrics_http_status='+$script:httpStatus)
   Write-Output ('incident2670_metrics='+$script:phase)
   # Let the outer protected workflow fail on missing success receipt, while
