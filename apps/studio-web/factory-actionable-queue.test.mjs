@@ -12,9 +12,10 @@ const start = js.indexOf("  function factoryHasHumanReviewAction(");
 const end = js.indexOf("  const FACTORY_WAITING_SELECTION_KEY", start);
 assert.ok(start >= 0 && end > start, "Review/attention partition functions exist");
 
-function partition(cards, submitted = []) {
+function partition(cards, submitted = [], active = []) {
   const ctx = {
     factorySubmittedApprovalIds: () => new Set(submitted),
+    factoryActiveSubmissionIds: () => new Set(active),
     canReviewActions: (card) => card.ready === true,
   };
   vm.createContext(ctx);
@@ -113,9 +114,15 @@ test("#10855 unheld returned-to-review carousel stays visible even with historic
     studio_scheduled_at:null, youtube_scheduled_publish_at:null,
     published_at:null, platform_post_url:null, ready:true,
   };
+  assert.deepEqual(partition([returned], [returned.id], [returned.id]), {
+    ready:[], attention:[],
+  }, "An unresolved approval owns the row; a stale RFR snapshot cannot reopen it");
   assert.deepEqual(partition([returned], [returned.id]), {
+    ready:[], attention:[],
+  }, "Recent accepted IDs remain suppressed until reconciliation");
+  assert.deepEqual(partition([returned]), {
     ready:[returned.id], attention:[],
-  }, "Reopened canonical review must not vanish behind a terminal or pending UI fence");
+  }, "A genuinely reopened canonical review is visible once the historical fence is reconciled");
   for (const override of [
     {output_status:"Approved for Publishing",ready:false},
     {review_package_ready:false,ready:false},
@@ -128,7 +135,7 @@ test("#10855 unheld returned-to-review carousel stays visible even with historic
   }
 });
 
-test("Factory keeps real in-flight claim fences while showing reopened rows", () => {
+test("Factory keeps real in-flight claim fences while showing reconciled reopened rows", () => {
   assert.match(js, /function factoryActiveSubmissionIds\(\{ ignoreClickIntent = false \} = \{\}\)/);
   assert.match(js, /if \(!ignoreClickIntent\) add\(state\.submissionIntentIds\)/);
   assert.match(js, /add\(state\.submittingOutputIds\)/);
