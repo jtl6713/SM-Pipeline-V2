@@ -32,7 +32,7 @@ jobs:
             [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
             git fetch --quiet --no-tags --depth=1 origin "$BASE_SHA"
             git diff --name-only "$BASE_SHA" HEAD > /tmp/pr-changed-paths
-            if ! grep -Eq '^(services/remotion-renderer/|services/pipeline-runner/(r4/|r5/|render/|studio_produce/|audio/|p2/|p3/|config\.py|supabase_pipeline\.py|requirements\.txt)|apps/studio-api/(worker\.js|worker-functions-[0-9]+\.mjs|factory-supabase-approval\.mjs|factory-audio-intent\.mjs|render-queue\.mjs|supabase-pipeline-reads\.mjs)|\.github/(scripts/test-real-remotion-audio\.py|workflows/(main-pr-safety-gate|real-remotion-audio-regression)\.yml))' /tmp/pr-changed-paths; then
+            if ! grep -Eq '^(services/remotion-renderer/|services/pipeline-runner/(r4/|r5/|render/|studio_produce/|audio/|p2/|p3/|tests/test_2970_encoded_media_quality\.py|tests/test_r5_studio_revision\.py|config\.py|supabase_pipeline\.py|requirements\.txt)|apps/studio-api/(worker\.js|worker-functions-[0-9]+\.mjs|factory-supabase-approval\.mjs|factory-audio-intent\.mjs|render-queue\.mjs|supabase-pipeline-reads\.mjs)|\.github/(scripts/test-real-remotion-audio\.py|workflows/(main-pr-safety-gate|real-remotion-audio-regression)\.yml))' /tmp/pr-changed-paths; then
               required=false
             fi
           fi
@@ -101,6 +101,18 @@ jobs:
           fi
           python .github/scripts/test-real-remotion-audio.py
           test -s /tmp/real-remotion-audio-receipt.json
+
+      - name: Require runner encoded-media and R5 admission regressions
+        if: steps.media_scope.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          command -v ffprobe
+          python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_2970_encoded_media_quality.py \
+            services/pipeline-runner/tests/test_r5_studio_revision.py
 
       - name: Archive exact encoded audio regression evidence
         if: always() && steps.media_scope.outputs.required == 'true'
