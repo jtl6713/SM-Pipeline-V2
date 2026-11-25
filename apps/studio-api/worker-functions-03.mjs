@@ -4819,16 +4819,39 @@ export async function deleteAssetLibraryItem(request, env, url) {
 
   // Read the live Supabase relationships, never Airtable. No catch-to-empty:
   // a failed usage lookup must block deletion rather than risk deleting media in use.
-  const [requests, outputs, transfers] = await Promise.all([
+  const [legacyRequests, objectRequests, outputs, transfers] = await Promise.all([
     supabaseRest(env, `production_requests?master_assets=cs.${encodeURIComponent(JSON.stringify([recordId]))}&select=id&limit=1`),
-    supabaseRest(env, `platform_outputs?selected_assets_text=ilike.*${encodeURIComponent(recordId)}*&select=id&limit=1`),
+    supabaseRest(env, `production_requests?master_assets=cs.${encodeURIComponent(JSON.stringify([{ media_asset_record_id: recordId }]))}&select=id&limit=1`),
+    supabaseRest(env, `platform_outputs?selected_assets_text=ilike.*${encodeURIComponent(recordId)}*&select=id,output_number,content_number&limit=10`),
     supabaseRest(env, `studio_media_transfer_queue?or=(source_media_asset_id.eq.${asset.id},generated_media_asset_id.eq.${asset.id})&select=id&limit=1`),
   ]);
-  if (!Array.isArray(requests) || !Array.isArray(outputs) || !Array.isArray(transfers)) {
+  if (![legacyRequests, objectRequests, outputs, transfers].every(Array.isArray)) {
     throw new HttpError(503, "Unable to verify media asset references");
   }
-  if (requests.length || outputs.length || transfers.length) {
-    throw new HttpError(409, "Cannot delete this asset while it is referenced by Production, an output, or media transfer. Remove those attachments first.");
+  let payload = {};
+  try { payload = await request.json(); } catch {}
+  if (payload?.retire_only === true) {
+    // Explicit non-destructive alternative: existing renders and direct ID
+    // lookups keep their source file; new selections must not use this asset.
+    const retired = await supabaseRest(env,
+      `media_assets?id=eq.${encodeURIComponent(asset.id)}&airtable_record_id=eq.${encodeURIComponent(recordId)}`,
+      { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ active: false, do_not_use: true, updated_at: new Date().toISOString() }) },
+    );
+    if (!Array.isArray(retired) || retired.length !== 1 || retired[0]?.id !== asset.id || retired[0]?.active !== false || retired[0]?.do_not_use !== true) {
+      throw new HttpError(409, "Supabase did not confirm removal from the library");
+    }
+    studioReadCacheDropPrefix("library:page:");
+    return respond(request, env, { ok: true, retired: true, deleted: false, record_id: recordId, name: asset.asset_name, read_source: "supabase" });
+  }
+  if (legacyRequests.length || objectRequests.length || outputs.length || transfers.length) {
+    const dependencies = [];
+    if (legacyRequests.length || objectRequests.length) dependencies.push("Production request");
+    if (outputs.length) {
+      const numbers = outputs.map((row) => row.output_number).filter((n) => n != null);
+      dependencies.push(numbers.length ? `output(s) ${numbers.map((n) => "#" + n).join(", ")}` : "Platform Output");
+    }
+    if (transfers.length) dependencies.push("media transfer");
+    throw new HttpError(409, `Cannot delete this asset while it is referenced by ${dependencies.join("; ")}. Remove those attachments first, or remove it from the library without deleting its source file.`);
   }
 
   const driveId = String(asset.google_drive_file_id || "").trim();

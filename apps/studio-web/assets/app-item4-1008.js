@@ -347,7 +347,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1098-pipeline-global-search";
+  const BUILD_ID = "item4-0.6.1099-asset-delete-3048";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -25397,20 +25397,59 @@ function timedScriptAssetLabel(asset, index) {
       button.addEventListener("click", async () => {
         const id = button.dataset.libraryDelete;
         const name = button.dataset.libraryName || "this asset";
-        if (!window.confirm(`Delete “${name}” from Asset Manager and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
-          return;
+        if (!window.confirm(`Delete “${name}” from Asset Manager and Google Drive?\n\nStudio will protect assets still referenced by existing content.`)) return;
+        const card = button.closest(".library-card");
+        let notice = card?.querySelector("[data-library-delete-notice]");
+        if (!notice && card) {
+          notice = document.createElement("div");
+          notice.dataset.libraryDeleteNotice = "";
+          notice.setAttribute("role", "alert");
+          card.appendChild(notice);
         }
+        const showError = (error) => {
+          const message = `Could not delete ${name}: ${error?.message || String(error)}`;
+          setLibraryUploadMessage(message, "error-text");
+          if (notice) {
+            notice.className = "form-message error-text";
+            notice.textContent = message;
+          }
+          button.disabled = false;
+        };
+        if (notice) { notice.className = "form-message"; notice.textContent = "Checking asset references…"; }
         button.disabled = true;
         try {
           const result = await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}), retries: 0, timeoutMs: 30000 });
           if (result?.deleted !== true || result?.read_source !== "supabase") {
-            throw new Error("Asset deletion was not confirmed by Supabase. The asset was not removed.");
+            throw new Error("Asset deletion was not confirmed by Supabase. Refresh to verify before retrying.");
           }
+          card?.remove();
           setLibraryUploadMessage(`Deleted ${name} from Supabase and Google Drive.`, "success");
           await loadLibrary();
         } catch (error) {
-          setLibraryUploadMessage(error.message, "error-text");
-          button.disabled = false;
+          showError(error);
+          if (notice && error?.status === 409 && /while it is referenced by/i.test(error.message || "")) {
+            const retire = document.createElement("button");
+            retire.type = "button";
+            retire.className = "secondary-button";
+            retire.textContent = "Remove from library only";
+            notice.appendChild(document.createElement("div")).appendChild(retire);
+            retire.addEventListener("click", async () => {
+              if (!window.confirm(`Remove “${name}” from library searches and future selections? Its source file stays available for existing content.`)) return;
+              retire.disabled = true;
+              button.disabled = true;
+              try {
+                const result = await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ retire_only: true }), retries: 0, timeoutMs: 30000 });
+                if (result?.retired !== true || result?.deleted !== false || result?.read_source !== "supabase") throw new Error("Library removal was not confirmed.");
+                card?.remove();
+                setLibraryUploadMessage(`Removed ${name} from the library; existing content retains its source file.`, "success");
+                await loadLibrary();
+              } catch (failure) {
+                showError(failure);
+                notice.appendChild(document.createElement("div")).appendChild(retire);
+                retire.disabled = false;
+              }
+            });
+          }
         }
       });
     });
