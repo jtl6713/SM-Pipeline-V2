@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {}, videoCostOffer: null };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, imageDecision: null, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {}, videoCostOffer: null };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -546,8 +546,30 @@
       report("Image generated. Review and Accept or Decline before it is used.");
     } finally { current.busy = false; }
   }
+  // Keep the in-flight state outside the DOM: background library/video
+  // refreshes can redraw a scene while its image decision is still saving.
+  function syncImageDecisionControls() {
+    const pending = current.imageDecision;
+    for (const group of document.querySelectorAll("[data-story-image-review]")) {
+      const active = pending && group.dataset.storyImageReview === pending.generatedId;
+      for (const control of group.querySelectorAll("[data-image-action]")) {
+        const action = control.dataset.imageAction;
+        control.disabled = Boolean(pending);
+        control.textContent = active && pending.action === action
+          ? (action === "accept" ? "Accepting Image…" : "Declining Image…")
+          : (action === "accept" ? "Accept Image" : "Decline Image");
+        control.setAttribute("aria-busy", String(Boolean(active && pending.action === action)));
+      }
+      const message = group.querySelector("[data-image-review-status]");
+      if (message) {
+        message.textContent = active ? pending.message : "";
+        message.hidden = !active;
+        message.classList.remove("error-text");
+      }
+    }
+  }
   async function decideGenerated(index, action) {
-    if (current.busy) return;
+    if (current.imageDecision || current.busy) return;
     const scene = current.story?.scenes?.[index];
     if (!scene?.generated_master_id) throw new Error("No pending image is available for review.");
     let mediaOverride = false;
@@ -555,18 +577,47 @@
       mediaOverride = confirm("This scene calls for moving footage. Explicitly accept a still image instead?");
       if (!mediaOverride) return;
     }
-    await save();
-    current.busy = true;
+    const pending = { generatedId: scene.generated_master_id, action,
+      message: action === "accept" ? "Saving your selection…" : "Saving your decision…" };
+    current.imageDecision = pending;
+    syncImageDecisionControls();
+    let submitted = false;
+    let failure = null;
     try {
-      report(action === "accept" ? "Registering accepted image in Drive and Media Assets…" : "Declining the image…");
+      await save();
+      current.busy = true;
+      pending.message = action === "accept" ? "Registering image in Asset Manager. Please do not tap again." : "Declining the image…";
+      syncImageDecisionControls();
+      report(pending.message);
+      submitted = true;
       await call(sceneUrl(index,action) + "?profile=" + encodeURIComponent(assertProfile()), {
-        method:"POST",body:JSON.stringify({generated_master_id:scene.generated_master_id,
+        method:"POST",body:JSON.stringify({generated_master_id:pending.generatedId,
           content_profile_id:assertProfile(),media_override:mediaOverride})
       });
+      pending.message = "Verifying saved decision…";
+      syncImageDecisionControls();
       await reloadIdea();
       report(action === "accept" ? "Scene " + (index+1) + " image accepted and saved." :
         "Declined. Generate again or supply the media yourself.");
-    } finally { current.busy = false; }
+    } catch (error) {
+      failure = error;
+      // A lost response can follow a successful registration. Never
+      // automatically repeat the POST; instruct the operator to reopen first.
+      if (submitted) failure = new Error((error?.message || "Image decision was not confirmed") +
+        ". Reopen the saved Idea to verify the image decision before retrying.");
+      throw failure;
+    } finally {
+      current.busy = false;
+      current.imageDecision = null;
+      syncImageDecisionControls();
+      if (failure) {
+        for (const group of document.querySelectorAll("[data-story-image-review]")) {
+          if (group.dataset.storyImageReview !== pending.generatedId) continue;
+          const message = group.querySelector("[data-image-review-status]");
+          if (message) { message.textContent = failure.message; message.hidden = false; message.classList.add("error-text"); }
+        }
+      }
+    }
   }
   // ElevenLabs video generation is asynchronous; these timers only poll a
   // previously paid job. They never retry or create a second paid generation.
@@ -1536,8 +1587,20 @@
           img.alt="AI-generated scene image, awaiting explicit review";
           actions.appendChild(node("p","story-first-asset-heading","AI image awaiting your decision"));
           actions.appendChild(img);
-          button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),actions);
-          button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
+          const review = node("div","story-first-image-review-controls");
+          review.dataset.storyImageReview = shot.generated_master_id;
+          const accept = button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),review);
+          const decline = button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),review);
+          accept.dataset.imageAction = "accept";
+          decline.dataset.imageAction = "decline";
+          const progress = node("p","story-first-upload-progress");
+          progress.dataset.imageReviewStatus = "";
+          progress.setAttribute("role","status");
+          progress.setAttribute("aria-live","polite");
+          progress.hidden = true;
+          review.appendChild(progress);
+          actions.appendChild(review);
+          syncImageDecisionControls();
         }else if(mode.value==="ai"){
           const prompt=label(actions,"Editable AI scene prompt (image or video)",shot.ai_prompt||shot.visual);
           prompt.maxLength=8000;prompt.rows=3;
