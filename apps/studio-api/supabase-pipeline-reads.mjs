@@ -2939,7 +2939,7 @@ export async function appendIdeaProductionRequestLink(env, ideaAirtableId, reque
 }
 
 /** Recent Production Requests with a non-blank Studio_Production_Job_JSON. */
-export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, statuses = null, unfinishedOnly = false } = {}) {
+export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, statuses = null, unfinishedOnly = false, createdSince = null } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
   const allowed = (Array.isArray(statuses) ? statuses : [])
@@ -2954,12 +2954,14 @@ export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, s
   const watchdogFilter = unfinishedOnly
     ? "&and=(or(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.),or(production_job->>step.is.null,production_job->>step.not.in.(done,escalated)))"
     : "";
+  const cutoff = createdSince == null ? "" : new Date(createdSince).toISOString();
+  const createdFilter = cutoff ? `&created_at=gte.${encodeURIComponent(cutoff)}` : "";
   const order = unfinishedOnly
     ? "production_job->>updated_at.asc.nullsfirst,id.asc"
     : "updated_at.desc.nullslast";
   const rows = await supabaseRest(
     env,
-    `production_requests?production_job=not.is.null${statusFilter}${watchdogFilter}`
+    `production_requests?production_job=not.is.null${statusFilter}${watchdogFilter}${createdFilter}`
       + `&select=${REQUEST_SELECT}&order=${order}&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
