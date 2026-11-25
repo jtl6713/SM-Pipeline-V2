@@ -1,4 +1,5 @@
 // #3096: exact audited historical hold recovery, not a new approval or publisher.
+import { STORY_2915_ID } from "./story-expired-generation-2915.mjs";
 import { planAuditedEarlyHoldMaeReschedule } from "./approved-publish-flow.mjs";
 import { factorySupabaseApprovalRows } from "./factory-supabase-approval.mjs";
 import { factoryBatchLock, factoryBatchUnlock } from "./factory-approval-queue.mjs";
@@ -64,7 +65,8 @@ function verify(entry, original, plan, state) {
  * and the reservation quarantined, never a second publish authorization.
  */
 export async function recoverAuditedOverdueMae(env, id, {horizonDays, now=Date.now} = {}, deps = {}) {
-  if (!RECORD_ID.test(id)) return skip(id,"invalid_record_id");
+  if (!RECORD_ID.test(id) || id === STORY_2915_ID) return skip(id,"invalid_or_special_generation_record");
+  if (!Number.isInteger(horizonDays) || horizonDays < 1 || horizonDays > 90) return skip(id,"verified_schedule_horizon_required");
   const read = deps.read || (async()=> (await factorySupabaseApprovalRows(env,[id])).get(id));
   const rest = deps.rest || ((query,options)=>supabaseRest(env,query,options));
   const bucket = env.STUDIO_MEDIA;
