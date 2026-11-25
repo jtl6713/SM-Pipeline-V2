@@ -19502,6 +19502,7 @@ function factoryGroupRecordsFromClientHints(ids, payload, policy) {
 
 /** Global parent approval route, dormant until independently authorized. */
 async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx) {
+  const submissionRouteEnteredAt = new Date().toISOString();
   const policy=factoryGlobalPolicy(env);
   if (!policy.enabled) throw new HttpError(403,"Global multi-profile approvals are not enabled");
   await factoryRequireSupabaseProfiles(env);
@@ -19610,6 +19611,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
       ({id, output_id, profile_id})),
   });
 
+  const submissionPreflightFinishedAt = new Date().toISOString();
   // First inspect *every* profile before mutating any claim registry. This
   // avoids reservations for ordinary partial-overlap errors. The subsequent
   // per-profile CAS reserves still close concurrent multi-device races.
@@ -19705,17 +19707,21 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     throw new HttpError(503, error?.message || "Factory claim pending; retry with the same request ID");
   }
 
+  const submissionClaimsReservedAt = new Date().toISOString();
   let submitted;
   try {
     submitted = await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA, {
       requestId, records, maxTotal: policy.max_total, maxPerProfile: policy.max_per_profile,
       submittedBy: String(authorization?.user?.record_id || "").trim(),
       note: String(payload.notes || ""),
+      submissionTiming: {route_entered_at:submissionRouteEnteredAt,
+        preflight_finished_at:submissionPreflightFinishedAt,claims_reserved_at:submissionClaimsReservedAt},
     });
   } catch (error) {
     throw new HttpError(409, error.message || "Group submission failed");
   }
 
+  const submissionLedgerVerifiedAt = new Date().toISOString();
   // Parent+child ledgers are durable. factoryBatchProcess only schedules
   // waitUntil when ctx is present — still never let scheduling 500 the client.
   try {
@@ -19725,7 +19731,22 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     console.warn("Factory group process schedule failed after durable accept", requestId, error);
   }
-  return respond(request, env, { ...submitted, accepted: true, accept_mode: "authoritative_preflight" });
+  const responseReadyAt = new Date().toISOString();
+  // This is server-route-to-response construction, NOT click-to-browser or
+  // original client acknowledgement. The durable parent contains all stages
+  // through child enqueue; the exact post-CAS/response timings are logged.
+  const serverSubmissionTiming = submitted.already_submitted ? null : {
+    ...submitted.submission_timing,
+    parent_and_children_verified_at:submissionLedgerVerifiedAt,
+    server_response_ready_at:responseReadyAt,
+    route_to_durable_verified_ms:Math.max(0,Date.parse(submissionLedgerVerifiedAt)-Date.parse(submissionRouteEnteredAt)),
+    route_to_response_ready_ms:Math.max(0,Date.parse(responseReadyAt)-Date.parse(submissionRouteEnteredAt)),
+  };
+  if (serverSubmissionTiming) console.info("FACTORY_2959_SUBMISSION_TIMING",JSON.stringify({
+    request_id:requestId,...serverSubmissionTiming,
+  }));
+  return respond(request, env, { ...submitted, accepted: true, accept_mode: "authoritative_preflight",
+    ...(serverSubmissionTiming?{submission_timing:serverSubmissionTiming}:{}) });
 }
 
 /**
