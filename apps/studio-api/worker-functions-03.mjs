@@ -816,7 +816,7 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     f(idea, "Primary_Location"),
   ].filter(Boolean).join(" "));
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
+  const { placeKeys, subjectKeys, scanKeys, neighborhoodKey, neighborhoodSubjectKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
   const filterKeys = placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
     ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
@@ -837,7 +837,7 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     try {
       const packed = await listSupabaseAssetLibraryRecords(env, {
         limit: scanLimit,
-        query: filterKeys.join(" "),
+        searchTokens: filterKeys,
         kind: "photo",
         profileId: crossScope ? "" : (profileId || ""),
         sortField: "Added_At",
@@ -862,6 +862,8 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
+      neighborhoodKey,
+      neighborhoodSubjectKeys,
       strongIdeaTokens,
       ideaTokens,
       queryTokens: [],
@@ -892,7 +894,7 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
     f(idea, "Primary_Location"),
   ].filter(Boolean).join(" "));
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
+  const { placeKeys, subjectKeys, scanKeys, neighborhoodKey, neighborhoodSubjectKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
   const filterKeys = placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
     ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
@@ -913,7 +915,7 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
     try {
       const packed = await listSupabaseAssetLibraryRecords(env, {
         limit: scanLimit,
-        query: filterKeys.join(" "),
+        searchTokens: filterKeys,
         kind: "video",
         profileId: crossScope ? "" : (profileId || ""),
         sortField: "Added_At",
@@ -938,6 +940,8 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
+      neighborhoodKey,
+      neighborhoodSubjectKeys,
       strongIdeaTokens,
       ideaTokens,
       queryTokens: [],
