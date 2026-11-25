@@ -1,0 +1,20 @@
+name: Incident 2853 renderer Story audio transport
+on:
+  pull_request:
+    paths:
+      - 'services/remotion-renderer/render-server.js'
+      - 'services/remotion-renderer/story-audio-payload*.js'
+      - '.github/workflows/incident-2853-render-story-audio-tests.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check services/remotion-renderer/render-server.js
+      - run: node --test services/remotion-renderer/story-audio-payload.test.js
