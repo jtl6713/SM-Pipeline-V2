@@ -34,6 +34,7 @@ const FACTORY_APPROVAL_SELECT = [
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "publish_hold_set_at", "publish_hold_reason", "publish_hold_source", "publish_hold_release_actor", "publish_retry_eligible", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "publish_asset_url", "publish_next_retry_at", "selected_clip_count", "selected_assets", "render_clip_list",
+  "image_count", "assets_ready_count", "ig_carousel_status", "fb_publish_status",
   "render_total_frames", "asset_set_revision", "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
@@ -348,6 +349,38 @@ async function factorySupabaseNextApprovedSlot(env, entry, onTiming = async () =
   return { iso: new Date(at).toISOString(), timeZone: zone };
 }
 
+// #3096: the final approved slide inventory is the authority for first-publish
+// readiness. Keep this narrow to the two native 4:5 gallery routes verified
+// by the existing package guard; never reset a progressed provider stage.
+export function nativeGalleryInitialReadiness(row, proof) {
+  const stage = row.platform === "Instagram" && row.platform_output_type === "Instagram Carousel"
+    ? ["ig_carousel_status", "Ready for Asset Prep", "Not Selected"]
+    : row.platform === "Facebook" && row.platform_output_type === "Facebook Photo Set"
+      ? ["fb_publish_status", "Ready for Assets", "Not Selected"] : null;
+  if (!stage || row.render_status !== "Native Photo Route") return {};
+  const count = proof?.slide_count;
+  if (proof?.eligible !== true || proof?.applicable !== true ||
+      !Number.isInteger(count) || count < 2 || count > 10)
+    throw Error("Native gallery initial readiness requires a verified final slide package");
+  const [key, initial, notSelected] = stage;
+  const current = String(row[key] || "");
+  const bag = row.error_messages || {};
+  const hasEvidence = ["Studio_Publish_Dispatch_At","Studio_Publish_Dispatch_Note",
+    "Publish_Started_At","Last_Publish_Attempt_At","Publish_Locked_By","Publish_Locked_At",
+    "Platform_Post_ID","Platform_Media_ID","IG_Carousel_Parent_Container_ID",
+    "IG_Carousel_Published_Media_ID"].some(k=>String(bag[k]??"").trim())
+    || ["Studio_Publish_Dispatch_Count","Publish_Attempt_Count","IG_Carousel_Parent_Poll_Attempt_Count"]
+      .some(k=>Number(bag[k]||0)!==0)
+    || row.published_at || row.platform_post_url || row.platform_publish_response;
+  if (hasEvidence || !["", initial, notSelected].includes(current))
+    throw Error("Native gallery has prior provider evidence or a progressed stage; reconcile before approval");
+  for (const k of ["image_count", "assets_ready_count"]) {
+    if (row[k] != null && row[k] !== 0 && row[k] !== count)
+      throw Error("Native gallery readiness count disagrees with verified final slides");
+  }
+  return {image_count:count, assets_ready_count:count, [key]:initial};
+}
+
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
   approvedByUserRecordId = null, submittedAt = null, originalIntentRecovery = false,
@@ -394,9 +427,10 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
   if (originalIntentRecovery && !originalIntentCoversGallery({requestId,approvedByUserRecordId,submittedAt},entry.row,pendingHumanReview)) {
     throw Error("Original Factory intent recovery: media or release revision changed; fresh review required");
   }
+  let galleryProof = null;
   if (!pendingHumanReview?.pending) {
     await onTiming("gallery_package_started");
-    await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
+    galleryProof = await assertSupabaseNativeGalleryPublicationPackage(env, entry.row);
     await onTiming("gallery_package_finished");
   }
   await onTiming("review_media_started");
@@ -412,7 +446,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     // Finalization itself re-runs the UNCHANGED persisted-slide publication
     // gate. No extra photo inventory read for unrelated Factory approvals.
     await onTiming("gallery_finalize_started");
-    await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
+    galleryProof = await finalizeNycOwnerGalleryOnFactoryClick(env, entry.row, {
       requestId, approvedByUserRecordId, submittedAt, originalIntentRecovery,
     });
     await onTiming("gallery_finalize_finished");
@@ -436,7 +470,9 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     published: false,
     ...(acceptedCreativeReview ? {creative_review:acceptedCreativeReview} : {}),
   };
+  const galleryReadiness = nativeGalleryInitialReadiness(row, galleryProof);
   const fields = {
+    ...galleryReadiness,
     output_status: "Approved for Publishing",
     review_status: "Approved",
     publish_status: "Ready to Schedule",
@@ -465,7 +501,8 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     + "&" + valueFilter("publish_status", row.publish_status)
     + (row.content_profile_id ? "&content_profile_id=eq." + encodeURIComponent(row.content_profile_id) : "")
     + "&do_not_publish=eq.false"
-    + "&" + valueFilter("test_run_id", row.test_run_id);
+    + "&" + valueFilter("test_run_id", row.test_run_id)
+    + Object.keys(galleryReadiness).map(key => "&" + valueFilter(key, row[key])).join("");
   await onStage("approving");
   await onTiming("supabase_commit_started");
   const updated = await supabaseRest(env, selector, {
@@ -492,6 +529,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     || check.row.auto_publish_enabled !== true
     || Date.parse(String(check.row.scheduled_post_date || "")) !== Date.parse(scheduled.iso)
     || Date.parse(String(check.row.studio_scheduled_at || "")) !== Date.parse(scheduled.iso)
+    || Object.entries(galleryReadiness).some(([key,value])=>check.row[key]!==value)
     || check.row.published_at
     || check.row.error_messages?.SM_Factory_Supabase_Approval_Receipt?.request_id !== requestId
     || check.row.error_messages?.SM_Factory_Supabase_Approval_Receipt?.scheduled !== true) {
