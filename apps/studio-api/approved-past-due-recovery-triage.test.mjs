@@ -100,3 +100,12 @@ test("#3096 native parent/draft/video identities and response supersede a schedu
  const row=dueFresh();row.fields.Platform_Publish_Response_JSON='{"id":"previous"}';
  assert.equal(call(row).evidence_state,"native_attempt_or_response");
 });
+
+
+test("#3096 native Meta credential failure stays reconciliation-only even with zero general counters",()=>{
+ const row=dueFresh();Object.assign(row.fields,{Platform:"Facebook",Platform_Output_Type:"Facebook Reel",
+  Studio_Publish_Dispatch_Count:0,Publish_Attempt_Count:0,
+  FB_Slideshow_Response_JSON:"{'error': {'message': 'Error validating access token'}}"});
+ const got=call(row);assert.equal(got.evidence_state,"native_attempt_or_response");
+ assert.equal(got.action_group,"F. Meta authentication");assert.equal(got.can_repost,false);
+});

@@ -18,6 +18,7 @@ const REMOTE_KEYS=[
 const NATIVE_COUNTERS=[
   "Publish_Attempt_Count","IG_Story_Attempt_Count",
   "IG_Carousel_Parent_Poll_Attempt_Count","TikTok_Draft_Poll_Attempt_Count",
+  "FB_Slideshow_Attempt_Count","IG_Carousel_Publish_Attempt_Count",
 ];
 const hasCount=v=>str(v)!=="" && (!Number.isFinite(Number(v)) || Number(v)!==0);
 const hasResponse=v=>{
@@ -32,7 +33,10 @@ function dispatchEvidence(row) {
     || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At"]
       .some(name=>Boolean(str(read(name))))
     || hasResponse(read("Platform_Publish_Response"))
-    || hasResponse(read("Platform_Publish_Response_JSON"));
+    || hasResponse(read("Platform_Publish_Response_JSON"))
+    || ["FB_Slideshow_Response_JSON","IG_Story_Response_JSON","IG_Carousel_Parent_Response_JSON",
+      "IG_Carousel_Publish_Response_JSON","TikTok_Draft_Response_JSON","YouTube_Response_JSON"]
+      .some(name=>hasResponse(read(name)));
   const dispatchAt=dateMs(read("Studio_Publish_Dispatch_At"));
   const scheduledAt=dateMs(read("Scheduled_Post_Date"));
   const dispatchPresent=Boolean(str(read("Studio_Publish_Dispatch_At")))
@@ -59,6 +63,9 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
   const publish=str(read("Publish_Status","publish_status"));
   const dispatchNote=str(read("Studio_Publish_Dispatch_Note","studio_publish_dispatch_note"));
   const errorStage=str(read("Publish_Error_Stage","publish_error_stage"));
+  const nativeErrors=[dispatchNote,read("FB_Slideshow_Response_JSON","fb_slideshow_response_json"),
+    read("IG_Story_Response_JSON","ig_story_response_json"),read("Publish_Error_Message","publish_error_message")]
+    .map(v=>typeof v==="object"?JSON.stringify(v):str(v)).join(" ");
   const videoId=str(read("YouTube_Video_ID","youtube_video_id"));
   const mediaId=str(read("Platform_Media_ID","platform_media_id"));
   const postId=str(read("Platform_Post_ID","platform_post_id"));
@@ -95,8 +102,8 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
   if(!auto) return assign("B. Automatic publishing disabled","User","Confirm intended publishing mode or manual handoff");
   if(platform==="TikTok"&&draftId) return assign("C. Existing TikTok draft","User","Check TikTok inbox and exact saved draft; never duplicate delivery");
   if(publish==="Publishing"||(platform==="YouTube"&&videoId)) return assign("D. Existing platform processing","Studio","Authenticated provider readback; reconcile existing upload only");
-  if(/RATE_LIMIT/i.test(errorStage)||/limit how often|request limit reached/i.test(dispatchNote)) return assign("E. Platform cooldown/rate restriction","Studio + User","Honor provider cooldown and check current connection state");
-  if(/session has been invalidated|log in to www\.facebook\.com|Page Access Token/i.test(dispatchNote)) return assign("F. Meta authentication","User","Reconnect/validate impacted Page and Instagram permissions");
+  if(/RATE_LIMIT/i.test(errorStage)||/limit how often|request limit reached/i.test(nativeErrors)) return assign("E. Platform cooldown/rate restriction","Studio + User","Honor provider cooldown and check current connection state");
+  if(/session has been invalidated|log in to www\.facebook\.com|Page Access Token|subject does not have permission to post videos|error validating access token/i.test(nativeErrors)) return assign("F. Meta authentication","User","Reconnect/validate impacted Page and Instagram permissions");
   // Retry=false/null does not disqualify a genuinely untouched first publish.
   // Reuse the real admission check; never treat this diagnostic as a claim,
   // provider non-delivery proof, or permission to invoke the provider.

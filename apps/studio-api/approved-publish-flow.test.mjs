@@ -154,3 +154,20 @@ test("#3096 historical early-hold proof does not supersede native provider evide
  row.fields.Platform_Publish_Response_JSON='{"id":"prior"}';
  assert.equal(check(row).eligible,false);
 });
+
+
+test("#3096 native provider response survives reset general counters and forbids first create",()=>{
+ for(const key of ["FB_Slideshow_Response_JSON","IG_Story_Response_JSON","IG_Carousel_Parent_Response_JSON",
+  "IG_Carousel_Publish_Response_JSON","TikTok_Draft_Response_JSON","YouTube_Response_JSON"]){
+  for(const row of [fresh(),reconciledEarlyHold()]){
+   row.fields[key]="{'error': {'message': 'Error validating access token'}}";
+   assert.equal(check(row).reason,"prior_provider_or_dispatch_identity",key);
+  }
+ }
+ for(const key of ["FB_Slideshow_Attempt_Count","IG_Carousel_Publish_Attempt_Count"]){
+  const row=fresh();row.fields[key]=1;
+  assert.equal(check(row).reason,"previous_attempt_requires_provider_reconciliation",key);
+ }
+ const row=fresh();row.fields.FB_Slideshow_Response_JSON="{}";
+ assert.equal(check(row).eligible,true);
+});
