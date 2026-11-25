@@ -11389,7 +11389,7 @@ export function assertProductionRequestFanoutComplete(outputFanout) {
   if (blocked > 0 || remaining > 0 || (!already && routed !== enabled)) {
     throw new HttpError(
       409,
-      `Promotion created the Content Item, but Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). The request is not complete and can be retried safely.`
+      `Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). ${[...new Set((outputFanout?.work_items || []).flatMap(item => item.issues || []))].join(" ").slice(0,800)} Existing content is preserved; do not create a replacement request.`
     );
   }
 }
@@ -12510,6 +12510,24 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
   if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate");
 
+  // Validate explicit soundtrack identity before I3 creates a Content Item.
+  // A catalog URL alone does not establish a usable audio duration.
+  const plannedDestinations = (await outputRowsForProductionRequest(env, requestRecord.id))
+    .filter(row => Boolean(f(row, "Enabled")));
+  const checkedMusic = new Map();
+  for (const row of plannedDestinations) {
+    const mode = String(f(row, "Background_Music_Mode_Override") || "Inherit").trim();
+    if (mode === "No" || (mode === "Inherit" && String(f(requestRecord, "Background_Music_Mode") || "") !== "Yes")) continue;
+    const chosen = arrayOrEmpty(f(row, "Selected_Music_Asset_Override"))[0]
+      || arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"))[0];
+    if (!chosen) continue; // existing catalog fallback and render checks remain authoritative
+    if (!checkedMusic.has(chosen)) checkedMusic.set(chosen, studioMusicFromMediaRecord(
+      await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, chosen)));
+    const music = checkedMusic.get(chosen);
+    if (!music.url || !(music.duration_seconds > 0)) {
+      throw new HttpError(409, "Selected soundtrack is unavailable or its duration is not verified. Studio must verify the existing audio asset before creating the Content Item. Your saved photos, crops and settings are preserved.");
+    }
+  }
   const input = promotionInputFromProductionRequest(requestRecord);
 
   // Mark Submitted before firing I3. This creates an idempotency fence in Studio.
