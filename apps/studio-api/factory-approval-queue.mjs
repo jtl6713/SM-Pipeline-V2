@@ -1,4 +1,4 @@
-import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
+import { factoryApprovalItemTiming, factoryApprovalTimingReport, normalizeFactoryApprovalTimeline } from "./factory-approval-timings.mjs";
 
 /**
  * Durable Factory approval batches: R2 CAS per request + a CAS profile mutex.
@@ -590,9 +590,9 @@ export async function factoryBatchDrain(bucket, options) {
               outcome.status === "failed" ? "failed" : "completed",
             stage_started_at: completedAt, last_progress_at: completedAt,
             completed_at: outcome.status === "pending" ? null : completedAt,
-            timeline: [...(row.timeline || []), ...events, {
+            timeline: normalizeFactoryApprovalTimeline([...(row.timeline || []), ...events, {
               state: outcome.status, at: completedAt, attempt,
-            }].slice(-180),
+            }]),
           } : row),
         };
         const counts = factoryBatchCounts(updated);
