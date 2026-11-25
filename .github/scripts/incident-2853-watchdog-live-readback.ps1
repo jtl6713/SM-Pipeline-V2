@@ -94,7 +94,8 @@ $parsed.PSObject.Properties.Remove('active_ids')
 $parsed | Add-Member -NotePropertyName active_stages -NotePropertyValue $active
 Write-Output ('watchdog2853_queue=' + ($parsed | ConvertTo-Json -Compress -Depth 5))
 $phase='story_receipt'
-$rr=@(Invoke-RestMethod "$sb/rest/v1/platform_outputs?output_number=eq.11277&select=error_messages&limit=2" -Headers $headers -TimeoutSec 20 | ForEach-Object {$_})
+$reply=Invoke-RestMethod "$sb/rest/v1/platform_outputs?output_number=eq.11277&select=error_messages&limit=2" -Headers $headers -TimeoutSec 20
+$rr=@($reply | ForEach-Object {$_})
 if($rr.Count -ne 1){throw 'story_identity'}
 $r=$rr[0].error_messages.Studio_Story_Voiceover_Receipt_JSON | ConvertFrom-Json
 $url='https://media.chicagoshining.com/studio/previews/story-voiceover/recgBtukVbv5vAMzS/2e71d62e8373a8a803ce2a1925372903f9a9bd45fa65c867b187bce18346f859.mp3'
