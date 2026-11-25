@@ -5,6 +5,13 @@
  * receiving invented timestamps.
  */
 export const FACTORY_APPROVAL_TARGET_MS = 60_000;
+// Engineering targets are strict less-than thresholds. Keep the legacy 60s budget
+// for compatibility; queue wait alone cannot establish avoidable idle time.
+export const FACTORY_APPROVAL_ENGINEERING_TARGETS_MS = Object.freeze({
+  worker_processing: 5000, review_media_validation: 1000,
+  mae_slot_calculation: 1000, mae_occupancy_and_slot: 1000,
+  supabase_approval_commit: 1000, supabase_commit_readback: 1000,
+});
 export const FACTORY_APPROVAL_TIMING_PAIRS = Object.freeze([
   ["queue_wait", "queued", "processing"],
   ["preflight_airtable_fetch", "preflight_fetch_started", "preflight_fetch_finished"],
@@ -23,6 +30,7 @@ export const FACTORY_APPROVAL_TIMING_PAIRS = Object.freeze([
   ["review_media_validation","review_media_started","review_media_finished"],
   ["mae_occupancy_read","mae_occupancy_started","mae_occupancy_finished"],
   ["mae_slot_calculation","mae_slot_calculation_started","mae_slot_calculation_finished"],
+  ["mae_occupancy_and_slot","mae_occupancy_started","mae_slot_calculation_finished"],
   ["gallery_finalization","gallery_finalize_started","gallery_finalize_finished"],
   ["supabase_approval_commit","supabase_commit_started","supabase_commit_finished"],
   ["supabase_commit_readback","supabase_readback_started","supabase_readback_finished"],
@@ -80,6 +88,14 @@ export function factoryApprovalItemTiming(item = {}) {
     durations_ms.worker_processing = processingMs;
     durations_ms.max_single_attempt_processing = longestAttempt;
   }
+  let retryWait = 0, retryWaitCount = 0;
+  for (const attempt of attempts) {
+    const pending = events.find(e => e.attempt === attempt && e.state === "pending");
+    const next = events.find(e => e.attempt === attempt + 1 && e.state === "processing");
+    const measured = delta(pending?.at, next?.at);
+    if (measured !== null) { retryWait += measured; retryWaitCount++; }
+  }
+  if (retryWaitCount) durations_ms.retry_wait = retryWait;
   const queued = events.find(e => e.state === "queued");
   const terminal = events.findLast(e => ["approved", "already_satisfied", "failed"].includes(e.state));
   const total = delta(queued?.at, terminal?.at);
@@ -90,6 +106,11 @@ export function factoryApprovalItemTiming(item = {}) {
   return {
     events, durations_ms,
     attempts_observed: attempts.length, complete: Boolean(terminal),
+    engineering_targets: Object.fromEntries(Object.entries(FACTORY_APPROVAL_ENGINEERING_TARGETS_MS).map(([metric,target_ms]) => {
+      const observed = durations_ms[metric];
+      return [metric, { target_ms, observed_ms: observed ?? null,
+        pass: positiveNumber(observed) ? observed < target_ms : null }];
+    })),
     performance_budget: {
       target_ms: FACTORY_APPROVAL_TARGET_MS,
       worker_processing_pass: processingCount ? longestAttempt <= FACTORY_APPROVAL_TARGET_MS : null,
@@ -101,7 +122,7 @@ export function factoryApprovalTimingReport(items = []) {
   const measurements = (items || []).map(factoryApprovalItemTiming).filter(Boolean);
   const keys = [...FACTORY_APPROVAL_TIMING_PAIRS.map(([metric]) => metric),
     "worker_processing", "max_single_attempt_processing",
-    "waiting_and_retry", "enqueue_to_terminal"];
+    "waiting_and_retry", "retry_wait", "enqueue_to_terminal"];
   const metrics = {};
   for (const name of keys) {
     const values = measurements.map(item => item.durations_ms[name]).filter(positiveNumber).sort((a,b) => a-b);
@@ -114,6 +135,10 @@ export function factoryApprovalTimingReport(items = []) {
       p99_ms: percentile(values, 0.99),
       max_ms: values.at(-1),
       over_target_count: values.filter(value => value > FACTORY_APPROVAL_TARGET_MS).length,
+      ...(FACTORY_APPROVAL_ENGINEERING_TARGETS_MS[name] ? {
+        engineering_target_ms: FACTORY_APPROVAL_ENGINEERING_TARGETS_MS[name],
+        engineering_target_miss_count: values.filter(value => value >= FACTORY_APPROVAL_ENGINEERING_TARGETS_MS[name]).length,
+      } : {}),
     };
   }
   return {

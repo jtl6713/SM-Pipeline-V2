@@ -63,7 +63,7 @@ export function factoryBatchNeedsAttention(job) {
 }
 /** Public, bounded progress projection shared by single and global R2 batches.
  * Unknown legacy checkpoints remain "Processing"; never invent an active phase. */
-export function factoryBatchItemProgress(item) {
+export function factoryBatchItemProgress(item, { nowMs = Date.now(), claim = null } = {}) {
   const status = String(item?.status || "pending");
   const phase = status === "failed" ? "failed"
     : ["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(status) ? "completed"
@@ -76,8 +76,22 @@ export function factoryBatchItemProgress(item) {
   const lastProgress = item?.last_progress_at || events.at(-1)?.at || null;
   const completedAt = item?.completed_at ||
     (phase === "completed" || phase === "failed" ? events.at(-1)?.at || null : null);
+  const retryAt = Number(item?.next_attempt_ms || 0);
+  const pendingReason = !item ? "missing_child_item" : status === "pending"
+    ? retryAt > nowMs ? "retry_backoff"
+      : claim?.state === "active" ? "profile_claim_active"
+      : claim?.state === "expired" ? "profile_claim_expired"
+      : claim?.state === "unclaimed" ? "eligible_unclaimed"
+      : "awaiting_dispatch_claim_unobserved"
+    : status === "processing" ? claim?.state === "expired" ? "processing_claim_expired"
+      : claim?.state === "unclaimed" ? "processing_without_profile_claim"
+      : claim?.state === "active" ? "processing_claim_active" : "processing_claim_unobserved"
+    : null;
   return {
-    phase,
+    phase, pending_reason: pendingReason,
+    retry_not_before_at: retryAt > 0 ? new Date(retryAt).toISOString() : null,
+    profile_claim_state: claim?.state || "unobserved",
+    profile_claim_expires_at: claim?.expires_at || null,
     attempt_started_at: attemptStarted,
     stage_started_at: item?.stage_started_at || attemptStarted,
     last_progress_at: lastProgress,
@@ -89,7 +103,7 @@ export function factoryBatchItemProgress(item) {
   };
 }
 
-export function factoryBatchSummary(job) {
+export function factoryBatchSummary(job, options = {}) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
   const counts = factoryBatchCounts(job);
   const timing_report = factoryApprovalTimingReport(job.items || []);
@@ -108,7 +122,7 @@ export function factoryBatchSummary(job) {
       failure_history: item.failure_history || [],
       removed_original_error: item.removed_original_error || null,
       previous_failure_error: item.previous_failure_error || null,
-      ...factoryBatchItemProgress(item),
+      ...factoryBatchItemProgress(item, options),
       timing: factoryApprovalItemTiming(item),
     })),
   };
@@ -449,6 +463,18 @@ export function factoryBatchCronSelectJobs(candidates = [], { maxProfiles = 5, n
     .slice(0, Math.max(0, Math.min(5, Math.trunc(maxProfiles) || 0)));
 }
 
+// Read-only snapshot; never expose the owner token or claim that an active lease
+// proves a live worker. A failed R2 read is unknown rather than idle.
+export async function factoryBatchReadProfileClaim(bucket, profileId, nowMs = Date.now()) {
+  try {
+    const old = await get(bucket, factoryBatchLockKey(profileId));
+    const value = old?.value;
+    if (!value?.owner) return { state: "unclaimed", expires_at: null };
+    const expiry = Number(value.expires_ms);
+    if (!Number.isFinite(expiry) || expiry <= 0) return { state: "unobserved", expires_at: null };
+    return { state: expiry > nowMs ? "active" : "expired", expires_at: new Date(expiry).toISOString() };
+  } catch { return { state: "unobserved", expires_at: null }; }
+}
 export async function factoryBatchLock(bucket, profileId, owner, nowMs, leaseMs = FACTORY_BATCH_LEASE_MS) {
   const key = factoryBatchLockKey(profileId);
   for (let i = 0; i < 8; i++) {
@@ -693,10 +719,31 @@ export async function factoryBatchRetryOriginalIntentOnce(bucket, {
  * stored item ledger; derived counters cannot disagree unless the stored
  * snapshot contains contradictory legacy metadata.
  */
-export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
+export function factoryBatchQualitySignals(job, nowMs = Date.now(), claim = null) {
   if (!job) return [];
   const signals = [];
   const counts = factoryBatchCounts(job);
+  // Observational per-output warnings. Existing guarded dispatch and exact
+  // receipt reconciliation own recovery; a timing miss never authorizes a write.
+  for (const item of job.items || []) {
+    const progress = factoryBatchItemProgress(item, { nowMs, claim });
+    const started = Date.parse(progress.attempt_started_at || "");
+    const last = Date.parse(progress.last_progress_at || job.created_at || "");
+    const detail = { output_ids: [item.output_id].filter(Boolean), record_id: item.id,
+      pending_reason: progress.pending_reason, last_progress_at: progress.last_progress_at,
+      retry_not_before_at: progress.retry_not_before_at, safe_auto_recover: false };
+    if (item.status === "processing" && Number.isFinite(started) && nowMs - started >= 5000) {
+      signals.push({ ...detail, code: "QA-FACTORY-OUTPUT-PROCESSING-TARGET", elapsed_ms: nowMs - started });
+    }
+    if (item.status === "processing" && ["expired","unclaimed"].includes(claim?.state)) {
+      signals.push({ ...detail, code: "QA-FACTORY-OUTPUT-ABANDONED-CLAIM" });
+    }
+    const eligibleSince = Math.max(last || 0, Number(item.next_attempt_ms || 0));
+    if (item.status === "pending" && ["expired","unclaimed"].includes(claim?.state)
+        && eligibleSince > 0 && nowMs - eligibleSince >= 60000) {
+      signals.push({ ...detail, code: "QA-FACTORY-OUTPUT-ELIGIBLE-UNCLAIMED", elapsed_ms: nowMs - eligibleSince });
+    }
+  }
   const ids = job.items.map(item => item.id);
   if (new Set(ids).size !== ids.length) {
     signals.push({ code: "QA-FACTORY-BATCH-DUPLICATE-ITEM", safe_auto_recover: false,
