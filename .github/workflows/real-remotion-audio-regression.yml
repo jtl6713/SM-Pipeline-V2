@@ -1,0 +1,50 @@
+name: Real Remotion audio regression
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/remotion-renderer/**'
+      - 'services/pipeline-runner/r4/**'
+      - 'services/pipeline-runner/r5/**'
+      - 'services/pipeline-runner/render/**'
+      - 'services/pipeline-runner/studio_produce/**'
+      - '.github/scripts/test-real-remotion-audio.py'
+      - '.github/workflows/real-remotion-audio-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/real-remotion-audio-regression.yml'
+permissions:
+  contents: read
+jobs:
+  real-audio-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/remotion-renderer/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact renderer dependencies
+        working-directory: services/remotion-renderer
+        run: npm ci --no-audit --no-fund
+      - name: Ensure media analysis tools
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+      - name: Render and independently inspect both audio stems and opt-outs
+        run: python .github/scripts/test-real-remotion-audio.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-remotion-audio-receipt
+          path: /tmp/real-remotion-audio-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
