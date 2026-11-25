@@ -74,9 +74,12 @@ try{
     await page.waitForFunction(()=>document.getElementById('factoryDeskStatus').textContent.includes('All 6 outputs accepted'));
     assert.equal(posts.length,1);assert.equal(job.total,6);await context.close();continue;
   }
-  await page.waitForFunction(()=>Object.keys(localStorage).some(k=>k.startsWith('studio.factory.recovery.v2.')) || Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
+  // The exact request is now archived before POST. Wait for a response/error,
+  // not merely for the pre-POST persistence marker, before simulating reload.
+  await page.waitForFunction(()=>Object.keys(localStorage).some(k=>k.startsWith('studio.factory.recovery.v2.') && JSON.parse(localStorage.getItem(k)||'{}').last_error) || Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
   assert.equal(posts.length,1);
   if(mode==='blocked'){
+    await page.waitForFunction(()=>document.getElementById('factoryBatchPendingNotice').textContent.includes('Output is held'));
     assert.match(await page.locator('#factoryBatchPendingNotice').innerText(),/Output is held/);
     await page.evaluate(()=>window.StudioFactoryDesk.load(true));
     assert.match(await page.locator('#factoryBatchPendingNotice').innerText(),/Output is held/);
