@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-28-3129-visual-integrity-guard'
+      EXPECTED_VERSION: '2026-11-25-2853-story-audio-transport'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth
@@ -173,9 +173,9 @@ jobs:
             code=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' \
               'https://render.chicagoshining.com/health' || true)
             if [[ "$code" == "200" ]] && jq -e --arg v "$EXPECTED_VERSION" \
-              '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and .version==$v' \
+              '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and .checksumBoundStoryAudio==true and .version==$v' \
               /tmp/remotion-health.json >/dev/null 2>&1; then
-              jq -c '{ok,service,version,privateDriveImageLocalization,watermarkLocalization}' /tmp/remotion-health.json
+              jq -c '{ok,service,version,privateDriveImageLocalization,watermarkLocalization,checksumBoundStoryAudio}' /tmp/remotion-health.json
               exit 0
             fi
             echo "waiting_version attempt=$i http=$code body=$(head -c 120 /tmp/remotion-health.json 2>/dev/null | tr '\n' ' ')"
