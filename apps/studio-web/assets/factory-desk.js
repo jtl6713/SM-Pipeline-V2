@@ -1919,7 +1919,8 @@
       </section>`;
     }).join("")}</div>` : "";
     const retryNotice = state.retryBatchNotice?.job_id === latest?.job_id ? state.retryBatchNotice : null;
-    const failedItems = items.filter(item => item.status === "failed" || item.error && !["approved", "already_satisfied"].includes(item.status));
+    const failedItems = items.filter(item => item.status === "failed");
+    const retryItems = items.filter(item => item.status === "pending" && item.error);
     details.innerHTML = latest ? `${latest.preview_only && state.batchSubmissionError ? '<p class="error-text" role="alert">' + esc(state.batchSubmissionError) + '</p>' : ""}${retryNotice ? '<p class="factory-batch-retry-result" role="status">' + esc(retryNotice.message) + '</p>' : ""}
       ${failedItems.length ? '<section class="factory-batch-failed-details"><strong>Failed outputs (' + failedItems.length + ')</strong><ul>' +
         failedItems.map(item => '<li><strong>' + esc(item.title || "Output " + item.output_id) + '</strong> · ' +
@@ -1927,6 +1928,10 @@
           '<p>' + esc(item.error || "No error details were returned.") + '</p>' +
           (item.previous_failure_error ? '<small>Previous failure: ' + esc(item.previous_failure_error) + '</small>' : '') +
           '</li>').join('') + '</ul><p>Retry only after checking the failure. A retry is not proof of success.</p></section>' : ""}
+      ${retryItems.length ? '<section role="status"><strong>Queued for automatic retry (' + retryItems.length + ')</strong><ul>' +
+        retryItems.map(item => '<li><strong>' + esc(item.title || "Output " + item.output_id) + '</strong> · Output ' +
+          esc(item.output_id || item.id) + '<p>' + esc(item.error) + '</p></li>').join('') +
+        '</ul><p>Studio will continue the existing approval request. No resubmission is needed.</p></section>' : ""}
       <div class="factory-batch-inspect-heading">
         <strong>${esc(latest.group ? "Global approval · per-profile progress" : factoryProfileLabel(latest.profile_id))}</strong>
         <span>${Number(latest.done_count)||0} / ${Number(latest.total)||0} processed</span>
