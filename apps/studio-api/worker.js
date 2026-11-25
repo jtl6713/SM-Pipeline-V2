@@ -4599,6 +4599,19 @@ export default {
         console.warn("airtable_retirement_collector_heartbeat_unavailable",
           String(error?.message || error))));
     }
+    // #2853: optional staged independent production recovery. The minute
+    // owner is disjoint from the shared light/heavy sweep, including cooldown.
+    // Keep the existing bounded Runner/governor path; no publishing dispatch.
+    const independentProduceWatchdog = studioPhase6WriteSource(env) === "supabase"
+      && studioSupabaseConfigured(env)
+      && env.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED === "true";
+    if (independentProduceWatchdog && collectorCron === "* * * * *" && collectorMinute % 5 === 2) {
+      ctx.waitUntil(resumeStaleStudioProductionJobs(env, {
+        maxCandidates: 4,
+        scheduledTime: Number.isFinite(scheduledAt) && scheduledAt > 1e12 ? scheduledAt : Date.now(),
+      }).then(pulses => console.info("Independent production watchdog", JSON.stringify(pulses)))
+        .catch(error => console.warn("Independent production watchdog unavailable", String(error?.message || error))));
+    }
     // #2853: Proactive, read-only 5-minute Quality Agent check of at most
     // four recent production plans and their platform output identities.
     // Existing zero-output recovery runs independently below. This probe
@@ -5325,10 +5338,14 @@ export default {
       } catch (error) {
         console.warn("Factory Producer revision QA failed", error);
       }
-      try {
-        await resumeStaleStudioProductionJobs(env);
-      } catch (error) {
-        console.warn("studio produce watchdog failed", error);
+      if (!independentProduceWatchdog) {
+        try {
+          await resumeStaleStudioProductionJobs(env, {
+            scheduledTime: studioPhase6WriteSource(env) === "supabase" ? Number(event?.scheduledTime) || Date.now() : undefined,
+          });
+        } catch (error) {
+          console.warn("studio produce watchdog failed", error);
+        }
       }
       try {
         await startOrphanedStudioProductionJobs(env);
