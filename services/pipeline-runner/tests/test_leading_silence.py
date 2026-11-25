@@ -39,12 +39,14 @@ def test_ingest_studio_music_trims_before_drive_upload(monkeypatch):
             return {"id": "driveMusic1", "webViewLink": "https://drive.google.com/file/d/driveMusic1/view"}
 
     monkeypatch.setattr("studio_music.processor.cap_leading_silence", lambda content, filename: trimmed)
+    monkeypatch.setattr("studio_music.processor.probe_audio_duration_bytes", lambda data: 118.9 if data == b"ID3trimmed" else 0)
     monkeypatch.setattr("studio_music.processor.GoogleDriveClient", lambda: _FakeDrive())
     result = ingest_studio_music(content=b"ID3fake", filename="Sunset drone bed")
     assert result["google_drive_file_id"] == "driveMusic1"
     assert result["leading_silence_status"] == STATUS_CAPPED
     assert result["leading_silence_removed_seconds"] == 1.55
     assert result["file_size_bytes"] == len(b"ID3trimmed")
+    assert result["duration_seconds"] == 118.9
     assert result["Leading_Silence_Status"] == STATUS_CAPPED
 
 

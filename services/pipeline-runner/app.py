@@ -1024,6 +1024,31 @@ def run_studio_music_library():
     return jsonify(result), 201
 
 
+@app.post("/internal/music-duration/verify")
+def verify_music_duration():
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"error":"music_duration_auth_unavailable"}), 503
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    if request.content_length is not None and request.content_length > 2048:
+        return jsonify({"error":"music_duration_payload_too_large"}), 413
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error":"invalid_music_identity"}), 422
+    from studio_music.processor import verify_catalog_music_duration
+    try:
+        return jsonify(verify_catalog_music_duration(str(body.get("record_id") or ""),
+            str(body.get("google_drive_file_id") or ""),settings=settings)), 200
+    except workload_governor.AdmissionDeferred:
+        return jsonify({"error":"music_duration_deferred"}), 503
+    except ValueError:
+        return jsonify({"error":"music_duration_invalid_asset"}), 422
+    except Exception:
+        logger.exception("music duration verification failed")
+        return jsonify({"error":"music_duration_verification_failed"}), 502
+
+
 @app.post("/jobs/studio-music-library-delete")
 def run_studio_music_library_delete():
     error_response, status = _verify_secret()

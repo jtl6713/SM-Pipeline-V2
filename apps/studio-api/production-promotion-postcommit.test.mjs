@@ -134,3 +134,23 @@ test("HTTP handler protects persisted success from best-effort continuation regi
   assert.match(moduleSource, /output_routing_verified/);
   assert.match(moduleSource, /promoted_write_complete/);
 });
+
+test("selected soundtrack is checked before the first irreversible promotion write", async () => {
+  const start=moduleSource.indexOf("  // Validate explicit soundtrack identity before I3");
+  const end=moduleSource.indexOf("  const input = promotionInputFromProductionRequest(requestRecord);",start);
+  assert.ok(start>=0 && end>start);
+  const submitted=moduleSource.indexOf("  // Mark Submitted before firing I3.",end);
+  assert.ok(submitted>end);
+  const check=vm.runInNewContext("(async (env,requestRecord)=>{"+moduleSource.slice(start,end)+"})",{
+    f:(r,k)=>r.fields[k],arrayOrEmpty:a=>Array.isArray(a)?a:[],
+    outputRowsForProductionRequest:async()=>[
+      {fields:{Enabled:true,Platform:"Instagram"}},
+      {fields:{Enabled:true,Platform:"Facebook"}}
+    ],
+    airtableFetch:async()=>({id:"recMusic",fields:{}}),
+    preferredMusicForProductionRequestOutput:async()=>({url:"verified-url",duration_seconds:0}),
+    HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}},
+  });
+  await assert.rejects(check({}, {id:"recRequest",fields:{Background_Music_Mode:"Yes",Selected_Music_Asset:["recMusic"]}}), /duration is not verified/);
+  await check({}, {id:"recRequest",fields:{Background_Music_Mode:"No",Selected_Music_Asset:["recMusic"]}});
+});

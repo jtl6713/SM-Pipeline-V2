@@ -5582,7 +5582,7 @@ export function studioMusicFromMediaRecord(record) {
 }
 /*__STUDIO_WORKER_END:studioMusicFromMediaRecord__*/
 
-export async function preferredMusicForProductionRequestOutput(env, outputRow, requestRecord) {
+export async function preferredMusicForProductionRequestOutput(env, outputRow, requestRecord, { verifyDuration = false } = {}) {
   const overrideLinks = arrayOrEmpty(f(outputRow, "Selected_Music_Asset_Override"));
   const masterLinks = arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"));
   const recordId = overrideLinks[0] || masterLinks[0] || null;
@@ -5590,7 +5590,27 @@ export async function preferredMusicForProductionRequestOutput(env, outputRow, r
   if (!recordId) return emptyStudioMusic();
 
   const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
-  return studioMusicFromMediaRecord(media);
+  const music = studioMusicFromMediaRecord(media);
+  if (!verifyDuration || !music.url || music.duration_seconds > 0 || !music.google_drive_file_id) return music;
+  const runner = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  if (!runner || !secret) return music;
+  // One exact authenticated verification; the runner owns admission and CAS.
+  // No arbitrary media URLs or replacement music are submitted.
+  try {
+    const response = await fetch(runner + "/internal/music-duration/verify", {
+      method:"POST", headers:{"Content-Type":"application/json","X-Pipeline-Secret":secret},
+      body:JSON.stringify({record_id:recordId,google_drive_file_id:music.google_drive_file_id}),
+      signal:AbortSignal.timeout(60000),
+    });
+    const proof = await response.json().catch(()=>null);
+    if (!response.ok || proof?.ok !== true || proof.record_id !== recordId ||
+        proof.google_drive_file_id !== music.google_drive_file_id ||
+        !Number.isFinite(proof.duration_seconds) || proof.duration_seconds <= 0) return music;
+    return {...music,duration_seconds:proof.duration_seconds};
+  } catch {
+    return music; // retain the fail-closed duration gate
+  }
 }
 /*__STUDIO_WORKER_END:preferredMusicForProductionRequestOutput__*/
 
@@ -5638,7 +5658,7 @@ export async function resolveStudioRenderMusic(env, outputRow, requestRecord, ef
   const overrideLinks = arrayOrEmpty(f(outputRow, "Selected_Music_Asset_Override"));
   const masterLinks = arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"));
   if (mode !== "yes" && !overrideLinks.length && !masterLinks.length) return emptyStudioMusic();
-  const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
+  const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord, {verifyDuration:mode === "yes"});
   if (preferred.url) return preferred;
   if (mode !== "yes") return preferred;
   return catalogFallbackMusic(env, { minDurationSeconds: Number(effective?.video_duration_seconds) || 0 });
@@ -11389,7 +11409,7 @@ export function assertProductionRequestFanoutComplete(outputFanout) {
   if (blocked > 0 || remaining > 0 || (!already && routed !== enabled)) {
     throw new HttpError(
       409,
-      `Promotion created the Content Item, but Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). The request is not complete and can be retried safely.`
+      `Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). ${[...new Set((outputFanout?.work_items || []).flatMap(item => item.issues || []))].join(" ").slice(0,800)} Existing content is preserved; do not create a replacement request.`
     );
   }
 }
@@ -12510,6 +12530,24 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
   if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate");
 
+  // Validate explicit soundtrack identity before I3 creates a Content Item.
+  // A catalog URL alone does not establish a usable audio duration.
+  const plannedDestinations = (await outputRowsForProductionRequest(env, requestRecord.id))
+    .filter(row => Boolean(f(row, "Enabled")));
+  const checkedMusic = new Map();
+  for (const row of plannedDestinations) {
+    const mode = String(f(row, "Background_Music_Mode_Override") || "Inherit").trim();
+    if (mode === "No" || (mode === "Inherit" && String(f(requestRecord, "Background_Music_Mode") || "") !== "Yes")) continue;
+    const chosen = arrayOrEmpty(f(row, "Selected_Music_Asset_Override"))[0]
+      || arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"))[0];
+    if (!chosen) continue; // existing catalog fallback and render checks remain authoritative
+    if (!checkedMusic.has(chosen)) checkedMusic.set(chosen,
+      await preferredMusicForProductionRequestOutput(env, row, requestRecord, {verifyDuration:true}));
+    const music = checkedMusic.get(chosen);
+    if (!music.url || !(music.duration_seconds > 0)) {
+      throw new HttpError(409, "Selected soundtrack is unavailable or its duration is not verified. Studio must verify the existing audio asset before creating the Content Item. Your saved photos, crops and settings are preserved.");
+    }
+  }
   const input = promotionInputFromProductionRequest(requestRecord);
 
   // Mark Submitted before firing I3. This creates an idempotency fence in Studio.
