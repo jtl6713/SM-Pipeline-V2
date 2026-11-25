@@ -106,9 +106,16 @@ test("production photo ranker strips Citywide without bypassing profile scope", 
   assert.match(source, /const locationForMatching = String\(primaryLocation \|\| ""\)\.replace/);
   const start = source.indexOf("async function rankStillsForIdeaPhotoWait(");
   assert.ok(start > 0, "compiled matcher remains in the deployed Worker");
-  const ranker = source.slice(start, start + 2200);
+  // The matcher now has bounded pagination and diagnostics; a fixed character
+  // window can truncate the unchanged profile-scoped fallback.
+  const end = source.indexOf("/*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/", start);
+  assert.ok(end > start, "production matcher end marker is present");
+  const ranker = source.slice(start, end);
   assert.match(ranker, /mediaAssetProfileScopeForId/);
   assert.match(ranker, /combineAirtableFormulas\(ideaLibraryFilterFormula\(filterKeys\), scopeFormula\)/);
+  assert.match(ranker, /profileId: crossScope \? "" : profileId/);
+  assert.match(ranker, /if \(!crossScope && !profileId\) throw/);
+  assert.match(ranker, /searchTokens: filterKeys/);
 });
 
 test("Chicago Winters assets with exclusions are screened before watermark, then provenance-held candidates are skipped", () => {
