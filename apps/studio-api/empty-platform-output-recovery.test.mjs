@@ -71,7 +71,7 @@ test("execute real seed: ordinary recovery cannot arm publication; legacy and te
  assert.ok(start>=0 && end>start);
  const seed=vm.runInNewContext(code.slice(start,end).replace(/^export /,"")+"\nplatformOutputSeedFields",{
    f:(r,k)=>r?.fields?.[k],
-   HttpError:class extends Error{},
+   HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}},
    productionRequestRevisionOpen:r=>Boolean(r.fields.revision),
    item4PlanItemForOutput:()=>({}),
    studioOutputIsNativePhotoRoute:()=>false,
