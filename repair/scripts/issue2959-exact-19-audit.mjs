@@ -4,11 +4,11 @@ const ROOT="studio/state/factory-approvals/v2/";
 const NYC="recgtK8Z7eNADNtVy",LA="recF7UAn0LkMZZrWZ",CHI="recT2rbKX3MF7cVFU";
 const TARGETS=Object.freeze({
   [NYC]:{rectw2pvgnBzK3wCN:10853,recJ8jTynJDxsN0hl:10854},
-  [CHI]:{rec9uodYpY4L6BvyQ:11166,recCYflzPH65HdbpS:11167,recyEgGuGKIrJw8Ca:11168,recckY9KlAJkWtXxO:11170},
+  [CHI]:{rec9uodYpY4L6BvyQ:11166,recCYflzPH65HdbpS:11167,recyEgGuGKIrJw8Ca:11168,recckY9KlAJkWtXxO:11170,recwGZF0JxVyTS2eF:11169,recl9v0xTGSwGgt8u:11171},
   [LA]:{recztl5GuZhhS8dGE:11172,rec1EEHHhPAQmbm9X:11173,reco2npIhDFJmhNSM:11174,recauG5u3gDMDyFN0:11175,recnPrM827psgnJbd:11178,rec17r1eQJmcWl4hy:11180,recKsGoKjLnaHdlpg:11181,recaDRS4GJfkKjNQ3:11182,recnlndGlSR6uWNLR:11183,reckBsz193ABJH2Zj:11184,recMG942g1KpH2FkS:11185,recHV6did16UCcqFL:11186,recL7CGkpA6a6tAbr:11187},
 });
-const KNOWN=[];
-const SINCE=Date.parse("2026-11-25T01:04:00Z");
+const KNOWN=["730ac1c7-50ac-43df-a050-c3fa83f73310"];
+const SINCE=Date.parse("2026-11-25T01:48:00Z");
 const RID=/^[A-Za-z0-9_-]{12,128}$/;
 const ACTOR=/^rec[A-Za-z0-9]{14}$/;
 const ALL=new Map(Object.values(TARGETS).flatMap(rows=>Object.entries(rows)));
@@ -73,7 +73,7 @@ export async function audit(bucket){
       }
     }
   }
-  return {schema:"issue2959.factory-exact-19-audit.v1",read_only:true,claims,groups:reports,recent_scan:{since:new Date(SINCE).toISOString(),metadata_complete:complete,candidates:candidates.length,checked:Math.min(30,candidates.length),complete:complete&&candidates.length<=30}};
+  return {schema:"issue2959.factory-exact-21-retry-audit.v1",read_only:true,claims,groups:reports,recent_scan:{since:new Date(SINCE).toISOString(),metadata_complete:complete,candidates:candidates.length,checked:Math.min(30,candidates.length),complete:complete&&candidates.length<=30}};
 }
 export default {async fetch(request,env){
   if(request.method!=="GET"||new URL(request.url).pathname!=="/report")return new Response("Not found",{status:404});
