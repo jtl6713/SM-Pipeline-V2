@@ -245,6 +245,37 @@ def smv1_maintenance_active(db: sqlite3.Connection) -> bool:
     return bool(row and float(row[0]) > time.time())
 
 
+def maintenance_requested() -> bool:
+    """Active producers honor the drain at their next safe checkpoint."""
+    with _connect() as db:
+        return smv1_maintenance_active(db)
+
+
+def half_open_probe_epoch(request_id: str, token: str) -> float | None:
+    with _connect() as db:
+        now = time.time()
+        row = db.execute("""SELECT g.until_at FROM governor_control g
+            WHERE g.name='database' AND g.until_at<=?
+            AND EXISTS (SELECT 1 FROM producer_jobs WHERE request_id=?
+                AND token=? AND state='running' AND lease_until>?)""",
+            (now, request_id, token, now)).fetchone()
+        return float(row[0]) if row else None
+
+
+def confirm_half_open_progress(request_id: str, token: str, epoch: float) -> bool:
+    """Close only the same cooled outage after a fenced canonical step readback."""
+    with _connect() as db:
+        _transaction(db)
+        now = time.time()
+        cleared = db.execute("""DELETE FROM governor_control
+            WHERE name='database' AND until_at=? AND until_at<=?
+            AND EXISTS (SELECT 1 FROM producer_jobs WHERE request_id=?
+                AND token=? AND state='running' AND lease_until>?)""",
+            (epoch, now, request_id, token, now)).rowcount
+        db.commit()
+        return bool(cleared)
+
+
 def set_smv1_maintenance(token: str, *, begin: bool) -> bool:
     """Operator-only, token-fenced gate sharing the same admission transaction."""
     if not enabled() or not re.fullmatch(r"[a-f0-9]{32}", token):
@@ -479,7 +510,7 @@ def job_valid(request_id: str, token: str) -> bool:
     return bool(row and row[0] == "running" and row[1] == token and row[2] > time.time())
 
 
-def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed: bool = False) -> None:
+def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed: bool = False, maintenance_yield: bool = False) -> None:
     """Yielded jobs are delayed and eventually parked for explicit review.
 
     A parked job is retained (never discarded) and can be resumed through
@@ -495,7 +526,7 @@ def finish_job(request_id: str, token: str, *, requeue: bool = False, progressed
                 (request_id, token, now),
             ).fetchone()
             if row:
-                streak = 1 if progressed else int(row[0]) + 1
+                streak = int(row[0]) if maintenance_yield else (1 if progressed else int(row[0]) + 1)
                 parked = streak >= MAX_CONSECUTIVE_YIELDS
                 delay = min(MAX_REQUEUE_DELAY_SECONDS, 30 * (2 ** min(streak - 1, 5)))
                 db.execute("""UPDATE producer_jobs SET state=?,token=NULL,lease_until=NULL,

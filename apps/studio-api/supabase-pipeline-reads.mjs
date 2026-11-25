@@ -1111,8 +1111,7 @@ export async function listSupabaseAssetLibraryRecords(env, {
     "media_class=in.(Image,Graphic,Video)",
     "or=(asset_role.is.null,asset_role.eq.,asset_role.neq.Music)",
     "asset_name=not.ilike.*fill-crop*",
-    // Inactive + Do Not Use is the explicit library-retirement state. Keep ID
-    // lookups above available for already-attached content and historical use.
+    // Keep explicitly retired assets available by ID, but not in ordinary browse.
     "or=(active.is.null,active.eq.true,do_not_use.is.null,do_not_use.eq.false)",
   ];
   const normalizedKind = String(kind || "").trim().toLowerCase();
@@ -2193,6 +2192,177 @@ export function pipelineTitleSearchLike(raw) {
   const tokens = pipelineTitleSearchTokens(raw);
   if (!tokens.length) return "";
   return `*${tokens.join("*")}*`;
+}
+
+/**
+ * Content ID or Platform Output ID from a Pipeline search box.
+ * Accepts bare digits plus light prefixes (content 1074, output 5963, #1074).
+ */
+export function pipelineSearchNumericId(raw) {
+  const text = String(raw || "").trim().replace(/^["']+|["']+$/g, "").trim();
+  if (!text) return null;
+  const prefixed = /^(?:#|content(?:\s*id)?\s*|ci\s*|output(?:\s*id)?\s*|po\s*|platform(?:\s*output)?\s*)(\d{1,9})$/i.exec(text);
+  if (prefixed) return Number(prefixed[1]);
+  if (/^\d{1,9}$/.test(text)) return Number(text);
+  return null;
+}
+
+function pipelineSearchContentGroupFromRow(c, requestById = new Map(), planProgressByRequest = new Map()) {
+  const request = requestById.get(c.production_request_id) || null;
+  const progress = planProgressByRequest.get(c.production_request_id) || {
+    planned_count: 0,
+    created_count: Number(c.platform_output_count || 0),
+  };
+  const step = String(request?.production_job?.step || "").trim().toLowerCase();
+  const state = progress.planned_count > 0 && progress.created_count >= progress.planned_count
+    ? "Created" : ["blocked", "escalated"].includes(step) ? "Blocked" : "Creating";
+  return {
+    id: c.airtable_record_id || c.id,
+    content_id: c.content_number,
+    title: c.content_title,
+    created_at: c.created_at,
+    platform_output_progress: {
+      ...progress,
+      state,
+      job_step: step || null,
+      error: String(request?.production_job?.error || "").trim() || null,
+    },
+  };
+}
+
+/**
+ * Profile-wide Pipeline search: content ID, output ID, or title.
+ * Returns every Platform Output sibling for each matched Content Item so the
+ * UI can paint the full package, not only the title-matched row.
+ */
+export async function listSupabasePipelineGlobalSearch(env, {
+  profileAirtableId, query, limit = 40,
+} = {}) {
+  if (!studioSupabaseConfigured(env)) throw new Error("Supabase Pipeline unavailable");
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) return { records: [], content_groups: [], content_ids: [], profileMissing: true, emptyQuery: false };
+  const cappedGroups = Math.max(1, Math.min(40, Number(limit) || 40));
+  const numericId = pipelineSearchNumericId(query);
+  const like = pipelineTitleSearchLike(query);
+  if (numericId == null && !like) {
+    return {
+      records: [], content_groups: [], content_ids: [], profileMissing: false,
+      emptyQuery: true, matched_by: null,
+    };
+  }
+
+  let contentRows = [];
+  let matchedBy = null;
+
+  if (numericId != null) {
+    contentRows = await supabaseRest(env,
+      `content_items?content_profile_id=eq.${profileId}&content_number=eq.${numericId}`
+      + `&select=id,airtable_record_id,content_number,content_title,created_at,production_request_id,platform_output_count`
+      + `&order=content_number.desc.nullslast&limit=${cappedGroups}`);
+    if ((contentRows || []).length) matchedBy = "content_id";
+    else {
+      const hitOutputs = await supabaseRest(env,
+        `platform_outputs?content_profile_id=eq.${profileId}&output_number=eq.${numericId}&test_run_id=is.null`
+        + `&select=content_item_id&limit=20`);
+      const uuids = [...new Set((hitOutputs || []).map((row) => row.content_item_id).filter(Boolean))];
+      if (uuids.length) {
+        contentRows = await supabaseRest(env,
+          `content_items?id=in.(${uuids.join(",")})&content_profile_id=eq.${profileId}`
+          + `&select=id,airtable_record_id,content_number,content_title,created_at,production_request_id,platform_output_count`
+          + `&order=content_number.desc.nullslast&limit=${cappedGroups}`);
+        matchedBy = "output_id";
+      }
+    }
+  }
+
+  if (!(contentRows || []).length && like) {
+    const pattern = encodeURIComponent(like);
+    const titleContents = await supabaseRest(env,
+      `content_items?content_profile_id=eq.${profileId}&content_title=ilike.${pattern}`
+      + `&select=id,airtable_record_id,content_number,content_title,created_at,production_request_id,platform_output_count`
+      + `&order=content_number.desc.nullslast&limit=${cappedGroups}`);
+    let titleOutputUuids = [];
+    try {
+      const titleOutputs = await supabaseRest(env,
+        `platform_outputs?content_profile_id=eq.${profileId}&test_run_id=is.null`
+        + `&or=(output_title.ilike.${pattern},content_items.content_title.ilike.${pattern})`
+        + `&select=content_item_id&order=output_number.desc.nullslast&limit=200`);
+      titleOutputUuids = [...new Set((titleOutputs || []).map((row) => row.content_item_id).filter(Boolean))];
+    } catch (error) {
+      console.warn("pipeline global title search embed failed; retrying output title", error);
+      const titleOutputs = await supabaseRest(env,
+        `platform_outputs?content_profile_id=eq.${profileId}&test_run_id=is.null&output_title=ilike.${pattern}`
+        + `&select=content_item_id&order=output_number.desc.nullslast&limit=200`);
+      titleOutputUuids = [...new Set((titleOutputs || []).map((row) => row.content_item_id).filter(Boolean))];
+    }
+    const byId = new Map((titleContents || []).map((row) => [row.id, row]));
+    const missing = titleOutputUuids.filter((id) => !byId.has(id)).slice(0, cappedGroups);
+    if (missing.length) {
+      const extra = await supabaseRest(env,
+        `content_items?id=in.(${missing.join(",")})&content_profile_id=eq.${profileId}`
+        + `&select=id,airtable_record_id,content_number,content_title,created_at,production_request_id,platform_output_count`
+        + `&limit=${missing.length}`);
+      for (const row of extra || []) byId.set(row.id, row);
+    }
+    contentRows = [...byId.values()]
+      .sort((a, b) => Number(b.content_number || 0) - Number(a.content_number || 0))
+      .slice(0, cappedGroups);
+    matchedBy = contentRows.length ? "title" : null;
+  }
+
+  const page = contentRows || [];
+  if (!page.length) {
+    return {
+      records: [], content_groups: [], content_ids: [], profileMissing: false,
+      emptyQuery: false, matched_by: matchedBy,
+    };
+  }
+
+  const requestIds = [...new Set(page.map((row) => row.production_request_id).filter(Boolean))];
+  const requestById = new Map();
+  const planProgressByRequest = new Map();
+  if (requestIds.length) {
+    const requestRows = await supabaseRest(env,
+      `production_requests?id=in.(${requestIds.join(",")})&select=id,request_status,production_job&limit=${requestIds.length}`);
+    for (const row of requestRows || []) requestById.set(row.id, row);
+    const planRows = await supabaseRest(env,
+      `production_request_outputs?production_request_id=in.(${requestIds.join(",")})&enabled=eq.true`
+      + `&select=production_request_id,platform_output_id&limit=500`);
+    for (const row of planRows || []) {
+      const progress = planProgressByRequest.get(row.production_request_id) || { planned_count: 0, created_count: 0 };
+      progress.planned_count += 1;
+      if (row.platform_output_id) progress.created_count += 1;
+      planProgressByRequest.set(row.production_request_id, progress);
+    }
+  }
+
+  const contentByAirtableId = new Map(page.filter((c) => c.airtable_record_id).map((c) => [
+    c.airtable_record_id, {
+      id: c.airtable_record_id,
+      createdTime: c.created_at,
+      fields: { Content_ID: c.content_number, Content_Title: c.content_title },
+    },
+  ]));
+  const uuids = page.map((c) => c.id);
+  let outputs = [];
+  if (uuids.length) {
+    const rows = await supabaseRest(env,
+      `platform_outputs?content_item_id=in.(${uuids.join(",")})&test_run_id=is.null`
+      + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast,id.desc&limit=2001`);
+    if ((rows || []).length > 2000) throw new Error("Pipeline search exceeds output safety bound");
+    outputs = (rows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase);
+  }
+
+  return {
+    profileMissing: false,
+    emptyQuery: false,
+    matched_by: matchedBy,
+    records: outputs,
+    contentByAirtableId,
+    content_ids: page.map((c) => c.content_number),
+    content_groups: page.map((c) => pipelineSearchContentGroupFromRow(c, requestById, planProgressByRequest)),
+    read_source: "supabase",
+  };
 }
 
 /**
