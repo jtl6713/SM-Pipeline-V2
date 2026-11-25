@@ -1285,6 +1285,20 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                         )
                     remaining.append(fresh["id"])
                     continue
+                # T1 accepts only Ready for Render, never Waiting in Render
+                # Queue. Admit the exact output before asking T1 to prepare it.
+                # The busy-render check above still serializes sibling work.
+                if render_status == "Waiting in Render Queue":
+                    client.update_record(
+                        PLATFORM_OUTPUTS_TABLE,
+                        fresh["id"],
+                        {"Render_Status": "Ready for Render"},
+                        typecast=True,
+                    )
+                    fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
+                    if field_str(fresh, "Render_Status") != "Ready for Render":
+                        remaining.append(fresh["id"])
+                        continue
                 timing = field_str(fresh, "Timing_Status")
                 if timing not in {"Ready", "Skipped"}:
                     process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
@@ -1314,13 +1328,6 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                             fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
                 except Exception:
                     pass
-                if render_status == "Waiting in Render Queue":
-                    client.update_record(
-                        PLATFORM_OUTPUTS_TABLE,
-                        fresh["id"],
-                        {"Render_Status": "Ready for Render"},
-                        typecast=True,
-                    )
                 r4 = process_r4(output_record_id=fresh["id"], test_run_id=test_run_id) or {}
                 if r4.get("processed"):
                     started_r4 = True
