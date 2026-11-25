@@ -345,3 +345,26 @@ test("#2915 new approval must never attach to a terminal historical group",()=>{
   assert.equal(factoryApprovalGroupCanReuseForNewSubmission({...live,items:[{...records[0],status:"pending"},{...records[1],status:"pending"}]},records,{canonical:true}),true);
   assert.equal(factoryApprovalGroupCanReuseForNewSubmission({...live,items:[{...records[0],status:"pending"},{...records[1],profile_id:chi,status:"pending"}]},records,{canonical:true}),false);
 });
+
+test("#2959 submission observations are durable without extra writes and survive resume",async()=>{
+  const bucket=new FakeR2();
+  const requestId="factory_2959_submission_observed";
+  const base=Date.now()-2000;
+  const iso=ms=>new Date(base+ms).toISOString();
+  const submissionTiming={route_entered_at:iso(0),preflight_finished_at:iso(300),claims_reserved_at:iso(500)};
+  const baseline=new FakeR2();
+  await factoryApprovalGroupEnqueue(baseline,{...opts,requestId});
+  const result=await factoryApprovalGroupEnqueue(bucket,{...opts,requestId,submissionTiming});
+  assert.equal(bucket.version,baseline.version,"no extra R2 writes for instrumentation");
+  assert.equal(result.submission_timing.route_preflight_ms,300);
+  assert.equal(result.submission_timing.output_claims_ms,200);
+  assert.ok(result.submission_timing.route_to_children_durable_ms>=500);
+  const before=(await factoryApprovalGroupRead(bucket,requestId)).submission_timing;
+  const duplicate=await factoryApprovalGroupEnqueue(bucket,{...opts,requestId,
+    submissionTiming:{route_entered_at:iso(600),preflight_finished_at:iso(700),claims_reserved_at:iso(800)}});
+  assert.equal(duplicate.already_submitted,true);
+  assert.deepEqual((await factoryApprovalGroupRead(bucket,requestId)).submission_timing,before);
+  assert.equal((await factoryApprovalGroupStatus(baseline,requestId)).submission_timing,null);
+  const malformed=await factoryApprovalGroupBuild({...opts,submissionTiming:{...submissionTiming,preflight_finished_at:iso(-1)}});
+  assert.equal(malformed.submission_timing,undefined);
+});
