@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 import json
 import re
+import os
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_PROFILES_TABLE, CONTENT_ITEMS_TABLE, SOURCE_CANDIDATES_TABLE
@@ -81,6 +82,10 @@ def _candidate_fields(
         "Content_Profile": [profile_id],
         **_auto_photo_listen_fields(idea),
     }
+    if os.environ.get("STUDIO_PRODUCTION_MODE_CAPTURE") == "true":
+        # Internal create marker; model/user JSON cannot choose a mode.
+        fields["Studio_Production_Mode"] = "automatic"
+        fields["Studio_Production_Source"] = "idea"
     if sourcing_context is not None:
         fields.update(idea_sourcing_fields(idea, sourcing_context))
         # Explore-mode ideas without media must remain deliberate pre-production
