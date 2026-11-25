@@ -144,3 +144,50 @@ def verify_rendered_media(output: dict, data: bytes, *, job_id: str) -> dict:
              "proof":"render_input_source_identity_plus_encoded_mix_probe",
              "individual_stems_verified":False}
     return {RECEIPT_FIELD:json.dumps(receipt,separators=(",",":"))}
+
+
+def committed_render_receipt_matches(output: dict, *, job_id: str) -> bool:
+    """R5 404 recovery may reuse only the already committed, exact receipt.
+
+    This validates provenance and recorded probe results, not a fresh download
+    or separate-stem attribution. Legacy routes outside render_contract retain
+    their existing behavior. Never manufacture proof for a missing render.
+    """
+    try:
+        contract = render_contract(output)
+    except MediaContractError:
+        return False
+    if contract is None:
+        return True
+    proof = _dict(field(output, RECEIPT_FIELD))
+    file_id = field_str(output, "Final_File_ID")
+    preview = field_str(output, "Studio_Preview_URL")
+    if not (proof.get("version") == 1 and job_id
+            and job_id == field_str(output, "Remotion_Job_ID") == proof.get("job_id")
+            and re.fullmatch(r"[a-f0-9]{64}", str(proof.get("sha256") or ""))
+            and type(proof.get("size_bytes")) is int and proof["size_bytes"] > 0
+            and file_id and file_id == proof.get("drive_file_id")
+            and "/" + file_id + "/" in field_str(output, "Final_File_URL")
+            and preview and preview == proof.get("preview_url")
+            and proof.get("contract") == contract):
+        return False
+    encoded = proof.get("encoded")
+    if not isinstance(encoded, dict):
+        return False
+    duration = _number(encoded.get("duration_seconds"))
+    if duration <= 0 or abs(duration-contract["seconds"]) > max(1/contract["fps"],0.035)+0.005:
+        return False
+    frames = encoded.get("encoded_frames")
+    if frames is not None and frames != contract["frames"]:
+        return False
+    if contract["width"] and contract["height"] and (
+            encoded.get("width"), encoded.get("height")) != (contract["width"], contract["height"]):
+        return False
+    if any(contract["required_audio"].values()):
+        peak, mean = encoded.get("peak_db"), encoded.get("mean_db")
+        if (encoded.get("audio_streams") != 1
+                or type(peak) not in (int,float) or type(mean) not in (int,float)
+                or not math.isfinite(peak) or not math.isfinite(mean)
+                or peak <= -35 or mean <= -50):
+            return False
+    return True

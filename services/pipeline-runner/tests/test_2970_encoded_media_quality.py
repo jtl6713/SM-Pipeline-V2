@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from render.media_quality import MediaContractError, render_contract, validate_probe, verify_rendered_media, RECEIPT_FIELD
+from render.media_quality import MediaContractError, render_contract, validate_probe, verify_rendered_media, committed_render_receipt_matches, RECEIPT_FIELD
 
 
 def output(**patch):
@@ -87,3 +87,74 @@ def test_real_encoded_audio_and_silent_aac(tmp_path):
             result=json.loads(verify_rendered_media(o,path.read_bytes(),job_id="job-audible")[RECEIPT_FIELD])
             assert result["job_id"]=="job-audible" and result["encoded"]["encoded_frames"]==300
             assert result["individual_stems_verified"] is False
+
+
+def committed_output():
+    o=output(Remotion_Job_ID="job-current", Final_File_ID="drive-current",
+             Final_File_URL="https://drive.google.com/file/d/drive-current/view",
+             Studio_Preview_URL="https://media.example/current.mp4")
+    c=render_contract(o)
+    proof={"version":1,"job_id":"job-current","sha256":"a"*64,"size_bytes":123,
+           "drive_file_id":"drive-current","preview_url":"https://media.example/current.mp4",
+           "contract":c,"encoded":validate_probe(c,metadata(),peak_db=-5,mean_db=-23)}
+    o["fields"][RECEIPT_FIELD]=json.dumps(proof)
+    return o,proof
+
+
+def test_r5_404_reuse_requires_exact_existing_media_proof():
+    o,proof=committed_output()
+    assert committed_render_receipt_matches(o,job_id="job-current")
+    assert not committed_render_receipt_matches(o,job_id="job-old")
+    for key,value in [("job_id","job-old"),("sha256","bad"),("size_bytes",0),
+                      ("drive_file_id","drive-old"),("preview_url","https://media.example/old"),
+                      ("contract",{}),("encoded",{})]:
+        changed={**proof,key:value}
+        o["fields"][RECEIPT_FIELD]=json.dumps(changed)
+        assert not committed_render_receipt_matches(o,job_id="job-current"),key
+    for key,value in [("peak_db",-90),("mean_db",-90),("audio_streams",0),
+                      ("duration_seconds",41),("encoded_frames",1257)]:
+        changed={**proof,"encoded":{**proof["encoded"],key:value}}
+        o["fields"][RECEIPT_FIELD]=json.dumps(changed)
+        assert not committed_render_receipt_matches(o,job_id="job-current"),key
+    o["fields"].pop(RECEIPT_FIELD)
+    assert not committed_render_receipt_matches(o,job_id="job-current")
+    assert committed_render_receipt_matches(output(Output_Filename="legacy.mp4"),job_id="legacy")
+    o,proof=committed_output()
+    o["fields"]["Studio_Effective_Voiceover_Mode"]="No"
+    assert not committed_render_receipt_matches(o,job_id="job-current")
+
+
+@pytest.mark.parametrize("verified",[False,True])
+def test_r5_actual_404_path_never_admits_unverified_generated_artifact(monkeypatch,verified):
+    from r5 import processor
+    o,_=committed_output()
+    if not verified:
+        o["fields"].pop(RECEIPT_FIELD)
+    o["fields"]["Remotion_Status_URL"]="https://renderer.example/status/current"
+    o["fields"]["Review_Status"]="Pending Review"
+    patches=[]
+    class Client:
+        def update_record(self,table,record_id,fields,**kwargs):
+            patches.append(fields.copy())
+    class Renderer:
+        def __init__(self,url): pass
+        def get_status(self,url):
+            return {"status":"completed","renderUrl":"https://renderer.example/current.mp4",
+                    "jobId":"job-current"}
+        def download_render(self,url):
+            raise RuntimeError("404 rendered asset unavailable")
+    monkeypatch.setattr(processor,"_current_or_stale",lambda *a,**k:(o,None))
+    monkeypatch.setattr(processor,"get_render_server_url",lambda c:"https://renderer.example")
+    monkeypatch.setattr(processor,"RemotionClient",Renderer)
+    monkeypatch.setattr(processor,"_classify_status",lambda status:"complete")
+    result=processor.process_one_output(Client(),o)
+    if verified:
+        assert result["processed"] is True
+        assert patches[-1]["Output_Status"]=="Ready for Review"
+    else:
+        assert result["processed"] is False
+        assert result["reason"]=="encoded_media_receipt_unverified"
+        assert patches[-1]["Render_Status"]=="Blocked"
+        assert patches[-1]["Output_Status"]=="In Production"
+    assert all("Do_Not_Publish" not in patch for patch in patches)
+    assert all("Scheduled_Post_Date" not in patch for patch in patches)
