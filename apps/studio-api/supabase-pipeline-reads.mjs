@@ -1111,6 +1111,9 @@ export async function listSupabaseAssetLibraryRecords(env, {
     "media_class=in.(Image,Graphic,Video)",
     "or=(asset_role.is.null,asset_role.eq.,asset_role.neq.Music)",
     "asset_name=not.ilike.*fill-crop*",
+    // Inactive + Do Not Use is the explicit library-retirement state. Keep ID
+    // lookups above available for already-attached content and historical use.
+    "or=(active.is.null,active.eq.true,do_not_use.is.null,do_not_use.eq.false)",
   ];
   const normalizedKind = String(kind || "").trim().toLowerCase();
   if (normalizedKind === "video") filters.push("media_class=eq.Video");
