@@ -368,3 +368,17 @@ test("#2959 submission observations are durable without extra writes and survive
   const malformed=await factoryApprovalGroupBuild({...opts,submissionTiming:{...submissionTiming,preflight_finished_at:iso(-1)}});
   assert.equal(malformed.submission_timing,undefined);
 });
+
+test("authenticated creative review snapshot survives durable parent enqueue and resume",async()=>{
+  const store=new FakeR2();
+  const creative_review={revision_sha256:"a".repeat(64),warnings:["Story planned 300 frames, rendered 900 frames"]};
+  const records=[{...outputs[0],creative_review},outputs[1]];
+  await factoryApprovalGroupEnqueue(store,{...opts,records,submittedBy:"recActor123456789"});
+  const first=await factoryApprovalGroupRead(store,opts.requestId);
+  assert.deepEqual(first.records.find(r=>r.id===outputs[0].id).creative_review,creative_review);
+  assert.deepEqual(first.children.find(c=>c.profile_id===chi).records[0].creative_review,creative_review);
+  assert.equal(first.records.find(r=>r.id===outputs[1].id).creative_review,undefined);
+  await factoryApprovalGroupResume(store,opts.requestId);
+  const resumed=await factoryApprovalGroupRead(store,opts.requestId);
+  assert.deepEqual(resumed.records.find(r=>r.id===outputs[0].id).creative_review,creative_review);
+});
