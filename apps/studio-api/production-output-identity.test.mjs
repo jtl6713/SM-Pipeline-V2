@@ -56,6 +56,6 @@ test("Supabase content mapping reconciles exact output foreign-key associations"
   const method = source.slice(start, end);
   assert.match(method, /productionOutputLinksFromJoinedRecords\(linkedOutputs\)/);
   assert.match(method, /production_active_output_count:/);
-  assert.match(method, /homeOutputInProduction\(mapOutput\(output\)\)/);
+  assert.match(method, /homeOutputInProduction\(mapped\)/);
   assert.match(method, /refusing Airtable fallback/);
 });
