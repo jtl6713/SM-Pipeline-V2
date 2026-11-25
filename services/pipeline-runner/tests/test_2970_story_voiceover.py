@@ -304,3 +304,60 @@ def test_private_story_render_source_requires_exact_verified_receipt():
     row["fields"]["Voiceover_URL"]="https://example.test/wrong.mp3"
     with pytest.raises(story.StoryVoiceoverError):
         story.private_story_render_url(row,p)
+
+
+def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(monkeypatch):
+    import hashlib
+    from copy import deepcopy
+    from contextlib import nullcontext
+    from studio_produce import workload_governor, context, story_history_recovery as history
+    from p2 import elevenlabs_client, normalizer_client
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+
+    p=parent()
+    p["id"]="reccVyNLdmJJeI8hG"
+    raw=b"original recording from history"
+    data=b"normalized original recording"
+    digest=story.fingerprint(p["id"],"voice-1",story.story_text(p["fields"]["Voiceover_Script"]),story.story_seconds(output()))
+    url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
+    evidence={"fingerprint":digest,"created_at":1795576594,"sha256":hashlib.sha256(raw).hexdigest(),
+              "outputs":{"recjqFCCxBroLyoQJ"}}
+    monkeypatch.setitem(history.HISTORY_RECOVERY,p["id"],evidence)
+    row=output(Content_Item=[p["id"]],Output_Status="In Production",Render_Status="Blocked",
+        Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
+        Composition_ID="Story",Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Do_Not_Publish=True,Auto_Publish_Enabled=False,
+        Studio_Story_Voiceover_Receipt_JSON=json.dumps({"state":"failed","fingerprint":digest,"url":url}))
+    row["id"]="recjqFCCxBroLyoQJ"
+    rows={p["id"]:p,row["id"]:row}
+    class Client:
+        def get_record(self,table,rid):
+            return deepcopy(rows[rid])
+        def update_record(self,table,rid,patch,**kw):
+            assert not {"Do_Not_Publish","Auto_Publish_Enabled","Output_Status","Review_Status"} & patch.keys()
+            rows[rid]["fields"].update(patch)
+    client=Client()
+    monkeypatch.setattr(workload_governor,"enabled",lambda:True)
+    monkeypatch.setattr(workload_governor,"resource_slot",lambda *a,**k:nullcontext())
+    monkeypatch.setattr(elevenlabs_client,"resolve_content_voice_id",lambda _:"voice-1")
+    paid=Mock(side_effect=AssertionError("no new synthesis"))
+    monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
+    monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
+    monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
+    monkeypatch.setattr(history,"download_audited_history",lambda *a:raw)
+    monkeypatch.setattr(normalizer_client,"normalize_voiceover",lambda *a,**k:({},data))
+    monkeypatch.setattr(story,"checked_voice",lambda *a:4.0)
+    objects={}
+    monkeypatch.setattr(R2UploadClient,"story_audio_exists",lambda self,key:key in objects)
+    monkeypatch.setattr(R2UploadClient,"put_object",lambda self,key,body,typ:objects.update({key:body}))
+    monkeypatch.setattr(R2UploadClient,"read_story_audio",lambda self,key,sha:objects[key])
+    result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
+    assert result["fields"]["Render_Status"]=="Ready for Render"
+    assert result["fields"]["Do_Not_Publish"] is True
+    assert result["fields"]["Auto_Publish_Enabled"] is False
+    receipt=json.loads(result["fields"][story.RECEIPT])
+    assert receipt["state"]=="verified"
+    assert receipt["history_original_sha256"]==evidence["sha256"]
+    assert receipt["sha256"]==hashlib.sha256(data).hexdigest()
+    paid.assert_not_called()
