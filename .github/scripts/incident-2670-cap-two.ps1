@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $phase='PREFLIGHT'
 try {
   $mode='__MODE__'
-  if($mode -notin @('stage','rollback','sample')){throw 'mode'}
+  if($mode -notin @('stage','rollback','sample','verify_rollback')){throw 'mode'}
   $path='D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\.env'
   $raw=[IO.File]::ReadAllText($path)
   function Setting([string]$name){
@@ -20,6 +20,13 @@ try {
      (Setting 'SUPABASE_URL').TrimEnd('/') -ne 'https://vkwvscgisqsbuwagdvtb.supabase.co'){throw 'config'}
   $secret=Setting 'PIPELINE_RUNNER_SHARED_SECRET'
   if($secret.Length -lt 24){throw 'secret'}
+  if($mode -eq 'verify_rollback'){
+    $phase='ROLLBACK_LIVE_READBACK'
+    $w=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers @{'X-Pipeline-Secret'=$secret} -TimeoutSec 15
+    if($cap -ne '1' -or $w.ok -ne $true -or $w.enabled -ne $true -or [int]$w.max_jobs -ne 1 -or [int]$w.combined_heavy_active -gt 1){throw 'rollback_unverified'}
+    Write-Output 'trial2670=CAP_1_LIVE_VERIFIED'
+    return
+  }
   if($mode -ne 'rollback'){
     $phase='LIVE_GUARDS'
     $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 15
