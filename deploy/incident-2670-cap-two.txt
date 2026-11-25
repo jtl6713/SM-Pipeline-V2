@@ -1,3 +1,5 @@
 2026-11-25 — Owner explicitly authorizes immediate two-producer trial. Change only STUDIO_MAX_PRODUCER_JOBS 1→2 on the Windows Runner under existing local governor, global coordinator stays OFF; no publisher, holds, database limits, outbox or consumer changes. Fresh memory and workload preflight, maintenance-drained deploy, six observation samples, rollback on threshold failure. Never increase to 3 in this workflow. Issue #2670.
 
 2026-11-25 — First trial stopped before any mutation at ops_auth; retry only with established protected curl transport/token selection.
+
+2026-11-25 — Run 45642366866 failed at cap compare-and-swap. Independently verify configured and live cap both 1 before retry. Exact locked one-byte write preserves every other byte; test synthetic quoted/unquoted BOM variants and rollback. No deployment on ambiguous prior mutation.
