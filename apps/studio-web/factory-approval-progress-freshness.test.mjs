@@ -52,3 +52,23 @@ test("Factory active approvals show actual stages, output identity, elapsed and 
   assert.match(html, /live=five-stages-20261120/);
   assert.match(css, /@media \(max-width: 600px\)/);
 });
+
+
+test("pending approval lock retry is never displayed as terminal failure (#2959)", async () => {
+  const source = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
+  const start = source.indexOf("    const failedItems = items.filter(");
+  const end = source.indexOf("    details.innerHTML", start);
+  assert.ok(start >= 0 && end > start);
+  const classify = new Function("items", source.slice(start, end) + "return {failedItems,retryItems};");
+  const result = classify([
+    {id:"11173",status:"pending",error:"Output approval already in progress"},
+    {id:"11168",status:"processing",error:"previous contention"},
+    {id:"done",status:"approved",error:"historical retry"},
+    {id:"bad",status:"failed",error:"terminal failure"},
+    {id:"queued",status:"pending"},
+  ]);
+  assert.deepEqual(result.failedItems.map(x=>x.id),["bad"]);
+  assert.deepEqual(result.retryItems.map(x=>x.id),["11173"]);
+  assert.match(source,/Queued for automatic retry/);
+  assert.match(source,/No resubmission is needed/);
+});
