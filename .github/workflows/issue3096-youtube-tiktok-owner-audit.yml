@@ -1,0 +1,162 @@
+name: Issue 3096 YouTube TikTok Original Owner Evidence Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/issue3096-youtube-tiktok-owner-readonly.ps1'
+      - '.github/workflows/issue3096-youtube-tiktok-owner-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue3096-youtube-tiktok-owner-readonly.ps1'
+      - '.github/workflows/issue3096-youtube-tiktok-owner-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue2374-youtube-tiktok-owner-getonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell script and fail on syntax errors
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'repair/scripts/issue3096-youtube-tiktok-owner-readonly.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+      - name: Require bounded provider GET, source-only reads, no status writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('repair/scripts/issue3096-youtube-tiktok-owner-readonly.ps1').read_text()
+          assert "ISSUE3096_YT_TT_OWNER_AUDIT=" in s
+          assert "wrong_supabase_project_or_credentials" in s
+          assert "https://vkwvscgisqsbuwagdvtb.supabase.co" in s
+          assert "cohort_changed_requires_new_admission" in s
+          assert "youtube/channel/uploads?expected_channel_id" in s
+          assert "tiktok/status" in s
+          assert "get_budget_exceeded" in s
+          assert "nonpublication_proved=$false" in s and "retry_authorized=$false" in s
+          assert "provider_media_writes=0" in s and "output_writes=0" in s
+          assert "publish_calls=0" in s and "airtable_operations=0" in s
+          assert "original_jobstore" in s and "output_number=in." in s
+          assert "test_run_id" in s and "jobs.Values" in s
+          assert "$ytOwner=@{};$ttOwner=@{}" in s
+          assert "jobstore_rows=$jobstoreRows" in s
+          assert "issue3096_youtube_tiktok_owner_exact_v1" in s
+          assert "$script:httpGets -gt 8" in s
+          assert "$targets.Count -ne 62" in s
+          assert "$statusHost=[string]$ttHosts[$city]" in s
+          assert "unknown_tiktok_status_owner" in s
+          assert "}[$city]" not in s, "PowerShell literal hashtable indexing may be parsed as array indexing"
+          for bad in ["-Method Post","-Method Patch","-Method Put","-Method Delete",
+                      "Invoke-Sqlcmd","/media_publish","Write-Host $key",
+                      "Write-Output $key","AIRTABLE_PAT","api.airtable.com"]:
+              assert bad not in s, "unsafe source/protocol operation"
+          print("issue3096_youtube_tiktok_static_scope=GET_ONLY")
+          PY
+  live-readonly-audit:
+    if: github.event_name != 'pull_request'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate Ops without revealing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/issue3096-ops-check.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/issue3096-ops-check.json >/dev/null 2>&1; then
+              echo "::add-mask::$candidate"
+              echo "ISSUE3096_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Approved Ops credential unavailable';exit 1
+      - name: Build SHA256 pinned immutable GET-only source loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib
+          path=pathlib.Path('repair/scripts/issue3096-youtube-tiktok-owner-readonly.ps1')
+          sha=hashlib.sha256(path.read_bytes()).hexdigest()
+          commit=os.environ['GITHUB_SHA']
+          assert len(commit)==40 and all(x in '0123456789abcdef' for x in commit)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/{path.as_posix()}'
+          cmd=(
+              "$ErrorActionPreference='Stop';"
+              f"$url='{url}';"
+              "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+              "$digest=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+              f"if($digest -ne '{sha}'){{throw 'pinned_source_hash_mismatch'}};"
+              "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/issue3096-ops-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          print('immutable_main_source_hash_guard=PASS')
+          PY
+      - name: Execute one full-cohort owner-scoped provider GET batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only HTTP 409 (Ops admitted ZERO job, another protected recovery
+          # currently owns the shell) may be retried. Never resubmit a 200/202
+          # accepted job; this is a read-only audit but other jobs may publish.
+          admitted=false
+          for admission in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/issue3096-ops-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $ISSUE3096_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/issue3096-ops-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]]; then admitted=true; break; fi
+            if [[ "$code" != 409 ]]; then
+              echo "Ops audit rejected ($code), no replay or provider action";exit 2
+            fi
+            echo "Ops shell busy: waiting for owner job without bypassing its lock"
+            sleep 12
+          done
+          if [[ "$admitted" != true ]]; then
+            echo 'Ops remained occupied; audit not executed, no retry/publish permitted';exit 2
+          fi
+          job=$(jq -er '.job.id // .jobId' /tmp/issue3096-ops-start.json)
+          for attempt in $(seq 1 320); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $ISSUE3096_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/issue3096-ops-status.json
+            state=$(jq -r '.job.status // empty' /tmp/issue3096-ops-status.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/issue3096-ops-status.json \
+                | grep '^ISSUE3096_YT_TT_OWNER_AUDIT=' | tail -1 \
+                | sed 's/^ISSUE3096_YT_TT_OWNER_AUDIT=//' > /tmp/issue3096-youtube-tiktok-owner-evidence.json
+              jq -e '.read_only==true and .provider_media_writes==0 and .output_writes==0 and .publish_calls==0 and .airtable_operations==0 and .retry_authorized==false and .nonpublication_proved==false and .targets==62 and .youtube_targets==57 and .tiktok_targets==5 and .http_get_calls<=8 and (.all_output_dispositions|length)==62 and .version=="issue3096_youtube_tiktok_owner_exact_v1"' /tmp/issue3096-youtube-tiktok-owner-evidence.json >/dev/null
+              jq -c '{version,targets,youtube_targets,tiktok_targets,http_get_calls,counts,provider_owner_coverage,provider_media_writes,output_writes,candidates:([.all_output_dispositions[]|select((.matching_original_job_count//0)>0 or (.same_owner_title_candidates//[]|length)>0 or .saved_video_id_present==true)|{output,state,matching_job_video_ids,saved_video_id,same_owner_title_candidates}])}' /tmp/issue3096-youtube-tiktok-owner-evidence.json
+              exit 0
+            elif [[ "$state" == failed ]]; then
+              echo 'Owner-scoped read-only batch failed. No retry/publish/status operation authorized.'
+              jq -r '.job.log // ""' /tmp/issue3096-ops-status.json | tail -n 12 \
+                | sed -E 's#[A-Za-z0-9_./+=-]{28,}#[redacted]#g; s#https?://[^[:space:]]+#[url]#g' \
+                | grep -Ev 'Authorization:|Bearer |Setting_Value|SUPABASE_SERVICE_ROLE_KEY|ACCESS_TOKEN' | tail -n 8 || true
+              exit 3
+            fi
+            sleep 3
+          done
+          echo 'Provider-history audit incomplete or timed out; no negative-delivery claims';exit 4
+      - name: Retain per-output sanitized evidence for 30 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3096-youtube-tiktok-owner-evidence
+          path: /tmp/issue3096-youtube-tiktok-owner-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
