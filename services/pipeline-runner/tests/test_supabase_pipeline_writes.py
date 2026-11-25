@@ -576,3 +576,5 @@ def test_3096_ap2c_unlock_clears_clock_preserves_provider_evidence(monkeypatch):
     })["error_messages"]
     assert untouched["Publish_Locked_At"] == prior["Publish_Locked_At"]
     assert untouched["Publish_Locked_By"] == "AP2C"
+
+# #3096 regression must run with the corrected main-branch read-only audit guard (#3108).
