@@ -12408,7 +12408,11 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
       // Must go through enqueueStudioProductionJob so Vibe Cut single-clip /
       // passthrough remounts run before the runner resume pulse. Direct
       // item4PulseStudioProduceJob skipped that gate (Walk with me Chicago).
-      const payload = await enqueueStudioProductionJob(env, requestId, { resume: true });
+      // An ordinary stale nonterminal job only needs idempotent enqueue.
+      // Explicit resume resets the Runner governor's queued backoff/paused
+      // streak; do not use it as a heartbeat for every stale request.
+      // Existing bounded blocked-job recovery still needs terminal resume.
+      const payload = await enqueueStudioProductionJob(env, requestId, { resume: isBlocked });
       const accepted = payload?.payload?.accepted === true || payload?.accepted === true;
       pulses.push({
         key: "STUDIO_PRODUCE",
