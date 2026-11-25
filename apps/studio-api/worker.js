@@ -2882,7 +2882,7 @@ export default {
       }
 
       if (isMediaAssetPreviewRoute) {
-        return mediaAssetImagePreview(request, env, url, authorization);
+        return await mediaAssetImagePreview(request, env, url, authorization);
       }
 
       if (isMediaAssetStreamRoute) {
