@@ -202,3 +202,64 @@ def test_rearm_story_missing_sentence_only_after_current_input_is_valid():
     assert client.writes == [(PLATFORM_OUTPUTS_TABLE,row["id"],{"Render_Status":"Ready for Render"})]
     # The original error remains until normal R4 validates and clears it.
     assert result["fields"]["Remotion_Error_Message"] == story.STORY_MISSING_SENTENCE
+
+
+@pytest.mark.parametrize("status", [404, 403, 503, 200])
+def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,status):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from studio_produce import workload_governor, context
+    from p2 import elevenlabs_client
+    p = parent()
+    row = output(Content_Item=[p["id"]])
+    client = Mock()
+    client.get_record.side_effect = lambda table,rid: p if rid == p["id"] else row
+    monkeypatch.setattr(workload_governor,"enabled",lambda: True)
+    monkeypatch.setattr(workload_governor,"resource_slot",lambda *a,**k:nullcontext())
+    monkeypatch.setattr(elevenlabs_client,"resolve_content_voice_id",lambda _: "voice-1")
+    paid = Mock(side_effect=AssertionError("must not regenerate"))
+    monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
+    monkeypatch.setattr(context,"load_outputs",lambda *_:[row])
+    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=status,content=b"unverified"))
+    with pytest.raises(story.StoryVoiceoverError):
+        story.ensure_story_voiceover(client,row,p,allow_generate=False)
+    paid.assert_not_called()
+    client.update_record.assert_not_called()
+
+
+def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
+    import hashlib
+    from copy import deepcopy
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from studio_produce import workload_governor, context
+    from p2 import elevenlabs_client
+    p = parent()
+    data=b"normalized"
+    text=story.story_text(p["fields"]["Voiceover_Script"])
+    digest=story.fingerprint(p["id"],"voice-1",text,story.story_seconds(output()))
+    url="https://media.chicagoshining.com/studio/previews/story-voiceover/"+p["id"]+"/"+digest+".mp3"
+    row=output(Content_Item=[p["id"]], Output_Status="In Production", Render_Status="Blocked",
+        Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
+        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"state":"failed","url":url,"sha256":hashlib.sha256(data).hexdigest()}))
+    rows={p["id"]:p,row["id"]:row}
+    class Client:
+        def get_record(self,table,rid):
+            return deepcopy(rows[rid])
+        def update_record(self,table,rid,patch,**kw):
+            rows[rid]["fields"].update(patch)
+    client=Client()
+    monkeypatch.setattr(workload_governor,"enabled",lambda: True)
+    monkeypatch.setattr(workload_governor,"resource_slot",lambda *a,**k:nullcontext())
+    monkeypatch.setattr(elevenlabs_client,"resolve_content_voice_id",lambda _: "voice-1")
+    paid=Mock(side_effect=AssertionError("must not regenerate"))
+    monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
+    monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
+    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=200,content=data))
+    monkeypatch.setattr(story,"checked_voice",lambda b,cap:4.0)
+    result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
+    assert result["fields"]["Render_Status"]=="Ready for Render"
+    assert result["fields"]["Voiceover_URL"]==url
+    assert json.loads(result["fields"][story.RECEIPT])["state"]=="verified"
+    paid.assert_not_called()

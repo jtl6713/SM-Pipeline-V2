@@ -69,20 +69,27 @@ def exact_story_snapshot(output, parent_id):
 STORY_MISSING_SENTENCE = "Studio Story narration integrity guard: Story needs a complete concise narration sentence"
 
 
-def story_sentence_recovery_candidate(output, parent):
+STORY_CACHE_ERRORS = {
+    "Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
+    "Studio Story narration integrity guard: Story narration attempt already recorded on a sibling; reconcile before retrying paid generation",
+}
+
+
+def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
     """Only an unapproved, unheld, unstamped Story with newly valid input.
 
-    Do not rearm failed/ambiguous paid attempts. This predicate performs no
-    provider work and cannot change the parent script or publication state.
+    Failed/ambiguous paid attempts may enter only the checksum-verified cache
+    recovery path, never a new generation. This predicate performs no writes.
     """
     if (not parent or not parent.get("id")
             or field_str(output, "Output_Status") != "In Production"
             or field_str(output, "Render_Status") != "Blocked"
-            or field_str(output, "Remotion_Error_Message") != STORY_MISSING_SENTENCE
+            or (field_str(output, "Remotion_Error_Message") not in (
+                {STORY_MISSING_SENTENCE} if not cached_only else STORY_CACHE_ERRORS))
             or field_str(output, "Review_Status") not in {"", "Pending Review", "Review Sent"}
             or field(output, "Do_Not_Publish") not in (None, False)
             or field(output, "Auto_Publish_Enabled") not in (None, False)
-            or field_str(output, RECEIPT)
+            or (not cached_only and field_str(output, RECEIPT))
             or any(field_str(output, name) for name in (
                 "Production_Approved_At", "Published_At", "Studio_Scheduled_At",
                 "YouTube_Scheduled_Publish_At", "Platform_Post_ID", "Platform_Post_URL",
@@ -107,14 +114,29 @@ def story_sentence_recovery_candidate(output, parent):
 
 def rearm_story_sentence_guard(client, output, parent):
     """Allow a corrected script back into normal R4, never waive its guard."""
-    if not story_sentence_recovery_candidate(output, parent):
+    cached_only = field_str(output, "Remotion_Error_Message") in STORY_CACHE_ERRORS
+    if not story_sentence_recovery_candidate(output, parent, cached_only=cached_only):
         return output
     current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
     live_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
-    if (not story_sentence_recovery_candidate(current, live_parent)
+    if (not story_sentence_recovery_candidate(current, live_parent, cached_only=cached_only)
             or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
             or story_text(field_str(live_parent, "Voiceover_Script")) != story_text(field_str(parent, "Voiceover_Script"))):
         return current
+    if cached_only:
+        # No paid synthesis or speculative re-upload. Only an exact current
+        # fingerprint with a persisted checksum and valid audible bytes can
+        # be attached. A missing or changed object stays blocked.
+        from studio_produce.workload_governor import AdmissionDeferred
+        try:
+            recovered = ensure_story_voiceover(client, current, live_parent, allow_generate=False)
+        except (StoryVoiceoverError, AdmissionDeferred, requests.RequestException):
+            return current
+        current = client.get_record(PLATFORM_OUTPUTS_TABLE, current["id"])
+        if (not story_sentence_recovery_candidate(current, live_parent, cached_only=True)
+                or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(recovered, parent["id"])
+                or (parse_json_field(field(current, RECEIPT)) or {}).get("state") != "verified"):
+            return current
     # R4 still validates timing, revision, narration fit, source integrity,
     # actual render ownership and sibling paid-attempt receipts.
     client.update_record(PLATFORM_OUTPUTS_TABLE, current["id"],
@@ -156,7 +178,7 @@ def verified_cached_voice(data, claims, cap):
     return checked_voice(data, cap)
 
 
-def ensure_story_voiceover(client,output,parent):
+def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
     """Return updated in-memory exact output. No parent mutation; no approval."""
     if not needs_story_voiceover(output):
         return output
@@ -166,7 +188,7 @@ def ensure_story_voiceover(client,output,parent):
     existing=field_str(output,"Voiceover_URL")
     parent_url=field_str(parent,"Voiceover_URL")
     receipt=parse_json_field(field(output,RECEIPT)) or {}
-    if existing and existing!=parent_url and not receipt:
+    if allow_generate and existing and existing!=parent_url and not receipt:
         # Preserve explicit per-output VO, including exact incident recovery.
         try:
             measured=probe_audio_duration_url(existing)
@@ -203,6 +225,8 @@ def ensure_story_voiceover(client,output,parent):
             data=response.content
             measured=verified_cached_voice(data,claims,cap)
         elif response.status_code==404:
+            if not allow_generate:
+                raise StoryVoiceoverError("Existing Story narration cache unavailable; no paid regeneration")
             if claims:
                 raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
             claim={"fingerprint":digest,"state":"generating","url":url}
