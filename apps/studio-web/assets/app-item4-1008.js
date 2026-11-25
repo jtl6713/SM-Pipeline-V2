@@ -17697,7 +17697,8 @@ function timedScriptAssetLabel(asset, index) {
       return '<div class="subtle">Output-level status unavailable. Refresh or open the request.</div>';
     }
     const labels = {blocked:"Blocked",queued:"Queued",submitted:"Render job recorded",reconcile:"Needs verification",preparing:"Preparing"};
-    return `<details class="production-output-diagnostics"><summary>Why these outputs remain in production (${escapeHtml(String(d.remaining))})</summary><div class="production-diagnostic-items">${d.outputs.map(o => {
+    const needsAttention = d.outputs.some(o => o.state === "blocked" || o.state === "reconcile");
+    return `<details class="production-output-diagnostics"${needsAttention ? " open" : ""}><summary>Why these outputs remain in production (${escapeHtml(String(d.remaining))})</summary><div class="production-diagnostic-items">${d.outputs.map(o => {
       const number = o.output_number == null ? "" : ` #${escapeHtml(String(o.output_number))}`;
       const owner = o.owner === "user" ? "User action required" : "System responsibility — no user action";
       return `<div class="production-diagnostic-item"><strong>${escapeHtml(o.platform || "Platform")} ${escapeHtml(o.output_type || "Output")}${number}</strong> · ${escapeHtml(labels[o.state] || "Needs verification")}<div>${escapeHtml(o.reason || "Reason unavailable")}</div><div class="subtle"><strong>${owner}</strong> · ${escapeHtml(o.next_action || "Open the request for details.")}</div></div>`;
@@ -17719,7 +17720,7 @@ function timedScriptAssetLabel(asset, index) {
         : outputCount
           ? `<button type="button" class="manage-button" data-content-pipeline="${escapeHtml(r.id)}">Open pipeline</button>`
           : "—";
-      return `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}${productionDiagnosticMarkup(r)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${r.production_diagnostics ? `<strong>${escapeHtml(String(r.production_diagnostics.remaining))} remaining</strong><div class="subtle">${escapeHtml(String(r.production_diagnostics.total))} total · ${escapeHtml(String(r.production_diagnostics.outside_production))} outside Production</div>` : outputCount}</td><td>${action}</td></tr>`;
+      return `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.production_diagnostics?.counts?.blocked ? "Blocked" : r.production_diagnostics?.counts?.reconcile ? "Needs Attention" : r.production_diagnostics?.counts?.queued && !r.production_diagnostics?.counts?.submitted ? "Queued" : r.production_diagnostics?.counts?.submitted ? "Render job recorded" : r.production_diagnostics ? "Preparing" : r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}${productionDiagnosticMarkup(r)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${r.production_diagnostics ? `<strong>${escapeHtml(String(r.production_diagnostics.remaining))} remaining</strong><div class="subtle">${escapeHtml(String(r.production_diagnostics.total))} total · ${escapeHtml(String(r.production_diagnostics.outside_production))} outside Production</div>` : outputCount}</td><td>${action}</td></tr>`;
     }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-content-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
