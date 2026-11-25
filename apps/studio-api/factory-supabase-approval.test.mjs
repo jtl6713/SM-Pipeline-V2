@@ -459,3 +459,72 @@ test("#2972 original audio intent rejects self-consistent silent render and hono
   entry=(await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]);
   assert.match(entry.originalAudioIssue,/could not be reconciled/);
 });
+
+test("#2959 authenticated group may approve a longer Story while exact media snapshot is unchanged",async t=>{
+  const row=output(IDS[0],8946);
+  Object.assign(row,{studio_output_type:"Story",render_status:"Rendered",render_total_frames:900,
+    selected_assets:{target_total_frames:300,fps:30},studio_preview_url:CDN+"studio/previews/story-current.mp4",
+    final_file_url:"https://drive.google.com/file/d/storyCurrent/view"});
+  const mock=mockSupabase(t,[row]);
+  const actor="recActor123456789";
+  await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy),/Story render duration/);
+  const records=await factorySupabaseGroupPreflight(env,[IDS[0]],policy,{approvedByUserRecordId:actor});
+  const creativeReview=records[0].creative_review;
+  assert.match(creativeReview.revision_sha256,/^[a-f0-9]{64}$/);
+  assert.match(creativeReview.warnings[0],/planned 300 frames, rendered 900/);
+  assert.ok(mock.calls.every(c=>c.method==="GET"));
+  const opts={requestId:"factory_creative_review_2959",policy,approvedByUserRecordId:actor,
+    creativeReview,verifyImages:async readiness=>readiness};
+  await assert.rejects(factorySupabaseApproveOutput(env,IDS[0],PROFILE_ID,{...opts,approvedByUserRecordId:null}),/authenticated/);
+  mock.rows[0].studio_preview_url=CDN+"studio/previews/changed.mp4";
+  await assert.rejects(factorySupabaseApproveOutput(env,IDS[0],PROFILE_ID,opts),/changed after submission/);
+  mock.rows[0].studio_preview_url=row.studio_preview_url;
+  mock.rows[0].do_not_publish=true;
+  await assert.rejects(factorySupabaseApproveOutput(env,IDS[0],PROFILE_ID,opts),/publishing hold/);
+  mock.rows[0].do_not_publish=false;
+  assert.equal(mock.calls.filter(c=>c.method==="PATCH").length,0);
+  const approved=await factorySupabaseApproveOutput(env,IDS[0],PROFILE_ID,opts);
+  assert.match(approved.message,/Ready to Schedule/);
+  assert.deepEqual(mock.rows[0].error_messages.SM_Factory_Supabase_Approval_Receipt.creative_review,creativeReview);
+  assert.equal(mock.rows[0].render_total_frames,900);
+  assert.equal(mock.rows[0].selected_assets.target_total_frames,300);
+  assert.equal(mock.calls.filter(c=>c.method==="PATCH").length,1);
+});
+test("#2959 creative override never excuses stale encoded proof or missing technical review asset",async t=>{
+  const row=output(IDS[0],8946);
+  Object.assign(row,{studio_output_type:"Story",render_status:"Rendered",render_total_frames:900,
+    selected_assets:{target_total_frames:300,fps:30},studio_preview_url:CDN+"studio/previews/story-current.mp4",
+    final_file_url:"https://drive.google.com/file/d/storyCurrent/view",
+    error_messages:{Studio_Media_Contract_Receipt_JSON:JSON.stringify({
+      version:1,sha256:"a".repeat(64),preview_url:CDN+"studio/previews/stale.mp4",
+      drive_file_id:"storyCurrent",encoded:{duration_seconds:30},contract:{frames:900}
+    })}});
+  const mock=mockSupabase(t,[row]);
+  const opts={approvedByUserRecordId:"recActor123456789"};
+  await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy,opts),/no longer matches/);
+  mock.rows[0].error_messages={};
+  mock.rows[0].final_file_url=null;
+  await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy,opts),/Final_File_URL/);
+  assert.ok(mock.calls.every(c=>c.method==="GET"));
+});
+test("#2959 reconciled audio preference mismatch is advisory but broken source linkage remains a gate",async t=>{
+  const row=output(IDS[0],8946);
+  const request="recNfBTrDYdmyhka2",linkId="rec5oq8VsdYzju0T8";
+  Object.assign(row,{studio_output_type:"Reel",render_status:"Rendered",render_total_frames:900,
+    final_file_url:"https://drive.google.com/file/d/reelCurrent/view",
+    studio_effective_voiceover_mode:"No",studio_effective_background_music_mode:"No",
+    selected_assets:{authority:"studio_owner_uploaded_exact_source",production_request_record_id:request},
+    error_messages:{Studio_Output_Directives_JSON:JSON.stringify({
+      production_request_record_id:request,production_request_output_record_id:linkId,
+      platform:row.platform,output_type:"Reel",pipeline_family:"Video",
+      voiceover_mode:"No",background_music_mode:"No"})}});
+  const link={airtable_record_id:linkId,production_request_airtable_id:request,content_item_id:row.content_item_id,
+    platform_output_id:row.id,platform:row.platform,output_type:"Reel",effective_resolution:{}};
+  const mock=mockSupabase(t,[row],{audioIntent:{voiceover_intent:"Yes",music_intent:"Yes"},audioLinks:[link]});
+  const opts={approvedByUserRecordId:"recActor123456789"};
+  const records=await factorySupabaseGroupPreflight(env,[IDS[0]],policy,opts);
+  assert.match(records[0].creative_review.warnings[0],/voiceover differs/);
+  link.platform_output_id="wrong-id";
+  await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy,opts),/could not be reconciled/);
+  assert.ok(mock.calls.every(c=>c.method==="GET"));
+});
