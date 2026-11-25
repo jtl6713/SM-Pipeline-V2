@@ -12217,6 +12217,9 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
       limit: 100,
       statuses: ["Promoted", "Submitted"],
       unfinishedOnly: true,
+      // Incident recovery fence: older requests were not reliably reconciled
+      // against publication history. Never age new work out of this lane.
+      createdSince: "2026-11-22T12:48:45Z",
     }).catch(() => null);
     if (!Array.isArray(rows)) {
       console.warn("Studio produce watchdog: authoritative candidate read unavailable");
@@ -12258,7 +12261,14 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
   const queueControls = await readOpsQueueControls(env);
-  for (const requestId of ids.slice(0, 16)) {
+  const candidateLimit = Math.max(1, Math.min(16, Number(options.maxCandidates) || 16));
+  // Rotate bounded windows for the scheduled lane so paused/deferred old
+  // candidates cannot permanently monopolize all work. On-demand stays oldest first.
+  const windows = Math.max(1, Math.ceil(ids.length / candidateLimit));
+  const scheduledAt = Number(options.scheduledTime);
+  const offset = Number.isFinite(scheduledAt) && scheduledAt > 0
+    ? (Math.floor(scheduledAt / 300000) % windows) * candidateLimit : 0;
+  for (const requestId of ids.slice(offset, offset + candidateLimit)) {
     try {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       const job = parseStudioProductionJob(record);
