@@ -148,7 +148,7 @@ test("selected soundtrack is checked before the first irreversible promotion wri
       {fields:{Enabled:true,Platform:"Facebook"}}
     ],
     airtableFetch:async()=>({id:"recMusic",fields:{}}),
-    studioMusicFromMediaRecord:()=>({url:"verified-url",duration_seconds:0}),
+    preferredMusicForProductionRequestOutput:async()=>({url:"verified-url",duration_seconds:0}),
     HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}},
   });
   await assert.rejects(check({}, {id:"recRequest",fields:{Background_Music_Mode:"Yes",Selected_Music_Asset:["recMusic"]}}), /duration is not verified/);
