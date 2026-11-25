@@ -1656,3 +1656,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-25 UTC — #2972 exact original audio intent check on new generated-video Factory approval; bounded Supabase parent/link read, preserve intentional silent overrides and all existing holds. No automatic approval, scheduling or publishing.
 
 2026-11-25 UTC — #2959 protected release of merged #2998 timing normalization and phase-to-operation timing reporting; 12/12 checks passed including real isolated interrupted 4/4/1 runtime with nine unique commits. No scheduling authority, hold, concurrency or publishing change.
+
+2026-11-25 UTC — #2959 server-side submission stage instrumentation: original authenticated route, preflight, claims and durable child timestamps retained in existing parent CAS; post-CAS and response readiness observed separately, no extra authority writes.
