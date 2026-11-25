@@ -185,6 +185,7 @@ def render_snapshot_identity(output: dict[str, Any]) -> tuple[str, ...]:
         "Output_Filename",
         "Music_URL",
         "Voiceover_URL",
+        "Studio_Story_Voiceover_Receipt_JSON",
         "Voiceover_Render_Volume",
         "Music_Volume",
         "Music_Ducked_Volume",
