@@ -457,7 +457,8 @@ test("Foreground submission has one POST and background retry preserves request 
   assert.match(retry,/JSON.stringify\(plan.payload\)/);
   assert.doesNotMatch(retry,/newFactoryRequestId/);
   assert.match(retry,/\[400, 401, 403, 409, 422\]/);
-  assert.match(js,/const batch = await submitPlan\(\)/);
+  const submit=extractNamedFunction(js,"submitFactoryGlobalApprovalBatches");
+  assert.equal((submit.match(/batch = await submitPlan\(\)/g)||[]).length,1,"one foreground POST per plan");
 });
 
 
