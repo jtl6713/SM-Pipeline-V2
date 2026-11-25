@@ -75,7 +75,7 @@ test("confirmed PATCH is a save receipt: no redundant /api/ideas list reload", a
   assert.deepEqual(run.requests.map(req => req.method), ["PATCH"]);
   assert.equal(run.picker.value, record.id);
   assert.equal(run.picker.options[0].textContent, "CTA Short · Idea 2468");
-  assert.match(run.notices.at(-1).msg, /Saved to Airtable/);
+  assert.match(run.notices.at(-1).msg, /Saved to Supabase/);
   assert.equal(run.saveButton.disabled, false);
   assert.equal(run.current.busy, false);
   assert.equal(run.stored["studio.story_first_resume." + profile], record.id);
@@ -90,7 +90,7 @@ test("interrupted PATCH verifies the authoritative GET before confirming save", 
   });
   await run.save();
   assert.deepEqual(run.requests.map(req => req.method), ["PATCH", "GET"]);
-  assert.match(run.notices.at(-1).msg, /Saved to Airtable/);
+  assert.match(run.notices.at(-1).msg, /Saved to Supabase/);
 });
 
 test("a stale GET after an aborted PATCH never fabricates save success or retries the write", async () => {
@@ -101,7 +101,7 @@ test("a stale GET after an aborted PATCH never fabricates save success or retrie
   });
   await assert.rejects(run.save(), error => error.saveUnconfirmed && /verify before trying again/.test(error.message));
   assert.deepEqual(run.requests.map(req => req.method), ["PATCH", "GET"]);
-  assert.ok(!run.notices.some(item => /Saved to Airtable/.test(item.msg)));
+  assert.ok(!run.notices.some(item => /Saved to Supabase/.test(item.msg)));
   assert.equal(run.current.busy, false);
   assert.equal(run.saveButton.disabled, false);
 });
