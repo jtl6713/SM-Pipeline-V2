@@ -1,3 +1,4 @@
+// #3096 2026-11-25: rerun existing protected four-profile exact Home census; no runtime release or output writes.
 // P0 #2340 post-deploy census: re-read exact four-profile Home buckets ONLY after verified live Worker rollout; no output mutations.
 // 2026-11-21: issue #2340 exact 4-profile Home snapshot and live drilldown parity recheck; no output writes.
 // Nov 20 evening: recount after one confirmed LA Meta Story publication and six verified terminal-container classifications (Supabase GET only).
