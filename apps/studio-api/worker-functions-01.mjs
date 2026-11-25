@@ -12212,11 +12212,22 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   // a job-JSON list ordered by recency was all Cancelled, so Promoted
   // requests stuck at themes were never resumed.
   let rows = null;
-  if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+  if (studioPhase6WriteSource(env) === "supabase") {
+    if (!studioSupabaseConfigured(env)) {
+      return [{ key: "STUDIO_PRODUCE", skipped: "authoritative_configuration_unavailable" }];
+    }
     rows = await listSupabaseRequestsWithProductionJob(env, {
       limit: 100,
       statuses: ["Promoted", "Submitted"],
+      unfinishedOnly: true,
+      // Incident recovery fence: older requests were not reliably reconciled
+      // against publication history. Never age new work out of this lane.
+      createdSince: "2026-11-22T12:48:45Z",
     }).catch(() => null);
+    if (!Array.isArray(rows)) {
+      console.warn("Studio produce watchdog: authoritative candidate read unavailable");
+      return [{ key: "STUDIO_PRODUCE", skipped: "authoritative_candidates_unavailable" }];
+    }
   }
   if (!Array.isArray(rows)) {
     rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -12253,9 +12264,21 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
   const queueControls = await readOpsQueueControls(env);
-  for (const requestId of ids.slice(0, 16)) {
+  const candidateLimit = Math.max(1, Math.min(16, Number(options.maxCandidates) || 16));
+  // Rotate bounded windows for the scheduled lane so paused/deferred old
+  // candidates cannot permanently monopolize all work. On-demand stays oldest first.
+  const windows = Math.max(1, Math.ceil(ids.length / candidateLimit));
+  const scheduledAt = Number(options.scheduledTime);
+  const offset = Number.isFinite(scheduledAt) && scheduledAt > 0
+    ? (Math.floor(scheduledAt / 300000) % windows) * candidateLimit : 0;
+  for (const requestId of ids.slice(offset, offset + candidateLimit)) {
     try {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      const currentStatus = String(f(record, "Request_Status") || "").trim();
+      if (!["Promoted", "Submitted"].includes(currentStatus) || String(f(record, "Test_Run_ID") || "").trim()) {
+        pulses.push({ key: "STUDIO_PRODUCE", request: requestId, skipped: "request_no_longer_eligible" });
+        continue;
+      }
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
       if (step === "done" || step === "escalated") continue;
@@ -12386,10 +12409,14 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
       // passthrough remounts run before the runner resume pulse. Direct
       // item4PulseStudioProduceJob skipped that gate (Walk with me Chicago).
       const payload = await enqueueStudioProductionJob(env, requestId, { resume: true });
+      const accepted = payload?.payload?.accepted === true || payload?.accepted === true;
       pulses.push({
         key: "STUDIO_PRODUCE",
         request: requestId,
-        resumed: true,
+        resumed: accepted,
+        ...(accepted ? {} : { skipped: payload?.skipped || payload?.payload?.reason || "runner_acceptance_unverified" }),
+        deferred: payload?.payload?.deferred_due_to_database_circuit === true,
+        already_running: payload?.payload?.already_running === true,
         self_heal: isBlocked,
         resume_count: nextHeal.resume_count,
         step: payload?.payload?.job?.step || payload?.job?.step || resumedJob.step || step || "themes",
