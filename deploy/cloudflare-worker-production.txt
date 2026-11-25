@@ -1684,3 +1684,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 # Release gate: exact negative-only read-only audit assertion corrected by merged #3108; rerun all required checks against current main.
 
 2026-11-25 UTC — #3096 Worker 0.10.1044-native-evidence-fb-ready-3096: release merged #3109 79bc7e63 and #3110 1d476b8f, 7/7 CI each. Preserve native provider evidence and persist verified FB image selection with original Factory approval; protected deployment, canonical identity, rollback, existing publication fences, holds, and producer cap unchanged. No direct recovery writes in this release. Verify exact runtime and public receipt progression.
+
+2026-11-25 UTC — #3096 Worker 0.10.1045-mae-recovery-3096: merged #3113 bdf1b1ad (19/19 CI). Release bounded audited single historical hold MAE rescheduling with profile/output leases, atomic reservation, canonical CAS/readback and committed receipt before dispatch. No mass rearm, no schedule bypass, no change to existing approval, provider identity, database cap or publication safeguards. Verify live version and scheduling authority; keep unverified historical records in reconciliation.
