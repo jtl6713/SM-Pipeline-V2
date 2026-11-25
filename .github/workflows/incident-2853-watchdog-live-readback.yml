@@ -41,11 +41,42 @@ jobs:
           for i, source in enumerate(probes):
               compile(source, f"read_only_probe_{i}", "exec")
           PY
+  exact-audio-cache:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check both known failed receipt objects without generating audio
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, urllib.request, urllib.error
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):
+                  return None
+          base="https://media.chicagoshining.com/studio/previews/story-voiceover/"
+          exact=[
+              (11228,"recX91Bo62trG2lJ6/330a613f28cc1e1b813661d124e50c62f546747328b5798d4b623d03bb4b76fe.mp3","f5e251a04e95c9cdaa1b3ec86b2758ad3e7d079ccf1deb8427835904c8aa78ae"),
+              (11277,"recgBtukVbv5vAMzS/2e71d62e8373a8a803ce2a1925372903f9a9bd45fa65c867b187bce18346f859.mp3","226eee5e3801d5f36928677ef3493bcecfc61611996209a417063aaa1db8d7f3"),
+          ]
+          opener=urllib.request.build_opener(NoRedirect())
+          for number,key,digest in exact:
+              try:
+                  req=urllib.request.Request(base+key,headers={"Cache-Control":"no-cache"})
+                  with opener.open(req,timeout=20) as response:
+                      body=response.read(8388609)
+                      result="checksum_match" if len(body)<=8388608 and hashlib.sha256(body).hexdigest()==digest else "checksum_mismatch_or_oversize"
+              except urllib.error.HTTPError as exc:
+                  result="http_"+str(exc.code)
+              except Exception:
+                  result="unavailable"
+              print("story_cache_exact="+json.dumps({"output_number":number,"result":result}))
+          PY
   readback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - name: Run exact authenticated read-only REST and local queue diagnostic
@@ -66,13 +97,13 @@ jobs:
           test -n "$selected"
           jq -Rs '{command:.,confirm:true}' .github/scripts/incident-2853-watchdog-live-readback.ps1 > /tmp/readonly.json
           job=''
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 120); do
             code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/readonly.json || true)
             if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
             [[ "$code" == 409 ]] || { echo "readonly_ops_launch_http=$code"; exit 1; }
             sleep 5
           done
-          test -n "$job"
+          [[ -n "$job" ]] || { echo "watchdog2853_ops_busy_no_job"; exit 1; }
           echo "watchdog2853_ops_job_id=$job"
           for attempt in $(seq 1 45); do
             curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/readonly-status.json
