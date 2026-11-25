@@ -13668,6 +13668,10 @@ export async function studioPublishFacebookReelNative(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3-NATIVE" };
   const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => null);
+  if (latest?.id === recordId && (f(latest, "Platform") !== "Facebook"
+      || f(latest, "Platform_Output_Type") !== "Facebook Reel")) {
+    return { ok: false, skipped: "wrong-facebook-reel-output", target: "FBS3-NATIVE" };
+  }
   if (!latest?.id || latest.id !== recordId || f(latest, "Do_Not_Publish") === true
       || String(f(latest, "Publish_Error_Stage") || "") === "FBS3_RATE_LIMIT") {
     return { ok: false, skipped: "qa_1050_verification_required", target: "FBS3-NATIVE" };
@@ -13854,6 +13858,10 @@ export async function studioPulseFbs3(env, record) {
   // QA-1050: re-read before any FBS3 create/upload attempt. A 368
   // cooldown expiring does NOT prove the previous Graph request created nothing.
   const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => null);
+  if (latest?.id === recordId && (f(latest, "Platform") !== "Facebook"
+      || f(latest, "Platform_Output_Type") !== "Facebook Reel")) {
+    return { ok: false, skipped: "wrong-facebook-reel-output", target: "FBS3" };
+  }
   if (!latest?.id || latest.id !== recordId
       || f(latest, "Do_Not_Publish") === true
       || String(f(latest, "Publish_Error_Stage") || "") === "FBS3_RATE_LIMIT"
