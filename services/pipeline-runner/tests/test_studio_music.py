@@ -1,3 +1,4 @@
+import pytest
 from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED
 from audio.wav_to_mp3 import WavConvertResult
 from studio_music.processor import drive_music_url, ingest_studio_music
@@ -21,11 +22,13 @@ def test_ingest_studio_music_uploads_shared_file(monkeypatch):
         "studio_music.processor.cap_leading_silence",
         lambda content, filename: LeadingSilenceResult(STATUS_NOT_NEEDED, 0.1, 0.0, content, False),
     )
+    monkeypatch.setattr("studio_music.processor.probe_audio_duration_bytes", lambda data: 64.25 if data == b"ID3fake" else 0)
     monkeypatch.setattr("studio_music.processor.GoogleDriveClient", lambda: _FakeDrive())
     result = ingest_studio_music(content=b"ID3fake", filename="Sunset drone bed")
     assert result["google_drive_file_id"] == "driveMusic1"
     assert result["google_drive_url"].endswith("id=driveMusic1")
     assert result["filename"] == "Sunset drone bed.mp3"
+    assert result["duration_seconds"] == 64.25
 
 
 def test_ingest_studio_music_converts_wav_before_drive(monkeypatch):
@@ -44,7 +47,20 @@ def test_ingest_studio_music_converts_wav_before_drive(monkeypatch):
         "studio_music.processor.cap_leading_silence",
         lambda content, filename: LeadingSilenceResult(STATUS_NOT_NEEDED, 0.0, 0.0, content, False),
     )
+    monkeypatch.setattr("studio_music.processor.probe_audio_duration_bytes", lambda data: 31.5 if data == b"ID3fromwav" else 0)
     monkeypatch.setattr("studio_music.processor.GoogleDriveClient", lambda: _WavDrive())
     result = ingest_studio_music(content=b"RIFFwav", filename="Sunset drone bed.wav")
     assert result["google_drive_file_id"] == "driveMusic2"
     assert result["filename"] == "Sunset drone bed.mp3"
+
+    assert result["duration_seconds"] == 31.5
+
+def test_ingest_rejects_unmeasured_audio_before_drive_write(monkeypatch):
+    monkeypatch.setattr("studio_music.processor.cap_leading_silence",
+        lambda content, filename: LeadingSilenceResult(STATUS_NOT_NEEDED, 0, 0, content, False))
+    monkeypatch.setattr("studio_music.processor.probe_audio_duration_bytes", lambda data: 0)
+    def no_drive():
+        pytest.fail("Unverified audio must not be uploaded")
+    monkeypatch.setattr("studio_music.processor.GoogleDriveClient", no_drive)
+    with pytest.raises(ValueError, match="duration"):
+        ingest_studio_music(content=b"ID3fake", filename="track.mp3")
