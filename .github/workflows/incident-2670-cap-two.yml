@@ -1,0 +1,64 @@
+name: Incident 2670 Controlled Two Producer Trial
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/incident-2670-cap-two.yml'
+      - '.github/scripts/incident-2670-cap-two.*'
+  push:
+    branches: [main]
+    paths: ['deploy/incident-2670-cap-two.txt']
+permissions:
+  contents: read
+concurrency:
+  group: production-pipeline-runner
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse both protected scripts without running Ops
+        shell: pwsh
+        run: |
+          foreach ($path in @('.github/scripts/incident-2670-cap-two.ps1','.github/scripts/incident-2670-supabase-metrics-ops.ps1')) {
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count -ne 0){throw 'trial_powershell_syntax'}
+          }
+      - name: Test trial thresholds and rollback decisions offline
+        run: |
+          python -m py_compile .github/scripts/incident-2670-cap-two.py
+          python - <<'PY'
+          import runpy
+          from unittest.mock import patch
+          m=runpy.run_path('.github/scripts/incident-2670-cap-two.py')
+          row=dict(cap=2,active=2,heavy=2,queued=27,paused=0,failures=0,max_ms=1000,read_cap=6,write_cap=3,photo_cap=1,ratio_cap=1,requests=100)
+          before=dict(memory_available_mb=793,memory_used_pct=56.8,swap_used_pct=32.1)
+          assert m['healthy'](row,before,row,before)
+          for bad in (dict(failures=1),dict(heavy=3),dict(cap=1),dict(write_cap=4),dict(max_ms=6000)):
+              assert not m['healthy'](dict(row,**bad),before,row,before)
+          assert not m['healthy'](row,dict(before,swap_used_pct=35),row,before)
+          assert not m['healthy'](row,dict(before,memory_available_mb=300),row,before)
+          g=m['main'].__globals__
+          initial=dict(row,cap=1,active=1,heavy=1)
+          with patch.dict(g,dict(call=lambda *a:(200,{}),cap=lambda mode: initial if mode=='sample' else None,memory=lambda:before,job=lambda *a:None,deploy=lambda:None,time=type('T',(),{'sleep':staticmethod(lambda _:None)})())):
+              try: m['main']()
+              except m['Rejected']: pass
+              else: raise AssertionError('failed trial accepted')
+          PY
+  trial:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Refuse obsolete main before changing production
+        run: |
+          git fetch --quiet --depth=1 origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+      - name: Owner authorized cap 2 only, guarded rollout and rollback
+        run: python .github/scripts/incident-2670-cap-two.py
