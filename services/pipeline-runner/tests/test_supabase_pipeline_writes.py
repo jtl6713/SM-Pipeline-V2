@@ -553,3 +553,28 @@ def test_supabase_phase6_create_failure_never_claims_minted_asset_id(monkeypatch
             studio_write_source="supabase",
             studio_phase6_write_source="supabase",
         )).create_records(MEDIA_ASSETS_TABLE, [{"Asset Name": "Never minted"}])
+
+
+def test_3096_ap2c_unlock_clears_clock_preserves_provider_evidence(monkeypatch):
+    from apc.common import unlock_fields
+    from supabase_pipeline import _partial_output_bag_and_json
+    prior = {"Publish_Locked_At": "2026-11-25T22:30:47Z",
+             "Publish_Locked_By": "AP2C", "Publish_Attempt_Count": 2,
+             "Publish_Started_At": "2026-11-25T22:30:47Z",
+             "IG_Carousel_Parent_Container_ID": "provider-id"}
+    monkeypatch.setattr("supabase_pipeline._rest", lambda *_a, **_k: [{"error_messages": prior}])
+    updated = _partial_output_bag_and_json(_settings(), {
+        "id": "recOutput1", "fields": {**unlock_fields(),
+            "IG_Carousel_Status": "Children Ready"}})["error_messages"]
+    assert "Publish_Locked_At" not in updated
+    assert "Publish_Locked_By" not in updated
+    assert updated["Publish_Attempt_Count"] == 2
+    assert updated["Publish_Started_At"] == prior["Publish_Started_At"]
+    assert updated["IG_Carousel_Parent_Container_ID"] == "provider-id"
+    untouched = _partial_output_bag_and_json(_settings(), {
+        "id": "recOutput1", "fields": {"IG_Carousel_Status": "Children Ready"}
+    })["error_messages"]
+    assert untouched["Publish_Locked_At"] == prior["Publish_Locked_At"]
+    assert untouched["Publish_Locked_By"] == "AP2C"
+
+# #3096 regression must run with the corrected main-branch read-only audit guard (#3108).

@@ -583,7 +583,10 @@ def _partial_output_bag_and_json(settings: dict, record: dict) -> dict:
     for key, value in fields.items():
         if key in TYPED_OUTPUT or key in OUTPUT_EXCLUDE:
             continue
-        if value == "":
+        # #3096: stage unlock_fields() explicitly supplies None for the lock
+        # clock and empty owner. Do not drop that explicit clear in _pack.
+        # Only clear this lifecycle field; absent keys and provider IDs remain.
+        if value == "" or (key == "Publish_Locked_At" and value is None):
             bag[key] = ""
     # Typed columns are SoR. Drop stale bag copies whenever a typed field is
     # patched, or TTD2 keeps reading Ready for Delivery over Processing.
