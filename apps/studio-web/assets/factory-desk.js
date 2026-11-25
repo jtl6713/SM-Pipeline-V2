@@ -193,10 +193,32 @@
     if (state.submittingBatch) return;
     const saved = pendingFactoryApproval();
     if (!saved) return;
-    const identity = saved.request_id || saved.batches?.[0]?.request_id || "legacy";
-    const key = FACTORY_RECOVERY_PREFIX + identity;
+    // Partition the persisted intent before any POST. A rejection belongs to
+    // exactly one backend request, never to its unrelated sibling plans.
+    const plans = saved.profile_id === "global" && Array.isArray(saved.batches)
+      ? saved.batches : [];
+    if (plans.length > 1 && plans.every(plan => plan.request_id && Array.isArray(plan.ids))) {
+      const rejectedId = saved.last_error ? factoryRejectedOutputId(saved) : null;
+      for (const plan of plans) {
+        const envelope = { ...saved, ids: plan.ids, batches: [plan] };
+        // Legacy shared error is ambiguous unless the server identified one
+        // rejected member. Never guess which old plan was rejected.
+        if (rejectedId && !plan.ids.includes(rejectedId)) {
+          delete envelope.last_error;
+          delete envelope.retry_blocked;
+          delete envelope.terminal_eligibility;
+          delete envelope.next_retry_ms;
+          delete envelope.attempts;
+        }
+        const key = FACTORY_RECOVERY_PREFIX + plan.request_id;
+        if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(envelope));
+      }
+    } else {
+      const identity = saved.request_id || saved.batches?.[0]?.request_id || "legacy";
+      const key = FACTORY_RECOVERY_PREFIX + identity;
+      if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(saved));
+    }
     // Write before removing the legacy slot: a storage failure loses no identity.
-    localStorage.setItem(key, JSON.stringify(saved));
     localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
   }
   function factoryRecoveringIds() {
@@ -1823,8 +1845,9 @@
       const percent = child.total ? Math.round(100*Number(child.approved_count||0)/child.total) : 0;
       return `<section class="factory-batch-child">
         <strong>${esc(factoryProfileLabel(child.profile_id))}</strong>
-        <span>${esc(child.progress_lag ? "Syncing approvals" :
-          ["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" :
+        <span>${esc(latest.preview_only ? (latest.status === "awaiting_acceptance" ? "Checking acceptance" : "Submitting") :
+          child.progress_lag ? "Syncing approvals" :
+          ["queued","running","enqueuing","missing"].includes(child.status) || Number(child.pending_count) > 0 ? "Processing" :
           child.failed_count ? "Completed with failures" : "Completed")}</span>
         <strong>${percent}% approved</strong><progress max="${Number(child.total)||1}" value="${Math.min(Number(child.total)||1,Number(child.approved_count)||0)}" aria-label="Successful approvals">${percent}%</progress><small>${done} of ${Number(child.total)||0} processed</small>
         <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
@@ -1833,7 +1856,7 @@
     }).join("")}</div>` : "";
     const retryNotice = state.retryBatchNotice?.job_id === latest?.job_id ? state.retryBatchNotice : null;
     const failedItems = items.filter(item => item.status === "failed" || item.error && !["approved", "already_satisfied"].includes(item.status));
-    details.innerHTML = latest ? `${retryNotice ? '<p class="factory-batch-retry-result" role="status">' + esc(retryNotice.message) + '</p>' : ""}
+    details.innerHTML = latest ? `${latest.preview_only && state.batchSubmissionError ? '<p class="error-text" role="alert">' + esc(state.batchSubmissionError) + '</p>' : ""}${retryNotice ? '<p class="factory-batch-retry-result" role="status">' + esc(retryNotice.message) + '</p>' : ""}
       ${failedItems.length ? '<section class="factory-batch-failed-details"><strong>Failed outputs (' + failedItems.length + ')</strong><ul>' +
         failedItems.map(item => '<li><strong>' + esc(item.title || "Output " + item.output_id) + '</strong> · ' +
           esc(factoryProfileLabel(item.profile_id)) + ' · Output ' + esc(item.output_id || item.id) +
@@ -1850,11 +1873,19 @@
         <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.profile_id ? factoryProfileLabel(item.profile_id)+" · " : "")}${factoryLiveItemHtml(item)}</span>
         ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
       <details class="factory-batch-technical"><summary>Technical reference</summary>
-      <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
+      <code>${esc(latest.job_id)}</code>
+      ${latest.preview_only ? factoryPendingExactCandidates(pendingFactoryApproval(), factoryRecoveryEntries()).map(row => '<div><code>' + esc(row.request_id) + '</code> <button type="button" class="secondary-button" data-factory-copy-request="' + esc(row.request_id) + '">Copy request ID</button></div>').join("") : ""}
+      <button type="button" class="secondary-button"
       data-factory-copy-batch="${esc(latest.job_id)}">Copy batch ID</button></details>` : "";
     details.querySelector("[data-factory-copy-batch]")?.addEventListener("click", () => {
       const value = String(latest?.job_id || "");
       if (value) navigator.clipboard?.writeText(value).catch(() => {});
+    });
+    details.querySelectorAll("[data-factory-copy-request]").forEach(button => {
+      button.addEventListener("click", () => {
+        const value = button.getAttribute("data-factory-copy-request");
+        if (value) navigator.clipboard?.writeText(value).catch(() => {});
+      });
     });
     recent?.querySelectorAll("[data-factory-activity-key]").forEach(button => {
       button.addEventListener("click", () => {
@@ -2678,11 +2709,13 @@
       }));
     };
     persistRemaining(planned);
+    archiveFactoryPending();
     setBatchSubmissionError(null);
     state.submittingBatch = true;
     state.submittingOutputIds = new Set(selectionIds);
     let acceptedOutputs = 0;
     let acceptedBatches = 0;
+    const failures = [];
     try {
       setStatus(`Submitting ${ready.length} outputs…`);
       updateFactoryBatchToolbar();
@@ -2698,16 +2731,34 @@
         });
         // One bounded foreground POST. A timeout or busy response moves the
         // saved envelope to background recovery, keeping other selections usable.
-        const batch = await submitPlan();
-        if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
+        const recoveryKey = FACTORY_RECOVERY_PREFIX + plan.request_id;
+        let batch;
+        try {
+          batch = await submitPlan();
+          if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
+          const actual = (batch.items || []).map(item => String(item.id)).sort();
+          if (JSON.stringify(actual) !== JSON.stringify(plan.ids.map(String).sort()))
+            throw new Error("Approval queue returned a different output set; verifying original request.");
+        } catch (error) {
+          const saved = JSON.parse(localStorage.getItem(recoveryKey) || "null");
+          if (!saved) throw error; // Do not send further requests without durable recovery.
+          saved.last_error = String(error.message || error);
+          saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
+          saved.next_retry_ms = Date.now() + Math.max(15000, Number(error.retryAfterSeconds || 0) * 1000);
+          localStorage.setItem(recoveryKey, JSON.stringify(saved));
+          failures.push(plan.request_id + ": " + saved.last_error);
+          factoryMarkSubmissionUnconfirmed();
+          // Continue unrelated original plans. Never change the failing plan's
+          // request ID, selection or retry disposition.
+          continue;
+        }
         acceptedOutputs += chunk.length;
         acceptedBatches++;
         rememberFactoryAccepted(plan.ids);
         chunk.forEach((card) => state.selectedOutputs.delete(card.id));
         saveFactorySelection();
         if (state.desk) renderDesk(state.desk);
-        const remaining = planned.slice(index + 1);
-        persistRemaining(remaining);
+        localStorage.removeItem(recoveryKey);
         state.lastBatchProfile = "global";
         try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({
           job_id: batch.job_id, profile_id: "global",
@@ -2725,8 +2776,12 @@
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
-      setBatchSubmissionError(null);
-      setStatus(`All ${ready.length} outputs accepted as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
+      if (failures.length) {
+        setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${ready.length - acceptedOutputs} not confirmed. ${failures.join(" | ")}`);
+      } else {
+        setBatchSubmissionError(null);
+        setStatus(`All ${ready.length} outputs accepted as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
+      }
       refreshFactoryBatchActivity(true).catch(() => {});
       // Never wait for all approvals in the click handler.
     } catch (error) {
