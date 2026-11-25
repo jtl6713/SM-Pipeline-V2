@@ -62,6 +62,28 @@ class R2UploadClient:
             headers.update(extra)
         return headers
 
+    def get_story_audio(self, key: str, sha256: str) -> bytes:
+        import hashlib
+        import re
+
+        if not re.fullmatch(r"studio/previews/story-voiceover/rec[A-Za-z0-9]{14}/[a-f0-9]{64}\.mp3", key) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError("invalid exact Story audio receipt")
+        url = self._upload_url()
+        if not url.startswith("https://"):
+            raise RuntimeError("Story audio requires HTTPS upload transport")
+        with requests.get(url + "/internal/story-audio", params={"key":key,"sha256":sha256},
+                          headers=self._headers(), timeout=(5,30), stream=True, allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise RuntimeError(f"Story audio private read HTTP {response.status_code}")
+            data = bytearray()
+            for chunk in response.iter_content(65536):
+                data.extend(chunk)
+                if len(data) > 8*1024*1024:
+                    raise RuntimeError("Story audio exceeds bounded size")
+        if not data or hashlib.sha256(data).hexdigest() != sha256:
+            raise RuntimeError("Story audio checksum mismatch")
+        return bytes(data)
+
     def put_object(self, key: str, content: bytes, content_type: str) -> dict[str, Any]:
         data = content if isinstance(content, (bytes, bytearray)) else bytes(content)
         if len(data) > DIRECT_PUT_MAX_BYTES:
