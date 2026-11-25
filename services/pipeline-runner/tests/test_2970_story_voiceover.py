@@ -59,6 +59,12 @@ def test_story_accepts_only_audible_narration_with_room_to_finish(monkeypatch):
     monkeypatch.setattr(story,"probe_audio_duration_bytes",lambda _:9.7)
     monkeypatch.setattr(story,"probe_max_volume_db",lambda _:-8)
     assert story.checked_voice(b"audio",10)==9.7
+    monkeypatch.setattr(story,"probe_audio_duration_bytes",lambda _:9.94)
+    with pytest.raises(story.StoryVoiceoverError):
+        story.checked_voice(b"audio",10)
+    monkeypatch.setattr(story,"probe_audio_duration_bytes",lambda _:None)
+    with pytest.raises(story.StoryVoiceoverError):
+        story.checked_voice(b"audio",10)
     monkeypatch.setattr(story,"probe_audio_duration_bytes",lambda _:41.889)
     with pytest.raises(story.StoryVoiceoverError):
         story.checked_voice(b"audio",10)
