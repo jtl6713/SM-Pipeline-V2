@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 import requests
@@ -91,8 +93,47 @@ def checked_stem(data, name, min_duration, max_duration):
     require(1000<len(data)<30_000_000,"stem_size_invalid_"+name)
     duration=probe_audio_duration_bytes(data)
     peak=probe_max_volume_db(data)
+    print("ISSUE2970_STEM_PROBE="+json.dumps({"name":name,"duration_seconds":round(duration,3),"peak_db":peak}),flush=True)
     require(min_duration<=duration<=max_duration and peak is not None and peak>=-18,"stem_audio_invalid_"+name)
     return {"seconds":round(duration,3),"peak_db":peak,"sha256":hashlib.sha256(data).hexdigest()}
+
+def fit_owned_music(data, target_seconds=42.2):
+    """Keep the approved owned track; extend short loops rather than dropping music."""
+    from audio.leading_silence import ffmpeg_bin
+    from audio.voiceover_duration import probe_audio_duration_bytes
+    from audio.speech_activity import probe_max_volume_db
+    require(1000<len(data)<30_000_000,"music_source_size_invalid")
+    seconds=probe_audio_duration_bytes(data)
+    peak=probe_max_volume_db(data)
+    print("ISSUE2970_MUSIC_SOURCE="+json.dumps({"duration_seconds":round(seconds,3),"peak_db":peak}),flush=True)
+    require(3<=seconds<=360 and peak is not None and peak>-45,"owned_music_not_decodable_or_silent")
+    # Normalize and loop the original instrumental only when needed. Preserve
+    # the exact source identity in the receipt; no different commercial song.
+    if seconds>=target_seconds and peak>=-18:
+        return data,{"original_seconds":round(seconds,3),"looped":False}
+    with tempfile.TemporaryDirectory(prefix="issue2970-music-") as tmp:
+        source=Path(tmp)/"source.mp3"; pcm=Path(tmp)/"source.wav"; dest=Path(tmp)/"music.mp3"
+        source.write_bytes(data)
+        # Decode once to sample-clocked PCM before looping. MP3 packet timestamps
+        # and loudnorm filter latency can otherwise shorten the encoded result.
+        decode=[ffmpeg_bin(),"-nostdin","-v","error","-y","-i",str(source),
+                "-ar","48000","-ac","2","-c:a","pcm_s16le",str(pcm)]
+        result=subprocess.run(decode,capture_output=True,timeout=90,check=False)
+        require(result.returncode==0 and pcm.is_file(),"music_pcm_decode_failed")
+        gain=min(24, max(-24, -12-peak))
+        command=[ffmpeg_bin(),"-nostdin","-v","error","-y","-stream_loop","-1","-i",str(pcm),
+                 "-t",str(target_seconds),"-af",f"volume={gain:.3f}dB,afade=t=out:st={target_seconds-1:.3f}:d=1",
+                 "-ar","48000","-c:a","libmp3lame","-b:a","192k",str(dest)]
+        result=subprocess.run(command,capture_output=True,timeout=90,check=False)
+        require(result.returncode==0 and dest.is_file(),"music_loop_encoding_failed")
+        fitted=dest.read_bytes()
+        fitted_seconds=probe_audio_duration_bytes(fitted)
+        fitted_peak=probe_max_volume_db(fitted)
+        print("ISSUE2970_MUSIC_FITTED="+json.dumps({"duration_seconds":fitted_seconds,"peak_db":fitted_peak}),flush=True)
+        require(target_seconds-0.05<=fitted_seconds<=target_seconds+0.15
+                and fitted_peak is not None and -18<=fitted_peak<-1,"fitted_music_contract_failed")
+    return fitted,{"original_seconds":round(seconds,3),"looped":seconds<target_seconds}
+
 
 def stage(r2, data, name):
     digest=hashlib.sha256(data).hexdigest()
@@ -134,7 +175,10 @@ def main():
         vo=checked_stem(full,"full_narration",41.7,42.0)
         music,mime=drive.download_file(MUSIC_DRIVE)
         require(str(mime).startswith("audio/"),"music_mime_invalid")
+        original_music_sha=hashlib.sha256(music).hexdigest()
+        music,fit=fit_owned_music(music)
         bg=checked_stem(music,"owned_music",42.0,360.0)
+        bg.update(fit,original_sha256=original_music_sha)
         # One short, complete sentence using the profile's configured voice.
         # Single bounded attempt; on failure preserve holds and do not loop paid TTS.
         raw=synthesize_voiceover_by_id(SCRIPT,voice_id=setup["Default_Narration_Voice_ID"])
