@@ -80,14 +80,7 @@ $parsed = $queue | ConvertFrom-Json
 if ([int]$parsed.matched -gt $rows.Count) { throw 'watchdog_queue_count_invalid' }
 $active=@($rows | Where-Object {$_.airtable_record_id -in $parsed.active_ids} | ForEach-Object {
 $step=[string]$_.production_job.step
-if($step -notmatch '^[a-z_]{1,40}
-Write-Output 'watchdog2853_proof=PASS_READONLY'
-} catch {
-throw ('watchdog2853_failed_' + $phase)
-} finally {
-Remove-Variable secret,key,headers -ErrorAction SilentlyContinue
-}
-){$step='other'}
+if($step -notmatch '^[a-z_]{1,40}$'){$step='other'}
 @{stage=$step;age_s=[int]([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($_.production_job.updated_at)).TotalSeconds}
 })
 $parsed.PSObject.Properties.Remove('active_ids')
