@@ -11164,7 +11164,10 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     // The global flag by itself is insufficient: other lanes must keep the
     // existing seed write, otherwise the atomic adapter calls its 503 guard.
     const seedProfileId = studioFirstLinkedId(f(parent, "Content_Profile"));
-    if (scheduleReservationLaneEnabled(env, seedProfileId, effective.platform)
+    // A newly created review-only row has no reservation to vacate. Keep its
+    // explicit null clocks in the canonical create and never call the scheduler.
+    if (options.recoveryReviewOnly !== true
+        && scheduleReservationLaneEnabled(env, seedProfileId, effective.platform)
         && Object.prototype.hasOwnProperty.call(seed, "Scheduled_Post_Date")) {
       atomicSeedHasScheduleMutation = true;
       atomicSeedVacate = seed.Scheduled_Post_Date == null || String(seed.Scheduled_Post_Date || "").trim() === "";
@@ -11980,13 +11983,20 @@ export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
         && Number(result?.outputFanout?.blocked_count||0)===0
         && links.every(row=>Boolean(f(row,"Platform_Output_Exists")))
         && actual.size===planned.size && [...planned].every(item=>actual.has(item))
-        && real.every(row=>f(row,"Do_Not_Publish")!==true
+        && real.every(row=>f(row,"Do_Not_Publish")===false
           && f(row,"Output_Status")==="In Production"
           && f(row,"Review_Status")==="Pending Review"
           && f(row,"Publish_Status")==="Not Ready"
           && f(row,"Auto_Publish_Enabled")===false
           && !f(row,"Review_Decision_At") && !f(row,"Published_At")
           && !f(row,"Platform_Post_URL") && !f(row,"YouTube_Video_ID")
+          && ["Platform_Post_ID","Platform_Media_ID","IG_Story_Container_ID",
+            "IG_Story_Post_ID","Instagram_Reel_Container_ID","IG_Carousel_Parent_Container_ID",
+            "IG_Carousel_Published_Media_ID","FB_Slideshow_Meta_Video_ID","TikTok_Draft_Publish_ID",
+            "Publish_Started_At","Publish_Locked_By","Publish_Locked_At","Studio_Publish_Dispatch_At",
+            "Last_Publish_Attempt_At"].every(field=>!f(row,field))
+          && Number(f(row,"Publish_Attempt_Count")||0)===0
+          && Number(f(row,"Studio_Publish_Dispatch_Count")||0)===0
           && !f(row,"Scheduled_Post_Date") && !f(row,"Studio_Scheduled_At")
           && !f(row,"YouTube_Scheduled_Publish_At"));
       const needsMedia=real.some(row=>String(f(row,"Render_Status")||"")==="Blocked");
