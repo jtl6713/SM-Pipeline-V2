@@ -1073,3 +1073,48 @@ test("#2959 live phase checkpoints are not duplicated at terminal CAS; legacy re
   const legacy=factoryBatchSummary(result.job).items[0].timing;
   assert.deepEqual(legacy,timing);
 });
+
+test("2959: absolute drain deadline prevents even the first late approval and survives a resumed slice",async()=>{
+  const bucket=new FakeR2();
+  await factoryBatchEnqueue(bucket,{...opts,records:records.slice(0,3)});
+  let clock=1000,calls=0;
+  const approve=async()=>{calls++;clock+=5000;};
+  const expired=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,startDeadlineMs:1000,approve});
+  assert.equal(expired.claimed,false);
+  assert.equal(calls,0);
+  const first=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,startDeadlineMs:7000,approve});
+  assert.equal(first.processed,2);
+  assert.equal(factoryBatchCounts(first.job).pending_count,1);
+  const resumed=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,startDeadlineMs:7000,approve});
+  assert.equal(resumed.claimed,false);
+  assert.equal(calls,2);
+  const independent=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,startDeadlineMs:30000,approve});
+  assert.equal(independent.job.status,"completed");
+  assert.equal(calls,3);
+});
+test("2959: unexpired canonical output mutex waits until exact expiry, not terminal failure or duplicate commit",async()=>{
+  const bucket=new FakeR2();
+  await factoryBatchEnqueue(bucket,{...opts,records:records.slice(0,2)});
+  let clock=1000;
+  const busy=records[0].id, expiry=900000, commits=[];
+  const first=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,approve:async id=>{
+    if(id===busy)throw Object.assign(Error("Output approval already in progress"),{status:409,code:"OUTPUT_APPROVAL_LOCK_BUSY",retry_at_ms:expiry});
+    commits.push(id);
+  }});
+  assert.equal(first.job.items.find(i=>i.id===busy).status,"pending");
+  assert.equal(first.job.items.find(i=>i.id===busy).next_attempt_ms,expiry+1000);
+  assert.equal(commits.length,1);
+  const early=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,approve:async id=>commits.push(id)});
+  assert.equal(early.processed,0);
+  clock=expiry+1001;
+  const last=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,approve:async id=>commits.push(id)});
+  assert.equal(last.job.status,"completed");
+  assert.equal(new Set(commits).size,2);
+  assert.equal(commits.length,2);
+});
+test("2959: other 409 errors stay terminal, not lock contention",async()=>{
+  const bucket=new FakeR2();
+  await factoryBatchEnqueue(bucket,{...opts,records:records.slice(0,1)});
+  const result=await factoryBatchDrain(bucket,{profileId,requestId,approve:async()=>{throw Object.assign(Error("Fresh review required"),{status:409});}});
+  assert.equal(result.job.items[0].status,"failed");
+});
