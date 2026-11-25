@@ -1,0 +1,35 @@
+name: Issue 2970 all six delivered Riverwalk preview checks
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2970-riverwalk-preview-audit.py'
+      - '.github/workflows/issue2970-riverwalk-preview-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2970-riverwalk-preview-audit.py'
+      - '.github/workflows/issue2970-riverwalk-preview-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2970-delivered-preview-audit
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run exact read-only preview and stem verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'numpy==2.2.6'
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
+          OPENBLAS_NUM_THREADS=1 python repair/scripts/issue2970-riverwalk-preview-audit.py
