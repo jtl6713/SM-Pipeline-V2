@@ -29,6 +29,7 @@ from supabase_pipeline import (
     CONTENT_PATCH_COLUMNS,
     OUTPUT_JSON_COLUMNS,
     OUTPUT_PATCH_COLUMNS,
+    media_duration_seconds,
     _rest,
     studio_phase6_write_source,
     studio_write_source,
@@ -633,6 +634,12 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
         # Library densify lives in metadata (no content_profile_id FK column).
         # A3 requires Content_Profile; without this map every classify skips.
         meta = bag if isinstance(bag, dict) else {}
+        # The generic metadata overlay has snake_case names; expose the
+        # canonical compatibility field only when the source receipt matches.
+        shaped["fields"].pop("Duration_Seconds", None)
+        duration = media_duration_seconds(row)
+        if duration is not None:
+            shaped["fields"]["Duration_Seconds"] = duration
         profile_id = str(meta.get("content_profile_airtable_id") or "").strip()
         if profile_id.startswith("rec") and "Content_Profile" not in shaped["fields"]:
             shaped["fields"]["Content_Profile"] = [profile_id]
