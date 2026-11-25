@@ -163,6 +163,7 @@ def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, du
     monkeypatch.setattr(g,"brand_watermark_bytes",lambda client:b"mark")
     monkeypatch.setattr(g,"_cover_jpeg",lambda data:data)
     monkeypatch.setattr(g,"_image_proof",lambda data:"a"*64)
+    monkeypatch.setattr(g,"_prepare_body_jpeg",lambda data:data)
     monkeypatch.setattr(g,"letter_jpeg_bytes",lambda data,text:data)
     monkeypatch.setattr(g,"apply_watermark_bytes",lambda data,mark,**kw:data)
     import hashlib
@@ -215,3 +216,34 @@ def test_native_tiktok_stamps_missing_typed_ratio_without_truncating_photos():
     assert "Aspect_Ratio" not in stamp_fields(package, None, existing={"fields": {"Aspect_Ratio": "9:16"}})
     conflicting = {**package, "clips": [{**clips[0], "aspect_ratio": "4:5"}, *clips[1:]]}
     assert "Aspect_Ratio" not in stamp_fields(conflicting, None)
+
+
+def test_high_resolution_owned_crop_normalizes_without_crop_or_source_mutation():
+    from PIL import ImageDraw
+    b=io.BytesIO()
+    img=Image.new("RGB",(2160,2700),(230,20,30))
+    draw=ImageDraw.Draw(img)
+    draw.rectangle((0,0,150,150), fill=(20,220,30))
+    draw.rectangle((2000,2540,2159,2699), fill=(30,40,230))
+    img.save(b,"JPEG",quality=95)
+    source=b.getvalue()
+    result=g._prepare_body_jpeg(source)
+    assert len(g._image_proof(result))==64
+    with Image.open(io.BytesIO(source)) as original:
+        assert original.size==(2160,2700)
+    with Image.open(io.BytesIO(result)) as normalized:
+        assert normalized.size==g.SIZE
+        assert normalized.getpixel((20,20))[1]>180
+        assert normalized.getpixel((1050,1320))[2]>180
+    assert g._prepare_body_jpeg(result)==result
+    with pytest.raises(RuntimeError,match="geometry"):
+        g._image_proof(source)
+
+
+@pytest.mark.parametrize("fmt,size",[("JPEG",(2160,1920)),("JPEG",(800,1000)),
+                                     ("PNG",(1080,1350))])
+def test_body_source_wrong_ratio_small_or_wrong_format_fails_closed(fmt,size):
+    b=io.BytesIO()
+    Image.new("RGB",size).save(b,fmt)
+    with pytest.raises(RuntimeError,match="source geometry invalid"):
+        g._prepare_body_jpeg(b.getvalue())

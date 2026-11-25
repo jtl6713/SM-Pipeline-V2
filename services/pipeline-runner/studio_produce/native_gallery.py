@@ -115,6 +115,39 @@ def _image_proof(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _prepare_body_jpeg(data):
+    """Normalize a verified high-resolution 4:5 JPEG for review, not its source.
+
+    Some older crop receipts report 1080x1350 while the exact owned Drive
+    bytes are 2160x2700. A resize of a matching aspect is safe; a wrong
+    aspect, undersized source, non-JPEG or corrupt image is not.
+    """
+    if not isinstance(data, bytes) or not 0 < len(data) <= 8 * 1024 * 1024:
+        raise RuntimeError("Native gallery source image byte budget exceeded")
+    with Image.open(io.BytesIO(data)) as source:
+        width, height = source.size
+        if (source.format != "JPEG" or width * SIZE[1] != height * SIZE[0]
+                or width < SIZE[0] or height < SIZE[1]
+                or width * height > 16_000_000):
+            raise RuntimeError(f"Native gallery source geometry invalid: {source.format} {width}x{height}")
+        source.verify()
+    with Image.open(io.BytesIO(data)) as source:
+        # The exact crop is already oriented. Reject rotated EXIF rather than
+        # silently changing the effective crop or letter/watermark positions.
+        if source.getexif().get(274, 1) != 1:
+            raise RuntimeError("Native gallery source orientation invalid")
+        source.load()
+        if source.size == SIZE:
+            _image_proof(data)
+            return data
+        out = io.BytesIO()
+        source.convert("RGB").resize(SIZE, Image.Resampling.LANCZOS).save(
+            out, format="JPEG", quality=95, optimize=True)
+    normalized = out.getvalue()
+    _image_proof(normalized)
+    return normalized
+
+
 def _stage(uploader, data, parent_id):
     sha = _image_proof(data)
     key = f"studio/previews/watermarked/studio-gallery-2873/{parent_id}/{sha}.jpg"
@@ -404,8 +437,11 @@ def complete_gallery(client, request, parent, output):
         if legacy and drive_id != clip.get("google_drive_file_id"):
             raise RuntimeError("Legacy gallery crop Drive provenance changed")
         raw, _ = drive.download_file(drive_id, timeout=60)
-        _image_proof(raw)
-        jpeg = letter_jpeg_bytes(raw, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
+        try:
+            body = _prepare_body_jpeg(raw)
+        except (RuntimeError, OSError, ValueError) as exc:
+            raise RuntimeError(f"Native gallery source {asset_id}: {exc}") from exc
+        jpeg = letter_jpeg_bytes(body, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
         final = apply_watermark_bytes(jpeg, watermark, output_format="jpeg")
         # Exact final JPEG hash, not filename or a fuzzy similarity guess.
         final_sha = hashlib.sha256(final).hexdigest()
