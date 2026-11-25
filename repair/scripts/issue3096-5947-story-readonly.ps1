@@ -10,7 +10,7 @@ $report=[ordered]@{
 $targets=@(
   @{n=5947;rid='recKw7c9aZ75tDOWU';profile='New York City';prefix='NYC_'}
 )
-$tmp=Join-Path ([IO.Path]::GetTempPath()) ('p1-2340-six-story-'+[guid]::NewGuid().ToString('N'))
+$tmp=$null
 try {
   $health=Invoke-RestMethod 'http://127.0.0.1:3350/health' -Method Get -TimeoutSec 20
   if($health.ok -ne $true -or $health.studio_write_source -ne 'supabase' -or $health.studio_runner_output_read_source -ne 'supabase'){throw 'source_not_supabase'}
@@ -121,7 +121,21 @@ try {
   $ff=Get-Command ffmpeg -ErrorAction SilentlyContinue
   if(-not $ff -or -not $ff.Source){throw 'ffmpeg_unavailable'}
   $report.preflight_step='temporary_directory'
-  New-Item -Path $tmp -ItemType Directory -ErrorAction Stop | Out-Null
+  # Use the CLR directory primitive: the protected Ops host may restrict
+  # PowerShell filesystem cmdlets. Never fall back to the service directory.
+  $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+  $candidate=[IO.Path]::Combine($tempRoot,('p1-3096-story-'+[guid]::NewGuid().ToString('N')))
+  try {
+    if([IO.Directory]::Exists($candidate)){throw 'temporary_directory_collision'}
+    $null=[IO.Directory]::CreateDirectory($candidate)
+    if(-not [IO.Directory]::Exists($candidate)){throw 'temporary_directory_not_created'}
+    $tmp=$candidate
+    $report.temp_directory_created=$true
+  } catch {
+    $report.temp_directory_created=$false
+    $report.temp_failure_type=[string]$_.Exception.GetType().Name
+    throw 'temporary_directory_unavailable'
+  }
   function BytesAt($video,$sec,$out) {
     & $ff.Source -hide_banner -loglevel error -ss ([string]$sec) -i $video -vf 'scale=64:112:flags=bicubic,format=gray' -frames:v 1 -f rawvideo -y $out 2>$null
     if($LASTEXITCODE -ne 0){throw 'video_frame_decode_failed'}
@@ -204,12 +218,12 @@ try {
   $report.reason='bounded_owned_story_and_media_audit_complete'
 }catch{
   # Never emit raw exception text: it may contain authenticated URLs or headers.
-  $safe=@('ffmpeg_unavailable','video_frame_decode_failed','decoded_frame_size_invalid','approved_asset_size_untrusted')
+  $safe=@('ffmpeg_unavailable','video_frame_decode_failed','decoded_frame_size_invalid','approved_asset_size_untrusted','temporary_directory_unavailable')
   $message=[string]$_.Exception.Message
   $report.failure_code=if($safe -contains $message){$message}else{'preflight_exception'}
   $report.reason='source_or_provider_preflight_failed_closed'
 }
 finally{
-  if(Test-Path $tmp){Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue}
+  if($tmp -and [IO.Directory]::Exists($tmp)){try{[IO.Directory]::Delete($tmp,$true)}catch{$report.temp_cleanup_failed=$true}}
 }
 Write-Output ('ISSUE3096_5947_STORY_READONLY='+($report|ConvertTo-Json -Depth 7 -Compress))
