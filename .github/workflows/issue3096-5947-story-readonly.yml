@@ -98,7 +98,7 @@ jobs:
             if [[ "$status" == ok ]];then
               jq -r '.job.log // ""' /tmp/p1-six-story-job.json | grep '^ISSUE3096_5947_STORY_READONLY=' | tail -1 | sed 's/^ISSUE3096_5947_STORY_READONLY=//' > /tmp/p1-six-story-evidence.json
               jq -e '.targets==1 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .media_publish_calls==0 and (.results|length)<=1' /tmp/p1-six-story-evidence.json >/dev/null
-              jq -c '{cohort,targets,provider_gets,provider_writes,output_writes,airtable_reads,media_publish_calls,pages,all_accounts_verified,results,reason}' /tmp/p1-six-story-evidence.json
+              jq -c '{cohort,targets,provider_gets,provider_writes,output_writes,airtable_reads,media_publish_calls,pages,all_accounts_verified,results,reason,preflight_step,failure_code,approved_asset_bytes}' /tmp/p1-six-story-evidence.json
               if ! jq -e '.all_accounts_verified==true and (.results|length)==1 and .results[0].approved_asset_decoded==true' /tmp/p1-six-story-evidence.json >/dev/null;then echo 'Source/provider GET incomplete, no publication decision';exit 3;fi
               exit 0
             elif [[ "$status" == failed ]];then echo 'Protected read-only execution failed, no provider writes';exit 3;fi

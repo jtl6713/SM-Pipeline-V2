@@ -5,7 +5,7 @@ $ProgressPreference='SilentlyContinue'
 $report=[ordered]@{
   cohort='issue3096-5947-explicit-early-hold';targets=1;provider_gets=0
   output_writes=0;provider_writes=0;airtable_reads=0;media_publish_calls=0
-  pages=0;all_accounts_verified=$false;results=@();reason='not_started'
+  pages=0;all_accounts_verified=$false;results=@();reason='not_started';preflight_step='source_identity';failure_code=$null
 }
 $targets=@(
   @{n=5947;rid='recKw7c9aZ75tDOWU';profile='New York City';prefix='NYC_'}
@@ -117,8 +117,10 @@ try {
     }
     $a.scan_complete=(-not $next)
   }
+  $report.preflight_step='ffmpeg_lookup'
   $ff=Get-Command ffmpeg -ErrorAction SilentlyContinue
   if(-not $ff -or -not $ff.Source){throw 'ffmpeg_unavailable'}
+  $report.preflight_step='temporary_directory'
   New-Item -Path $tmp -ItemType Directory -ErrorAction Stop | Out-Null
   function BytesAt($video,$sec,$out) {
     & $ff.Source -hide_banner -loglevel error -ss ([string]$sec) -i $video -vf 'scale=64:112:flags=bicubic,format=gray' -frames:v 1 -f rawvideo -y $out 2>$null
@@ -140,11 +142,16 @@ try {
     }
     # Always prove the exact approved original asset is accessible, even if no active Story candidate.
     $src=Join-Path $tmp ($t.n+'-approved.mp4')
+    $report.preflight_step='approved_asset_download'
     Invoke-WebRequest ([string]$o.publish_asset_url) -Method Get -OutFile $src -TimeoutSec 85 | Out-Null
+    $report.preflight_step='approved_asset_size'
     $len=(Get-Item $src).Length
+    $report.approved_asset_bytes=$len
     if($len -lt 100000 -or $len -gt 104857600){throw 'approved_asset_size_untrusted'}
+    $report.preflight_step='approved_asset_decode'
     $null=BytesAt $src 1 (Join-Path $tmp ($t.n+'-original-preflight.raw'))
     $rr.approved_asset_decoded=$true
+    $report.preflight_step='owned_candidate_comparison'
     if(-not $a.scan_complete){
       $rr.conclusion='incomplete_owned_story_pagination_no_versus_publish_conclusion'
     }elseif($within.Count -gt 4){
@@ -193,8 +200,13 @@ try {
     }
     $report.results+=($rr)
   }
+  $report.preflight_step='complete'
   $report.reason='bounded_owned_story_and_media_audit_complete'
 }catch{
+  # Never emit raw exception text: it may contain authenticated URLs or headers.
+  $safe=@('ffmpeg_unavailable','video_frame_decode_failed','decoded_frame_size_invalid','approved_asset_size_untrusted')
+  $message=[string]$_.Exception.Message
+  $report.failure_code=if($safe -contains $message){$message}else{'preflight_exception'}
   $report.reason='source_or_provider_preflight_failed_closed'
 }
 finally{
