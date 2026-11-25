@@ -91,7 +91,7 @@ def verify_catalog_music_duration(record_id: str, expected_drive_id: str, *, set
     import hashlib
     import re
     from urllib.parse import quote
-    from supabase_pipeline import _rest, supabase_configured, studio_write_source
+    from supabase_pipeline import _rest, media_duration_seconds, supabase_configured, studio_write_source
     from studio_produce import workload_governor as governor
 
     if not re.fullmatch(r"rec[A-Za-z0-9]{14}", record_id or "") or not re.fullmatch(r"[A-Za-z0-9_-]{10,128}", expected_drive_id or ""):
@@ -117,8 +117,8 @@ def verify_catalog_music_duration(record_id: str, expected_drive_id: str, *, set
     with governor.resource_slot("music_duration_probe", limit=1, wait_seconds=0):
         row = read()
         meta = row.get("metadata") or {}
-        duration = float(meta.get("duration_seconds") or 0)
-        if not (math.isfinite(duration) and duration > 0):
+        duration = media_duration_seconds(row)
+        if duration is None:
             declared_size = int(row.get("file_size_bytes") or 0)
             if declared_size > MAX_FILE_BYTES:
                 raise ValueError("Catalog music exceeds verification size limit")
@@ -142,6 +142,7 @@ def verify_catalog_music_duration(record_id: str, expected_drive_id: str, *, set
             if not isinstance(updated,list) or len(updated)!=1:
                 raise governor.AdmissionDeferred("Catalog music revision changed")
             fresh = read()
-            if abs(float(fresh["metadata"]["duration_seconds"])-duration)>0.05:
+            verified_duration = media_duration_seconds(fresh)
+            if verified_duration is None or abs(verified_duration - duration) > 0.05:
                 raise RuntimeError("Catalog duration receipt mismatch")
         return {"ok":True,"record_id":record_id,"google_drive_file_id":expected_drive_id,"duration_seconds":duration}
