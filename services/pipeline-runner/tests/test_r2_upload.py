@@ -1,4 +1,6 @@
 import io
+
+import pytest
 from unittest.mock import patch
 
 from integrations.r2_upload import R2UploadClient
@@ -71,3 +73,39 @@ def test_put_object_small_stays_direct():
     assert calls[0]["params"] == {"key": "publish/small.mp4"}
     assert "action" not in calls[0]["params"]
     assert isinstance(calls[0]["data"], (bytes, bytearray, io.BytesIO)) or calls[0]["data"] == b"hello"
+
+
+@pytest.mark.parametrize("status,body,expected", [
+    (200, {"ok": True, "object": {"key": "EXACT"}}, True),
+    (404, {"ok": False, "error": "Not found", "key": "EXACT"}, False),
+    (200, {"ok": False, "error": "Not found", "key": "EXACT"}, False),
+    (404, {"ok": False, "error": "Not found", "key": "WRONG"}, None),
+    (404, {"ok": False, "error": "Not found"}, None),
+    (404, {"ok": True, "object": {"key": "EXACT"}}, None),
+    (404, [], None),
+    (403, {"ok": False, "error": "Not found", "key": "EXACT"}, None),
+    (503, {"ok": False, "error": "Not found", "key": "EXACT"}, None),
+    (200, {"ok": True, "object": "EXACT"}, None),
+])
+def test_story_head_only_accepts_exact_authenticated_receipts(status, body, expected):
+    import json
+    from unittest.mock import MagicMock
+    key = "studio/previews/story-voiceover/recAAAAAAAAAAAAAA/" + "0" * 64 + ".mp3"
+    payload = json.loads(json.dumps(body).replace('"EXACT"', json.dumps(key)))
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status_code = status
+    response.json.return_value = payload
+    client = R2UploadClient()
+    with (
+        patch.object(client, "_upload_url", return_value="https://r2.example"),
+        patch.object(client, "_secret", return_value="secret"),
+        patch("integrations.r2_upload.requests.get", return_value=response) as get,
+    ):
+        if expected is None:
+            with pytest.raises(RuntimeError):
+                client.story_audio_exists(key)
+        else:
+            assert client.story_audio_exists(key) is expected
+        assert get.call_args.kwargs["allow_redirects"] is False
+        assert get.call_args.kwargs["params"] == {"key": key}
