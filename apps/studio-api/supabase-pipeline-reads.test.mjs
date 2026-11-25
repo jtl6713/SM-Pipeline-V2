@@ -6774,3 +6774,20 @@ test("#2965 Supabase variant mutations preserve active and newly raced runner cl
     assert.ok(urls.some(u=>u.includes("status=eq.Error")&&u.includes("last_attempt_at=eq.")&&u.includes("payload=eq.")));
   }finally{globalThis.fetch=originalFetch}
 });
+
+
+test("#3014: catalog and library projections do not reuse a duration probe for a different Drive source", () => {
+  const row = {
+    airtable_record_id: "rec12345678901234", google_drive_file_id: "drive-original",
+    metadata: { duration_seconds: 84.625, music_duration_probe_v1: {
+      drive_file_id: "drive-original", duration_seconds: 84.625
+    }}
+  };
+  for (const shape of [airtableShapedMusicFromSupabase, airtableShapedLibraryAssetFromSupabase]) {
+    assert.equal(shape(row).fields.Duration_Seconds, 84.625);
+    assert.equal(shape({...row, google_drive_file_id: "drive-replaced"}).fields.Duration_Seconds, null);
+    assert.equal(shape({...row, metadata: {...row.metadata, duration_seconds: 10}}).fields.Duration_Seconds, null);
+    assert.equal(shape({...row, metadata: {duration_seconds: "invalid"}}).fields.Duration_Seconds, null);
+    assert.equal(shape({...row, metadata: {duration_seconds: 84.625}}).fields.Duration_Seconds, 84.625);
+  }
+});
