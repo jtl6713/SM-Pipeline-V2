@@ -433,6 +433,13 @@ def process_one(
         return {"processed": False, "dry_run": True, **preview}
 
     remotion = RemotionClient(render_base)
+    if (payload.get("voiceover") or {}).get("storyAudioSha256"):
+        try:
+            transport_ready = remotion.get_health().get("privateStoryAudioLocalization") is True
+        except Exception:
+            transport_ready = False
+        if not transport_ready:
+            return {"processed":False,"reason":"waiting_for_private_story_audio_transport","output_record_id":output["id"]}
     # Single Remotion slot: if Chrome is already busy, park this row in the
     # waiting queue instead of accepting another job that only looks like Rendering.
     if remotion.slot_busy():
