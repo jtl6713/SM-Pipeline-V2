@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import time
+import hashlib
+import re
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, BinaryIO
 
 import requests
@@ -61,6 +64,49 @@ class R2UploadClient:
         if extra:
             headers.update(extra)
         return headers
+
+    def _story_endpoint(self, path: str, key: str) -> str:
+        if not re.fullmatch(r"studio/previews/story-voiceover/rec[A-Za-z0-9]{14}/[a-f0-9]{64}\.mp3", key):
+            raise ValueError("Invalid Story audio identity")
+        origin = urlsplit(self._upload_url())
+        if origin.scheme != "https" or not origin.hostname or origin.username or origin.password:
+            raise ValueError("Story storage authority must be HTTPS")
+        return urlunsplit((origin.scheme, origin.netloc, path, "", ""))
+
+    def story_audio_exists(self, key: str) -> bool:
+        """The authenticated bucket, not a public-domain 403, owns existence."""
+        url = self._story_endpoint("/lifecycle/object", key)
+        with requests.get(url, params={"key": key}, headers=self._headers(),
+                          timeout=(5, 20), allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise RuntimeError("Story audio storage head unavailable")
+            payload = response.json()
+            if payload.get("ok") is True and (payload.get("object") or {}).get("key") == key:
+                return True
+            if payload.get("ok") is False and payload.get("error") == "Not found" and payload.get("key") == key:
+                return False
+            raise RuntimeError("Story audio storage head ambiguous")
+
+    def read_story_audio(self, key: str, sha256: str) -> bytes:
+        """Exact private media read, bounded bytes and independent receipt digest."""
+        if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError("Invalid Story audio checksum")
+        url = self._story_endpoint("/internal/story-audio", key)
+        with requests.get(url, params={"key": key, "sha256": sha256},
+                          headers=self._headers(), stream=True, timeout=(5, 30),
+                          allow_redirects=False) as response:
+            if response.status_code == 404:
+                raise FileNotFoundError("Story audio missing from upload bucket")
+            if response.status_code != 200:
+                raise RuntimeError("Authenticated Story audio read unavailable")
+            data = bytearray()
+            for chunk in response.iter_content(chunk_size=65536):
+                data.extend(chunk)
+                if len(data) > 8 * 1024 * 1024:
+                    raise ValueError("Story audio exceeds bound")
+            if not data or hashlib.sha256(data).hexdigest() != sha256:
+                raise ValueError("Story audio checksum mismatch")
+            return bytes(data)
 
     def put_object(self, key: str, content: bytes, content_type: str) -> dict[str, Any]:
         data = content if isinstance(content, (bytes, bytearray)) else bytes(content)
