@@ -85,7 +85,7 @@ def test_exact_preflight_runs_on_pr_but_production_access_does_not():
 
 def test_normal_recovery_requires_closed_circuit_and_actual_i1_idleness():
     for required in (
-        "param([switch]$NormalClosedRecovery)",
+        "param([switch]$NormalClosedRecovery, [switch]$GeometryRecovery",
         "$NormalClosedRecovery -and $work.database_circuit_phase -ne 'closed'",
         "incident2853_normal_resume_requires_closed_circuit",
         "Get-I1BusyCount",
@@ -98,3 +98,17 @@ def test_normal_recovery_requires_closed_circuit_and_actual_i1_idleness():
         assert required in SCRIPT
     assert 'contains("incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED") and contains(' in WORKFLOW
     assert 'contains("incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED")' not in WORKFLOW
+
+
+def test_geometry_retry_is_exact_terminal_revision_and_corrected_source_bound():
+    for required in (
+        "$job.step -eq 'blocked'",
+        "$job.error -eq 'Native gallery image geometry mismatch'",
+        "$job.updated_at -eq '2026-11-25T00:11:06Z'",
+        "$actual -ne $ExpectedGallerySourceSha",
+        "incident2853_geometry_recovery_deployed_source=PASS",
+    ):
+        assert required in SCRIPT
+    assert "geometry_correction_not_on_main" in WORKFLOW
+    assert "-GeometryRecovery -ExpectedGallerySourceSha" in WORKFLOW
+    assert SCRIPT.count("Invoke-RestMethod -Method POST") == 1
