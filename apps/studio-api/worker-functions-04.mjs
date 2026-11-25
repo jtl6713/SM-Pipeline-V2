@@ -19162,6 +19162,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
                 approvedByUserRecordId: intent?.approvedByUserRecordId || null,
                 submittedAt: intent?.submittedAt || null,
                 originalIntentRecovery: recoveryItem?.original_intent_recovery === true,
+                creativeReview: originalParent?.records?.find(row=>row.id===id)?.creative_review || null,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
@@ -19569,7 +19570,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   let records;
   if (supabaseAuthority) {
     try {
-      records = await factorySupabaseGroupPreflight(env, ids, policy);
+      records = await factorySupabaseGroupPreflight(env, ids, policy, {
+        approvedByUserRecordId: String(authorization?.user?.record_id || "").trim(),
+      });
     } catch (error) {
       const message = String(error?.message || error);
       throw new HttpError(/No new batch was accepted/.test(message) ? 409 : 503, message);
