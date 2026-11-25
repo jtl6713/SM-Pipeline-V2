@@ -84,6 +84,10 @@ HELD_CACHE_RECOVERY = {
     "recmx1yk1C8iZBDM1": "rec3fNJ6QgaL7EMBn",
     "recp6KQO7fJMvSzI2": "rec1IvSP9aGeOQRfd",
     "recZYUkGnBDBJrsDf": "rec1IvSP9aGeOQRfd",
+    "recjqFCCxBroLyoQJ": "reccVyNLdmJJeI8hG",
+    "recjhiYhg1ECvZUHo": "reccVyNLdmJJeI8hG",
+    "rec72bKqmIjLMs1gI": "recG0b34XYwYWggTp",
+    "recRI9JfNjjhLLo2m": "recG0b34XYwYWggTp",
 }
 
 
@@ -236,17 +240,63 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
             raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
         claims=matching_story_claims(client,live_parent,current["id"],digest,url)
         known = {claim["sha256"] for claim in claims if claim.get("sha256")}
+        from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history
+        history = HISTORY_RECOVERY.get(parent["id"])
+        provenance = {}
         if claims:
-            if len(known) != 1:
-                raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
-            try:
-                storage = R2UploadClient(pipeline_settings(client))
-                data = storage.read_story_audio(key, next(iter(known)))
-                measured = verified_cached_voice(data, claims, cap)
-            except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
-                raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt") from exc
+            if not known and history and current["id"] in history["outputs"]:
+                # Only the two owner-authorized held pairs, exact original
+                # failed receipt and independently verified provider bytes.
+                if (digest != history["fingerprint"] or len(claims)!=1
+                        or claims[0].get("state")!="failed"
+                        or field(current,"Do_Not_Publish") is not True
+                        or not story_sentence_recovery_candidate(current,live_parent,cached_only=True)):
+                    raise StoryVoiceoverError("Story history recovery identity changed")
+                try:
+                    settings = pipeline_settings(client)
+                    storage = R2UploadClient(settings)
+                    if storage.story_audio_exists(key):
+                        raise StoryVoiceoverError("Unexpected existing Story audio without receipt checksum")
+                    raw = download_audited_history(history,text,voice_id)
+                    _,data=normalize_voiceover(raw,filename="story-history-"+digest[:16]+".mp3",
+                        normalizer_base_url=settings.get(PIPELINE_SETTING_NORMALIZER_URL))
+                    measured=checked_voice(data,cap)
+                    latest=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
+                    latest_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
+                    if (not story_sentence_recovery_candidate(latest,latest_parent,cached_only=True)
+                            or field(latest,"Do_Not_Publish") is not True
+                            or exact_story_snapshot(latest,parent["id"])!=snapshot
+                            or fingerprint(parent["id"],resolve_content_voice_id(latest_parent),
+                                story_text(field_str(latest_parent,"Voiceover_Script")),cap)!=digest
+                            or matching_story_claims(client,latest_parent,latest["id"],digest,url)!=claims):
+                        raise StoryVoiceoverError("Story history recovery changed before write")
+                    provenance={"history_original_sha256":history["sha256"],
+                                "history_created_at":history["created_at"]}
+                    prepared={"fingerprint":digest,"state":"prepared","url":url,
+                              "sha256":hashlib.sha256(data).hexdigest(),**provenance}
+                    client.update_record(PLATFORM_OUTPUTS_TABLE,latest["id"],{RECEIPT:json.dumps(prepared)},typecast=True)
+                    if parse_json_field(field(client.get_record(PLATFORM_OUTPUTS_TABLE,latest["id"]),RECEIPT))!=prepared:
+                        raise StoryVoiceoverError("Story history checksum receipt not durable")
+                    if not storage.story_audio_exists(key):
+                        storage.put_object(key,data,"audio/mpeg")
+                    if storage.read_story_audio(key,prepared["sha256"])!=data:
+                        raise StoryVoiceoverError("Recovered Story history storage readback failed")
+                except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
+                    raise StoryVoiceoverError("Exact Story history recovery failed; no new synthesis") from exc
+            else:
+                if len(known) != 1:
+                    raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
+                try:
+                    storage = R2UploadClient(pipeline_settings(client))
+                    data = storage.read_story_audio(key, next(iter(known)))
+                    measured = verified_cached_voice(data, claims, cap)
+                    if history and any(c.get("history_original_sha256")==history["sha256"] for c in claims):
+                        provenance={"history_original_sha256":history["sha256"],
+                                    "history_created_at":history["created_at"]}
+                except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
+                    raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt") from exc
         else:
-            if not allow_generate:
+            if not allow_generate or (history and current["id"] in history["outputs"]):
                 raise StoryVoiceoverError("Existing Story narration cache unavailable; no paid regeneration")
             try:
                 settings = pipeline_settings(client)
@@ -290,7 +340,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                "Studio_Effective_Voiceover_Duration_Seconds":measured,"Voiceover_Render_Volume":1,
                "Voiceover_Tail_Seconds":0,"Studio_Effective_Voiceover_Tail_Seconds":0,
                RECEIPT:json.dumps({"fingerprint":digest,"state":"verified","url":url,"text":text,
-                    "seconds":measured,"sha256":hashlib.sha256(data).hexdigest()},separators=(",",":"))}
+                    "seconds":measured,"sha256":hashlib.sha256(data).hexdigest(),**provenance},separators=(",",":"))}
         client.update_record(PLATFORM_OUTPUTS_TABLE,fresh["id"],patch,typecast=True)
         return {**fresh,"fields":{**fresh["fields"],**patch}}
 
