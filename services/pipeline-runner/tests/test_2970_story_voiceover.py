@@ -381,8 +381,10 @@ def test_r4_snapshot_fences_changed_story_receipt_at_same_url(monkeypatch):
 @pytest.mark.parametrize("mode,expected", [
     ("absent", "Ready for Render"), ("present", "Blocked"),
     ("unavailable", "Blocked"), ("claim", "Blocked"), ("stale", "Blocked"),
+    ("verified_sibling", "Ready for Render"), ("corrupt_sibling", "Blocked"),
+    ("unreadable_sibling", "Blocked"),
 ])
-def test_storage_guard_recovery_requires_exact_absence_and_no_attempt(monkeypatch, mode, expected):
+def test_storage_guard_recovery_requires_exact_absence_or_verified_cache(monkeypatch, mode, expected):
     from copy import deepcopy
     from contextlib import nullcontext
     from studio_produce import workload_governor, context
@@ -410,7 +412,19 @@ def test_storage_guard_recovery_requires_exact_absence_and_no_attempt(monkeypatc
     sibling = deepcopy(row)
     sibling["id"] = "recBBBBBBBBBBBBBB"
     sibling["fields"][story.RECEIPT] = json.dumps({"fingerprint":digest,"state":"failed","url":f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"})
-    monkeypatch.setattr(context, "load_outputs", lambda *_: [row, sibling] if mode == "claim" else [row])
+    import hashlib
+    cached = b"verified-story-audio"
+    if mode.endswith("_sibling"):
+        claim = json.loads(sibling["fields"][story.RECEIPT])
+        claim.update(state="verified", sha256=hashlib.sha256(cached).hexdigest())
+        sibling["fields"][story.RECEIPT] = json.dumps(claim)
+    monkeypatch.setattr(context, "load_outputs", lambda *_: [row, sibling] if mode == "claim" or mode.endswith("_sibling") else [row])
+    monkeypatch.setattr(story, "checked_voice", lambda *_: 4.0)
+    def read_cache(*_):
+        if mode == "unreadable_sibling":
+            raise RuntimeError("cache unavailable")
+        return b"wrong-story-audio" if mode == "corrupt_sibling" else cached
+    monkeypatch.setattr(R2UploadClient, "read_story_audio", read_cache)
     def exists(*_):
         if mode == "unavailable":
             raise RuntimeError("storage unavailable")

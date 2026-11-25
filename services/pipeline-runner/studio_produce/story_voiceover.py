@@ -158,11 +158,18 @@ def storage_guard_clear(client, output, parent):
                         story_text(field_str(live_parent, "Voiceover_Script")), story_seconds(current)) != digest):
                 return False
             claims = matching_story_claims(client, live_parent, current["id"], digest, url)
-            # A prior paid attempt or unreceipted existing object cannot be
-            # reclassified as first-time work. Keep it blocked for reconciliation.
+            storage = R2UploadClient(pipeline_settings(client))
+            # Once the first sibling recovers, its verified cache can safely
+            # unblock the other sibling. A claim without a unique checksum,
+            # an unreceipted object or unreadable audio remains blocked.
             if claims:
-                return False
-            return R2UploadClient(pipeline_settings(client)).story_audio_exists(key) is False
+                known = {claim["sha256"] for claim in claims if claim.get("sha256")}
+                if len(known) != 1:
+                    return False
+                data = storage.read_story_audio(key, next(iter(known)))
+                verified_cached_voice(data, claims, cap)
+                return True
+            return storage.story_audio_exists(key) is False
     except (StoryVoiceoverError, AdmissionDeferred, OSError, RuntimeError, ValueError, requests.RequestException):
         return False
 
