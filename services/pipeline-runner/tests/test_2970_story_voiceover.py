@@ -376,3 +376,53 @@ def test_r4_snapshot_fences_changed_story_receipt_at_same_url(monkeypatch):
     assert processor.render_snapshot_error(snapshot, None, original) is None
     assert processor.render_snapshot_error(snapshot, None, changed) is not None
     assert processor.render_snapshot_error(snapshot, None, removed) is not None
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("absent", "Ready for Render"), ("present", "Blocked"),
+    ("unavailable", "Blocked"), ("claim", "Blocked"), ("stale", "Blocked"),
+])
+def test_storage_guard_recovery_requires_exact_absence_and_no_attempt(monkeypatch, mode, expected):
+    from copy import deepcopy
+    from contextlib import nullcontext
+    from studio_produce import workload_governor, context
+    from p2 import elevenlabs_client
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+    p = parent()
+    row = output(Content_Item=[p["id"]], Output_Status="In Production",
+        Render_Status="Blocked", Remotion_Error_Message=story.STORY_STORAGE_GUARD,
+        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Review_Status="Pending Review", Do_Not_Publish=False, Auto_Publish_Enabled=False)
+    rows = {p["id"]: deepcopy(p), row["id"]: deepcopy(row)}
+    client = Mock()
+    client.get_record.side_effect = lambda table, rid: deepcopy(rows[rid])
+    def update(table, rid, patch, **kwargs):
+        rows[rid]["fields"].update(patch)
+    client.update_record.side_effect = update
+    monkeypatch.setattr(workload_governor, "enabled", lambda: True)
+    monkeypatch.setattr(workload_governor, "resource_slot", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(elevenlabs_client, "resolve_content_voice_id", lambda _: "voice-1")
+    paid = Mock(side_effect=AssertionError("rearm may not synthesize"))
+    monkeypatch.setattr(elevenlabs_client, "synthesize_voiceover_by_id", paid)
+    monkeypatch.setattr(item_settings, "pipeline_settings", lambda *_: {})
+    digest = story.fingerprint(p["id"], "voice-1", story.story_text(p["fields"]["Voiceover_Script"]), story.story_seconds(row))
+    sibling = deepcopy(row)
+    sibling["id"] = "recBBBBBBBBBBBBBB"
+    sibling["fields"][story.RECEIPT] = json.dumps({"fingerprint":digest,"state":"failed","url":f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"})
+    monkeypatch.setattr(context, "load_outputs", lambda *_: [row, sibling] if mode == "claim" else [row])
+    def exists(*_):
+        if mode == "unavailable":
+            raise RuntimeError("storage unavailable")
+        if mode == "stale":
+            rows[row["id"]]["fields"]["Do_Not_Publish"] = True
+        return mode == "present"
+    monkeypatch.setattr(R2UploadClient, "story_audio_exists", exists)
+    result = story.rearm_story_sentence_guard(client, row, p)
+    assert result["fields"]["Render_Status"] == expected
+    paid.assert_not_called()
+    if expected == "Blocked":
+        client.update_record.assert_not_called()
+    else:
+        assert client.update_record.call_count == 1
+        assert rows[row["id"]]["fields"]["Do_Not_Publish"] is False

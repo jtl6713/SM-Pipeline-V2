@@ -69,6 +69,9 @@ def exact_story_snapshot(output, parent_id):
 STORY_MISSING_SENTENCE = "Studio Story narration integrity guard: Story needs a complete concise narration sentence"
 
 
+STORY_STORAGE_GUARD = "Studio Story narration integrity guard: Story narration storage existence not safely resolved"
+
+
 STORY_CACHE_ERRORS = {
     "Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
     "Studio Story narration integrity guard: Story narration attempt already recorded on a sibling; reconcile before retrying paid generation",
@@ -101,7 +104,7 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
             or field_str(output, "Output_Status") != "In Production"
             or field_str(output, "Render_Status") != "Blocked"
             or (field_str(output, "Remotion_Error_Message") not in (
-                {STORY_MISSING_SENTENCE} if not cached_only else STORY_CACHE_ERRORS))
+                {STORY_MISSING_SENTENCE, STORY_STORAGE_GUARD} if not cached_only else STORY_CACHE_ERRORS))
             or field_str(output, "Review_Status") not in {"", "Pending Review", "Review Sent"}
             or (field(output, "Do_Not_Publish") not in (None, False)
                 and not (cached_only and field(output, "Do_Not_Publish") is True
@@ -131,6 +134,39 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
     return True
 
 
+def storage_guard_clear(client, output, parent):
+    """Read-only recovery proof. No synthesis, write, or speculative upload."""
+    from integrations.r2_upload import R2UploadClient
+    from item4.settings import pipeline_settings
+    from p2.elevenlabs_client import resolve_content_voice_id
+    from studio_produce.workload_governor import AdmissionDeferred, enabled, resource_slot
+    if not enabled():
+        return False
+    try:
+        cap = story_seconds(output)
+        voice = resolve_content_voice_id(parent)
+        digest = fingerprint(parent["id"], voice, story_text(field_str(parent, "Voiceover_Script")), cap)
+        key = f"studio/previews/story-voiceover/{parent['id']}/{digest}.mp3"
+        url = "https://media.chicagoshining.com/" + key
+        with resource_slot("story_voiceover", key=parent["id"], limit=1, wait_seconds=0):
+            current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+            live_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+            if (not story_sentence_recovery_candidate(current, live_parent)
+                    or field_str(current, "Remotion_Error_Message") != STORY_STORAGE_GUARD
+                    or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
+                    or fingerprint(parent["id"], resolve_content_voice_id(live_parent),
+                        story_text(field_str(live_parent, "Voiceover_Script")), story_seconds(current)) != digest):
+                return False
+            claims = matching_story_claims(client, live_parent, current["id"], digest, url)
+            # A prior paid attempt or unreceipted existing object cannot be
+            # reclassified as first-time work. Keep it blocked for reconciliation.
+            if claims:
+                return False
+            return R2UploadClient(pipeline_settings(client)).story_audio_exists(key) is False
+    except (StoryVoiceoverError, AdmissionDeferred, OSError, RuntimeError, ValueError, requests.RequestException):
+        return False
+
+
 def rearm_story_sentence_guard(client, output, parent):
     """Allow a corrected script back into normal R4, never waive its guard."""
     cached_only = field_str(output, "Remotion_Error_Message") in STORY_CACHE_ERRORS
@@ -142,6 +178,19 @@ def rearm_story_sentence_guard(client, output, parent):
             or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
             or story_text(field_str(live_parent, "Voiceover_Script")) != story_text(field_str(parent, "Voiceover_Script"))):
         return current
+    if field_str(current, "Remotion_Error_Message") == STORY_STORAGE_GUARD:
+        if not storage_guard_clear(client, current, live_parent):
+            return current
+        # Re-read after the storage probe. R4 still repeats the exact claim
+        # and storage checks under its own governor slot before any generation.
+        latest = client.get_record(PLATFORM_OUTPUTS_TABLE, current["id"])
+        latest_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+        if (not story_sentence_recovery_candidate(latest, latest_parent)
+                or field_str(latest, "Remotion_Error_Message") != STORY_STORAGE_GUARD
+                or exact_story_snapshot(latest, parent["id"]) != exact_story_snapshot(current, parent["id"])
+                or story_text(field_str(latest_parent, "Voiceover_Script")) != story_text(field_str(live_parent, "Voiceover_Script"))):
+            return latest
+        current = latest
     if cached_only:
         # No paid synthesis or speculative re-upload. Only an exact current
         # fingerprint with a persisted checksum and valid audible bytes can
