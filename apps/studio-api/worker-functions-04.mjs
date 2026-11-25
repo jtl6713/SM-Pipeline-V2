@@ -2896,6 +2896,10 @@ export async function studioReconcileFacebookReels(env, options = {}) {
   const graphHeld = studioFacebookGraphPublishHeld(env);
   const limit = Number(options.limit || 3);
   const results = [];
+  // #3096: the compatibility selector can over-return. Never dispatch or stamp
+  // an unrelated platform/format even if upstream filters regress.
+  const isReel = row => f(row, "Platform") === "Facebook"
+    && f(row, "Platform_Output_Type") === "Facebook Reel";
   let ready = [];
   let processing = [];
   // Graph-held still allows FBS4 finalize for rows Make/public already posted.
@@ -2904,7 +2908,7 @@ export async function studioReconcileFacebookReels(env, options = {}) {
     try {
       ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit,
-        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",OR(FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0,FIND("RATE_LIMIT",UPPER({Publish_Error_Stage}&""))>0))))',
+        filterFormula: 'AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",OR(FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0,FIND("RATE_LIMIT",UPPER({Publish_Error_Stage}&""))>0))))',
         sortField: "Scheduled_Post_Date",
         sortDirection: "asc",
       });
@@ -2918,11 +2922,11 @@ export async function studioReconcileFacebookReels(env, options = {}) {
   const pollScans = [
     {
       label: "pending-finalize",
-      formula: 'AND({Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Published Pending Finalize",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
+      formula: 'AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Published Pending Finalize",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
     },
     {
       label: "reel-processing",
-      formula: 'AND({Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Reel Processing",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
+      formula: 'AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Reel Processing",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
     },
   ];
   const seen = new Set();
@@ -2941,13 +2945,14 @@ export async function studioReconcileFacebookReels(env, options = {}) {
       continue;
     }
     for (const row of rows) {
-      if (seen.has(row.id)) continue;
+      if (!isReel(row) || seen.has(row.id)) continue;
       seen.add(row.id);
       processing.push(row);
       if (processing.length >= limit) break;
     }
   }
   for (const row of ready) {
+    if (!isReel(row)) continue;
     // Meta Graph 368 is not permission to start a second Reel.
     // Quality Agent requires 48-hour hold AND renewed operator review.
     // FBS4 may still verify any already-uploaded remote video independently.
@@ -2959,7 +2964,8 @@ export async function studioReconcileFacebookReels(env, options = {}) {
     if (!studioPublishCanDispatchNow(row)) continue;
     try {
       const pulsed = await studioPulseFbs3(env, row);
-      await studioStampPublishDispatch(
+      // A preflight skip is not an outbound publication attempt.
+      if (!pulsed?.skipped) await studioStampPublishDispatch(
         env,
         row,
         `facebook-native-reel: ${pulsed?.skipped ? `skipped=${pulsed.skipped}` : pulsed?.ok === false ? `failed=${pulsed?.message || pulsed?.status || "unknown"}` : `accepted FBS3 video_id=${pulsed?.video_id || ""}`}`
