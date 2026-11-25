@@ -1,4 +1,4 @@
-name: Issue 2959 Exact 19-Output Factory Read-Only Audit
+name: Issue 2959 Exact 21-Output Retry Factory Read-Only Audit
 on:
   pull_request:
     paths:
@@ -44,7 +44,7 @@ jobs:
           const bucket={get:async key=>objects.has(key)?{size:1,text:async()=>JSON.stringify(objects.get(key))}:null,list:async()=>({objects:[],truncated:false})};
           const result=await audit(bucket);
           assert.equal(result.read_only,true);
-          assert.equal(result.claims.length,19);
+          assert.equal(result.claims.length,21);
           assert.equal(result.claims.find(x=>x.n===10853).request_id,group);
           assert.equal(result.groups[0].children[0].items[0].status,'failed');
           assert.equal(result.recent_scan.complete,true);
@@ -98,7 +98,7 @@ jobs:
             sleep 2
           done
           [[ "$HTTP" == 200 ]] || { echo "Exact R2 audit unavailable HTTP $HTTP"; exit 1; }
-          jq -e '.schema=="issue2959.factory-exact-19-audit.v1" and .read_only==true and (.claims|length)==19' /tmp/2959-exact-factory-audit.json >/dev/null
+          jq -e '.schema=="issue2959.factory-exact-21-retry-audit.v1" and .read_only==true and (.claims|length)==21' /tmp/2959-exact-factory-audit.json >/dev/null
           jq -c . /tmp/2959-exact-factory-audit.json
           echo "ISSUE2959_EXACT_FACTORY_INTENT_READ_ONLY=PASS"
       - uses: actions/upload-artifact@v4
