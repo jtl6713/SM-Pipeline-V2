@@ -19060,13 +19060,13 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
   // Do not let an old queued job bypass an operator's active rollout scope.
   // This guard also runs on cron recovery, not only on fresh HTTP requests.
   const continueSlice = Math.max(0, Math.min(12, Number(options?.continueSlice || 0) || 0));
+  const rollout = factoryBatchRolloutPolicy(env, profileId);
   const supabaseDrain = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
   const scheduled = options.scheduled === true;
   // One absolute budget for the whole invocation, including all continuations.
   // HTTP waitUntil is short; cron owns independent, longer lived execution.
   const deadlineMs = Number(options.deadlineMs) || Date.now() + (scheduled ? 120000 : 16000);
   const startDeadlineMs = deadlineMs - (scheduled ? 10000 : 6000);
-  const rollout = factoryBatchRolloutPolicy(env, profileId);
   const job=await factoryBatchRead(env.STUDIO_MEDIA,profileId,requestId);
   if (!job) return null;
   const globalPolicy=factoryGlobalPolicy(env);
