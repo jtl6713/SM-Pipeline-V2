@@ -1797,6 +1797,9 @@ test("phase 6 production request write-through persists master assets and org au
         Organization: ["recOrg00000000001"],
         Brand: ["recBrand000000001"],
         Idea_Candidate: ["recIdea0000000001"],
+        Voice_ID: "fixture-miami-briony",
+        Voice_Name: "Briony",
+        Voiceover_Mode: "Yes",
         Studio_Master_Asset_Status: "Ready",
         Studio_Master_Asset_Count: 1,
         Studio_Master_Assets_JSON: JSON.stringify(assets),
@@ -1816,6 +1819,8 @@ test("phase 6 production request write-through persists master assets and org au
     assert.deepEqual(rows[0].publish_status.Brand, ["recBrand000000001"]);
     assert.equal(rows[0].publish_status.idea_candidate_airtable_id, "recIdea0000000001");
     assert.equal(rows[0].publish_status.Active, true);
+    assert.equal(rows[0].publish_status.Voice_ID, "fixture-miami-briony");
+    assert.equal(rows[0].publish_status.Voice_Name, "Briony");
 
     const shaped = airtableShapedProductionRequestFromSupabase({
       airtable_record_id: "recRequestAssets1",
@@ -1828,6 +1833,9 @@ test("phase 6 production request write-through persists master assets and org au
       brands: { airtable_record_id: "recBrand000000001" },
       idea_candidates: { airtable_record_id: "recIdea0000000001" },
     });
+    assert.equal(shaped.fields.Voice_ID, "fixture-miami-briony");
+    assert.equal(shaped.fields.Voice_Name, "Briony");
+    assert.equal(shaped.fields.Voiceover_Mode, "Yes");
     assert.deepEqual(shaped.fields.Organization, ["recOrg00000000001"]);
     assert.deepEqual(shaped.fields.Brand, ["recBrand000000001"]);
     assert.deepEqual(shaped.fields.Idea_Candidate, ["recIdea0000000001"]);

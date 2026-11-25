@@ -1603,6 +1603,8 @@ export function airtableShapedProductionRequestFromSupabase(row) {
         : [],
       Background_Music_Mode: bag.Background_Music_Mode || null,
       Voiceover_Mode: bag.Voiceover_Mode || null,
+      Voice_ID: bag.Voice_ID ?? null,
+      Voice_Name: bag.Voice_Name ?? null,
       Script_Mode: bag.Script_Mode || null,
       Requested_Script: bag.Requested_Script || null,
       Video_Duration_Seconds: bag.Video_Duration_Seconds ?? null,
@@ -6799,7 +6801,7 @@ function productionRequestPublishStatusPatch(fields) {
     bag.Target_Platforms = Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [];
   }
   for (const key of [
-    "Background_Music_Mode", "Voiceover_Mode", "Script_Mode", "Requested_Script",
+    "Background_Music_Mode", "Voiceover_Mode", "Voice_ID", "Voice_Name", "Script_Mode", "Requested_Script",
     "Video_Duration_Seconds", "Voiceover_Duration_Seconds", "Music_Start_Seconds",
     "Voiceover_Tail_Seconds", "Video_Clip_Count_Mode", "Video_Clip_Count_Exact",
   ]) {
