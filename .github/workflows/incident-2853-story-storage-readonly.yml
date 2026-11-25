@@ -1,0 +1,67 @@
+name: Incident 2853 Story storage read-only proof
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/incident-2853-story-storage-readonly.yml'
+      - '.github/scripts/incident-2853-story-storage-readonly.ps1'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/incident-2853-story-storage-readonly.yml']
+permissions:
+  contents: read
+concurrency:
+  group: incident-2853-story-storage-readonly
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse read-only PowerShell and Python
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.github/scripts/incident-2853-story-storage-readonly.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw 'parser_failure'}
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('.github/scripts/incident-2853-story-storage-readonly.ps1').read_text()
+          compile(s.split("$code=@'\n",1)[1].split("\n'@",1)[0],"readonly","exec")
+          PY
+  readback:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Execute GET-only local proof
+        run: |
+          python - <<'PY'
+          import json,re,runpy
+          from pathlib import Path
+          m=runpy.run_path('.github/scripts/incident-2670-cap-two.py')
+          m['authenticate']()
+          log=m['shell'](Path('.github/scripts/incident-2853-story-storage-readonly.ps1').read_text())
+          for line in log.splitlines():
+              if line.startswith(('story2853_config=','story2853_health=','story2853_head=')):
+                  prefix,body=line.split('=',1)
+                  obj=json.loads(body)
+                  if prefix=='story2853_config':
+                      assert set(obj)=={'url_present','secret_present','expected_origin'} and all(type(v) is bool for v in obj.values())
+                  elif prefix=='story2853_health':
+                      assert set(obj)=={'http','expected_version'} and type(obj['http']) is int and type(obj['expected_version']) is bool
+                  else:
+                      assert set(obj)=={'sample','http','result'} and obj['sample'] in ('prior','synthetic') and type(obj['http']) is int and obj['result'] in ('unverified','present','absent','forbidden','prefix_rejected','invalid_json','transport_error')
+                  print(prefix+'='+json.dumps(obj))
+              elif re.fullmatch(r'story2853_error=(runtime|import|configuration|health|head)',line):
+                  print(line)
+          if 'story2853_proof=READONLY_COMPLETE' not in log.splitlines():
+              raise SystemExit('readonly_incomplete')
+          print('story2853_proof=READONLY_COMPLETE')
+          PY
