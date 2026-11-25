@@ -137,3 +137,32 @@ runtime side effects. Later rollout must use a separate tested enablement
 flag, roll back admission/visibility together, preserve stored mode and
 leases, and keep operations diagnostics available. Never roll back by
 releasing publishing holds or enabling public publishing.
+
+## Checkpoint 2 — canonical capture (review required)
+
+The staged migration `docs/supabase-migration/phase7/3094_production_mode_staged.sql`
+adds nullable typed mode/source to idea_candidates only, with a pair constraint
+and no default, backfill, or job trigger. Requests will derive mode from their
+existing typed Idea FK instead of maintaining competing mutable authorities.
+The existing dedicated Finished Video origin and publishing-mode contract is
+unchanged. Vibe Cut and unknown legacy rows are not classified by the migration.
+
+Worker ordinary Idea creation, autonomous Idea creation, and validated
+storyboard creation plus Runner I1 creation capture automatic metadata in
+the same new-row insert when `STUDIO_PRODUCTION_MODE_CAPTURE=true`. Typed
+create receipts are checked. Generic PATCH and Runner mirror paths strip
+untrusted transport markers and never write typed mode. Worker exact Idea
+reads, profile Idea lists and ready-lane reads project only typed metadata
+when capture is enabled. This flag is OFF by default; neither writer requires
+the new columns when it is off. This checkpoint grants no manual opt-in
+or new automatic dispatch authority. It is not an editor visibility change.
+
+Before capture activation: merge after CI, verify the active target and
+existing RLS, coordinate protected additive schema application with #3096
+release owners, verify columns/constraint readback, then enable capture only
+with reviewed runtime flag configuration. Validate no new job/publish
+authority and exact newly created test Ideas in a non-publishing path.
+Subsequent PR must implement audited manual transition with lease CAS,
+all automatic admission/claim guards, manual-only list and editor
+authorization, dedicated and ordinary UI routing and QA calibration. Only
+enable user-visible behavior when the gates are jointly proven.
