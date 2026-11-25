@@ -1,0 +1,41 @@
+name: Issue 3096 Exact 13 Approved Facebook Gallery CDN Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/manifests/issue3096-13-approved-fb-gallery-cdn.json'
+      - 'repair/scripts/issue3096-13-approved-fb-gallery-cdn.py'
+      - '.github/workflows/issue3096-13-fb-gallery-cdn.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/manifests/issue3096-13-approved-fb-gallery-cdn.json'
+      - 'repair/scripts/issue3096-13-approved-fb-gallery-cdn.py'
+      - '.github/workflows/issue3096-13-fb-gallery-cdn.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue3096-fb-gallery-cdn-get
+  cancel-in-progress: false
+jobs:
+  exact-cdn-get:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify GET-only audit source and install pinned decoder
+        run: |
+          python -m py_compile repair/scripts/issue3096-13-approved-fb-gallery-cdn.py
+          python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Retrieve and decode only exact public approved media
+        run: python repair/scripts/issue3096-13-approved-fb-gallery-cdn.py
+      - name: Preserve exact per-slide evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3096-13-approved-gallery-byte-evidence
+          path: /tmp/issue3096-fb-gallery-cdn.json
+          retention-days: 30
+          if-no-files-found: error
