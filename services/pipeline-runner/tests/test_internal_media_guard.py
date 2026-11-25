@@ -81,3 +81,29 @@ def test_internal_drive_streams_private_source_in_chunks_not_full_memory(monkeyp
     assert captured["url"].endswith("1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt")
     assert captured["headers"]["Authorization"] == "Bearer private-test-token"
     assert fake.closed
+
+
+def test_story_audio_bridge_exact_loopback_only(monkeypatch):
+    import hashlib
+    import app as runner_app
+    from integrations.r2_upload import R2UploadClient
+    data=b"verified original narration"
+    digest="a"*64
+    sha=hashlib.sha256(data).hexdigest()
+    path=f"/internal/story-audio/rec9qS53G7HDoyCL5/{digest}/{sha}.mp3"
+    calls=[]
+    monkeypatch.setattr(runner_app,"pipeline_settings",lambda:{})
+    def read(self,key,checksum):
+        calls.append((key,checksum))
+        assert checksum==sha
+        return data
+    monkeypatch.setattr(R2UploadClient,"read_story_audio",read)
+    client=app.test_client()
+    assert client.get(path,headers={"X-Forwarded-For":"203.0.113.1"}).status_code==403
+    assert client.get(path,environ_base={"REMOTE_ADDR":"8.8.8.8"}).status_code==403
+    assert client.get(path.replace(sha,"invalid")).status_code==400
+    assert calls==[]
+    response=client.get(path,environ_base={"REMOTE_ADDR":"127.0.0.1"})
+    assert response.status_code==200 and response.data==data
+    assert response.headers["Cache-Control"]=="private, no-store"
+    assert calls==[(f"studio/previews/story-voiceover/rec9qS53G7HDoyCL5/{digest}.mp3",sha)]
