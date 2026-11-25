@@ -1,0 +1,72 @@
+name: Incident 2853 Story Factory read-only acceptance
+on:
+  pull_request:
+    paths: ['.github/workflows/incident-2853-story-factory-readonly.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/incident-2853-story-factory-readonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: incident-2853-story-factory-readonly
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check read-only shell syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          src=Path('.github/workflows/incident-2853-story-factory-readonly.yml').read_text()
+          block=src.split('      - name: Read exact live Story cards using existing Access identity\n',1)[1].split('        run: |\n',1)[1]
+          assert all(not line or line.startswith('          ') for line in block.splitlines())
+          subprocess.run(['bash','-n'],input='\n'.join(line[10:] for line in block.splitlines())+'\n',text=True,check=True)
+          PY
+  acceptance:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Read exact live Story cards using existing Access identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET"
+          BASE=https://studio.chicagoshining.com
+          HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          code=$(curl -sS --max-time 100 -o /tmp/story2853-desk.json -w '%{http_code}' "${HEADERS[@]}" -H 'Accept: application/json' "$BASE/api/factory/desk?story2853_readonly=$GITHUB_SHA")
+          echo "story2853_factory_http=$code"
+          test "$code" = 200
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const body=JSON.parse(fs.readFileSync('/tmp/story2853-desk.json','utf8'));
+          if (!Array.isArray(body?.lanes?.needs_eyes)) throw Error('Factory lane unavailable');
+          const targeted=[11274,11275,11298,11299,11306,11308,11352,11353,11364,11365];
+          const others=[11196,11197,11202,11203,11214,11215,11220,11221,11234,11235,11228,11229,11252,11253];
+          const all=Object.entries(body.lanes).flatMap(([lane,cards])=>
+            (Array.isArray(cards)?cards:[]).map(c=>({lane,c})));
+          const allowedStatus=new Set(['Ready for Review','In Production','Blocked','Rendered','Review Sent','Pending Review','Not Ready','Ready to Publish']);
+          const safe=v=>allowedStatus.has(v)?v:null;
+          const rows=[...targeted,...others].map(id=>{
+            const matches=all.filter(({c})=>Number(c.output_id)===id);
+            const hit=matches.find(x=>x.lane==='needs_eyes');
+            const c=hit?.c;
+            return {id,visible:!!hit,needs_eyes_matches:matches.filter(x=>x.lane==='needs_eyes').length,
+              held:c?.do_not_publish===true,ready:c?.review_package_ready===true,
+              can_approve:c?.can_approve===true,can_preview:c?.can_preview===true,
+              auto_publish:c?.auto_publish_enabled===true,status:safe(c?.output_status),review:safe(c?.review_status)};
+          });
+          console.log('story2853_factory_rows='+JSON.stringify(rows));
+          const approvedReady=rows.filter(r=>targeted.includes(r.id)&&r.needs_eyes_matches===1&&r.ready&&r.can_approve&&!r.held&&!r.auto_publish&&r.status==='Ready for Review');
+          console.log('story2853_factory_target_ready='+approvedReady.length);
+          if (!approvedReady.length) throw Error('No newly targeted storage-blocked Story proven Factory-approvable');
+          console.log('story2853_factory=PASS_AT_LEAST_ONE_TARGET');
+          NODE
