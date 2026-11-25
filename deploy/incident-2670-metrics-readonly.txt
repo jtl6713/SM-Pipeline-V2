@@ -3,3 +3,5 @@ Run one GET-only, fixed-host Supabase privileged Metrics API RAM/swap readback v
 2026-11-25 UTC — Owner target is three concurrent producers. Recheck dedicated monitoring credential and actual memory/swap on the now-deployed Runner under the existing cap1 backlog. Read-only gate only; no automatic cap change, no key fallback, no restart, no provider calls. Use result with #3036 and representative-load/cross-host checks for staged 1→2→3.
 
 2026-11-25 — Owner confirms local dedicated key provisioned. Rerun protected GET-only probe with sanitized key-length/prefix and HTTP-status diagnostics; no secret export or cap change.
+
+2026-11-25 — Correct invalid workflow definition in #3068; trigger validated diagnostic only after merge.
