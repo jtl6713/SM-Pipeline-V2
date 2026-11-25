@@ -86,7 +86,10 @@ function Assert-Baseline([object]$requestRow, [object[]]$outputs) {
   if ($GeometryRecovery) {
     $jobBaseline = ($job.step -eq 'blocked' -and
       $job.error -eq 'Native gallery image geometry mismatch' -and
-      $job.updated_at -eq '2026-11-25T00:11:06Z')
+      $job.updated_at -eq '2026-11-25T00:26:21Z' -and
+      [int]$job.heal.resume_count -eq 3 -and
+      $job.heal.last_resume_at -eq '2026-11-25T00:25:50.411Z' -and
+      $job.heal.last_block_error -eq 'Native gallery image geometry mismatch')
   }
   if ($requestRow.request_status -ne 'Promoted' -or
       $requestRow.master_asset_status -ne 'Ready' -or
@@ -260,6 +263,15 @@ try {
 
   $beforeRequest = Get-RequestRow
   $beforeOutputs = @(Get-OutputRows)
+  if ($GeometryRecovery -and $beforeRequest.production_job.step -eq 'done') {
+    # Autonomous recovery may have completed after the corrected deployment.
+    # Verify both complete human-review packages, without resubmission.
+    Assert-Recovered $beforeRequest $beforeOutputs
+    Write-Output 'incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED'
+    Write-Output 'incident2853_bryant_factory_packages=PASS_10853_10854_HUMAN_REVIEW_REQUIRED'
+    Write-Output 'incident2853_geometry_recovery=ALREADY_RECOVERED_NO_POST'
+    exit 0
+  }
   Assert-Baseline $beforeRequest $beforeOutputs
   if ($NormalClosedRecovery) {
     Write-Output 'incident2853_probe_preflight=PASS_CAP1_CLOSED_EXACT_BASELINE'
