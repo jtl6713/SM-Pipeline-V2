@@ -509,6 +509,26 @@ function Exit-Smv1DeploymentMaintenance {
     } catch { Write-Warning 'SMV1 maintenance release not confirmed; bounded gate expires automatically.' }
 }
 
+# Deployment telemetry is deliberately counts-only: never print a token,
+# request identifier, job payload, or the complete authenticated snapshot.
+function Get-RunnerDeploymentDrainCounts($Snapshot, [bool]$Bootstrap) {
+    if ($Snapshot.ok -ne $true -or $Snapshot.enabled -ne $true -or
+        (!$Bootstrap -and $Snapshot.smv1_maintenance_active -ne $true)) {
+        throw 'runner quiescence unverifiable'
+    }
+    $counts=[ordered]@{active_jobs=$Snapshot.active_jobs}
+    foreach ($scope in @('worker_heavy','smv1_drain','photo_group','transfer','ratio')) {
+        $counts[$scope]=$Snapshot.active_resource_slots.$scope
+    }
+    foreach ($key in @($counts.Keys)) {
+        $value=$counts[$key]
+        if (($value -isnot [int] -and $value -isnot [long]) -or $value -lt 0) {
+            throw 'runner quiescence counters missing or invalid'
+        }
+    }
+    return $counts
+}
+
 function Enter-Smv1DeploymentMaintenance([string]$Root) {
     if (@(Get-NetTCPConnection -LocalPort 3350 -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { return }
     $lines=@(Get-Content -LiteralPath (Join-Path $Root '.env') | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
@@ -536,18 +556,29 @@ function Enter-Smv1DeploymentMaintenance([string]$Root) {
         Write-Warning 'One-time #2965 bootstrap: legacy runner cannot atomically fence new crop arrivals.'
     }
     try {
-        $deadline=(Get-Date).AddSeconds(120)
+        # The maintenance token expires after 30 minutes. Eight minutes of
+        # drain time remains bounded well within that lease and the Ops job
+        # deadline, while allowing real production jobs to finish naturally.
+        $drainClock=[System.Diagnostics.Stopwatch]::StartNew()
+        $lastCounts=''
+        $lastReport=-30
         do {
             $g=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' -Headers $header -TimeoutSec 15
-            if ($g.ok -ne $true -or $g.enabled -ne $true -or $null -eq $g.active_resource_slots.smv1_drain -or (!$bootstrap -and $g.smv1_maintenance_active -ne $true)) { throw 'runner quiescence unverifiable' }
-            $a=$g.active_resource_slots
-            if ([int]$g.active_jobs -eq 0 -and [int]$a.worker_heavy -eq 0 -and [int]$a.smv1_drain -eq 0 -and [int]$a.photo_group -eq 0 -and [int]$a.transfer -eq 0) {
+            $counts=Get-RunnerDeploymentDrainCounts $g $bootstrap
+            $elapsed=[int]$drainClock.Elapsed.TotalSeconds
+            $signature=$counts|ConvertTo-Json -Compress
+            if ($signature -ne $lastCounts -or ($elapsed-$lastReport) -ge 30) {
+                Write-Host "runner_drain_elapsed_seconds=$elapsed runner_drain_counts=$signature"
+                $lastCounts=$signature
+                $lastReport=$elapsed
+            }
+            if (@($counts.Values|Where-Object {$_ -ne 0}).Count -eq 0) {
                 Write-Host 'SMV1 deployment quiescence verified; no active crop or producer claims.'
                 return
             }
             if ($bootstrap) { throw 'legacy runner busy; defer bootstrap without interrupting jobs' }
             Start-Sleep -Seconds 3
-        } while ((Get-Date) -lt $deadline)
+        } while ($drainClock.Elapsed.TotalSeconds -lt 480)
         throw 'runner still processing; deployment deferred without stopping service'
     } catch {
         Exit-Smv1DeploymentMaintenance

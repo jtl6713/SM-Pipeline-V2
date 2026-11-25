@@ -61,7 +61,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
@@ -278,7 +278,10 @@ jobs:
           done
           test -n "$JOB"
 
-          for i in $(seq 1 120); do
+          # Observe this same accepted job for a bounded period. Never submit
+          # a second deployment on timeout or ambiguous transport completion.
+          deploy_observe_deadline=$((SECONDS + 1800))
+          while (( SECONDS < deploy_observe_deadline )); do
             code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' \
               -H "Authorization: Bearer $selected" "$BASE/api/jobs/$JOB" || true)
             if [[ "$code" == "200" ]]; then
