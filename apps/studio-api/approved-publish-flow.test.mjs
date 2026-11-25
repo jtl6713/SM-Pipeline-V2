@@ -126,3 +126,31 @@ test("historical single hold proof never overrides a 2099 cooldown or an active 
   record.fields.Scheduled_Post_Date = "2026-11-22T18:30:00Z";
   assert.equal(check(record).eligible, false, "slot changes invalidate recovery proof");
 });
+
+test("#3096 provider-specific prior operations cannot be admitted as first create with zero general counters",()=>{
+ for(const key of ["IG_Story_Attempt_Count","IG_Carousel_Parent_Poll_Attempt_Count",
+     "TikTok_Draft_Poll_Attempt_Count"]){
+  for(const value of [1,"1","invalid"]){
+   const row=fresh();row.fields[key]=value;
+   assert.equal(check(row).reason,"previous_attempt_requires_provider_reconciliation",key);
+  }
+ }
+ for(const [key,value] of [["IG_Story_Last_Attempt_At","2026-11-20T17:00:00Z"],
+   ["YouTube_Upload_Job_ID","existing-job"],
+   ["Platform_Publish_Response",{id:"previous-operation"}],
+   ["Platform_Publish_Response_JSON",'{"id":"previous-operation"}']]){
+  const row=fresh();row.fields[key]=value;
+  assert.equal(check(row).reason,"prior_provider_or_dispatch_identity",key);
+ }
+ const row=fresh();row.fields.Platform_Publish_Response_JSON="{}";
+ row.fields.IG_Story_Attempt_Count=0;
+ assert.equal(check(row).eligible,true);
+});
+test("#3096 historical early-hold proof does not supersede native provider evidence",()=>{
+ const row=reconciledEarlyHold();
+ row.fields.IG_Story_Attempt_Count=1;
+ assert.equal(check(row).eligible,false);
+ delete row.fields.IG_Story_Attempt_Count;
+ row.fields.Platform_Publish_Response_JSON='{"id":"prior"}';
+ assert.equal(check(row).eligible,false);
+});
