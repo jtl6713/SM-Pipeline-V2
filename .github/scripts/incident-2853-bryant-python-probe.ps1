@@ -1,3 +1,5 @@
+param([switch]$NormalClosedRecovery)
+
 $ErrorActionPreference = 'Stop'
 
 $requestId = 'recbD8PLtJpez8Oz0'
@@ -49,7 +51,7 @@ function Has-Value($value) {
 
 function Assert-NoProviderOrApproval([object]$row) {
   foreach ($name in @(
-    'published_at', 'studio_scheduled_at', 'youtube_scheduled_publish_at',
+    'published_at', 'scheduled_post_date', 'studio_scheduled_at', 'youtube_scheduled_publish_at',
     'platform_post_url', 'platform_publish_response', 'publish_asset_url'
   )) {
     if (Has-Value $row.$name) { throw "incident2853_output_external_state_changed_$name" }
@@ -140,6 +142,28 @@ function Assert-Recovered([object]$requestRow, [object[]]$outputs) {
   }
 }
 
+function Get-I1BusyCount {
+  # Existing I1 spool, read-only, no job claims or setting changes.
+  $dbPath = Read-Setting 'I1_JOB_DB_PATH'
+  if (-not (Test-Path -LiteralPath $dbPath -PathType Leaf)) {
+    throw 'incident2853_i1_spool_unavailable'
+  }
+  $code = @'
+import sqlite3, sys
+from pathlib import Path
+db = sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
+try:
+    print(db.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0])
+finally:
+    db.close()
+'@
+  $value = $code | & python - $dbPath
+  if ($LASTEXITCODE -ne 0 -or ([string]$value) -notmatch '^\d+$') {
+    throw 'incident2853_i1_spool_read_failed'
+  }
+  return [int]$value
+}
+
 function Get-Workload {
   return Invoke-RestMethod -Uri 'http://127.0.0.1:3350/admin/workload' `
     -Headers $script:runnerHeaders -TimeoutSec 20
@@ -159,7 +183,7 @@ try {
       $health.supabase_pipeline_writes -ne $true -or
       $health.workload_governor_enabled -ne $true -or
       $health.recovery_read_only -ne $false -or
-      $health.i1_durable_jobs -ne $false -or
+      (-not $NormalClosedRecovery -and $health.i1_durable_jobs -ne $false) -or
       $health.airtable_activity.any_activity -ne $false -or
       $health.studio_native_gallery_companion_2873 -ne $true) {
     throw 'incident2853_runner_health_gate_failed'
@@ -174,7 +198,11 @@ try {
     foreach ($property in $work.active_resource_slots.PSObject.Properties) {
       $resourceTotal += [int]$property.Value
     }
-    if ($work.enabled -eq $true -and $work.max_jobs -eq 1 -and
+    $i1Busy = 0
+    if ($NormalClosedRecovery -and $health.i1_durable_jobs -eq $true) {
+      $i1Busy = Get-I1BusyCount
+    }
+    if ($i1Busy -eq 0 -and $work.enabled -eq $true -and $work.max_jobs -eq 1 -and
         $work.active_jobs -eq 0 -and $work.queued_jobs -eq 0 -and
         $work.paused_jobs -eq 0 -and $work.active_worker_heavy -eq 0 -and
         $resourceTotal -eq 0 -and $work.database_circuit_phase -ne 'open' -and
@@ -185,18 +213,25 @@ try {
     Start-Sleep -Seconds 5
   }
 
-  if ($work.database_circuit_phase -eq 'closed') {
+  if ($work.database_circuit_phase -eq 'closed' -and -not $NormalClosedRecovery) {
     Write-Output 'incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED'
     exit 0
   }
-  if ($work.database_circuit_phase -ne 'half_open') {
+  if ($NormalClosedRecovery -and $work.database_circuit_phase -ne 'closed') {
+    throw 'incident2853_normal_resume_requires_closed_circuit'
+  }
+  if (-not $NormalClosedRecovery -and $work.database_circuit_phase -ne 'half_open') {
     throw 'incident2853_unexpected_circuit_phase'
   }
 
   $beforeRequest = Get-RequestRow
   $beforeOutputs = @(Get-OutputRows)
   Assert-Baseline $beforeRequest $beforeOutputs
-  Write-Output 'incident2853_probe_preflight=PASS_CAP1_HALF_OPEN_EXACT_BASELINE'
+  if ($NormalClosedRecovery) {
+    Write-Output 'incident2853_probe_preflight=PASS_CAP1_CLOSED_EXACT_BASELINE'
+  } else {
+    Write-Output 'incident2853_probe_preflight=PASS_CAP1_HALF_OPEN_EXACT_BASELINE'
+  }
 
   # Exactly one governed submission. Never retry an accepted or ambiguous POST.
   $body = @{production_request_record_id = $requestId; resume = $true} |
@@ -237,7 +272,11 @@ try {
   $afterRequest = Get-RequestRow
   $afterOutputs = @(Get-OutputRows)
   Assert-Recovered $afterRequest $afterOutputs
-  Write-Output 'incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED'
+  if ($NormalClosedRecovery) {
+    Write-Output 'incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED'
+  } else {
+    Write-Output 'incident2853_probe=PASS_CANONICAL_PROGRESS_CIRCUIT_CLOSED'
+  }
   Write-Output 'incident2853_bryant_factory_packages=PASS_10853_10854_HUMAN_REVIEW_REQUIRED'
   Write-Output 'incident2853_safety=CAP1_ZERO_APPROVAL_SCHEDULE_PUBLISH'
 }

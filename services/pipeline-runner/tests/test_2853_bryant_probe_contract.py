@@ -62,9 +62,11 @@ def test_human_review_and_external_action_fences_are_verified():
 
 def test_ops_launch_preserves_exact_script_under_command_limit():
     for required in (
-        "gzip.compress(script, compresslevel=9, mtime=0)",
-        "base64.b64encode",
-        "[ScriptBlock]::Create($script)",
+        "hashlib.sha256(source.read_bytes()).hexdigest()",
+        "raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{commit}/",
+        "Get-FileHash $tmp -Algorithm SHA256",
+        "incident2853_pinned_source_hash_mismatch",
+        "& $tmp -NormalClosedRecovery",
         "if len(command) > 7800:",
         "'command': command, 'confirm': True",
     ):
@@ -79,3 +81,20 @@ def test_exact_preflight_runs_on_pr_but_production_access_does_not():
     assert "tests/test_2670_workload_governor.py" in WORKFLOW[test_pos:exec_pos]
     assert "OPS_TOKEN_A:" not in WORKFLOW[:exec_pos]
     assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in WORKFLOW[exec_pos:]
+
+
+def test_normal_recovery_requires_closed_circuit_and_actual_i1_idleness():
+    for required in (
+        "param([switch]$NormalClosedRecovery)",
+        "$NormalClosedRecovery -and $work.database_circuit_phase -ne 'closed'",
+        "incident2853_normal_resume_requires_closed_circuit",
+        "Get-I1BusyCount",
+        "I1_JOB_DB_PATH",
+        "?mode=ro",
+        "$i1Busy -eq 0",
+        "PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED",
+        "scheduled_post_date",
+    ):
+        assert required in SCRIPT
+    assert 'contains("incident2853_probe=PASS_NORMAL_RECOVERY_CIRCUIT_CLOSED") and contains(' in WORKFLOW
+    assert 'contains("incident2853_probe=NOT_NEEDED_CIRCUIT_ALREADY_CLOSED")' not in WORKFLOW
