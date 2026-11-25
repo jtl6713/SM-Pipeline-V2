@@ -21,6 +21,7 @@ import {
   proveStudioAuthorizationSources,
 } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
+import { fetchAuthorizedDrivePhoto } from "./media-asset-drive-photo.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
@@ -6596,7 +6597,7 @@ export function mediaAssetPreviewRecordIdFromPath(url) {
 }
 /*__STUDIO_WORKER_END:mediaAssetPreviewRecordIdFromPath__*/
 
-export async function fetchGoogleDriveInlineImage(record, request) {
+export async function fetchGoogleDriveInlineImage(record, request, env = null) {
   const fileId = googleDriveFileId(record);
   if (!fileId) throw new HttpError(404, "Google Drive file ID is not available for this media asset");
 
@@ -6604,6 +6605,11 @@ export async function fetchGoogleDriveInlineImage(record, request) {
   headers.set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.9,*/*;q=0.5");
   const requestedRange = request.headers.get("Range");
   if (requestedRange) headers.set("Range", requestedRange);
+
+  const authorized = await fetchAuthorizedDrivePhoto({
+    fileId, headers, getToken: env ? () => item4GoogleAccessToken(env) : null,
+  });
+  if (authorized) return authorized;
 
   const urls = [
     googleDriveDownloadUrl(fileId),
@@ -6626,7 +6632,7 @@ export async function fetchGoogleDriveInlineImage(record, request) {
   }
 
   throw new HttpError(
-    lastResponse?.status || 502,
+    lastResponse && !lastResponse.ok ? lastResponse.status : 502,
     `Google Drive image preview fetch failed (${lastResponse?.status || "unknown"})`
   );
 }
@@ -6812,19 +6818,21 @@ export async function mediaAssetImagePreview(request, env, url, authorization) {
     });
   }
 
-  // Retain Drive fallback for browser-safe originals whose Drive permissions already allow it.
+  // Fall back to the authenticated exact original, retaining the public-original path.
   if (request.method === "HEAD") {
     const upstream = await fetchGoogleDriveInlineImage(
       record,
-      new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } })
+      new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } }),
+      env
     );
     const headers = copyDriveImageHeaders(upstream, record);
+    if (upstream.status === 206) headers.delete("Content-Length");
     headers.delete("Content-Range");
     try { await upstream.body?.cancel(); } catch {}
     return new Response(null, { status: 200, headers });
   }
 
-  const upstream = await fetchGoogleDriveInlineImage(record, request);
+  const upstream = await fetchGoogleDriveInlineImage(record, request, env);
   return new Response(upstream.body, {
     status: upstream.status === 206 ? 206 : 200,
     headers: copyDriveImageHeaders(upstream, record),
