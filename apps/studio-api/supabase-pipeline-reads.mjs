@@ -888,6 +888,20 @@ export function airtableShapedContentFromSupabase(row) {
  * Drive ids stay on columns; library extras and studio CDN URLs live in metadata
  * because google_drive_url intentionally drops media.chicagoshining.com values.
  */
+function projectedMediaDuration(row, meta) {
+  const duration = Number(meta.duration_seconds || 0);
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  const proof = meta.music_duration_probe_v1;
+  if (proof != null) {
+    const measured = Number(proof.duration_seconds || 0);
+    if (!isPlainObject(proof) || !row?.google_drive_file_id ||
+        proof.drive_file_id !== row.google_drive_file_id ||
+        !Number.isFinite(measured) || measured <= 0 ||
+        Math.abs(measured - duration) > 0.05) return null;
+  }
+  return duration;
+}
+
 export function airtableShapedMusicFromSupabase(row) {
   const meta = isPlainObject(row?.metadata) ? row.metadata : {};
   const bytes = row?.file_size_bytes != null && Number.isFinite(Number(row.file_size_bytes))
@@ -917,7 +931,7 @@ export function airtableShapedMusicFromSupabase(row) {
       File_Size_Bytes: bytes,
       File_Size_MB: sizeMb,
       Rights_Status: meta.rights_status || null,
-      Duration_Seconds: meta.duration_seconds != null ? Number(meta.duration_seconds) : null,
+      Duration_Seconds: projectedMediaDuration(row, meta),
       Asset_Description: meta.asset_description || null,
       Studio_Transfer_ID: meta.studio_transfer_id || null,
       Added_At: meta.added_at || row.created_at || null,
@@ -995,7 +1009,7 @@ export function airtableShapedLibraryAssetFromSupabase(row) {
       Time_Of_Day: meta.time_of_day || null,
       Weather: meta.weather || null,
       Visible_Subjects: meta.visible_subjects || null,
-      Duration_Seconds: meta.duration_seconds ?? null,
+      Duration_Seconds: projectedMediaDuration(row, meta),
       Intake_Date: meta.intake_date || null,
       Intake_Batch_ID: meta.intake_batch_id || null,
     },
