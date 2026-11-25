@@ -7,10 +7,10 @@ import re
 
 import requests
 
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from audio.speech_activity import probe_max_volume_db
 from audio.voiceover_duration import probe_audio_duration_bytes, probe_audio_duration_url
-from render.fields import field, field_str, parse_json_field
+from render.fields import field, field_str, first_linked_id, parse_json_field
 
 RECEIPT = "Studio_Story_Voiceover_Receipt_JSON"
 
@@ -53,6 +53,52 @@ def checked_voice(data,cap):
         raise StoryVoiceoverError("Story narration must be audible and finish within its own timeline")
     return round(duration,3)
 
+def exact_story_snapshot(output, parent_id):
+    if (first_linked_id(field(output, "Content_Item")) != parent_id
+            or not needs_story_voiceover(output)
+            or field_str(output, "Remotion_Job_ID") or field_str(output, "Final_File_URL")):
+        raise StoryVoiceoverError("Story revision or render ownership changed")
+    return tuple(field_str(output, name) for name in (
+        "Output_Filename", "Voiceover_URL", "Studio_Effective_Voiceover_Mode",
+        "Studio_Effective_Background_Music_Mode", "Render_Total_Frames",
+        "Selected_Assets_JSON", "Render_Clip_List_JSON",
+    ))
+
+
+def matching_story_claims(client, parent, output_id, digest, url):
+    # Read all siblings under the existing exact parent-scoped loader, while
+    # holding the Windows governor resource slot. Never infer an absent attempt
+    # from a partial or ambiguous sibling set.
+    from studio_produce.context import load_outputs
+    rows = load_outputs(client, "", parent)
+    ids = [row.get("id") for row in rows]
+    if (not rows or len(rows) >= 50 or len(set(ids)) != len(ids) or output_id not in ids
+            or any(not row.get("id") or first_linked_id(field(row, "Content_Item")) != parent["id"]
+                   for row in rows)):
+        raise StoryVoiceoverError("Exact Story sibling claim set unavailable")
+    claims = []
+    for row in rows:
+        receipt = parse_json_field(field(row, RECEIPT)) or {}
+        if not isinstance(receipt, dict):
+            raise StoryVoiceoverError("Story sibling narration receipt malformed")
+        if receipt.get("fingerprint") != digest:
+            continue
+        if receipt.get("url") != url or receipt.get("state") not in {"generating", "prepared", "verified", "failed"}:
+            raise StoryVoiceoverError("Story sibling narration claim identity invalid")
+        claims.append(receipt)
+    return claims
+
+
+def verified_cached_voice(data, claims, cap):
+    # A matching key alone is not a byte-level proof. A prepared/verified
+    # receipt written before upload binds the cached bytes to the paid attempt.
+    sha = hashlib.sha256(data).hexdigest()
+    known = {claim["sha256"] for claim in claims if claim.get("sha256")}
+    if known != {sha}:
+        raise StoryVoiceoverError("Story narration cache has no unambiguous checksum receipt")
+    return checked_voice(data, cap)
+
+
 def ensure_story_voiceover(client,output,parent):
     """Return updated in-memory exact output. No parent mutation; no approval."""
     if not needs_story_voiceover(output):
@@ -77,33 +123,48 @@ def ensure_story_voiceover(client,output,parent):
     from p2.constants import PIPELINE_SETTING_NORMALIZER_URL
     from item4.settings import pipeline_settings
     from integrations.r2_upload import R2UploadClient
-    from studio_produce.workload_governor import resource_slot
+    from studio_produce.workload_governor import resource_slot, enabled
 
+    if not enabled():
+        raise StoryVoiceoverError("Story narration requires the durable runner governor")
     voice_id=resolve_content_voice_id(parent)
     text=story_text(field_str(parent,"Voiceover_Script"))
     digest=fingerprint(parent["id"],voice_id,text,cap)
     key=f"studio/previews/story-voiceover/{parent['id']}/{digest}.mp3"
     url="https://media.chicagoshining.com/"+key
+    snapshot=exact_story_snapshot(output,parent["id"])
     with resource_slot("story_voiceover",key=parent["id"],limit=1,wait_seconds=0):
         current=client.get_record(PLATFORM_OUTPUTS_TABLE,output["id"])
-        if not needs_story_voiceover(current) or field_str(current,"Remotion_Job_ID") or field_str(current,"Final_File_URL"):
-            raise StoryVoiceoverError("Story revision or render ownership changed")
-        prior=parse_json_field(field(current,RECEIPT)) or {}
+        live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
+        if (exact_story_snapshot(current,parent["id"])!=snapshot or story_seconds(current)!=cap
+                or fingerprint(parent["id"],resolve_content_voice_id(live_parent),
+                    story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest):
+            raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
+        claims=matching_story_claims(client,live_parent,current["id"],digest,url)
         response=requests.get(url,timeout=(5,20),headers={"Cache-Control":"no-cache"})
         if response.status_code==200:
             data=response.content
-            measured=checked_voice(data,cap)
+            measured=verified_cached_voice(data,claims,cap)
         elif response.status_code==404:
-            if isinstance(prior,dict) and prior.get("fingerprint")==digest and prior.get("state") in {"generating","failed","verified"}:
-                raise StoryVoiceoverError("Story narration attempt already recorded; reconcile before retrying paid generation")
+            if claims:
+                raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
             claim={"fingerprint":digest,"state":"generating","url":url}
             client.update_record(PLATFORM_OUTPUTS_TABLE,current["id"],{RECEIPT:json.dumps(claim)},typecast=True)
+            persisted=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
+            if (parse_json_field(field(persisted,RECEIPT))!=claim
+                    or exact_story_snapshot(persisted,parent["id"])!=snapshot):
+                raise StoryVoiceoverError("Story narration claim not durably recorded")
             try:
                 raw=synthesize_voiceover_by_id(text,voice_id=voice_id)
                 settings=pipeline_settings(client)
                 _,data=normalize_voiceover(raw,filename="story-"+digest[:16]+".mp3",
                     normalizer_base_url=settings.get(PIPELINE_SETTING_NORMALIZER_URL))
                 measured=checked_voice(data,cap)
+                claim={**claim,"state":"prepared","sha256":hashlib.sha256(data).hexdigest()}
+                client.update_record(PLATFORM_OUTPUTS_TABLE,current["id"],{RECEIPT:json.dumps(claim)},typecast=True)
+                persisted=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
+                if parse_json_field(field(persisted,RECEIPT))!=claim:
+                    raise StoryVoiceoverError("Story narration checksum receipt not durably recorded")
                 R2UploadClient(settings).put_object(key,data,"audio/mpeg")
                 readback=requests.get(url,timeout=(5,30),headers={"Cache-Control":"no-cache"})
                 if not readback.ok or hashlib.sha256(readback.content).digest()!=hashlib.sha256(data).digest():
@@ -115,12 +176,11 @@ def ensure_story_voiceover(client,output,parent):
         else:
             raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt")
         fresh=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
-        from airtable.constants import CONTENT_ITEMS_TABLE
         live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
         if fingerprint(parent["id"],resolve_content_voice_id(live_parent),
                 story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest:
             raise StoryVoiceoverError("Parent script or voice changed before narration binding")
-        if not needs_story_voiceover(fresh) or story_seconds(fresh)!=cap or field_str(fresh,"Remotion_Job_ID") or field_str(fresh,"Final_File_URL"):
+        if exact_story_snapshot(fresh,parent["id"])!=snapshot or story_seconds(fresh)!=cap:
             raise StoryVoiceoverError("Story changed before narration binding")
         patch={"Voiceover_URL":url,"Voiceover_Duration_Seconds":measured,
                "Studio_Effective_Voiceover_Duration_Seconds":measured,"Voiceover_Render_Volume":1,
