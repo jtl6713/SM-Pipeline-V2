@@ -112,3 +112,26 @@ def test_legacy_music_duration_repair_preserves_identity_and_unrelated_metadata(
     with pytest.raises(ValueError,match="not eligible"):
         verify_catalog_music_duration(record_id,drive_id,settings={})
     assert len(writes)==1
+
+
+def test_catalog_duration_projection_rejects_stale_source_and_invalid_metadata():
+    from airtable.constants import MEDIA_ASSETS_TABLE
+    from supabase_pipeline import media_duration_seconds
+    from supabase_reads import _record_from_row
+
+    row = {
+        "airtable_record_id": "rec12345678901234",
+        "google_drive_file_id": "drive-original",
+        "metadata": {"duration_seconds": 84.625, "music_duration_probe_v1": {
+            "drive_file_id": "drive-original", "duration_seconds": 84.625,
+        }},
+    }
+    assert media_duration_seconds(row) == 84.625
+    assert _record_from_row(row, MEDIA_ASSETS_TABLE)["fields"]["Duration_Seconds"] == 84.625
+    row["google_drive_file_id"] = "drive-replacement"
+    assert media_duration_seconds(row) is None
+    assert "Duration_Seconds" not in _record_from_row(row, MEDIA_ASSETS_TABLE)["fields"]
+    row["metadata"] = {"duration_seconds": "invalid"}
+    assert media_duration_seconds(row) is None
+    row["metadata"] = {"duration_seconds": 84.625}
+    assert media_duration_seconds(row) == 84.625
