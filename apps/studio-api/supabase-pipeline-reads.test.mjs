@@ -6811,6 +6811,7 @@ test("production watchdog selects unfinished non-test requests before cap; other
     };
     assert.deepEqual(await listSupabaseRequestsWithProductionJob(env, {
       limit: 100, statuses: ["Promoted", "Submitted"], unfinishedOnly: true,
+      createdSince: "2026-11-22T12:48:45Z",
     }), []);
     assert.deepEqual(await listSupabaseRequestsWithProductionJob(env, { limit: 50 }), []);
     assert.equal(urls.length, 2);
@@ -6820,10 +6821,25 @@ test("production watchdog selects unfinished non-test requests before cap; other
     assert.equal(watchdog.get("and"), "(or(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.),or(production_job->>step.is.null,production_job->>step.not.in.(done,escalated)))");
     assert.equal(watchdog.get("order"), "production_job->>updated_at.asc.nullsfirst,id.asc");
     assert.equal(watchdog.get("limit"), "100");
+    assert.equal(watchdog.get("created_at"), "gte.2026-11-22T12:48:45.000Z");
+    assert.equal(urls[1].searchParams.get("created_at"), null);
     assert.equal(urls[1].searchParams.get("and"), null);
     assert.equal(urls[1].searchParams.get("order"), "updated_at.desc.nullslast");
   } finally {
     globalThis.fetch = originalFetch;
     resetSupabaseCircuitForTests();
   }
+});
+
+
+test("independent production watchdog has a gated minute owner and does not duplicate the scheduled sweep", async () => {
+  const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+  const produce = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(worker, /env\.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED === "true"/);
+  assert.match(worker, /if \(independentProduceWatchdog && collectorCron === "\* \* \* \* \*" && collectorMinute % 5 === 2\)/);
+  assert.match(worker, /if \(!independentProduceWatchdog\) \{\s*try \{\s*await resumeStaleStudioProductionJobs/);
+  assert.match(worker, /resumeStaleStudioProductionJobs\(env, \{\s*maxCandidates: 4,/);
+  assert.match(produce, /createdSince: "2026-11-22T12:48:45Z"/);
+  assert.match(produce, /ids\.slice\(offset, offset \+ candidateLimit\)/);
+  assert.match(produce, /skipped: "request_no_longer_eligible"/);
 });
