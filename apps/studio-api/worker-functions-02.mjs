@@ -265,7 +265,8 @@ import {
   mergeAutonomousOccupied,
   parseAutonomousLastRun,
   pickAutonomousMusicAssetId,
-  pickNarrationVoiceFromProfiles,
+  resolveRequiredProfileNarrationVoice,
+  resolveProductionNarrationVoice,
   resolveAutonomousNarrationVoice,
   parseAutonomousPick,
   parseRssItemTitles,
@@ -3427,12 +3428,17 @@ export function normalizeRequestedVoice(payload, voiceoverMode) {
 }
 /*__STUDIO_WORKER_END:normalizeRequestedVoice__*/
 
-export function requestedVoiceFromProductionRequest(record) {
+export function requestedVoiceFromProductionRequest(record, profile) {
   const mode = String(f(record, "Voiceover_Mode") || "").trim();
   if (mode !== "Yes") return { voice_id: null, voice_name: null, voice_choice: null };
-  const voiceId = String(f(record, "Voice_ID") || "").trim() || PHASE6_DEFAULT_VOICE_ID;
-  const voiceName = String(f(record, "Voice_Name") || "").trim()
-    || (voiceId === PHASE6_GEORGE_VOICE_ID ? "George" : voiceId === PHASE6_DEFAULT_VOICE_ID ? "Kate" : voiceId);
+  let resolved;
+  try {
+    resolved = resolveProductionNarrationVoice(f(record, "Voice_ID"), f(record, "Voice_Name"),
+      profile?.fields || profile, PHASE6_DEFAULT_VOICE_ID);
+  } catch (error) {
+    throw new HttpError(409, error.message);
+  }
+  const { voice_id: voiceId, voice_name: voiceName } = resolved;
   const lower = voiceName.toLowerCase();
   const voiceChoice = voiceId === PHASE6_GEORGE_VOICE_ID || lower === "george"
     ? "George"
@@ -3811,32 +3817,18 @@ export async function loadContentProfileRecord(env, authorization, profileId) {
 /*__STUDIO_WORKER_END:loadContentProfileRecord__*/
 
 export async function resolveDraftNarrationVoice(env, idea, authorization, fallback = {}, preferredProfileId = null) {
-  const fallbackId = String(fallback.voice_id || PHASE6_DEFAULT_VOICE_ID).trim() || PHASE6_DEFAULT_VOICE_ID;
-  const fallbackName = String(fallback.voice_name || "Kate").trim() || "Kate";
   const ideaProfileId = arrayOrEmpty(f(idea, "Content_Profile"))[0]
-    || arrayOrEmpty(f(idea, "Content Profiles"))[0]
-    || "";
-  const candidateIds = [...new Set([ideaProfileId, preferredProfileId].filter(Boolean))];
-  const profiles = [];
+    || arrayOrEmpty(f(idea, "Content Profiles"))[0] || "";
+  const profileId = ideaProfileId || preferredProfileId;
+  const record = profileId
+    ? await loadContentProfileRecord(env, authorization, profileId)
+    : await resolveWorkingContentProfile(env, authorization, null).catch(() => null);
+  if (!record || (profileId && record.id !== profileId))
+    throw new HttpError(409, "Content profile could not be resolved for narration");
   try {
-    for (const profileId of candidateIds) {
-      const record = await loadContentProfileRecord(env, authorization, profileId);
-      if (record) profiles.push(mapOperationsProfile(record));
-    }
-    const working = await resolveWorkingContentProfile(env, authorization, preferredProfileId || null).catch(() => null);
-    if (working && !profiles.some((row) => row.id === working.id)) {
-      profiles.push(mapOperationsProfile(working));
-    }
-    return pickNarrationVoiceFromProfiles(profiles, {
-      voice_id: fallbackId,
-      voice_name: fallbackName,
-    });
+    return resolveRequiredProfileNarrationVoice(record.fields || record);
   } catch (error) {
-    console.warn("draft narration voice profile lookup failed", idea?.id, error);
-    return pickNarrationVoiceFromProfiles(profiles, {
-      voice_id: fallbackId,
-      voice_name: fallbackName,
-    });
+    throw new HttpError(409, error.message);
   }
 }
 /*__STUDIO_WORKER_END:resolveDraftNarrationVoice__*/
@@ -3884,8 +3876,8 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
       voice_id: PHASE6_DEFAULT_VOICE_ID,
       voice_name: "Kate",
     }, preferredProfileId);
-    defaults.voice_id = narration.voice_id || PHASE6_DEFAULT_VOICE_ID;
-    defaults.voice_name = narration.voice_name || "Kate";
+    defaults.voice_id = narration.voice_id;
+    defaults.voice_name = narration.voice_name;
     if (input && typeof input === "object") {
       input = { ...input, voice_id: defaults.voice_id, voice_name: defaults.voice_name };
     }
@@ -5400,7 +5392,26 @@ export async function syncProductionRequestDirectivesToContentItem(env, requestR
     }
   }
 
-  const requestedVoice = requestedVoiceFromProductionRequest(requestRecord);
+  let narrationProfile = null;
+  if (String(f(requestRecord, "Voiceover_Mode") || "").trim() === "Yes") {
+    const contentProfileId = studioFirstLinkedId(f(existingContentItem, "Content_Profile"));
+    const requestProfileId = studioFirstLinkedId(f(requestRecord, "Content_Profile"));
+    if (!contentProfileId || (requestProfileId && requestProfileId !== contentProfileId))
+      throw new HttpError(409, "Content profile missing or mismatched; narration cannot be assigned");
+    narrationProfile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, contentProfileId);
+    if (narrationProfile?.id !== contentProfileId)
+      throw new HttpError(409, "Could not resolve the exact content profile for narration");
+  }
+  const requestedVoice = requestedVoiceFromProductionRequest(requestRecord, narrationProfile);
+  if (requestedVoice.voice_id) {
+    const priorVoice = String(f(existingContentItem, "Voice_ID") || "").trim();
+    if ((f(existingContentItem, "Voiceover_URL") || f(existingContentItem, "Voiceover_Google_Drive_File_ID"))
+      && priorVoice !== requestedVoice.voice_id && !Object.prototype.hasOwnProperty.call(fields, "Voiceover_URL"))
+      throw new HttpError(409, "Existing narration voice differs from the resolved profile voice; regenerate audio before rendering");
+    snapshot.voice_id = requestedVoice.voice_id;
+    snapshot.voice_name = requestedVoice.voice_name;
+    fields.Production_Request_Directives_JSON = JSON.stringify(snapshot);
+  }
   if (requestedVoice.voice_id) {
     fields.Voice_ID = requestedVoice.voice_id;
     fields.Voice_Name = requestedVoice.voice_name;
