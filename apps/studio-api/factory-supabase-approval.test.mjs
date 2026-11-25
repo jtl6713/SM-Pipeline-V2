@@ -554,6 +554,11 @@ test("#3096 exact verified native gallery readiness is committed with human appr
     assert.equal(fields.error_messages.Publish_Attempt_Count,undefined);
     assert.equal(new URLSearchParams(patches[i].query).get(stage),"is.null");
     assert.equal(mock.rows[i][stage],value);
+    if(i===1){
+      assert.equal(fields.image_output_selected,true);
+      assert.equal(new URLSearchParams(patches[i].query).get("image_output_selected"),"is.null");
+      assert.equal(mock.rows[i].image_output_selected,true);
+    } else assert.equal(fields.image_output_selected,undefined);
   }
 });
 
