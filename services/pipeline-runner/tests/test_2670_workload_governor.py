@@ -729,3 +729,41 @@ def test_retry_rejoins_behind_continuously_runnable_jobs(isolated_governor, monk
     assert retry[0] == "recOldWaiting" and retry[1] != claim[1]
     g.finish_job(*claim)  # stale owner must not remove new claim
     assert g.job_valid(*retry)
+
+
+def test_half_open_progress_requires_exact_outage_and_live_owner(isolated_governor):
+    g = isolated_governor
+    g.enqueue("recProbe")
+    g.trip_database_circuit()
+    with g._connect() as db:
+        db.execute("UPDATE governor_control SET until_at=0 WHERE name='database'")
+    job = g.claim_next()
+    assert job
+    assert g.half_open_probe_epoch(*job) == 0
+    assert not g.confirm_half_open_progress(job[0], "wrong", 0)
+    g.trip_database_circuit()
+    assert not g.confirm_half_open_progress(*job, 0)
+    with g._connect() as db:
+        db.execute("UPDATE governor_control SET until_at=1 WHERE name='database'")
+    assert not g.confirm_half_open_progress(*job, 0)
+    assert g.confirm_half_open_progress(*job, 1)
+    assert g.snapshot()["database_circuit_phase"] == "closed"
+    assert g.job_valid(*job)
+
+
+def test_maintenance_yield_preserves_retry_budget(isolated_governor):
+    g = isolated_governor
+    g.enqueue("recDrain")
+    job = g.claim_next()
+    assert job
+    with g._connect() as db:
+        db.execute("UPDATE producer_jobs SET consecutive_yields=7 WHERE request_id=?", (job[0],))
+    token = "a"*32
+    assert g.set_smv1_maintenance(token,begin=True)
+    assert g.maintenance_requested()
+    g.finish_job(*job,requeue=True,maintenance_yield=True)
+    assert g.claim_next() is None
+    with g._connect() as db:
+        row=db.execute("SELECT state,consecutive_yields FROM producer_jobs WHERE request_id=?", (job[0],)).fetchone()
+    assert tuple(row)==("queued",7)
+    assert g.set_smv1_maintenance(token,begin=False)

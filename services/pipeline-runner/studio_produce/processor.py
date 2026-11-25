@@ -153,6 +153,7 @@ def _run_governed(request_id: str, token: str) -> None:
     """Locally claimed producer; optionally require a second cross-host fence."""
     requeue = False
     progressed = False
+    maintenance_yield = False
     try:
         if not governor.job_valid(request_id, token):
             return
@@ -171,7 +172,8 @@ def _run_governed(request_id: str, token: str) -> None:
                     request_id, lease_token=token, heartbeat_stopped=stopped,
                     global_lease_stopped=global_guard.lost,
                 )
-                requeue = outcome in {"yielded", "yielded_progressed"}
+                maintenance_yield = outcome == "maintenance_yield"
+                requeue = outcome in {"yielded", "yielded_progressed", "maintenance_yield"}
                 progressed = outcome in {"yielded_progressed", "completed_progressed"}
                 if global_guard.lost.is_set():
                     # Never claim global recovery success after a lost fence.
@@ -202,7 +204,7 @@ def _run_governed(request_id: str, token: str) -> None:
                 logger.exception("unable to persist governed producer failure; retaining job request=%s", request_id)
                 requeue = True
     finally:
-        governor.finish_job(request_id, token, requeue=requeue, progressed=progressed)
+        governor.finish_job(request_id, token, requeue=requeue, progressed=progressed, maintenance_yield=maintenance_yield)
 
 
 def _run_safe(request_id: str) -> None:
@@ -240,6 +242,10 @@ def _run(
             or governor.circuit_open()
         ):
             return "yielded_progressed" if advanced else "yielded"
+        if lease_token and governor.maintenance_requested():
+            # Do not start another stage or sleep through a requested drain.
+            # The currently executing handler still reaches its safe boundary.
+            return "maintenance_yield"
         if time.monotonic() - started >= MAX_WALL_SECONDS:
             logger.info("studio produce yielding request=%s after wall clock", request_id)
             return "yielded_progressed" if advanced else "yielded"
@@ -270,6 +276,7 @@ def _run(
             "slides": load_slides(client, parent),
             "job": job,
         }
+        probe_epoch = governor.half_open_probe_epoch(request_id, lease_token) if lease_token else None
         try:
             nxt = handler(client, ctx)
         except StepWait as exc:
@@ -316,8 +323,6 @@ def _run(
         if global_lease_stopped is not None and global_lease_stopped.is_set():
             return "yielded_progressed" if advanced else "yielded"
         nxt = nxt or next_step(step)
-        if nxt != step:
-            advanced = True
         next_job = with_step(job, nxt)
         if nxt == "done" and isinstance(next_job.get("heal"), dict):
             heal = dict(next_job["heal"])
@@ -326,6 +331,16 @@ def _run(
             heal["escalated_at"] = None
             next_job["heal"] = heal
         write_job(client, request_id, next_job)
+        if nxt != step:
+            advanced = True
+            if (probe_epoch is not None and nxt not in {"blocked", "escalated"}
+                    and not (heartbeat_stopped is not None and heartbeat_stopped.is_set())
+                    and not (global_lease_stopped is not None and global_lease_stopped.is_set())):
+                # Only a confirmed canonical transition, never a heartbeat or
+                # waiting loop, certifies recovery. A newer outage wins.
+                observed = read_job(load_request(client, request_id))
+                if all(observed.get(k) == next_job.get(k) for k in ("job_id", "step", "updated_at")):
+                    governor.confirm_half_open_progress(request_id, lease_token, probe_epoch)
         if nxt in TERMINAL_STEPS:
             return "completed_progressed" if advanced else None
     return "yielded_progressed" if advanced else "yielded"
