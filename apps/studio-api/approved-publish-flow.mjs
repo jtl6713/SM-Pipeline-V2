@@ -48,8 +48,26 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
   if (!Number.isFinite(dispatchCount) || !Number.isFinite(providerAttempts) ||
       providerAttempts !== 0 || (dispatchCount !== 0 && !auditedEarlyHold))
     return block("previous_attempt_requires_provider_reconciliation");
+  // #3096: provider-specific attempts and receipts can outlive the general
+  // dispatch count (or an old schedule revision). These are continuation/
+  // reconciliation evidence, not permission for a fresh external create.
+  for (const name of ["IG_Story_Attempt_Count","IG_Carousel_Parent_Poll_Attempt_Count",
+    "TikTok_Draft_Poll_Attempt_Count"]) {
+    const raw=read(name,name.toLowerCase());
+    if (present(raw) && (!Number.isFinite(Number(raw)) || Number(raw)!==0))
+      return block("previous_attempt_requires_provider_reconciliation");
+  }
+  const responsePresent=v=>{
+    if(v==null || v===false) return false;
+    if(typeof v==="object") return Object.keys(v).length>0;
+    return !["","null","{}","[]"].includes(str(v));
+  };
+  if(responsePresent(read("Platform_Publish_Response","platform_publish_response"))
+    || responsePresent(read("Platform_Publish_Response_JSON","platform_publish_response_json")))
+    return block("prior_provider_or_dispatch_identity");
   for (const name of [
     "Studio_Publish_Dispatch_At", "Publish_Started_At", "Last_Publish_Attempt_At",
+    "IG_Story_Last_Attempt_At","YouTube_Upload_Job_ID",
     "Platform_Post_ID", "Platform_Media_ID", "YouTube_Video_ID", "IG_Story_Container_ID",
     "IG_Story_Post_ID", "Instagram_Reel_Container_ID",
     "IG_Carousel_Parent_Container_ID", "IG_Carousel_Published_Media_ID",
