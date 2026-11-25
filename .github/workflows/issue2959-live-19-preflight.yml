@@ -85,7 +85,14 @@ jobs:
           SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
           BASE="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev"
           echo "::add-mask::$TOKEN"
-          HTTP="$(curl -sS --max-time 70 -o /tmp/factory-preflight.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/preflight" || true)"
+          HTTP=000
+          for attempt in $(seq 1 12); do
+            HTTP="$(curl -sS --max-time 70 -o /tmp/factory-preflight.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/preflight" || true)"
+            [[ "$HTTP" == "200" ]] && break
+            # Wait for temporary Worker route propagation; never repeat a successful read.
+            [[ "$HTTP" == "404" || "$HTTP" == "000" || "$HTTP" == "503" ]] || break
+            sleep 3
+          done
           echo "FACTORY_EXACT19_PREFLIGHT_HTTP=$HTTP"
           test "$HTTP" = 200
           jq -e '.read_only==true and .output_count==19 and (.results|length)==2 and all(.results[]; .accepted!=true)' /tmp/factory-preflight.json >/dev/null
