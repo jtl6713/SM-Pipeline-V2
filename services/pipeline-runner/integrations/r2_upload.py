@@ -78,10 +78,19 @@ class R2UploadClient:
         url = self._story_endpoint("/lifecycle/object", key)
         with requests.get(url, params={"key": key}, headers=self._headers(),
                           timeout=(5, 20), allow_redirects=False) as response:
-            if response.status_code != 200:
+            # Upload Worker intentionally maps its exact Not found receipt to
+            # HTTP 404. A generic 404, wrong key, denied auth or malformed body
+            # is NOT evidence of absence and must never permit paid generation.
+            if response.status_code not in (200, 404):
                 raise RuntimeError("Story audio storage head unavailable")
-            payload = response.json()
-            if payload.get("ok") is True and (payload.get("object") or {}).get("key") == key:
+            try:
+                payload = response.json()
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError("Story audio storage head ambiguous") from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError("Story audio storage head ambiguous")
+            obj = payload.get("object")
+            if response.status_code == 200 and payload.get("ok") is True and isinstance(obj, dict) and obj.get("key") == key:
                 return True
             if payload.get("ok") is False and payload.get("error") == "Not found" and payload.get("key") == key:
                 return False
