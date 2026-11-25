@@ -75,6 +75,18 @@ STORY_CACHE_ERRORS = {
 }
 
 
+# Exact parked cohort with confirmed original R2 checksums (audit 45616089704).
+# These holds remain set throughout rendering and final human review.
+HELD_CACHE_RECOVERY = {
+    "recoheiAMq2vG48V3": "rec9qS53G7HDoyCL5",
+    "reccgtEdV1EKo4Hlp": "rec9qS53G7HDoyCL5",
+    "rec0suYTujG4dje1R": "rec3fNJ6QgaL7EMBn",
+    "recmx1yk1C8iZBDM1": "rec3fNJ6QgaL7EMBn",
+    "recp6KQO7fJMvSzI2": "rec1IvSP9aGeOQRfd",
+    "recZYUkGnBDBJrsDf": "rec1IvSP9aGeOQRfd",
+}
+
+
 def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
     """Only an unapproved, unheld, unstamped Story with newly valid input.
 
@@ -87,7 +99,10 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
             or (field_str(output, "Remotion_Error_Message") not in (
                 {STORY_MISSING_SENTENCE} if not cached_only else STORY_CACHE_ERRORS))
             or field_str(output, "Review_Status") not in {"", "Pending Review", "Review Sent"}
-            or field(output, "Do_Not_Publish") not in (None, False)
+            or (field(output, "Do_Not_Publish") not in (None, False)
+                and not (cached_only and field(output, "Do_Not_Publish") is True
+                         and HELD_CACHE_RECOVERY.get(output.get("id")) == parent.get("id")
+                         and field(output, "Auto_Publish_Enabled") is False))
             or field(output, "Auto_Publish_Enabled") not in (None, False)
             or (not cached_only and field_str(output, RECEIPT))
             or any(field_str(output, name) for name in (
@@ -220,15 +235,26 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                     story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest):
             raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
         claims=matching_story_claims(client,live_parent,current["id"],digest,url)
-        response=requests.get(url,timeout=(5,20),headers={"Cache-Control":"no-cache"})
-        if response.status_code==200:
-            data=response.content
-            measured=verified_cached_voice(data,claims,cap)
-        elif response.status_code==404:
+        known = {claim["sha256"] for claim in claims if claim.get("sha256")}
+        if claims:
+            if len(known) != 1:
+                raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
+            try:
+                storage = R2UploadClient(pipeline_settings(client))
+                data = storage.read_story_audio(key, next(iter(known)))
+                measured = verified_cached_voice(data, claims, cap)
+            except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
+                raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt") from exc
+        else:
             if not allow_generate:
                 raise StoryVoiceoverError("Existing Story narration cache unavailable; no paid regeneration")
-            if claims:
-                raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
+            try:
+                settings = pipeline_settings(client)
+                storage = R2UploadClient(settings)
+                if storage.story_audio_exists(key):
+                    raise StoryVoiceoverError("Story audio already exists without a verified receipt")
+            except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
+                raise StoryVoiceoverError("Story narration storage existence not safely resolved") from exc
             claim={"fingerprint":digest,"state":"generating","url":url}
             client.update_record(PLATFORM_OUTPUTS_TABLE,current["id"],{RECEIPT:json.dumps(claim)},typecast=True)
             persisted=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
@@ -246,16 +272,13 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                 persisted=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
                 if parse_json_field(field(persisted,RECEIPT))!=claim:
                     raise StoryVoiceoverError("Story narration checksum receipt not durably recorded")
-                R2UploadClient(settings).put_object(key,data,"audio/mpeg")
-                readback=requests.get(url,timeout=(5,30),headers={"Cache-Control":"no-cache"})
-                if not readback.ok or hashlib.sha256(readback.content).digest()!=hashlib.sha256(data).digest():
+                storage.put_object(key,data,"audio/mpeg")
+                if storage.read_story_audio(key,claim["sha256"]) != data:
                     raise StoryVoiceoverError("Story narration upload readback not confirmed")
             except Exception as exc:
                 client.update_record(PLATFORM_OUTPUTS_TABLE,current["id"],{
                     RECEIPT:json.dumps({**claim,"state":"failed"})},typecast=True)
                 raise StoryVoiceoverError("Story narration preparation failed; reconcile its exact attempt") from exc
-        else:
-            raise StoryVoiceoverError("Story narration cache unavailable; refuse duplicate paid attempt")
         fresh=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
         live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
         if fingerprint(parent["id"],resolve_content_voice_id(live_parent),
@@ -270,3 +293,24 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                     "seconds":measured,"sha256":hashlib.sha256(data).hexdigest()},separators=(",",":"))}
         client.update_record(PLATFORM_OUTPUTS_TABLE,fresh["id"],patch,typecast=True)
         return {**fresh,"fields":{**fresh["fields"],**patch}}
+
+
+def private_story_render_url(output, parent):
+    """Build only the exact verified source URL for same-host Remotion."""
+    if not needs_story_voiceover(output):
+        return None
+    receipt = parse_json_field(field(output, RECEIPT)) or {}
+    if not receipt:
+        return None  # explicitly supplied Story voiceover
+    if not isinstance(receipt, dict) or receipt.get("state") != "verified":
+        raise StoryVoiceoverError("Story narration receipt is not verified")
+    digest, sha = receipt.get("fingerprint"), receipt.get("sha256")
+    parent_id = (parent or {}).get("id", "")
+    if not (re.fullmatch(r"rec[A-Za-z0-9]{14}", parent_id)
+            and isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest)
+            and isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{64}", sha)):
+        raise StoryVoiceoverError("Story narration receipt identity invalid")
+    url = f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{digest}.mp3"
+    if receipt.get("url") != url or field_str(output, "Voiceover_URL") != url:
+        raise StoryVoiceoverError("Story narration receipt/source mismatch")
+    return f"http://127.0.0.1:3350/internal/story-audio/{parent_id}/{digest}/{sha}.mp3"
