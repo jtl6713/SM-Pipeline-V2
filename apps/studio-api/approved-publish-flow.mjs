@@ -4,6 +4,7 @@
  * dispatch must be verified against its provider before it can be retried.
  */
 import { STORY_2915_ID, story2915DispatchFence } from "./story-expired-generation-2915.mjs";
+import { maeScheduleNextSlot, maeNormalizeHorizonDays, maeNormalizeTimeZone, maeIsBlackoutLocalTime, MAE_SUGGEST_LEAD_MS } from "./mae-schedule.mjs";
 const field = (r, name, snake) => r?.fields?.[name] ?? r?.[snake] ?? r?.error_messages?.[name] ?? null;
 const str = v => String(v ?? "").trim();
 const checked = v => v === true || v === 1 || str(v).toLowerCase() === "true";
@@ -14,6 +15,10 @@ const time = v => {
 };
 
 export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
+  return assess(row, nowMs, false);
+}
+
+function assess(row, nowMs, planningOriginalHold) {
   const read = (name, snake) => field(row, name, snake);
   const block = reason => ({ eligible: false, reason });
   if (!/^rec[A-Za-z0-9]{14}$/.test(str(row?.id))) return block("invalid_record_id");
@@ -38,13 +43,29 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
   const providerAttempts = Number(read("Publish_Attempt_Count", "publish_attempt_count") || 0);
   const dispatchAt = time(read("Studio_Publish_Dispatch_At", "studio_publish_dispatch_at"));
   const slotAt = time(read("Scheduled_Post_Date", "scheduled_post_date"));
-  const auditedEarlyHold =
+  const originalSlot = time(read("Studio_Early_Hold_Original_Scheduled_At", "studio_early_hold_original_scheduled_at"));
+  const originalProof =
     dispatchCount === 1 && providerAttempts === 0 &&
     str(read("Studio_Early_Hold_Recovery_Proof", "studio_early_hold_recovery_proof")) ===
       "issue-2340-scheduled-hold-v1" &&
-    dispatchAt !== null && slotAt !== null && dispatchAt < slotAt &&
-    time(read("Studio_Early_Hold_Original_Dispatch_At", "studio_early_hold_original_dispatch_at")) === dispatchAt &&
-    time(read("Studio_Early_Hold_Original_Scheduled_At", "studio_early_hold_original_scheduled_at")) === slotAt;
+    dispatchAt !== null && originalSlot !== null && dispatchAt < originalSlot &&
+    time(read("Studio_Early_Hold_Original_Dispatch_At", "studio_early_hold_original_dispatch_at")) === dispatchAt;
+  // A new MAE reservation is distinct from the immutable original audit.
+  // Neither a changed date nor a v1 proof alone authorizes a new provider call.
+  const receipt = read("Studio_Overdue_MAE_Recovery_Receipt", "studio_overdue_mae_recovery_receipt");
+  const plannedAt = time(receipt?.planned_at);
+  const receiptValid = originalProof && receipt?.version === "issue-3096-mae-v1"
+    && receipt.output_record_id === row.id
+    && receipt.platform === str(read("Platform", "platform"))
+    && receipt.output_type === str(read("Platform_Output_Type", "platform_output_type"))
+    && time(receipt.original_dispatch_at) === dispatchAt
+    && time(receipt.original_scheduled_at) === originalSlot
+    && slotAt !== null && time(receipt.scheduled_for) === slotAt
+    && plannedAt !== null && originalSlot <= plannedAt && plannedAt <= nowMs
+    && slotAt > plannedAt + MAE_SUGGEST_LEAD_MS
+    && typeof receipt.time_zone === "string" && receipt.time_zone === maeNormalizeTimeZone(receipt.time_zone)
+    && !maeIsBlackoutLocalTime(slotAt, receipt.time_zone);
+  const auditedEarlyHold = originalProof && (receiptValid || originalSlot === slotAt);
   if (!Number.isFinite(dispatchCount) || !Number.isFinite(providerAttempts) ||
       providerAttempts !== 0 || (dispatchCount !== 0 && !auditedEarlyHold))
     return block("previous_attempt_requires_provider_reconciliation");
@@ -115,6 +136,35 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
     return block("media_not_ready");
   if (!photo && !final) return block("media_not_ready");
   if (!present(read("Output_Caption", "output_caption"))) return block("caption_not_ready");
+  if (auditedEarlyHold && !receiptValid && !planningOriginalHold) return block("overdue_recovery_requires_mae_reschedule");
   return { eligible: true, reason: auditedEarlyHold
     ? "audited_pre_schedule_hold_first_publish" : "fresh_approved_due_unattempted" };
+}
+
+/** Plan only; caller must own the shared profile scheduling claim, prove complete
+ * canonical occupancy, and commit the schedule + receipt in a single exact CAS.
+ * This function does not write, release a hold, approve or contact a provider.
+ */
+export function planAuditedEarlyHoldMaeReschedule(row, { nowMs, timeZone, horizonDays, laneOccupiedMs, platformOccupiedMs, occupancyComplete } = {}) {
+  const read = (name, snake) => field(row, name, snake);
+  const reject = reason => ({ ok: false, reason });
+  if (!Number.isFinite(nowMs) || occupancyComplete !== true || !Array.isArray(laneOccupiedMs) || !Array.isArray(platformOccupiedMs)
+      || [...laneOccupiedMs, ...platformOccupiedMs].some(ms => !Number.isFinite(ms))
+      || typeof timeZone !== "string" || !timeZone || timeZone !== maeNormalizeTimeZone(timeZone)
+      || !Number.isInteger(horizonDays) || horizonDays !== maeNormalizeHorizonDays(horizonDays)) return reject("verified_schedule_context_required");
+  const originalSlot = time(read("Studio_Early_Hold_Original_Scheduled_At", "studio_early_hold_original_scheduled_at"));
+  const originalDispatch = time(read("Studio_Early_Hold_Original_Dispatch_At", "studio_early_hold_original_dispatch_at"));
+  if (originalSlot === null || originalSlot >= nowMs || originalSlot !== time(read("Scheduled_Post_Date", "scheduled_post_date"))
+      || originalDispatch === null || read("Studio_Overdue_MAE_Recovery_Receipt", "studio_overdue_mae_recovery_receipt") != null) return reject("original_overdue_slot_required");
+  const gate = assess(row, nowMs, true);
+  if (!gate.eligible || gate.reason !== "audited_pre_schedule_hold_first_publish") return reject(gate.reason);
+  const platform = str(read("Platform", "platform"));
+  const outputType = str(read("Platform_Output_Type", "platform_output_type"));
+  const slot = maeScheduleNextSlot({ timeZone, now: new Date(nowMs), horizonDays, laneOccupiedMs, platformOccupiedMs,
+    leadMs: platform === "TikTok" ? 15 * 60000 : MAE_SUGGEST_LEAD_MS });
+  if (!slot.ok || !(time(slot.iso) > nowMs + MAE_SUGGEST_LEAD_MS)) return reject("no_verified_future_mae_slot");
+  return { ok: true, scheduled_for: slot.iso, receipt: { version: "issue-3096-mae-v1", output_record_id: row.id,
+    platform, output_type: outputType, original_dispatch_at: new Date(originalDispatch).toISOString(),
+    original_scheduled_at: new Date(originalSlot).toISOString(), planned_at: new Date(nowMs).toISOString(),
+    scheduled_for: slot.iso, time_zone: timeZone } };
 }
