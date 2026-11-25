@@ -129,7 +129,34 @@ export function ideaLibraryNamedPlaceKeys(text) {
   return [...new Set(keys)];
 }
 
-export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary = "", query = "" } = {}) {
+// A structured neighborhood is evidence, not an item in a hard-coded landmark list.
+export function ideaLibraryNeighborhoodContext(primaryLocation, neighborhood, title, summary) {
+  const normalize = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const key = normalize(neighborhood);
+  const primary = normalize(primaryLocation);
+  const areaTokens = ideaLibraryTokens(key);
+  const specific = ideaLibraryStrongTokens(areaTokens).some(token =>
+    !["brooklyn","manhattan","queens","bronx","chicago","miami","angeles","york","city","nyc","county","citywide"].includes(token));
+  const neighborhoodKey = key && key !== primary && specific && !/\bcity\s*wide\b/.test(key) ? key : "";
+  const excluded = new Set(neighborhoodKey ? [...areaTokens, ...ideaLibraryTokens(primary)] : []);
+  const titleSubjects = ideaLibraryStrongTokens(ideaLibraryTokens(title)).filter(token => !excluded.has(token));
+  const summarySubjects = ideaLibraryStrongTokens(ideaLibraryTokens(summary)).filter(token => !excluded.has(token));
+  return { neighborhoodKey, neighborhoodSubjectKeys: titleSubjects.length ? titleSubjects : summarySubjects,
+    neighborhoodTokens: neighborhoodKey ? areaTokens : [] };
+}
+
+// Do not mistake nearby but unrelated imagery for a specific street/subject.
+// For a broader neighborhood fallback, demand a subject in the actual media metadata.
+export function ideaLibraryNeighborhoodAnchor({ neighborhoodKey, neighborhoodSubjectKeys = [], location, name, haystack }) {
+  if (!neighborhoodKey) return false;
+  const normalize = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const area = ideaLibraryHasToken(normalize(location), neighborhoodKey)
+    || ideaLibraryHasToken(normalize(name), neighborhoodKey);
+  return area && (!neighborhoodSubjectKeys.length
+    || ideaLibraryFieldHits(normalize(haystack), neighborhoodSubjectKeys).length > 0);
+}
+
+export function buildIdeaLibraryKeys({ primaryLocation = "", neighborhood = "", title = "", summary = "", query = "" } = {}) {
   // A generic city-wide brief is not a named place: do not search for the
   // literal word "citywide" and discard the actual seasonal/topic photos.
   // Preserve any real city or neighborhood tokens in the same location field.
@@ -137,12 +164,16 @@ export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary
   const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(locationForMatching));
   const fromNamed = ideaLibraryNamedPlaceKeys(`${primaryLocation} ${title} ${summary}`);
   const fromQuery = ideaLibraryStrongTokens(ideaLibraryTokens(query));
-  const placeKeys = [...new Set([...fromLocation, ...fromNamed, ...fromQuery])];
+  const { neighborhoodKey, neighborhoodSubjectKeys, neighborhoodTokens } =
+    ideaLibraryNeighborhoodContext(primaryLocation, neighborhood, title, summary);
+  const placeKeys = [...new Set([neighborhoodKey, ...fromLocation, ...fromNamed, ...fromQuery].filter(Boolean))];
   const subjectKeys = ideaLibraryStrongTokens(ideaLibraryTokens(`${title} ${summary}`))
-    .filter((token) => !placeKeys.includes(token));
+    .filter((token) => !placeKeys.includes(token) && !neighborhoodTokens.includes(token));
   return {
     placeKeys,
     subjectKeys,
+    neighborhoodKey,
+    neighborhoodSubjectKeys,
     scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
   };
 }
@@ -178,6 +209,8 @@ export function rankIdeaLibraryFields({
   haystack = "",
   placeKeys = [],
   subjectKeys = [],
+  neighborhoodKey = "",
+  neighborhoodSubjectKeys = [],
   strongIdeaTokens = [],
   ideaTokens = [],
   queryTokens = [],
@@ -187,17 +220,20 @@ export function rankIdeaLibraryFields({
   if (queryTokens.length && !queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) {
     return null;
   }
-  const distinctivePlaceKeys = (placeKeys || []).filter((token) =>
+  const directPlaceKeys = (placeKeys || []).filter(token => token !== neighborhoodKey);
+  const distinctivePlaceKeys = directPlaceKeys.filter((token) =>
     !IDEA_LIBRARY_GENERIC_PLACE_TOKENS.has(token)
     && !IDEA_LIBRARY_AMBIGUOUS_PLACE_TOKENS.has(token)
   );
-  const anchorPlaceKeys = distinctivePlaceKeys.length ? distinctivePlaceKeys : placeKeys;
+  const anchorPlaceKeys = distinctivePlaceKeys.length ? distinctivePlaceKeys : directPlaceKeys;
   const locationPlaceHits = ideaLibraryFieldHits(location, anchorPlaceKeys);
   const namePlaceHits = ideaLibraryFieldHits(name, anchorPlaceKeys);
   const locationSubjectHits = ideaLibraryFieldHits(location, subjectKeys);
   const nameSubjectHits = ideaLibraryFieldHits(name, subjectKeys);
   const haySubjectHits = ideaLibraryFieldHits(haystack, subjectKeys);
-  const placeAnchor = locationPlaceHits.length > 0 || namePlaceHits.length > 0;
+  const areaAnchor = ideaLibraryNeighborhoodAnchor({ neighborhoodKey, neighborhoodSubjectKeys, location, name, haystack });
+  const placeAnchor = locationPlaceHits.length > 0 || namePlaceHits.length > 0 || areaAnchor;
+  if (neighborhoodKey && !placeAnchor && !queryTokens.length) return null;
   const subjectAnchor = locationSubjectHits.length > 0 || nameSubjectHits.length > 0;
   const subjectTopic = haySubjectHits.length >= 2;
   const strongOverlap = strongIdeaTokens.filter((token) =>
@@ -206,6 +242,7 @@ export function rankIdeaLibraryFields({
   const weakOverlap = ideaTokens.filter((token) => ideaLibraryHasToken(haystack, token)).length;
   const intakeToday = Boolean(today) && String(intakeDate || "") === today;
   const reasons = [];
+  if (areaAnchor) reasons.push(`neighborhood_subject:${neighborhoodKey}`);
   if (locationPlaceHits.length) reasons.push(`location:${locationPlaceHits[0]}`);
   if (namePlaceHits.length) reasons.push(`asset_name:${namePlaceHits[0]}`);
   if (locationSubjectHits.length) reasons.push(`location_subject:${locationSubjectHits[0]}`);
@@ -224,7 +261,7 @@ export function rankIdeaLibraryFields({
     reasons.push("search_hit");
   }
 
-  const score = (locationPlaceHits.length ? 40 : 0)
+  const score = (areaAnchor ? 35 : 0) + (locationPlaceHits.length ? 40 : 0)
     + (namePlaceHits.length ? 30 : 0)
     + (subjectAnchor ? 30 : 0)
     + (subjectTopic ? 25 : 0)

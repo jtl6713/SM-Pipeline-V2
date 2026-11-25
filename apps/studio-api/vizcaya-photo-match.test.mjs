@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -104,11 +105,21 @@ test("Idea #1811 Citywide winter view discovers high-confidence Chicago Winters 
 test("production photo ranker strips Citywide without bypassing profile scope", () => {
   const source = readStudioWorkerSource();
   assert.match(source, /const locationForMatching = String\(primaryLocation \|\| ""\)\.replace/);
-  const start = source.indexOf("async function rankStillsForIdeaPhotoWait(");
-  assert.ok(start > 0, "compiled matcher remains in the deployed Worker");
-  const ranker = source.slice(start, start + 2200);
+  assert.ok(source.includes("async function rankStillsForIdeaPhotoWait("), "compiled matcher remains in the deployed Worker");
+  // The source reader restores functions without their extraction end markers.
+  // Use the real function module and its explicit boundary instead of a fixed
+  // character window that truncates the unchanged profile-scoped fallback.
+  const moduleSource = readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const start = moduleSource.indexOf("export async function rankStillsForIdeaPhotoWait(");
+  assert.ok(start >= 0, "production matcher declaration is present");
+  const end = moduleSource.indexOf("/*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/", start);
+  assert.ok(end > start, "production matcher end marker is present");
+  const ranker = moduleSource.slice(start, end);
   assert.match(ranker, /mediaAssetProfileScopeForId/);
   assert.match(ranker, /combineAirtableFormulas\(ideaLibraryFilterFormula\(filterKeys\), scopeFormula\)/);
+  assert.match(ranker, /profileId: crossScope \? "" : profileId/);
+  assert.match(ranker, /if \(!crossScope && !profileId\) throw/);
+  assert.match(ranker, /searchTokens: filterKeys/);
 });
 
 test("Chicago Winters assets with exclusions are screened before watermark, then provenance-held candidates are skipped", () => {
