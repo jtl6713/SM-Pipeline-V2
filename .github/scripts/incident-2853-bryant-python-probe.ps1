@@ -197,8 +197,16 @@ try {
       throw 'incident2853_geometry_recovery_source_sha_missing'
     }
     $gallery = Join-Path (Split-Path -Parent $envPath) 'studio_produce\native_gallery.py'
-    if (-not (Test-Path -LiteralPath $gallery -PathType Leaf) -or
-        (Get-FileHash -LiteralPath $gallery -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedGallerySourceSha) {
+    if (-not (Test-Path -LiteralPath $gallery -PathType Leaf)) {
+      throw 'incident2853_geometry_recovery_deployed_source_missing'
+    }
+    # Windows checkout line endings are not an implementation difference.
+    $sourceText = [IO.File]::ReadAllText($gallery).Replace("`r`n","`n")
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+      $actual = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($sourceText))).Replace('-','').ToLowerInvariant()
+    } finally { $hasher.Dispose() }
+    if ($actual -ne $ExpectedGallerySourceSha) {
       throw 'incident2853_geometry_recovery_deployed_source_mismatch'
     }
     Write-Output 'incident2853_geometry_recovery_deployed_source=PASS'
