@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+import math
+from audio.voiceover_duration import probe_audio_duration_bytes
 
 from asset.constants import GDRIVE_MUSIC_FOLDER
 from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED, cap_leading_silence, is_voiceover_audio
@@ -46,6 +48,10 @@ def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
     if not payload:
         raise ValueError("Music file is empty after leading-silence processing")
 
+    # Probe the final bytes after conversion and trimming, before creating a Drive file.
+    duration = probe_audio_duration_bytes(payload)
+    if not math.isfinite(duration) or duration <= 0 or duration > 12 * 60 * 60:
+        raise ValueError("Music duration could not be verified")
     drive = GoogleDriveClient()
     uploaded = drive.upload_and_share(GDRIVE_MUSIC_FOLDER, name, payload, "audio/mpeg")
     file_id = str(uploaded.get("id") or "").strip()
@@ -58,6 +64,8 @@ def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
         "web_view_link": uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view",
         "folder_id": GDRIVE_MUSIC_FOLDER,
         "filename": name,
+        "duration_seconds": duration,
+        "file_size_bytes": len(payload),
         **trimmed.public_dict(),
         **trimmed.airtable_fields(),
     }
