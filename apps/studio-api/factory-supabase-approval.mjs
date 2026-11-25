@@ -34,7 +34,7 @@ const FACTORY_APPROVAL_SELECT = [
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "publish_hold_set_at", "publish_hold_reason", "publish_hold_source", "publish_hold_release_actor", "publish_retry_eligible", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "publish_asset_url", "publish_next_retry_at", "selected_clip_count", "selected_assets", "render_clip_list",
-  "image_count", "assets_ready_count", "ig_carousel_status", "fb_publish_status",
+  "image_count", "assets_ready_count", "image_output_selected", "ig_carousel_status", "fb_publish_status",
   "render_total_frames", "asset_set_revision", "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
@@ -378,7 +378,8 @@ export function nativeGalleryInitialReadiness(row, proof) {
     if (row[k] != null && row[k] !== 0 && row[k] !== count)
       throw Error("Native gallery readiness count disagrees with verified final slides");
   }
-  return {image_count:count, assets_ready_count:count, [key]:initial};
+  return {image_count:count, assets_ready_count:count, [key]:initial,
+    ...(key==="fb_publish_status" ? {image_output_selected:true} : {})};
 }
 
 export async function factorySupabaseApproveOutput(env, id, profileId, {
