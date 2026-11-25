@@ -62,10 +62,10 @@ def shell(source):
     return job("/api/shell", {"command":source,"confirm":True}, 120)
 
 def cap(mode):
-    assert mode in ("stage","rollback","sample")
+    assert mode in ("stage","rollback","sample","verify_rollback")
     script = (SCRIPTS / "incident-2670-cap-two.ps1").read_text().replace("__MODE__", mode)
     log = shell(script)
-    expected = {"stage":"CAP_2_STAGED", "rollback":"CAP_1_STAGED", "sample":"PASS_SAMPLE"}[mode]
+    expected = {"stage":"CAP_2_STAGED", "rollback":"CAP_1_STAGED", "sample":"PASS_SAMPLE","verify_rollback":"CAP_1_LIVE_VERIFIED"}[mode]
     markers = re.findall(r"(?m)^trial2670=([A-Z0-9_]+)\r?$",log)
     if markers != [expected]:
         safe = markers[-1] if markers and markers[-1] in ("FAILED_PREFLIGHT","FAILED_CONFIG_GUARDS","FAILED_LIVE_GUARDS","FAILED_CAP_COMPARE_AND_SWAP") else "MISSING_RECEIPT"
@@ -75,7 +75,7 @@ def cap(mode):
             raise Ambiguous("config_mutation_unconfirmed")
         raise Rejected("cap_guard")
     print("trial2670=" + expected,flush=True)
-    if mode == "rollback":
+    if mode in ("rollback","verify_rollback"):
         return None
     matches = re.findall(r"(?m)^trial2670_sample=(\{[^\r\n]*\})\r?$",log)
     if len(matches) != 1:
@@ -138,8 +138,7 @@ def main():
         print("trial2670=TRIAL_FAILED_ROLLBACK",flush=True)
         cap("rollback")
         deploy()
-        row=cap("sample")
-        if row["cap"] != 1: raise Rejected("rollback_live_unverified")
+        cap("verify_rollback")
         print("trial2670=CAP_1_ROLLBACK_VERIFIED",flush=True)
         raise
 
