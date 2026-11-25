@@ -30,6 +30,7 @@
  * - production_requests.publish_status → request link bag for Factory
  */
 
+import { IDEA_TITLE_UNIQUENESS_DAYS, studioIdeaTitleYearFormula } from "./idea-title-uniqueness.mjs";
 import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
@@ -10142,6 +10143,42 @@ async function readReviewLedger(env, tableId, { id="", formula="", limit=30, off
   return rows.map(reviewLedgerRow);
 }
 
+// The manual and autonomous Idea writers share the same 365-day title guard.
+ // Translate ONLY its exact generated formula; all other unsupported formulas stay fail-closed.
+async function readRecentTitleHistoryPage(env, kind, formula, params) {
+  const field = kind === "idea" ? "Candidate_Title" : kind === "content" ? "Content_Title" : null;
+  if (!field) return null;
+  const prefix = formula.match(/"\^([a-z0-9]{1,8})"\)\)$/)?.[1];
+  if (!prefix || formula !== studioIdeaTitleYearFormula(prefix, field)) return null;
+  const limit = Math.max(1, Math.min(100, Number(params.get("pageSize") || 100)));
+  const offset = Number(params.get("offset") || 0);
+  if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(offset) || offset < 0 || offset > 1000)
+    throw new Error("Title history pagination invalid");
+  const table = kind === "idea" ? "idea_candidates" : "content_items";
+  const column = kind === "idea" ? "candidate_title" : "content_title";
+  // Equivalent to stripping ASCII non-alphanumerics from the lowercase title
+  // and testing its prefix. Restrict prefix to validated alphanumerics above.
+  const pattern = "^[^a-z0-9]*" + prefix.split("").join("[^a-z0-9]*");
+  const cutoff = new Date();
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - IDEA_TITLE_UNIQUENESS_DAYS);
+  const query = new URLSearchParams({
+    select: "airtable_record_id," + column,
+    created_at: "gt." + cutoff.toISOString(),
+    [column]: "imatch." + pattern,
+    order: "airtable_record_id.asc",
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (kind === "idea") query.set("or", '(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq."")');
+  const rows = await supabaseRest(env, table + "?" + query.toString());
+  if (!Array.isArray(rows) || rows.length > limit ||
+      rows.some(row => !row?.airtable_record_id || typeof row[column] !== "string"))
+    throw new Error("Incomplete canonical title history");
+  const records = rows.map(row => ({ id: row.airtable_record_id, fields: { [field]: row[column] } }));
+  return { records, ...(rows.length === limit ? { offset: String(offset + rows.length) } : {}) };
+}
+
 export async function studioSideTableRead(env, tableId, pathOrParams) {
   if (studioWriteSource(env) !== "supabase") return null;
   const kind = sideTableKind(env, tableId);
@@ -10209,6 +10246,8 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     return null;
   }
   const formula = sideQuery(pathOrParams).get("filterByFormula") || "";
+  const titleHistory = await readRecentTitleHistoryPage(env, kind, formula, sideQuery(pathOrParams));
+  if (titleHistory !== null) return titleHistory;
   const limit = Math.max(1, Math.min(100, Number(sideQuery(pathOrParams).get("maxRecords") || sideQuery(pathOrParams).get("pageSize") || 50)));
   if (kind === "review_ledger") {
     const offset = Math.max(0, Number(sideQuery(pathOrParams).get("offset") || 0));
