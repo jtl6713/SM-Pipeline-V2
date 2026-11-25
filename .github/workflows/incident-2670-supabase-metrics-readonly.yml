@@ -3,6 +3,10 @@ on:
   push:
     branches: [main]
     paths: ['deploy/incident-2670-metrics-readonly.txt']
+  pull_request:
+    paths:
+      - '.github/workflows/incident-2670-supabase-metrics-readonly.yml'
+      - '.github/scripts/incident-2670-supabase-metrics-ops.ps1'
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,6 +31,7 @@ jobs:
           if($errors.Count -ne 0){throw 'metrics_ps_parser_invalid'}
           Write-Output 'incident2670_metrics_parser=PASS'
       - name: Check protected Runner health and unused Airtable authority
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
@@ -37,6 +42,7 @@ jobs:
             .airtable_activity.any_activity==false' /tmp/incident2670-metrics-health.json >/dev/null
           echo 'incident2670_metrics_runner_health=PASS'
       - name: Fetch two Supabase metrics samples in existing protected Windows Ops process
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -62,25 +68,14 @@ jobs:
               "$BASE/api/jobs/$job" -o /tmp/incident2670-metrics-status.json
             status=$(jq -r '.job.status // empty' /tmp/incident2670-metrics-status.json)
             if [[ "$status" == ok || "$status" == failed ]]; then
-              # Only finite classifications and bounded numeric metadata are printed.
               jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
                 tr -d '\r' |
-                grep -E '^incident2670_(key_length=[0-9]{1,4}|key_prefix_valid=[01]|metrics_http_status=[0-9]{1,3}|metrics=(NEEDS_EXISTING_SB_SECRET|API_UNAVAILABLE|REQUIRED_SERIES_UNAVAILABLE|RUNNER_ENV_UNAVAILABLE|ENV_PROJECT_OR_DUPLICATE|ENV_KEY_DUPLICATE_OR_UNREADABLE|METRIC_CALCULATION_FAILED))
-            sleep 3
-          done
-          echo 'incident2670_metrics_production=UNVERIFIED_TIMEOUT'
-          exit 1
- || true
+                grep -E '^incident2670_(key_length=[0-9]{1,4}|key_prefix_valid=[01]|metrics_http_status=[0-9]{1,3}|metrics=(NEEDS_EXISTING_SB_SECRET|API_UNAVAILABLE|REQUIRED_SERIES_UNAVAILABLE|RUNNER_ENV_UNAVAILABLE|ENV_PROJECT_OR_DUPLICATE|ENV_KEY_DUPLICATE_OR_UNREADABLE|METRIC_CALCULATION_FAILED))$' || true
               if [[ "$status" == ok ]] && jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
                 tr -d '\r' | grep -x 'incident2670_metrics=PASS_TWO_READONLY_SAMPLES' >/dev/null; then
                 jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
                   tr -d '\r' |
-                  grep -E '^incident2670_(memory|swap)_(total_mb|available_mb|used_pct|available_delta_mb)=-?[0-9]+([.][0-9]+)?
-            sleep 3
-          done
-          echo 'incident2670_metrics_production=UNVERIFIED_TIMEOUT'
-          exit 1
- | tail -6
+                  grep -E '^incident2670_(memory|swap)_(total_mb|available_mb|used_pct|available_delta_mb)=-?[0-9]+([.][0-9]+)?$' | tail -6
                 echo 'incident2670_metrics_production=PASS_READONLY'
                 exit 0
               fi
