@@ -1,0 +1,140 @@
+# Single-execution diagnostic: GET two exact audio checksums; always delete isolated helper.
+name: Issue 2853 authenticated exact Story audio checksum audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-story-r2-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2853-r2-ephemeral-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TEMP_WORKER: issue2853-story-readonly-${{ github.run_id }}
+    steps:
+      - name: Read exact existing production STUDIO_MEDIA binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/settings" \
+            -o /tmp/2853-settings.json
+          jq -e '.success==true' /tmp/2853-settings.json >/dev/null
+          jq -er '[.result.bindings[]|select(.name=="STUDIO_MEDIA" and .type=="r2_bucket")|.bucket_name] | if length==1 then .[0] else empty end' \
+            /tmp/2853-settings.json >/tmp/2853-bucket
+          echo 'issue2853_live_r2_binding_verified=true'
+      - name: Prepare isolated temporary Worker with GET-only unguessable route
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib,secrets
+          route='/'+secrets.token_urlsafe(48)
+          pathlib.Path('/tmp/2853-route').write_text(route)
+          source="""const EXPECTED=__ROUTE__;
+          const EXACT=[
+            [11228,'studio/previews/story-voiceover/recX91Bo62trG2lJ6/330a613f28cc1e1b813661d124e50c62f546747328b5798d4b623d03bb4b76fe.mp3','f5e251a04e95c9cdaa1b3ec86b2758ad3e7d079ccf1deb8427835904c8aa78ae'],
+            [11277,'studio/previews/story-voiceover/recgBtukVbv5vAMzS/2e71d62e8373a8a803ce2a1925372903f9a9bd45fa65c867b187bce18346f859.mp3','226eee5e3801d5f36928677ef3493bcecfc61611996209a417063aaa1db8d7f3']
+          ];
+          export default {async fetch(request,env) {
+            const url=new URL(request.url);
+            if(request.method !== 'GET' || url.pathname!==EXPECTED)
+              return new Response('Not found',{status:404});
+            const result=[];
+            for(const [output,key,digest] of EXACT) {
+              let row={output,result:'missing'};
+              try {
+                const head=await env.STUDIO_MEDIA.head(key);
+                if(head) {
+                  if(head.size>8388608 || head.size<=0) row.result='invalid_size';
+                  else {
+                    const obj=await env.STUDIO_MEDIA.get(key,{onlyIf:{etagMatches:head.etag}});
+                    if(!obj || !obj.body) row.result='changed_during_read';
+                    else {
+                      const bytes=await obj.arrayBuffer();
+                      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+                      row={output,result:hash===digest?'checksum_match':'checksum_mismatch',size:bytes.byteLength};
+                    }
+                  }
+                }
+              }catch(e){row={output,result:'read_error'}}
+              result.push(row);
+            }
+            return Response.json({ok:true,read_only:true,result},
+              {headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+          }};
+          """.replace('__ROUTE__',json.dumps(route))
+          pathlib.Path('/tmp/2853-worker.mjs').write_text(source)
+          bucket=pathlib.Path('/tmp/2853-bucket').read_text().strip()
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-08-02',
+            'bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':bucket}]}
+          pathlib.Path('/tmp/2853-metadata.json').write_text(json.dumps(metadata))
+          PY
+          node --check /tmp/2853-worker.mjs
+          echo 'issue2853_ephemeral_source_readonly=true'
+      - name: Create isolated temporary Worker without changing production
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS --max-time 60 -o /tmp/2853-created.json -w '%{http_code}' \
+            -X PUT "$API/workers/scripts/$TEMP_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/2853-metadata.json;type=application/json' \
+            -F 'worker.mjs=@/tmp/2853-worker.mjs;type=application/javascript+module;filename=worker.mjs')
+          test "$code" -ge 200 && test "$code" -lt 300
+          jq -e '.success==true' /tmp/2853-created.json >/dev/null
+          curl -fsS --max-time 30 -X POST "$API/workers/scripts/$TEMP_WORKER/subdomain" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/2853-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/2853-enabled.json >/dev/null
+          curl -fsS --max-time 25 "$API/workers/subdomain" -H "$AUTH" -o /tmp/2853-subdomain.json
+          jq -er '.result.subdomain' /tmp/2853-subdomain.json >/tmp/2853-account-subdomain
+          echo 'issue2853_temporary_worker_created=true'
+      - name: Read only exact sanitized Story audio checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$TEMP_WORKER.$(cat /tmp/2853-account-subdomain).workers.dev$(cat /tmp/2853-route)"
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 35 -o /tmp/2853-result.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .read_only==true' /tmp/2853-result.json >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "issue2853_temporary_read_failed_http_$code"
+              exit 1
+            fi
+            sleep 3
+          done
+          jq -e '.result|length==2' /tmp/2853-result.json >/dev/null
+          jq -c '.result' /tmp/2853-result.json | tee /tmp/2853-result-sanitized.jsonl
+          echo 'issue2853_exact_r2_receipt_read_complete=true'
+      - name: Remove temporary Worker even on failure
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" && -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${TEMP_WORKER:-}" ]]; then
+            curl -sS --max-time 25 -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TEMP_WORKER" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -o /tmp/2853-deleted.json || true
+          fi
+          echo 'issue2853_temporary_cleanup_attempted=true'
+      - name: Save sanitized receipt status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue2853-temporary-r2-receipt
+          path: /tmp/2853-result-sanitized.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
