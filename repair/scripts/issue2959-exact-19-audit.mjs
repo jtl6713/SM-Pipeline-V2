@@ -19,14 +19,17 @@ async function read(bucket,key){
   if(Number(object.size)>8_000_000)throw Error("ledger_too_large");
   return JSON.parse(await object.text());
 }
-const targetItem=i=>({id:i.id,output_number:ALL.get(i.id),ledger_output_id:i.output_id??null,status:i.status,error:safeError(i.error),attempts:i.total_attempts??i.attempts??null,updated_at:i.updated_at??null,started_at:i.attempt_started_at??null,original_intent_recovery:i.original_intent_recovery===true,recovery_state:i.exception_recovery?.state??null});
+const targetItem=i=>({id:i.id,output_number:ALL.get(i.id),ledger_output_id:i.output_id??null,status:i.status,error:safeError(i.error),attempts:i.total_attempts??i.attempts??null,updated_at:i.updated_at??null,started_at:i.attempt_started_at??null,last_progress_at:i.last_progress_at??null,processing_stage:i.processing_stage??null,latest_timeline:(i.timeline||[]).slice(-5).map(e=>({state:e.state,at:e.at})),original_intent_recovery:i.original_intent_recovery===true,recovery_state:i.exception_recovery?.state??null});
 export async function audit(bucket){
-  const claims=[];const groupIds=new Set(KNOWN);
+  const claims=[];const groupIds=new Set(KNOWN);const profile_locks=[],output_locks=[];const checked=Date.now();
+  const summarizeLock=lock=>({state:!lock?.owner?"unclaimed":Number(lock.expires_ms)>checked?"active":"expired",expires_at:lock?.owner&&Number.isFinite(Number(lock.expires_ms))?new Date(Number(lock.expires_ms)).toISOString():null});
   for(const [profile,targets] of Object.entries(TARGETS)){
     const reg=await read(bucket,ROOT+"output-claims-v1/"+profile+".json");
+    profile_locks.push({profile,...summarizeLock(await read(bucket,ROOT+"locks/"+profile+".json"))});
     if(reg&&(reg.schema!=="studio.factory-output-claims.1"||reg.profile_id!==profile))throw Error("claim_registry_identity_mismatch");
     for(const [id,n] of Object.entries(targets)){
       const row=reg?.outputs?.[id];
+      output_locks.push({output_number:n,...summarizeLock(await read(bucket,"studio/state/output-approval-locks/v1/"+id+".json"))});
       if(row?.request_id&&!RID.test(row.request_id))throw Error("invalid_request_identity");
       if(row?.request_id)groupIds.add(row.request_id);
       claims.push({profile,id,n,registry_present:!!reg,request_id:row?.request_id??null,at:row?.at??null,source:row?.source??null,previous_request_id:row?.previous_request_id??null});
@@ -73,7 +76,7 @@ export async function audit(bucket){
       }
     }
   }
-  return {schema:"issue2959.factory-exact-21-retry-audit.v1",read_only:true,claims,groups:reports,recent_scan:{since:new Date(SINCE).toISOString(),metadata_complete:complete,candidates:candidates.length,checked:Math.min(30,candidates.length),complete:complete&&candidates.length<=30}};
+  return {schema:"issue2959.factory-exact-21-retry-audit.v1",read_only:true,observed_at:new Date(checked).toISOString(),claims,profile_locks,output_locks,groups:reports,recent_scan:{since:new Date(SINCE).toISOString(),metadata_complete:complete,candidates:candidates.length,checked:Math.min(30,candidates.length),complete:complete&&candidates.length<=30}};
 }
 export default {async fetch(request,env){
   if(request.method!=="GET"||new URL(request.url).pathname!=="/report")return new Response("Not found",{status:404});
