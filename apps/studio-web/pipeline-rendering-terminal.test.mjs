@@ -21,6 +21,7 @@ const runtime = vm.runInNewContext(
   [
     "const pipelineViewFilter = 'rendering';",
     "const pipelineColumnFilters = {};",
+    "const pipelineGlobalSearchActive = false;",
     "const activeCreativeOutput = null;",
     "function pipelineStudioStateLabel(r) { return r.studio_state; }",
     "function pipelineRenderLabel(r) { return r.render_status; }",
