@@ -52,7 +52,7 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
   // dispatch count (or an old schedule revision). These are continuation/
   // reconciliation evidence, not permission for a fresh external create.
   for (const name of ["IG_Story_Attempt_Count","IG_Carousel_Parent_Poll_Attempt_Count",
-    "TikTok_Draft_Poll_Attempt_Count"]) {
+    "TikTok_Draft_Poll_Attempt_Count","FB_Slideshow_Attempt_Count","IG_Carousel_Publish_Attempt_Count"]) {
     const raw=read(name,name.toLowerCase());
     if (present(raw) && (!Number.isFinite(Number(raw)) || Number(raw)!==0))
       return block("previous_attempt_requires_provider_reconciliation");
@@ -63,7 +63,10 @@ export function assessFreshSupabasePublish(row, { nowMs = Date.now() } = {}) {
     return !["","null","{}","[]"].includes(str(v));
   };
   if(responsePresent(read("Platform_Publish_Response","platform_publish_response"))
-    || responsePresent(read("Platform_Publish_Response_JSON","platform_publish_response_json")))
+    || responsePresent(read("Platform_Publish_Response_JSON","platform_publish_response_json"))
+    || ["FB_Slideshow_Response_JSON","IG_Story_Response_JSON","IG_Carousel_Parent_Response_JSON",
+      "IG_Carousel_Publish_Response_JSON","TikTok_Draft_Response_JSON","YouTube_Response_JSON"]
+      .some(name=>responsePresent(read(name,name.toLowerCase()))))
     return block("prior_provider_or_dispatch_identity");
   for (const name of [
     "Studio_Publish_Dispatch_At", "Publish_Started_At", "Last_Publish_Attempt_At",
