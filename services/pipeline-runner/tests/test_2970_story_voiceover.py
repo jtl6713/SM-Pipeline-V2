@@ -211,8 +211,11 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     from types import SimpleNamespace
     from studio_produce import workload_governor, context
     from p2 import elevenlabs_client
+    import hashlib
     p = parent()
-    row = output(Content_Item=[p["id"]])
+    digest=story.fingerprint(p["id"],"voice-1",story.story_text(p["fields"]["Voiceover_Script"]),story.story_seconds(output()))
+    url="https://media.chicagoshining.com/studio/previews/story-voiceover/"+p["id"]+"/"+digest+".mp3"
+    row = output(Content_Item=[p["id"]], Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"state":"failed","url":url,"sha256":hashlib.sha256(b"original").hexdigest()}))
     client = Mock()
     client.get_record.side_effect = lambda table,rid: p if rid == p["id"] else row
     monkeypatch.setattr(workload_governor,"enabled",lambda: True)
@@ -222,10 +225,12 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[row])
     from integrations.r2_upload import R2UploadClient
-    monkeypatch.setattr(R2UploadClient,"get_story_audio",Mock(side_effect=RuntimeError("unavailable")))
+    read=Mock(return_value=b"mismatch") if status==200 else Mock(side_effect=RuntimeError(f"HTTP {status}"))
+    monkeypatch.setattr(R2UploadClient,"get_story_audio",read)
     monkeypatch.setattr(R2UploadClient,"story_audio_missing",Mock(side_effect=AssertionError("cache-only must not check generation")))
     with pytest.raises(story.StoryVoiceoverError):
         story.ensure_story_voiceover(client,row,p,allow_generate=False)
+    read.assert_called_once()
     paid.assert_not_called()
     client.update_record.assert_not_called()
 
