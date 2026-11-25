@@ -1,0 +1,40 @@
+name: Issue 2970 exact render queue diagnostic
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2970-exact-render-queue-diagnostic.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2970-exact-render-queue-diagnostic.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2970-exact-render-queue-readonly
+  cancel-in-progress: false
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Read renderer health and exact existing Griffith job
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://render.chicagoshining.com'
+          JOB='job-20261124233020-a55ab2dd'
+          health_http=$(curl -sS --max-time 20 -o /tmp/render-health.json -w '%{http_code}' "$BASE/health" || true)
+          echo "renderer_health_http=$health_http"
+          test "$health_http" = 200
+          jq -ce '{active:(.remotionActiveRenders // null),in_flight:(.remotionInFlightJobs // null),queued:(.remotionQueuedRenders // null),max_concurrent:(.remotionMaxConcurrent // null),status:(.status // null)}' /tmp/render-health.json
+          job_http=$(curl -sS --max-time 20 -o /tmp/render-job.json -w '%{http_code}' "$BASE/status/$JOB" || true)
+          echo "griffith_11179_job_http=$job_http"
+          case "$job_http" in
+            200)
+              jq -ce --arg expected "$JOB" '{expected_job:$expected,job_id:(.jobId // .job_id // null),state:(.status // .state // null),output_present:((.outputUrl // .output_url // .url // "")|length>0),error_present:((.error // "") != "")}' /tmp/render-job.json
+              ;;
+            404|410) echo 'griffith_11179_job_not_found_or_expired=true' ;;
+            *) exit 1 ;;
+          esac
+          echo 'ISSUE2970_READ_ONLY=PASS no_render_submission=true no_approval=true no_publish=true'
