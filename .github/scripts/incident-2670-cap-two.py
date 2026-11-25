@@ -80,19 +80,24 @@ def shell(source):
     return job("/api/shell", {"command":source,"confirm":True}, 120)
 
 def cap(mode):
-    assert mode in ("stage","rollback","sample","verify_rollback")
+    assert mode in ("stage","rollback","sample","verify_rollback","inspect")
     script = (SCRIPTS / "incident-2670-cap-two.ps1").read_text().replace("__MODE__", mode)
     log = shell(script)
-    expected = {"stage":"CAP_2_STAGED", "rollback":"CAP_1_STAGED", "sample":"PASS_SAMPLE","verify_rollback":"CAP_1_LIVE_VERIFIED"}[mode]
+    expected = {"stage":"CAP_2_STAGED", "rollback":"CAP_1_STAGED", "sample":"PASS_SAMPLE","verify_rollback":"CAP_1_LIVE_VERIFIED","inspect":"PASS_INSPECT"}[mode]
     markers = re.findall(r"(?m)^trial2670=([A-Z0-9_]+)\r?$",log)
     if markers != [expected]:
-        safe = markers[-1] if markers and markers[-1] in ("FAILED_PREFLIGHT","FAILED_CONFIG_GUARDS","FAILED_LIVE_GUARDS","FAILED_CAP_COMPARE_AND_SWAP") else "MISSING_RECEIPT"
+        safe = markers[-1] if markers and markers[-1] in ("FAILED_PREFLIGHT","FAILED_CONFIG_GUARDS","FAILED_LIVE_GUARDS","FAILED_CAP_COMPARE_AND_SWAP","FAILED_CAP_EXACT_LINE","FAILED_CAP_ENCODING","FAILED_CAP_EXCLUSIVE_OPEN","FAILED_CAP_LOCKED_COMPARE","FAILED_CAP_WRITE_UNCONFIRMED","FAILED_CAP_READBACK","FAILED_ROLLBACK_LIVE_READBACK") else "MISSING_RECEIPT"
         print("trial2670=" + safe,flush=True)
         # A failure during config write is uncertain until independently reconciled.
-        if mode != "sample" and safe in ("FAILED_CAP_COMPARE_AND_SWAP","MISSING_RECEIPT"):
+        if mode != "sample" and safe in ("FAILED_CAP_COMPARE_AND_SWAP","FAILED_CAP_WRITE_UNCONFIRMED","MISSING_RECEIPT"):
             raise Ambiguous("config_mutation_unconfirmed")
         raise Rejected("cap_guard")
     print("trial2670=" + expected,flush=True)
+    if mode == "inspect":
+        hits = re.findall(r"(?m)^trial2670_cap_readback=([12]):([12])\r?$",log)
+        if len(hits) != 1: raise Rejected("cap_readback_missing")
+        print("trial2670_cap_readback="+":".join(hits[0]),flush=True)
+        return tuple(map(int,hits[0]))
     if mode in ("rollback","verify_rollback"):
         return None
     matches = re.findall(r"(?m)^trial2670_sample=(\{[^\r\n]*\})\r?$",log)
@@ -129,6 +134,8 @@ def deploy():
 
 def main():
     authenticate()
+    if cap("inspect") != (1,1):
+        raise Rejected("prior_cap_mutation_requires_reconciliation")
     baseline = cap("sample")
     before = memory()
     if baseline["cap"] != 1 or baseline["queued"] < 2 or before["memory_available_mb"] < 400 or before["memory_used_pct"] > 80:
@@ -137,6 +144,8 @@ def main():
     job("/api/run", {"action":"sync","confirm":True},180)
     cap("stage")
     try:
+        if cap("inspect") != (2,1):
+            raise Ambiguous("staged_cap_readback_unexpected")
         deploy()
         seen_two = False
         for i in range(6):
