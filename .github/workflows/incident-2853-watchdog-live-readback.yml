@@ -75,7 +75,7 @@ jobs:
           data=json.loads(Path('/tmp/readonly-status.json').read_text())
           job=data['job']
           lines=job.get('log','').splitlines()
-          for key in ('rest','workload','queue'):
+          for key in ('rest','workload','queue','story'):
               matches=[l.split('=',1)[1] for l in lines if re.match(r'^watchdog2853_'+key+r'=\{.*\}$',l)]
               if len(matches)!=1:
                   print('watchdog2853_'+key+'=UNVERIFIED')
@@ -86,7 +86,7 @@ jobs:
           if errors: print('watchdog2853_error_codes='+','.join(errors))
           if job.get('status')!='ok' or lines.count('watchdog2853_proof=PASS_READONLY')!=1:
               raise SystemExit('watchdog2853_live_proof_failed_or_incomplete')
-          for key in ('rest','workload','queue'):
+          for key in ('rest','workload','queue','story'):
               if sum(bool(re.match(r'^watchdog2853_'+key+r'=\{.*\}$',l)) for l in lines)!=1:
                   raise SystemExit('watchdog2853_missing_receipt_'+key)
           print('watchdog2853_proof=PASS_READONLY')
