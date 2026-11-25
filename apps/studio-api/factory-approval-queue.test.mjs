@@ -1043,3 +1043,33 @@ test("#2959 pending reasons distinguish backoff, active claim, expired claim and
   assert.equal(signals[0].safe_auto_recover,false);
   assert.ok(!factoryBatchQualitySignals(job,now,{state:"active"}).some(s=>s.code==="QA-FACTORY-OUTPUT-ELIGIBLE-UNCLAIMED"));
 });
+
+test("#2959 live phase checkpoints are not duplicated at terminal CAS; legacy reports preserve execution order", async () => {
+  const bucket=new FakeR2(), requestId="factory_2959_phase_order";
+  const base=Date.parse("2026-11-25T00:36:12.033Z");
+  let clock=base;
+  await factoryBatchEnqueue(bucket,{profileId,requestId,records:records.slice(0,1),now:new Date(base).toISOString()});
+  const result=await factoryBatchDrain(bucket,{profileId,requestId,now:()=>clock,
+    approve:async (_id,_job,checkpoint)=>{
+      for(const [state,elapsed] of [["approval_lease_wait_started",10],["validating",20],["canonical_read_started",30],["canonical_read_finished",40],["approving",50],["supabase_commit_started",2311],["supabase_commit_finished",2402],["verifying",2402],["supabase_readback_started",2839],["supabase_readback_finished",2994]]) {
+        clock=base+elapsed;
+        await checkpoint(state);
+      }
+      clock=base+3300;
+      return {};
+    }});
+  assert.equal(result.job.status,"completed");
+  const item=result.job.items[0];
+  for(const state of ["validating","approving","verifying"])
+    assert.equal(item.timeline.filter(e=>e.state===state).length,1);
+  const timing=factoryBatchSummary(result.job).items[0].timing;
+  assert.equal(timing.durations_ms.approving_to_commit_start,2261);
+  assert.equal(timing.durations_ms.supabase_approval_commit,91);
+  assert.equal(timing.durations_ms.verifying_to_readback_start,437);
+  assert.ok(timing.events.slice(1).every(e=>e.since_previous_ms!==null));
+  // Reproduce the duplicate, nonchronological live Getty ledger on read.
+  const live=item.timeline.filter(e=>["validating","approving","verifying"].includes(e.state));
+  item.timeline=[...item.timeline.slice(0,2),...live,...item.timeline.slice(2)];
+  const legacy=factoryBatchSummary(result.job).items[0].timing;
+  assert.deepEqual(legacy,timing);
+});
