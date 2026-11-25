@@ -637,7 +637,7 @@
         record_ids:survivors,items:(original.payload.items || []).filter(item=>survivors.includes(item.id))}};
       const key = FACTORY_RECOVERY_PREFIX + request_id;
       const replacement = {profile_id:"global",ids:survivors,batches:[plan],
-        saved_ms:saved.saved_ms,auto_retry:true,previous_rejected_request_id:original.request_id};
+        saved_ms:saved.saved_ms,auto_retry:true,needs_review_revalidation:true,previous_rejected_request_id:original.request_id};
       try {
         localStorage.setItem(key,JSON.stringify(replacement));
         localStorage.removeItem(recoveryKey);
@@ -2272,14 +2272,14 @@
         // commit grace expired, keeping the archived browser fence is a dead end.
         // Do not replay or automatically select these outputs: fresh human
         // approval is required; live server admission/overlap checks still apply.
-        if (saved.retry_blocked === true && graceExpired) {
+        if ((saved.retry_blocked === true && graceExpired) || saved.needs_review_revalidation === true) {
           const creativeOnly = /Output #(\d+|rec[A-Za-z0-9]{14}):[^\n]*(?:Story render duration differs|Generated video (?:voiceover|background music) differs from original (?:Yes|No))[^\n]*No new batch was accepted/i.test(String(saved.last_error || ""));
-          if (creativeOnly && isGlobal && factorySavedPayloadMatchesPlan(saved,plan)) {
+          if ((creativeOnly || saved.needs_review_revalidation === true) && isGlobal && factorySavedPayloadMatchesPlan(saved,plan)) {
             // Exact GET has proved no ledger exists. Ask only the read-only
             // authenticated preflight to verify the original selection and
             // canonical versions; no approval POST while the old veto exists.
             if (Number(saved.next_retry_ms || 0) > Date.now())
-              return {resolved:false,message:saved.last_error};
+              return {resolved:false,message:saved.last_error || "Original approval is awaiting read-only review validation."};
             saved.next_retry_ms=Date.now()+60000;
             const fence=JSON.stringify(saved);
             localStorage.setItem(recoveryKey,fence);
@@ -2331,9 +2331,11 @@
             saved.retry_blocked=false;
             saved.next_retry_ms=0;
             delete saved.terminal_eligibility;
+            delete saved.needs_review_revalidation;
             delete saved.last_error;
             localStorage.setItem(recoveryKey,JSON.stringify(saved));
           } else {
+            if(saved.needs_review_revalidation === true) return {resolved:false,message:"Original approval retained; exact saved payload unavailable for validation."};
             retiredRejected.push(...plan.ids);
             continue;
           }
