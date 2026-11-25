@@ -829,22 +829,29 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     profileId,
     { crossScope, includeUnscoped: true },
   );
+  if (!crossScope && !profileId) throw new HttpError(503, "Idea photo discovery cannot resolve the content profile");
+  const minimum = Math.max(1, Number(f(idea, "Production_Carousel_Slide_Count_Min")) || 1);
   let records = null;
+  let packed = null;
+  let pages = 0;
+  let readSource = "airtable";
+  const loadPage = offset => listSupabaseAssetLibraryRecords(env, {
+    limit: scanLimit, searchTokens: filterKeys, kind: "photo",
+    profileId: crossScope ? "" : profileId, sortField: "Added_At",
+    sortDirection: "desc", offset,
+  });
   if (studioSupabaseConfigured(env) && (
     studioAssetsReadSource(env) === "supabase"
     || (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase")
   )) {
     try {
-      const packed = await listSupabaseAssetLibraryRecords(env, {
-        limit: scanLimit,
-        searchTokens: filterKeys,
-        kind: "photo",
-        profileId: crossScope ? "" : (profileId || ""),
-        sortField: "Added_At",
-        sortDirection: "desc",
-      });
-      if (Array.isArray(packed?.records)) records = packed.records;
+      packed = await loadPage(null);
+      if (!Array.isArray(packed?.records)) throw new Error("Invalid photo candidate page");
+      records = packed.records;
+      pages = 1;
+      readSource = "supabase";
     } catch (error) {
+      if (studioWriteSource(env) === "supabase" && studioPhase6WriteSource(env) === "supabase") throw error;
       console.warn("supabase idea photo-wait stills failed; falling back to Airtable", error);
     }
   }
@@ -857,8 +864,14 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
     });
   }
   const ranked = [];
-  for (const record of records) {
-    if (!ideaLibraryIsEligibleImage(record)) continue;
+  const seen = new Set();
+  let rejectedEligibility = 0;
+  let rejectedRelevance = 0;
+  const rankPage = page => {
+  for (const record of page) {
+    if (!record?.id || seen.has(record.id)) continue;
+    seen.add(record.id);
+    if (!ideaLibraryIsEligibleImage(record)) { rejectedEligibility++; continue; }
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
@@ -869,7 +882,7 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
       queryTokens: [],
       today,
     });
-    if (!row) continue;
+    if (!row) { rejectedRelevance++; continue; }
     ranked.push({
       id: record.id,
       record,
@@ -883,6 +896,23 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
       duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
     });
   }
+  };
+  rankPage(records);
+  // Keep DB load bounded. A truncated candidate scan is not proof of shortage.
+  if (packed?.has_more && ranked.length < minimum && packed.offset) {
+    const nextOffset = packed.offset;
+    packed = await loadPage(nextOffset);
+    if (!Array.isArray(packed?.records)) throw new Error("Invalid photo candidate continuation");
+    pages++;
+    rankPage(packed.records);
+  }
+  const incomplete = readSource === "supabase" ? Boolean(packed?.has_more) : records.length >= scanLimit;
+  if (incomplete && ranked.length < minimum) {
+    throw new HttpError(503, "Idea photo candidate search incomplete after bounded scan; retry required, not an inventory shortage");
+  }
+  ranked.scan_diagnostics = { read_source: readSource, candidate_count: seen.size,
+    rejected_eligibility: rejectedEligibility, rejected_relevance: rejectedRelevance,
+    scan_pages: pages || 1, scan_complete: !incomplete, filter_keys: filterKeys };
   return ranked;
 }
 /*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/
@@ -1380,6 +1410,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     action: decision.action,
     reason: decision.reason,
     high_count: decision.high_count,
+    scan_diagnostics: matches.scan_diagnostics || null,
     min,
     max,
     selected: decision.selected.map((row) => ({
