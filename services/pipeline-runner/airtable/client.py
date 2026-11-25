@@ -270,7 +270,16 @@ class AirtableClient:
             ] if (legacy or phase6 or side) else []
             committed = False
             if side and minted:
-                committed = self._commit_side_table(table_id, minted)
+                from airtable.constants import SOURCE_CANDIDATES_TABLE
+                if table_id == SOURCE_CANDIDATES_TABLE and any(
+                    "Studio_Production_Mode" in row["fields"] or "Studio_Production_Source" in row["fields"]
+                    for row in minted
+                ):
+                    from supabase_pipeline import commit_idea_candidates
+                    receipt = commit_idea_candidates(self._settings, minted, partial=True, creating=True)
+                    committed = receipt.get("ok") is True and receipt.get("count") == len(minted)
+                else:
+                    committed = self._commit_side_table(table_id, minted)
                 if not committed:
                     raise RuntimeError(f"Supabase create failed for {table_id}")
                 logger.info("Airtable archive kept the Supabase side-table create and did not export %s", table_id)
