@@ -1031,6 +1031,36 @@ def _mirror_request(settings: dict, record: dict) -> None:
     _enqueue_outbox(settings, "request", record, "PATCH")
 
 
+def media_duration_seconds(row: dict) -> float | None:
+    """Return catalog duration, rejecting a stale or inconsistent probe receipt.
+
+    Legacy ingest durations without a probe remain compatible. A receipt tied
+    to another Drive identity must never authorize a replacement asset.
+    """
+    import math
+
+    meta = row.get("metadata")
+    if not isinstance(meta, dict):
+        return None
+    try:
+        duration = float(meta.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(duration) or duration <= 0:
+        return None
+    proof = meta.get("music_duration_probe_v1")
+    if proof is not None:
+        if not isinstance(proof, dict) or not row.get("google_drive_file_id") or proof.get("drive_file_id") != row.get("google_drive_file_id"):
+            return None
+        try:
+            measured = float(proof.get("duration_seconds") or 0)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(measured) or measured <= 0 or abs(measured - duration) > 0.05:
+            return None
+    return duration
+
+
 def _media_row(record: dict) -> dict:
     """Scalar Media Asset metadata. Drive id and URL only; never file bytes.
 
