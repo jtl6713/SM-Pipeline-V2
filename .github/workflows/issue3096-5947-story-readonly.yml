@@ -34,6 +34,9 @@ jobs:
           foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/media_publish','api.airtable.com','/stages/ap1_igs','Publish_Retry_Eligible=true')){
             if($s.Contains($bad)){throw ('mutating_operation_found: '+$bad)}
           }
+          if($s.Contains("($"+'t.n+'+"'")){throw 'numeric_output_id_path_concatenation'}
+          $sample=@{n=5947}
+          if(([string]$sample.n+'-approved.mp4') -ne '5947-approved.mp4'){throw 'output_id_path_regression'}
           Write-Output 'P1_SIX_ORIGINAL_STORY_GET_ONLY_STATIC_PASS'
   exact-owned-media-provider-audit:
     if: github.event_name == 'push'
