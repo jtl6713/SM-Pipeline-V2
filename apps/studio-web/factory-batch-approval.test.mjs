@@ -755,3 +755,58 @@ test('submitted approvals stay outside Needs Eyes even with a stale Ready-for-Re
   state.desk.lanes.needs_eyes=[gone];
   assert.deepEqual(ready(true).map(row=>row.id),[]);
 });
+
+test("19 across three profiles: rejection of first 16 does not suppress remaining three",async()=>{
+  const storage=new Map(), posts=[], errors=[];
+  const localStorage={getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+  const cards=[...Array.from({length:13},(_,i)=>({id:"recLA"+i,profile_id:"recLA",output_id:i+1})),
+    ...Array.from({length:4},(_,i)=>({id:"recCHI"+i,profile_id:"recCHI"})),
+    ...Array.from({length:2},(_,i)=>({id:"recNY"+i,profile_id:"recNY"}))];
+  const state={batchGlobal:{max_total:20,max_per_profile:10},selectedOutputs:new Set(cards.map(c=>c.id)),desk:null,submittingBatch:false};
+  const source=["planFactoryApprovalBatches","pendingFactoryApproval","archiveFactoryPending",
+    "factoryRejectedOutputId","submitFactoryGlobalApprovalBatches"].map(n=>
+      (n==="submitFactoryGlobalApprovalBatches"?"async ":"")+extractNamedFunction(js,n)).join("\n");
+  const build=new Function("localStorage","state","fetchJson","errors",`
+    const FACTORY_PENDING_REQUEST_KEY="pending",FACTORY_RECOVERY_PREFIX="recovery.",FACTORY_LAST_BATCH_KEY="last";
+    let sequence=0;
+    const newFactoryRequestId=()=>"request_2959_"+(++sequence);
+    const setBatchSubmissionError=m=>{if(m)errors.push(m);};
+    const setStatus=()=>{},updateFactoryBatchToolbar=()=>{},rememberFactoryAccepted=()=>{},
+      saveFactorySelection=()=>{},rememberFactoryGroupRequest=()=>{},renderFactoryBatchActivity=()=>{},
+      factoryBatchMergeAcceptedActivity=()=>({}),closeFactoryPreview=()=>{},
+      factoryMarkSubmissionUnconfirmed=()=>{},refreshFactoryAcceptedReceipt=async()=>{},
+      refreshFactoryBatchActivity=async()=>{},reconcilePersistedFactoryPending=async()=>{};
+    ${source}
+    return submitFactoryGlobalApprovalBatches;
+  `);
+  const run=build(localStorage,state,async(url,opts)=>{
+    const body=JSON.parse(opts.body);posts.push(body);
+    assert.ok(storage.has("recovery."+body.request_id),"persist exact plan before POST");
+    if(posts.length===1)throw Object.assign(Error("Output #1: creative discrepancy. No new batch was accepted."),{status:409});
+    return {accepted:true,job_id:"fg_"+body.request_id,items:body.record_ids.map(id=>({id}))};
+  },errors);
+  await run(cards);
+  assert.deepEqual(posts.map(p=>p.record_ids.length),[16,3]);
+  assert.equal(new Set(posts.flatMap(p=>p.record_ids)).size,19);
+  const pending=[...storage.entries()].filter(([k])=>k.startsWith("recovery.")).map(([,v])=>JSON.parse(v));
+  assert.equal(pending.length,1);
+  assert.equal(pending[0].batches[0].request_id,posts[0].request_id);
+  assert.equal(pending[0].retry_blocked,true);
+  assert.equal(pending[0].ids.length,16);
+  assert.ok(errors.some(e=>e.includes("Confirmed 3 of 19")&&e.includes("creative discrepancy")));
+});
+test("legacy shared rejection is scoped only to an exactly identified plan",()=>{
+  const first=savedGlobalEnvelope();
+  first.batches[0].payload.items[0].output_id=11187;
+  const second={request_id:"request_2959_second",ids:["recNewChicago"],payload:{
+    action:"start_group",request_id:"request_2959_second",record_ids:["recNewChicago"],
+    items:[{id:"recNewChicago",output_id:10854}]}};
+  const saved={...first,ids:[...first.ids,...second.ids],batches:[...first.batches,second],
+    last_error:"Output #11187: Story duration differs. No new batch was accepted.",retry_blocked:true};
+  const h=automaticRecoveryHarness(saved,async()=>{throw Error("not required");});
+  h.archiveFactoryPending();
+  const entries=h.factoryRecoveryEntries().map(e=>e.saved);
+  assert.equal(entries.length,2);
+  assert.equal(entries.find(e=>e.ids.includes("recExistingA")).retry_blocked,true);
+  assert.equal(entries.find(e=>e.ids.includes("recNewChicago")).retry_blocked,undefined);
+});
