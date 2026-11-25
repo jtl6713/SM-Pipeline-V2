@@ -5,3 +5,5 @@ Run one GET-only, fixed-host Supabase privileged Metrics API RAM/swap readback v
 2026-11-25 — Owner confirms local dedicated key provisioned. Rerun protected GET-only probe with sanitized key-length/prefix and HTTP-status diagnostics; no secret export or cap change.
 
 2026-11-25 — Correct invalid workflow definition in #3068; trigger validated diagnostic only after merge.
+
+2026-11-25 — Diagnose verified HTTP 401 with independent GET-only project-key and alternate HTTP transport tests.
