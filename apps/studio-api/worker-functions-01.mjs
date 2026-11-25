@@ -12216,7 +12216,12 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
     rows = await listSupabaseRequestsWithProductionJob(env, {
       limit: 100,
       statuses: ["Promoted", "Submitted"],
+      unfinishedOnly: true,
     }).catch(() => null);
+    if (!Array.isArray(rows)) {
+      console.warn("Studio produce watchdog: authoritative candidate read unavailable");
+      return [{ key: "STUDIO_PRODUCE", skipped: "authoritative_candidates_unavailable" }];
+    }
   }
   if (!Array.isArray(rows)) {
     rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -12386,10 +12391,14 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
       // passthrough remounts run before the runner resume pulse. Direct
       // item4PulseStudioProduceJob skipped that gate (Walk with me Chicago).
       const payload = await enqueueStudioProductionJob(env, requestId, { resume: true });
+      const accepted = payload?.payload?.accepted === true || payload?.accepted === true;
       pulses.push({
         key: "STUDIO_PRODUCE",
         request: requestId,
-        resumed: true,
+        resumed: accepted,
+        ...(accepted ? {} : { skipped: payload?.skipped || payload?.payload?.reason || "runner_acceptance_unverified" }),
+        deferred: payload?.payload?.deferred_due_to_database_circuit === true,
+        already_running: payload?.payload?.already_running === true,
         self_heal: isBlocked,
         resume_count: nextHeal.resume_count,
         step: payload?.payload?.job?.step || payload?.job?.step || resumedJob.step || step || "themes",
