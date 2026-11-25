@@ -43,9 +43,9 @@ def probe(data):
     with Image.open(io.BytesIO(data)) as source:
         fmt=source.format
         size=source.size
-        orientation=source.getexif().get(274,1)
         source.verify()
     with Image.open(io.BytesIO(data)) as source:
+        orientation=source.getexif().get(274,1)
         corrected=ImageOps.exif_transpose(source)
         corrected.load()
         oriented=corrected.size
