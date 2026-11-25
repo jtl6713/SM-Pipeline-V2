@@ -28,7 +28,7 @@ jobs:
           CONFIG=apps/studio-api/factory-batch-acceptance.wrangler.jsonc
           mkdir -p /tmp/factory-batch-r2
           ./node_modules/.bin/wrangler dev --config "$CONFIG" --local \
-            --port 8976 --persist-to /tmp/factory-batch-r2 \
+            --port 8976 --persist-to /tmp/factory-batch-r2 --var FACTORY_2959_LOCAL_TEST:true \
             >/tmp/factory-batch-wrangler.log 2>&1 &
           echo "$!" > /tmp/factory-batch-worker.pid
           for n in $(seq 1 45); do
@@ -101,11 +101,15 @@ jobs:
           assert obj['handoff_to']==obj['lock_loser'],obj
           print('simultaneous_same_profile_lock=PASS; winner=1; unique_commits=20')
           PY
+          # Force the exact original 4/4/1 slice boundary and leave five
+          # approvals pending when the actual local Worker runtime stops.
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/slice-start' -o /tmp/factory-slice-first.json
+          jq -e '.processed==4 and .approved_count==4 and .pending_count==5' /tmp/factory-slice-first.json >/dev/null
           # Stop/restart the Worker, imitating a client/dev-server shutdown.
           kill "$(cat /tmp/factory-batch-worker.pid)"
           sleep 2
           ./node_modules/.bin/wrangler dev --config "$CONFIG" --local \
-            --port 8976 --persist-to /tmp/factory-batch-r2 \
+            --port 8976 --persist-to /tmp/factory-batch-r2 --var FACTORY_2959_LOCAL_TEST:true \
             >/tmp/factory-batch-wrangler-restart.log 2>&1 &
           echo "$!" > /tmp/factory-batch-worker-restarted.pid
           for n in $(seq 1 45); do
@@ -120,6 +124,16 @@ jobs:
           assert obj['total']==20 and obj['approved_count']==20 and obj['stored_commits']==20 and obj['failed_count']==0,obj
           print('persisted_after_server_restart_and_new_client=PASS')
           PY
+          curl -fsS 'http://127.0.0.1:8976/api/slice-status' -o /tmp/factory-slice-restarted.json
+          jq -e '.approved_count==4 and .pending_count==5 and .unique_commits==4' /tmp/factory-slice-restarted.json >/dev/null
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/slice-recover' -o /tmp/factory-slice-second.json
+          jq -e '.processed==4 and .approved_count==8 and .pending_count==1' /tmp/factory-slice-second.json >/dev/null
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/slice-recover' -o /tmp/factory-slice-third.json
+          jq -e '.processed==1 and .approved_count==9 and .pending_count==0 and .failed_count==0' /tmp/factory-slice-third.json >/dev/null
+          curl -fsS 'http://127.0.0.1:8976/api/slice-status' -o /tmp/factory-slice-final.json
+          jq -e '.status=="completed" and .unique_commits==9 and ([.items[]|select(.status=="approved" and .total_attempts==1)]|length)==9' /tmp/factory-slice-final.json >/dev/null
+          echo '2959_runtime_4_4_1_pending_restart_exact_index_recovery=PASS; nine_unique_commits=PASS'
+
       - name: Show Worker diagnostics on failure
         if: failure()
         run: |

@@ -32,6 +32,9 @@ export const FACTORY_APPROVAL_TIMING_PAIRS = Object.freeze([
   ["mae_slot_calculation","mae_slot_calculation_started","mae_slot_calculation_finished"],
   ["mae_occupancy_and_slot","mae_occupancy_started","mae_slot_calculation_finished"],
   ["gallery_finalization","gallery_finalize_started","gallery_finalize_finished"],
+  ["validating_to_canonical_read_start","validating","canonical_read_started"],
+  ["approving_to_commit_start","approving","supabase_commit_started"],
+  ["verifying_to_readback_start","verifying","supabase_readback_started"],
   ["supabase_approval_commit","supabase_commit_started","supabase_commit_finished"],
   ["supabase_commit_readback","supabase_readback_started","supabase_readback_finished"],
 ]);
@@ -48,8 +51,22 @@ function positiveNumber(value) { return Number.isFinite(value) && value >= 0; }
 function percentile(sorted, proportion) {
   return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * proportion) - 1)] : null;
 }
+// Live phase CAS persists a checkpoint before the terminal CAS appends the
+// full attempt. Keep the final occurrence of each identical event so legacy
+// ledgers are read in execution order and current ledgers never duplicate it.
+export function normalizeFactoryApprovalTimeline(events = []) {
+  const seen = new Set();
+  const result = [];
+  for (const event of (Array.isArray(events) ? events : []).slice().reverse()) {
+    const key = JSON.stringify([event?.state, event?.at, Number(event?.attempt) || 0]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(event);
+  }
+  return result.reverse().slice(-180);
+}
 export function factoryApprovalItemTiming(item = {}) {
-  const timeline = Array.isArray(item?.timeline) ? item.timeline.slice(-180) : [];
+  const timeline = normalizeFactoryApprovalTimeline(item?.timeline);
   if (!timeline.length) return null;
   const events = timeline.map((entry, index) => ({
     state: String(entry?.state || "").slice(0, 64),
