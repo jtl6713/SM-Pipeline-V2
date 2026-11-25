@@ -225,11 +225,13 @@ test("NYC #2371: eight held review outputs remain visible even after older Facto
   // completed Activity after a previous batch, but the server has restored
   // a held Ready-for-Review state. They must remain inspectable, not published.
   const submitted = new Set(ids.map(([id]) => id));
-  const run = (input, accepted) => runInNewContext(code, {
+  const run = (input, accepted, active = new Set()) => runInNewContext(code, {
     cards: input,
     factorySubmittedApprovalIds: () => accepted,
+    factoryActiveSubmissionIds: () => active,
     canReviewActions: () => false,
   });
+  assert.equal(run(cards, submitted, submitted).length, 0, "an active approval owns the row even if Desk reports an older held snapshot");
   const visible = run(cards, submitted);
   assert.deepEqual(Array.from(visible, row => row.output_id), ids.map(([, number]) => number));
   assert.ok(visible.every(row => row.do_not_publish === true && row.auto_publish_enabled === false));
