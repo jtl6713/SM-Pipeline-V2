@@ -30,6 +30,17 @@ jobs:
             [ref]$tokens,[ref]$errors)
           if($errors.Count -ne 0){throw 'metrics_ps_parser_invalid'}
           Write-Output 'incident2670_metrics_parser=PASS'
+      - name: Validate protected bash script without executing it
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          src=Path('.github/workflows/incident-2670-supabase-metrics-readonly.yml').read_text()
+          block=src.split('      - name: Fetch two Supabase metrics samples in existing protected Windows Ops process\n',1)[1].split('        run: |\n',1)[1]
+          assert all(not line or line.startswith('          ') for line in block.splitlines())
+          subprocess.run(['bash','-n'],input='\n'.join(line[10:] for line in block.splitlines())+'\n',text=True,check=True)
+          PY
       - name: Check protected Runner health and unused Airtable authority
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
