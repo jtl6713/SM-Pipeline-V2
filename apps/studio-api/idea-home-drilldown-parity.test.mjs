@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {ideaProductionModeSelect} from "./production-mode-capture.mjs";
 
 const backend=readFileSync(new URL("./supabase-pipeline-reads.mjs",import.meta.url),"utf8");
 const list=readFileSync(new URL("./worker-functions-01.mjs",import.meta.url),"utf8");
@@ -11,7 +12,7 @@ const end=backend.indexOf("\nfunction ideaListReadError(",start);
 assert.ok(start>=0 && end>start);
 const implementation=backend.slice(start,end).replace(/^export /,"");
 const makeList=({page})=>new Function(
- "resolveSupabaseProfileId","supabaseRest","airtableShapedIdeaFromSupabase","ideaListReadError",
+ "resolveSupabaseProfileId","supabaseRest","airtableShapedIdeaFromSupabase","ideaListReadError","ideaProductionModeSelect",
  implementation+"\nreturn listSupabaseIdeasForProfile;"
 )(
  async()=> "00000000-0000-4000-8000-000000000001",
@@ -29,7 +30,8 @@ const makeList=({page})=>new Function(
      "Content Items":row.payload?.["Content Items"]||[],
    },
  }),
- message=>new Error(String(message))
+ message=>new Error(String(message)),
+ ideaProductionModeSelect
 );
 
 const candidate=(n,linked=false)=>({
