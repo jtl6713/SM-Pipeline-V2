@@ -16,3 +16,10 @@
  #page-content .production-schedule-summary,
  #page-content .production-story-summary { padding: 10px 12px; }
 }
+
+/* Output-specific reasons remain visible on narrow Production tables. */
+.production-output-diagnostics { margin-top:.45rem; min-width:12rem; max-width:30rem; white-space:normal; }
+.production-output-diagnostics summary { cursor:pointer; color:var(--text-primary, #153c64); font-weight:600; font-size:.8rem; }
+.production-diagnostic-items { display:grid; gap:.5rem; margin-top:.5rem; }
+.production-diagnostic-item { border-inline-start:3px solid #94a3b8; padding:.35rem .5rem; overflow-wrap:anywhere; font-size:.82rem; line-height:1.45; }
+.production-diagnostic-item .subtle { margin-top:.2rem; }
