@@ -70,34 +70,60 @@
       showStatus(message,true);
     }
   }
-  async function releaseHold(record,check) {
-    // Keep the hold visually checked until the server confirms the actual release.
+  async function releaseHold(record,check,feedback){
+    const output="#"+(record.number||record.id);
+    const notify=(message,isError=false)=>{
+      feedback.textContent=message;
+      feedback.classList.toggle("error-text",isError);
+      showStatus(message,isError);
+    };
     check.checked=true;
-    const note=prompt("Reason for releasing the publishing hold on #"+
-      (record.number||record.id)+" ("+record.profile_name+"):\n\n"+
+    const note=prompt("Reason for releasing the publishing hold on "+output+
+      " ("+record.profile_name+") (12–500 characters):\n\n"+
       "This does NOT approve, schedule, publish, retry, or enable automatic publishing.");
-    if(note===null)return;
+    if(note===null){notify("Release cancelled for "+output+". Hold unchanged.");return;}
     if(note.trim().length<12||note.trim().length>500){
-      showStatus("Release requires a reason of 12–500 characters. No hold changed.",true);
+      notify("Release requires a reason of 12–500 characters. "+output+" remains held.",true);
       return;
     }
-    if(!confirm("Release publishing hold on output #"+(record.number||record.id)+
+    if(!confirm("Release publishing hold on output "+output+
       " only?\n\n"+(record.release_warning?record.release_warning+"\n\n":"")+
-      "Automatic publishing will remain disabled. You must explicitly approve/schedule/publish later."))return;
+      "Automatic publishing will remain disabled. You must explicitly approve/schedule/publish later.")){
+      notify("Release cancelled for "+output+". Hold unchanged.");return;
+    }
     check.disabled=true;
-    showStatus("Rechecking and releasing output #"+(record.number||record.id)+"…");
+    notify("Rechecking and releasing "+output+"…");
+    let verified=false;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),20000);
     try{
-      await request("/api/operations/publishing-holds/"+record.id+"/release",{
-        method:"POST",body:JSON.stringify({
+      const result=await request("/api/operations/publishing-holds/"+record.id+"/release",{
+        method:"POST",signal:controller.signal,body:JSON.stringify({
           confirm_output_id:record.id,release_note:note.trim(),
           revision:record.revision,hold_set_at:record.hold_set_at
         })
       });
-      showStatus("Released #"+(record.number||record.id)+". Automatic publishing remains OFF. No post was dispatched.");
-      await load(false);
+      if(result.id!==record.id||result.released!==true||result.automatic_publishing_enabled!==false||
+         result.publication_triggered!==false||result.approved!==false||result.scheduled!==false||
+         result.audit?.operation!=="released"||result.audit?.reason!==note.trim()){
+        throw Error("The server did not return the exact verified release receipt");
+      }
+      verified=true;
+      check.checked=false;
+      check.disabled=true;
+      // Keep the confirmation on this row until the operator refreshes.
+      // Pagination offsets are no longer reliable after a held row disappears.
+      hasMore=false;more.hidden=true;more.disabled=true;
+      notify("Released "+output+". Automatic publishing remains OFF. No post dispatched. Refresh to update the held list.");
     }catch(error){
-      check.checked=true;showStatus("Hold NOT confirmed released: "+error.message,true);
-    }finally{check.disabled=false;}
+      check.checked=true;
+      const message=error.name==="AbortError"?"Request timed out; the release may have been saved.":error.message;
+      notify("Release not confirmed for "+output+": "+message+
+        ". Refresh or check History before trying again.",true);
+    }finally{
+      clearTimeout(timer);
+      if(!verified)check.disabled=!record.releasable;
+    }
   }
   function renderRow(record){
     const tr=document.createElement("tr");
@@ -122,9 +148,11 @@
     checkbox.type="checkbox";checkbox.checked=true;
     checkbox.disabled=!record.releasable;
     checkbox.setAttribute("aria-label","Hold for publishing on output #"+(record.number||record.id));
-    checkbox.addEventListener("change",()=>releaseHold(record,checkbox));
+    const feedback=document.createElement("p");
+    feedback.setAttribute("role","status");feedback.setAttribute("aria-live","polite");
+    checkbox.addEventListener("change",()=>releaseHold(record,checkbox,feedback));
     control.append(checkbox,document.createTextNode(" Hold for publishing"));
-    action.append(control);
+    action.append(control,feedback);
     if(!record.releasable)label(action,"p",record.block_reason||"Protected hold","admin-hold-blocked");
     else {
       label(action,"p","Uncheck to release this publishing hold only","subtle");
