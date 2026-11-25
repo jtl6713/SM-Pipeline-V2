@@ -38,6 +38,30 @@ jobs:
             [ref]$tokens,[ref]$errors)
           if($errors.Count -ne 0){throw 'incident2853_probe_script_parse_invalid'}
           Write-Output 'incident2853_probe_script_parse=PASS'
+          # Run the actual helper in isolation; no credentials/network.
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2853-bryant-python-probe.ps1'),
+            [ref]$tokens,[ref]$errors)
+          $helper=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Read-ExactRows'},$true)
+          if(-not $helper){throw 'exact_rest_helper_missing'}
+          . ([scriptblock]::Create($helper.Extent.Text))
+          function Invoke-RestMethod {
+            param($Uri,$Headers,$TimeoutSec)
+            Write-Output -NoEnumerate $script:fixture
+          }
+          $script:fixture=@([pscustomobject]@{id=1},[pscustomobject]@{id=2})
+          $rows=@(Read-ExactRows 'https://example.invalid' 2 'fixture')
+          if($rows.Count -ne 2 -or $rows[1].id -ne 2){throw 'array_fixture_failed'}
+          $script:fixture=@([pscustomobject]@{id=3})
+          $rows=@(Read-ExactRows 'https://example.invalid' 1 'fixture')
+          if($rows.Count -ne 1 -or $rows[0].id -ne 3){throw 'single_fixture_failed'}
+          $rejected=$false
+          try { Read-ExactRows 'https://example.invalid' 2 'fixture' } catch { $rejected=$true }
+          if(-not $rejected){throw 'cardinality_fixture_failed'}
+          $encoded=[uri]::EscapeDataString((ConvertTo-Json -InputObject @(10853) -Compress))
+          if([uri]::UnescapeDataString($encoded) -ne '[10853]'){throw 'slide_filter_fixture_failed'}
+          Write-Output 'incident2853_exact_rest_cardinality=PASS'
+
 
       - uses: actions/setup-python@v5
         with:
@@ -127,7 +151,7 @@ jobs:
             fi
             if [[ "$state" == failed ]]; then
               echo 'incident2853_protected_probe=FAILED_NO_RETRY'
-              jq -r '.job.log // ""' /tmp/status.json | grep -oE 'incident2853_[A-Za-z0-9_]+' | sort -u | tail -20 || true
+              python -c 'import json,re; log=json.load(open("/tmp/status.json"))["job"].get("log",""); print("\\n".join(sorted(set(re.findall(r"incident2853_[A-Za-z0-9_]+",log.partition("\n\n")[2])))))'
               exit 1
             fi
             sleep 3

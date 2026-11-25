@@ -20,28 +20,37 @@ function Read-Setting([string]$name) {
   return $value
 }
 
+function Read-ExactRows([string]$uri, [int]$expected, [string]$failure) {
+  # Windows PowerShell 5.1 Invoke-RestMethod emits JSON arrays as a single
+  # pipeline object. Assignment followed by explicit enumeration avoids
+  # nesting that array inside @(), while also accepting PS7 semantics.
+  $response = Invoke-RestMethod -Uri $uri -Headers $script:sbHeaders -TimeoutSec 25
+  $rows = @($response | ForEach-Object { $_ })
+  if ($rows.Count -ne $expected -or @($rows | Where-Object { $null -eq $_ -or $_ -is [array] }).Count -ne 0) {
+    throw ($failure + '_count_' + $rows.Count)
+  }
+  return $rows
+}
+
 function Get-RequestRow {
-  $rows = @(Invoke-RestMethod -Uri (
+  $rows = @(Read-ExactRows (
     "$script:sb/rest/v1/production_requests?airtable_record_id=eq.$requestId&select=*&limit=2"
-  ) -Headers $script:sbHeaders -TimeoutSec 25)
-  if ($rows.Count -ne 1) { throw 'incident2853_exact_request_not_unique' }
+  ) 1 'incident2853_exact_request_not_unique')
   return $rows[0]
 }
 
 function Get-OutputRows {
   $ids = ($expectedOutputs.Keys | Sort-Object) -join ','
-  $rows = @(Invoke-RestMethod -Uri (
+  return @(Read-ExactRows (
     "$script:sb/rest/v1/platform_outputs?airtable_record_id=in.($ids)&select=*&limit=3"
-  ) -Headers $script:sbHeaders -TimeoutSec 25)
-  if ($rows.Count -ne 2) { throw 'incident2853_exact_outputs_not_unique' }
-  return $rows
+  ) 2 'incident2853_exact_outputs_not_unique')
 }
 
 function Get-OutputSlides([int]$number) {
-  $encoded = [uri]::EscapeDataString((ConvertTo-Json @($number) -Compress))
-  return @(Invoke-RestMethod -Uri (
+  $encoded = [uri]::EscapeDataString((ConvertTo-Json -InputObject @($number) -Compress))
+  return @(Read-ExactRows (
     "$script:sb/rest/v1/carousel_slides?deleted_from_carousel=eq.false&fields-%3EPO_Output_ID=cs.$encoded&select=airtable_record_id,current_order,deleted_from_carousel,fields&limit=8"
-  ) -Headers $script:sbHeaders -TimeoutSec 25)
+  ) 5 'incident2853_exact_slides_not_unique')
 }
 
 function Has-Value($value) {
