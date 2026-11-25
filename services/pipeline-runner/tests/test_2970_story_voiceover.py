@@ -152,3 +152,53 @@ def test_story_sibling_scan_refuses_partial_parent_set(monkeypatch):
     monkeypatch.setattr(context, "load_outputs", lambda *_: [])
     with pytest.raises(story.StoryVoiceoverError, match="sibling claim set"):
         story.matching_story_claims(Mock(), parent(), "recStory", "digest", "https://example.test/voice")
+
+
+def test_rearm_story_missing_sentence_only_after_current_input_is_valid():
+    from copy import deepcopy
+    from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+
+    p = parent()
+    row = output(
+        Content_Item=[p["id"]], Output_Status="In Production",
+        Render_Status="Blocked", Remotion_Error_Message=story.STORY_MISSING_SENTENCE,
+        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Review_Status="Pending Review", Do_Not_Publish=False, Auto_Publish_Enabled=False,
+    )
+    rows = {row["id"]: deepcopy(row), p["id"]: deepcopy(p)}
+
+    class Client:
+        def __init__(self):
+            self.writes = []
+        def get_record(self, table, rid):
+            return deepcopy(rows[rid])
+        def update_record(self, table, rid, patch, **kwargs):
+            self.writes.append((table, rid, patch))
+            rows[rid]["fields"].update(patch)
+
+    client = Client()
+    assert story.story_sentence_recovery_candidate(row, p)
+    invalid_parent = deepcopy(p)
+    invalid_parent["fields"]["Voiceover_Script"] = "unfinished narration"
+    assert not story.story_sentence_recovery_candidate(row, invalid_parent)
+    for patch in (
+        {"Output_Status":"Approved for Publishing"}, {"Do_Not_Publish":True},
+        {"Auto_Publish_Enabled":True}, {"Review_Status":"Approved"},
+        {"Remotion_Job_ID":"job-1"}, {"Final_File_URL":"https://example.test/file"},
+        {"Platform_Post_ID":"provider-1"}, {"Publish_Attempt_Count":1},
+        {story.RECEIPT:json.dumps({"state":"failed"})},
+        {"Remotion_Error_Message":"unrelated guard"}, {"Composition_ID":""},
+    ):
+        other = deepcopy(row)
+        other["fields"].update(patch)
+        assert not story.story_sentence_recovery_candidate(other,p), patch
+    # A changed live script cannot be rearmed from a stale snapshot.
+    rows[p["id"]] = invalid_parent
+    assert story.rearm_story_sentence_guard(client,row,p)["fields"]["Render_Status"] == "Blocked"
+    assert client.writes == []
+    rows[p["id"]] = deepcopy(p)
+    result = story.rearm_story_sentence_guard(client,row,p)
+    assert result["fields"]["Render_Status"] == "Ready for Render"
+    assert client.writes == [(PLATFORM_OUTPUTS_TABLE,row["id"],{"Render_Status":"Ready for Render"})]
+    # The original error remains until normal R4 validates and clears it.
+    assert result["fields"]["Remotion_Error_Message"] == story.STORY_MISSING_SENTENCE
