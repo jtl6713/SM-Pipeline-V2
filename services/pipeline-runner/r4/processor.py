@@ -419,6 +419,19 @@ def process_one(
         preview["render_request"] = payload
         return {"processed": False, "dry_run": True, **preview}
 
+    # The saved receipt points at private R2 authority. Remotion is on the
+    # Windows host and already downloads private media via Runner loopback.
+    # Never send a public media URL, secret header, or inline audio bytes.
+    from studio_produce.story_voiceover import private_story_render_url
+    try:
+        private_voiceover_url = private_story_render_url(output, content_item)
+    except StoryVoiceoverError as exc:
+        return {"processed": False, "reason": "story_voiceover_blocked",
+                "output_record_id": output["id"], "error": str(exc)}
+    if private_voiceover_url:
+        payload["voiceover"]["url"] = private_voiceover_url
+        payload["voiceoverUrl"] = private_voiceover_url
+
     remotion = RemotionClient(render_base)
     # Single Remotion slot: if Chrome is already busy, park this row in the
     # waiting queue instead of accepting another job that only looks like Rendering.

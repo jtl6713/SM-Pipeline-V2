@@ -628,6 +628,32 @@ def internal_drive_media(file_id: str):
     return Response(chunks(), mimetype=mime, headers=headers)
 
 
+@app.get("/internal/story-audio/<parent_id>/<fingerprint>/<checksum>.mp3")
+def internal_story_audio(parent_id: str, fingerprint: str, checksum: str):
+    # Same-host Remotion uses the established private media bridge. Reject
+    # forwarded/public traffic and do not return storage credentials or errors.
+    denied, status = _require_loopback()
+    if denied is not None:
+        return denied, status
+    import re
+    if not (re.fullmatch(r"rec[A-Za-z0-9]{14}", parent_id)
+            and re.fullmatch(r"[a-f0-9]{64}", fingerprint)
+            and re.fullmatch(r"[a-f0-9]{64}", checksum)):
+        return jsonify({"error": "Invalid Story audio identity"}), 400
+    from integrations.r2_upload import R2UploadClient
+    key = f"studio/previews/story-voiceover/{parent_id}/{fingerprint}.mp3"
+    try:
+        data = R2UploadClient(pipeline_settings()).read_story_audio(key, checksum)
+    except FileNotFoundError:
+        return jsonify({"error": "Story audio not found"}), 404
+    except Exception:
+        return jsonify({"error": "Verified Story audio unavailable"}), 503
+    return Response(data, mimetype="audio/mpeg", headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+        "Content-Length": str(len(data)),
+    })
+
+
 @app.get("/internal/studio-master")
 def internal_studio_master():
     denied, status = _require_loopback()
