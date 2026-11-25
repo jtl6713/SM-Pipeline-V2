@@ -1548,7 +1548,7 @@ def commit_idea_candidates(settings: dict | None, records: list[dict], *, partia
                 f"idea_candidates?airtable_record_id=eq.{record_id}&select=payload&limit=1",
                 "GET",
                 prefer="return=representation",
-            ) or []
+            )
             if capturing and (not isinstance(existing, list) or existing):
                 raise RuntimeError("I1 mode capture requires a new Idea identity")
             row0 = existing[0] if isinstance(existing, list) and existing else None
