@@ -965,3 +965,5 @@ Deploy Studio UI 0.6.1082-approval-success-2622 after protected CI: separate app
 2026-11-24 UTC — #2873 UI 0.6.1092 Factory TikTok Multi-Photo/Slideshow exact-output Creative swipe viewer. No Meta gallery or MP4 route change, no media mutations, approval, schedule, publishing or runner/Worker restart. Verify all 19 Pilsen photos and live Factory click.
 
 2026-11-25 UTC — #2959/#2847 UI 0.6.1093 Factory independent submission recovery, exact backend IDs, truthful pending profile state and isolated per-plan rejection. Protected Pages deployment only; no approval replay, publishing, media mutation or database safeguards changed.
+
+2026-11-25 UTC — #2959/#2847 UI 0.6.1094: exact saved consent recovery with read-only canonical review-version preflight, isolate definitive rejected members, retain original request ID for unchanged creative-warning cases. No synthetic approvals or hold/publishing changes. Requires protected Worker support and green CI.
