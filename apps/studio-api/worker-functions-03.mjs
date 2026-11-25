@@ -33,6 +33,7 @@ import { exploreIdeaNeedsApproval, ideaPhotoMatchingSlaFinding, selectProfileFai
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure, homeOutputInProduction } from "./profile-summary-classification.mjs";
+import { productionDiagnosticsSummary } from "./production-output-diagnostics.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { submittedApprovalAge, verifySubmittedPromotionOwnership, verifySubmittedAutonomousOrphan, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
@@ -1744,14 +1745,14 @@ export async function listContent(request, env, url, authorization) {
         // Do_Not_Publish/approved/review-ready siblings must never create a
         // Production-screen ghost row; NYC's seven real pending outputs must
         // still be grouped under their two parent Content Items.
-        const activeCountByContent = new Map();
+        const productionDiagnosticsByContent = new Map();
         for (const [contentId, outputRecords] of outputsByContent) {
-          let count = 0;
+          const activeRows = [];
           for (const output of outputRecords) {
             if (f(output, "Test_Run_ID")) continue;
-            if (homeOutputInProduction(mapOutput(output))) count += 1;
+            if (homeOutputInProduction(mapOutput(output))) activeRows.push(mapOutput(output));
           }
-          activeCountByContent.set(contentId, count);
+          productionDiagnosticsByContent.set(contentId, productionDiagnosticsSummary(activeRows, outputRecords.length));
         }
         return {
           records: (packed.records || []).map((record) => {
@@ -1761,7 +1762,8 @@ export async function listContent(request, env, url, authorization) {
             return {
               ...mapContent(record, linkedOutputs),
               output_links: productionOutputLinksFromJoinedRecords(linkedOutputs),
-              production_active_output_count: activeCountByContent.get(record.id) || 0,
+              production_active_output_count: productionDiagnosticsByContent.get(record.id)?.remaining || 0,
+              production_diagnostics: productionDiagnosticsByContent.get(record.id) || productionDiagnosticsSummary([], linkedOutputs.length),
             };
           }),
           profile: mapStudioContentProfile(profile),
