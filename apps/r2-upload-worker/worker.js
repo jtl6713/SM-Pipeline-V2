@@ -1,5 +1,5 @@
 const SERVICE = "chicagoshining-r2-upload";
-const VERSION = "1.3.0-post-publish-cleanup";
+const VERSION = "1.3.1-story-audio-read";
 const LEGACY_SECRET_SHA256 = "206163e803094104e8de49871a138636b2978653a9935feea94f85e2454d666e";
 const ALLOWED_PREFIXES = ["publish/", "studio/previews/"];
 // Authenticated Studio post-publish release may delete pointed-at production keys.
@@ -41,6 +41,10 @@ export default {
 
       const bucket = resolveBucket(env);
       if (!bucket) return json({ ok: false, error: "R2 bucket binding missing" }, 500);
+
+      if (request.method === "GET" && url.pathname === "/internal/story-audio") {
+        return await readStoryAudio(bucket, url);
+      }
 
       if (request.method === "GET" && url.pathname === "/lifecycle/report") {
         return json(await reportPrefix(bucket, url.searchParams.get("prefix") || ""));
@@ -179,6 +183,38 @@ async function reportPrefix(bucket, rawPrefix) {
     ttl_policy: PUBLISH_TTL_POLICY,
     objects,
   };
+}
+
+async function readStoryAudio(bucket, url) {
+  // Shared-secret authentication has already passed. Never expose arbitrary
+  // bucket objects or bytes that do not match a persisted narration receipt.
+  const key = url.searchParams.get("key") || "";
+  const expected = url.searchParams.get("sha256") || "";
+  if (!/^studio\/previews\/story-voiceover\/rec[A-Za-z0-9]{14}\/[a-f0-9]{64}\.mp3$/.test(key)
+      || !/^[a-f0-9]{64}$/.test(expected)) {
+    return json({ok:false,error:"Invalid Story audio identity"},400);
+  }
+  const head = await bucket.head(key);
+  if (!head) return json({ok:false,error:"Story audio not found"},404);
+  if (head.size <= 0 || head.size > 8 * 1024 * 1024) {
+    return json({ok:false,error:"Story audio exceeds bounded size"},413);
+  }
+  const object = await bucket.get(key,{onlyIf:{etagMatches:head.etag}});
+  if (!object || !object.body || object.size !== head.size) {
+    return json({ok:false,error:"Story audio changed during read"},409);
+  }
+  const bytes = await object.arrayBuffer();
+  const actual = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)))
+    .map(value=>value.toString(16).padStart(2,"0")).join("");
+  if (bytes.byteLength !== head.size || actual !== expected) {
+    return json({ok:false,error:"Story audio checksum mismatch"},409);
+  }
+  return new Response(bytes,{headers:{
+    "Content-Type":"audio/mpeg",
+    "Content-Length":String(bytes.byteLength),
+    "Cache-Control":"private, no-store",
+    "X-Content-Type-Options":"nosniff"
+  }});
 }
 
 async function headObject(bucket, rawKey) {
