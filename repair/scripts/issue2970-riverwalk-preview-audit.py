@@ -102,7 +102,11 @@ def main():
         for number, (url, sha, frames) in OUTPUTS.items():
             path = folder / (str(number) + ".mp4")
             try:
-                download(path, url, sha, 22_000_000)
+                # Exact canonical R5 receipt byte counts, not a duration-based guess.
+                expected_size = 29_703_300 if frames == 300 else 18_478_500
+                download(path, url, sha, expected_size)
+                if path.stat().st_size != expected_size:
+                    raise ValueError("delivered artifact size differs from receipt")
                 if sha not in verified:
                     verify_video(path, frames)
                     result = assess(proof.pcm(path), audio["story" if frames == 300 else "full"], audio["music"], frames == 300)
