@@ -112,7 +112,10 @@ def test_story_sibling_failed_generation_fences_second_paid_call(monkeypatch):
     monkeypatch.setattr(elevenlabs_client, "resolve_content_voice_id", lambda _: "voice-1")
     synthesize = Mock(side_effect=RuntimeError("ambiguous provider timeout"))
     monkeypatch.setattr(elevenlabs_client, "synthesize_voiceover_by_id", synthesize)
-    monkeypatch.setattr(story.requests, "get", lambda *a, **k: SimpleNamespace(status_code=404))
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+    monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
+    monkeypatch.setattr(R2UploadClient,"story_audio_exists",lambda *_:False)
     with pytest.raises(story.StoryVoiceoverError, match="reconcile its exact attempt"):
         story.ensure_story_voiceover(client, a, p)
     assert json.loads(rows[a["id"]]["fields"][story.RECEIPT])["state"] == "failed"
@@ -211,7 +214,9 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     from studio_produce import workload_governor, context
     from p2 import elevenlabs_client
     p = parent()
-    row = output(Content_Item=[p["id"]])
+    digest=story.fingerprint(p["id"],"voice-1",story.story_text(p["fields"]["Voiceover_Script"]),story.story_seconds(output()))
+    url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
+    row = output(Content_Item=[p["id"]],Studio_Story_Voiceover_Receipt_JSON=json.dumps({"state":"failed","fingerprint":digest,"url":url,"sha256":"a"*64}))
     client = Mock()
     client.get_record.side_effect = lambda table,rid: p if rid == p["id"] else row
     monkeypatch.setattr(workload_governor,"enabled",lambda: True)
@@ -220,7 +225,13 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     paid = Mock(side_effect=AssertionError("must not regenerate"))
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[row])
-    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=status,content=b"unverified"))
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+    monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
+    def read(*_):
+        if status!=200: raise RuntimeError(f"storage status {status}")
+        return b"unverified"
+    monkeypatch.setattr(R2UploadClient,"read_story_audio",read)
     with pytest.raises(story.StoryVoiceoverError):
         story.ensure_story_voiceover(client,row,p,allow_generate=False)
     paid.assert_not_called()
@@ -256,10 +267,40 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
     paid=Mock(side_effect=AssertionError("must not regenerate"))
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
-    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=200,content=data))
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+    monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
+    monkeypatch.setattr(R2UploadClient,"read_story_audio",lambda *_:data)
     monkeypatch.setattr(story,"checked_voice",lambda b,cap:4.0)
     result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
     assert result["fields"]["Render_Status"]=="Ready for Render"
     assert result["fields"]["Voiceover_URL"]==url
     assert json.loads(result["fields"][story.RECEIPT])["state"]=="verified"
     paid.assert_not_called()
+
+def test_held_cache_recovery_is_exact_and_preserves_hold():
+    p=parent()
+    p["id"]="rec9qS53G7HDoyCL5"
+    row=output(Content_Item=[p["id"]],Output_Status="In Production",Render_Status="Blocked",
+        Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
+        Composition_ID="Story",Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Do_Not_Publish=True,Auto_Publish_Enabled=False)
+    row["id"]="recoheiAMq2vG48V3"
+    assert story.story_sentence_recovery_candidate(row,p,cached_only=True)
+    assert not story.story_sentence_recovery_candidate({**row,"id":"recUnrelated"},p,cached_only=True)
+    assert not story.story_sentence_recovery_candidate({**row,"fields":{**row["fields"],"Auto_Publish_Enabled":True}},p,cached_only=True)
+    assert not story.story_sentence_recovery_candidate({**row,"fields":{**row["fields"],"Production_Approved_At":"2026-11-25"}},p,cached_only=True)
+
+
+def test_private_story_render_source_requires_exact_verified_receipt():
+    p=parent()
+    p["id"]="rec9qS53G7HDoyCL5"
+    digest="a"*64
+    sha="b"*64
+    url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
+    row=output(Content_Item=[p["id"]],Voiceover_URL=url,Studio_Story_Voiceover_Receipt_JSON=json.dumps(
+        {"state":"verified","url":url,"fingerprint":digest,"sha256":sha}))
+    assert story.private_story_render_url(row,p)==f"http://127.0.0.1:3350/internal/story-audio/{p['id']}/{digest}/{sha}.mp3"
+    row["fields"]["Voiceover_URL"]="https://example.test/wrong.mp3"
+    with pytest.raises(story.StoryVoiceoverError):
+        story.private_story_render_url(row,p)
