@@ -628,6 +628,24 @@ def internal_drive_media(file_id: str):
     return Response(chunks(), mimetype=mime, headers=headers)
 
 
+@app.get("/internal/story-audio")
+def internal_story_audio():
+    denied, status = _require_loopback()
+    if denied is not None:
+        return denied, status
+    from integrations.r2_upload import R2UploadClient
+    key = str(request.args.get("key") or "")
+    checksum = str(request.args.get("sha256") or "")
+    try:
+        audio = R2UploadClient(pipeline_settings()).get_story_audio(key, checksum)
+    except ValueError:
+        return jsonify({"error": "Invalid Story audio receipt"}), 400
+    except Exception:
+        return jsonify({"error": "Verified Story audio unavailable"}), 502
+    return Response(audio, mimetype="audio/mpeg",
+                    headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
 @app.get("/internal/studio-master")
 def internal_studio_master():
     denied, status = _require_loopback()

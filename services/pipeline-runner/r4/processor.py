@@ -185,6 +185,7 @@ def render_snapshot_identity(output: dict[str, Any]) -> tuple[str, ...]:
         "Output_Filename",
         "Music_URL",
         "Voiceover_URL",
+        "Studio_Story_Voiceover_Receipt_JSON",
         "Voiceover_Render_Volume",
         "Music_Volume",
         "Music_Ducked_Volume",
@@ -399,6 +400,19 @@ def process_one(
             "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
+    # Renderer localizes the exact receipt through the existing private
+    # Runner transport; the public media hostname is not an access grant.
+    if needs_story_voiceover(output) and not dry_run:
+        from studio_produce.story_voiceover import RECEIPT
+        from render.fields import parse_json_field
+        receipt = parse_json_field(field(output, RECEIPT)) or {}
+        if receipt.get("state") == "verified" and receipt.get("url") == vo:
+            import re
+            sha = str(receipt.get("sha256") or "")
+            if not re.fullmatch(r"[a-f0-9]{64}", sha) or not isinstance(payload.get("voiceover"), dict):
+                return {"processed":False,"reason":"story_audio_receipt_invalid","output_record_id":output["id"]}
+            payload["voiceover"]["storyAudioSha256"] = sha
+
     expected_revision = manifest_studio_revision(output)
     expected_snapshot = render_snapshot_identity(output)
     watermark_url = render_watermark_url(client, output, content_item)
@@ -420,6 +434,13 @@ def process_one(
         return {"processed": False, "dry_run": True, **preview}
 
     remotion = RemotionClient(render_base)
+    if (payload.get("voiceover") or {}).get("storyAudioSha256"):
+        try:
+            transport_ready = remotion.get_health().get("privateStoryAudioLocalization") is True
+        except Exception:
+            transport_ready = False
+        if not transport_ready:
+            return {"processed":False,"reason":"waiting_for_private_story_audio_transport","output_record_id":output["id"]}
     # Single Remotion slot: if Chrome is already busy, park this row in the
     # waiting queue instead of accepting another job that only looks like Rendering.
     if remotion.slot_busy():

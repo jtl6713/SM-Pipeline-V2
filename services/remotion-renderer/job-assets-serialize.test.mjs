@@ -76,3 +76,37 @@ test("image assert is watermark-only so music/VO MP3 downloads are allowed", () 
   assert.match(fn, /if \(expectImage\)/);
   assert.match(fn, /Accept: expectImage/);
 });
+
+
+test("private Story audio must localize with exact receipt, no public URL fallback", async () => {
+  const vm=await import("node:vm");
+  const crypto=await import("node:crypto");
+  const data=Buffer.from("fixture original audio");
+  const sha=crypto.createHash("sha256").update(data).digest("hex");
+  const start=serverSrc.indexOf("async function rewriteVoiceoverAsset");
+  const end=serverSrc.indexOf("async function rewriteWatermarkAsset",start);
+  assert.ok(start>=0 && end>start);
+  const calls=[];
+  const ctx={URLSearchParams,crypto,path,
+    PIPELINE_RUNNER_INTERNAL_URL:"http://127.0.0.1:3350",
+    fsp:{readFile:async()=>data},
+    downloadUrlToFile:async(...args)=>calls.push(args),
+    toPublicSrc:()=>"/job-assets/fixture/voiceover.mp3",
+    appendLog:()=>{},
+    isHttpUrl:s=>/^https?:\/\//.test(s)
+  };
+  const localize=vm.runInNewContext(serverSrc.slice(start,end)+"\nrewriteVoiceoverAsset",ctx);
+  const voiceover={url:"https://media.chicagoshining.com/studio/previews/story-voiceover/recABCDEFGHIJKLMN/"+"a".repeat(64)+".mp3",storyAudioSha256:sha,volume:1};
+  const out=await localize({voiceover,jobAssetDir:"/fixture",job:{}});
+  assert.equal(out.src,"/job-assets/fixture/voiceover.mp3");
+  assert.equal(out.url,undefined);
+  assert.equal(out.storyAudioSha256,undefined);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0][2],0);
+  const internal=new URL(calls[0][0]);
+  assert.equal(internal.pathname,"/internal/story-audio");
+  assert.equal(internal.searchParams.get("sha256"),sha);
+  await assert.rejects(localize({voiceover:{...voiceover,url:"https://untrusted.test/audio.mp3"},jobAssetDir:"/fixture",job:{}}),/Invalid private Story audio receipt/);
+  assert.equal(calls.length,1);
+  await assert.rejects(localize({voiceover:{...voiceover,storyAudioSha256:"0".repeat(64)},jobAssetDir:"/fixture",job:{}}),/integrity check failed/);
+});
