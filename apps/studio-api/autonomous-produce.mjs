@@ -156,6 +156,22 @@ export function resolveAutonomousNarrationVoice(profile, defaults = {}) {
   return { voice_id: fallbackId, voice_name: fallbackName };
 }
 
+/** A narration default belongs to exactly one profile, never a working-profile or global fallback. */
+export function resolveRequiredProfileNarrationVoice(profile) {
+  const voiceId = String(profile?.default_narration_voice_id || profile?.Default_Narration_Voice_ID || "").trim();
+  const voiceName = String(profile?.default_narration_voice_name || profile?.Default_Narration_Voice_Name || "").trim();
+  if (!voiceId) throw new Error("Content profile has no configured default narration voice");
+  return { voice_id: voiceId, voice_name: voiceName || voiceId };
+}
+
+/** Older requests used Kate as a placeholder. Do not treat it as an override without evidence. */
+export function resolveProductionNarrationVoice(storedId, storedName, profile, legacyDefaultId) {
+  const configured = resolveRequiredProfileNarrationVoice(profile);
+  const id = String(storedId || "").trim();
+  if (!id || id === legacyDefaultId) return configured;
+  return { voice_id: id, voice_name: String(storedName || "").trim() || id };
+}
+
 /** First profile that actually set a narration default wins; empty defaults are skipped. */
 export function pickNarrationVoiceFromProfiles(profiles, fallback = {}) {
   const fallbackId = String(fallback.voice_id || "").trim();
