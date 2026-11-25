@@ -1210,6 +1210,11 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             if meta.get("role") == "canonical" and meta.get("sibling_ids"):
                 propagate_render_result(client, fresh, meta["sibling_ids"])
             continue
+        # Recheck only the precise stale missing-sentence guard when fresh
+        # creator narration now qualifies. All other blocks, including paid
+        # attempt receipts, stay fenced; R4 retains its normal validation.
+        from studio_produce.story_voiceover import rearm_story_sentence_guard
+        fresh = rearm_story_sentence_guard(client, fresh, ctx.get("parent"))
         render_status = field_str(fresh, "Render_Status")
         native = is_native_photo(
             field_str(fresh, "Platform"),
