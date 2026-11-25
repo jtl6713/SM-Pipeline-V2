@@ -21,7 +21,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-28-3129-visual-integrity-guard';
+const SERVICE_VERSION = '2026-11-25-2853-private-story-audio';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -133,6 +133,7 @@ app.get('/health', (req, res) => {
         defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
         postVoiceoverMusicBoost: true,
         privateDriveImageLocalization: true,
+        privateStoryAudioLocalization: true,
         watermarkLocalization: true,
         jobAssetsOutsidePublic: true,
         remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
@@ -969,6 +970,31 @@ function normalizeVoiceover(body) {
 async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
     if (!voiceover) {
         return undefined;
+    }
+
+    if (voiceover.storyAudioSha256 !== undefined) {
+        const checksum = String(voiceover.storyAudioSha256 || '');
+        const source = String(voiceover.url || '');
+        const match = /^https:\/\/media\.chicagoshining\.com\/(studio\/previews\/story-voiceover\/rec[A-Za-z0-9]{14}\/[a-f0-9]{64}\.mp3)$/.exec(source);
+        if (!match || !/^[a-f0-9]{64}$/.test(checksum)) {
+            throw new Error('Invalid private Story audio receipt');
+        }
+        const query = new URLSearchParams({key: match[1], sha256: checksum});
+        const destination = path.join(jobAssetDir, 'voiceover.mp3');
+        await downloadUrlToFile(
+            PIPELINE_RUNNER_INTERNAL_URL + '/internal/story-audio?' + query,
+            destination, 0
+        );
+        const bytes = await fsp.readFile(destination);
+        if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024 ||
+            crypto.createHash('sha256').update(bytes).digest('hex') !== checksum) {
+            throw new Error('Private Story audio integrity check failed');
+        }
+        const rewritten = {...voiceover, src:toPublicSrc(destination)};
+        delete rewritten.url;
+        delete rewritten.storyAudioSha256;
+        appendLog(job, 'Verified private Story audio localized');
+        return rewritten;
     }
 
     if (isHttpUrl(voiceover.url)) {
