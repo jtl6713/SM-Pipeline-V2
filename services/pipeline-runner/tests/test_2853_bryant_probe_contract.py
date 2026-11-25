@@ -104,7 +104,10 @@ def test_geometry_retry_is_exact_terminal_revision_and_corrected_source_bound():
     for required in (
         "$job.step -eq 'blocked'",
         "$job.error -eq 'Native gallery image geometry mismatch'",
-        "$job.updated_at -eq '2026-11-25T00:11:06Z'",
+        "$job.updated_at -eq '2026-11-25T00:26:21Z'",
+        "[int]$job.heal.resume_count -eq 3",
+        "$job.heal.last_resume_at -eq '2026-11-25T00:25:50.411Z'",
+        "$job.heal.last_block_error -eq 'Native gallery image geometry mismatch'",
         "$actual -ne $ExpectedGallerySourceSha",
         "incident2853_geometry_recovery_deployed_source=PASS",
     ):
@@ -112,3 +115,14 @@ def test_geometry_retry_is_exact_terminal_revision_and_corrected_source_bound():
     assert "geometry_correction_not_on_main" in WORKFLOW
     assert "-GeometryRecovery -ExpectedGallerySourceSha" in WORKFLOW
     assert SCRIPT.count("Invoke-RestMethod -Method POST") == 1
+
+
+def test_geometry_recovery_already_done_is_verified_without_post():
+    start = SCRIPT.index("if ($GeometryRecovery -and $beforeRequest.production_job.step -eq 'done')")
+    end = SCRIPT.index("  Assert-Baseline $beforeRequest $beforeOutputs", start)
+    branch = SCRIPT[start:end]
+    assert "Assert-Recovered $beforeRequest $beforeOutputs" in branch
+    assert "incident2853_geometry_recovery=ALREADY_RECOVERED_NO_POST" in branch
+    assert "exit 0" in branch
+    assert "Invoke-RestMethod -Method POST" not in branch
+    assert end < SCRIPT.index("Invoke-RestMethod -Method POST")
