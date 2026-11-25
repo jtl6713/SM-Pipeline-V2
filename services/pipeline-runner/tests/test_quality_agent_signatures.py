@@ -242,7 +242,7 @@ def test_stalled_pending_crop_signature_excludes_incomplete_or_active_cases():
         {"confirmed_master_count": 18}, {"plan_status": "Needs Plan"},
         {"ready_crops": 38, "pending_crops": 0}, {"pending_crops": 27},
         {"pending_attempted_count": 29}, {"request_status": "Cancelled"},
-        {"test_run_id": "test-only"}, {"last_pending_change_utc": "2026-11-24T17:35:00Z"},
+        {"test_run_id": "test-only"}, {"last_pending_change_utc": "2026-11-24T17:40:00Z"},
         {"last_pending_change_utc": "2026-11-22T12:48:04"},
         {"last_pending_change_utc": "invalid"},
     ):
@@ -265,4 +265,29 @@ def test_stalled_pending_crop_signature_includes_abandoned_attempts():
     result=detect_stalled_pending_crops(**_stalled_crop_fixture(pending_attempted_count=7))
     assert result["pending_attempted_crops"]==7
     assert result["pending_unattempted_crops"]==21
+    assert result["auto_repair_safe"] is False
+
+
+def test_crop_stall_two_minute_boundary_for_partial_buckingham_batch():
+    from quality_agent.signatures import PENDING_CROP_STALL_SECONDS, detect_stalled_pending_crops
+    assert PENDING_CROP_STALL_SECONDS == 120
+    base = _stalled_crop_fixture(
+        request_id="recWni5UcEHcq7mdX", master_count=5, confirmed_master_count=5,
+        ready_crops=5, target_crops=6, pending_crops=1, pending_attempted_count=0,
+        last_pending_change_utc="2026-11-25T02:46:47Z",
+    )
+    assert detect_stalled_pending_crops(**{**base, "now_utc": "2026-11-25T02:48:46Z"}) is None
+    result = detect_stalled_pending_crops(**{**base, "now_utc": "2026-11-25T02:48:47Z"})
+    assert result["age_seconds"] == 120
+    assert result["pending_unattempted_crops"] == 1
+    assert result["auto_repair_safe"] is False
+    assert "no_live_or_ambiguous_transfer_claim" in result["requires"]
+    assert "governor_and_database_admission" in result["requires"]
+    assert detect_stalled_pending_crops(**{**base, "now_utc": "2026-11-25T02:49:00Z",
+        "last_pending_change_utc": "2026-11-25T02:48:50Z"}) is None
+    assert detect_stalled_pending_crops(**{**base, "now_utc": "2026-11-25T02:50:00Z",
+        "ready_crops": 6, "pending_crops": 0}) is None
+    result = detect_stalled_pending_crops(**{**base, "now_utc": "2026-11-25T02:48:47Z",
+        "pending_attempted_count": 1})
+    assert result["pending_attempted_crops"] == 1
     assert result["auto_repair_safe"] is False
