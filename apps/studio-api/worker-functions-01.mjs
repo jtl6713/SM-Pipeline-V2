@@ -279,7 +279,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { ideaLibraryNeighborhoodContext, ideaLibraryNeighborhoodAnchor, ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -7254,12 +7254,16 @@ export function ideaLibraryMatchKeys(idea, query = "") {
   const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(locationForMatching));
   const fromNamed = ideaLibraryNamedPlaceKeys(`${primaryLocation} ${title} ${summary}`);
   const fromQuery = ideaLibraryStrongTokens(ideaLibraryTokens(query));
-  const placeKeys = [...new Set([...fromLocation, ...fromNamed, ...fromQuery])];
+  const { neighborhoodKey, neighborhoodSubjectKeys, neighborhoodTokens } =
+    ideaLibraryNeighborhoodContext(primaryLocation, f(idea, "Neighborhood_or_Area"), title, summary);
+  const placeKeys = [...new Set([neighborhoodKey, ...fromLocation, ...fromNamed, ...fromQuery].filter(Boolean))];
   const subjectKeys = ideaLibraryStrongTokens(ideaLibraryTokens(`${title} ${summary}`))
-    .filter((token) => !placeKeys.includes(token));
+    .filter((token) => !placeKeys.includes(token) && !neighborhoodTokens.includes(token));
   return {
     placeKeys,
     subjectKeys,
+    neighborhoodKey,
+    neighborhoodSubjectKeys,
     scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
   };
 }
@@ -7340,6 +7344,7 @@ export function ideaLibraryHaystack(record) {
     f(record, "Subtopic"),
     f(record, "Location"),
     f(record, "Asset_Description"),
+    f(record, "Visible_Subjects"),
     f(record, "Manual_Classification_JSON"),
     Array.isArray(tags) ? tags.join(" ") : tags,
     Array.isArray(keywords) ? keywords.join(" ") : keywords,
@@ -7416,7 +7421,7 @@ export function ideaLibraryIsEligibleImage(record, { allowLowQuality = false } =
 }
 /*__STUDIO_WORKER_END:ideaLibraryIsEligibleImage__*/
 
-export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIdeaTokens, ideaTokens, queryTokens, today }) {
+export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, neighborhoodKey = "", neighborhoodSubjectKeys = [], strongIdeaTokens, ideaTokens, queryTokens, today }) {
   const location = String(f(record, "Location") || "").toLowerCase();
   const name = String(f(record, "Asset Name") || "").toLowerCase();
   const batchId = String(f(record, "Intake_Batch_ID") || "").trim();
@@ -7424,12 +7429,15 @@ export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIde
   if (queryTokens.length && !queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) {
     return null;
   }
-  const locationPlaceHits = ideaLibraryFieldHits(location, placeKeys);
-  const namePlaceHits = ideaLibraryFieldHits(name, placeKeys);
+  const directPlaceKeys = placeKeys.filter(token => token !== neighborhoodKey);
+  const locationPlaceHits = ideaLibraryFieldHits(location, directPlaceKeys);
+  const namePlaceHits = ideaLibraryFieldHits(name, directPlaceKeys);
   const locationSubjectHits = ideaLibraryFieldHits(location, subjectKeys);
   const nameSubjectHits = ideaLibraryFieldHits(name, subjectKeys);
   const haySubjectHits = ideaLibraryFieldHits(haystack, subjectKeys);
-  const placeAnchor = locationPlaceHits.length > 0 || namePlaceHits.length > 0;
+  const areaAnchor = ideaLibraryNeighborhoodAnchor({ neighborhoodKey, neighborhoodSubjectKeys, location, name, haystack });
+  const placeAnchor = locationPlaceHits.length > 0 || namePlaceHits.length > 0 || areaAnchor;
+  if (neighborhoodKey && !placeAnchor && !queryTokens.length) return null;
   const subjectAnchor = locationSubjectHits.length > 0 || nameSubjectHits.length > 0;
   const subjectTopic = haySubjectHits.length >= 2;
   const strongOverlap = strongIdeaTokens.filter((token) =>
@@ -7438,6 +7446,7 @@ export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIde
   const weakOverlap = ideaTokens.filter((token) => ideaLibraryHasToken(haystack, token)).length;
   const intakeToday = ideaLibraryIntakeDate(record) === today;
   const reasons = [];
+  if (areaAnchor) reasons.push(`neighborhood_subject:${neighborhoodKey}`);
   if (locationPlaceHits.length) reasons.push(`location:${locationPlaceHits[0]}`);
   if (namePlaceHits.length) reasons.push(`asset_name:${namePlaceHits[0]}`);
   if (locationSubjectHits.length) reasons.push(`location_subject:${locationSubjectHits[0]}`);
@@ -7456,7 +7465,7 @@ export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIde
     reasons.push("search_hit");
   }
 
-  const score = (locationPlaceHits.length ? 40 : 0)
+  const score = (areaAnchor ? 35 : 0) + (locationPlaceHits.length ? 40 : 0)
     + (namePlaceHits.length ? 30 : 0)
     + (subjectAnchor ? 30 : 0)
     + (subjectTopic ? 25 : 0)
@@ -7512,6 +7521,7 @@ function preferSupabaseIdeaLibraryMedia(env) {
 async function listIdeaLibraryMediaRecords(env, {
   limit,
   query = "",
+  searchTokens = null,
   kind = "",
   profileId = "",
   filterFormula = null,
@@ -7521,6 +7531,7 @@ async function listIdeaLibraryMediaRecords(env, {
       const packed = await listSupabaseAssetLibraryRecords(env, {
         limit,
         query: phraseOrQueryForSupabaseLibrary(query),
+        searchTokens,
         kind,
         profileId,
         sortField: "Added_At",
@@ -7616,7 +7627,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
   ].filter(Boolean).join(" "));
   const queryTokens = phrase ? [] : ideaLibraryTokens(query);
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, phrase ? "" : query);
+  const { placeKeys, subjectKeys, scanKeys, neighborhoodKey, neighborhoodSubjectKeys } = ideaLibraryMatchKeys(idea, phrase ? "" : query);
   const today = chicagoNowParts().date;
   const operatorSearch = Boolean(phrase || queryTokens.length);
   // Typed search is operator choice only: every library hit for the query, no idea
@@ -7633,9 +7644,9 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listIdeaLibraryMediaRecords(env, {
     limit: scanLimit,
-    // Place-key Airtable OR packs stay on the Airtable fallback; Supabase
-    // loads a profile-scoped recent page and ranks in memory.
+    // Use the same structured candidate keys as the background matcher.
     query: operatorSearch ? query : "",
+    searchTokens: operatorSearch ? null : filterKeys,
     kind: includeVideo ? "" : "photo",
     profileId: profileId || "",
     filterFormula: combineAirtableFormulas(
@@ -7681,6 +7692,8 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
+      neighborhoodKey,
+      neighborhoodSubjectKeys,
       strongIdeaTokens,
       ideaTokens,
       queryTokens,
