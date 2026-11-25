@@ -46,7 +46,7 @@ test("held, terminal, and test rows remain excluded from the Home-compatible Pro
 test("content endpoint and UI display exact same diagnostics without adding retry or publishing action", () => {
   const worker = readFileSync(new URL("./worker-functions-03.mjs",import.meta.url),"utf8");
   assert.match(worker,/production_diagnostics: productionDiagnosticsByContent/);
-  assert.match(worker,/homeOutputInProduction\(mapOutput\(output\)\)/);
+  assert.match(worker,/homeOutputInProduction\(mapped\)/);
   const ui = readFileSync(new URL("../studio-web/assets/app-item4-1008.js",import.meta.url),"utf8");
   const markup=ui.slice(ui.indexOf("function productionDiagnosticMarkup("),ui.indexOf("function renderContentItemsTable("));
   assert.match(markup,/escapeHtml\(o\.reason/);
