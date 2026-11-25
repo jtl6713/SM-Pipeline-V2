@@ -57,7 +57,7 @@ function output(id, number, state = "Ready for Review") {
     updated_at: ISO,
   };
 }
-function mockSupabase(t, seed, { timeZone = "America/Chicago", missingSlides = false } = {}) {
+function mockSupabase(t, seed, { timeZone = "America/Chicago", missingSlides = false, audioIntent = null, audioLinks = [] } = {}) {
   const rows = seed.map(row => structuredClone(row)), calls = [];
   const savedFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = savedFetch; });
@@ -120,7 +120,11 @@ function mockSupabase(t, seed, { timeZone = "America/Chicago", missingSlides = f
       })) : []);
     }
     if (u.pathname.endsWith("/content_items")) {
-      return Response.json([{ id: CONTENT_UUID, airtable_record_id: CONTENT_ID, content_profile_id: PROFILE_UUID }]);
+      return Response.json([{ id: CONTENT_UUID, airtable_record_id: CONTENT_ID, content_profile_id: PROFILE_UUID, ...audioIntent }]);
+    }
+    if (u.pathname.endsWith("/production_request_outputs")) {
+      const ids = String(u.searchParams.get("airtable_record_id")).match(/^in\.\((.*)\)$/)?.[1].split(",") || [];
+      return Response.json(audioLinks.filter(x=>ids.includes(x.airtable_record_id)));
     }
     if (u.pathname.endsWith("/content_profiles")) {
       return Response.json([{ id: PROFILE_UUID, airtable_record_id: PROFILE_ID,
@@ -425,4 +429,33 @@ test("#2970 rejects wrong Story frame totals and stale audio/preview proof", () 
   proof.preview_url="https://media.chicagoshining.com/studio/previews/old.mp4";
   row.error_messages.Studio_Media_Contract_Receipt_JSON=JSON.stringify(proof);
   assert.match(encodedMediaReviewIssue(row),/no longer matches/);
+});
+
+
+test("#2972 original audio intent rejects self-consistent silent render and honors exact explicit opt-out", async t => {
+  const row=output(IDS[0],8946);
+  const request="recNfBTrDYdmyhka2",linkId="rec5oq8VsdYzju0T8";
+  Object.assign(row,{studio_output_type:"Reel",render_status:"Rendered",
+    studio_effective_voiceover_mode:"No",studio_effective_background_music_mode:"No",
+    selected_assets:{authority:"studio_owner_uploaded_exact_source",production_request_record_id:request},
+    error_messages:{Studio_Output_Directives_JSON:JSON.stringify({
+      production_request_record_id:request,production_request_output_record_id:linkId,
+      platform:row.platform,output_type:"Reel",pipeline_family:"Video",
+      voiceover_mode:"No",background_music_mode:"No"})}});
+  const link={airtable_record_id:linkId,production_request_airtable_id:request,content_item_id:row.content_item_id,
+    platform_output_id:row.id,platform:row.platform,output_type:"Reel",effective_resolution:{}};
+  const mock=mockSupabase(t,[row],{audioIntent:{voiceover_intent:"Yes",music_intent:"Yes"},audioLinks:[link]});
+  let entry=(await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]);
+  assert.match(entry.originalAudioIssue,/voiceover differs from original Yes/);
+  await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy),/original Yes/);
+  assert.ok(mock.calls.every(c=>c.method==="GET"));
+  link.effective_resolution={Voiceover_Mode_Override:"No",Background_Music_Mode_Override:"No"};
+  entry=(await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]);
+  assert.equal(entry.originalAudioIssue,null);
+  link.effective_resolution={Voiceover_Mode_Override:"AI decides",Background_Music_Mode_Override:"Yes"};
+  entry=(await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]);
+  assert.match(entry.originalAudioIssue,/background music differs from original Yes/);
+  link.platform_output_id="wrong-id";
+  entry=(await factorySupabaseApprovalRows(env,[IDS[0]])).get(IDS[0]);
+  assert.match(entry.originalAudioIssue,/could not be reconciled/);
 });

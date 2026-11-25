@@ -17,6 +17,7 @@ import {
 } from "./native-gallery-package-guard.mjs";
 import { STORY_2915_ID, story2915GenerationValid, story2915NewApprovalValid, story2915HeldRecoveryReceiptValid } from "./story-expired-generation-2915.mjs";
 import { originalIntentCoversGallery } from "./factory-original-intent.mjs";
+import { generatedAudioSource, originalAudioIntentIssue } from "./factory-audio-intent.mjs";
 import { factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   maeScheduleNextSlot, maeNormalizeTimeZone, maeTimeZoneFromTheme, MAE_SUGGEST_HORIZON_DAYS,
@@ -90,10 +91,20 @@ export async function factorySupabaseApprovalRows(env, ids) {
   const contentIds = [...new Set(rows.map(row => row.content_item_id).filter(Boolean))];
   const contents = contentIds.length
     ? await supabaseRest(env,
-      "content_items?id=" + listFilter(contentIds) + "&select=id,content_profile_id,airtable_record_id&limit=21")
+      "content_items?id=" + listFilter(contentIds) + "&select=id,content_profile_id,airtable_record_id,voiceover_intent:extras->>Include_Voiceover,music_intent:extras->>Include_Background_Music&limit=21")
     : [];
   if (!Array.isArray(contents)) throw Error("Factory Supabase content ownership unavailable");
   const contentMap = new Map(contents.map(row => [row.id, row]));
+  // One bounded exact link read per batch; native galleries and prior approvals do not use it.
+  const audioSources = new Map(rows.map(row => [row.airtable_record_id, generatedAudioSource(row)]));
+  const audioLinkIds = [...new Set([...audioSources.values()].filter(Boolean).map(d=>d.production_request_output_record_id))];
+  const audioLinks = audioLinkIds.length ? await supabaseRest(env,
+    "production_request_outputs?airtable_record_id=" + listFilter(audioLinkIds)
+    + "&select=airtable_record_id,production_request_airtable_id,content_item_id,platform_output_id,platform,output_type,effective_resolution&limit=21") : [];
+  if (!Array.isArray(audioLinks) || audioLinks.length > audioLinkIds.length
+      || new Set(audioLinks.map(l=>l.airtable_record_id)).size!==audioLinks.length)
+    throw Error("Factory original audio instructions unavailable or ambiguous");
+  const audioLinkMap = new Map(audioLinks.map(l=>[l.airtable_record_id,l]));
   const profileUuids = [...new Set(rows.flatMap(row => [
     row.content_profile_id, contentMap.get(row.content_item_id)?.content_profile_id,
   ]).filter(Boolean))];
@@ -134,7 +145,9 @@ export async function factorySupabaseApprovalRows(env, ids) {
         ? row.selected_assets : JSON.stringify(row.selected_assets);
     }
     result.set(id, { row, record, profileId, profileUuid: direct || linked,
-      profileTimeZone: profileZones.get(direct || linked) });
+      profileTimeZone: profileZones.get(direct || linked),
+      originalAudioIssue: originalAudioIntentIssue(row,content,
+        audioLinkMap.get(audioSources.get(id)?.production_request_output_record_id),audioSources.get(id)) });
   }
   return result;
 }
@@ -184,6 +197,7 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
   if(row.airtable_record_id===STORY_2915_ID&&!story2915GenerationValid(row))return {eligible:false,reason:"Corrected Story replacement generation not verified"};
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
+  if (entry.originalAudioIssue) return { eligible: false, reason: entry.originalAudioIssue };
   const mediaIssue = encodedMediaReviewIssue(row);
   if (mediaIssue) return { eligible: false, reason: mediaIssue };
   const readiness = evaluateReviewPackage(record);
