@@ -82,7 +82,7 @@ const reconciledEarlyHold = () => {
   record.fields.Studio_Early_Hold_Original_Dispatch_At = record.fields.Studio_Publish_Dispatch_At;
   record.fields.Studio_Early_Hold_Original_Scheduled_At = "2026-11-19T18:30:00Z";
   record.fields.Studio_Overdue_MAE_Recovery_Receipt = {
-    version: "issue-3096-mae-v1", output_record_id: record.id,
+    version: "issue-3096-mae-v1", state: "committed", output_record_id: record.id,
     platform: record.fields.Platform, output_type: record.fields.Platform_Output_Type,
     original_dispatch_at: record.fields.Studio_Publish_Dispatch_At,
     original_scheduled_at: record.fields.Studio_Early_Hold_Original_Scheduled_At,
@@ -194,10 +194,12 @@ test("#3096 expired audited hold requires a new MAE slot, not immediate publicat
   assert.equal(row.fields.Scheduled_Post_Date, "2026-11-19T18:30:00Z");
   assert.equal(plan.receipt.original_scheduled_at, "2026-11-19T18:30:00.000Z");
   row.fields.Scheduled_Post_Date = plan.scheduled_for;
-  row.fields.Studio_Overdue_MAE_Recovery_Receipt = plan.receipt;
+  row.fields.Studio_Overdue_MAE_Recovery_Receipt = {...plan.receipt, state:"pending_commit"};
+  assert.equal(assessFreshSupabasePublish(row, { nowMs: Date.parse(plan.scheduled_for) }).eligible, false);
+  row.fields.Studio_Overdue_MAE_Recovery_Receipt = {...plan.receipt, state:"committed"};
   assert.equal(check(row).reason, "future_schedule");
   assert.equal(assessFreshSupabasePublish(row, { nowMs: Date.parse(plan.scheduled_for) }).eligible, true);
-  row.fields.Studio_Overdue_MAE_Recovery_Receipt = {...plan.receipt, output_record_id:"rec00000000000000"};
+  row.fields.Studio_Overdue_MAE_Recovery_Receipt = {...plan.receipt, state:"committed", output_record_id:"rec00000000000000"};
   assert.equal(assessFreshSupabasePublish(row, { nowMs: Date.parse(plan.scheduled_for) }).eligible, false);
 });
 test("#3096 MAE plan fails closed on incomplete occupancy, receipt or prior provider evidence", () => {
