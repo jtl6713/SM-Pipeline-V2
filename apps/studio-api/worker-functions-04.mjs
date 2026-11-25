@@ -19162,6 +19162,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
                 approvedByUserRecordId: intent?.approvedByUserRecordId || null,
                 submittedAt: intent?.submittedAt || null,
                 originalIntentRecovery: recoveryItem?.original_intent_recovery === true,
+                creativeReview: originalParent?.records?.find(row=>row.id===id)?.creative_review || null,
                 policy: parentId ? globalPolicy : null,
                 pilotRollout: parentId ? null : rollout,
                 onStage: checkpoint,
@@ -19569,7 +19570,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   let records;
   if (supabaseAuthority) {
     try {
-      records = await factorySupabaseGroupPreflight(env, ids, policy);
+      records = await factorySupabaseGroupPreflight(env, ids, policy, {
+        approvedByUserRecordId: String(authorization?.user?.record_id || "").trim(),
+      });
     } catch (error) {
       const message = String(error?.message || error);
       throw new HttpError(/No new batch was accepted/.test(message) ? 409 : 503, message);
@@ -19580,6 +19583,25 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     );
   }
 
+  // A saved pre-acceptance rejection may be revalidated read-only and then
+  // retried with the same original IDs. If the client supplies the exact
+  // canonical versions returned by that validation, fail before claims on
+  // any intervening change. A normal new click need not supply versions.
+  if (supabaseAuthority && !validateOnly) {
+    const expectedVersions = new Map((Array.isArray(payload?.items) ? payload.items : [])
+      .filter(item => item?.expected_review_updated_at != null)
+      .map(item => [String(item.id), String(item.expected_review_updated_at)]));
+    if (expectedVersions.size) {
+      if (expectedVersions.size !== records.length || records.some(row=>!expectedVersions.has(row.id)))
+        throw new HttpError(400,"Incomplete Factory review version fence; no batch accepted");
+      for (const row of records) {
+        if (row.requires_current_approval && (!row.review_updated_at
+            || row.review_updated_at !== expectedVersions.get(row.id)))
+          throw new HttpError(409,"Output #" + row.output_id
+            + ": media review changed since validation; fresh review required. No new batch was accepted.");
+      }
+    }
+  }
   const verifiedProfiles = new Set();
   for (const row of records) {
     if (verifiedProfiles.has(row.profile_id)) continue;
@@ -19607,8 +19629,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   // and profile checks, then stop BEFORE any R2 access, claim or approval.
   if (validateOnly) return respond(request, env, {
     accepted: false, read_only: true, preflight_valid: true,
-    request_id: requestId, records: records.map(({id, output_id, profile_id}) =>
-      ({id, output_id, profile_id})),
+    request_id: requestId, records: records.map(({id, output_id, profile_id, review_updated_at, requires_current_approval, creative_review}) =>
+      ({id, output_id, profile_id, ...(supabaseAuthority ? {review_updated_at,requires_current_approval,
+        creative_warnings:creative_review?.warnings || []} : {})})),
   });
 
   const submissionPreflightFinishedAt = new Date().toISOString();

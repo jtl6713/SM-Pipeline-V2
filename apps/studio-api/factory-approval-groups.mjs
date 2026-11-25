@@ -63,6 +63,13 @@ function clean(row) {
     format: String(row.format||"").slice(0,60),
     title: String(row.title||"").slice(0,180),
     content_id: ID.test(String(row.content_id||"")) ? row.content_id : null,
+    // This evidence comes from authenticated canonical preflight, never from
+    // the browser's hints. Preserve it in the durable parent snapshot.
+    ...(/^[a-f0-9]{64}$/.test(String(row.creative_review?.revision_sha256||""))
+      && Array.isArray(row.creative_review?.warnings) && row.creative_review.warnings.length > 0
+      && row.creative_review.warnings.length <= 4
+      && row.creative_review.warnings.every(w=>typeof w==="string" && w.length<=500)
+      ? {creative_review:{revision_sha256:row.creative_review.revision_sha256,warnings:[...row.creative_review.warnings]}} : {}),
   };
 }
 /** Deduplicate canonical output IDs, not content IDs. Require resolved ownership. */

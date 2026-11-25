@@ -34,7 +34,7 @@ const FACTORY_APPROVAL_SELECT = [
   "output_title", "output_status", "review_status", "publish_status", "publish_method", "render_status",
   "do_not_publish", "publish_hold_released_at", "publish_hold_set_at", "publish_hold_reason", "publish_hold_source", "publish_hold_release_actor", "publish_retry_eligible", "test_run_id", "output_caption", "thumbnail_url",
   "studio_preview_url", "final_file_url", "publish_asset_url", "publish_next_retry_at", "selected_clip_count", "selected_assets", "render_clip_list",
-  "render_total_frames", "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
+  "render_total_frames", "asset_set_revision", "studio_effective_voiceover_mode", "studio_effective_background_music_mode",
   "error_messages", "updated_at", "auto_publish_enabled", "scheduled_post_date",
   "studio_scheduled_at", "youtube_scheduled_publish_at", "published_at", "platform_post_url",
   "platform_publish_response",
@@ -152,11 +152,11 @@ export async function factorySupabaseApprovalRows(env, ids) {
   return result;
 }
 
-export function encodedMediaReviewIssue(row) {
+export function encodedMediaReviewIssue(row, { allowPlannedDurationDifference = false } = {}) {
   const type = String(row?.studio_output_type || row?.format || "").toLowerCase();
   const expected = Number(row?.selected_assets?.target_total_frames);
   const frames = Number(row?.render_total_frames);
-  if (type === "story" && expected > 0 && frames > 0 && frames !== expected)
+  if (!allowPlannedDurationDifference && type === "story" && expected > 0 && frames > 0 && frames !== expected)
     return "Story render duration differs from its planned package; rebuild before approval";
   const raw = row?.error_messages?.Studio_Media_Contract_Receipt_JSON;
   // Historic rows without a receipt retain their old eligibility rules; the
@@ -178,7 +178,43 @@ export function encodedMediaReviewIssue(row) {
   return null;
 }
 
-export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRollout = null) {
+// The planned creative choices are advisory when a new authenticated human
+// explicitly approves the canonical media snapshot. Never downgrade missing
+// source identity, corrupt/stale encoded evidence, holds or technical gates.
+function factoryCreativeReviewWarnings(entry) {
+  const row = entry?.row;
+  const warnings = [];
+  const planned = Number(row?.selected_assets?.target_total_frames);
+  const actual = Number(row?.render_total_frames);
+  if (String(row?.studio_output_type || row?.format || "").toLowerCase() === "story"
+      && planned > 0 && actual > 0 && planned !== actual)
+    warnings.push("Story planned " + planned + " frames, rendered " + actual + " frames");
+  const audio = String(entry?.originalAudioIssue || "");
+  if (/^Generated video (?:voiceover|background music) differs from original (?:Yes|No) instruction;/.test(audio))
+    warnings.push(audio);
+  return warnings;
+}
+async function factoryCreativeReviewSnapshot(entry) {
+  const row = entry.row;
+  const warnings = factoryCreativeReviewWarnings(entry);
+  if (!warnings.length) return null;
+  // Capture the actual canonical review package, not the expected duration
+  // or a client-provided flag. Legacy assets may have no encoded hash; in
+  // that case this binds the recorded asset references, not the bytes.
+  const identity = JSON.stringify([
+    row.id, row.airtable_record_id, entry.profileId, row.platform,
+    row.studio_output_type || row.format, row.asset_set_revision || null,
+    row.studio_preview_url, row.final_file_url, row.publish_asset_url,
+    row.thumbnail_url, row.output_caption, row.render_total_frames,
+    row.selected_assets, row.render_clip_list,
+    row.studio_effective_voiceover_mode, row.studio_effective_background_music_mode,
+    row.error_messages?.Studio_Media_Contract_Receipt_JSON || null,
+    warnings,
+  ]);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity)));
+  return { revision_sha256: [...digest].map(b => b.toString(16).padStart(2, "0")).join(""), warnings };
+}
+export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRollout = null, { allowCreativeWarnings = false } = {}) {
   const row = entry?.row;
   const record = entry?.record;
   if (!row || !record || !entry.profileId) return { eligible: false, reason: "Supabase output identity missing" };
@@ -197,23 +233,26 @@ export function factorySupabaseApprovalDisposition(entry, policy = null, pilotRo
   if (row.do_not_publish === true) return { eligible: false, reason: "publishing hold is active" };
   if(row.airtable_record_id===STORY_2915_ID&&!story2915GenerationValid(row))return {eligible:false,reason:"Corrected Story replacement generation not verified"};
   if (row.test_run_id) return { eligible: false, reason: "test output is not eligible for approval" };
-  if (entry.originalAudioIssue) return { eligible: false, reason: entry.originalAudioIssue };
-  const mediaIssue = encodedMediaReviewIssue(row);
+  const warnings = factoryCreativeReviewWarnings(entry);
+  if (entry.originalAudioIssue && !(allowCreativeWarnings && warnings.includes(entry.originalAudioIssue)))
+    return { eligible: false, reason: entry.originalAudioIssue };
+  const mediaIssue = encodedMediaReviewIssue(row, {allowPlannedDurationDifference:allowCreativeWarnings});
   if (mediaIssue) return { eligible: false, reason: mediaIssue };
   const readiness = evaluateReviewPackage(record);
   if (!formalFactoryApprovalReady(record, readiness)) {
     return { eligible: false, reason: (readiness.missing_requirements || []).join(", ")
       || readiness.reason || "output is no longer ready for approval" };
   }
-  return { eligible: true, already_satisfied: false, readiness };
+  return { eligible: true, already_satisfied: false, readiness, ...(allowCreativeWarnings && warnings.length ? {creative_warnings:warnings} : {}) };
 }
 
-export async function factorySupabaseGroupPreflight(env, ids, policy) {
+export async function factorySupabaseGroupPreflight(env, ids, policy, { approvedByUserRecordId = null } = {}) {
+  const allowCreativeWarnings = RECORD_ID.test(String(approvedByUserRecordId || ""));
   const unique = validIds(ids);
   const rows = await factorySupabaseApprovalRows(env, unique);
   return Promise.all(unique.map(async id => {
     const entry = rows.get(id);
-    const state = factorySupabaseApprovalDisposition(entry, policy);
+    const state = factorySupabaseApprovalDisposition(entry, policy, null, { allowCreativeWarnings });
     const number = entry?.row?.output_number || id;
     if (!state.eligible) {
       throw Error("Output #" + number + ": " + state.reason + ". No new batch was accepted.");
@@ -247,6 +286,8 @@ export async function factorySupabaseGroupPreflight(env, ids, policy) {
       title: entry.row.output_title || "", content_id: entry.row.content_item_airtable_id || null,
       // Internal current-review evidence, never trusted from browser payloads.
       requires_current_approval: !state.already_satisfied,
+      review_updated_at: entry.row.updated_at || null,
+      ...(state.creative_warnings?.length ? {creative_review: await factoryCreativeReviewSnapshot(entry)} : {}),
     };
   }));
 }
@@ -310,6 +351,7 @@ async function factorySupabaseNextApprovedSlot(env, entry, onTiming = async () =
 export async function factorySupabaseApproveOutput(env, id, profileId, {
   requestId = "", policy = null, pilotRollout = null,
   approvedByUserRecordId = null, submittedAt = null, originalIntentRecovery = false,
+  creativeReview = null,
   verifyImages = verifyReviewImages, onStage = async () => {}, onTiming = async () => {},
 } = {}) {
   // These exact awaited checkpoints are observational only; the canonical
@@ -323,7 +365,20 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
     throw Error("Factory output ownership changed; no approval committed");
   }
   await onTiming("disposition_started");
-  const state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
+  let state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout);
+  let acceptedCreativeReview = null;
+  if (!state.already_satisfied && creativeReview) {
+    // Only an authenticated new group may carry this server-generated
+    // snapshot. A changed asset/creative decision requires fresh review.
+    if (originalIntentRecovery || !RECORD_ID.test(String(approvedByUserRecordId || "")))
+      throw Error("Creative review snapshot lacks authenticated current approval");
+    const current = await factoryCreativeReviewSnapshot(entry);
+    if (!current || current.revision_sha256 !== creativeReview.revision_sha256
+        || JSON.stringify(current.warnings) !== JSON.stringify(creativeReview.warnings))
+      throw Error("Creative review package changed after submission; fresh review required");
+    state = factorySupabaseApprovalDisposition(entry, policy, pilotRollout, {allowCreativeWarnings:true});
+    if (state.eligible) acceptedCreativeReview = current;
+  }
   await onTiming("disposition_finished");
   if (!state.eligible) throw Error("Cannot approve: " + state.reason);
   if (state.already_satisfied) {
@@ -379,6 +434,7 @@ export async function factorySupabaseApproveOutput(env, id, profileId, {
       ? "authenticated_factory_submission" : "legacy_batch_actor_not_captured",
     scheduled_for: scheduled.iso, scheduled_timezone: scheduled.timeZone,
     published: false,
+    ...(acceptedCreativeReview ? {creative_review:acceptedCreativeReview} : {}),
   };
   const fields = {
     output_status: "Approved for Publishing",
