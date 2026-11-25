@@ -65,6 +65,63 @@ def exact_story_snapshot(output, parent_id):
     ))
 
 
+
+STORY_MISSING_SENTENCE = "Studio Story narration integrity guard: Story needs a complete concise narration sentence"
+
+
+def story_sentence_recovery_candidate(output, parent):
+    """Only an unapproved, unheld, unstamped Story with newly valid input.
+
+    Do not rearm failed/ambiguous paid attempts. This predicate performs no
+    provider work and cannot change the parent script or publication state.
+    """
+    if (not parent or not parent.get("id")
+            or field_str(output, "Output_Status") != "In Production"
+            or field_str(output, "Render_Status") != "Blocked"
+            or field_str(output, "Remotion_Error_Message") != STORY_MISSING_SENTENCE
+            or field_str(output, "Review_Status") not in {"", "Pending Review", "Review Sent"}
+            or field(output, "Do_Not_Publish") not in (None, False)
+            or field(output, "Auto_Publish_Enabled") not in (None, False)
+            or field_str(output, RECEIPT)
+            or any(field_str(output, name) for name in (
+                "Production_Approved_At", "Published_At", "Studio_Scheduled_At",
+                "YouTube_Scheduled_Publish_At", "Platform_Post_ID", "Platform_Post_URL",
+                "Platform_Media_ID", "Platform_Publish_Response", "Publish_Started_At",
+                "Last_Publish_Attempt_At", "Studio_Publish_Dispatch_At",
+                "Publish_Locked_At", "IG_Story_Container_ID", "IG_Story_Post_ID",
+            ))
+            or any(field_str(output, name) not in {"", "0"} for name in (
+                "Publish_Attempt_Count", "Studio_Publish_Dispatch_Count",
+            ))
+            or not field_str(output, "Composition_ID")
+            or not field_str(output, "Render_Clip_List_JSON")):
+        return False
+    try:
+        exact_story_snapshot(output, parent["id"])
+        story_seconds(output)
+        story_text(field_str(parent, "Voiceover_Script"))
+    except StoryVoiceoverError:
+        return False
+    return True
+
+
+def rearm_story_sentence_guard(client, output, parent):
+    """Allow a corrected script back into normal R4, never waive its guard."""
+    if not story_sentence_recovery_candidate(output, parent):
+        return output
+    current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    live_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+    if (not story_sentence_recovery_candidate(current, live_parent)
+            or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
+            or story_text(field_str(live_parent, "Voiceover_Script")) != story_text(field_str(parent, "Voiceover_Script"))):
+        return current
+    # R4 still validates timing, revision, narration fit, source integrity,
+    # actual render ownership and sibling paid-attempt receipts.
+    client.update_record(PLATFORM_OUTPUTS_TABLE, current["id"],
+                         {"Render_Status": "Ready for Render"}, typecast=True)
+    return client.get_record(PLATFORM_OUTPUTS_TABLE, current["id"])
+
+
 def matching_story_claims(client, parent, output_id, digest, url):
     # Read all siblings under the existing exact parent-scoped loader, while
     # holding the Windows governor resource slot. Never infer an absent attempt
