@@ -1,0 +1,19 @@
+name: Incident 2853 authenticated Story audio read
+on:
+  pull_request:
+    paths:
+      - 'apps/r2-upload-worker/worker.js'
+      - 'apps/r2-upload-worker/story-audio-read.test.mjs'
+      - '.github/workflows/incident-2853-story-audio-read-tests.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test apps/r2-upload-worker/story-audio-read.test.mjs
