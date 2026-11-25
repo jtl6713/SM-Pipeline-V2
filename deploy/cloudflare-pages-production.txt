@@ -967,3 +967,4 @@ Deploy Studio UI 0.6.1082-approval-success-2622 after protected CI: separate app
 2026-11-25 UTC — #2959/#2847 UI 0.6.1093 Factory independent submission recovery, exact backend IDs, truthful pending profile state and isolated per-plan rejection. Protected Pages deployment only; no approval replay, publishing, media mutation or database safeguards changed.
 
 2026-11-25 UTC — #2959/#2847 UI 0.6.1094: exact saved consent recovery with read-only canonical review-version preflight, isolate definitive rejected members, retain original request ID for unchanged creative-warning cases. No synthetic approvals or hold/publishing changes. Requires protected Worker support and green CI.
+2026-11-25 UTC — #2959 UI 0.6.1095: distinguish pending automatic lock retry from terminal failure in Factory Activity; preserve original accepted request, no approval, retry dispatch, publishing, hold or scheduling mutations. Protected Pages release and live BUILD_ID verification required.
