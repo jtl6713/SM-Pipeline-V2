@@ -6835,11 +6835,13 @@ test("production watchdog selects unfinished non-test requests before cap; other
 test("independent production watchdog has a gated minute owner and does not duplicate the scheduled sweep", async () => {
   const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
   const produce = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
-  assert.match(worker, /env\.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED === "true"/);
+  assert.match(worker, /env\.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED !== "false"/);
   assert.match(worker, /if \(independentProduceWatchdog && collectorCron === "\* \* \* \* \*" && collectorMinute % 5 === 2\)/);
   assert.match(worker, /if \(!independentProduceWatchdog\) \{\s*try \{\s*await resumeStaleStudioProductionJobs/);
   assert.match(worker, /resumeStaleStudioProductionJobs\(env, \{\s*maxCandidates: 4,/);
   assert.match(produce, /createdSince: "2026-11-22T12:48:45Z"/);
   assert.match(produce, /ids\.slice\(offset, offset \+ candidateLimit\)/);
   assert.match(produce, /skipped: "request_no_longer_eligible"/);
+  assert.match(produce, /enqueueStudioProductionJob\(env, requestId, \{ resume: isBlocked \}\)/);
+  assert.match(worker, /studio_produce_watchdog_independent_enabled:/);
 });

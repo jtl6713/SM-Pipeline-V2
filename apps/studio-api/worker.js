@@ -1482,6 +1482,8 @@ export default {
           studio_assets_read_source: studioAssetsReadSource(env),
           studio_auth_read_source: studioAuthReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
+          studio_produce_watchdog_independent_enabled: studioPhase6WriteSource(env) === "supabase"
+            && studioSupabaseConfigured(env) && env.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED !== "false",
           studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
           studio_supabase_read_routes: STUDIO_SUPABASE_READ_ROUTES,
           studio_supabase_phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -4599,12 +4601,12 @@ export default {
         console.warn("airtable_retirement_collector_heartbeat_unavailable",
           String(error?.message || error))));
     }
-    // #2853: optional staged independent production recovery. The minute
+    // #2853: verified independent Supabase production recovery. The minute
     // owner is disjoint from the shared light/heavy sweep, including cooldown.
     // Keep the existing bounded Runner/governor path; no publishing dispatch.
     const independentProduceWatchdog = studioPhase6WriteSource(env) === "supabase"
       && studioSupabaseConfigured(env)
-      && env.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED === "true";
+      && env.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED !== "false";
     if (independentProduceWatchdog && collectorCron === "* * * * *" && collectorMinute % 5 === 2) {
       ctx.waitUntil(resumeStaleStudioProductionJobs(env, {
         maxCandidates: 4,
