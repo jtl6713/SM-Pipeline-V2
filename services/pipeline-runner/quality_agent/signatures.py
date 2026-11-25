@@ -304,7 +304,9 @@ def reconcile_ig_stale_upload(
 
 STALLED_PENDING_CROPS = "QA-PRODUCTION-STALLED-PENDING-CROPS-v1"
 CREATIVE_IMAGE_ADVISORY = "QA-CREATIVE-IMAGE-ADVISORY-v1"
-PENDING_CROP_STALL_SECONDS = 30 * 60
+# Interactive crop preparation: detect two minutes without canonical transfer progress.
+# This is a detection threshold only, not a lease timeout or permission to replay.
+PENDING_CROP_STALL_SECONDS = 2 * 60
 
 
 def detect_stalled_pending_crops(
