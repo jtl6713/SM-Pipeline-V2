@@ -192,6 +192,32 @@
   function archiveFactoryPending() {
     if (state.submittingBatch) return;
     const saved = pendingFactoryApproval();
+    // Upgrade archived multi-plan envelopes too; their original backend IDs
+    // remain exact and must not be replaced by the browser-only preview ID.
+    for (const { key, saved: old } of factoryRecoveryEntries()) {
+      if (old.profile_id !== "global" || !Array.isArray(old.batches) || old.batches.length < 2
+          || !old.batches.every(plan => plan.request_id && Array.isArray(plan.ids))) continue;
+      const rejectedId = old.last_error ? factoryRejectedOutputId(old) : null;
+      // Write every sibling before replacing the legacy key (which usually
+      // names the first plan). Do not overwrite an independently tracked plan.
+      const envelopes = old.batches.map(plan => {
+        const envelope = { ...old, ids: plan.ids, batches: [plan] };
+        if (rejectedId && !plan.ids.includes(rejectedId)) {
+          delete envelope.last_error;
+          delete envelope.retry_blocked;
+          delete envelope.terminal_eligibility;
+          delete envelope.next_retry_ms;
+          delete envelope.attempts;
+        }
+        return { key: FACTORY_RECOVERY_PREFIX + plan.request_id, envelope };
+      });
+      for (const row of envelopes.filter(row => row.key !== key)) {
+        if (!localStorage.getItem(row.key)) localStorage.setItem(row.key, JSON.stringify(row.envelope));
+      }
+      const original = envelopes.find(row => row.key === key);
+      if (original) localStorage.setItem(key, JSON.stringify(original.envelope));
+      else localStorage.removeItem(key);
+    }
     if (!saved) return;
     // Partition the persisted intent before any POST. A rejection belongs to
     // exactly one backend request, never to its unrelated sibling plans.
@@ -1881,7 +1907,7 @@
       const value = String(latest?.job_id || "");
       if (value) navigator.clipboard?.writeText(value).catch(() => {});
     });
-    details.querySelectorAll("[data-factory-copy-request]").forEach(button => {
+    details.querySelectorAll?.("[data-factory-copy-request]")?.forEach(button => {
       button.addEventListener("click", () => {
         const value = button.getAttribute("data-factory-copy-request");
         if (value) navigator.clipboard?.writeText(value).catch(() => {});
@@ -2074,15 +2100,14 @@
             + "). Cleared the browser queue so your current Ready for Review selection can submit.");
           continue;
         }
-        if (!result?.resolved && result?.message && touchesSelection) {
+        if (!result?.resolved && result?.message && (touchesSelection || (saved.ids || []).length)) {
           const message = "Submission not accepted yet: " + result.message;
           setBatchSubmissionError(message);
           setStatus(message, true);
         }
       }
       // A past failed recovery must not keep painting after the operator moves on.
-      if (state.batchSubmissionError && !factoryRecoveryEntries().some(({ saved }) =>
-        (saved.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+      if (state.batchSubmissionError && !factoryRecoveryEntries().length) {
         setBatchSubmissionError(null);
       }
     } finally {
