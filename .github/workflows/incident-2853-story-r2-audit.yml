@@ -1,4 +1,4 @@
-# Single-execution diagnostic: GET two exact audio checksums; always delete isolated helper.
+# Single-execution diagnostic: GET five exact parked-parent audio receipts; always delete isolated helper.
 name: Issue 2853 authenticated upload-bucket Story audio checksum audit
 on:
   push:
@@ -42,8 +42,11 @@ jobs:
           pathlib.Path('/tmp/2853-route').write_text(route)
           source="""const EXPECTED=__ROUTE__;
           const EXACT=[
-            [11228,'studio/previews/story-voiceover/recX91Bo62trG2lJ6/330a613f28cc1e1b813661d124e50c62f546747328b5798d4b623d03bb4b76fe.mp3','f5e251a04e95c9cdaa1b3ec86b2758ad3e7d079ccf1deb8427835904c8aa78ae'],
-            [11277,'studio/previews/story-voiceover/recgBtukVbv5vAMzS/2e71d62e8373a8a803ce2a1925372903f9a9bd45fa65c867b187bce18346f859.mp3','226eee5e3801d5f36928677ef3493bcecfc61611996209a417063aaa1db8d7f3']
+            [11196,'studio/previews/story-voiceover/rec9qS53G7HDoyCL5/0454c4863049a512c784d2964e74a587387baa5665a2753a1bb8f5b3c501c18d.mp3','e6d305b08797e5c83f5ee30104384e702573cfe0d352a8a078f6eee6df1982fb'],
+            [11202,'studio/previews/story-voiceover/reccVyNLdmJJeI8hG/b55b795ffb32c1bf079705ddf7ad1248762847b0c5600b76c88df8e7401f6260.mp3',''],
+            [11214,'studio/previews/story-voiceover/rec3fNJ6QgaL7EMBn/f1a4382db6a08f1f5591a61a768420b93d9f6d01c52b3aa337fc197147350a58.mp3','3d3cb59ea7a0d6512663607773464d59f003d6cd7af96f7adf3e54469cab72f5'],
+            [11220,'studio/previews/story-voiceover/rec1IvSP9aGeOQRfd/c794387245520b188bb45588addeb137cf4cc6237e5d7d2324b476f6b90ebfaa.mp3','bc89fc89aa041a774362fb8d29ec23ccfa7051fc4f9de045847164ef5a2b1b63'],
+            [11234,'studio/previews/story-voiceover/recG0b34XYwYWggTp/69e65eb8a0e00385ba952c8bfee7926fa8b6c6bc3562c2a3909e07718df71147.mp3','']
           ];
           export default {async fetch(request,env) {
             const url=new URL(request.url);
@@ -55,7 +58,8 @@ jobs:
               try {
                 const head=await env.STUDIO_MEDIA.head(key);
                 if(head) {
-                  if(head.size>8388608 || head.size<=0) row.result='invalid_size';
+                  if(!digest) row.result='present_without_checksum_unverified';
+                  else if(head.size>8388608 || head.size<=0) row.result='invalid_size';
                   else {
                     const obj=await env.STUDIO_MEDIA.get(key,{onlyIf:{etagMatches:head.etag}});
                     if(!obj || !obj.body) row.result='changed_during_read';
@@ -116,7 +120,7 @@ jobs:
             fi
             sleep 3
           done
-          jq -e '.result|length==2' /tmp/2853-result.json >/dev/null
+          jq -e '.result|length==5' /tmp/2853-result.json >/dev/null
           jq -c '.result' /tmp/2853-result.json | tee /tmp/2853-result-sanitized.jsonl
           echo 'issue2853_exact_r2_receipt_read_complete=true'
       - name: Remove temporary Worker even on failure
