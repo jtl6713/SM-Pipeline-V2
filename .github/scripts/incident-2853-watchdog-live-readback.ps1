@@ -71,46 +71,36 @@ finally:
     db.close()
 counts = collections.Counter(str(row[1]) if row[1] in ("queued","running","paused") else "other" for row in rows)
 counts["absent"] = len(ids)-len(rows)
-print(json.dumps({"active_ids":[r[0] for r in rows if r[1]=="running"],"matched":len(rows),"states":dict(counts),"queued_available":sum(r[1]=="queued" and float(r[2] or 0)<=now for r in rows),"running_expired":sum(r[1]=="running" and float(r[3] or 0)<=now for r in rows),"max_yields":max((int(r[4] or 0) for r in rows),default=0)},separators=(",",":")))
+print(json.dumps({"identities":[{"id":r[0],"state":r[1],"yield_count":int(r[4] or 0),"wait_s":max(0,int(float(r[2] or 0)-now))} for r in rows],"matched":len(rows),"states":dict(counts),"queued_available":sum(r[1]=="queued" and float(r[2] or 0)<=now for r in rows),"running_expired":sum(r[1]=="running" and float(r[3] or 0)<=now for r in rows),"max_yields":max((int(r[4] or 0) for r in rows),default=0)},separators=(",",":")))
 '@
 $candidateArg = if ($ids.Count) { $ids -join ',' } else { ',' }
 $queue = $code | & python - $dbPath $candidateArg
 if ($LASTEXITCODE -ne 0 -or -not $queue) { throw 'watchdog_queue_read_failed' }
 $parsed = $queue | ConvertFrom-Json
 if ([int]$parsed.matched -gt $rows.Count) { throw 'watchdog_queue_count_invalid' }
-$active=@($rows | Where-Object {$_.airtable_record_id -in $parsed.active_ids} | ForEach-Object {
-$step=[string]$_.production_job.step
-if($step -notmatch '^[a-z_]{1,40}$'){$step='other'}
-@{stage=$step;age_s=[int]([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($_.production_job.updated_at)).TotalSeconds}
-})
-$parsed.PSObject.Properties.Remove('active_ids')
-$parsed | Add-Member -NotePropertyName active_stages -NotePropertyValue $active
-Write-Output ('watchdog2853_queue=' + ($parsed | ConvertTo-Json -Compress -Depth 5))
-$phase='story_receipt'
-$reply=Invoke-RestMethod "$sb/rest/v1/platform_outputs?output_number=eq.11277&select=error_messages&limit=2" -Headers $headers -TimeoutSec 20
-$rr=@($reply | ForEach-Object {$_})
-if($rr.Count -ne 1){throw 'story_identity'}
-$r=$rr[0].error_messages.Studio_Story_Voiceover_Receipt_JSON | ConvertFrom-Json
-$url='https://media.chicagoshining.com/studio/previews/story-voiceover/recgBtukVbv5vAMzS/2e71d62e8373a8a803ce2a1925372903f9a9bd45fa65c867b187bce18346f859.mp3'
-if($r.url -ne $url -or $r.sha256 -ne '226eee5e3801d5f36928677ef3493bcecfc61611996209a417063aaa1db8d7f3'){
-Write-Output 'watchdog2853_story={"result":"receipt_changed_no_fetch"}'
-}else{
-$probe=@'
-import hashlib,json,sys,urllib.request,urllib.error
-class NoRedirect(urllib.request.HTTPRedirectHandler):
- def redirect_request(self,*a,**k): return None
-try:
- with urllib.request.build_opener(NoRedirect()).open(sys.argv[1],timeout=15) as r:
-  b=r.read(8388609)
-  result="checksum_match" if len(b)<=8388608 and hashlib.sha256(b).hexdigest()==sys.argv[2] else "checksum_mismatch"
-except urllib.error.HTTPError as e: result="http_"+str(e.code)
-except Exception: result="unavailable"
-print(json.dumps({"result":result}))
-'@
-$cache=$probe | & python - $url $r.sha256
-if($LASTEXITCODE -ne 0 -or -not $cache){throw 'story_probe_failed'}
-Write-Output ('watchdog2853_story='+$cache)
+$cohort=@()
+foreach($identity in $parsed.identities){
+  $r=$rows | Where-Object {$_.airtable_record_id -eq $identity.id} | Select-Object -First 1
+  if(-not $r){continue}
+  $name=[string]$r.production_request_id
+  $step=[string]$r.production_job.step
+  if($name -notmatch '^PR-[0-9]{14}-[A-Z0-9]{6}$'){$name='other'}
+  if($step -notmatch '^[a-z_]{1,40}$'){$step='other'}
+  $age=-1
+  if($r.production_job.updated_at){$age=[int]([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($r.production_job.updated_at)).TotalSeconds}
+  $cohort+=@{request=$name;stage=$step;state=$identity.state;yields=$identity.yield_count;wait_s=$identity.wait_s;age_s=$age}
 }
+$parsed.PSObject.Properties.Remove('identities')
+Write-Output ('watchdog2853_cohort='+(@{requests=$cohort} | ConvertTo-Json -Compress -Depth 6))
+Write-Output ('watchdog2853_queue=' + ($parsed | ConvertTo-Json -Compress -Depth 5))
+$phase='metrics'
+$history=@($work.runner_request_history)
+$metrics=@{}
+foreach($op in @('read','write')){
+  $items=@($history | Where-Object {$_.operation -eq $op})
+  $metrics[$op]=@{requests=[int](($items | Measure-Object -Property requests -Sum).Sum);failures=[int](($items | Measure-Object -Property failures -Sum).Sum);max_ms=[double](($items | Measure-Object -Property max_latency_ms -Maximum).Maximum)}
+}
+Write-Output ('watchdog2853_metrics='+($metrics | ConvertTo-Json -Compress -Depth 5))
 Write-Output 'watchdog2853_proof=PASS_READONLY'
 } catch {
 throw ('watchdog2853_failed_' + $phase)
