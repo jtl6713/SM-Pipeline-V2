@@ -107,5 +107,5 @@ test("#3096 native Meta credential failure stays reconciliation-only even with z
   Studio_Publish_Dispatch_Count:0,Publish_Attempt_Count:0,
   FB_Slideshow_Response_JSON:"{'error': {'message': 'Error validating access token'}}"});
  const got=call(row);assert.equal(got.evidence_state,"native_attempt_or_response");
- assert.match(got.action_group,/^F\\./);assert.equal(got.can_repost,false);
+ assert.equal(got.action_group,"F. Meta authentication");assert.equal(got.can_repost,false);
 });
