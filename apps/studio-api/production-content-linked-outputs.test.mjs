@@ -59,7 +59,7 @@ test("Supabase Production read elevates old and undated active outputs ahead of 
 test("Supabase content route classifies Production by the same output predicate as Home and never falls back to Airtable", () => {
   const source = readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
   const method = source.slice(source.indexOf("export async function listContent("), source.indexOf("export async function scheduleGridContentById("));
-  assert.match(method, /homeOutputInProduction\(mapOutput\(output\)\)/);
+  assert.match(method, /homeOutputInProduction\(mapped\)/);
   assert.match(method, /production_active_output_count:/);
   assert.match(method, /if \(f\(output, "Test_Run_ID"\)\) continue/);
   assert.match(method, /refusing Airtable fallback/);
