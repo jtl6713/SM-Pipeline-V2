@@ -1,4 +1,4 @@
-param([switch]$NormalClosedRecovery)
+param([switch]$NormalClosedRecovery, [switch]$GeometryRecovery, [string]$ExpectedGallerySourceSha)
 
 $ErrorActionPreference = 'Stop'
 
@@ -82,12 +82,18 @@ function Assert-NoProviderOrApproval([object]$row) {
 
 function Assert-Baseline([object]$requestRow, [object[]]$outputs) {
   $job = $requestRow.production_job
+  $jobBaseline = ($job.step -eq 'done' -and -not (Has-Value $job.error))
+  if ($GeometryRecovery) {
+    $jobBaseline = ($job.step -eq 'blocked' -and
+      $job.error -eq 'Native gallery image geometry mismatch' -and
+      $job.updated_at -eq '2026-11-25T00:11:06Z')
+  }
   if ($requestRow.request_status -ne 'Promoted' -or
       $requestRow.master_asset_status -ne 'Ready' -or
       $requestRow.output_plan_status -ne 'Ready' -or
       $requestRow.variant_status -ne 'Ready' -or
       $null -eq $job -or $job.job_id -ne $expectedJobId -or
-      $job.step -ne 'done' -or (Has-Value $job.error)) {
+      -not $jobBaseline) {
     throw 'incident2853_request_baseline_changed'
   }
   foreach ($row in $outputs) {
@@ -186,6 +192,17 @@ $script:runnerHeaders = @{'X-Pipeline-Secret' = $secret}
 $script:sbHeaders = @{apikey = $sbKey; Authorization = "Bearer $sbKey"}
 
 try {
+  if ($GeometryRecovery) {
+    if (-not $NormalClosedRecovery -or $ExpectedGallerySourceSha -notmatch '^[0-9a-f]{64}$') {
+      throw 'incident2853_geometry_recovery_source_sha_missing'
+    }
+    $gallery = Join-Path (Split-Path -Parent $envPath) 'studio_produce\native_gallery.py'
+    if (-not (Test-Path -LiteralPath $gallery -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $gallery -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedGallerySourceSha) {
+      throw 'incident2853_geometry_recovery_deployed_source_mismatch'
+    }
+    Write-Output 'incident2853_geometry_recovery_deployed_source=PASS'
+  }
   $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 20
   if ($health.ok -ne $true -or $health.service -ne 'pipeline-runner' -or
       $health.studio_write_source -ne 'supabase' -or
