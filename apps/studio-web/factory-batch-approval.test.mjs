@@ -561,6 +561,7 @@ function automaticRecoveryHarness(saved, response) {
     const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
       FACTORY_WAITING_SELECTION_KEY='waiting', FACTORY_PENDING_MISSING_GRACE_MS=90000;
     let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
+    let recoverySeq=0; const newFactoryRequestId=()=> 'factory_recovered_'+(++recoverySeq)+'_20261125';
     const $=()=>({options:[]});
     const setBatchSubmissionError=message=>messages.push(message),setStatus=message=>messages.push(message),
       updateFactoryBatchToolbar=()=>{},
@@ -829,4 +830,69 @@ test("already archived legacy multi-plan envelope migrates without replacing bac
   assert.equal(rows.length,2);
   assert.equal(rows.find(e=>e.ids.includes("recExistingA")).retry_blocked,true);
   assert.equal(rows.find(e=>e.ids.includes("recNewChicago")).retry_blocked,undefined);
+});
+
+test('creative-only veto recovers unchanged original intent using exact canonical version',async()=>{
+  const saved=savedGlobalEnvelope(), plan=saved.batches[0], posts=[];
+  saved.retry_blocked=true;
+  saved.last_error='Output #11187: Story render duration differs from its planned package. No new batch was accepted.';
+  plan.payload.items[0].output_id=11187;
+  const version=new Date(saved.saved_ms-1000).toISOString();
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method!=='POST')return {ok:true,exact_request_id:plan.request_id,batches:[]};
+    const body=JSON.parse(options.body);posts.push(body);
+    if(body.action==='validate_group')return {accepted:false,read_only:true,preflight_valid:true,
+      request_id:plan.request_id,records:[{id:saved.ids[0],profile_id:'recChicago',output_id:11187,
+        review_updated_at:version,requires_current_approval:true}]};
+    return {accepted:true,items:body.record_ids.map(id=>({id}))};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  assert.deepEqual(posts.map(p=>p.action),['validate_group','start_group']);
+  assert.equal(posts[1].request_id,plan.request_id);
+  assert.deepEqual(posts[1].record_ids,saved.ids);
+  assert.equal(posts[1].items[0].expected_review_updated_at,version);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+});
+test('creative-only recovery never replays a changed review or an unversioned response',async()=>{
+  for(const changed of [true,false]){
+    const saved=savedGlobalEnvelope(),plan=saved.batches[0],posts=[];
+    saved.retry_blocked=true;
+    saved.last_error='Output #11187: Story render duration differs from its planned package. No new batch was accepted.';
+    plan.payload.items[0].output_id=11187;
+    const h=automaticRecoveryHarness(saved,async(url,options)=>{
+      if(options.method!=='POST')return {ok:true,exact_request_id:plan.request_id,batches:[]};
+      const body=JSON.parse(options.body);posts.push(body);
+      assert.equal(body.action,'validate_group');
+      return {accepted:false,read_only:true,preflight_valid:true,request_id:plan.request_id,
+        records:[{id:saved.ids[0],profile_id:'recChicago',output_id:11187,
+          review_updated_at:changed?new Date(saved.saved_ms+1000).toISOString():null,requires_current_approval:true}]};
+    });
+    await h.reconcilePersistedFactoryPending(true);
+    assert.equal(posts.length,1);
+    assert.equal(h.factoryRecoveryEntries().length,changed?0:1);
+  }
+});
+test('one definitive rejected member cannot discard unaffected original approvals',async()=>{
+  const saved=savedGlobalEnvelope(),plan=saved.batches[0],posts=[];
+  saved.ids.push('recNewChicago');plan.payload.record_ids=saved.ids;plan.ids=saved.ids;
+  plan.payload.items[0].output_id=11187;
+  plan.payload.items.push({id:'recNewChicago',output_id:10854,profile_id:'recChicago'});
+  saved.retry_blocked=true;
+  saved.last_error='Output #11187: missing technical media. No new batch was accepted.';
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method!=='POST')return {ok:true,exact_request_id:new URL(url,'https://example.test').searchParams.get('request_id'),batches:[]};
+    const body=JSON.parse(options.body);posts.push(body);
+    if(body.action==='validate_group')return {accepted:false,read_only:true,preflight_valid:true,
+      request_id:body.request_id,records:[{id:'recNewChicago',output_id:10854,profile_id:'recChicago',
+        review_updated_at:new Date(saved.saved_ms-1000).toISOString(),requires_current_approval:true}]};
+    return {accepted:true,items:body.record_ids.map(id=>({id}))};
+  });
+  h.state.selectedOutputs.clear();
+  await h.reconcilePersistedFactoryPending(true);
+  await h.reconcilePersistedFactoryPending(true);
+  assert.deepEqual(posts.map(p=>p.action),['validate_group','start_group']);
+  assert.ok(posts.every(p=>p.request_id!==plan.request_id));
+  assert.deepEqual(posts[1].record_ids,['recNewChicago']);
+  assert.ok(posts[1].items[0].expected_review_updated_at);
+  assert.equal(h.factoryRecoveryEntries().length,0);
 });
