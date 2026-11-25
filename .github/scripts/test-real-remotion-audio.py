@@ -89,6 +89,7 @@ def verify(path, voiceover, music):
 
 def main():
     # Keep generated fixtures outside the tracked source tree after the test.
+    (SERVICE/"public").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="smv2-real-audio-",dir=SERVICE/"public") as public_dir, \
          tempfile.TemporaryDirectory(prefix="smv2-audio-result-") as work:
         public = Path(public_dir)
