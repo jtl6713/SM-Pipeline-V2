@@ -12212,7 +12212,10 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   // a job-JSON list ordered by recency was all Cancelled, so Promoted
   // requests stuck at themes were never resumed.
   let rows = null;
-  if (studioPhase6WriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+  if (studioPhase6WriteSource(env) === "supabase") {
+    if (!studioSupabaseConfigured(env)) {
+      return [{ key: "STUDIO_PRODUCE", skipped: "authoritative_configuration_unavailable" }];
+    }
     rows = await listSupabaseRequestsWithProductionJob(env, {
       limit: 100,
       statuses: ["Promoted", "Submitted"],
@@ -12271,6 +12274,11 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   for (const requestId of ids.slice(offset, offset + candidateLimit)) {
     try {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      const currentStatus = String(f(record, "Request_Status") || "").trim();
+      if (!["Promoted", "Submitted"].includes(currentStatus) || String(f(record, "Test_Run_ID") || "").trim()) {
+        pulses.push({ key: "STUDIO_PRODUCE", request: requestId, skipped: "request_no_longer_eligible" });
+        continue;
+      }
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
       if (step === "done" || step === "escalated") continue;
