@@ -6,6 +6,7 @@
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchSummary,
   factoryBatchDrain, factoryBatchRetry, factoryBatchList, factoryBatchCronSelectJobs,
+  factoryBatchActiveIndexCandidates,
 } from "./factory-approval-queue.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 
@@ -169,6 +170,49 @@ export default {
           handoff_to: next.requestId, unique_commits: committed.objects.length,
           passed: first.job.status === "completed" && second.job.status === "completed"
             && committed.objects.length === 20 });
+      }
+      // Exact 4/4/1 interruption exercise uses only disposable local storage.
+      // The remote-R2 workflow never sets this opt-in or invokes these routes.
+      if (["/api/slice-start","/api/slice-recover","/api/slice-status"].includes(url.pathname)) {
+        if (env.FACTORY_2959_LOCAL_TEST !== "true") return json({error:"local test only"},403);
+        const profileId="recFactorySlice2959";
+        const fixedRequestId="factory_2959_slice_restart";
+        const keyPrefix=PREFIX+"/2959-slice/";
+        const runSlice=async requestId=>factoryBatchDrain(env.STUDIO_MEDIA,{
+          profileId,requestId,maxItems:4,
+          approve:async (id,_job,checkpoint)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>{
+            await checkpoint("validating");
+            const key=keyPrefix+id+".json";
+            if(await read(env,key)) throw Error("unexpected duplicate approval attempt");
+            await checkpoint("approving");
+            const put=await env.STUDIO_MEDIA.put(key,JSON.stringify({id}),{onlyIf:new Headers({"If-None-Match":"*"})});
+            if(!put) throw Error("duplicate synthetic commit");
+            await checkpoint("verifying");
+            return {id};
+          })
+        });
+        if(req.method==="POST"&&url.pathname==="/api/slice-start"){
+          const records=Array.from({length:9},(_,i)=>({id:"recFactorySlice"+String(i).padStart(4,"0"),platform:i%2?"Facebook":"Instagram",format:i>6?"Story":"Reel"}));
+          const enqueued=await factoryBatchEnqueue(env.STUDIO_MEDIA,{profileId,requestId:fixedRequestId,records});
+          if(enqueued.already_submitted) throw Error("unexpected test replay");
+          const first=await runSlice(fixedRequestId);
+          return json({processed:first.processed,...factoryBatchSummary(first.job)});
+        }
+        if(req.method==="POST"&&url.pathname==="/api/slice-recover"){
+          // No supplied request ID or historical list: discover durable work
+          // solely from the active index after the runtime restarted.
+          const index=await factoryBatchActiveIndexCandidates(env.STUDIO_MEDIA,profileId);
+          const next=factoryBatchCronSelectJobs(index.candidates,{maxProfiles:1})[0];
+          if(!index.found||!index.complete||!next||next.requestId!==fixedRequestId) throw Error("durable pending tail was not discovered");
+          const result=await runSlice(next.requestId);
+          return json({processed:result.processed,...factoryBatchSummary(result.job)});
+        }
+        if(req.method==="GET"&&url.pathname==="/api/slice-status"){
+          const job=await factoryBatchRead(env.STUDIO_MEDIA,profileId,fixedRequestId);
+          const rows=await env.STUDIO_MEDIA.list({prefix:keyPrefix});
+          return json({...factoryBatchSummary(job),unique_commits:rows.objects.length});
+        }
+        return json({error:"method not supported"},405);
       }
       if (req.method === "POST" && url.pathname === "/api/cleanup") {
         // Even if a live Cloudflare R2 bucket is bound by a staging test,
