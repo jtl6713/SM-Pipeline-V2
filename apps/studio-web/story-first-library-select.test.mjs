@@ -40,7 +40,7 @@ function setup({ existing = false, failPatch = false, unconfirmed = false, rejec
         current.story = clone(current.story);
         return { ...current.record, story_first: clone(current.story) };
       }
-      if (failPatch) throw new Error("Media selection rejected by Airtable rights validation");
+      if (failPatch) throw new Error("Media selection rejected by Studio rights validation");
       const returned = clone(current.story);
       if (unconfirmed) {
         returned.scenes[0].assigned_asset_id = null;
@@ -73,7 +73,7 @@ test("unsaved seven-scene flow creates an unselected Idea before the selected-as
   assert.equal(run.current.story.scenes[0].state, "media_approved");
   assert.equal(run.current.selectedAssetNames[image.id], image.name);
   assert.equal(run.renderCount, 1);
-  assert.match(run.notices.at(-1), /saved and verified in Airtable/);
+  assert.match(run.notices.at(-1), /saved and verified in Supabase/);
 });
 
 test("existing saved Idea uses one PATCH and never creates a duplicate Idea", async () => {

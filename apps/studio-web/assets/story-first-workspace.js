@@ -1,4 +1,4 @@
-/* Story-first storyboard workspace. All persistence is through canonical Airtable Idea routes. */
+/* Story-first storyboard workspace. All persistence is through canonical Studio Idea routes backed by Supabase. */
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {}, videoCostOffer: null };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, imageDecision: null, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {}, videoCostOffer: null };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -148,7 +148,7 @@
       }
     }
     if (lastError) throw lastError;
-    if (result.live !== true || !Array.isArray(result.records)) throw new Error("Saved Ideas could not be verified against Airtable.");
+    if (result.live !== true || !Array.isArray(result.records)) throw new Error("Saved Ideas could not be verified in Studio.");
     current.ideaRecords = result.records.filter(row =>
       Array.isArray(row.content_profile_links) && row.content_profile_links.includes(id) && storyNotesFromRecord(row));
     const picker = $("storyFirstSaved");
@@ -187,7 +187,7 @@
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
     // On reopen, poll existing jobs without generating or charging.
-    // Avoid a 12-request Airtable burst while reopening a storyboard.
+    // Avoid a 12-request database request burst while reopening a storyboard.
     // Only AI-sourced scenes can have paid video jobs; check a bounded three
     // sequentially, with manual status controls available for the remainder.
     const reopenedIdeaId=current.record.id;
@@ -207,7 +207,7 @@
     $("storyFirstSaved").value = record.id;
     report("Reopened saved Idea " + (record.candidate_id || record.id) + ". All shot requirements and sourcing choices are preserved.");
   }
-  // A confirmed Airtable response is the save receipt. Updating the local picker
+  // A confirmed Studio response is the save receipt. Updating the local picker
   // must not require another network request (especially on mobile Safari).
   function rememberSavedIdea(record) {
     const index = current.ideaRecords.findIndex(row => row.id === record.id);
@@ -229,7 +229,7 @@
     return error?.name === "AbortError" || error?.name === "TypeError"
       || /fetch is aborted|aborted|failed to fetch|network|load failed|timed out|timeout/i.test(String(error?.message || ""));
   }
-  // A request may finish its Airtable PATCH after the phone loses its response.
+  // A request may finish its canonical PATCH after the phone loses its response.
   // Only call it saved if a fresh, authorized GET actually matches this payload.
   function savedIdeaMatches(record, submitted) {
     const saved = storyNotesFromRecord(record), expected = submitted.storyboard;
@@ -305,8 +305,8 @@
         } catch (error) {
           // Report real Worker validation errors; only transport aborts are ambiguous.
           if (!interruptedSave(error)) throw error;
-          // Do not repeat an ambiguous create; it may already exist in Airtable.
-          const unresolved = new Error("New Idea may exist in Airtable even though its save response was not confirmed (" +
+          // Do not repeat an ambiguous create; it may already exist in Studio.
+          const unresolved = new Error("New Idea may exist in Studio even though its save response was not confirmed (" +
             (error?.message || "connection interrupted") +
             "). Check Saved Ideas before trying again to avoid creating a duplicate.");
           unresolved.saveUnconfirmed = true;
@@ -317,10 +317,10 @@
       current.record = result.record;
       current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
       localStorage.setItem("studio.story_first_resume." + id, result.record.id);
-      // A successful Airtable write is already the receipt. Keep the saved-Ideas
+      // A successful canonical write is already the receipt. Keep the saved-Ideas
       // selector current locally; do not issue an abort-prone second network request.
       rememberSavedIdea(result.record);
-      report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) +
+      report("Saved to Supabase · Idea " + (result.record.candidate_id || result.record.id) +
         (result.verified_after_interruption ? " · Verified after connection interruption." :
           ". You can leave and reopen it from Ideas."));
       return result.record;
@@ -515,7 +515,7 @@
         content_profile_id: assertProfile(), media_override: override }),
     });
     await reopenLatest();
-    report(accept ? "AI image accepted and registered to the exact scene in Drive and Airtable."
+    report(accept ? "AI image accepted and registered to the exact scene in Drive and Supabase."
       : "AI image declined. You can generate again or supply media.");
     return result;
   }
@@ -527,7 +527,7 @@
   async function reloadIdea() {
     const profile = assertProfile();
     const result = await call("/api/ideas/" + current.record.id + "?profile=" + encodeURIComponent(profile));
-    if (!result.record) throw new Error("Could not verify saved Idea from Airtable");
+    if (!result.record) throw new Error("Could not verify saved Idea from Studio");
     openRecord(result.record);
   }
   async function generateSceneImage(index) {
@@ -546,8 +546,30 @@
       report("Image generated. Review and Accept or Decline before it is used.");
     } finally { current.busy = false; }
   }
+  // Keep the in-flight state outside the DOM: background library/video
+  // refreshes can redraw a scene while its image decision is still saving.
+  function syncImageDecisionControls() {
+    const pending = current.imageDecision;
+    for (const group of document.querySelectorAll("[data-story-image-review]")) {
+      const active = pending && group.dataset.storyImageReview === pending.generatedId;
+      for (const control of group.querySelectorAll("[data-image-action]")) {
+        const action = control.dataset.imageAction;
+        control.disabled = Boolean(pending);
+        control.textContent = active && pending.action === action
+          ? (action === "accept" ? "Accepting Image…" : "Declining Image…")
+          : (action === "accept" ? "Accept Image" : "Decline Image");
+        control.setAttribute("aria-busy", String(Boolean(active && pending.action === action)));
+      }
+      const message = group.querySelector("[data-image-review-status]");
+      if (message) {
+        message.textContent = active ? pending.message : "";
+        message.hidden = !active;
+        message.classList.remove("error-text");
+      }
+    }
+  }
   async function decideGenerated(index, action) {
-    if (current.busy) return;
+    if (current.imageDecision || current.busy) return;
     const scene = current.story?.scenes?.[index];
     if (!scene?.generated_master_id) throw new Error("No pending image is available for review.");
     let mediaOverride = false;
@@ -555,18 +577,47 @@
       mediaOverride = confirm("This scene calls for moving footage. Explicitly accept a still image instead?");
       if (!mediaOverride) return;
     }
-    await save();
-    current.busy = true;
+    const pending = { generatedId: scene.generated_master_id, action,
+      message: action === "accept" ? "Saving your selection…" : "Saving your decision…" };
+    current.imageDecision = pending;
+    syncImageDecisionControls();
+    let submitted = false;
+    let failure = null;
     try {
-      report(action === "accept" ? "Registering accepted image in Drive and Media Assets…" : "Declining the image…");
+      await save();
+      current.busy = true;
+      pending.message = action === "accept" ? "Registering image in Asset Manager. Please do not tap again." : "Declining the image…";
+      syncImageDecisionControls();
+      report(pending.message);
+      submitted = true;
       await call(sceneUrl(index,action) + "?profile=" + encodeURIComponent(assertProfile()), {
-        method:"POST",body:JSON.stringify({generated_master_id:scene.generated_master_id,
+        method:"POST",body:JSON.stringify({generated_master_id:pending.generatedId,
           content_profile_id:assertProfile(),media_override:mediaOverride})
       });
+      pending.message = "Verifying saved decision…";
+      syncImageDecisionControls();
       await reloadIdea();
       report(action === "accept" ? "Scene " + (index+1) + " image accepted and saved." :
         "Declined. Generate again or supply the media yourself.");
-    } finally { current.busy = false; }
+    } catch (error) {
+      failure = error;
+      // A lost response can follow a successful registration. Never
+      // automatically repeat the POST; instruct the operator to reopen first.
+      if (submitted) failure = new Error((error?.message || "Image decision was not confirmed") +
+        ". Reopen the saved Idea to verify the image decision before retrying.");
+      throw failure;
+    } finally {
+      current.busy = false;
+      current.imageDecision = null;
+      syncImageDecisionControls();
+      if (failure) {
+        for (const group of document.querySelectorAll("[data-story-image-review]")) {
+          if (group.dataset.storyImageReview !== pending.generatedId) continue;
+          const message = group.querySelector("[data-image-review-status]");
+          if (message) { message.textContent = failure.message; message.hidden = false; message.classList.add("error-text"); }
+        }
+      }
+    }
   }
   // ElevenLabs video generation is asynchronous; these timers only poll a
   // previously paid job. They never retry or create a second paid generation.
@@ -714,7 +765,7 @@
     show();
   }
 
-  // A browser-wide request lock starts before Airtable save and quote fetch, not
+  // A browser-wide request lock starts before storyboard save and quote fetch, not
   // just before the paid POST. The Worker independently guards duplicate charges.
   function videoSceneIdentity(index) {
     return String(current.record?.id || "unsaved") + ":" + index;
@@ -957,7 +1008,7 @@
     await save();
     current.busy = true;
     try {
-      report(action === "accept" ? "Registering video in Drive and Airtable…" : "Declining generated video…");
+      report(action === "accept" ? "Registering video in Drive and Supabase…" : "Declining generated video…");
       await call(sceneUrl(index, "video/" + action) + "?profile=" + encodeURIComponent(profile), {
         method: "POST", body: JSON.stringify({ content_profile_id: profile, media_override: mediaOverride,
           audio_mix_acknowledged: audioAck }),
@@ -1152,12 +1203,12 @@
       const confirmed = storyNotesFromRecord(saved)?.scenes?.[index];
       if (confirmed?.assigned_asset_id !== asset.id || confirmed?.selected_approved !== true ||
           confirmed?.state !== "media_approved") {
-        const error = new Error("Airtable did not confirm the selected image. Reopen the saved Idea and verify before retrying.");
+        const error = new Error("Studio did not confirm the selected image. Reopen the saved Idea and verify before retrying.");
         error.saveUnconfirmed = true;
         throw error;
       }
       render();
-      report("Scene " + (index + 1) + " selected image saved and verified in Airtable.");
+      report("Scene " + (index + 1) + " selected image saved and verified in Supabase.");
     } catch (err) {
       // Keep search results open on failure instead of silently closing the
       // picker and showing a different suggested thumbnail.
@@ -1289,7 +1340,7 @@
       }, desc);
       put(wrap,img,desc);parent.appendChild(wrap);
     }
-    // All editorial controls remain the same inputs and save to the same Airtable storyboard.
+    // All editorial controls remain the same inputs and save to the same canonical storyboard.
     // Only their presentation changes: a compact icon/label column with a full-width editor.
     function sceneIcon(kind) {
       const ns="http://www.w3.org/2000/svg";
@@ -1536,8 +1587,20 @@
           img.alt="AI-generated scene image, awaiting explicit review";
           actions.appendChild(node("p","story-first-asset-heading","AI image awaiting your decision"));
           actions.appendChild(img);
-          button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),actions);
-          button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
+          const review = node("div","story-first-image-review-controls");
+          review.dataset.storyImageReview = shot.generated_master_id;
+          const accept = button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),review);
+          const decline = button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),review);
+          accept.dataset.imageAction = "accept";
+          decline.dataset.imageAction = "decline";
+          const progress = node("p","story-first-upload-progress");
+          progress.dataset.imageReviewStatus = "";
+          progress.setAttribute("role","status");
+          progress.setAttribute("aria-live","polite");
+          progress.hidden = true;
+          review.appendChild(progress);
+          actions.appendChild(review);
+          syncImageDecisionControls();
         }else if(mode.value==="ai"){
           const prompt=label(actions,"Editable AI scene prompt (image or video)",shot.ai_prompt||shot.visual);
           prompt.maxLength=8000;prompt.rows=3;
@@ -1728,7 +1791,7 @@
     }
     const saved = Boolean(current.record?.id);
     const warning = saved
-      ? "Reject this plan and start a NEW storyboard? The previously saved Idea will remain in Airtable and can be reopened. No assets or production records will be deleted."
+      ? "Reject this plan and start a NEW storyboard? The previously saved Idea will remain saved in Studio and can be reopened. No assets or production records will be deleted."
       : "Reject the entire unsaved Producer Plan and start over? All proposed scenes, narration and media choices will be discarded.";
     if (!window.confirm(warning)) return;
     // Increment the revision so a late AI response cannot resurrect the rejected plan.
@@ -1886,7 +1949,7 @@
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
   $("storyFirstOpenId").addEventListener("click", async () => {
     const recordId = String($("storyFirstRecordId").value || "").trim();
-    if (!isId(recordId)) { report("Enter an Airtable Idea record ID beginning with rec.", true); return; }
+    if (!isId(recordId)) { report("Enter a Studio Idea record ID beginning with rec.", true); return; }
     try {
       const id = profileId();
       const result = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id));

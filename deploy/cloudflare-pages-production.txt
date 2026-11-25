@@ -974,3 +974,5 @@ Deploy Studio UI 0.6.1082-approval-success-2622 after protected CI: separate app
 2026-11-25 UTC — Pipeline global search UI 0.6.1098-pipeline-global-search: content ID / output ID / title search across the profile database; returns full content packages. Protected Pages release and live BUILD_ID verification required.
 
 2026-11-25 UTC — #3048 protected Pages UI 0.6.1099-asset-delete-3048 release of merged PR #3049 (16f4ab8aa7c1d7070e132d719b2bfe02973a7422; 26/26 PR workflows passed). Deploy Worker before Pages; preserve source files and existing output dependencies, all approval/publishing holds and admission safeguards. Verify live version, exact Calle Ocho 2 browse exclusion and in-card deletion feedback. No physical deletion, output status or publishing mutation during release.
+
+2026-11-25 UTC — #3065 UI 0.6.1100-story-save-copy-3065: remove obsolete Airtable wording from Script a Short saved, verified, retry and media registration messages. Supabase remains sole authority. No API, database or publishing changes. Verify custom domain version and new copy through protected Pages deployment.

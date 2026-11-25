@@ -76,11 +76,11 @@ test("rejecting an unsaved plan clears all scenes and selections but keeps origi
   assert.match(h.reports.at(-1), /Plan rejected/);
 });
 
-test("a saved plan is closed locally without deleting Airtable, assets or production records", () => {
+test("a saved plan is closed locally without deleting the saved Idea, assets or production records", () => {
   const h = harness({ saved: true });
   h.run();
   assert.equal(h.current.story, null);
-  assert.match(h.confirmations[0], /remain in Airtable/);
+  assert.match(h.confirmations[0], /remain saved in Studio/);
   assert.match(h.reports[0], /saved Idea remains available/);
   assert.doesNotMatch(implementation, /fetch\(|call\(|DELETE|\/api\/outputs|\/production-request/);
 });
