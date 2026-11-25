@@ -94,3 +94,5 @@ jobs:
               print('story2853_history='+json.dumps(obj,sort_keys=True,separators=(',',':')))
           print('story2853_history_proof=PASS_READONLY')
           PY
+
+# Run bounded ambiguous-candidate comparison after protected merge.
