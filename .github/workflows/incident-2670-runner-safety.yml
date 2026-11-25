@@ -8,6 +8,9 @@ on:
       - "services/pipeline-runner/supabase_pipeline.py"
       - "services/pipeline-runner/tests/test_2670_*.py"
       - ".github/workflows/incident-2670-runner-safety.yml"
+      - ".github/workflows/deploy-pipeline-runner-via-ops.yml"
+      - "deploy/local-services/Deploy-SMService.ps1"
+      - "deploy/local-services/test-runner-deployment-drain.ps1"
   workflow_dispatch:
 
 permissions:
@@ -60,3 +63,7 @@ jobs:
           STUDIO_WORKLOAD_GOVERNOR_ENABLED: "false"
           STUDIO_SIDE_EFFECT_OUTBOX_ENABLED: "false"
         run: python -m pytest -q tests/test_2965_smv1_restart.py
+
+      - name: Exercise actual PowerShell drain count validation (no live services)
+        shell: powershell
+        run: '& ./deploy/local-services/test-runner-deployment-drain.ps1'
