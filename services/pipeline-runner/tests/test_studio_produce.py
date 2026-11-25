@@ -826,8 +826,9 @@ def test_authoritative_timed_script_extends_only_last_scene_for_full_voiceover()
         output=None,
     )
     assert frames[0] == 90
-    assert frames[1] == 96
-    assert total == 186
+    assert frames[1] == 99
+    assert total == 189
+    assert total / 30 >= 6.2 + 0.1
 
 
 def test_assign_clip_frames_trims_long_video_and_reserves_photo_floor():
@@ -1368,3 +1369,34 @@ def test_bethesda_2303_audio_resumes_when_original_voiceover_exists(monkeypatch)
         "request": request, "parent": parent,
         "outputs": [], "job": {"route": "uploaded:photo_sequence"},
     }) == "images"
+
+
+def test_riverwalk_photo_timeline_reserves_r4_headroom_without_retiming_scenes():
+    durations = [180, 168, 180, 156, 168, 168, 237]
+    cursor = 0
+    segments = []
+    for frames in durations:
+        segments.append({"start_seconds": cursor / 30, "end_seconds": (cursor + frames) / 30,
+                         "duration_seconds": frames / 30})
+        cursor += frames
+    request = {"fields": {"Production_Notes": "[timed-script] " + json.dumps({
+        "mode": "timed_script", "timing_mode": "authoritative", "timing_source": "timed_script",
+        "segments": segments}), "Voiceover_Mode": "Yes"}}
+    clips = [{"source": {"media_kind": "photo"}} for _ in durations]
+    frames, total = assign_clip_frames(clips, story=False,
+        effective={"voiceover_mode": "Yes", "voiceover_duration_seconds": 41.889},
+        request=request, output=None)
+    assert frames[:-1] == durations[:-1]
+    assert frames[-1] == 240
+    assert total == 1260
+    assert total / 30 >= 41.889 + 0.1
+    silent_frames, silent_total = assign_clip_frames(clips, story=False,
+        effective={"voiceover_mode": "No", "voiceover_duration_seconds": 41.889},
+        request=request, output=None)
+    assert silent_frames == durations
+    assert silent_total == 1257
+    story_frames, story_total = assign_clip_frames(clips[:1], story=True,
+        effective={"voiceover_mode": "Yes", "voiceover_duration_seconds": 41.889},
+        request=request, output=None)
+    assert story_total == 300
+    assert story_frames == [300]
