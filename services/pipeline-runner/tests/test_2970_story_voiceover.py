@@ -361,3 +361,18 @@ def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(
     assert receipt["history_original_sha256"]==evidence["sha256"]
     assert receipt["sha256"]==hashlib.sha256(data).hexdigest()
     paid.assert_not_called()
+
+
+def test_r4_snapshot_fences_changed_story_receipt_at_same_url(monkeypatch):
+    from r4 import processor
+
+    url = "https://example.test/story.mp3"
+    receipt = {"state": "verified", "url": url, "sha256": "a" * 64}
+    original = output(Voiceover_URL=url, Studio_Story_Voiceover_Receipt_JSON=json.dumps(receipt))
+    changed = output(Voiceover_URL=url, Studio_Story_Voiceover_Receipt_JSON=json.dumps({**receipt, "sha256": "b" * 64}))
+    removed = output(Voiceover_URL=url)
+    snapshot = processor.render_snapshot_identity(original)
+    monkeypatch.setattr(processor, "studio_revision_error", lambda *_: None)
+    assert processor.render_snapshot_error(snapshot, None, original) is None
+    assert processor.render_snapshot_error(snapshot, None, changed) is not None
+    assert processor.render_snapshot_error(snapshot, None, removed) is not None
