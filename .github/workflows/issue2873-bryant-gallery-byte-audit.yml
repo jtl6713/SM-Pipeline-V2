@@ -1,0 +1,113 @@
+name: Issue 2873 Bryant exact gallery byte audit
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2873-bryant-gallery-byte-audit.py'
+      - '.github/workflows/issue2873-bryant-gallery-byte-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue2873-bryant-gallery-byte-audit.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2873-bryant-gallery-byte-audit
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m py_compile repair/scripts/issue2873-bryant-gallery-byte-audit.py
+          python -m pip install -q pillow
+          python - <<'PY'
+          import ast,io,hashlib
+          from pathlib import Path
+          from PIL import Image
+          path=Path('repair/scripts/issue2873-bryant-gallery-byte-audit.py')
+          text=path.read_text()
+          for forbidden in ('requests.post','requests.patch','requests.put','requests.delete','update_record(','put_object(','/jobs/studio-produce/resume'):
+              assert forbidden not in text
+          tree=ast.parse(text)
+          ns={'io':io,'hashlib':hashlib}
+          nodes=[x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name in ('require','probe')]
+          exec(compile(ast.Module(body=nodes,type_ignores=[]),'audit-fixture','exec'),ns)
+          for fmt,size in [('JPEG',(1080,1350)),('PNG',(1080,1350)),('JPEG',(800,1000))]:
+              b=io.BytesIO(); Image.new('RGB',size).save(b,fmt)
+              actual=ns['probe'](b.getvalue())
+              assert actual['format']==fmt and (actual['width'],actual['height'])==size
+          print('EXACT_IMAGE_AUDIT_FIXTURES_PASS')
+          PY
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Protected read-only exact source byte inspection
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue2873-bryant-gallery-byte-audit.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('bryant-audit-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 36); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','').partition('\n\n')[2]
+          for line in out.splitlines():
+              if line.startswith('BRYANT_IMAGE_AUDIT=') or line.startswith('BRYANT_IMAGE_AUDIT_COMPLETE='):
+                  print(line)
+          if job['status']!='ok':
+              print('audit_failure_codes='+str(sorted(set(re.findall(r'\b(?:runner_not_idle|governor_unavailable|request_revision_changed|crop_identity_changed|cover_identity_changed|image_byte_budget_exceeded|UnidentifiedImageError|RuntimeError|ImportError|ModuleNotFoundError|audit_python_failed)\b',out)))))
+              raise SystemExit('protected_audit_failed')
+          if out.count('BRYANT_IMAGE_AUDIT=')!=5 or 'BRYANT_IMAGE_AUDIT_COMPLETE=5_NO_CANONICAL_OR_PROVIDER_WRITES' not in out:
+              raise SystemExit('audit_receipt_incomplete')
+          PY
