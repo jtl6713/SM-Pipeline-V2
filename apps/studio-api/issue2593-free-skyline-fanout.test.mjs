@@ -34,7 +34,9 @@ test("2593 output seed applies publication hold AFTER all normal scheduled stamp
  assert.match(body,/Scheduled_Post_Date: null/);
  assert.match(body,/Studio_Scheduled_At: null/);
  assert.match(body,/YouTube_Scheduled_Publish_At: null/);
- assert.match(code,/platformOutputSeedFields\(parent,requestRecord,outputRow,effective,sourcePackage,\{recoveryHold:options\.recoveryHold===true\}\)/);
+ assert.match(code,/platformOutputSeedFields\(parent,requestRecord,outputRow,effective,sourcePackage,\{\s*recoveryHold:options\.recoveryHold===true,\s*recoveryReviewOnly:options\.recoveryReviewOnly===true,\s*\}\)/);
+ assert.match(body,/options\.recoveryReviewOnly === true \? \{\} : \{ Do_Not_Publish: true \}/);
+ assert.doesNotMatch(section("studioRecoverFreeSkylineFerryFanoutCron"),/recoveryReviewOnly/);
  assert.match(code, /\{ routingOnly: true, recoveryHold: options\.recoveryHold === true,/);
  assert.match(code, /skipDirectiveSync: options\.recoveryHold === true && options\.skipDirectiveSync === true/);
 });

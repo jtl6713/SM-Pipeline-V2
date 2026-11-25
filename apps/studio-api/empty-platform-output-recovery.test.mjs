@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 
 const worker=fs.readFileSync(new URL("./worker.js",import.meta.url),"utf8");
@@ -62,4 +63,56 @@ test("media source failure cannot block creation of user-editable recovery outpu
  assert.match(seed,/Scheduled_Post_Date: null/);
  assert.match(seed,/Review_Status: "Pending Review"/);
  assert.match(code,/buildOutputWorkItemEffective\(env,outputRow,requestRecord,parent,profileDefaults,\{recoveryHold:options\.recoveryHold===true\}\)/);
+});
+
+test("execute real seed: ordinary recovery cannot arm publication; legacy and test recovery stay held",()=>{
+ const start=code.indexOf("export function platformOutputSeedFields(");
+ const end=code.indexOf("/*__STUDIO_WORKER_END:platformOutputSeedFields__*/",start);
+ assert.ok(start>=0 && end>start);
+ const seed=vm.runInNewContext(code.slice(start,end).replace(/^export /,"")+"\nplatformOutputSeedFields",{
+   f:(r,k)=>r?.fields?.[k],
+   HttpError:class extends Error{},
+   productionRequestRevisionOpen:r=>Boolean(r.fields.revision),
+   item4PlanItemForOutput:()=>({}),
+   studioOutputIsNativePhotoRoute:()=>false,
+   storySeedRenderStatus:()=> "Ready for Render",
+   studioAiThumbnailUrl:()=>null,
+   item4ThumbnailSource:()=> "none",
+   studioWritableTextMode:x=>x,
+   studioIsFinishedPassthrough:()=>false,
+   studioFinishedSeedOverlay:()=>({}),
+   item4StudioDirectiveYes:x=>x==="Yes",
+ });
+ const parent={id:"parent",fields:{}};
+ const request={id:"request",fields:{}};
+ const output={id:"output",fields:{}};
+ const effective={platform:"Instagram",output_type:"Story",voiceover_mode:"Yes",
+   background_music_mode:"Yes",video_duration_seconds:10,
+   scheduled_at:"2026-12-01T12:00:00Z",recovery_media_issue:"Music source unavailable"};
+ const pkg={story_teaser:true,clips:[]};
+ const ordinary=seed(parent,request,output,effective,pkg,{recoveryHold:true,recoveryReviewOnly:true});
+ assert.equal(Object.hasOwn(ordinary,"Do_Not_Publish"),false);
+ assert.equal(ordinary.Render_Status,"Blocked");
+ assert.equal(ordinary.Asset_Selection_Notes,"Music source unavailable");
+ for(const [key,value] of Object.entries({Output_Status:"In Production",Review_Status:"Pending Review",
+   Publish_Status:"Not Ready",Auto_Publish_Enabled:false,Scheduled_Post_Date:null,
+   Studio_Scheduled_At:null,YouTube_Scheduled_Publish_At:null})) assert.equal(ordinary[key],value,key);
+ assert.equal(ordinary.Studio_Effective_Video_Duration_Seconds,10);
+ assert.equal(ordinary.Studio_Effective_Voiceover_Mode,"Yes");
+ assert.equal(ordinary.Studio_Effective_Background_Music_Mode,"Yes");
+ const ready=seed(parent,request,output,{...effective,recovery_media_issue:null},pkg,{recoveryHold:true,recoveryReviewOnly:true});
+ assert.equal(ready.Render_Status,"Ready for Render");
+ assert.equal(ready.Output_Status,"In Production");
+ assert.equal(Object.hasOwn(ready,"Do_Not_Publish"),false);
+ const legacy=seed(parent,request,output,effective,pkg,{recoveryHold:true});
+ assert.equal(legacy.Do_Not_Publish,true);
+ assert.equal(legacy.Auto_Publish_Enabled,false);
+ assert.equal(legacy.Scheduled_Post_Date,null);
+ const testRequest={...request,fields:{Test_Run_ID:"test"}};
+ assert.equal(seed(parent,testRequest,output,effective,pkg,{recoveryHold:true}).Do_Not_Publish,true);
+ for(const [req,options] of [[testRequest,{recoveryHold:true,recoveryReviewOnly:true}],
+   [{...request,fields:{revision:true}},{recoveryHold:true,recoveryReviewOnly:true}],
+   [request,{recoveryReviewOnly:true}]]) {
+   assert.throws(()=>seed(parent,req,output,effective,pkg,options),/new non-test output/);
+ }
 });
