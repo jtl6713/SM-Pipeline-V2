@@ -112,7 +112,8 @@ def test_story_sibling_failed_generation_fences_second_paid_call(monkeypatch):
     monkeypatch.setattr(elevenlabs_client, "resolve_content_voice_id", lambda _: "voice-1")
     synthesize = Mock(side_effect=RuntimeError("ambiguous provider timeout"))
     monkeypatch.setattr(elevenlabs_client, "synthesize_voiceover_by_id", synthesize)
-    monkeypatch.setattr(story.requests, "get", lambda *a, **k: SimpleNamespace(status_code=404))
+    from integrations.r2_upload import R2UploadClient
+    monkeypatch.setattr(R2UploadClient, "story_audio_missing", lambda *a: True)
     with pytest.raises(story.StoryVoiceoverError, match="reconcile its exact attempt"):
         story.ensure_story_voiceover(client, a, p)
     assert json.loads(rows[a["id"]]["fields"][story.RECEIPT])["state"] == "failed"
@@ -220,14 +221,17 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     paid = Mock(side_effect=AssertionError("must not regenerate"))
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[row])
-    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=status,content=b"unverified"))
+    from integrations.r2_upload import R2UploadClient
+    monkeypatch.setattr(R2UploadClient,"get_story_audio",Mock(side_effect=RuntimeError("unavailable")))
+    monkeypatch.setattr(R2UploadClient,"story_audio_missing",Mock(side_effect=AssertionError("cache-only must not check generation")))
     with pytest.raises(story.StoryVoiceoverError):
         story.ensure_story_voiceover(client,row,p,allow_generate=False)
     paid.assert_not_called()
     client.update_record.assert_not_called()
 
 
-def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
+@pytest.mark.parametrize("held",[False,True])
+def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch,held):
     import hashlib
     from copy import deepcopy
     from contextlib import nullcontext
@@ -241,7 +245,7 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
     url="https://media.chicagoshining.com/studio/previews/story-voiceover/"+p["id"]+"/"+digest+".mp3"
     row=output(Content_Item=[p["id"]], Output_Status="In Production", Render_Status="Blocked",
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
-        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]', Do_Not_Publish=held,
         Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"state":"failed","url":url,"sha256":hashlib.sha256(data).hexdigest()}))
     rows={p["id"]:p,row["id"]:row}
     class Client:
@@ -256,10 +260,13 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
     paid=Mock(side_effect=AssertionError("must not regenerate"))
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
-    monkeypatch.setattr(story.requests,"get",lambda *a,**k:SimpleNamespace(status_code=200,content=data))
+    from integrations.r2_upload import R2UploadClient
+    monkeypatch.setattr(R2UploadClient,"get_story_audio",lambda *a:data)
     monkeypatch.setattr(story,"checked_voice",lambda b,cap:4.0)
     result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
     assert result["fields"]["Render_Status"]=="Ready for Render"
+    assert result["fields"]["Do_Not_Publish"] is held
     assert result["fields"]["Voiceover_URL"]==url
     assert json.loads(result["fields"][story.RECEIPT])["state"]=="verified"
     paid.assert_not_called()
+
