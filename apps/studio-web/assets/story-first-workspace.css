@@ -602,3 +602,10 @@
     width: 100%;
   }
 }
+
+/* Keep AI still review feedback adjacent to the tapped control on mobile. */
+#storyFirstPanel .story-first-image-review-controls {display:grid;gap:8px;min-width:0;grid-column:1/-1}
+#storyFirstPanel .story-first-image-review-controls>button {width:100%;min-height:44px;white-space:normal}
+#storyFirstPanel .story-first-image-review-controls>button:disabled {opacity:.62;cursor:wait}
+#storyFirstPanel .story-first-image-review-controls>button[aria-busy="true"] {opacity:.72}
+#storyFirstPanel .story-first-image-review-controls>[hidden] {display:none}
