@@ -51,6 +51,10 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
   // evidence, not proof of an external outcome. Missing/blank notes remain
   // ambiguous. The admin census never writes an audited admission marker.
   const explicitEarlyHold=attempts===1&&!priorNative&&!hasRemote&&!errorStage&&
+    str(read("Review_Status","review_status"))==="Approved"&&
+    str(read("Output_Status","output_status"))==="Approved for Publishing"&&
+    !identity(row,"Test_Run_ID")&&
+    !identity(row,"Published_At")&&!identity(row,"Platform_Post_URL")&&!identity(row,"Manual_Published_URL")&&
     !identity(row,"Publish_Error_Message")&&holdMatch&&dueAt!==null&&dueAt<=nowMs&&
     dispatchAt!==null&&approvalAt!==null&&dispatchAt>=approvalAt&&dispatchAt-approvalAt<=30000&&
     dispatchAt<dueAt&&dateMs(holdMatch[1])===dueAt;
