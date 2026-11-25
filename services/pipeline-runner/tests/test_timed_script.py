@@ -346,9 +346,9 @@ def test_timed_script_extends_last_scene_to_probed_voiceover():
         request={"fields": {"Production_Notes": notes, "Voiceover_Mode": "Yes", "Video_Duration_Seconds": 96}},
         output=None,
     )
-    assert total == math.ceil(55.12 * FPS)
-    assert total == 1654
-    assert frames == [1654]
+    assert total == math.ceil(55.12 * FPS) + 3
+    assert total == 1657
+    assert frames == [1657]
 
 
 def test_photo_voiceover_without_timeline_uses_measured_speech_not_owner_duration():
@@ -362,8 +362,8 @@ def test_photo_voiceover_without_timeline_uses_measured_speech_not_owner_duratio
         request={"fields": {"Video_Duration_Seconds": 30, "Voiceover_Mode": "Yes"}},
         output=None,
     )
-    assert total == 12 * 30
-    assert frames == [180, 180]
+    assert total == 12 * 30 + 3
+    assert frames == [180, 183]
 
 
 def test_beat_sync_cannot_rewrite_authoritative_scene_lengths():

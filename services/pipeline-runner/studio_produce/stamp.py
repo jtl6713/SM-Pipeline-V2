@@ -724,6 +724,10 @@ def assign_clip_frames(
             total = sum(frames)
             if voice_n > 0:
                 required = max(1, math.ceil(voice_n * FPS))
+                # Worker R4 admission requires 100 ms of narration headroom.
+                # Only add it to a final still, never lengthen a video source.
+                if directive_yes(effective.get("voiceover_mode")) and kinds[-1] != "video":
+                    required += math.ceil(0.1 * FPS)
                 if required > total:
                     frames[-1] += required - total
                     total = required
@@ -748,7 +752,9 @@ def assign_clip_frames(
             for position, index in enumerate(photo_indexes):
                 frames[index] = allocated[position]
             total = sum(frames)
-            required = max(1, math.ceil(voice_n * FPS))
+            # Preserve the allocation of spoken scenes and add only the
+            # minimum R4 admission headroom to the final still.
+            required = max(1, math.ceil(voice_n * FPS)) + math.ceil(0.1 * FPS)
             if required > total and photo_indexes:
                 frames[photo_indexes[-1]] += required - total
                 total = required
