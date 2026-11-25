@@ -61,7 +61,17 @@ for number,parent_id,output_id,expected,after,before in [
    params["start_after_history_item_id"]=cursor
   result["matches"]=len(matched)
   if more is not False: result["status"]="history_incomplete"
-  elif len(matched)!=1: result["status"]="no_exact_history" if not matched else "ambiguous_history"
+  elif len(matched)!=1:
+   result["status"]="no_exact_history" if not matched else "ambiguous_history"
+   # Report bounded candidates, without provider IDs or narration bytes.
+   # A matching text/voice alone cannot authorize reuse.
+   if 1<len(matched)<=4:
+    candidates=[]
+    for item_id,item in matched.items():
+     data=get("https://api.elevenlabs.io/v1/history/"+item_id+"/audio",{"xi-api-key":el,"Accept":"audio/mpeg"},bound=8388608)
+     if len(data)<32: raise ValueError("empty_audio")
+     candidates.append({"created_at":int(item["date_unix"]),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+    result["candidates"]=sorted(candidates,key=lambda x:(x["created_at"],x["sha256"]))
   else:
    item_id=next(iter(matched))
    data=get("https://api.elevenlabs.io/v1/history/"+item_id+"/audio",{"xi-api-key":el,"Accept":"audio/mpeg"},bound=8388608)
