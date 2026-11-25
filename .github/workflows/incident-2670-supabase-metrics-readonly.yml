@@ -81,7 +81,7 @@ jobs:
             if [[ "$status" == ok || "$status" == failed ]]; then
               jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
                 tr -d '\r' |
-                grep -E '^incident2670_(key_length=[0-9]{1,4}|key_prefix_valid=[01]|metrics_http_status=[0-9]{1,3}|metrics=(NEEDS_EXISTING_SB_SECRET|API_UNAVAILABLE|REQUIRED_SERIES_UNAVAILABLE|RUNNER_ENV_UNAVAILABLE|ENV_PROJECT_OR_DUPLICATE|ENV_KEY_DUPLICATE_OR_UNREADABLE|METRIC_CALCULATION_FAILED))$' || true
+                grep -E '^incident2670_(key_length=[0-9]{1,4}|key_prefix_valid=[01]|metrics_http_status=[0-9]{1,3}|key_http_status=[0-9]{1,3}|metrics=(NEEDS_EXISTING_SB_SECRET|API_UNAVAILABLE|REQUIRED_SERIES_UNAVAILABLE|RUNNER_ENV_UNAVAILABLE|ENV_PROJECT_OR_DUPLICATE|ENV_KEY_DUPLICATE_OR_UNREADABLE|METRIC_CALCULATION_FAILED|METRICS_AUTH_REJECTED|PROJECT_KEY_REJECTED|METRICS_AUTH_UNVERIFIED))$' || true
               if [[ "$status" == ok ]] && jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
                 tr -d '\r' | grep -x 'incident2670_metrics=PASS_TWO_READONLY_SAMPLES' >/dev/null; then
                 jq -r '.job.log // ""' /tmp/incident2670-metrics-status.json |
