@@ -22,44 +22,93 @@ jobs:
     if: github.event_name == 'push' && github.repository == 'jtl6713/SM-Pipeline-V2'
     needs: read-only-contract
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      AUDIT_WORKER: studio-factory-2959-getty-readonly
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Read exact immutable approval ledger objects only
+      - name: Read exact existing Factory status through established service binding
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS --max-time 20 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/deployments" -o /tmp/deployments.json
-          ACTIVE=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deployments.json)
-          curl -fsS --max-time 20 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/versions/$ACTIVE" -o /tmp/version.json
-          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/version.json)
-          RID=26efdab7-5418-429d-8c5d-04d148889f55
-          PROFILE=recF7UAn0LkMZZrWZ
-          ROOT=studio/state/factory-approvals/v2
-          CHILD="fgc_$(printf '%s' "factory-group-child-v1:$RID:$PROFILE" | sha256sum | cut -d' ' -f1)"
-          BASE="$API/r2/buckets/$BUCKET/objects"
-          curl -fsS --max-time 20 -H "$AUTH" "$BASE/$ROOT/groups/$RID.json" -o /tmp/group.json
-          jq -e --arg rid "$RID" --arg child "$CHILD" --arg profile "$PROFILE" '.request_id==$rid and (.records|length)==2 and (.children|length)==1 and .children[0].profile_id==$profile and .children[0].request_id==$child' /tmp/group.json >/dev/null
-          curl -fsS --max-time 20 -H "$AUTH" "$BASE/$ROOT/jobs/$PROFILE/$CHILD.json" -o /tmp/child.json
+          # Fail closed if another Worker already owns this name.
+          EXISTING=$(curl -sS -o /tmp/existing.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")
+          if [[ "$EXISTING" != "404" ]]; then echo "::error::Auditor Worker name already in use or unavailable: HTTP $EXISTING"; exit 1; fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER" >/dev/null || { echo "::error::Ephemeral inspector cleanup failed"; exit 1; }
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::$TOKEN"
+          cat >/tmp/audit-worker.js <<'EOF'
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (request.method !== "GET" || url.pathname !== "/exact") return new Response("Not found", { status:404 });
+              if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) return new Response("Unauthorized", {status:401});
+              const internal = new Request("https://studio.chicagoshining.com/api/factory/approval-batches?scope=all&request_id=26efdab7-5418-429d-8c5d-04d148889f55", {
+                headers: {
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Accept":"application/json"
+                }
+              });
+              const response = await env.STUDIO_API.fetch(internal);
+              return new Response(await response.text(), {status:response.status,
+                headers: {"Content-Type":"application/json","Cache-Control":"no-store"}});
+            }
+          };
+          EOF
+          cat >/tmp/audit-meta.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          CODE=$(curl -sS -o /tmp/audit-put.json -w '%{http_code}' -X PUT "$API/workers/scripts/$AUDIT_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/audit-meta.json;type=application/json' -F 'worker.js=@/tmp/audit-worker.js;type=application/javascript+module;filename=worker.js')
+          if ! [[ "$CODE" =~ ^2[0-9][0-9]$ ]] || ! jq -e '.success==true' /tmp/audit-put.json >/dev/null; then
+            jq -c '{success,errors}' /tmp/audit-put.json
+            exit 1
+          fi
+          OWNED=1
+          curl -fsS -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/audit-sub.json
+          jq -e '.success==true' /tmp/audit-sub.json >/dev/null
+          SUBDOMAIN=$(curl -fsS -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')
+          URL="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev/exact"
+          CODE=000
+          for attempt in $(seq 1 12); do
+            CODE=$(curl -sS --max-time 30 -o /tmp/getty-status.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)
+            echo "exact_read_http=$CODE"
+            if [[ "$CODE" == "200" ]]; then break; fi
+            sleep 2
+          done
+          test "$CODE" = 200
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
-          import {factoryApprovalItemTiming,factoryApprovalTimingReport} from './apps/studio-api/factory-approval-timings.mjs';
-          const p=JSON.parse(fs.readFileSync('/tmp/group.json','utf8'));
-          const c=JSON.parse(fs.readFileSync('/tmp/child.json','utf8'));
-          assert.equal(c.group_request_id,p.request_id);
-          assert.equal(c.request_id,p.children[0].request_id);
-          assert.equal(c.profile_id,p.children[0].profile_id);
-          assert.deepEqual(c.items.map(i=>i.id).sort(),['rec65CWO9nx4YHFcX','recMyAqf98U50xjmL']);
-          assert.ok(c.items.every(i=>i.status==='approved'));
-          const report={request_id:p.request_id,parent_created_at:p.created_at,child_request_id:c.request_id,child_created_at:c.created_at,child_updated_at:c.updated_at,status:c.status,items:c.items.map(i=>({id:i.id,status:i.status,attempts:i.attempts,total_attempts:i.total_attempts,timing:factoryApprovalItemTiming(i)})),timing_report:factoryApprovalTimingReport(c.items)};
+          const result=JSON.parse(fs.readFileSync('/tmp/getty-status.json','utf8'));
+          const rid='26efdab7-5418-429d-8c5d-04d148889f55';
+          assert.equal(result.ok,true);
+          assert.equal(result.exact_request_id,rid);
+          assert.equal(result.batches.length,1);
+          const p=result.batches[0];
+          assert.equal(p.request_id,rid);
+          assert.equal(p.approved_count,2);
+          assert.equal(p.pending_count,0);
+          assert.equal(p.failed_count,0);
+          assert.equal(p.children.length,1);
+          assert.equal(p.children[0].profile_id,'recF7UAn0LkMZZrWZ');
+          assert.deepEqual(p.items.map(i=>i.id).sort(),['rec65CWO9nx4YHFcX','recMyAqf98U50xjmL']);
+          assert.ok(p.items.every(i=>i.status==='approved'&&i.timing?.complete));
+          const report={request_id:rid,parent_created_at:p.created_at,child_request_id:p.children[0].request_id,status:p.status,items:p.items.map(i=>({id:i.id,status:i.status,output_id:i.output_id,total_attempts:i.total_attempts,completed_at:i.completed_at,timing:i.timing})),timing_report:p.timing_report};
           console.log('ISSUE2959_GETTY_TIMING='+JSON.stringify(report));
           fs.writeFileSync('/tmp/getty-timing.json',JSON.stringify(report,null,2));
           JS
