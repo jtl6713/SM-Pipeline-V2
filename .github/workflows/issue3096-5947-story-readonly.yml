@@ -1,0 +1,115 @@
+name: Issue 3096 Exact NYC Story 5947 Owner and Approved Asset Audit
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3096-5947-story-readonly.yml'
+      - 'repair/scripts/issue3096-5947-story-readonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3096-5947-story-readonly.yml'
+      - 'repair/scripts/issue3096-5947-story-readonly.ps1'
+permissions: {contents: read}
+concurrency:
+  group: p1-2340-six-new-stories-owned-media-readonly
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell parser and original six exact IDs, reject media writes
+        shell: pwsh
+        run: |
+          $f='repair/scripts/issue3096-5947-story-readonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $s=Get-Content -Raw $f
+          foreach($guard in @('vkwvscgisqsbuwagdvtb','recKw7c9aZ75tDOWU','held until 2026-11-25T21:40:00.000Z','approved_asset_decoded','graph.facebook.com','all_accounts_verified','ISSUE3096_5947_STORY_READONLY','video_frame_decode_failed','provider_writes=0','output_writes=0','airtable_reads=0','media_publish_calls=0')){
+            if(-not $s.Contains($guard)){throw ('missing_safety_guard: '+$guard)}
+          }
+          if(([regex]::Matches($s,'@\{n=\d+;rid=')).Count -ne 1){throw 'source_target_count_changed'}
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/media_publish','api.airtable.com','/stages/ap1_igs','Publish_Retry_Eligible=true')){
+            if($s.Contains($bad)){throw ('mutating_operation_found: '+$bad)}
+          }
+          Write-Output 'P1_SIX_ORIGINAL_STORY_GET_ONLY_STATIC_PASS'
+  exact-owned-media-provider-audit:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate protected read-only Ops executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in "$OPS_A" "$OPS_B" "$OPS_C";do
+            test -n "$key" || continue
+            code=$(curl -sS --max-time 25 -o /tmp/p1-six-story-catalog.json -w '%{http_code}' 'https://ops.chicagoshining.com/api/catalog' -H "Authorization: Bearer $key" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/p1-six-story-catalog.json >/dev/null;then
+              echo "::add-mask::$key"
+              echo "P1_SIX_STORIES_OPS=$key" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Protected Ops credential unavailable: zero provider calls';exit 1
+      - name: Execute SHA-256-pinned exact six original Story GET audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          f=pathlib.Path('repair/scripts/issue3096-5947-story-readonly.ps1')
+          digest=hashlib.sha256(f.read_bytes()).hexdigest()
+          sha=os.environ['GITHUB_SHA']
+          assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{f.as_posix()}'
+          cmd=(
+            "$ErrorActionPreference='Stop';"
+            f"$url='{url}';"
+            "$src=[string](Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing -TimeoutSec 45).Content;"
+            "$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($src))).Replace('-','').ToLowerInvariant();"
+            f"if($hash -ne '{digest}'){{throw 'immutable_source_hash_mismatch'}};"
+            "& ([ScriptBlock]::Create($src))"
+          )
+          pathlib.Path('/tmp/p1-six-story-request.json').write_text(json.dumps({'command':cmd,'confirm':True}))
+          PY
+          admitted=false
+          for n in $(seq 1 8);do
+            code=$(curl -sS --max-time 35 -o /tmp/p1-six-story-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $P1_SIX_STORIES_OPS" \
+              -H 'Content-Type: application/json' --data-binary @/tmp/p1-six-story-request.json || true)
+            if [[ "$code" == 200 || "$code" == 202 ]];then admitted=true;break;fi
+            if [[ "$code" != 409 ]];then echo "Ops GET-only command admission denied ($code)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$admitted" != true ]];then echo 'Ops busy; no provider GET';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-six-story-start.json)
+          for n in $(seq 1 155);do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_SIX_STORIES_OPS" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-six-story-job.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-six-story-job.json)
+            if [[ "$status" == ok ]];then
+              jq -r '.job.log // ""' /tmp/p1-six-story-job.json | grep '^ISSUE3096_5947_STORY_READONLY=' | tail -1 | sed 's/^ISSUE3096_5947_STORY_READONLY=//' > /tmp/p1-six-story-evidence.json
+              jq -e '.targets==1 and .provider_writes==0 and .output_writes==0 and .airtable_reads==0 and .media_publish_calls==0 and (.results|length)<=1' /tmp/p1-six-story-evidence.json >/dev/null
+              jq -c '{cohort,targets,provider_gets,provider_writes,output_writes,airtable_reads,media_publish_calls,pages,all_accounts_verified,results,reason}' /tmp/p1-six-story-evidence.json
+              if ! jq -e '.all_accounts_verified==true and (.results|length)==1 and .results[0].approved_asset_decoded==true' /tmp/p1-six-story-evidence.json >/dev/null;then echo 'Source/provider GET incomplete, no publication decision';exit 3;fi
+              exit 0
+            elif [[ "$status" == failed ]];then echo 'Protected read-only execution failed, no provider writes';exit 3;fi
+            sleep 4
+          done
+          echo 'Protected read-only audit incomplete';exit 4
+      - name: Preserve immutable sanitized audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3096-5947-owned-media-proof
+          path: /tmp/p1-six-story-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
