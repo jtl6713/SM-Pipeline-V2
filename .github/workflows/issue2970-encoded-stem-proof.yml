@@ -1,0 +1,48 @@
+name: Issue 2970 Riverwalk encoded source attribution
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2970-encoded-stem-proof.py'
+      - '.github/workflows/issue2970-encoded-stem-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue2970-encoded-stem-proof.py'
+      - '.github/workflows/issue2970-encoded-stem-proof.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue2970-encoded-source-proof
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned numerical dependency and run synthetic two-source negative controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'numpy==2.2.6'
+          OPENBLAS_NUM_THREADS=1 python repair/scripts/issue2970-encoded-stem-proof.py --synthetic
+      - name: Download the exact completed media and staged sources (read only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
+          DIR="$(mktemp -d)"
+          trap 'rm -rf "$DIR"' EXIT
+          BASE='https://media.chicagoshining.com/studio/previews'
+          curl -fsS --max-time 60 --max-filesize 22000000 "$BASE/rec9uodYpY4L6BvyQ/jobs/job-20261125005008-e9ce74b8.mp4" -o "$DIR/final.mp4"
+          curl -fsS --max-time 40 --max-filesize 3000000 "$BASE/repairs/issue2970/2306/full-narration-7ded24a0c2fc51cb470c2810.mp3" -o "$DIR/voice.mp3"
+          curl -fsS --max-time 40 --max-filesize 3000000 "$BASE/repairs/issue2970/2306/owned-music-7e8a6b73c96d617a08ed57dd.mp3" -o "$DIR/music.mp3"
+          OPENBLAS_NUM_THREADS=1 python repair/scripts/issue2970-encoded-stem-proof.py "$DIR/final.mp4" "$DIR/voice.mp3" "$DIR/music.mp3"
+          echo 'ISSUE2970_NO_PRODUCTION_WRITES=PASS'
