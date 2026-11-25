@@ -240,7 +240,7 @@ test("Factory removes submitted outputs from the checkable Needs Eyes lane immed
 });
 
 test("Factory submitted-output projection covers click, durable queue, reload and Active Approvals", () => {
-  const names = ["factoryActivityRows", "factorySubmittedApprovalIds", "factoryHasHumanReviewAction", "factoryVisibleNeedsEyes"];
+  const names = ["factoryActivityRows", "factorySubmittedApprovalIds", "factoryActiveSubmissionIds", "factoryHasHumanReviewAction", "factoryVisibleNeedsEyes"];
   const sources = names.map(name => extractNamedFunction(js, name)).join("\n");
   const A = "recAAAA1111AAAA11", B = "recBBBB2222BBBB22";
   const C = "recCCCC3333CCCC33", D = "recDDDD4444DDDD44";
