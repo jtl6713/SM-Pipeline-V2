@@ -100,6 +100,10 @@ OTHER_EXACT_POWERSHELL_GUARDS = {
         "foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/media_publish','__AIRT_HOST__','/stages/ap1_igs','Publish_Retry_Eligible=true')){",
         "if($s.Contains($bad)){throw ('mutating_operation_found: '+$bad)}",
     ),
+    ".github/workflows/issue3096-5947-story-readonly.yml": (
+        "foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/media_publish','__AIRT_HOST__','/stages/ap1_igs','Publish_Retry_Eligible=true')){",
+        "if($s.Contains($bad)){throw ('mutating_operation_found: '+$bad)}",
+    ),
 
 }
 
