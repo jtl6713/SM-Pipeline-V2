@@ -29,11 +29,17 @@ test("root repair is per-profile, exact-plan and zero-output only",()=>{
    body.indexOf('finalizeProductionRequestPromotion(env,sampled.id'));
  assert.match(body,/recoveryHold:true,skipDirectiveSync:true/);
  assert.match(body,/real\.length===rows\.length/);
- assert.match(body,/real\.every\(row=>f\(row,"Do_Not_Publish"\)===true/);
+ assert.match(body,/recoveryReviewOnly:true/);
+ assert.match(body,/real\.every\(row=>f\(row,"Do_Not_Publish"\)!==true/);
+ for (const field of ["Output_Status","Review_Status","Publish_Status","Auto_Publish_Enabled","Review_Decision_At","Published_At","Platform_Post_URL","YouTube_Video_ID","Scheduled_Post_Date","Studio_Scheduled_At","YouTube_Scheduled_Publish_At"]) {
+   assert.ok(body.includes('f(row,"'+field+'")'), "recovery verifies "+field);
+ }
+ assert.match(body,/f\(row,"Auto_Publish_Enabled"\)===false/);
+ assert.match(body,/studioFinishedOriginKind\(requestRecord\)!=="finished-video"/);
  assert.doesNotMatch(body,/publishNow|scheduleOutput|sendToMeta|approveAll/i);
 });
 
-test("media source failure cannot block creation of user-editable held outputs or silently publish",()=>{
+test("media source failure cannot block creation of user-editable recovery outputs or silently publish",()=>{
  const effect=code.slice(code.indexOf("export async function buildOutputWorkItemEffective("),
    code.indexOf("/*__STUDIO_WORKER_END:buildOutputWorkItemEffective__*/"));
  const seed=code.slice(code.indexOf("function platformOutputSeedFields("),
@@ -43,7 +49,15 @@ test("media source failure cannot block creation of user-editable held outputs o
  assert.match(effect,/effective\.recovery_media_issue/);
  assert.match(seed,/Render_Status: "Blocked"/);
  assert.match(seed,/Asset_Selection_Notes: effective\.recovery_media_issue/);
- assert.match(seed,/Do_Not_Publish: true/);
+ assert.match(seed,/options\.recoveryReviewOnly === true \? \{\} : \{ Do_Not_Publish: true \}/);
+ assert.match(seed,/productionRequestRevisionOpen\(requestRecord\)/);
+ assert.match(seed,/Test_Run_ID/);
+ assert.match(seed,/Review-only recovery requires a new non-test output/);
+ assert.match(code,/if \(poId && options\.recoveryReviewOnly === true\)/);
+ assert.ok(code.indexOf("Existing output discovered during review-only recovery; reconcile instead") <
+   code.indexOf("let createdNewPlatformOutput=false"));
+ assert.match(seed,/Publish_Status: "Not Ready"/);
+ assert.match(seed,/Output_Status: "In Production"/);
  assert.match(seed,/Auto_Publish_Enabled: false/);
  assert.match(seed,/Scheduled_Post_Date: null/);
  assert.match(seed,/Review_Status: "Pending Review"/);
