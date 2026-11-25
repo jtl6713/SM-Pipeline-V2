@@ -448,8 +448,12 @@
     if (/\blive Factory approval\b|still committing\b|overlap another (live )?Factory approval\b/i.test(text)) {
       return false;
     }
+    // Prior creative-only vetoes are revalidated through the authenticated
+    // read-only route; do not retire their original saved approval intent.
+    if (/Output #(\d+|rec[A-Za-z0-9]{14}):[^\n]*(?:Story render duration differs|Generated video (?:voiceover|background music) differs from original (?:Yes|No))[^\n]*No new batch was accepted/i.test(text)) return false;
     return /\bpast_review\b|no longer ready for approval|Approved for Publishing|already past review/i
-      .test(text) || (/Native gallery publication blocked:\s*native_gallery_[a-z0-9_]+/i.test(text)
+      .test(text) || /Output #(\d+|rec[A-Za-z0-9]{14}):[^\n]*No new batch was accepted[.!]?/i.test(text)
+      || (/Native gallery publication blocked:\s*native_gallery_[a-z0-9_]+/i.test(text)
         && /No new batch was accepted[.!]?/i.test(text));
   }
 
@@ -470,6 +474,7 @@
     let dropped = 0;
     for (const { key, saved } of factoryRecoveryEntries()) {
       const unrecoverable = factoryUnrecoverableSubmitError(saved?.last_error)
+        || factoryTerminalEligibilityError(saved?.last_error)
         || saved?.terminal_eligibility === true;
       if (onlyUnrecoverable && !unrecoverable) continue;
       if (onlyUnrecoverable) {
@@ -593,8 +598,9 @@
       const recordId = recordMatches[0][1];
       return recordMatches.length === 1 && ids.includes(recordId) ? recordId : null;
     }
-    const match = text.match(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/i);
-    if (!match) return null;
+    const numericMatches = [...text.matchAll(/Output #(\d+):[^\n]+?No new batch was accepted[.!]?/gi)];
+    if (numericMatches.length !== 1) return null;
+    const match = numericMatches[0];
     const member = (saved?.batches || []).flatMap(plan =>
       Array.isArray(plan?.payload?.items) ? plan.payload.items : [])
       .filter(item => String(item?.output_id || "") === match[1]
@@ -613,11 +619,40 @@
           "All saved output IDs and request IDs are preserved; inspect Activity rather than discarding or resubmitting the batch.",
       };
     }
-    // Persist the surviving selection BEFORE releasing its old rejected
-    // request ID. The next ordinary submission allocates a fresh idempotency
-    // key; never reuse the invalid plan's original key for a different set.
-    const survivors = (saved.ids || []).filter(id =>
-      id !== rejectedId && state.selectedOutputs.has(id));
+    // For an exact saved authenticated click, preserve its unaffected
+    // members even if their checkboxes are hidden by the recovery fence.
+    // A changed output set must get a new idempotency key. The original
+    // definitive preflight rejection proves no batch was accepted.
+    const original = saved.profile_id === "global" && saved.batches?.length === 1 ? saved.batches[0] : null;
+    const exact = saved.auto_retry === true && original?.payload?.action === "start_group"
+      && original.payload.request_id === original.request_id
+      && Array.isArray(original.payload.record_ids)
+      && JSON.stringify([...original.payload.record_ids].sort()) === JSON.stringify([...(saved.ids || [])].sort())
+      && JSON.stringify([...(original.ids || [])].sort()) === JSON.stringify([...(saved.ids || [])].sort())
+      && /No new batch was accepted[.!]?/i.test(String(saved.last_error || ""));
+    const survivors = (saved.ids || []).filter(id => id !== rejectedId && (exact || state.selectedOutputs.has(id)));
+    if (exact && survivors.length) {
+      const request_id = newFactoryRequestId();
+      const plan = {request_id, ids:survivors, payload:{...original.payload,request_id,
+        record_ids:survivors,items:(original.payload.items || []).filter(item=>survivors.includes(item.id))}};
+      const key = FACTORY_RECOVERY_PREFIX + request_id;
+      const replacement = {profile_id:"global",ids:survivors,batches:[plan],
+        saved_ms:saved.saved_ms,auto_retry:true,needs_review_revalidation:true,previous_rejected_request_id:original.request_id};
+      try {
+        localStorage.setItem(key,JSON.stringify(replacement));
+        localStorage.removeItem(recoveryKey);
+      } catch {
+        return {resolved:false,dropped:false,message:"Unable to persist unaffected approvals; original selection preserved."};
+      }
+      state.selectedOutputs.delete(rejectedId);
+      (state.submissionRejectedIds ||= new Set()).add(rejectedId);
+      saveFactorySelection();
+      return {resolved:true,count:0,dropped:true,skipped_output_id:rejectedId,remaining:survivors.length,
+        message:"Output rejected before acceptance: " + String(saved.last_error || reason)
+          + " Preserved " + survivors.length + " unaffected original approvals for safe independent submission."};
+    }
+    // Legacy requests without an exact saved payload retain only the
+    // still-selected survivors, never manufacture a new click.
     const waiting = [...new Set([...waitingFactorySelection(), ...survivors])]
       .filter(id => id !== rejectedId);
     try {
@@ -630,6 +665,7 @@
       };
     }
     state.selectedOutputs.delete(rejectedId);
+    (state.submissionRejectedIds ||= new Set()).add(rejectedId);
     saveFactorySelection();
     if (!factoryRecoveryEntries().some(({ saved: row }) =>
       (row.ids || []).some(id => state.selectedOutputs.has(id)))) {
@@ -1653,6 +1689,7 @@
   function factoryShowSubmissionPreview(cards) {
     if (!cards.length) return;
     state.submissionPreview = factorySubmissionPreview(cards);
+    state.submissionRejectedIds = new Set();
     state.completedOpen = false;
     state.activeApprovalsCollapsed = false;
     state.inspectedBatchKey = state.submissionPreview.job_id;
@@ -1673,6 +1710,7 @@
     if (!preview) return null;
     const confirmed = new Set(serverRows.flatMap(row =>
       Array.isArray(row.items) && !row.preview_only ? row.items.map(item => item.id) : []));
+    for (const id of state.submissionRejectedIds || []) confirmed.add(id);
     if (!confirmed.size) return preview;
     const remaining = preview.items.filter(item => !confirmed.has(item.id));
     if (remaining.length === preview.items.length) return preview;
@@ -2234,9 +2272,73 @@
         // commit grace expired, keeping the archived browser fence is a dead end.
         // Do not replay or automatically select these outputs: fresh human
         // approval is required; live server admission/overlap checks still apply.
-        if (saved.retry_blocked === true && graceExpired) {
-          retiredRejected.push(...plan.ids);
-          continue;
+        if ((saved.retry_blocked === true && graceExpired) || saved.needs_review_revalidation === true) {
+          const creativeOnly = /Output #(\d+|rec[A-Za-z0-9]{14}):[^\n]*(?:Story render duration differs|Generated video (?:voiceover|background music) differs from original (?:Yes|No))[^\n]*No new batch was accepted/i.test(String(saved.last_error || ""));
+          if ((creativeOnly || saved.needs_review_revalidation === true) && isGlobal && factorySavedPayloadMatchesPlan(saved,plan)) {
+            // Exact GET has proved no ledger exists. Ask only the read-only
+            // authenticated preflight to verify the original selection and
+            // canonical versions; no approval POST while the old veto exists.
+            if (Number(saved.next_retry_ms || 0) > Date.now())
+              return {resolved:false,message:saved.last_error || "Original approval is awaiting read-only review validation."};
+            saved.next_retry_ms=Date.now()+60000;
+            const fence=JSON.stringify(saved);
+            localStorage.setItem(recoveryKey,fence);
+            let check;
+            try {
+              check=await fetchJson("/api/factory/approval-batches",{
+                method:"POST",body:JSON.stringify({...plan.payload,action:"validate_group"})
+              });
+            } catch(error) {
+              if(localStorage.getItem(recoveryKey)!==fence)
+                return {resolved:false,message:"Saved approval changed during read-only validation."};
+              const detail=String(error.message || error);
+              if(factoryTerminalEligibilityError(detail)||factoryUnrecoverableSubmitError(detail)) {
+                saved.last_error=detail;
+                saved.terminal_eligibility=true;
+                localStorage.setItem(recoveryKey,JSON.stringify(saved));
+                return dropFactoryRecoveryEntry(recoveryKey,saved,detail);
+              }
+              return {resolved:false,message:"Original approval retained; read-only validation: "+detail};
+            }
+            if(localStorage.getItem(recoveryKey)!==fence)
+              return {resolved:false,message:"Saved approval changed during read-only validation."};
+            const rows=Array.isArray(check?.records)?check.records:[];
+            const versions=new Map(rows.map(row=>[row.id,row]));
+            if(check?.accepted!==false || check?.read_only!==true || check?.preflight_valid!==true
+                || check?.request_id!==plan.request_id || rows.length!==plan.ids.length
+                || versions.size!==plan.ids.length || plan.ids.some(id=>!versions.has(id))
+                || !Number.isFinite(Number(saved.saved_ms)) || Number(saved.saved_ms)<=0
+                || rows.some(row=>!Number.isFinite(Date.parse(String(row.review_updated_at||"")))
+                  || typeof row.requires_current_approval!=="boolean"))
+              return {resolved:false,message:"Original approval retained; canonical review versions unavailable."};
+            const changed=rows.find(row=>row.requires_current_approval
+              && Date.parse(row.review_updated_at)>Number(saved.saved_ms));
+            if(changed) {
+              saved.last_error="Output #"+(changed.output_id || changed.id)
+                +": review changed after the original saved approval; fresh review required. No new batch was accepted.";
+              saved.terminal_eligibility=true;
+              localStorage.setItem(recoveryKey,JSON.stringify(saved));
+              return dropFactoryRecoveryEntry(recoveryKey,saved,saved.last_error);
+            }
+            // Preserve original request ID and exact output set; the backend
+            // compares these canonical versions again BEFORE taking claims.
+            const items=plan.payload.items || [];
+            if(items.length!==plan.ids.length || new Set(items.map(item=>item.id)).size!==plan.ids.length
+                || items.some(item=>!versions.has(item.id)||versions.get(item.id).profile_id!==item.profile_id))
+              return {resolved:false,message:"Original approval retained; saved profile identity differs."};
+            plan.payload={...plan.payload,items:items.map(item=>({...item,
+              expected_review_updated_at:versions.get(item.id).review_updated_at}))};
+            saved.retry_blocked=false;
+            saved.next_retry_ms=0;
+            delete saved.terminal_eligibility;
+            delete saved.needs_review_revalidation;
+            delete saved.last_error;
+            localStorage.setItem(recoveryKey,JSON.stringify(saved));
+          } else {
+            if(saved.needs_review_revalidation === true) return {resolved:false,message:"Original approval retained; exact saved payload unavailable for validation."};
+            retiredRejected.push(...plan.ids);
+            continue;
+          }
         }
         if (factorySavedPayloadMatchesPlan(saved, plan)) {
           const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
@@ -2282,6 +2384,7 @@
     }
     if (committed.length) rememberFactoryAccepted(committed);
     if (committed.length || retiredRejected.length) {
+      for (const id of retiredRejected) (state.submissionRejectedIds ||= new Set()).add(id);
       const released = new Set([...committed, ...retiredRejected]);
       released.forEach(id => state.selectedOutputs.delete(id));
       if (retiredRejected.length) {
