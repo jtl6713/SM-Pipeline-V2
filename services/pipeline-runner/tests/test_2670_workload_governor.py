@@ -767,3 +767,54 @@ def test_maintenance_yield_preserves_retry_budget(isolated_governor):
         row=db.execute("SELECT state,consecutive_yields FROM producer_jobs WHERE request_id=?", (job[0],)).fetchone()
     assert tuple(row)==("queued",7)
     assert g.set_smv1_maintenance(token,begin=False)
+
+
+@pytest.mark.parametrize("transient", [False, True])
+def test_half_open_waiting_render_yields_to_next_fenced_probe(isolated_governor, monkeypatch, transient):
+    from studio_produce import processor, steps
+
+    g = isolated_governor
+    assert g.enqueue("recStalled")
+    assert g.enqueue("recNext")
+    g.trip_database_circuit()
+    with g._connect() as db:
+        db.execute("UPDATE governor_control SET until_at=0 WHERE name='database'")
+        db.execute("UPDATE producer_jobs SET available_at=0 WHERE request_id='recStalled'")
+    claim = g.claim_next()
+    assert claim and claim[0] == "recStalled"
+    assert g.claim_next() is None
+    assert g.half_open_probe_epoch(*claim) == 0
+    job = {"job_id": "test-job", "step": "render", "attempt": 1}
+    request = {"id": claim[0]}
+    calls = []
+    sleeps = []
+    monkeypatch.setattr(processor, "AirtableClient", lambda: object())
+    monkeypatch.setattr(processor, "load_request", lambda *_: request)
+    monkeypatch.setattr(processor, "load_parent", lambda *_: {"id": "recParent"})
+    monkeypatch.setattr(processor, "load_outputs", lambda *_: [])
+    monkeypatch.setattr(processor, "load_slides", lambda *_: [])
+    monkeypatch.setattr(processor, "read_job", lambda *_: job)
+    monkeypatch.setattr(processor, "write_job_if_changed", lambda *_: False)
+    monkeypatch.setattr(processor, "render_progress_detail", lambda *_: "waiting")
+    monkeypatch.setattr(processor.time, "sleep", sleeps.append)
+    def fail_write(*_):
+        pytest.fail("wait must not persist a canonical stage transition")
+    monkeypatch.setattr(processor, "write_job", fail_write)
+    monkeypatch.setattr(g, "confirm_half_open_progress", fail_write)
+    monkeypatch.setattr(steps, "_is_transient_render_error", lambda *_: transient)
+    def wait(*_):
+        calls.append(1)
+        if transient:
+            raise RuntimeError("temporary renderer wait")
+        raise processor.StepWait("waiting on renderer")
+    monkeypatch.setitem(processor.STEP_HANDLERS, "render", wait)
+    assert processor._run(claim[0], lease_token=claim[1]) == "yielded"
+    assert len(calls) == 2
+    assert len(sleeps) == 1
+    assert g.snapshot()["database_circuit_phase"] == "half_open"
+    g.finish_job(*claim, requeue=True, progressed=False)
+    next_claim = g.claim_next()
+    assert next_claim and next_claim[0] == "recNext"
+    assert g.claim_next() is None
+    assert g.snapshot()["database_circuit_phase"] == "half_open"
+    assert g.snapshot()["queued_jobs"] == 1
