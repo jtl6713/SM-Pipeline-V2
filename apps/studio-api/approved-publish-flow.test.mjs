@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assessFreshSupabasePublish, planAuditedEarlyHoldMaeReschedule } from "./approved-publish-flow.mjs";
+import { recoverAuditedOverdueMae } from "./overdue-mae-recovery.mjs";
 
 const nowMs = Date.parse("2026-11-20T19:00:00Z");
 const fresh = () => ({
@@ -215,4 +216,80 @@ test("#3096 MAE plan fails closed on incomplete occupancy, receipt or prior prov
   }
   const row=original();row.fields.Do_Not_Publish=true;
   assert.equal(planAuditedEarlyHoldMaeReschedule(row,options).ok,false);
+});
+
+function recoveryHarness({existingFence=false,failCommit=false,changed=false,profileBusy=false}={}) {
+  const original=reconciledEarlyHold();
+  delete original.fields.Studio_Overdue_MAE_Recovery_Receipt;
+  original.fields.Scheduled_Post_Date=original.fields.Studio_Early_Hold_Original_Scheduled_At;
+  const id=original.id, profileId="rec11111111111111", profileUuid="11111111-1111-4111-8111-111111111111";
+  let row={id:"22222222-2222-4222-8222-222222222222",airtable_record_id:id,content_profile_id:profileUuid,
+    content_item_id:"33333333-3333-4333-8333-333333333333",platform:"Instagram",platform_output_type:"Instagram Reel",
+    updated_at:"2026-11-20T10:00:00Z",review_status:"Approved",output_status:"Approved for Publishing",
+    publish_status:"Ready to Schedule",publish_method:"Automated",do_not_publish:false,auto_publish_enabled:true,
+    scheduled_post_date:original.fields.Scheduled_Post_Date,studio_scheduled_at:original.fields.Scheduled_Post_Date,
+    youtube_scheduled_publish_at:null,published_at:null,platform_post_url:null,platform_publish_response:null,
+    publish_next_retry_at:null,test_run_id:null,asset_set_revision:"r1",
+    error_messages:Object.fromEntries(Object.entries(original.fields).filter(([k])=>k.startsWith("Studio_")))};
+  const events=[], writes=[];
+  const entry=()=>({row:structuredClone(row),profileId,profileUuid,profileTimeZone:"America/New_York",
+    record:{id,fields:{...original.fields,...row.error_messages,Scheduled_Post_Date:row.scheduled_post_date}}});
+  const deps={
+    read:async()=>entry(),enabled:()=>true,
+    claim:async()=>{events.push("profile_claim");return !profileBusy;},
+    release:async()=>events.push("profile_release"),
+    lock:async fn=>{events.push("output_lock");return fn();},
+    fenceExists:async()=>existingFence,
+    rest:async (query,options)=>{
+      if(!options)return [{airtable_record_id:"rec44444444444444",platform_output_type:"Instagram Reel",scheduled_post_date:"2026-11-20T21:30:00Z"}];
+      assert.equal(options.method,"PATCH");assert.ok(query.includes("error_messages=eq."));
+      writes.push(options.body);
+      if(changed)return [];
+      row={...row,...options.body};return [{id:row.id}];
+    },
+    atomic:async (args,cb)=>{
+      events.push("atomic_reserve");
+      assert.equal(args.content_profile_id,profileId);
+      const plan=await cb.plan({occupied_reservations:[]});
+      await cb.write(plan,{});
+      const pending=entry().record;
+      assert.equal(assessFreshSupabasePublish(pending,{nowMs:Date.parse(plan.selectedIso)}).eligible,false);
+      assert.equal(Date.parse(await cb.verify()),Date.parse(plan.selectedIso));
+      if(failCommit)throw Error("test_commit_failed");
+      events.push("atomic_commit");
+      return {atomic_schedule:true,commit:{committed:true}};
+    },
+  };
+  return {id,events,writes,entry,deps};
+}
+test("#3096 exact atomic recovery reserves then independently confirms committed future MAE slot",async()=>{
+  const h=recoveryHarness();
+  const result=await recoverAuditedOverdueMae({},h.id,{horizonDays:30,now:()=>nowMs},h.deps);
+  assert.equal(result.rescheduled,true);
+  assert.equal(result.scheduled_for,"2026-11-21T10:30:00.000Z");
+  assert.deepEqual(h.events,["profile_claim","output_lock","atomic_reserve","atomic_commit","profile_release"]);
+  assert.equal(h.writes.length,2);
+  const first=h.writes[0].error_messages.Studio_Overdue_MAE_Recovery_Receipt;
+  const second=h.writes[1].error_messages.Studio_Overdue_MAE_Recovery_Receipt;
+  assert.equal(first.state,"pending_commit");assert.equal(second.state,"committed");
+  assert.equal(h.entry().row.error_messages.Studio_Publish_Dispatch_Count,1);
+  assert.equal(h.entry().row.review_status,"Approved");
+  assert.equal(assessFreshSupabasePublish(h.entry().record,{nowMs:Date.parse(result.scheduled_for)}).eligible,true);
+  for(const patch of h.writes)for(const field of ["review_status","output_status","publish_status","auto_publish_enabled","do_not_publish","published_at","platform_post_url"])
+    assert.ok(!(field in patch),field);
+});
+test("#3096 recovery never replays a prior dispatch or an ambiguous schedule transaction",async()=>{
+  for(const flags of [{existingFence:true},{profileBusy:true}]){
+    const h=recoveryHarness(flags);const result=await recoverAuditedOverdueMae({},h.id,{horizonDays:30,now:()=>nowMs},h.deps);
+    assert.ok(result.skipped);assert.equal(h.writes.length,0);
+  }
+  const ambiguous=recoveryHarness({failCommit:true});
+  await assert.rejects(()=>recoverAuditedOverdueMae({},ambiguous.id,{horizonDays:30,now:()=>nowMs},ambiguous.deps),/test_commit_failed/);
+  assert.equal(ambiguous.writes.length,1);
+  assert.equal(ambiguous.entry().row.error_messages.Studio_Overdue_MAE_Recovery_Receipt.state,"pending_commit");
+  assert.equal(assessFreshSupabasePublish(ambiguous.entry().record,{nowMs:Date.parse(ambiguous.entry().row.scheduled_post_date)}).eligible,false);
+  const conflict=recoveryHarness({changed:true});
+  await assert.rejects(()=>recoverAuditedOverdueMae({},conflict.id,{horizonDays:30,now:()=>nowMs},conflict.deps),/schedule_cas_not_verified/);
+  assert.equal(conflict.writes.length,1);
+  assert.equal(conflict.entry().row.error_messages.Studio_Overdue_MAE_Recovery_Receipt,undefined);
 });
