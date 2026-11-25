@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   factorySupabaseApprovalRows, factorySupabaseGroupPreflight,
-  factorySupabaseApprovalDisposition, factorySupabaseApproveOutput, encodedMediaReviewIssue,
+  factorySupabaseApprovalDisposition, factorySupabaseApproveOutput, encodedMediaReviewIssue, nativeGalleryInitialReadiness,
 } from "./factory-supabase-approval.mjs";
 import { factoryGlobalPolicy } from "./factory-batch-global-policy.mjs";
 
@@ -527,4 +527,48 @@ test("#2959 reconciled audio preference mismatch is advisory but broken source l
   link.platform_output_id="wrong-id";
   await assert.rejects(factorySupabaseGroupPreflight(env,[IDS[0]],policy,opts),/could not be reconciled/);
   assert.ok(mock.calls.every(c=>c.method==="GET"));
+});
+
+
+test("#3096 exact verified native gallery readiness is committed with human approval and MAE", async t => {
+  const ig = {...output(IDS[0],8946),platform_output_type:"Instagram Carousel",
+    image_count:null,assets_ready_count:null,ig_carousel_status:null};
+  const fb = {...output(IDS[1],8948),platform_output_type:"Facebook Photo Set",
+    image_count:2,assets_ready_count:null,fb_publish_status:null};
+  const mock=mockSupabase(t,[ig,fb]);
+  for (const row of [ig,fb]) {
+    await factorySupabaseApproveOutput(env,row.airtable_record_id,PROFILE_ID,{
+      requestId:"gallery_readiness_3096",policy,verifyImages:async readiness=>readiness,
+    });
+  }
+  const patches=mock.calls.filter(c=>c.method==="PATCH");
+  assert.equal(patches.length,2);
+  for(const [i,stage,value] of [[0,"ig_carousel_status","Ready for Asset Prep"],[1,"fb_publish_status","Ready for Assets"]]){
+    const fields=JSON.parse(patches[i].body);
+    assert.equal(fields.image_count,2);
+    assert.equal(fields.assets_ready_count,2);
+    assert.equal(fields[stage],value);
+    assert.equal(fields.publish_status,"Ready to Schedule");
+    assert.equal(fields.published_at,undefined);
+    assert.equal(fields.error_messages.Studio_Publish_Dispatch_Count,undefined);
+    assert.equal(fields.error_messages.Publish_Attempt_Count,undefined);
+    assert.equal(new URLSearchParams(patches[i].query).get(stage),"is.null");
+    assert.equal(mock.rows[i][stage],value);
+  }
+});
+
+test("#3096 initial gallery readiness refuses stale attempts, stages, counts or unverified slides",()=>{
+  const row={...output(IDS[0],8946),platform_output_type:"Instagram Carousel"};
+  const proof={applicable:true,eligible:true,slide_count:2};
+  assert.deepEqual(nativeGalleryInitialReadiness(row,proof),{
+    image_count:2,assets_ready_count:2,ig_carousel_status:"Ready for Asset Prep"});
+  for(const override of [
+    {ig_carousel_status:"Children Created"},
+    {assets_ready_count:3},
+    {error_messages:{Publish_Attempt_Count:1}},
+    {error_messages:{IG_Carousel_Parent_Container_ID:"123"}},
+    {error_messages:{Studio_Publish_Dispatch_At:"2026-11-18T10:00:00Z"}},
+  ]) assert.throws(()=>nativeGalleryInitialReadiness({...row,...override},proof),/Native gallery/);
+  assert.throws(()=>nativeGalleryInitialReadiness(row,{...proof,eligible:false}),/verified final slide/);
+  assert.deepEqual(nativeGalleryInitialReadiness({...row,platform:"YouTube"},proof),{});
 });
