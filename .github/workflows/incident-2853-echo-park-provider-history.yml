@@ -1,0 +1,96 @@
+name: Incident 2853 Echo Park original narration history
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-echo-park-provider-history.yml'
+      - '.github/scripts/incident-2853-echo-park-provider-history.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-2853-echo-park-provider-history.yml'
+permissions:
+  contents: read
+concurrency:
+  group: incident-2853-echo-park-provider-history
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse read-only diagnostic
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-2853-echo-park-provider-history.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){$errors | ForEach-Object {Write-Output ('parse_error='+$_.ErrorId+' line='+$_.Extent.StartLineNumber)};throw 'readonly_script_parse_invalid'}
+          if((Get-Content '.github/scripts/incident-2853-echo-park-provider-history.ps1' -Raw).Length -gt 7800){throw 'readonly_script_too_large'}
+      - name: Compile embedded read-only Python queue probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          s=Path('.github/scripts/incident-2853-echo-park-provider-history.ps1').read_text()
+          probes=re.findall(r"(?m)^\$(?:code|probe)\s*=\s*@'\n([\s\S]*?)\n'@$",s)
+          assert len(probes)==1
+          for i, source in enumerate(probes):
+              compile(source, f"read_only_probe_{i}", "exec")
+          PY
+  readback:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read exact current receipt and provider history (GET only)
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' .github/scripts/incident-2853-echo-park-provider-history.ps1 > /tmp/readonly.json
+          job=''
+          for attempt in $(seq 1 120); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/readonly.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "readonly_ops_launch_http=$code"; exit 1; }
+            sleep 5
+          done
+          [[ -n "$job" ]] || { echo "watchdog2853_ops_busy_no_job"; exit 1; }
+          echo "watchdog2853_ops_job_id=$job"
+          for attempt in $(seq 1 45); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/readonly-status.json
+            state=$(jq -r '.job.status' /tmp/readonly-status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          # Never print the shell command, raw transcript or response body.
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          data=json.loads(Path('/tmp/readonly-status.json').read_text())
+          job=data['job']
+          lines=job.get('log','').splitlines()
+          rows=[json.loads(l.split('=',1)[1]) for l in lines if re.match(r'^story2853_history=\{.*\}$',l)]
+          if job.get('status')!='ok' or lines.count('story2853_history_proof=PASS_READONLY')!=1 or sorted(x.get('output') for x in rows)!=[11252]:
+              raise SystemExit('story2853_history_live_proof_incomplete')
+          for obj in rows:
+              print('story2853_history='+json.dumps(obj,sort_keys=True,separators=(',',':')))
+          print('story2853_history_proof=PASS_READONLY')
+          PY
