@@ -19060,6 +19060,12 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
   // Do not let an old queued job bypass an operator's active rollout scope.
   // This guard also runs on cron recovery, not only on fresh HTTP requests.
   const continueSlice = Math.max(0, Math.min(12, Number(options?.continueSlice || 0) || 0));
+  const supabaseDrain = studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env);
+  const scheduled = options.scheduled === true;
+  // One absolute budget for the whole invocation, including all continuations.
+  // HTTP waitUntil is short; cron owns independent, longer lived execution.
+  const deadlineMs = Number(options.deadlineMs) || Date.now() + (scheduled ? 120000 : 16000);
+  const startDeadlineMs = deadlineMs - (scheduled ? 10000 : 6000);
   const rollout = factoryBatchRolloutPolicy(env, profileId);
   const job=await factoryBatchRead(env.STUDIO_MEDIA,profileId,requestId);
   if (!job) return null;
@@ -19089,10 +19095,11 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
     let horizonDays = null;
     // Both authorities must hand off only after factoryBatchDrain releases
     // its profile lease. A future retry is not eligible continuation work.
-    const continueAfterDrain = (result) => {
+    const continueAfterDrain = async (result) => {
       const processed = Number(result?.processed || 0);
-      if (result?.claimed && processed > 0 && continueSlice < 8 && ctx?.waitUntil) {
-        ctx.waitUntil((async () => {
+      if (result?.claimed && processed > 0 && continueSlice < 8 &&
+          (supabaseDrain ? Date.now() < startDeadlineMs && (scheduled || ctx?.waitUntil || options.inline) : ctx?.waitUntil)) {
+        const continuation = (async () => {
           await new Promise((resolve) => setTimeout(resolve, 300));
           // Preserve existing oldest-eligible sibling fairness. Always include
           // the exact just-drained child, even if bounded history misses it.
@@ -19119,8 +19126,12 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
             { maxProfiles: 1 },
           )[0];
           if (!next) return null;
-          return factoryBatchProcess(env, profileId, next.requestId, ctx, { continueSlice: continueSlice + 1 });
-        })().catch((error) => console.warn("Factory batch continue", requestId, error)));
+          return factoryBatchProcess(env, profileId, next.requestId, ctx, {
+            continueSlice: continueSlice + 1, scheduled, deadlineMs, inline: supabaseDrain,
+          });
+        })().catch((error) => console.warn("Factory batch continue", requestId, error));
+        if (supabaseDrain) await continuation;
+        else ctx.waitUntil(continuation);
       }
       return result;
     };
@@ -19129,7 +19140,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
       // Airtable canonical reread, scheduling occupancy, or approval writer.
       if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
         const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
-          profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
+          profileId, requestId, maxItems: 25, maxElapsedMs: scheduled ? 20000 : 8000,
+          startDeadlineMs,
           approve: async (id, currentJob, checkpoint = () => {}) => {
             await checkpoint("approval_lease_wait_started");
             return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
@@ -19262,7 +19274,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
       studioInvalidateOccupiedScheduleCache();
     }
   };
-  if (ctx?.waitUntil) {
+  if (ctx?.waitUntil && !options.inline) {
     ctx.waitUntil(run().catch(error => console.warn("Factory batch drain", requestId, error)));
     return null;
   }
@@ -20106,7 +20118,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
       }
     }
     for (const candidate of factoryBatchCronSelectJobs(indexedCandidates, { maxProfiles: 5 })) {
-      await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
+      await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx, { scheduled: true });
       dispatchedProfiles.add(candidate.profileId);
     }
   } catch (error) {
@@ -20215,7 +20227,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
   for (const candidate of selected) {
     const exact = distinct.find(row => row.profileId === candidate.profileId && row.requestId === candidate.requestId);
     if (exact?.job) await factoryBatchIndexRemember(env.STUDIO_MEDIA, exact.job, { refresh: false });
-    await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
+    await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx, { scheduled: true });
   }
   // Do not let completed-with-failures accumulate forever on the active desk.
   // Bounded at four exact failed rows per minute; each decision requires fresh
