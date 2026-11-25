@@ -286,6 +286,7 @@ export async function factorySupabaseGroupPreflight(env, ids, policy, { approved
       title: entry.row.output_title || "", content_id: entry.row.content_item_airtable_id || null,
       // Internal current-review evidence, never trusted from browser payloads.
       requires_current_approval: !state.already_satisfied,
+      review_updated_at: entry.row.updated_at || null,
       ...(state.creative_warnings?.length ? {creative_review: await factoryCreativeReviewSnapshot(entry)} : {}),
     };
   }));
