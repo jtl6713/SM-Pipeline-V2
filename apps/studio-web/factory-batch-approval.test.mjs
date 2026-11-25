@@ -758,12 +758,12 @@ test('submitted approvals stay outside Needs Eyes even with a stale Ready-for-Re
 
 test("19 across three profiles: rejection of first 16 does not suppress remaining three",async()=>{
   const storage=new Map(), posts=[], errors=[];
-  const localStorage={getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+  const localStorage={get length(){return storage.size;},key:i=>[...storage.keys()][i],getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
   const cards=[...Array.from({length:13},(_,i)=>({id:"recLA"+i,profile_id:"recLA",output_id:i+1})),
     ...Array.from({length:4},(_,i)=>({id:"recCHI"+i,profile_id:"recCHI"})),
     ...Array.from({length:2},(_,i)=>({id:"recNY"+i,profile_id:"recNY"}))];
   const state={batchGlobal:{max_total:20,max_per_profile:10},selectedOutputs:new Set(cards.map(c=>c.id)),desk:null,submittingBatch:false};
-  const source=["planFactoryApprovalBatches","pendingFactoryApproval","archiveFactoryPending",
+  const source=["planFactoryApprovalBatches","pendingFactoryApproval","factoryRecoveryEntries","archiveFactoryPending",
     "factoryRejectedOutputId","submitFactoryGlobalApprovalBatches"].map(n=>
       (n==="submitFactoryGlobalApprovalBatches"?"async ":"")+extractNamedFunction(js,n)).join("\n");
   const build=new Function("localStorage","state","fetchJson","errors",`
@@ -809,4 +809,23 @@ test("legacy shared rejection is scoped only to an exactly identified plan",()=>
   assert.equal(entries.length,2);
   assert.equal(entries.find(e=>e.ids.includes("recExistingA")).retry_blocked,true);
   assert.equal(entries.find(e=>e.ids.includes("recNewChicago")).retry_blocked,undefined);
+});
+
+test("already archived legacy multi-plan envelope migrates without replacing backend identities",()=>{
+  const first=savedGlobalEnvelope();
+  first.batches[0].payload.items[0].output_id=11187;
+  const next={request_id:"request_2959_archived_other",ids:["recNewChicago"],payload:{
+    action:"start_group",request_id:"request_2959_archived_other",record_ids:["recNewChicago"],
+    items:[{id:"recNewChicago",output_id:10854}]}};
+  const legacy={...first,ids:[...first.ids,...next.ids],batches:[...first.batches,next],
+    retry_blocked:true,last_error:"Output #11187: Story duration differs. No new batch was accepted."};
+  const h=automaticRecoveryHarness(null,async()=>{throw Error("not required");});
+  h.store.set("recovery."+first.batches[0].request_id,JSON.stringify(legacy));
+  h.archiveFactoryPending();
+  assert.equal(h.factoryRecoveryEntries().length,2);
+  h.archiveFactoryPending();
+  const rows=h.factoryRecoveryEntries().map(e=>e.saved);
+  assert.equal(rows.length,2);
+  assert.equal(rows.find(e=>e.ids.includes("recExistingA")).retry_blocked,true);
+  assert.equal(rows.find(e=>e.ids.includes("recNewChicago")).retry_blocked,undefined);
 });
