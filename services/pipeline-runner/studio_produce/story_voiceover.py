@@ -49,7 +49,7 @@ def fingerprint(parent_id,voice_id,text,seconds):
 def checked_voice(data,cap):
     duration=probe_audio_duration_bytes(data)
     peak=probe_max_volume_db(data)
-    if not 2<=duration<=cap-0.05 or peak is None or peak<-18:
+    if duration is None or not 2<=duration<=cap-0.1 or peak is None or peak<-18:
         raise StoryVoiceoverError("Story narration must be audible and finish within its own timeline")
     return round(duration,3)
 
@@ -115,7 +115,7 @@ def ensure_story_voiceover(client,output,parent):
             measured=probe_audio_duration_url(existing)
         except Exception as exc:
             raise StoryVoiceoverError("Story-specific narration is not readable") from exc
-        if 2<=measured<=cap-0.05:
+        if measured is not None and 2<=measured<=cap-0.1:
             return output
         raise StoryVoiceoverError("Story-specific narration does not fit; rework the source")
     from p2.elevenlabs_client import resolve_content_voice_id,synthesize_voiceover_by_id
