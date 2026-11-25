@@ -133,5 +133,5 @@ test("Home eligibility wins over stale Production stage and private revision out
 test("Production summary explains Home output counts separately from parent content rows", () => {
   assert.match(source, /production-active-summary/);
   assert.match(source, /Home counts outputs; Production groups them by piece/);
-  assert.match(source, /r\.production_active_output_count,\s*r\.lifecycle_complete/);
+  assert.match(source, /r\.production_active_output_count,\s*r\.production_diagnostics,\s*r\.lifecycle_complete/);
 });
