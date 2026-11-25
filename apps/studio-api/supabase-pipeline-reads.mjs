@@ -8691,7 +8691,7 @@ export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit 
   });
   if (!uuid) return [];
   const unpromotedOnly = options.unpromotedOnly === true;
-  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at";
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at" + ideaProductionModeSelect(env);
   const profileFilter = `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`;
   if (!unpromotedOnly) {
     const rows = await supabaseRest(
@@ -8954,7 +8954,7 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
     const rows = await supabaseRestAll(
       env,
       `idea_candidates?content_profile_id=eq.${profileUuid}`
-        + "&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)"
+        + "&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)" + ideaProductionModeSelect(env)
         + "&order=created_at.desc",
       { pageSize: 1000, maxRows: limit },
     );
@@ -8976,7 +8976,7 @@ export async function readProfileSummaryDirtyBatch(env, kind, ids) {
   const rows = kind === "idea"
     ? await supabaseRest(
       env,
-      `idea_candidates?airtable_record_id=in.(${quoted})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)`,
+      `idea_candidates?airtable_record_id=in.(${quoted})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)${ideaProductionModeSelect(env)}`,
     )
     : await supabaseRest(
       env,
