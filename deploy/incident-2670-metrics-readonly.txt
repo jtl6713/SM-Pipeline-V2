@@ -1,1 +1,3 @@
 Run one GET-only, fixed-host Supabase privileged Metrics API RAM/swap readback via existing Windows Ops, using ONLY an existing sb_secret_ key if present in the allowlisted local runner env. No key export, no database or consumer mutations, no producer cap change, no provider/publish calls. Fail closed and report missing existing metrics credential when unavailable. Issue #2670.
+
+2026-11-25 UTC — Owner target is three concurrent producers. Recheck dedicated monitoring credential and actual memory/swap on the now-deployed Runner under the existing cap1 backlog. Read-only gate only; no automatic cap change, no key fallback, no restart, no provider calls. Use result with #3036 and representative-load/cross-host checks for staged 1→2→3.
