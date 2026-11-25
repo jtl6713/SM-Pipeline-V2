@@ -284,6 +284,13 @@ def _run(
                 return "yielded_progressed" if advanced else "yielded"
             write_job_if_changed(client, request_id, read_job(request), with_step(job, step, detail=str(exc.detail), bump_attempt=False))
             wait_streak += 1
+            # A render that is waiting on media cannot monopolize the sole
+            # half-open probe slot. Give another FIFO request its own fenced
+            # probe opportunity; ordinary durable requeue/backoff still applies.
+            # Never clear the outage latch on a wait or an unchanged record.
+            if probe_epoch is not None and wait_streak >= 2:
+                logger.info("half-open probe yielded waiting request=%s", request_id)
+                return "yielded"
             time.sleep(wait_interval(wait_streak))
             continue
         except StepBlocked as exc:
@@ -313,6 +320,9 @@ def _run(
                     with_step(job, "render", detail=render_progress_detail(ctx.get("outputs") or outputs), bump_attempt=False),
                 )
                 wait_streak += 1
+                if probe_epoch is not None and wait_streak >= 2:
+                    logger.info("half-open probe yielded transient render wait request=%s", request_id)
+                    return "yielded"
                 time.sleep(wait_interval(wait_streak))
                 continue
             logger.exception("studio produce step failed request=%s step=%s", request_id, step)
