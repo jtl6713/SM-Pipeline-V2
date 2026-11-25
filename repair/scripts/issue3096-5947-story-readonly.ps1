@@ -155,7 +155,8 @@ try {
       conclusion='not_started'
     }
     # Always prove the exact approved original asset is accessible, even if no active Story candidate.
-    $src=Join-Path $tmp ($t.n+'-approved.mp4')
+    $report.preflight_step='approved_asset_path'
+    $src=Join-Path $tmp ([string]$t.n+'-approved.mp4')
     $report.preflight_step='approved_asset_download'
     Invoke-WebRequest ([string]$o.publish_asset_url) -Method Get -OutFile $src -TimeoutSec 85 | Out-Null
     $report.preflight_step='approved_asset_size'
@@ -163,7 +164,7 @@ try {
     $report.approved_asset_bytes=$len
     if($len -lt 100000 -or $len -gt 104857600){throw 'approved_asset_size_untrusted'}
     $report.preflight_step='approved_asset_decode'
-    $null=BytesAt $src 1 (Join-Path $tmp ($t.n+'-original-preflight.raw'))
+    $null=BytesAt $src 1 (Join-Path $tmp ([string]$t.n+'-original-preflight.raw'))
     $rr.approved_asset_decoded=$true
     $report.preflight_step='owned_candidate_comparison'
     if(-not $a.scan_complete){
@@ -181,15 +182,15 @@ try {
              [DateTimeOffset]::Parse([string]$md.timestamp) -ne $story.timestamp){throw 'provider_media_identity_mismatch'}
           $remote=[uri]([string]$md.media_url)
           if($remote.Scheme -ne 'https' -or $remote.Host -notmatch '(^|\.)(fbcdn\.net|cdninstagram\.com)$'){throw 'untrusted_owned_video_host'}
-          $dst=Join-Path $tmp ($t.n+'-'+$story.id+'.mp4')
+          $dst=Join-Path $tmp ([string]$t.n+'-'+$story.id+'.mp4')
           Invoke-WebRequest $remote.AbsoluteUri -Method Get -OutFile $dst -TimeoutSec 75 | Out-Null
           $dl=(Get-Item $dst).Length
           if($dl -lt 100000 -or $dl -gt 104857600){throw 'remote_video_size_untrusted'}
           $match=$true
           $metrics=@()
           foreach($sec in @(1,3)){
-            $x=BytesAt $src $sec (Join-Path $tmp ($t.n+'-orig-'+$sec+'.raw'))
-            $y=BytesAt $dst $sec (Join-Path $tmp ($t.n+'-'+$story.id+'-'+$sec+'.raw'))
+            $x=BytesAt $src $sec (Join-Path $tmp ([string]$t.n+'-orig-'+$sec+'.raw'))
+            $y=BytesAt $dst $sec (Join-Path $tmp ([string]$t.n+'-'+$story.id+'-'+$sec+'.raw'))
             [double]$diff=0
             for($i=0;$i -lt 7168;$i++){$diff += [math]::Abs([int]$x[$i]-[int]$y[$i])}
             $mae=[math]::Round($diff/(7168*255.0),5)
