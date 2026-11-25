@@ -1,0 +1,70 @@
+name: Issue 2959 Getty two-output exact timing audit
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue2959-getty-timing-readonly.yml']
+  pull_request:
+    paths: ['.github/workflows/issue2959-getty-timing-readonly.yml']
+permissions:
+  contents: read
+concurrency:
+  group: issue2959-getty-timing-readonly
+  cancel-in-progress: false
+jobs:
+  read-only-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: node --check apps/studio-api/factory-approval-timings.mjs
+  exact-timing:
+    if: github.event_name == 'push' && github.repository == 'jtl6713/SM-Pipeline-V2'
+    needs: read-only-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read exact immutable approval ledger objects only
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --max-time 20 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/deployments" -o /tmp/deployments.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deployments.json)
+          curl -fsS --max-time 20 -H "$AUTH" "$API/workers/scripts/chicagoshining-studio-api/versions/$ACTIVE" -o /tmp/version.json
+          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/version.json)
+          RID=26efdab7-5418-429d-8c5d-04d148889f55
+          PROFILE=recF7UAn0LkMZZrWZ
+          ROOT=studio/state/factory-approvals/v2
+          CHILD="fgc_$(printf '%s' "factory-group-child-v1:$RID:$PROFILE" | sha256sum | cut -d' ' -f1)"
+          BASE="$API/r2/buckets/$BUCKET/objects"
+          curl -fsS --max-time 20 -H "$AUTH" "$BASE/$ROOT/groups/$RID.json" -o /tmp/group.json
+          jq -e --arg rid "$RID" --arg child "$CHILD" --arg profile "$PROFILE" '.request_id==$rid and (.records|length)==2 and (.children|length)==1 and .children[0].profile_id==$profile and .children[0].request_id==$child' /tmp/group.json >/dev/null
+          curl -fsS --max-time 20 -H "$AUTH" "$BASE/$ROOT/jobs/$PROFILE/$CHILD.json" -o /tmp/child.json
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {factoryApprovalItemTiming,factoryApprovalTimingReport} from './apps/studio-api/factory-approval-timings.mjs';
+          const p=JSON.parse(fs.readFileSync('/tmp/group.json','utf8'));
+          const c=JSON.parse(fs.readFileSync('/tmp/child.json','utf8'));
+          assert.equal(c.group_request_id,p.request_id);
+          assert.equal(c.request_id,p.children[0].request_id);
+          assert.equal(c.profile_id,p.children[0].profile_id);
+          assert.deepEqual(c.items.map(i=>i.id).sort(),['rec65CWO9nx4YHFcX','recMyAqf98U50xjmL']);
+          assert.ok(c.items.every(i=>i.status==='approved'));
+          const report={request_id:p.request_id,parent_created_at:p.created_at,child_request_id:c.request_id,child_created_at:c.created_at,child_updated_at:c.updated_at,status:c.status,items:c.items.map(i=>({id:i.id,status:i.status,attempts:i.attempts,total_attempts:i.total_attempts,timing:factoryApprovalItemTiming(i)})),timing_report:factoryApprovalTimingReport(c.items)};
+          console.log('ISSUE2959_GETTY_TIMING='+JSON.stringify(report));
+          fs.writeFileSync('/tmp/getty-timing.json',JSON.stringify(report,null,2));
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: getty-factory-exact-timing
+          path: /tmp/getty-timing.json
+          retention-days: 14
