@@ -42,7 +42,7 @@ jobs:
           assert not m['healthy'](row,dict(before,memory_available_mb=300),row,before)
           g=m['main'].__globals__
           initial=dict(row,cap=1,active=1,heavy=1)
-          with patch.dict(g,dict(call=lambda *a:(200,{}),cap=lambda mode: initial if mode=='sample' else None,memory=lambda:before,job=lambda *a:None,deploy=lambda:None,time=type('T',(),{'sleep':staticmethod(lambda _:None)})())):
+          with patch.dict(g,dict(authenticate=lambda:None,cap=lambda mode: initial if mode=='sample' else None,memory=lambda:before,job=lambda *a:None,deploy=lambda:None,time=type('T',(),{'sleep':staticmethod(lambda _:None)})())):
               try: m['main']()
               except m['Rejected']: pass
               else: raise AssertionError('failed trial accepted')
@@ -53,7 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
-      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Refuse obsolete main before changing production

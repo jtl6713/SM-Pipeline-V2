@@ -1,1 +1,3 @@
 2026-11-25 — Owner explicitly authorizes immediate two-producer trial. Change only STUDIO_MAX_PRODUCER_JOBS 1→2 on the Windows Runner under existing local governor, global coordinator stays OFF; no publisher, holds, database limits, outbox or consumer changes. Fresh memory and workload preflight, maintenance-drained deploy, six observation samples, rollback on threshold failure. Never increase to 3 in this workflow. Issue #2670.
+
+2026-11-25 — First trial stopped before any mutation at ops_auth; retry only with established protected curl transport/token selection.
