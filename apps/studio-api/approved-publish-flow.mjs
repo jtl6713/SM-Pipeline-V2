@@ -54,7 +54,7 @@ function assess(row, nowMs, planningOriginalHold) {
   // Neither a changed date nor a v1 proof alone authorizes a new provider call.
   const receipt = read("Studio_Overdue_MAE_Recovery_Receipt", "studio_overdue_mae_recovery_receipt");
   const plannedAt = time(receipt?.planned_at);
-  const receiptValid = originalProof && receipt?.version === "issue-3096-mae-v1"
+  const receiptValid = originalProof && receipt?.version === "issue-3096-mae-v1" && receipt.state === "committed"
     && receipt.output_record_id === row.id
     && receipt.platform === str(read("Platform", "platform"))
     && receipt.output_type === str(read("Platform_Output_Type", "platform_output_type"))
