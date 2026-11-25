@@ -237,7 +237,7 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
     p = parent()
     data=b"normalized"
     text=story.story_text(p["fields"]["Voiceover_Script"])
-    digest=story.fingerprint(p["id"],"voice-1",text,10)
+    digest=story.fingerprint(p["id"],"voice-1",text,story.story_seconds(output()))
     url="https://media.chicagoshining.com/studio/previews/story-voiceover/"+p["id"]+"/"+digest+".mp3"
     row=output(Content_Item=[p["id"]], Output_Status="In Production", Render_Status="Blocked",
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
