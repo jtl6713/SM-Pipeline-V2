@@ -6791,3 +6791,39 @@ test("#3014: catalog and library projections do not reuse a duration probe for a
     assert.equal(shape({...row, metadata: {duration_seconds: 84.625}}).fields.Duration_Seconds, 84.625);
   }
 });
+
+
+test("production watchdog selects unfinished non-test requests before cap; other callers retain recent ordering", async () => {
+  const { listSupabaseRequestsWithProductionJob, resetSupabaseCircuitForTests } = await import("./supabase-pipeline-reads.mjs");
+  resetSupabaseCircuitForTests();
+  const env = {
+    STUDIO_WRITE_SOURCE: "supabase",
+    STUDIO_PHASE6_WRITE_SOURCE: "supabase",
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    globalThis.fetch = async (url) => {
+      urls.push(new URL(String(url)));
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    assert.deepEqual(await listSupabaseRequestsWithProductionJob(env, {
+      limit: 100, statuses: ["Promoted", "Submitted"], unfinishedOnly: true,
+    }), []);
+    assert.deepEqual(await listSupabaseRequestsWithProductionJob(env, { limit: 50 }), []);
+    assert.equal(urls.length, 2);
+    const watchdog = urls[0].searchParams;
+    assert.equal(watchdog.get("request_status"), "in.(Promoted,Submitted)");
+    assert.equal(watchdog.get("production_job"), "not.is.null");
+    assert.equal(watchdog.get("and"), "(or(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.),or(production_job->>step.is.null,production_job->>step.not.in.(done,escalated)))");
+    assert.equal(watchdog.get("order"), "production_job->>updated_at.asc.nullsfirst,id.asc");
+    assert.equal(watchdog.get("limit"), "100");
+    assert.equal(urls[1].searchParams.get("and"), null);
+    assert.equal(urls[1].searchParams.get("order"), "updated_at.desc.nullslast");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSupabaseCircuitForTests();
+  }
+});
