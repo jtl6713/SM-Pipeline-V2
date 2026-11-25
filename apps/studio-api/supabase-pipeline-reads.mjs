@@ -2939,7 +2939,7 @@ export async function appendIdeaProductionRequestLink(env, ideaAirtableId, reque
 }
 
 /** Recent Production Requests with a non-blank Studio_Production_Job_JSON. */
-export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, statuses = null } = {}) {
+export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, statuses = null, unfinishedOnly = false } = {}) {
   if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env) !== "supabase") return null;
   const cap = Math.max(1, Math.min(100, Number(limit) || 50));
   const allowed = (Array.isArray(statuses) ? statuses : [])
@@ -2948,10 +2948,19 @@ export async function listSupabaseRequestsWithProductionJob(env, { limit = 50, s
   const statusFilter = allowed.length
     ? `&request_status=in.(${allowed.map(encodeURIComponent).join(",")})`
     : "";
+  // Watchdog must exclude terminal and synthetic requests BEFORE applying the cap.
+  // Order by persisted job heartbeat, not the unrelated request row timestamp.
+  // Other consumers retain their existing recent-record listing semantics.
+  const watchdogFilter = unfinishedOnly
+    ? "&and=(or(publish_status->>Test_Run_ID.is.null,publish_status->>Test_Run_ID.eq.),or(production_job->>step.is.null,production_job->>step.not.in.(done,escalated)))"
+    : "";
+  const order = unfinishedOnly
+    ? "production_job->>updated_at.asc.nullsfirst,id.asc"
+    : "updated_at.desc.nullslast";
   const rows = await supabaseRest(
     env,
-    `production_requests?production_job=not.is.null${statusFilter}`
-      + `&select=${REQUEST_SELECT}&order=updated_at.desc.nullslast&limit=${cap}`,
+    `production_requests?production_job=not.is.null${statusFilter}${watchdogFilter}`
+      + `&select=${REQUEST_SELECT}&order=${order}&limit=${cap}`,
   ).catch(() => null);
   if (!Array.isArray(rows)) return null;
   return rows
