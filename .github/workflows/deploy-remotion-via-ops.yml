@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-28-3129-visual-integrity-guard'
+      EXPECTED_VERSION: '2026-11-25-2853-private-story-audio'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth
