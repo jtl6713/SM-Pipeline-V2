@@ -145,3 +145,5 @@ try{
 }finally{
  if(created){await cf("/workers/scripts/"+bridge,{method:"DELETE"});console.log("temporary_bridge_deleted=PASS");}
 }
+
+// #3096: rerun the existing GET-only exact Home census on main for the new overdue recovery owner; no change to bridge scope or provider calls.
