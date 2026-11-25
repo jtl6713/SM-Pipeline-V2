@@ -78,3 +78,71 @@ def test_explicit_short_existing_audio_preserves_user_choice(monkeypatch):
     with pytest.raises(story.StoryVoiceoverError):
         story.ensure_story_voiceover(client,row,parent())
     client.update_record.assert_not_called()
+
+
+def test_story_sibling_failed_generation_fences_second_paid_call(monkeypatch):
+    import copy
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from airtable.constants import CONTENT_ITEMS_TABLE
+    from studio_produce import context, workload_governor
+    from p2 import elevenlabs_client
+
+    p = parent()
+    a = output(Content_Item=[p["id"]])
+    b = {**output(Content_Item=[p["id"]]), "id": "recSibling"}
+    rows = {a["id"]: copy.deepcopy(a), b["id"]: copy.deepcopy(b)}
+
+    class Client:
+        def get_record(self, table, rid):
+            return copy.deepcopy(p if table == CONTENT_ITEMS_TABLE else rows[rid])
+        def update_record(self, table, rid, patch, **kwargs):
+            rows[rid]["fields"].update(patch)
+
+    client = Client()
+    monkeypatch.setattr(context, "load_outputs", lambda *_: copy.deepcopy(list(rows.values())))
+    monkeypatch.setattr(workload_governor, "enabled", lambda: True)
+    monkeypatch.setattr(workload_governor, "resource_slot", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(elevenlabs_client, "resolve_content_voice_id", lambda _: "voice-1")
+    synthesize = Mock(side_effect=RuntimeError("ambiguous provider timeout"))
+    monkeypatch.setattr(elevenlabs_client, "synthesize_voiceover_by_id", synthesize)
+    monkeypatch.setattr(story.requests, "get", lambda *a, **k: SimpleNamespace(status_code=404))
+    with pytest.raises(story.StoryVoiceoverError, match="reconcile its exact attempt"):
+        story.ensure_story_voiceover(client, a, p)
+    assert json.loads(rows[a["id"]]["fields"][story.RECEIPT])["state"] == "failed"
+    with pytest.raises(story.StoryVoiceoverError, match="already recorded on a sibling"):
+        story.ensure_story_voiceover(client, b, p)
+    assert synthesize.call_count == 1
+
+
+def test_story_cache_requires_one_exact_prepared_or_verified_checksum(monkeypatch):
+    import hashlib
+    data = b"normalized-audio"
+    sha = hashlib.sha256(data).hexdigest()
+    monkeypatch.setattr(story, "checked_voice", lambda data, cap: 5.25)
+    assert story.verified_cached_voice(data, [{"state": "prepared", "sha256": sha}], 10) == 5.25
+    assert story.verified_cached_voice(data, [{"state": "verified", "sha256": sha},
+        {"state": "failed"}], 10) == 5.25
+    with pytest.raises(story.StoryVoiceoverError, match="checksum"):
+        story.verified_cached_voice(data, [], 10)
+    with pytest.raises(story.StoryVoiceoverError, match="checksum"):
+        story.verified_cached_voice(data, [{"sha256": sha}, {"sha256": "0" * 64}], 10)
+    with pytest.raises(story.StoryVoiceoverError, match="checksum"):
+        story.verified_cached_voice(b"replaced-audio", [{"sha256": sha}], 10)
+
+
+def test_story_snapshot_rejects_parent_or_render_owner_change():
+    row = output(Content_Item=["recParent"])
+    snapshot = story.exact_story_snapshot(row, "recParent")
+    assert story.exact_story_snapshot(output(Content_Item=["recParent"], Voiceover_URL="changed"), "recParent") != snapshot
+    with pytest.raises(story.StoryVoiceoverError):
+        story.exact_story_snapshot(row, "recOther")
+    with pytest.raises(story.StoryVoiceoverError):
+        story.exact_story_snapshot(output(Content_Item=["recParent"], Remotion_Job_ID="new-job"), "recParent")
+
+
+def test_story_sibling_scan_refuses_partial_parent_set(monkeypatch):
+    from studio_produce import context
+    monkeypatch.setattr(context, "load_outputs", lambda *_: [])
+    with pytest.raises(story.StoryVoiceoverError, match="sibling claim set"):
+        story.matching_story_claims(Mock(), parent(), "recStory", "digest", "https://example.test/voice")
