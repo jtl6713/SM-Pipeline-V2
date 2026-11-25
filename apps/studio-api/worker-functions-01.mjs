@@ -9114,8 +9114,8 @@ export function item4CompanionStoryFields(outputType, { finishedVideo = false } 
   if (!item4IsCompanionOutputType(outputType)) return {};
   if (finishedVideo) return finishedCompanionStoryFields();
   return {
-    Voiceover_Mode_Override: "No",
-    Background_Music_Mode_Override: "Yes",
+    Voiceover_Mode_Override: "Inherit",
+    Background_Music_Mode_Override: "Inherit",
     Video_Duration_Seconds_Override: ITEM4_STORY_TEASER_SECONDS,
     Video_Clip_Count_Mode_Override: "Exact",
     Video_Clip_Count_Exact_Override: 1,
@@ -12420,6 +12420,8 @@ export function studioOutputVoiceoverRequired(row, parent = null) {
 /*__STUDIO_WORKER_END:studioOutputVoiceoverRequired__*/
 
 export async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Map(), requests: new Map() }) {
+  // The Windows R4 Story-specific path owns this narration; never copy the parent track.
+  if ([f(row, "Studio_Output_Type"), f(row, "Output_Type"), f(row, "Format")].some(v => /^story$/i.test(String(v || "").trim()))) return null;
   if (String(f(row, "Voiceover_URL") || "").trim()) return null;
   const parentId = studioFirstLinkedId(f(row, "Content_Item"));
   if (!parentId) return null;

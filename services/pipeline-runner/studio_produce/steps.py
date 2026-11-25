@@ -223,7 +223,10 @@ def copy_voiceover_to_outputs(client: AirtableClient, parent: dict[str, Any], ou
     if not vo:
         return 0
     copied = 0
+    from studio_produce.story_voiceover import is_story
     for output in outputs or []:
+        if is_story(output):
+            continue
         effective_mode = field_str(output, "Studio_Effective_Voiceover_Mode").strip().lower()
         if effective_mode in {"no", "false", "0"}:
             continue

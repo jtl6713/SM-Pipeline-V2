@@ -36,7 +36,7 @@ test("#2489: request Yes survives missing Phase6 voiceover setting; explicit No 
     {fields:{Voiceover_Mode:"No"}}, "Voiceover_Mode", true, contentIntent), "No");
 });
 
-test("#2489: effective full video retains 39.66-second narration; Stories default to music-only", async () => {
+test("#2489: effective full video retains 39.66-second narration; Stories inherit audio intent without full narration", async () => {
   const resolve = extract(worker, "resolvedOutputTriState", {f});
   const effectiveFn = extract(worker, "buildOutputWorkItemEffective", {
     f, resolvedOutputTriState:resolve,
@@ -44,7 +44,7 @@ test("#2489: effective full video retains 39.66-second narration; Stories defaul
     outputEffectiveChoice:(_row,_override,req,key,def)=>f(req,key) || def,
     outputEffectiveNumber:(row,key,req,master,def)=>f(row,key) ?? f(req,master) ?? def,
     outputEffectiveText:(row,key,req,master)=>f(row,key)||f(req,master)||"",
-    item4ResolvedVideoDurationSeconds:()=>30,
+    item4ResolvedVideoDurationSeconds:({storyTeaser})=>storyTeaser?10:30,
     resolvedThumbnailMode:()=>"Yes",
     resolveStudioRenderMusic:async()=>({record_id:"recLicensedMusic",url:"https://example.test/verified-music.mp3",rights_status:"Licensed",duration_seconds:49.08}),
     studioIsFinishedPassthrough:()=>false,
@@ -63,8 +63,15 @@ test("#2489: effective full video retains 39.66-second narration; Stories defaul
   assert.ok(full.voiceover_duration_seconds >= 39.66);
   assert.equal(full.issues.length,0);
   const story=await effectiveFn({}, {fields:{Platform:"Instagram",Output_Type:"Story"}}, req, parent, defaults);
-  assert.equal(story.voiceover_mode,"No");
+  assert.equal(story.voiceover_mode,"Yes");
   assert.equal(story.background_music_mode,"Yes");
+  assert.equal(story.video_duration_seconds,10);
+  assert.equal(story.voiceover_duration_seconds,0);
+  assert.equal(story.voiceover_tail_seconds,0);
+  assert.equal(story.issues.length,0);
+  const optOut=await effectiveFn({}, {fields:{Platform:"Instagram",Output_Type:"Story",Voiceover_Mode_Override:"No"}},req,parent,defaults);
+  assert.equal(optOut.voiceover_mode,"No");
+  assert.equal(optOut.background_music_mode,"Yes");
   const explicit=await effectiveFn({}, {fields:{Platform:"Instagram",Output_Type:"Story",
     Voiceover_Mode_Override:"Yes",Background_Music_Mode_Override:"No"}},req,parent,defaults);
   assert.equal(explicit.voiceover_mode,"Yes");
@@ -79,6 +86,11 @@ test("#2489: R4 fails closed for missing VO, missing music, muted music and cut-
   const row={fields};
   assert.equal(guard(row),null);
   assert.equal(guard({fields:{...fields,Voiceover_URL:""}}),"voiceover_missing");
+  const story={...fields,Studio_Output_Type:"Story",Output_Filename:"studio-story.mp4",Voiceover_URL:"",Voiceover_Duration_Seconds:0,Render_Total_Frames:300};
+  assert.equal(guard({fields:story}),null);
+  assert.equal(guard({fields:{...story,Music_URL:""}}),"background_music_missing");
+  assert.equal(guard({fields:{...story,Output_Filename:"legacy-story.mp4"}}),"voiceover_missing");
+  assert.equal(guard({fields:{...story,Voiceover_URL:"https://example.test/full.mp3",Voiceover_Duration_Seconds:39.66}}),"voiceover_exceeds_video");
   assert.equal(guard({fields:{...fields,Render_Total_Frames:900}}),"voiceover_exceeds_video");
   assert.equal(guard({fields:{...fields,Music_URL:""}}),"background_music_missing");
   assert.equal(guard({fields:{...fields,Music_Volume:0}}),"background_music_muted");

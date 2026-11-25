@@ -212,6 +212,9 @@ def studio_visual_integrity_error(output: dict[str, Any], payload: dict[str, Any
 
 
 def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
+    from studio_produce.story_voiceover import is_story
+    if is_story(output):
+        return field_str(output, "Voiceover_URL")
     return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
 
 
@@ -223,7 +226,18 @@ def voiceover_is_required(output: dict[str, Any], content_item: dict[str, Any] |
     return mode in {"yes", "true", "1"}
 
 
+def render_voiceover_text(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
+    from studio_produce.story_voiceover import is_story, RECEIPT
+    if is_story(output):
+        receipt = parse_json_field(field(output, RECEIPT))
+        return str(receipt.get("text") or "") if isinstance(receipt, dict) else ""
+    return field_str(content_item or {}, "Voiceover_Script")
+
+
 def duration_is_explicit(output: dict[str, Any]) -> bool:
+    from studio_produce.story_voiceover import is_story
+    if is_story(output):
+        return True
     from studio_produce.timed_script import output_uses_authoritative_timing
 
     if output_uses_authoritative_timing(output):
@@ -260,7 +274,7 @@ def attach_voiceover(
     if "voiceoverTailSeconds" not in payload:
         payload["voiceoverTailSeconds"] = _num(field(output, "Voiceover_Tail_Seconds"), 0)
     if content_item and not payload.get("voiceoverText"):
-        payload["voiceoverText"] = field_str(content_item, "Voiceover_Script")
+        payload["voiceoverText"] = render_voiceover_text(output, content_item)
     return payload
 
 
@@ -358,7 +372,7 @@ def build_voiceover_request(
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
         "blackFrameGuard": _black_frame_guard(output),
-        "voiceoverText": field_str(content_item or {}, "Voiceover_Script"),
+        "voiceoverText": render_voiceover_text(output, content_item),
         "spokenCaptionsEnabled": not spoken_disabled,
         "spokenCaptionWordsPerPage": 4,
         "expectedClipCount": expected_clip_count(output, clips),

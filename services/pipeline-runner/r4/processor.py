@@ -310,6 +310,19 @@ def process_one(
             "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
+    from studio_produce.story_voiceover import needs_story_voiceover, ensure_story_voiceover, StoryVoiceoverError
+    from studio_produce.workload_governor import AdmissionDeferred
+    if needs_story_voiceover(output) and not dry_run:
+        try:
+            output = ensure_story_voiceover(client, output, content_item)
+        except AdmissionDeferred:
+            return {"processed": False, "reason": "waiting_for_story_voiceover", "output_record_id": output["id"]}
+        except StoryVoiceoverError as exc:
+            client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {
+                "Render_Status": "Blocked",
+                "Remotion_Error_Message": "Studio Story narration integrity guard: "+str(exc),
+            }, typecast=True)
+            return {"processed": False, "reason": "story_voiceover_blocked", "output_record_id": output["id"], "error": str(exc)}
     voiceover_required = voiceover_is_required(output, content_item)
     voiceover_disabled = voiceover_is_disabled(output, content_item)
     vo = "" if voiceover_disabled else voiceover_url(output, content_item)
