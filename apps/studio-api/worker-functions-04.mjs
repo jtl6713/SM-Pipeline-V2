@@ -31,6 +31,7 @@ import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { classifyApprovedPastDueOutput } from "./approved-past-due-recovery-triage.mjs";
 import { assessFreshSupabasePublish } from "./approved-publish-flow.mjs";
+import { recoverAuditedOverdueMae } from "./overdue-mae-recovery.mjs";
 import { STORY_2915_ID, story2915DispatchFence, verifyStory2915Bytes } from "./story-expired-generation-2915.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
@@ -2424,6 +2425,7 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
   let rows = [];
+  let auditedMaeCandidate = null;
   try {
     if (supabaseMode) {
       // Bounded oldest-due-first scan. Older incomplete candidates must never
@@ -2441,7 +2443,10 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
         for (const candidate of candidates) {
           const admission = assessFreshSupabasePublish(candidate, { nowMs });
           if (admission.eligible) rows.push(candidate);
-          else blocked[admission.reason] = (blocked[admission.reason] || 0) + 1;
+          else {
+            blocked[admission.reason] = (blocked[admission.reason] || 0) + 1;
+            if (!auditedMaeCandidate && admission.reason === "overdue_recovery_requires_mae_reschedule") auditedMaeCandidate = candidate.id;
+          }
           if (rows.length >= limit) break;
         }
         if (candidates.length < pageSize) break;
@@ -2520,6 +2525,18 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
       console.warn("publish reconcile dispatch failed", row.id, error);
       await studioStampPublishDispatch(env, row, "reconcile failed: " + message);
       results.push({ id: row.id, error: message });
+    }
+  }
+  // At most one audited historical recovery per pass, AFTER normal publishing.
+  // No newly rescheduled output enters this pass's provider dispatch list.
+  if (supabaseMode && auditedMaeCandidate) {
+    try {
+      results.push(await recoverAuditedOverdueMae(env, auditedMaeCandidate, {
+        horizonDays: await studioScheduleHorizonDays(env),
+      }));
+    } catch (error) {
+      console.warn("Audited overdue MAE recovery failed closed", auditedMaeCandidate, error?.message);
+      results.push({id:auditedMaeCandidate, skipped:"overdue_mae_recovery_unverified"});
     }
   }
   return results;
