@@ -698,3 +698,34 @@ def test_reused_or_unknown_pid_clears_dead_observation(isolated_governor, monkey
             pytest.fail("unknown or reused live PID is not death evidence")
     with g._connect() as db:
         assert db.execute("SELECT owner_dead_seen_at FROM resource_leases WHERE lease_key='prior'").fetchone() == (None,)
+
+
+def test_retry_rejoins_behind_continuously_runnable_jobs(isolated_governor, monkeypatch):
+    g = isolated_governor
+    monkeypatch.setenv("STUDIO_MAX_PRODUCER_JOBS", "1")
+    clock = [1000.0]
+    monkeypatch.setattr(g.time, "time", lambda: clock[0])
+    assert g.enqueue("recOldWaiting")
+    clock[0] += 1
+    assert g.enqueue("recNext")
+    clock[0] += 1
+    assert g.enqueue("recThird")
+    claim = g.claim_next()
+    assert claim[0] == "recOldWaiting"
+    g.finish_job(*claim, requeue=True)
+    clock[0] += 60  # Retry is already runnable when the next claim occurs.
+    # An ordinary duplicate pulse must not alter the delayed retry.
+    assert not g.enqueue("recOldWaiting")
+    with g._connect() as db:
+        row = db.execute("SELECT enqueued_at,available_at,consecutive_yields FROM producer_jobs WHERE request_id='recOldWaiting'").fetchone()
+    assert tuple(row) == (1000.0, 1032.0, 1)
+    next_claim = g.claim_next()
+    assert next_claim[0] == "recNext"
+    g.finish_job(*next_claim)
+    third_claim = g.claim_next()
+    assert third_claim[0] == "recThird"
+    g.finish_job(*third_claim)
+    retry = g.claim_next()
+    assert retry[0] == "recOldWaiting" and retry[1] != claim[1]
+    g.finish_job(*claim)  # stale owner must not remove new claim
+    assert g.job_valid(*retry)
