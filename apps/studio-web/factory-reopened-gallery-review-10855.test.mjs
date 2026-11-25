@@ -55,3 +55,34 @@ test("the restored review must have no hold, schedule, automatic publishing or c
 test("a terminal previously-approved card still stays out of Needs Eyes",()=>{
   assert.equal(evaluate({current:{...card,output_status:"Approved for Publishing"}}),true);
 });
+
+
+test("submitted review-ready cards disappear synchronously, remain hidden through stale snapshots and can reopen after reconciliation",()=>{
+  const visibleEnd=source.indexOf("  // Only genuinely unreviewable",end);
+  const pendingIds=new Set(),recovery=[],accepted={};
+  const state={submissionIntentIds:new Set(),submittingOutputIds:new Set(),batch:{},desk:{lanes:{needs_eyes:[card]}}};
+  let items=[];
+  const ctx={state,Date,recentFactoryAccepted:()=>accepted,pendingFactoryApproval:()=>pendingIds.size?{ids:[...pendingIds]}:null,
+    factoryRecoveryEntries:()=>recovery,factoryActivityRows:()=>[{items}],
+    canReviewActions:()=>true,canReviewHeldOutput:c=>c.do_not_publish===true,canRejectHeldOutput:()=>false};
+  const visible=vm.runInNewContext(source.slice(start,visibleEnd)+"\nfactoryVisibleNeedsEyes",ctx);
+  const other={...card,id:"recOtherOutput001"};
+  const both=()=>Array.from(visible([card,other]),c=>c.id);
+  assert.deepEqual(both(),[id,other.id]);
+  state.submissionIntentIds.add(id);
+  assert.deepEqual(both(),[other.id],"click must hide without waiting for any request");
+  assert.equal(visible([{...card,do_not_publish:true}]).length,0,"stale held snapshot cannot defeat active fence");
+  state.submissionIntentIds.clear();pendingIds.add(id);
+  assert.deepEqual(both(),[other.id],"persisted unconfirmed request remains hidden");
+  pendingIds.clear();recovery.push({saved:{ids:[id]}});
+  assert.deepEqual(both(),[other.id],"reloaded recovery request remains hidden");
+  recovery.length=0;items=[{id,status:"processing"}];
+  assert.deepEqual(both(),[other.id],"accepted active claim remains hidden");
+  items=[{id,status:"approved"}];accepted[id]=Date.now();
+  assert.deepEqual(both(),[other.id],"completed receipt cannot resurrect stale RFR");
+  items=[];assert.deepEqual(both(),[other.id],"recent acceptance survives activity cleanup");
+  accepted[id]=Date.now()-12*3600000;
+  assert.deepEqual(both(),[id,other.id],"genuine reopened review remains available");
+  delete accepted[id];items=[{id,status:"failed"}];
+  assert.deepEqual(both(),[id,other.id],"definitively failed request can reenter canonical review");
+});
