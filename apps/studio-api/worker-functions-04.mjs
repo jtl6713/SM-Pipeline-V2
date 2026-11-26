@@ -1,3 +1,4 @@
+import { windowsOutageState, windowsOutagePublishBlock } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
 import { automaticEzIdeaKind, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, hasAutomaticEzIntakeMarker, automaticEzDestinationPlanMatches } from "./automatic-ez-intake.mjs";
@@ -2415,6 +2416,7 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
 /*__STUDIO_WORKER_END:studioHealStoryCompanionDrift__*/
 
 export async function studioReconcileApprovedPublishes(env, options = {}) {
+  if (windowsOutageState().active) return [];
   const supabaseMode = studioWriteSource(env) === "supabase";
   // Supabase ownership must fail closed; no legacy Airtable read fallback.
   if (supabaseMode && !studioSupabaseConfigured(env)) {
@@ -2446,7 +2448,11 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
         inspected += candidates.length;
         for (const candidate of candidates) {
           const admission = assessFreshSupabasePublish(candidate, { nowMs });
-          if (admission.eligible) rows.push(candidate);
+          if (admission.eligible) {
+            const outageBlock = windowsOutagePublishBlock(Date.parse(String(f(candidate, "Scheduled_Post_Date") || "")), nowMs);
+            if (outageBlock) blocked[outageBlock] = (blocked[outageBlock] || 0) + 1;
+            else rows.push(candidate);
+          }
           else {
             blocked[admission.reason] = (blocked[admission.reason] || 0) + 1;
             if (!auditedMaeCandidate && admission.reason === "overdue_recovery_requires_mae_reschedule") auditedMaeCandidate = candidate.id;
@@ -2484,6 +2490,8 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
           const current = await readSupabaseShapedOutput(env, row.id);
           const preflight = assessFreshSupabasePublish(current, { nowMs: Date.now() });
           if (!preflight.eligible) return { id: row.id, skipped: preflight.reason };
+          const outageBlock = windowsOutagePublishBlock(Date.parse(String(f(current, "Scheduled_Post_Date") || "")));
+          if (outageBlock) return { id: row.id, skipped: outageBlock };
           const key = row.id===STORY_2915_ID ? story2915DispatchFence(current) : "studio/state/initial-publish-fence/v1/" + row.id + ".json";
           if(row.id===STORY_2915_ID)await verifyStory2915Bytes();
           if (await env.STUDIO_MEDIA.get(key)) {
