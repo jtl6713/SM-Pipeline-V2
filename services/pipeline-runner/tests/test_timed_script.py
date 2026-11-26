@@ -740,3 +740,30 @@ def test_mixed_timed_script_refuses_to_stretch_short_video():
     request = {"id": "recPRSHORT", "fields": {"Production_Request_ID": "PR-SHORT", "Production_Notes": directive_line(timeline), "Studio_Variant_Status": "Ready", "Studio_Master_Assets_JSON": json.dumps(masters), "Studio_Variant_Manifest_JSON": json.dumps({"assets": manifest}), "Studio_Output_Plan_JSON": json.dumps({"items": [{"platform": "Instagram", "output_type": "Reel", "aspect_ratio": "9:16"}]})}}
     output = {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}
     assert source_package(request, output, None) is None
+
+
+def test_story_first_missing_timed_directive_recovers_seven_exact_scenes():
+    bounds = [0, 14, 27, 41, 49, 58, 64, 74]
+    scripts = ["Zoo Miami entrance.", "Best time to visit.", "Admission costs.",
+               "Giraffe feeding.", "Amazon and Beyond.", "Africa habitats.", "Plan your visit."]
+    scenes = [{"time": f"{start}-{end}", "voiceover": text, "visual": "Not narration",
+               "asset_id": f"rec{i:014d}", "music_only_last_seconds": 0,
+               "voiceover_instagram": ""}
+              for i, (start, end, text) in enumerate(zip(bounds, bounds[1:], scripts))]
+    notes = "[story-first-production.1] " + json.dumps({
+        "schema": "story-first-production.1", "target_seconds": 74, "scenes": scenes,
+    })
+    request = {"fields": {"Production_Notes": notes, "Script_Mode": "AI decides"}}
+    timeline = timed_script_from_request(request)
+    assert timeline["duration_seconds"] == 74
+    assert [s["asset_id"] for s in timeline["segments"]] == [s["asset_id"] for s in scenes]
+    assert [s["voiceover_text"] for s in timeline["segments"]] == scripts
+    assert exact_requested_script(request) == " ".join(scripts)
+
+
+def test_invalid_story_first_timeline_does_not_fall_back_to_generic_script():
+    import pytest
+    notes = '[story-first-production.1] {"schema":"story-first-production.1","scenes":[]}'
+    request = {"fields": {"Production_Notes": notes, "Script_Mode": "AI decides"}}
+    with pytest.raises(ValueError, match="no scenes"):
+        exact_requested_script(request)
