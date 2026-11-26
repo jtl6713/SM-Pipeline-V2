@@ -351,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1105-atomic-photo-wait-3094";
+  const BUILD_ID = "item4-0.6.1106-existing-photo-wait-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -9629,6 +9629,22 @@ function timedScriptAssetLabel(asset, index) {
           return;
         }
         if (answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
+          const profile = selectedProfileId;
+          const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 });
+          if (caps?.ok !== true || typeof caps.ordinary_editor_boundary_enabled !== "boolean" || profile !== selectedProfileId)
+            throw new Error("Existing Idea routing could not be verified. No approval was submitted.");
+          let automaticExisting = false;
+          if (caps.ordinary_editor_boundary_enabled) {
+            const exact = await api(`/api/ideas/${encodeURIComponent(idea.id)}`, { timeoutMs: 8000, retries: 0 });
+            if (exact?.ok !== true || exact.record?.id !== idea.id || profile !== selectedProfileId)
+              throw new Error("Existing Idea could not be verified. No approval was submitted.");
+            idea = exact.record;
+            automaticExisting = idea.production_mode === "automatic" && idea.production_source === "idea";
+            if (!automaticExisting && !ordinaryIdeaEditorAllowed(idea, caps))
+              throw new Error("Use the saved Idea's verified workflow. No approval was submitted.");
+            if (automaticExisting && caps.automatic_photo_wait_existing_enabled !== true)
+              throw new Error("Automatic existing-Idea photo wait is unavailable. No approval was submitted.");
+          }
           setEzWizardBusy(true, `Approving and waiting for ${answers.photoCountMin}–${answers.photoCountMax} photos…`);
           const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok"];
           const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/promote`, {
@@ -9644,10 +9660,22 @@ function timedScriptAssetLabel(asset, index) {
               carousel_slide_count_max: answers.photoCountMax,
               carousel_image_mode: "Wait for matching photos",
               photo_wait: true,
+              ...(automaticExisting ? { automatic_photo_wait_existing: { profile_id: profile }, carousel_slide_count_min: Number(answers.photoCountMin), carousel_slide_count_max: Number(answers.photoCountMax) } : {}),
             }),
             timeoutMs: 45000,
             retries: 0,
           });
+          if (automaticExisting) {
+            if (profile !== selectedProfileId || result?.ok !== true || result.waiting !== true ||
+                result.record?.id !== idea.id || result.record.production_mode !== "automatic" ||
+                result.record.production_source !== "idea")
+              throw new Error("Photo-wait approval receipt was not verified. Check the saved Idea before retrying.");
+            resetEzWizard({ silent: true });
+            switchToPage("ideas");
+            setIdeasAutonomousMessage("Idea accepted. Studio will match photos and prepare eligible outputs for Approval Factory automatically.", "success");
+            loadIdeas().catch(() => {});
+            return;
+          }
           resetEzWizard({ silent: true });
           switchToPage("ideas");
           updateIdeaDrawer(result.record || idea);
