@@ -351,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1104-ordinary-idea-editor-3094";
+  const BUILD_ID = "item4-0.6.1105-atomic-photo-wait-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -9548,6 +9548,53 @@ function timedScriptAssetLabel(asset, index) {
       ezWizardPending = { ...ezWizardAnswers, planned };
       const answers = ezWizardPending;
       if (answers.start === "idea") {
+        // A new photo-wait Idea must be accepted with its actual configuration
+        // before any background worker can observe default photo settings.
+        if (!answers.ideaId && answers.ideaTitle && answers.photoWait) {
+          const profile = selectedProfileId;
+          const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 });
+          if (caps?.ok !== true || profile !== selectedProfileId)
+            throw new Error("Idea routing could not be verified. No Idea was created.");
+          if (caps.automatic_photo_wait_create_enabled === true) {
+            applyEzWizardAnswersToIntake();
+            const config = {
+              approve_idea: true,
+              content_type: planned?.master_content_type || "Photo Set",
+              platforms: planned?.platforms || [],
+              include_voiceover: $("ezAudioVoiceover")?.value || "Use Profile Default",
+              include_background_music: $("ezAudioMusic")?.value || "Use Profile Default",
+              include_thumbnail: $("ezThumbnail")?.value || "Use Profile Default",
+              carousel_slide_count_min: Number(answers.photoCountMin),
+              carousel_slide_count_max: Number(answers.photoCountMax),
+            };
+            let result;
+            try {
+              result = await api("/api/ideas", {
+                method: "POST", retries: 0, timeoutMs: 30000,
+                body: JSON.stringify({
+                  title: answers.ideaTitle, summary: answers.ideaSummary || answers.ideaTitle,
+                  primary_location: answers.ideaLocation || "", content_profile_id: profile,
+                  input_kind: "multiple-photos", production_mode: "automatic",
+                  automatic_photo_wait: config,
+                }),
+              });
+            } catch (error) {
+              throw new Error("Idea save was not confirmed: " + (error.message || "connection interrupted") +
+                ". Check Current Ideas before trying again; no automatic retry was made.");
+            }
+            if (result.record?.id) ezWizardAnswers.ideaId = result.record.id;
+            if (result.automatic_photo_wait_saved !== true || !result.record?.id ||
+                result.record.production_mode !== "automatic" || result.record.production_source !== "idea")
+              throw new Error("Idea may be saved, but automatic photo-wait was not verified. Check Current Ideas; do not recreate it.");
+            resetEzWizard({ silent: true });
+            switchToPage("ideas");
+            setIdeasAutonomousMessage("Idea accepted. Studio will match photos and prepare eligible outputs for Approval Factory automatically.", "success");
+            loadIdeas().catch(() => {});
+            return;
+          }
+          if (caps.ordinary_editor_boundary_enabled === true)
+            throw new Error("Automatic photo-wait intake is not yet available. No Idea was created.");
+        }
         let idea = null;
         if (answers.ideaId) {
           idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };

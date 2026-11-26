@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -4270,6 +4271,14 @@ export async function createIdea(request, env, authorization, ctx = null) {
     requestedProductionMode=parseNewIdeaModeChoice(env,{source:modeSource,
       requestedMode:payload?.production_mode,canConfigure:authorization?.permissions?.production_configure===true});
   } catch(error) {throw new HttpError(409,error?.message||"Invalid Production mode");}
+  let atomicPhotoWaitFields = null;
+  if (Object.prototype.hasOwnProperty.call(payload, "automatic_photo_wait")) {
+    try {
+      atomicPhotoWaitFields = automaticPhotoWaitCreateFields(env, authorization, payload.automatic_photo_wait, {
+        source: modeSource, mode: requestedProductionMode, inputKind: payload.input_kind,
+      });
+    } catch (error) { throw new HttpError(409, error?.message || "Invalid automatic photo-wait settings"); }
+  }
   if (storyFirst?.scenes.some(scene => scene.assigned_asset_id)) {
     throw new HttpError(409, "New Script a Short ideas cannot contain unverified media selections. Save first, then select media.");
   }
@@ -4331,7 +4340,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
     targetSeconds: payload?.vibe_target_seconds ?? payload?.video_duration ?? 15,
   }));
+  if (atomicPhotoWaitFields) Object.assign(fields, atomicPhotoWaitFields);
   if (input.summary) fields.Idea_Summary = input.summary;
+  else if (atomicPhotoWaitFields) fields.Idea_Summary = input.title;
   const inferredLocation = suggestPrimaryLocationFromIdea({
     fields: {
       Candidate_Title: input.title,
@@ -4350,7 +4361,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   // matching fails. Cron's Waiting scan owns bounded retries.
   const modeVerified=requestedProductionMode!=="manual"||
     (f(created,"Studio_Production_Mode")==="manual"&&f(created,"Studio_Production_Source")==="idea");
-  if (!vibeCut && ctx?.waitUntil && !storyFirst && !(finishedVideo && env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" && env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") && modeVerified) {
+  if (!atomicPhotoWaitFields && !vibeCut && ctx?.waitUntil && !storyFirst && !(finishedVideo && env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" && env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") && modeVerified) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
@@ -4361,6 +4372,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
     created: true,
     record: mapIdea(created),
     production_mode_verified: modeVerified,
+    ...(atomicPhotoWaitFields ? { automatic_photo_wait_saved: f(created,"Studio_Production_Mode")==="automatic" && f(created,"Studio_Production_Source")==="idea" && f(created,"Candidate_Status")==="Approved" && f(created,"Studio_Photo_Wait_Status")==="Waiting" } : {}),
     manual_production_available: manualIdeaCreateEnabled(env),
     ...(modeVerified?{}:{warning:"Idea saved; Manual Production mode receipt could not be verified. Refresh this exact Idea before retrying."}),
     context: {
