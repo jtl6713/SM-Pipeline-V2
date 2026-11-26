@@ -166,3 +166,44 @@ Subsequent PR must implement audited manual transition with lease CAS,
 all automatic admission/claim guards, manual-only list and editor
 authorization, dedicated and ordinary UI routing and QA calibration. Only
 enable user-visible behavior when the gates are jointly proven.
+
+
+## Checkpoint 4 — ordinary HTTP editor and new-Idea selection
+
+PR #3119 was merged at 1648b72949346bea038d5c27af8ea01b1e47143e
+with 26/26 checks. Keep the single mainline flag
+`STUDIO_PRODUCTION_MODE_ROUTING`; do not merge the overlapping older
+phase-3 draft #3120.
+
+The staged `STUDIO_PRODUCTION_EDITOR_GUARD=true` checks every ordinary
+request/editor HTTP path after authentication, before any editor handler.
+It reads exact canonical FK identity, organization, authorized profile and
+brand, manual ordinary Idea source/mode, and rejects conflicting legacy
+compatibility links. It covers direct document/light reads, request
+creation, assets, plan, variants, promotion, child outputs and stale client
+writes; the bounded existing GET producer-progress projection and Factory
+paths remain separate. Internal worker helper calls retain their own
+authorization and leases. A browser header/query cannot choose internal
+authority.
+
+The staged `STUDIO_MANUAL_IDEA_CREATE=true` only works if capture, routing
+and editor guard are also enabled. Authorized new ordinary Idea creation
+can persist an explicit manual choice in the same canonical insert; default
+automatic remains. AI/dedicated paths cannot request manual and ordinary
+PATCHes cannot change the typed mode. A missing manual receipt is surfaced
+without retrying the insert. New flags remain OFF.
+
+**Do not activate these flags yet.** The exact HTTP guard deliberately
+denies shared legacy editor URLs to all nonmanual requests, including
+currently necessary dedicated upload operations. Before activation,
+separate those operations onto authorized dedicated routes and update the
+browser; Script a Short must commit the exact storyboard and queue the
+existing governed production job, not open the editor. Finished Video
+must retain its existing upload, approval, scheduling and Publish Now
+modes (never add ordinary editor access or a new approval gate). Vibe Cut
+is out of scope but its existing dedicated upload operations must remain
+functional. Runner direct promotion fence, atomic lease-safe audited
+existing-Idea mode transition, UI mode selector, operational progress
+routing, semantic QA shadow calibration and protected canaries remain
+required. No live schema, flags, dispatch, approval or scheduling changes
+in this checkpoint.

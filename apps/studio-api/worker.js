@@ -1,4 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
+import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess } from "./production-editor-boundary.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -684,6 +685,9 @@ import {
   brandLogo,
   listIdeas,
   listStudioContentProfiles,
+  loadAuthorizedIdea,
+  resolveAuthorizedContentProfiles,
+  membershipAllowsBrand,
   studioProfileOnboardingHandlers,
   listStudioProfileSetups,
   createStudioProfileSetup,
@@ -2351,6 +2355,33 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      // #3094 ordinary editor boundary. Internal producers call shared helpers
+      // directly and never acquire editor access from a browser-controlled flag.
+      if (editorGuardEnabled(env)) {
+        const editorRoute=classifyProductionEditorHttp(url.pathname,request.method,url.searchParams);
+        if(editorRoute) {
+          assertEditorGuardReady(env);
+          requirePermission(authorization,"production_configure");
+          let ideaRecordId=null;
+          if(editorRoute.kind==="create_request") {
+            try {ideaRecordId=(await request.clone().json())?.idea_record_id;}
+            catch {throw new HttpError(400,"Request body must be valid JSON");}
+          }
+          const profiles=(await resolveAuthorizedContentProfiles(env,authorization)).map(profile=>({
+            id:profile.id,brandIds:(Array.isArray(f(profile,"Brand"))?f(profile,"Brand"):[])
+              .filter(id=>membershipAllowsBrand(authorization,[id])),
+          }));
+          const allowed=await verifyEditorHttpAccess({
+            route:editorRoute,requestId:ideaRecordId,
+            scope:{organizationId:authorization?.organization?.record_id,profiles},
+            read:path=>adminHoldSupabaseRest(env,path),
+            loadIdea:id=>loadAuthorizedIdea(env,id,authorization),
+          });
+          if(!allowed) throw new HttpError(409,
+            "Ordinary Production is available only to explicitly Manual Production Ideas. Automatic or dedicated work is tracked outside Production.");
+        }
       }
 
       // QA is tenant-admin-only and cannot mutate pipeline output or publish state.
