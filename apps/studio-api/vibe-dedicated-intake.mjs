@@ -93,8 +93,10 @@ export function vibeRequestOperationAllowed(route,record,body){
     typeof body.mime_type==="string"&&/^video\//i.test(body.mime_type);
   const a=assets[0];
   if(assets.length!==1||Number(f.Studio_Master_Asset_Count)!==1||a?.id!==route.asset||
-    a.origin_kind!=="vibe-cut"||a.media_kind!=="video"||!a.r2_key)return false;
-  if(route.operation==="part")return a.upload_status==="multipart_pending"&&Boolean(a.multipart_upload_id);
-  if(route.operation==="complete")return (a.upload_status==="multipart_pending"&&Boolean(a.multipart_upload_id))||a.upload_status==="complete";
+    a.origin_kind!=="vibe-cut"||a.media_kind!=="video")return false;
+  const staged=Boolean(a.r2_key&&a.multipart_upload_id);
+  if(route.operation==="part")return a.upload_status==="multipart_pending"&&staged;
+  if(route.operation==="complete")return (a.upload_status==="multipart_pending"&&staged)||
+    (a.upload_status==="complete"&&Boolean(a.r2_key||(a.google_drive_file_id&&a.media_asset_record_id)));
   return false;
 }
