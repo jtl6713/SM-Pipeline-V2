@@ -14054,6 +14054,12 @@ async function discoverReadyVibeProductionDrafts(env, { limit = 25 } = {}) {
 
 async function readyProductionRequestForIdea(env, idea) {
   let ids = linkedRecordIds(f(idea, "Production Requests"));
+  if(automaticEzIdeaKind(idea)) {
+    const canonical=await listSupabaseOpenProductionRequestsForIdea(env,idea.id);
+    if(!Array.isArray(canonical)||canonical.length>1||ids.some(id=>id!==canonical[0]?.id))
+      throw new HttpError(409,"Automatic EZ request ownership requires reconciliation");
+    ids=canonical.map(row=>row.id);
+  }
   // Phase 6 SoR: Idea reciprocal bag is often empty. Fall back to
   // production_requests.idea_candidate_id before treating this as "no request".
   if (!ids.length && idea?.id) {
