@@ -9576,7 +9576,7 @@ function timedScriptAssetLabel(asset, index) {
     if(validId(draft.record?.id))session.requestId=draft.record.id;
     if(draft.automatic_ez_draft_verified!==true||!validId(session.requestId)||draft.record?.idea_record_id!==session.ideaId||
       !equalSet(draft.record?.platforms,planned.platforms)||draft.record?.content_type!==session.payload.content_type||
-      draft.record?.production_notes!==session.payload.production_notes||draft.record?.status!=="Draft"||
+      String(draft.record?.production_notes||"").split(/\r?\n/)[0]!==session.payload.production_notes||draft.record?.status!=="Draft"||
       Number(draft.record?.studio_master_asset_count)!==0)throw new Error("Exact empty intake draft was not verified. No media was uploaded.");
     let stored=0;
     for(const file of files) {
@@ -9626,16 +9626,18 @@ function timedScriptAssetLabel(asset, index) {
     return receipt;
   }
   function automaticEzWizardAssertCurrent(session) {
-    if(automaticEzWizardSession!==session||selectedProfileId!==session.profile||ezWizardStep!=="automaticEzIntake")
+    if(automaticEzWizardSession!==session||selectedProfileId!==session.profile||ezWizardStep!=="automaticEzIntake"||!$("page-home")?.classList.contains("active"))
       throw new Error("The wizard or working profile changed. Reconcile the saved intake before starting another.");
   }
   function automaticEzWizardError(session,error) {
     const ids=[session.ideaId&&"Idea "+session.ideaId,session.requestId&&"request "+session.requestId].filter(Boolean).join("; ");
     ezWizardSetMessage((error?.message||"Intake was not confirmed")+(ids?". Saved IDs: "+ids:""),"error-text");
   }
-  async function finishAutomaticEzWizardMedia(session, {polls=8}={}) {
+  async function finishAutomaticEzWizardMedia(session, {polls=5,manual=false}={}) {
     if(session.checking)return;
     session.checking=true;
+    if(manual)session.pollRounds=0;
+    session.pollRounds=(session.pollRounds||0)+1;
     setEzWizardBusy(true,"Checking saved master media…");
     try {
       for(let i=0;i<polls;i++) {
@@ -9651,11 +9653,15 @@ function timedScriptAssetLabel(asset, index) {
         if(i+1<polls)await sleepMs(2500);
       }
       automaticEzWizardAssertCurrent(session);
-      ezWizardSetMessage("Originals are saved. Studio is still preserving the master media; checking again automatically.","success");
-      session.pollTimer=window.setTimeout(()=>{
-        if(automaticEzWizardSession===session&&selectedProfileId===session.profile&&ezWizardStep==="automaticEzIntake")
-          void finishAutomaticEzWizardMedia(session,{polls:1});
-      },10000);
+      if(session.pollRounds>=6||!$("page-home")?.classList.contains("active")) {
+        ezWizardSetMessage("Originals are saved. Background media preparation is still running. Check the same saved request again when ready; do not upload again.","success");
+      } else {
+        ezWizardSetMessage("Originals are saved. Studio is still preserving the master media; checking again automatically.","success");
+        session.pollTimer=window.setTimeout(()=>{
+          if(automaticEzWizardSession===session&&selectedProfileId===session.profile&&ezWizardStep==="automaticEzIntake"&&$("page-home")?.classList.contains("active"))
+            void finishAutomaticEzWizardMedia(session,{polls:1});
+        },20000);
+      }
     } catch(error) {
       if(automaticEzWizardSession===session)automaticEzWizardError(session,error);
     } finally {
@@ -9678,7 +9684,7 @@ function timedScriptAssetLabel(asset, index) {
       if(prompt)prompt.textContent="Automatic intake — saved media";
       ezWizardShowForm('<p class="subtle">Saved request: '+escapeHtml(session.requestId||"not yet confirmed")+'</p>'+
         (session.mediaSubmitted?'<div class="ez-wizard-form-actions"><button type="submit">Check media and continue</button></div>':""),
-        ()=>{if(session.mediaSubmitted){window.clearTimeout(session.pollTimer);void finishAutomaticEzWizardMedia(session);}});
+        ()=>{if(session.mediaSubmitted){window.clearTimeout(session.pollTimer);void finishAutomaticEzWizardMedia(session,{manual:true});}});
       if($("ezWizardBack"))$("ezWizardBack").disabled=true;
       if($("ezWizardReset"))$("ezWizardReset").disabled=true;
       return;
@@ -9706,8 +9712,8 @@ function timedScriptAssetLabel(asset, index) {
     const videos=files.filter(item4FileLooksLikeVideo);
     const photos=files.filter(file=>!item4FileLooksLikeVideo(file)&&(/^image\//i.test(file.type)||/\.(heic|heif)$/i.test(file.name)));
     if(photos.length!==counts.photos||videos.length!==counts.clips||files.length!==photos.length+videos.length||
-      videos.some(file=>file.size>90*1024*1024)||files.some(file=>file.size>90*1024*1024)) {
-      ezWizardSetMessage("Choose the exact photo and clip counts. Direct uploads support files up to 90 MB; large multipart clips are not enabled here.","error-text");return;
+      videos.some(file=>file.size>90*1024*1024)||photos.some(file=>file.size>25*1024*1024)) {
+      ezWizardSetMessage("Choose the exact photo and clip counts. This direct intake supports photos up to 25 MB and clips up to 90 MB; large multipart clips are not enabled here.","error-text");return;
     }
     session.title=String(data.get("title")||"").trim();
     if(!session.title){ezWizardSetMessage("Enter an Idea title.","error-text");return;}

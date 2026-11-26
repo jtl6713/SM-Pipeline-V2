@@ -43,3 +43,16 @@ test("dedicated and existing Idea paths are excluded from new ordinary intake",(
  assert.equal(f.automaticEzWizardCandidate({inputKind:"multiple-photos",photoWait:true}),false);
  assert.equal(f.automaticEzWizardCandidate({inputKind:"mixed"}),true);
 });
+
+test("server-added creative direction does not invalidate exact first-line routing, but altered routing does",async()=>{
+ const args=(s,results)=>({session:s,call:async()=>results.shift(),assertCurrent:()=>{},files:[],progress:()=>{}});
+ const appended={...draft,record:{...draft.record,production_notes:draft.record.production_notes+"\n\nIdea direction: Use skyline imagery."}};
+ const s=session();await f.runAutomaticEzWizardMedia(args(s,[idea,appended,ai]));assert.equal(s.mediaSubmitted,true);
+ const wrong={...draft,record:{...draft.record,production_notes:"origin=ez-wizard; ez-input=single-ai; ez-package=video"}};
+ const other=session();await assert.rejects(f.runAutomaticEzWizardMedia(args(other,[idea,wrong])));assert.equal(other.mediaSubmitted,undefined);
+});
+test("profile change after an Idea response stops before draft creation",async()=>{
+ const s=session();let calls=0,checks=0;
+ await assert.rejects(f.runAutomaticEzWizardMedia({session:s,call:async()=>{calls++;return idea;},assertCurrent:()=>{if(++checks>1)throw new Error("profile changed");},files:[],progress:()=>{}}));
+ assert.equal(calls,1);assert.equal(s.mediaSubmitted,undefined);
+});
