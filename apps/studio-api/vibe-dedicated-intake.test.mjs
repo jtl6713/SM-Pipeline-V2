@@ -67,6 +67,9 @@ test("multipart starts only on an empty Draft, and parts and completion belong t
  const done=draft(payload(),{Studio_Master_Asset_Count:1,Studio_Master_Assets_JSON:JSON.stringify([{...source,upload_status:"complete"}])});
  assert.equal(vibeRequestOperationAllowed({operation:"part",asset:"source"},done),false);
  assert.equal(vibeRequestOperationAllowed({operation:"complete",asset:"source"},done),true);
+ const preserved=draft(payload(),{Studio_Master_Asset_Count:1,Studio_Master_Assets_JSON:JSON.stringify([{...source,upload_status:"complete",r2_key:null,google_drive_file_id:"drive",media_asset_record_id:"recMedia000000001"}])});
+ assert.equal(vibeRequestOperationAllowed({operation:"complete",asset:"source"},preserved),true);
+ assert.equal(vibeRequestOperationAllowed({operation:"part",asset:"source"},preserved),false);
  for(const status of ["Submitted","Promoted","Cancelled"]){
    const locked=draft(payload(),{...staged.fields,Request_Status:status});
    assert.equal(vibeRequestOperationAllowed({operation:"complete",asset:"source"},locked),false);
@@ -101,4 +104,8 @@ test("shared handler fences are applied before staging and AZ publishing continu
  assert.ok(start.indexOf("vibeRequestOperationAllowed(")<start.indexOf("await env.STUDIO_MEDIA.createMultipartUpload("));
  assert.ok(finish.indexOf("vibeRequestOperationAllowed(")<finish.indexOf("await multipart.complete("));
  assert.match(finish,/if \(!dedicatedVibe && studioIsAzFinishedVideo/);
+ assert.match(finish,/await item4UpsertMasterQueue\(env,recordId,pending\)/);
+ assert.match(finish,/await preserveDedicatedVibeSource\(assets\)/);
+ assert.ok(finish.indexOf("await preserveDedicatedVibeSource(nextAssets)")<finish.lastIndexOf("return respond("));
+ assert.match(finish,/Studio_Master_Asset_Status: dedicatedVibe \|\| needsCompress \? "Uploading" : "Ready"/);
 });
