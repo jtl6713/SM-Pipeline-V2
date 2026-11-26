@@ -760,6 +760,7 @@ import {
   item4HealIncompletePreparingVariants,
   getItem4WorkspaceStatus,
   getOrCreateProductionRequestForIdea,
+  approveStoryFirstAutomaticHandoff,
   createProductionRequestFromBody,
   listProductionRequests,
   getProductionRequest,
@@ -1040,6 +1041,7 @@ export default {
       const isScriptedShortProposeRoute = url.pathname === "/api/scripted-short/propose";
       const isScriptedShortReviseRoute = url.pathname === "/api/scripted-short/revise";
       const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
+      const storyboardHandoffMatch = /^\/api\/ideas\/(rec[A-Za-z0-9]{14})\/storyboard-handoff$/.exec(url.pathname);
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProducerConversationRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/producer-conversation$/.test(url.pathname);
@@ -1299,6 +1301,7 @@ export default {
         isScriptedShortProposeWrite ||
         isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
+        (storyboardHandoffMatch && request.method === "POST") ||
         (isStoryFirstSceneMediaRoute && request.method === "POST") ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
@@ -4090,6 +4093,15 @@ export default {
       if (isIdeaLibrarySuggestionsRoute) {
         requirePermission(authorization, "production_configure");
         return getIdeaLibrarySuggestions(request, env, url, authorization);
+      }
+
+      if (storyboardHandoffMatch) {
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        assertWriteRequest(request,env);
+        requirePermission(authorization,"ideas_promote");
+        requirePermission(authorization,"production_configure");
+        return await withOutputApprovalLock(env.STUDIO_MEDIA,storyboardHandoffMatch[1],
+          ()=>approveStoryFirstAutomaticHandoff(request,env,url,authorization));
       }
 
       if (isIdeaProductionRequestRoute) {
@@ -7043,6 +7055,8 @@ const OPEN_PRODUCTION_REQUEST_FORMULA = 'OR({Request_Status}="Draft",{Request_St
 /*__STUDIO_WORKER_EXTRACT:createDraftForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:verifiedStoryFirstProduction__*/
 /*__STUDIO_WORKER_EXTRACT:ensureStoryFirstProductionMedia__*/
+/*__STUDIO_WORKER_EXTRACT:approveStoryFirstAutomaticHandoff__*/
+
 /*__STUDIO_WORKER_EXTRACT:getOrCreateProductionRequestForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:createProductionRequestFromBody__*/
 /*__STUDIO_WORKER_EXTRACT:mapProductionRequestLight__*/
