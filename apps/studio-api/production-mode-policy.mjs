@@ -15,11 +15,12 @@ export const PRODUCTION_SOURCES = Object.freeze({
   IDEA: "idea",
   SCRIPT_A_SHORT: "script_a_short",
   FINISHED_VIDEO: "finished_video",
+  VIBE_CUT: "vibe_cut",
 });
 
 const { AUTOMATIC, MANUAL } = PRODUCTION_MODES;
-const { IDEA, SCRIPT_A_SHORT, FINISHED_VIDEO } = PRODUCTION_SOURCES;
-const dedicated = source => source === SCRIPT_A_SHORT || source === FINISHED_VIDEO;
+const { IDEA, SCRIPT_A_SHORT, FINISHED_VIDEO, VIBE_CUT } = PRODUCTION_SOURCES;
+const dedicated = source => source === SCRIPT_A_SHORT || source === FINISHED_VIDEO || source === VIBE_CUT;
 const knownSource = source => source === IDEA || dedicated(source);
 const knownMode = mode => mode === AUTOMATIC || mode === MANUAL;
 
