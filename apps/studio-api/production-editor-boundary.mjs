@@ -17,13 +17,13 @@ export function productionEditorBoundaryReady(env) {
 export function classifyProductionEditorRoute(url, method) {
   const verb=String(method||"GET").toUpperCase(), path=url.pathname;
   const collection=path==="/api/production-requests";
-  const createIdea=path.match(/^\/api\/ideas\/(rec[A-Za-z0-9]{14})\/production-request$/);
-  const exact=path.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]{14})(?:\/(.*))?$/);
-  const output=path.match(/^\/api\/production-request-outputs\/(rec[A-Za-z0-9]{14})$/);
+  const createIdea=path.match(/^\/api\/ideas\/(rec[A-Za-z0-9]+)\/production-request$/);
+  const exact=path.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]+)(?:\/(.*))?$/);
+  const output=path.match(/^\/api\/production-request-outputs\/(rec[A-Za-z0-9]+)$/);
   if (collection && verb!=="POST") return null; // manual-only collection has its own guard
   if (!collection&&!createIdea&&!exact&&!output) return null;
   const scopes=url.searchParams.getAll("production_scope");
-  const scope=scopes.length>1 ? "invalid" : scopes[0]||"manual";
+  const scope=scopes.length>1 || (scopes.length===1&&!["manual","finished-video","script-a-short"].includes(scopes[0])) ? "invalid" : scopes[0]||"manual";
   if (collection) return {kind:"create",scope,verb,operation:"collection"};
   if (createIdea) return {kind:"create",scope,verb,operation:"idea",id:createIdea[1]};
   if (output) return {kind:"output",scope,verb,operation:"output",id:output[1]};
@@ -39,6 +39,10 @@ export function productionEditorOwnerVerified(row, allowed) {
   return Boolean(row?.airtable_record_id&&row?.idea_candidate_id&&idea?.id===row.idea_candidate_id&&
     idea.airtable_record_id&&idea.content_profile_id&&
     idea.content_profiles?.id===idea.content_profile_id&&
+    idea.content_profiles?.active===true&&
+    idea.content_profiles.organization_id===row.organization_id&&
+    idea.content_profiles.brand_id===row.brand_id&&
+    row.brands?.organization_id===row.organization_id&&
     allowed.profileRecordIds.includes(idea.content_profiles?.airtable_record_id)&&
     row.organization_id&&row.organizations?.id===row.organization_id&&
     row.organizations?.airtable_record_id===allowed.organizationRecordId&&
@@ -47,7 +51,12 @@ export function productionEditorOwnerVerified(row, allowed) {
 }
 export function productionEditorIdeaVerified(idea, allowed) {
   return Boolean(idea?.id&&idea?.airtable_record_id&&idea.content_profile_id&&
-    idea.content_profiles?.id===idea.content_profile_id&&
+    idea.content_profiles?.id===idea.content_profile_id&&idea.content_profiles?.active===true&&
+    idea.content_profiles.organizations?.id===idea.content_profiles.organization_id&&
+    idea.content_profiles.organizations?.airtable_record_id===allowed.organizationRecordId&&
+    idea.content_profiles.brands?.id===idea.content_profiles.brand_id&&
+    idea.content_profiles.brands?.organization_id===idea.content_profiles.organization_id&&
+    allowed.brandRecordIds.includes(idea.content_profiles.brands?.airtable_record_id)&&
     allowed.profileRecordIds.includes(idea.content_profiles?.airtable_record_id));
 }
 function dedicatedMode(idea,source) {
@@ -59,7 +68,7 @@ function finishedOperationAllowed(route) {
   if (route.verb==="GET") return finishedRead.has(route.operation);
   if (route.kind==="output") return false;
   if (route.verb==="PATCH") return route.operation==="record";
-  if (route.verb==="POST") return finishedWrite.has(route.operation)&&route.operation!=="record"&&route.operation!=="outputs"||
+  if (route.verb==="POST") return (finishedWrite.has(route.operation)&&route.operation!=="record"&&route.operation!=="outputs")||
     /^assets\/upload-session\/[A-Za-z0-9_-]+\/complete$/.test(route.operation)||
     /^assets\/[A-Za-z0-9_-]+\/poster$/.test(route.operation);
   if (route.verb==="PUT") return route.operation==="outputs"||/^assets\/upload-session\/[A-Za-z0-9_-]+\/parts\/\d+$/.test(route.operation);
