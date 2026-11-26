@@ -4309,11 +4309,25 @@ export async function createIdea(request, env, authorization, ctx = null) {
       Production_Config_Notes: notes,
     });
   }
-  // Capture metadata only; do not change existing production admission.
-  // Finished Video and Vibe Cut retain their dedicated legacy contracts.
-  if (storyFirst) Object.assign(fields, newIdeaProductionCapture(env, "script_a_short"));
-  else if (!vibeCut && String(payload?.input_kind || "").trim() !== "finished-video") {
-    Object.assign(fields, newIdeaProductionCapture(env, "idea"));
+  // Source is chosen by the server's validated creation entrypoint. A
+  // human's explicit Manual choice is legal only for an ordinary new Idea.
+  const inputKind = String(payload?.input_kind || "").trim();
+  const requestedMode = payload?.production_mode;
+  const captureSource = storyFirst ? "script_a_short" :
+    inputKind === "finished-video" && !vibeCut ? "finished_video" : vibeCut ? null : "idea";
+  if (requestedMode != null && (!["automatic", "manual"].includes(requestedMode)
+      || !captureSource || (requestedMode === "manual" &&
+        (captureSource !== "idea" || (inputKind && inputKind !== "idea"))))) {
+    throw new HttpError(400, "Production mode selection is only available for ordinary Ideas");
+  }
+  if (captureSource) {
+    try {
+      Object.assign(fields, newIdeaProductionCapture(env, captureSource, {
+        requestedMode, humanChoice: captureSource === "idea" && (!inputKind || inputKind === "idea"),
+      }));
+    } catch (error) {
+      throw new HttpError(409, error?.message || "Production mode selection is unavailable");
+    }
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
