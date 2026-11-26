@@ -70,7 +70,8 @@ test("Self-service uploads, existing library browse and guarded production hando
 });
 test("Canonical Airtable Ideas remain the only writable story source, other Idea paths are gated", () => {
   assert.match(helper, /normalizeStoryFirst\(payload\?\.storyboard, profile\.id\)/);
-  assert.match(helper, /!vibeCut && ctx\?\.waitUntil && !storyFirst/);
+  // The same immediate matching gate excludes staged EZ intake as well as stories.
+  assert.match(helper, /!vibeCut && ctx\?\.waitUntil && !atomicEzIntakeFields && !storyFirst/);
   assert.match(helper, /fields\.Production_Config_Notes = upsertStoryFirstNotes/);
   assert.match(helper, /story_first: storyFirst/);
   assert.match(helper, /storyFirstAssignedAssetIds\(storyFirst\)/);
