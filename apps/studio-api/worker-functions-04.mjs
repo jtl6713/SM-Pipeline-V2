@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { typedStoryIdea, frozenStorySnapshotMatches } from "./story-first-auto-handoff.mjs";
 import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
@@ -13944,6 +13945,10 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (productionNotesRevisionOpen(notes)) return false;
+  // A typed Script a Short draft is not acceptance. Require its durable
+  // owner-approved exact scene snapshot before any automatic producer claim.
+  if (typedStoryIdea(idea)) return String(f(idea,"Candidate_Status")||"")==="Approved" &&
+    frozenStorySnapshotMatches(idea,requestRecord,item4AssetManifest(requestRecord));
   // Vibe Cut upload is an explicit user request to create an edit. Once its
   // one original is saved and verified, proceed to Factory review without
   // requiring the newly generated Idea to be Approved first.
@@ -13968,6 +13973,8 @@ function readyProductionIdeaEligible(idea, requestRecord = null) {
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
   if (linkedRecordIds(f(idea, "Content Items")).length) return false;
   if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
+  if (typedStoryIdea(idea)) return readyProductionExistingDraftEligible(idea,requestRecord);
+  if (String(f(idea,"Studio_Production_Source")||"")==="finished_video") return false;
   if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Ready") return true;
   return readyProductionExistingDraftEligible(idea, requestRecord);
 }
@@ -14264,7 +14271,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  const manualAssetSelection = verifiedVibeDraft || Boolean(requestRecord
+  const manualAssetSelection = typedStoryIdea(idea) || verifiedVibeDraft || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
   const selectedMasterIds = requestRecord
@@ -15395,20 +15402,23 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
   const requestId = requestRecord.id;
   const verifyAutomaticMode = async current => {
     if (String(f(current, "Request_Status") || "").trim() === "Promoted") return;
-    if (productionModeRoutingEnabled(env)) {
-      assertManualListSchemaReady(env);
+    if (productionModeRoutingEnabled(env) || typedStoryIdea(idea)) {
+      if (productionModeRoutingEnabled(env)) assertManualListSchemaReady(env);
       const owner = firstLinkedRecordId(f(current, "Idea_Candidate"));
       if (!owner || owner !== idea?.id) throw new HttpError(409, "Automatic Production owner unverified");
       const canonical = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, owner);
       if (!canonical?.id || canonical.id !== owner || isExplicitManualIdea(canonical))
         throw new HttpError(409, "Automatic Production not authorized for this Idea");
+      if (typedStoryIdea(canonical) && (String(f(canonical,"Candidate_Status")||"")!=="Approved" ||
+          !frozenStorySnapshotMatches(canonical,current,item4AssetManifest(current))))
+        throw new HttpError(409,"Approved storyboard snapshot changed; autonomous Production stopped before promotion");
     } else if (isExplicitManualIdea(idea)) {
       throw new HttpError(409, "Manual Production requires intermediate approval");
     }
   };
   await verifyAutomaticMode(requestRecord);
   let current = await ensureAutonomousSelectedMusic(env, requestRecord);
-  const incoming = autonomousIncomingMediaIds(
+  const incoming = typedStoryIdea(idea) ? [] : autonomousIncomingMediaIds(
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
     pick.media_asset_ids
   );
@@ -15432,7 +15442,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
     current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   }
-  if (pick.content_type) {
+  if (pick.content_type && !typedStoryIdea(idea)) {
     current = await alignAutonomousDraftContentType(env, current, pick.content_type);
   }
 
@@ -15825,6 +15835,8 @@ export async function annotateAutonomousResumeDrafts(env, drafts) {
         ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId).catch(() => null)
         : null;
       if (isExplicitManualIdea(idea) || (productionModeRoutingEnabled(env) && !idea?.id)) continue;
+      if (typedStoryIdea(idea) && (String(f(idea,"Candidate_Status")||"")!=="Approved" ||
+          !frozenStorySnapshotMatches(idea,requestRecord,item4AssetManifest(requestRecord)))) continue;
       if (isAutonomousOrigin(notes)) profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
     }
     let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
@@ -15962,7 +15974,7 @@ export async function resumeAutonomousDrafts(env, authorization, ctx, drafts, ch
       // Serialize Remotion: only the first asset-ready draft enqueues produce in this pass.
       const deferProduce = baseDeferProduce || enqueuedProduce || index > 0;
       try {
-        await alignAutonomousDraftContentType(env, requestRecord, contentType);
+        if (!typedStoryIdea(idea)) await alignAutonomousDraftContentType(env, requestRecord, contentType);
         const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
           content_type: contentType,
           media_asset_ids: mediaAssetIds,
