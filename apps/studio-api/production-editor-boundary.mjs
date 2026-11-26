@@ -22,9 +22,12 @@ export function manualIdeaCreateEnabled(env) {
     editorGuardEnabled(env)&&env?.[MANUAL_CREATE_FLAG]==="true";
 }
 const idPattern="rec[A-Za-z0-9]{14}";
-const exactRequest=new RegExp("^/api/production-requests/("+idPattern+")(?:/|$)");
-const exactOutput=new RegExp("^/api/production-request-outputs/("+idPattern+")$");
-const ideaDraft=new RegExp("^/api/ideas/("+idPattern+")/production-request$");
+// Match the public router's broader identity syntax; exact validation below
+// rejects malformed IDs instead of letting them bypass this boundary.
+const routeId="rec[A-Za-z0-9]+";
+const exactRequest=new RegExp("^/api/production-requests/("+routeId+")(?:/|$)");
+const exactOutput=new RegExp("^/api/production-request-outputs/("+routeId+")$");
+const ideaDraft=new RegExp("^/api/ideas/("+routeId+")/production-request$");
 export function classifyProductionEditorHttp(pathname,method,searchParams) {
   const path=String(pathname||"");
   const verb=String(method||"").toUpperCase();
