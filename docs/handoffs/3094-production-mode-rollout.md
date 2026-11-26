@@ -166,3 +166,36 @@ Subsequent PR must implement audited manual transition with lease CAS,
 all automatic admission/claim guards, manual-only list and editor
 authorization, dedicated and ordinary UI routing and QA calibration. Only
 enable user-visible behavior when the gates are jointly proven.
+
+## Checkpoint 3 — automatic deny fence and manual-only collection
+
+The ready-production and photo-ready adoption lanes exclude typed explicit
+manual Ideas before their query limit when capture is enabled. Exact durable
+claim, shared autonomous finish, photo-ready stamp, daily adoption, direct
+Prepare to Review and resume/annotation paths check the canonical Idea mode.
+Promoted work retains existing monitoring. Unknown legacy records retain
+their previous eligibility only; mode metadata confers no new permission.
+No changes to admission limits, existing acceptance rules, Finished Video,
+or publication approval paths.
+
+The separate `STUDIO_MANUAL_PRODUCTION_LIST=true` flag (also requires
+`STUDIO_PRODUCTION_MODE_CAPTURE=true`) switches only the ordinary
+Production collection to a scoped canonical query. It filters mode/source,
+profile UUID, organization and authorized brands through inner FK joins
+before limit; dedicated-origin compatibility exclusion is additional
+defense. Response readback rechecks canonical FK identity and scope, replaces
+stale compatibility links, and never falls back to an unfiltered/cached list.
+The query does not count the historical table or fetch full asset/variant
+manifests. Home/Factory/operations/diagnostic queries are not changed.
+
+Both flags remain OFF; this checkpoint is not activation authorization.
+The manual list alone is insufficient: direct detail/mutation/approval
+entrypoints and legacy Runner promotion must be fenced; dedicated
+authoring and Factory revision/read paths share old APIs and require
+separate scoped authorization before switching. Do not accept manual mode
+from browser payload or enable either flag until all mutation/claim paths
+and lease-fenced audited transitions are proven. Keep existing legacy
+work observable in Home/Pipeline during reconciliation. Verify the live
+PostgREST scoped query and exact counts with bounded test records after
+schema application, and verify dedicated Finished Video approval/scheduling
+unchanged through non-publishing validation.
