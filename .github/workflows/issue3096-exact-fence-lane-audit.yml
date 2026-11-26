@@ -80,15 +80,63 @@ jobs:
             (10461,'recIorCsOniQbv9n3','recT2rbKX3MF7cVFU','facebook'),
             (10487,'recZZUOojvU7mnQYW','recT2rbKX3MF7cVFU','facebook'),
           ]
-          # A 404 is meaningful only with an authenticated positive bucket read.
-          bucket='/r2/buckets/'+urllib.parse.quote(buckets[0],safe='')
-          bucket_check=obj(bucket)
-          assert bucket_check.get('name')==buckets[0]
-          rows=[]
-          for n,rid,profile,platform in exact:
-              key='studio/state/initial-publish-fence/v1/'+rid+'.json'
-              status,_=get(bucket+'/objects/'+urllib.parse.quote(key,safe=''))
-              rows.append({'output':n,'fence_http':status,'fence_observation':'present' if status==200 else 'not_found' if status==404 else 'unverified','lane_enabled':enabled and profile+'::'+platform in lanes})
-          print('ISSUE3096_FENCE_LANE='+json.dumps({'read_only':True,'worker_version':version,'authority_enabled':enabled,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')))
-          assert all(x['fence_http'] in (200,404) for x in rows),'fence_get_unavailable'
+          # Account token cannot read R2 REST objects (403). Resolve the exact
+          # production R2 binding and use a short-lived, scoped HEAD-only helper.
+          import pathlib,secrets,subprocess,tempfile
+          print('ISSUE3096_LANES='+json.dumps({'worker_version':version,'authority_enabled':enabled,'rows':[{'output':n,'lane_enabled':enabled and profile+'::'+platform in lanes} for n,rid,profile,platform in exact]},separators=(',',':')),flush=True)
+          helper='issue3096-fences-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+          helper_path='/workers/scripts/'+helper
+          assert get(helper_path+'/settings')[0]==404,'helper_already_exists_or_unverified'
+          auth=secrets.token_hex(32)
+          source="""const ROWS=__ROWS__;
+          export default {async fetch(req,env){
+            if(req.method!=='GET'||new URL(req.url).pathname!=='/exact'||req.headers.get('Authorization')!=='Bearer '+env.READ_TOKEN)return new Response('Not found',{status:404});
+            const rows=[];
+            for(const [n,rid] of ROWS){
+              try{const h=await env.STUDIO_MEDIA.head('studio/state/initial-publish-fence/v1/'+rid+'.json');
+                rows.push({output:n,fence_observation:h?'present':'not_found'});}
+              catch{rows.push({output:n,fence_observation:'unverified'});}
+            }
+            return Response.json({read_only:true,rows},{headers:{'Cache-Control':'no-store'}});
+          }};
+          """.replace('__ROWS__',json.dumps([[n,rid] for n,rid,_,_ in exact]))
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-10-01','bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':buckets[0]},{'type':'plain_text','name':'READ_TOKEN','text':auth}]}
+          def request(method,path,payload=None):
+              req=urllib.request.Request(api+path,data=payload,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+              with urllib.request.urlopen(req,timeout=35) as res:
+                  data=json.loads(res.read(1024*1024))
+                  assert data.get('success') is True,'helper_operation_failed'
+                  return data['result']
+          owned=False
+          try:
+              with tempfile.TemporaryDirectory() as d:
+                  p=pathlib.Path(d)
+                  (p/'worker.mjs').write_text(source)
+                  (p/'metadata.json').write_text(json.dumps(metadata))
+                  subprocess.run(['node','--check',str(p/'worker.mjs')],check=True,capture_output=True)
+                  resp=subprocess.run(['curl','-fsS','--max-time','45','-X','PUT',api+helper_path+'/content','-H','Authorization: Bearer '+token,'-F','metadata=@'+str(p/'metadata.json')+';type=application/json','-F','worker.mjs=@'+str(p/'worker.mjs')+';type=application/javascript+module;filename=worker.mjs'],check=True,capture_output=True)
+                  assert json.loads(resp.stdout).get('success') is True
+                  owned=True
+              request('POST',helper_path+'/subdomain',b'{"enabled":true,"previews_enabled":false}')
+              domain=obj('/workers/subdomain')['subdomain']
+              assert domain.replace('-','').isalnum()
+              import time
+              result=None
+              for attempt in range(10):
+                  try:
+                      req=urllib.request.Request('https://'+helper+'.'+domain+'.workers.dev/exact',headers={'Authorization':'Bearer '+auth},method='GET')
+                      with urllib.request.urlopen(req,timeout=20) as res: result=json.loads(res.read(65536))
+                      if result.get('read_only') is True: break
+                  except (urllib.error.URLError,ValueError): pass
+                  time.sleep(2)
+              assert result and result['read_only'] is True and len(result['rows'])==len(exact)
+              obs={x['output']:x['fence_observation'] for x in result['rows']}
+              rows=[{'output':n,'fence_observation':obs[n],'lane_enabled':enabled and profile+'::'+platform in lanes} for n,rid,profile,platform in exact]
+              print('ISSUE3096_FENCE_LANE='+json.dumps({'read_only':True,'worker_version':version,'authority_enabled':enabled,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
+              assert all(x['fence_observation'] in ('present','not_found') for x in rows),'fence_head_unavailable'
+          finally:
+              if owned:
+                  request('DELETE',helper_path)
+                  assert get(helper_path+'/settings')[0]==404,'helper_cleanup_unverified'
+                  print('issue3096_helper_deleted=true')
           PY
