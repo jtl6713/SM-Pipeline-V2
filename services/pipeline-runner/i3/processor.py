@@ -18,9 +18,11 @@ from i3.decisions import (
 from i3.html import carousel_form, confirmation, video_form
 from idea.chain import trigger_next
 from idea.mapping import first_value, route_for_payload
+from production_mode_guard import explicit_manual_idea, verify_manual_submitted_owner
 
 
-def _trigger_i4(record_id: str, payload: dict[str, Any], *, trigger: bool) -> dict[str, Any] | None:
+def _trigger_i4(record_id: str, payload: dict[str, Any], *, trigger: bool,
+                trusted_production_request_id: str | None = None) -> dict[str, Any] | None:
     if not trigger:
         return {"skipped": "trigger_i4_false"}
     from i4.processor import process_request as process_i4
@@ -34,7 +36,8 @@ def _trigger_i4(record_id: str, payload: dict[str, Any], *, trigger: bool) -> di
             "action": first_value(payload, "action"),
             "decision": first_value(payload, "decision"),
         },
-        python_call=lambda: process_i4(record_id=record_id, dry_run=False),
+        python_call=lambda: process_i4(record_id=record_id, dry_run=False,
+                                       trusted_production_request_id=trusted_production_request_id),
     )
 
 
@@ -43,6 +46,7 @@ def process_request(
     payload: dict[str, Any],
     dry_run: bool = False,
     trigger_i4: bool = True,
+    trusted_production_request_id: str | None = None,
 ) -> dict[str, Any]:
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -113,6 +117,25 @@ def process_request(
             **preview,
         }
 
+    # Manual Production permits initial Idea acceptance, but that is not
+    # intermediate Production approval. Legacy email/form calls have no
+    # authenticated exact Submitted owner and must never chain I4.
+    if explicit_manual_idea(candidate):
+        if trusted_production_request_id:
+            if not verify_manual_submitted_owner(candidate["id"], trusted_production_request_id):
+                return {"processed": False, "reason": "manual_production_approval_unverified", **preview}
+        else:
+            status = (candidate.get("fields") or {}).get("Candidate_Status")
+            if status not in ("Generated", "Sent for Review"):
+                return {"processed": False, "reason": "manual_production_review_required",
+                        "html": confirmation("Manual Production", "Review the saved Idea in Production."), **preview}
+            # Acceptance only: do not let legacy configuration forms change
+            # approved media, target platforms, or production settings.
+            client.update_record(SOURCE_CANDIDATES_TABLE, candidate["id"], quick_approve_fields(), typecast=True)
+            return {"processed": True, "manual_production_required": True,
+                    "html": confirmation("Idea accepted", "Review and approve it in Manual Production."),
+                    "i4": {"skipped": "manual_production_review_required"}, **preview}
+
     if route == "carousel_submit":
         fields = carousel_fields(payload)
         message = "Carousel configuration saved. I4 will promote the Content Item."
@@ -127,7 +150,8 @@ def process_request(
         message = "Candidate approved. Existing Production_* fields were preserved."
 
     client.update_record(SOURCE_CANDIDATES_TABLE, candidate["id"], fields, typecast=True)
-    next_result = _trigger_i4(candidate["id"], payload, trigger=trigger_i4)
+    next_result = _trigger_i4(candidate["id"], payload, trigger=trigger_i4,
+                              trusted_production_request_id=trusted_production_request_id)
     return {
         "processed": True,
         "html": confirmation("Idea approved", message),
