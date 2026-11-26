@@ -6,7 +6,7 @@
  * Keep disabled until dedicated upload/storyboard routes and browser callers
  * have been separated and the full activation matrix has passed.
  */
-import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
+import { productionModeRoutingEnabled, assertManualListSchemaReady, manualProductionRowVerified } from "./manual-production-list.mjs";
 import { productionModeCaptureEnabled } from "./production-mode-capture.mjs";
 export const EDITOR_GUARD_FLAG="STUDIO_PRODUCTION_EDITOR_GUARD";
 export const MANUAL_CREATE_FLAG="STUDIO_MANUAL_IDEA_CREATE";
@@ -50,4 +50,26 @@ export function parseNewIdeaModeChoice(env,{source,requestedMode,canConfigure=fa
   if(source!=="idea"||!canConfigure) throw new Error("Manual Production requires an authorized ordinary Idea");
   if(!manualIdeaCreateEnabled(env)) throw new Error("Manual Production opt-in is not yet enabled");
   return requestedMode;
+}
+
+const isRecordId=id=>new RegExp("^"+idPattern+"$").test(String(id||""));
+export function editorAuthorityQuery(id) {
+  if(!isRecordId(id)) throw new Error("Invalid exact Production Request ID");
+  const select="id,airtable_record_id,organization_id,brand_id,idea_candidate_id,request_status,origin,production_notes,publish_status,organizations(id,airtable_record_id),brands(id,airtable_record_id),idea_candidates!inner(id,airtable_record_id,production_mode,production_source,content_profile_id,content_profiles(id,airtable_record_id))";
+  return "production_requests?"+new URLSearchParams({airtable_record_id:"eq."+id,select,limit:"2"});
+}
+export function manualEditorAuthority(row,{requestId,organizationId,profiles}={}) {
+  const owner=row?.idea_candidates;
+  const profile=owner?.content_profiles;
+  if(row?.airtable_record_id!==requestId||!isRecordId(requestId)||!isRecordId(organizationId)||
+     !owner?.id||row.idea_candidate_id!==owner.id||!isRecordId(owner.airtable_record_id)||
+     !profile?.id||owner.content_profile_id!==profile.id||!isRecordId(profile.airtable_record_id)||
+     !row.organizations?.id||row.organization_id!==row.organizations.id||
+     row.organizations.airtable_record_id!==organizationId||!row.brands?.id||
+     row.brand_id!==row.brands.id||!isRecordId(row.brands.airtable_record_id)) return false;
+  const authorized=Array.isArray(profiles)&&profiles.some(p=>p.id===profile.airtable_record_id&&
+      p.brandIds?.includes(row.brands.airtable_record_id));
+  if(!authorized) return false;
+  // Reuse the exact same mode, dedicated-origin, status and active gates as the list.
+  return manualProductionRowVerified(row,{profileUuid:profile.id,organizationUuid:row.organizations.id,brandUuids:[row.brands.id]});
 }
