@@ -1,3 +1,4 @@
+import { windowsOutageState } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
 import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, automaticEzDestinationItemsMatch } from "./automatic-ez-intake.mjs";
@@ -11965,6 +11966,7 @@ export async function enqueueStudioProductionJob(env, requestId, options = {}) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const existing = parseStudioProductionJob(record);
+  if (windowsOutageState().active) return { skipped: "windows_outage_paused", request_id: requestId, job: existing };
   if (!options.force && (jobIsOpsPaused(existing) || isProducePaused(await readOpsQueueControls(env), requestId))) {
     return { skipped: "ops_paused", request_id: requestId, job: existing };
   }
