@@ -73,3 +73,44 @@ export function manualEditorAuthority(row,{requestId,organizationId,profiles}={}
   // Reuse the exact same mode, dedicated-origin, status and active gates as the list.
   return manualProductionRowVerified(row,{profileUuid:profile.id,organizationUuid:row.organizations.id,brandUuids:[row.brands.id]});
 }
+
+export function childEditorAuthorityQuery(id) {
+  if(!isRecordId(id)) throw new Error("Invalid exact Production Request Output ID");
+  return "production_request_outputs?"+new URLSearchParams({airtable_record_id:"eq."+id,
+    select:"airtable_record_id,production_request_id,organization_id,brand_id,production_request_airtable_id,production_request_airtable_ids,production_requests(id,airtable_record_id)",limit:"2"});
+}
+export function childEditorParent(row,id) {
+  const parent=row?.production_requests;
+  if(row?.airtable_record_id!==id||!isRecordId(id)||!parent?.id||
+      row.production_request_id!==parent.id||!isRecordId(parent.airtable_record_id)) return null;
+  // Reject compatibility linkage disagreements: the downstream editor still
+  // consumes those fields and must never mutate a different parent.
+  const links=[...new Set([row.production_request_airtable_id,
+    ...(Array.isArray(row.production_request_airtable_ids)?row.production_request_airtable_ids:[])].filter(Boolean))];
+  if(links.length!==1||links[0]!==parent.airtable_record_id) return null;
+  return parent.airtable_record_id;
+}
+/** Pure HTTP boundary with injected canonical reads and no write operations. */
+export async function verifyEditorHttpAccess({route,requestId,scope,read,loadIdea}={}) {
+  if(!route) return true;
+  if(route.kind==="create_request"||route.kind==="idea_draft") {
+    const id=route.id||requestId;
+    if(!isRecordId(id)) return false;
+    const idea=await loadIdea(id);
+    return idea?.id===id&&idea?.fields?.Studio_Production_Mode==="manual"&&
+      idea?.fields?.Studio_Production_Source==="idea";
+  }
+  let id=route.id,child=null;
+  if(route.kind==="output") {
+    const rows=await read(childEditorAuthorityQuery(id));
+    if(!Array.isArray(rows)||rows.length!==1) return false;
+    child=rows[0];id=childEditorParent(child,id);
+    if(!id)return false;
+  }else if(route.kind!=="request")return false;
+  const rows=await read(editorAuthorityQuery(id));
+  if(!Array.isArray(rows)||rows.length!==1)return false;
+  const row=rows[0];
+  if(child&&(child.production_request_id!==row.id||
+      child.organization_id!==row.organization_id||child.brand_id!==row.brand_id))return false;
+  return manualEditorAuthority(row,{...scope,requestId:id});
+}
