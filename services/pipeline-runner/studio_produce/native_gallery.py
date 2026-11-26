@@ -416,6 +416,7 @@ def complete_gallery(client, request, parent, output):
     prepared.append(_clip({"asset_name":"Generated cover"}, 1, cover_id, cover_drive, url, sha, True))
     skipped_duplicates = []
     seen_sources = set()
+    source_hashes = set()
     final_hashes = {sha}
     for clip in clips:
         if len(prepared) == target_body + 1:
@@ -441,6 +442,15 @@ def complete_gallery(client, request, parent, output):
             body = _prepare_body_jpeg(raw)
         except (RuntimeError, OSError, ValueError) as exc:
             raise RuntimeError(f"Native gallery source {asset_id}: {exc}") from exc
+        # Different Drive IDs can carry identical source bytes (#10430).
+        # Check the already-normalized source before per-slide text or branding
+        # changes its final hash. No additional network or decoder work.
+        source_sha = hashlib.sha256(body).hexdigest()
+        if source_sha in source_hashes:
+            skipped_duplicates.append({"source_asset_id": source_id, "sha256": source_sha,
+                                       "reason": "duplicate_pre_lettering_source"})
+            continue
+        source_hashes.add(source_sha)
         jpeg = letter_jpeg_bytes(body, overlay_text_for_clip(clip, str(row.get("output_title") or "")))
         final = apply_watermark_bytes(jpeg, watermark, output_format="jpeg")
         # Exact final JPEG hash, not filename or a fuzzy similarity guess.
