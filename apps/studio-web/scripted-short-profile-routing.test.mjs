@@ -5,15 +5,15 @@ import vm from "node:vm";
 
 const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
-const from = app.indexOf("function withStudioProfile(path) {");
+const from = app.indexOf("function azDedicatedRequestPath(path) {");
 const to = app.indexOf("function activeNavPage()", from);
 assert.ok(from >= 0 && to > from, "profile router exists");
 const snippet = app.slice(from, to);
 
-function route(path, id) {
+function route(path, id, { finished = false, requests = [] } = {}) {
   return vm.runInNewContext(
     "const selectedProfileId = " + JSON.stringify(id) + ";\n" + snippet + "\nwithStudioProfile(" + JSON.stringify(path) + ")",
-    { URLSearchParams },
+    { URLSearchParams, azFinishedPath: finished, azDedicatedRequests: new Map(requests) },
   );
 }
 
@@ -36,6 +36,26 @@ test("profile router preserves query params, existing Ideas scoping and unrelate
   assert.equal(route("/api/ideas", "recNYC"), "/api/ideas?profile=recNYC");
   assert.equal(route("/api/health", "recNYC"), "/api/health");
   assert.equal(route("/api/scripted-short/propose", ""), "/api/scripted-short/propose");
+});
+
+test("profile router preserves exact dedicated Finished Video request ownership and query scope", () => {
+  const id = "rec12345678901234";
+  const other = "rec12345678901235";
+  const profile = "recNYC";
+  const registered = { finished: true, requests: [[id, profile]] };
+  const path = "/api/production-requests/" + id;
+  assert.equal(route(path + "/item4?snapshot=1", profile, registered),
+    "/api/finished-video/production-requests/" + id + "/item4?snapshot=1&profile=recNYC");
+  assert.equal(route(path + "/assets/upload-session/session/parts/2", profile, registered),
+    "/api/finished-video/production-requests/" + id + "/assets/upload-session/session/parts/2?profile=recNYC");
+  assert.equal(route("/api/production-requests/" + other, profile, registered),
+    "/api/production-requests/" + other + "?profile=recNYC");
+  assert.equal(route(path, "recMiami", registered), path + "?profile=recMiami");
+  assert.equal(route(path, profile, { ...registered, finished: false }), path + "?profile=recNYC");
+  assert.equal(route("/api/scripted-short/accept", profile, registered),
+    "/api/scripted-short/accept?profile=recNYC");
+  assert.equal(route("/api/finished-video/production-requests", profile, registered),
+    "/api/finished-video/production-requests?profile=recNYC");
 });
 
 test("Script a Short proposal and acceptance carry explicit selected profile and prevent missing selection", () => {
