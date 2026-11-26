@@ -1,4 +1,7 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { typedStoryIdea, storyAutoStamped, storyAutoNotes, frozenStorySnapshotMatches } from "./story-first-auto-handoff.mjs";
+import { readyProductionEnqueue } from "./ready-production-queue.mjs";
+import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
 import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
@@ -4055,9 +4058,12 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
 }
 
 /*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/
-export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
+export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null, {automaticStoryHandoff=false}={}) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
+  if (automaticStoryHandoff) {
+    return withOutputApprovalLock(env.STUDIO_MEDIA, ideaRecordId, () => submitApprovedStoryFirstToQueue(request, env, ideaRecordId, authorization));
+  }
   if (promotionCompleted(idea)) {
     throw new HttpError(409, "This idea has already been promoted; its production configuration is locked");
   }
@@ -4100,6 +4106,62 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
   }, 201);
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
+
+// The only caller is the authenticated dedicated Script a Short submit route.
+// No immediate I3/I4 or rendering call: the durable ready-production queue
+// retains its current global/profile admission limits and exact claim fences.
+async function submitApprovedStoryFirstToQueue(request,env,ideaId,authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503,"Durable Production queue unavailable");
+  const idea=await loadAuthorizedIdea(env,ideaId,authorization);
+  if(!typedStoryIdea(idea))throw new HttpError(409,"Script a Short source is not verified");
+  if(promotionCompleted(idea))return respond(request,env,{ok:true,queued:false,already_promoted:true,idea_id:ideaId,
+    message:"Already submitted to Production. Follow progress outside the editor."});
+  if(["On Hold","Rejected","Promoted"].includes(String(f(idea,"Candidate_Status")||"")))
+    throw new HttpError(409,"This storyboard is not eligible for submission");
+  const validated=await verifiedStoryFirstProduction(env,idea);
+  if(!validated)throw new HttpError(409,"A complete approved storyboard is required");
+  let draft=await existingDraftForIdea(env,ideaId,authorization,idea);
+  const created=!draft;
+  if(!draft)draft=await createDraftForIdea(env,idea,authorization,null,{preferredProfileId:validated.story.profile_id});
+  if(storyAutoStamped(draft)) {
+    if(!frozenStorySnapshotMatches(idea,draft,item4AssetManifest(draft)))
+      throw new HttpError(409,"The previously submitted storyboard has changed; request a controlled revision");
+  } else {
+    draft=await ensureStoryFirstProductionMedia(env,draft,validated);
+    draft=await item4UpdateRequestState(env,draft.id,{
+      Production_Notes:storyAutoNotes(withProductionPhotoWaitManual(f(draft,"Production_Notes"))),
+    });
+    draft=await airtableFetch(env,PRODUCTION_REQUEST_TABLE,draft.id);
+    if(!frozenStorySnapshotMatches(idea,draft,item4AssetManifest(draft)))
+      throw new HttpError(409,"Exact submitted storyboard could not be verified");
+  }
+  // The immutable request snapshot is committed before the explicit acceptance
+  // state. Discovery requires BOTH, so a crash cannot approve an incomplete draft.
+  if(String(f(idea,"Candidate_Status")||"")!=="Approved") {
+    await airtableFetch(env,env.AIRTABLE_IDEA_TABLE_ID,ideaId,{method:"PATCH",
+      body:JSON.stringify({fields:{Candidate_Status:"Approved"},typecast:true})});
+  }
+  const accepted=await loadAuthorizedIdea(env,ideaId,authorization);
+  if(String(f(accepted,"Candidate_Status")||"")!=="Approved"||
+      !frozenStorySnapshotMatches(accepted,draft,item4AssetManifest(draft)))
+    throw new HttpError(409,"Storyboard acceptance receipt could not be verified");
+  let queued=false;
+  try {
+    const receipt=await readyProductionEnqueue(env.STUDIO_MEDIA,{ideaId,profileId:validated.story.profile_id,
+      createdAt:f(accepted,"Create_Date")||accepted.createdTime||null});
+    queued=Boolean(receipt?.job);
+  } catch(error) {
+    // The existing bounded ready-draft scanner rediscovers this exact
+    // committed Approved snapshot. Do not create another request on retry.
+    console.warn("story-first durable enqueue deferred",ideaId,String(error?.message||error).slice(0,180));
+  }
+  return respond(request,env,{ok:true,created,queued,automatic_production:true,
+    record:mapProductionRequestLight(draft),storyboard_verified:true,
+    storyboard_asset_ids:validated.ids,storyboard_asset_count:validated.ids.length,
+    message:queued?"Storyboard accepted. Production continues automatically to Factory approval.":
+      "Storyboard accepted. Durable Production discovery will resume this request."},202);
+}
+
 
 export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null) {
   let payload;
