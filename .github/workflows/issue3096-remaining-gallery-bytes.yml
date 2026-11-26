@@ -1,0 +1,41 @@
+name: Issue 3096 Remaining Approved Gallery Bytes Audit
+on:
+  pull_request:
+    paths:
+      - 'repair/manifests/issue3096-remaining-gallery-bytes.json'
+      - 'repair/scripts/issue3096-remaining-gallery-bytes.py'
+      - '.github/workflows/issue3096-remaining-gallery-bytes.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/manifests/issue3096-remaining-gallery-bytes.json'
+      - 'repair/scripts/issue3096-remaining-gallery-bytes.py'
+      - '.github/workflows/issue3096-remaining-gallery-bytes.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue3096-remaining-gallery-bytes-get
+  cancel-in-progress: false
+jobs:
+  exact-cdn-get:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check source and install pinned image decoder
+        run: |
+          python -m py_compile repair/scripts/issue3096-remaining-gallery-bytes.py
+          python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Read exact approved media without provider or database writes
+        run: python repair/scripts/issue3096-remaining-gallery-bytes.py
+      - name: Preserve per-slide evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3096-remaining-approved-gallery-byte-evidence
+          path: /tmp/issue3096-remaining-gallery-bytes.json
+          retention-days: 30
+          if-no-files-found: error
