@@ -9,6 +9,10 @@ set local statement_timeout = '15s';
 alter table public.idea_candidates
   add column if not exists production_mode text,
   add column if not exists production_source text;
+-- Replace the prior staged constraint atomically if its three-source version
+-- was already installed. This does not classify or rewrite legacy Ideas.
+alter table public.idea_candidates
+  drop constraint if exists idea_candidates_production_mode_3094_chk;
 -- Intentionally NOT VALID: no broad table scan in this migration. PostgreSQL
 -- enforces this constraint on every new or changed row. Validate separately.
 alter table public.idea_candidates
@@ -17,7 +21,7 @@ alter table public.idea_candidates
     (production_mode is null and production_source is null) or
     (production_mode is not null and production_source is not null and
      production_mode in ('automatic', 'manual') and
-     production_source in ('idea', 'script_a_short', 'finished_video') and
+     production_source in ('idea', 'script_a_short', 'finished_video', 'vibe_cut') and
      (production_source = 'idea' or production_mode = 'automatic'))
   ) not valid;
 comment on column public.idea_candidates.production_mode is
