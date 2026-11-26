@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
@@ -4263,6 +4264,12 @@ export async function createIdea(request, env, authorization, ctx = null) {
     try { storyFirst = normalizeStoryFirst(payload?.storyboard, profile.id); }
     catch (error) { throw new HttpError(400, error?.message || "Invalid storyboard"); }
   }
+  let requestedProductionMode;
+  const modeSource=storyFirst?"script_a_short":vibeCut?"vibe_cut":String(payload?.input_kind||"").trim()==="finished-video"?"finished_video":"idea";
+  try {
+    requestedProductionMode=parseNewIdeaModeChoice(env,{source:modeSource,
+      requestedMode:payload?.production_mode,canConfigure:authorization?.permissions?.production_configure===true});
+  } catch(error) {throw new HttpError(409,error?.message||"Invalid Production mode");}
   if (storyFirst?.scenes.some(scene => scene.assigned_asset_id)) {
     throw new HttpError(409, "New Script a Short ideas cannot contain unverified media selections. Save first, then select media.");
   }
@@ -4313,7 +4320,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   // Finished Video and Vibe Cut retain their dedicated legacy contracts.
   if (storyFirst) Object.assign(fields, newIdeaProductionCapture(env, "script_a_short"));
   else if (!vibeCut && String(payload?.input_kind || "").trim() !== "finished-video") {
-    Object.assign(fields, newIdeaProductionCapture(env, "idea"));
+    Object.assign(fields, newIdeaProductionCapture(env, "idea", {requestedMode:requestedProductionMode,humanChoice:true}));
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
@@ -4336,7 +4343,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
   });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
-  if (!vibeCut && ctx?.waitUntil && !storyFirst) {
+  const modeVerified=requestedProductionMode!=="manual"||
+    (f(created,"Studio_Production_Mode")==="manual"&&f(created,"Studio_Production_Source")==="idea");
+  if (!vibeCut && ctx?.waitUntil && !storyFirst && modeVerified) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
@@ -4346,6 +4355,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
     ok: true,
     created: true,
     record: mapIdea(created),
+    production_mode_verified: modeVerified,
+    manual_production_available: manualIdeaCreateEnabled(env),
+    ...(modeVerified?{}:{warning:"Idea saved; Manual Production mode receipt could not be verified. Refresh this exact Idea before retrying."}),
     context: {
       organization: authorization.organization,
       brand: authorization.brand,
