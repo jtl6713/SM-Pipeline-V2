@@ -1,3 +1,4 @@
+import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
 import { globalWorkloadEnabled, globalWorkloadAdmission, globalWorkloadRpc, startGlobalWorkloadHeartbeat } from "./global-workload-coordinator.mjs";
@@ -15298,6 +15299,7 @@ export async function createAutonomousIdea(env, profile, pick, ctx = null) {
   const fields = {
     Candidate_Title: pick.candidate_title,
     Candidate_Status: "Generated",
+    ...newIdeaProductionCapture(env, "idea"),
     Batch_Date: chicagoNowParts().date,
     Content_Profile: [profile.id],
     Idea_Summary: pick.idea_summary,

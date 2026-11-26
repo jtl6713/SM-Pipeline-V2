@@ -1,3 +1,4 @@
+import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
 import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
@@ -13920,6 +13921,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
         Candidate_Title: title,
         Idea_Summary: creativeBrief,
         Candidate_Status: "Approved",
+        ...newIdeaProductionCapture(env, "script_a_short"),
         Batch_Date: new Date().toISOString().slice(0, 10),
         Content_Profile: [profile.id],
         Production_Content_Type: "Vertical Short Video",

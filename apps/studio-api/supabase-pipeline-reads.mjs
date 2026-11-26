@@ -31,6 +31,7 @@
  */
 
 import { IDEA_TITLE_UNIQUENESS_DAYS, studioIdeaTitleYearFormula } from "./idea-title-uniqueness.mjs";
+import { ideaProductionModeSelect, splitIdeaProductionCapture, projectIdeaProductionMode } from "./production-mode-capture.mjs";
 import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
@@ -1425,7 +1426,7 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
   if (!studioSupabaseConfigured(env)) return null;
   // Photo-wait fair queue scans up to 2000 lean rows.
   const cap = Math.max(1, Math.min(2000, Number(limit) || 100));
-  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)";
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)" + ideaProductionModeSelect(env);
   let filter = "or=(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.)";
   if (lane === "ready_production" || lane === "photo_ready") {
     filter += `&payload->>Studio_Photo_Wait_Status=eq.${encodeDeskFilterValue("Ready")}`;
@@ -1532,7 +1533,7 @@ export async function listSupabaseMusicRecords(env, { limit = 100, ids = null } 
 export function airtableShapedIdeaFromSupabase(row) {
   const bag = isPlainObject(row.payload) ? row.payload : {};
   const profileId = row.content_profile_airtable_id || bag.content_profile_airtable_id || null;
-  const fields = { ...bag };
+  const fields = projectIdeaProductionMode(row, bag);
   delete fields.content_profile_airtable_id;
   fields.Candidate_ID = bag.Candidate_ID ?? null;
   fields.Candidate_Title = row.candidate_title || bag.Candidate_Title || null;
@@ -8366,7 +8367,7 @@ function shapeSetting(row) {
 async function readIdeaRow(env, id) {
   const rows = await supabaseRest(
     env,
-    `idea_candidates?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at&limit=1`,
+    `idea_candidates?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at${ideaProductionModeSelect(env)}&limit=1`,
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row?.airtable_record_id) return null;
@@ -8667,7 +8668,7 @@ async function readIdeasForProfiles(env, profileIds, openOnly, limit) {
   if (!uuids.length) return [];
   const rows = await supabaseRest(
     env,
-    `idea_candidates?content_profile_id=in.(${uuids.map(encodeURIComponent).join(",")})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at&order=created_at.desc&limit=${limit}`,
+    `idea_candidates?content_profile_id=in.(${uuids.map(encodeURIComponent).join(",")})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at${ideaProductionModeSelect(env)}&order=created_at.desc&limit=${limit}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
@@ -8690,7 +8691,7 @@ export async function listSupabaseIdeasForProfile(env, profileAirtableId, limit 
   });
   if (!uuid) return [];
   const unpromotedOnly = options.unpromotedOnly === true;
-  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at";
+  const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at" + ideaProductionModeSelect(env);
   const profileFilter = `idea_candidates?content_profile_id=eq.${encodeURIComponent(uuid)}`;
   if (!unpromotedOnly) {
     const rows = await supabaseRest(
@@ -8953,7 +8954,7 @@ export async function listProfileSummaryRecords(env, tableId, options = {}) {
     const rows = await supabaseRestAll(
       env,
       `idea_candidates?content_profile_id=eq.${profileUuid}`
-        + "&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)"
+        + "&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)" + ideaProductionModeSelect(env)
         + "&order=created_at.desc",
       { pageSize: 1000, maxRows: limit },
     );
@@ -8975,7 +8976,7 @@ export async function readProfileSummaryDirtyBatch(env, kind, ids) {
   const rows = kind === "idea"
     ? await supabaseRest(
       env,
-      `idea_candidates?airtable_record_id=in.(${quoted})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)`,
+      `idea_candidates?airtable_record_id=in.(${quoted})&select=airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)${ideaProductionModeSelect(env)}`,
     )
     : await supabaseRest(
       env,
@@ -10487,17 +10488,22 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
   return null;
 }
 
-async function commitIdeaRecords(env, records) {
+async function commitIdeaRecords(env, records, { creating = false } = {}) {
   const saved = [];
   for (const record of records) {
+    const { fields, typed } = splitIdeaProductionCapture(env, record.fields, {creating});
+    const capturing = Object.keys(typed).length > 0;
     const existingRows = await supabaseRest(
       env,
-      `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload,content_profile_id,candidate_title,idea_summary,status&limit=1`,
-    ).catch(() => []);
+      `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload,content_profile_id,candidate_title,idea_summary,status${ideaProductionModeSelect(env)}&limit=1`,
+    ).catch(error => { if (capturing) throw error; return []; });
     const existing = Array.isArray(existingRows) ? existingRows[0] : null;
+    if (capturing && (!Array.isArray(existingRows) || existing)) throw new Error("New Idea mode identity is not unique");
     const prior = isPlainObject(existing?.payload) ? existing.payload : {};
-    const fields = record.fields || {};
     const payload = { ...prior, ...fields };
+    // Remove old JSON markers: the typed columns are the only mode authority.
+    delete payload.Studio_Production_Mode;
+    delete payload.Studio_Production_Source;
     const profileAirtableId = firstLink(fields.Content_Profile) || prior.content_profile_airtable_id || null;
     if (profileAirtableId) payload.content_profile_airtable_id = profileAirtableId;
     const body = {
@@ -10506,18 +10512,29 @@ async function commitIdeaRecords(env, records) {
       idea_summary: fields.Idea_Summary || existing?.idea_summary || payload.Idea_Summary || null,
       status: selectName(fields.Candidate_Status) || existing?.status || selectName(payload.Candidate_Status),
       payload,
+      ...typed,
       updated_at: new Date().toISOString(),
     };
     const profileUuid = profileAirtableId
       ? await resolveSupabaseProfileId(env, profileAirtableId).catch(() => null)
       : existing?.content_profile_id || null;
     if (profileUuid) body.content_profile_id = profileUuid;
+    let modeRow = existing;
     if (existing) {
       await supabaseRest(env, `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}`, {
         method: "PATCH",
         body,
         headers: { Prefer: "return=minimal" },
       });
+    } else if (capturing) {
+      // Insert (not a merge-upsert): a repeated or conflicting identity must
+      // never replace a previously captured mode. Read the same write receipt.
+      const inserted = await supabaseRest(env, "idea_candidates?select=airtable_record_id,payload,production_mode,production_source", {
+        method: "POST", body: [body], headers: {Prefer: "return=representation"},
+      });
+      const row = Array.isArray(inserted) && inserted.length === 1 ? inserted[0] : null;
+      if (row?.airtable_record_id === record.id && row.production_mode === typed.production_mode && row.production_source === typed.production_source) modeRow = row;
+      else console.warn("New Idea Production mode receipt unverified", record.id);
     } else {
       await upsertChunk(env, "idea_candidates", [body]);
     }
@@ -10529,19 +10546,20 @@ async function commitIdeaRecords(env, records) {
     // real Idea number instead of falling back to the internal rec... key.
     // A temporary readback error must never turn a committed create into an
     // ambiguous failure that encourages a duplicate retry.
-    let canonicalNumber = payload.Candidate_ID ?? null;
-    if (!existing && !canonicalNumber) {
+    let canonicalNumber = modeRow?.payload?.Candidate_ID ?? payload.Candidate_ID ?? null;
+    if (!existing && (!canonicalNumber || (capturing && !modeRow))) {
       const readback = await supabaseRest(
         env,
-        `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload&limit=1`,
+        `idea_candidates?airtable_record_id=eq.${encodeURIComponent(record.id)}&select=payload${ideaProductionModeSelect(env)}&limit=1`,
       ).catch(() => []);
-      canonicalNumber = readback?.[0]?.payload?.Candidate_ID ?? null;
+      canonicalNumber = readback?.[0]?.payload?.Candidate_ID ?? canonicalNumber;
+      if (capturing && readback?.[0]?.production_mode === typed.production_mode && readback[0].production_source === typed.production_source) modeRow = readback[0];
     }
-    saved.push({ id: record.id, fields: {
+    saved.push({ id: record.id, fields: projectIdeaProductionMode(modeRow, {
       ...payload,
       ...(String(canonicalNumber || "").match(/^[0-9]+$/)
         ? { Candidate_ID: Number(canonicalNumber) } : {}),
-    } });
+    }) });
   }
   return saved;
 }
@@ -10769,7 +10787,7 @@ export async function studioSideTableCommit(env, tableId, method, pathOrParams, 
       : parseAirtableCreateFields(rawBody).map((fields) => ({ id: mintAirtableRecordId(), fields }));
     if (!parsed.length) return { ok: false, reason: "no_records" };
     let records = null;
-    if (kind === "idea") records = await commitIdeaRecords(env, parsed);
+    if (kind === "idea") records = await commitIdeaRecords(env, parsed, {creating:verb === "POST"});
     else if (kind === "idea_batch") records = await commitIdeaBatchRecords(env, parsed);
     else if (kind === "slides") records = await commitSlideRecords(env, parsed);
     else if (kind === "review_ledger") {

@@ -1,3 +1,4 @@
+import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
@@ -2590,6 +2591,8 @@ export function mapIdea(record) {
   return {
     id: record.id,
     candidate_id: f(record, "Candidate_ID"),
+    production_mode: f(record, "Studio_Production_Mode") || null,
+    production_source: f(record, "Studio_Production_Source") || null,
     title: f(record, "Candidate_Title"),
     summary: f(record, "Idea_Summary"),
     status: f(record, "Candidate_Status"),
@@ -4305,6 +4308,12 @@ export async function createIdea(request, env, authorization, ctx = null) {
       Suggested_Visuals: storyFirstShotChecklist(storyFirst),
       Production_Config_Notes: notes,
     });
+  }
+  // Capture metadata only; do not change existing production admission.
+  // Finished Video and Vibe Cut retain their dedicated legacy contracts.
+  if (storyFirst) Object.assign(fields, newIdeaProductionCapture(env, "script_a_short"));
+  else if (!vibeCut && String(payload?.input_kind || "").trim() !== "finished-video") {
+    Object.assign(fields, newIdeaProductionCapture(env, "idea"));
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,

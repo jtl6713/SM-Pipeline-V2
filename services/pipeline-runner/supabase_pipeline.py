@@ -1523,7 +1523,7 @@ def _append_idea_to_batch(settings: dict, batch_id: str, idea_id: str) -> None:
     commit_idea_batches(settings, [{"id": batch_id, "fields": fields}], partial=True)
 
 
-def commit_idea_candidates(settings: dict | None, records: list[dict], *, partial: bool = True) -> dict:
+def commit_idea_candidates(settings: dict | None, records: list[dict], *, partial: bool = True, creating: bool = False) -> dict:
     """Commit Idea Candidates to Supabase and link them on their batch."""
     if not side_table_export_enabled(settings, SOURCE_CANDIDATES_TABLE):
         return {"ok": False, "reason": "disabled"}
@@ -1536,18 +1536,27 @@ def commit_idea_candidates(settings: dict | None, records: list[dict], *, partia
             continue
         record_id = str(record["id"])
         patch_fields = dict(record.get("fields") or {})
+        mode = patch_fields.pop("Studio_Production_Mode", None)
+        source = patch_fields.pop("Studio_Production_Source", None)
+        capturing = creating and os.environ.get("STUDIO_PRODUCTION_MODE_CAPTURE") == "true" and (mode is not None or source is not None)
+        if capturing and (mode != "automatic" or source != "idea"):
+            raise RuntimeError("Invalid I1 Production mode capture")
         prior: dict[str, Any] = {}
-        if partial:
+        if partial or capturing:
             existing = _rest(
                 cfg,
                 f"idea_candidates?airtable_record_id=eq.{record_id}&select=payload&limit=1",
                 "GET",
                 prefer="return=representation",
-            ) or []
+            )
+            if capturing and (not isinstance(existing, list) or existing):
+                raise RuntimeError("I1 mode capture requires a new Idea identity")
             row0 = existing[0] if isinstance(existing, list) and existing else None
             if isinstance(row0, dict) and isinstance(row0.get("payload"), dict):
                 prior = dict(row0["payload"])
         merged = {**prior, **patch_fields}
+        merged.pop("Studio_Production_Mode", None)
+        merged.pop("Studio_Production_Source", None)
         profile_id = _first_record_link(merged.get("Content_Profile"))
         body = {
             "airtable_record_id": record_id,
@@ -1560,13 +1569,24 @@ def commit_idea_candidates(settings: dict | None, records: list[dict], *, partia
         profile_uuid = _profile_uuid(cfg, profile_id)
         if profile_uuid:
             body["content_profile_id"] = profile_uuid
-        _rest(
-            cfg,
-            "idea_candidates?on_conflict=airtable_record_id",
-            "POST",
-            [body],
-            prefer="resolution=merge-duplicates,return=minimal",
-        )
+        if capturing:
+            body.update(production_mode=mode, production_source=source)
+            receipt = _rest(
+                cfg, "idea_candidates?select=airtable_record_id,production_mode,production_source",
+                "POST", [body], prefer="return=representation",
+            )
+            row = receipt[0] if isinstance(receipt, list) and len(receipt) == 1 else None
+            if not isinstance(row, dict) or row.get("airtable_record_id") != record_id or row.get("production_mode") != mode or row.get("production_source") != source:
+                # Never retry the insert on an ambiguous receipt.
+                raise RuntimeError(f"I1 Production mode receipt unverified for {record_id}")
+        else:
+            _rest(
+                cfg,
+                "idea_candidates?on_conflict=airtable_record_id",
+                "POST",
+                [body],
+                prefer="resolution=merge-duplicates,return=minimal",
+            )
         batch_id = _first_record_link(merged.get("Idea_Batch"))
         if batch_id:
             _append_idea_to_batch(cfg, batch_id, record_id)
