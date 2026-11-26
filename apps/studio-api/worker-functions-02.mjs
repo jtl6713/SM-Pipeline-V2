@@ -1,6 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
-import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId } from "./automatic-ez-intake.mjs";
+import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId, automaticEzMediaContext, automaticEzAiTarget } from "./automatic-ez-intake.mjs";
 import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
 import { readyProductionEnqueue, readyProductionRead } from "./ready-production-queue.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
@@ -6345,7 +6345,7 @@ export async function item4GeneratePreProductionImageBytes(env, prompt, ratio) {
 }
 /*__STUDIO_WORKER_END:item4GeneratePreProductionImageBytes__*/
 
-export async function generateItem4PreProductionAiMaster(request, env, url, authorization, ctx = null) {
+export async function generateItem4PreProductionAiMaster(request, env, url, authorization, ctx = null, {automaticEzIntake=false}={}) {
   const recordId = productionRequestRecordIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const status = String(f(record, "Request_Status") || "Draft").trim();
@@ -6353,12 +6353,23 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
     throw new HttpError(409, "AI images can only be generated while this request is editable");
   }
   const body = await request.json().catch(() => ({}));
-  const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
+  let automaticTarget=null;
+  let automaticProfile=null;
+  if(automaticEzIntake) {
+    const ideaId=firstLinkedRecordId(f(record,"Idea_Candidate"));
+    const idea=ideaId?await loadAuthorizedIdea(env,ideaId,authorization):null;
+    const context=automaticEzMediaContext(record,idea);
+    automaticProfile=context?.profileId;
+    automaticTarget=context?automaticEzAiTarget(context.kind,record,body,automaticProfile):null;
+    if(!automaticTarget||[url.searchParams.get("profile"),url.searchParams.get("content_profile_id")].some(id=>id!=null&&id!==automaticProfile))
+      throw new HttpError(409,"AI generation must match the saved automatic EZ intake and profile");
+  }
+  const requestedTarget = automaticTarget || Math.round(Number(body?.target_ai_count || 0));
   const requestedAdd = Math.round(Number(body?.add_ai_count || 0));
   const promptGuidance = String(body?.prompt_guidance || "").trim().slice(0, 2000);
   // Prefer the profile the operator is currently on (UI selectedProfileId). Idea /
   // Content fallbacks only apply when the request body has no profile.
-  const preferredProfileId = requestedProfileId(url, body);
+  const preferredProfileId = automaticProfile || requestedProfileId(url, body);
   let productionProfile = null;
   if (/^rec[A-Za-z0-9]+$/.test(String(preferredProfileId || "").trim())) {
     productionProfile = await resolveWorkingContentProfile(env, authorization, preferredProfileId).catch(() => null);
@@ -6367,8 +6378,8 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
     productionProfile = await item4ProductionProfileRecord(env, record, preferredProfileId)
       || await resolveWorkingContentProfile(env, authorization, preferredProfileId || null);
   }
-  if (!productionProfile?.id) {
-    throw new HttpError(409, "This Production Request does not have a Content Profile");
+  if (!productionProfile?.id || (automaticProfile && productionProfile.id!==automaticProfile)) {
+    throw new HttpError(409, "This Production Request does not have a verified Content Profile");
   }
   const explicitAiAdd = (Number.isFinite(requestedTarget) && requestedTarget > 0)
     || (Number.isFinite(requestedAdd) && requestedAdd > 0);
@@ -6503,7 +6514,18 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
   // while this request is in flight. Re-read the manifest before committing.
   // A delete stamps ez-ai-auto=off; if an asset disappeared since this request
   // started, the delete wins and this generated image is discarded.
-  const latestBeforeAiCommit = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => record);
+  const latestBeforeAiCommit = automaticEzIntake
+    ? await loadAuthorizedProductionRequest(env,recordId,authorization)
+    : await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => record);
+  if(automaticEzIntake) {
+    const ideaId=firstLinkedRecordId(f(latestBeforeAiCommit,"Idea_Candidate"));
+    const idea=ideaId?await loadAuthorizedIdea(env,ideaId,authorization):null;
+    const context=automaticEzMediaContext(latestBeforeAiCommit,idea);
+    if(!context||context.profileId!==automaticProfile||
+       automaticEzAiTarget(context.kind,latestBeforeAiCommit,body,automaticProfile)!==automaticTarget||
+       JSON.stringify(item4AssetManifest(latestBeforeAiCommit))!==JSON.stringify(assets))
+      throw new HttpError(409,"Automatic EZ intake changed during AI generation; no generated asset was committed");
+  }
   const latestBeforeAiAssets = item4AssetManifest(latestBeforeAiCommit);
   const originalAssetIds = new Set(assets.map((asset) => String(asset?.id || "")).filter(Boolean));
   const latestAssetIds = new Set(latestBeforeAiAssets.map((asset) => String(asset?.id || "")).filter(Boolean));
