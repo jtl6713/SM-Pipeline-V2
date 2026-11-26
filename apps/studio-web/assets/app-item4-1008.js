@@ -202,6 +202,7 @@
   let ezWizardAnswers = {};
   let ezWizardHistory = [];
   let ezWizardBusy = false;
+  let ordinaryEditorGuardActive = false;
   let azFinishedPath = false;
   let azDedicatedTransport = false;
   const azDedicatedRequests = new Map();
@@ -350,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1103-finished-video-3094";
+  const BUILD_ID = "item4-0.6.1104-ordinary-idea-editor-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3811,6 +3812,40 @@
     renderIdeaMatchedPhotos(activeIdea);
   }
 
+  function ordinaryIdeaEditorAllowed(idea, capabilities) {
+    if (capabilities?.ok !== true || typeof capabilities.ordinary_editor_boundary_enabled !== "boolean") return false;
+    if (!capabilities.ordinary_editor_boundary_enabled) return true;
+    return idea?.production_mode === "manual" && idea?.production_source === "idea";
+  }
+
+  async function requireOrdinaryIdeaEditor(idea) {
+    const profile = selectedProfileId;
+    const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 });
+    if (profile !== selectedProfileId) throw new Error("Profile changed. Reopen the Idea.");
+    ordinaryEditorGuardActive = caps?.ordinary_editor_boundary_enabled === true;
+    if (!ordinaryIdeaEditorAllowed(idea, caps))
+      throw new Error("Manual Production access is not verified for this Idea. Automatic Ideas continue to Approval Factory; check the saved Idea or its dedicated workflow.");
+  }
+
+  function syncOrdinaryIdeaModeControls(idea) {
+    const hint = $("ideaProductionModeHint");
+    const blocked = ordinaryEditorGuardActive && !ordinaryIdeaEditorAllowed(idea, {
+      ok: true, ordinary_editor_boundary_enabled: true,
+    });
+    if (hint) {
+      hint.hidden = !blocked;
+      hint.textContent = idea?.production_mode === "automatic" && idea?.production_source === "idea"
+        ? "Automatic Production: Studio prepares eligible content for Approval Factory. No intermediate Production approval is required."
+        : "This Idea is not verified for the ordinary Production editor. Use its dedicated workflow or check its saved routing.";
+    }
+    if (!blocked) return;
+    for (const id of ["configureProductionButton", "openIdeaProductionButton", "createIdeaTimelineButton",
+      "useExistingLibraryButton", "ideaLibraryContinueButton"]) {
+      const control = $(id);
+      if (control) { control.hidden = true; control.disabled = true; }
+    }
+  }
+
   function updateIdeaDrawer(idea) {
     const sameIdea = Boolean(activeIdea?.id && idea?.id && activeIdea.id === idea.id);
     const picker = $("ideaLibraryPicker");
@@ -3880,6 +3915,7 @@
     $("deleteIdeaButton").textContent = "Delete";
     const configureButton = $("configureProductionButton");
     if (configureButton) {
+      configureButton.hidden = false;
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
       const hasDraftOrStory = Boolean(String(idea?.production_request_id || "").trim())
         || storyFirstReady(idea)
@@ -3888,6 +3924,8 @@
         ? "Production locked"
         : (hasDraftOrStory ? "Open Production" : "Add new media");
     }
+    const libraryContinue = $("ideaLibraryContinueButton");
+    if (libraryContinue) libraryContinue.hidden = false;
     const useExistingButton = $("useExistingLibraryButton");
     if (useExistingButton) {
       useExistingButton.disabled = promoted || Boolean(idea?.is_on_hold);
@@ -3983,6 +4021,7 @@
       syncPromotionPanels();
       setManageMessage("Promote to production below. No review email is required.", "");
     }
+    syncOrdinaryIdeaModeControls(idea);
   }
 
   function flushIdeaManageInputs() {
@@ -4107,6 +4146,13 @@
 
   async function openIdeaDrawer(idea, { focusPromote = false } = {}) {
     updateIdeaDrawer(idea);
+    const profile = selectedProfileId;
+    const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 }).catch(() => null);
+    if (activeIdea?.id !== idea?.id || selectedProfileId !== profile) return;
+    if (caps?.ok === true && typeof caps.ordinary_editor_boundary_enabled === "boolean") {
+      ordinaryEditorGuardActive = caps.ordinary_editor_boundary_enabled;
+      updateIdeaDrawer(activeIdea);
+    }
     // Establish the server-side pause before exposing editable photo controls.
     // This closes the race where a cron match can land between opening Manage Idea
     // and the operator's first delete/uncheck.
@@ -4473,6 +4519,7 @@
 
   async function openOrCreateIdeaTimeline(idea, { button = null, heading = false } = {}) {
     if (!idea?.id) throw new Error("Open an idea before creating its timeline.");
+    await requireOrdinaryIdeaEditor(idea);
     const entries = Array.isArray(idea.production_request_links) ? idea.production_request_links : [];
     const knownIds = [...new Set([
       ...entries.map((row) => typeof row === "string" ? row : row?.id),
@@ -15295,6 +15342,7 @@ function timedScriptAssetLabel(asset, index) {
     if (fromWizard) ezWizardSetMessage("Opening production…");
 
     try {
+      await requireOrdinaryIdeaEditor(idea);
       loadEzAudioOptions().catch(() => {});
       const storyScenes = storyFirstScenes(idea);
       const storyReady = storyFirstReady(idea);
@@ -15506,6 +15554,7 @@ function timedScriptAssetLabel(asset, index) {
           ? "Open Production"
           : "Add new media";
       }
+      syncOrdinaryIdeaModeControls(activeIdea);
     }
   }
 
@@ -15933,6 +15982,7 @@ function timedScriptAssetLabel(asset, index) {
 
   async function openProductionRequestWithLibrary(idea, mediaAssetIds) {
     if (!idea?.id) return;
+    await requireOrdinaryIdeaEditor(idea);
     const continueButton = $("ideaLibraryContinueButton");
     if (continueButton) {
       continueButton.disabled = true;
