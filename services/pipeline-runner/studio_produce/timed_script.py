@@ -360,11 +360,58 @@ def normalize_timeline(raw: Any) -> dict[str, Any] | None:
     return timeline
 
 
+def storyboard_timeline_from_notes(notes: str) -> dict[str, Any] | None:
+    """Recover the approved base storyboard when no timed-script was persisted.
+
+    Do not substitute generic narration for an invalid approved storyboard.
+    Platform-specific narration and music tails require a format-aware path.
+    """
+    marker = "[story-first-production.1] "
+    lines = [line for line in notes.splitlines() if line.startswith(marker)]
+    if not lines:
+        return None
+    if len(lines) != 1:
+        raise ValueError("Multiple approved storyboard directives")
+    story = _parse_json_object(lines[0][len(marker):])
+    if not isinstance(story, dict) or story.get("schema") != "story-first-production.1":
+        raise ValueError("Invalid approved storyboard directive")
+    scenes = story.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("Approved storyboard has no scenes")
+    rows = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            raise ValueError("Invalid approved storyboard scene")
+        time = str(scene.get("time") or "").strip()
+        numeric = re.fullmatch(r"(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)", time)
+        bounds = tuple(float(value) for value in numeric.groups()) if numeric else parse_time_range(time)
+        asset_id = str(scene.get("asset_id") or "").strip()
+        if not bounds or not re.fullmatch(r"rec[A-Za-z0-9]{14}", asset_id):
+            raise ValueError("Approved storyboard scene has invalid time or asset ID")
+        if str(scene.get("voiceover_instagram") or "").strip() or scene.get("music_only_last_seconds"):
+            raise ValueError("Approved storyboard requires format-aware narration or music-tail handling")
+        text = str(scene.get("voiceover") or "").strip()
+        rows.append({
+            "start_seconds": bounds[0], "end_seconds": bounds[1],
+            "voiceover_text": text, "suggested_visual": str(scene.get("visual") or ""),
+            "asset_id": asset_id, "silent": not text,
+        })
+    timeline = build_timeline(rows)
+    issues = validate_timeline(timeline["segments"])
+    try:
+        target = float(story.get("target_seconds"))
+    except (TypeError, ValueError):
+        raise ValueError("Approved storyboard has invalid target duration") from None
+    if issues or rows[0]["start_seconds"] != 0 or abs(timeline["duration_seconds"] - target) > BOUNDARY_EPSILON_SECONDS:
+        raise ValueError("Approved storyboard timeline is invalid: " + "; ".join(issues))
+    return timeline
+
+
 def timed_script_from_request(request: dict[str, Any] | None) -> dict[str, Any] | None:
     notes = field_str(request or {}, "Production_Notes")
     match = _TIMED_SCRIPT_RE.search(notes)
     if not match:
-        return None
+        return storyboard_timeline_from_notes(notes)
     payload = str(match.group(1) or "").strip()
     if not payload:
         return None
