@@ -17,8 +17,8 @@ export function assertManualListSchemaReady(env) {
 const uuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const recordId=value=>typeof value==="string"&&/^rec[A-Za-z0-9]{14}$/.test(value);
 const ordinaryStatuses=new Set(["Draft","Ready","Submitted"]);
-const deniedOrigins=["az-finished-video","scripted-short","story-first","script_a_short","finished_video"];
-const deniedNotes=["origin=az-finished-video","ez-input=finished-video","[story-first-production.1]","scripted-short="];
+const deniedOrigins=["az-finished-video","scripted-short","story-first","script_a_short","finished_video","vibe-cut","vibe_cut"];
+const deniedNotes=["origin=az-finished-video","ez-input=finished-video","[story-first-production.1]","scripted-short=","ez-input=vibe-cut"];
 function checkedScope(scope) {
   if (!uuid(scope?.profileUuid)||!uuid(scope?.organizationUuid)||!Array.isArray(scope?.brandUuids)
       || !scope.brandUuids.length || scope.brandUuids.some(id=>!uuid(id)))
