@@ -1,0 +1,431 @@
+{
+  "schema": "issue3096_fb_approved_cdn_v1",
+  "read_only": true,
+  "publication_authorized": false,
+  "entries": [
+    {
+      "output_number": 9851,
+      "record_id": "rec0TGgcWk6FF8Kem",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-16T00:35:13.056Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recUF07Le0O8vC1Ho",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recUaMwkKzw0TI5wV",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recLtG5DvWbd7oUVQ",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "reczOhdF4BO51daAd",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/3.jpg"
+        },
+        {
+          "slide": 5,
+          "slide_id": "recNcqOCBMvAQc472",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/4.jpg"
+        },
+        {
+          "slide": 6,
+          "slide_id": "recopvwgaZLJSuY35",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/5.jpg"
+        },
+        {
+          "slide": 7,
+          "slide_id": "recNYtOJDQwSLNS9Z",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/6.jpg"
+        },
+        {
+          "slide": 8,
+          "slide_id": "recY914PVyiBHysJS",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec0TGgcWk6FF8Kem/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10205,
+      "record_id": "rec5bIppB59ZOoqAR",
+      "market_name": "New York City",
+      "approval_at": "2026-11-10T13:57:58.259Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recoe1xxfGbB1Pwpf",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec5bIppB59ZOoqAR/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recJmUgWCDJzDFNvu",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec5bIppB59ZOoqAR/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recpgFcjlNniAjOyX",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec5bIppB59ZOoqAR/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recOf32mUEeEbyn0q",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec5bIppB59ZOoqAR/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10207,
+      "record_id": "recyvYSoXIn7O65on",
+      "market_name": "New York City",
+      "approval_at": "2026-11-10T14:02:53.417Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recgMl0gqPyZwtrJQ",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recHwMC4FUIOnsRxI",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "rechdxannVetXOr4Y",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recZmcEdbCqxPu8BI",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/3.jpg"
+        },
+        {
+          "slide": 5,
+          "slide_id": "rec1iKRkY222QAhly",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/4.jpg"
+        },
+        {
+          "slide": 6,
+          "slide_id": "recbz4iUposB01ZkN",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/5.jpg"
+        },
+        {
+          "slide": 7,
+          "slide_id": "recbmXViUbe3zz6Tx",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/6.jpg"
+        },
+        {
+          "slide": 8,
+          "slide_id": "recq6rhQxGpjGfQrd",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recyvYSoXIn7O65on/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10214,
+      "record_id": "recEoyaoGOnHBuIAx",
+      "market_name": "New York City",
+      "approval_at": "2026-11-10T14:02:15.267Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recVINJERHxgFBzBZ",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recEoyaoGOnHBuIAx/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "reco0slLQxsIZoWnY",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recEoyaoGOnHBuIAx/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recFIAy6Spiu1s9dU",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recEoyaoGOnHBuIAx/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recgYEjdB04qRSVXE",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recEoyaoGOnHBuIAx/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10311,
+      "record_id": "recIkzEyedhLA1j9T",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-15T01:30:03.172Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recJCDLnlGDQQ1ik9",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkzEyedhLA1j9T/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "rec3N10cztOiK5f5m",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkzEyedhLA1j9T/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recFUMXRk9bWaplL5",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkzEyedhLA1j9T/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recxiFiDEweNa0RiC",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIkzEyedhLA1j9T/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10319,
+      "record_id": "recb47Ep2N5cn6lC9",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-15T01:28:01.652Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recLu7BWXOhJ1V7km",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recb47Ep2N5cn6lC9/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "rec82sam5FOBmjJnS",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recb47Ep2N5cn6lC9/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "reclf96DUQc0J23ef",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recb47Ep2N5cn6lC9/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "reczuTGo51XW9pjgC",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recb47Ep2N5cn6lC9/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10328,
+      "record_id": "recMwox4BM73Tt6ZK",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-15T01:29:38.676Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "rectSM9FQb7ZdCQKM",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recMwox4BM73Tt6ZK/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recFCLrjTAt8riYgK",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recMwox4BM73Tt6ZK/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recyH6HkQDsRo5PAp",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recMwox4BM73Tt6ZK/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "rec6K10xPRd9xsLGY",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recMwox4BM73Tt6ZK/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10357,
+      "record_id": "recsK443k84pwX2ZN",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-15T01:46:48.387Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recpvSRu90URalMxo",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recsK443k84pwX2ZN/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "rececECS2C2xQCtgi",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recsK443k84pwX2ZN/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recmrPpIP2IsdhUdl",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recsK443k84pwX2ZN/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "reckE797jK1sF6wkC",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recsK443k84pwX2ZN/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10430,
+      "record_id": "recehG1fslmTeJWAa",
+      "market_name": "New York City",
+      "approval_at": "2026-11-12T05:13:42.569Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recEuJ1oY8pTSiVMA",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recaFXmnanGWIkWKR",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "rectOuoAIPKYaMl0w",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recyAIUzGpu2lyp2r",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/3.jpg"
+        },
+        {
+          "slide": 5,
+          "slide_id": "recRgjdC8rv54qoeI",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/4.jpg"
+        },
+        {
+          "slide": 6,
+          "slide_id": "recBbX2p9daxpbqT3",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/5.jpg"
+        },
+        {
+          "slide": 7,
+          "slide_id": "recsMjjqJfP7d1SSp",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/6.jpg"
+        },
+        {
+          "slide": 8,
+          "slide_id": "recA8EsHamVRzOiO7",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recehG1fslmTeJWAa/7.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10432,
+      "record_id": "rec2h64uHpZRvoP1d",
+      "market_name": "New York City",
+      "approval_at": "2026-11-12T05:12:19.455Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recm2g1Jg2ASasSE9",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2h64uHpZRvoP1d/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "recJWYDDljVGqIVtP",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2h64uHpZRvoP1d/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "rectGwmR44tJW9pWU",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2h64uHpZRvoP1d/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recobWIlx53StWvtj",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/rec2h64uHpZRvoP1d/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10444,
+      "record_id": "recOCe3oLSIjoFy2l",
+      "market_name": "New York City",
+      "approval_at": "2026-11-12T05:16:38.052Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recbtUqdvmAwjxDpm",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recOCe3oLSIjoFy2l/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "rec2NHYPgXCMO2B2G",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recOCe3oLSIjoFy2l/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recMNDxEI1Xe1EQx0",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recOCe3oLSIjoFy2l/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recjRTDXZiCHgpkTe",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recOCe3oLSIjoFy2l/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10461,
+      "record_id": "recIorCsOniQbv9n3",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-12T05:19:18.771Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "rec5uR4i72Q7W5g8B",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIorCsOniQbv9n3/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "reca8ed8kBeuaR4ah",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIorCsOniQbv9n3/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "rec09sxsoIHPkStou",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIorCsOniQbv9n3/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recM59j9HtiTylOzJ",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recIorCsOniQbv9n3/3.jpg"
+        }
+      ]
+    },
+    {
+      "output_number": 10487,
+      "record_id": "recZZUOojvU7mnQYW",
+      "market_name": "Chicago",
+      "approval_at": "2026-11-12T05:20:18.842Z",
+      "slides": [
+        {
+          "slide": 1,
+          "slide_id": "recEPDPYMPxKZ6pvb",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recZZUOojvU7mnQYW/0.jpg"
+        },
+        {
+          "slide": 2,
+          "slide_id": "rechdLEJ8Zm0yZ8P3",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recZZUOojvU7mnQYW/1.jpg"
+        },
+        {
+          "slide": 3,
+          "slide_id": "recUpxRJ7VDcpT32Y",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recZZUOojvU7mnQYW/2.jpg"
+        },
+        {
+          "slide": 4,
+          "slide_id": "recBCmrqmi5ZtBzn3",
+          "cdn_url": "https://media.chicagoshining.com/studio/previews/lettered/recZZUOojvU7mnQYW/3.jpg"
+        }
+      ]
+    }
+  ]
+}
