@@ -1,0 +1,52 @@
+name: Issue 3159 emergency Studio cron containment
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3159-cron-containment.yml'
+      - 'repair/scripts/issue3159_cron_containment.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-cron-containment.yml'
+      - 'repair/scripts/issue3159_cron_containment.py'
+permissions:
+  contents: read
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 repair/scripts/issue3159_cron_containment.py selftest
+  contain:
+    needs: preflight
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Capture exact current cron inventory
+        run: python3 repair/scripts/issue3159_cron_containment.py capture
+      - name: Preserve restoration snapshot before mutation
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3159-cron-before-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outage3159-before.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Pause only the Studio API scheduled triggers and verify
+        run: python3 repair/scripts/issue3159_cron_containment.py apply
+      - name: Preserve independent readback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3159-cron-after-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outage3159-after.json
+          if-no-files-found: warn
+          retention-days: 90
