@@ -93,3 +93,80 @@ def test_fb0_reads_guard_before_any_attempt_or_lock_writes():
     assert check < attempt
     assert 'if preflight_reason:' in src[check:attempt]
     assert '"native_gallery_preflight_only": True' in src[check:attempt]
+
+
+def legacy_fixture():
+    out, slides = fixture(4)
+    record_id, number = "rec5bIppB59ZOoqAR", 10205
+    out["id"] = record_id
+    out["fields"].update({
+        "Output_ID": str(number), "Review_Status": "Approved",
+        "Output_Status": "Approved for Publishing", "Platform": "Facebook",
+        "Studio_Output_Type": "Multi-Image Post",
+        "FB_Image_Publish_Mode": "Multi-Photo Collage",
+        "FB_Resolved_Publish_Mode": "Multi-Photo Collage",
+        "Review_Decision_At": "2026-11-10T13:57:58.259Z",
+        "Studio_Early_Hold_Recovery_Proof": "issue-2340-scheduled-hold-v1",
+        "Studio_Early_Hold_Original_Dispatch_At": "2026-11-10T13:58:04.727Z",
+        "Studio_Early_Hold_Original_Scheduled_At": "2026-11-23T16:30:00.000Z",
+        "Scheduled_Post_Date": "2027-01-07T16:30:00Z",
+        "Studio_Scheduled_At": "2027-01-07T16:30:00+00:00",
+        "Studio_Overdue_MAE_Recovery_Receipt": {
+            "state": "committed", "version": "issue-3096-mae-v1",
+            "output_record_id": record_id, "platform": "Facebook",
+            "output_type": "Facebook Photo Set",
+            "planned_at": "2026-11-26T03:55:05.668Z",
+            "original_dispatch_at": "2026-11-10T13:58:04.727Z",
+            "original_scheduled_at": "2026-11-23T16:30:00Z",
+            "scheduled_for": "2027-01-07T16:30:00Z",
+        },
+    })
+    for slide in slides:
+        slide["fields"]["Platform Output"] = [record_id]
+        slide["fields"]["PO_Output_ID"] = [number]
+        del slide["fields"]["Approved For Final"]
+    return out, slides
+
+
+def test_audited_legacy_missing_checkbox_with_committed_mae_and_exact_media():
+    out, slides = legacy_fixture()
+    assert native_photo_preflight_reason(out, slides) is None
+    assert all("Approved For Final" not in slide["fields"] for slide in slides)
+
+
+def test_audited_legacy_never_overrides_explicit_negative_or_bad_media():
+    for key, value in [("Approved For Final", False), ("Approved For Final", None),
+                       ("Shared_Asset_Approved", False), ("Review Status", "Review Sent")]:
+        out, slides = legacy_fixture()
+        slides[0]["fields"][key] = value
+        assert native_photo_preflight_reason(out, slides) == "native_gallery_final_creative_approval_missing"
+    out, slides = legacy_fixture()
+    slides[0]["fields"]["Google Drive File ID"] = "different-original"
+    assert native_photo_preflight_reason(out, slides) == "native_gallery_original_source_provenance_invalid"
+    out, slides = legacy_fixture()
+    slides[0]["fields"]["FB_Photo_ID"] = "existing-remote"
+    assert native_photo_preflight_reason(out, slides) == "native_gallery_existing_provider_media_requires_reconciliation"
+
+
+def test_legacy_compatibility_requires_exact_cohort_and_matching_committed_receipt():
+    for key, value in [
+        ("Studio_Early_Hold_Recovery_Proof", ""),
+        ("Review_Status", "Pending Review"),
+        ("Review_Decision_At", "2026-11-10T14:00:00Z"),
+        ("Scheduled_Post_Date", "2027-01-08T16:30:00Z"),
+        ("FB_Resolved_Publish_Mode", "Slideshow Reel"),
+    ]:
+        out, slides = legacy_fixture()
+        out["fields"][key] = value
+        assert native_photo_preflight_reason(out, slides) == "native_gallery_final_creative_approval_missing"
+    for key, value in [("state", "pending_commit"), ("output_record_id", OUT),
+                       ("original_dispatch_at", "2026-11-09T13:58:04.727Z")]:
+        out, slides = legacy_fixture()
+        out["fields"]["Studio_Overdue_MAE_Recovery_Receipt"][key] = value
+        assert native_photo_preflight_reason(out, slides) == "native_gallery_final_creative_approval_missing"
+    out, slides = legacy_fixture()
+    out["id"] = OUT
+    out["fields"]["Studio_Overdue_MAE_Recovery_Receipt"]["output_record_id"] = OUT
+    for slide in slides:
+        slide["fields"]["Platform Output"] = [OUT]
+    assert native_photo_preflight_reason(out, slides) == "native_gallery_final_creative_approval_missing"
