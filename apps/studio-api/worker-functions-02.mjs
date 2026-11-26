@@ -1,4 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
+import { readyProductionEnqueue, readyProductionRead } from "./ready-production-queue.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
 import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
@@ -4055,6 +4057,58 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
 }
 
 /*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/
+// Dedicated authoring approval; the caller owns the exact Idea lock.
+export async function approveStoryFirstAutomaticHandoff(request,env,url,authorization) {
+  if(!storyFirstAutomaticHandoffEnabled(env)||!env.STUDIO_MEDIA)
+    throw new HttpError(503,"Automatic storyboard handoff is not enabled");
+  const ideaId=ideaRecordIdFromPath(url);
+  let payload;try{payload=await request.json();}catch{throw new HttpError(400,"JSON required");}
+  if(!payload||Object.keys(payload).length!==1||payload.approve_storyboard!==true)
+    throw new HttpError(400,"Explicit saved storyboard approval required");
+  const idea=await loadAuthorizedIdea(env,ideaId,authorization);
+  try {
+    const receipt=await queueApprovedStoryFirst({
+      idea,
+      verifyStory:row=>verifiedStoryFirstProduction(env,row),
+      listRequests:id=>listSupabaseOpenProductionRequestsForIdea(env,id),
+      loadRequest:id=>loadAuthorizedProductionRequest(env,id,authorization),
+      createDraft:async(row,approved)=>{
+        const defaults=productionRequestDefaultsFromIdea(row);
+        const platforms=defaults.platforms.length?defaults.platforms:[...AUTONOMOUS_STANDARD_PLATFORMS];
+        const input=await cleanProductionRequestPayload({...defaults,
+          content_type:"Vertical Short Video",platforms,
+          video_duration_seconds:approved.story.target_seconds,
+          video_clip_count_mode:"Exact",video_clip_count_exact:approved.story.scenes.length,
+        },env);
+        return createDraftForIdea(env,row,authorization,input,{preferredProfileId:approved.story.profile_id});
+      },
+      verifyDraft:async(draft,approved)=>{
+        await ensureStoryFirstProductionMedia(env,draft,approved);
+        const saved=await loadAuthorizedProductionRequest(env,draft.id,authorization);
+        if(String(f(saved,"Studio_Master_Asset_Status")||"")!=="Ready"||
+           item4AssetManifest(saved).map(asset=>String(asset?.media_asset_record_id||"")).join(",")!==approved.ids.join(","))
+          throw new Error("Saved storyboard media is not ready in exact selected order");
+        return saved;
+      },
+      commitRequestApproval:async(draft,notes)=>{
+        await item4UpdateRequestState(env,draft.id,{Production_Notes:notes});
+        return loadAuthorizedProductionRequest(env,draft.id,authorization);
+      },
+      commitIdeaAcceptance:async(row)=>{
+        await airtableFetch(env,env.AIRTABLE_IDEA_TABLE_ID,row.id,{method:"PATCH",body:JSON.stringify({fields:{
+          Candidate_Status:"Approved",Approved_At:f(row,"Approved_At")||new Date().toISOString(),
+        },typecast:true})});
+        return loadAuthorizedIdea(env,row.id,authorization);
+      },
+      readJob:id=>readyProductionRead(env.STUDIO_MEDIA,id),
+      enqueue:async(id,profileId)=>(await readyProductionEnqueue(env.STUDIO_MEDIA,{ideaId:id,profileId})).job,
+    });
+    return respond(request,env,{ok:true,...receipt},receipt.queued?202:200);
+  }catch(error){
+    if(error instanceof HttpError)throw error;
+    throw new HttpError(409,String(error?.message||"Storyboard handoff requires reconciliation"));
+  }
+}
 export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
