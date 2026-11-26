@@ -2383,6 +2383,7 @@ export default {
           automatic_photo_wait_existing_enabled: automaticPhotoWaitExistingEnabled(env, authorization),
           automatic_ez_idea_create_enabled: automaticEzCreateEnabled(env,authorization),
           automatic_ez_draft_create_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
+          automatic_ez_media_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
           storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
             authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
@@ -2402,8 +2403,11 @@ export default {
         const allowed=await verifyDedicatedProductionAccess({
           route:dedicatedRoute,body,scope:{organizationId:authorization?.organization?.record_id,profiles},
           read:path=>adminHoldSupabaseRest(env,path),loadIdea:id=>loadAuthorizedIdea(env,id,authorization),
+          loadRequest:id=>loadAuthorizedProductionRequest(env,id,authorization),
         });
         if(!allowed)throw new HttpError(403,"Dedicated Production source or ownership could not be verified");
+        if(dedicatedRoute.kind==="automatic_ez_request" && dedicatedRoute.operation==="snapshot")
+          url.searchParams.set("snapshot","1");
       }
 
       // #3094 ordinary editor boundary. Internal producers call shared helpers
@@ -4143,6 +4147,11 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
+        if(dedicatedRoute?.kind==="automatic_ez_request") {
+          if(!env.STUDIO_MEDIA)throw new HttpError(503,"Automatic EZ media lock unavailable");
+          return withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>
+            generateItem4PreProductionAiMaster(request,env,url,authorization,ctx,{automaticEzIntake:true}));
+        }
         return generateItem4PreProductionAiMaster(request, env, url, authorization, ctx);
       }
 
@@ -4192,6 +4201,11 @@ export default {
         requirePermission(authorization, "production_configure");
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
+          if(dedicatedRoute?.kind==="automatic_ez_request") {
+            if(!env.STUDIO_MEDIA)throw new HttpError(503,"Automatic EZ media lock unavailable");
+            return withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>
+              uploadItem4MasterAssets(request,env,url,authorization,ctx,{automaticEzIntake:true}));
+          }
           return uploadItem4MasterAssets(request, env, url, authorization, ctx);
         }
         return getItem4MasterAssets(request, env, url, authorization);
