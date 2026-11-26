@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { manualProductionListEnabled } from "./production-mode-routing.mjs";
 import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
 import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
@@ -46,6 +47,7 @@ import {
   listSupabaseDeskHealOutputs,
   listSupabaseIdeaLane,
   listSupabaseOpenProductionRequestsForIdea,
+  listSupabaseManualProductionRequests,
   listSupabaseRevisionOpenProductionRequests,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
@@ -4322,6 +4324,24 @@ export async function listProductionRequests(request, env, url, authorization) {
   const limit = clampLimit(url, 100, 100);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const orgId = String(authorization?.organization?.record_id || "none");
+  if (manualProductionListEnabled(env)) {
+    const brandRecordIds = arrayOrEmpty(f(profile, "Brand"))
+      .filter(id => membershipAllowsBrand(authorization, [id]));
+    // No fallback to the legacy collection, even when a read fails. A stale
+    // cached or unfiltered list must never expose automatic work.
+    if (!brandRecordIds.length) return respond(request, env, {ok:true,records:[],photo_watch_waiting_count:0,production_list_mode:"manual"});
+    const records = await listSupabaseManualProductionRequests(env, {
+      profileRecordId:profile.id, orgRecordId:orgId, brandRecordIds, limit,
+    });
+    return respond(request, env, {
+      ok:true, production_list_mode:"manual",
+      records:records.map(record => ({
+        ...mapProductionRequestSummary(record, f(record, "Idea_Title") || null),
+        production_mode:"manual",production_source:"idea",
+      })),
+      photo_watch_waiting_count:0,
+    });
+  }
   const payload = await studioReadCoalesce(`production-requests:${orgId}:${profile.id}:${limit}`, 25000, async () => {
   const records = await listOpenProductionRequests(env, { limit });
   const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
