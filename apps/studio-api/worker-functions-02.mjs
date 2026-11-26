@@ -4109,6 +4109,7 @@ export async function approveStoryFirstAutomaticHandoff(request,env,url,authoriz
     throw new HttpError(409,String(error?.message||"Storyboard handoff requires reconciliation"));
   }
 }
+/*__STUDIO_WORKER_END:approveStoryFirstAutomaticHandoff__*/
 export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
