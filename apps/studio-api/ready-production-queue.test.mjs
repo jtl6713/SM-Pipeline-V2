@@ -301,7 +301,10 @@ test("Ready production backfills existing linked asset-ready autonomous drafts w
     "non-autonomous drafts need explicit Idea approval");
   const processor = functions.slice(functions.indexOf("async function processReadyProductionClaim("),
     functions.indexOf("async function studioReadyProductionCronResume("));
-  assert.match(processor, /readyProductionIdeaEligible\(idea, requestRecord\)/);
+  assert.match(processor, /readyProductionIdeaEligible\(idea, requestRecord,\s*env\)/);
+  assert.match(eligibility, /storyFirstAutomaticHandoffEnabled\(env\)/);
+  assert.match(eligibility, /hasStoryHandoffApproval\(requestRecord\)/);
+  assert.match(dispatcher, /readyProductionIdeaEligible\(idea, draft,\s*env\)/);
   assert.match(processor, /autonomousMasterMediaIds\(item4ParseJson/);
   assert.match(processor, /if \(!requestRecord\) \{/); // Only absent link may create a draft.
 });

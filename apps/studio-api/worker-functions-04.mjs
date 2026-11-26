@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
 import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
@@ -13957,7 +13958,7 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   return String(f(idea, "Candidate_Status") || "").trim() === "Approved";
 }
 
-function readyProductionIdeaEligible(idea, requestRecord = null) {
+function readyProductionIdeaEligible(idea, requestRecord = null, env = null) {
   if (!idea?.id || isExplicitManualIdea(idea)) return false;
   if (exploreIdeaNeedsApproval({
     sourcingMode: f(idea, "Asset_Sourcing_Mode"),
@@ -13968,6 +13969,9 @@ function readyProductionIdeaEligible(idea, requestRecord = null) {
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
   if (linkedRecordIds(f(idea, "Content Items")).length) return false;
   if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
+  if (storyFirstAutomaticHandoffEnabled(env)&&f(idea,"Studio_Production_Source")==="script_a_short") {
+    return status==="approved"&&hasStoryHandoffApproval(requestRecord)&&readyProductionExistingDraftEligible(idea,requestRecord);
+  }
   if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Ready") return true;
   return readyProductionExistingDraftEligible(idea, requestRecord);
 }
@@ -13976,7 +13980,7 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
   const cap = Math.max(1, Math.min(200, Number(limit) || 100));
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
     const rows = await listSupabaseIdeaLane(env, { lane: "ready_production", limit: cap }).catch(() => null);
-    if (Array.isArray(rows)) return rows.filter(readyProductionIdeaEligible);
+    if (Array.isArray(rows)) return rows.filter(idea=>readyProductionIdeaEligible(idea,null,env));
   }
   if (productionModeRoutingEnabled(env)) throw new HttpError(503, "Canonical automatic Idea discovery unavailable");
   const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
@@ -14005,7 +14009,7 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
       "Create_Date",
     ],
   });
-  return ideas.filter(readyProductionIdeaEligible);
+  return ideas.filter(idea=>readyProductionIdeaEligible(idea,null,env));
 }
 
 /** Backfill already asset-ready autonomous drafts without creating new PRs.
@@ -14231,7 +14235,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
       completed_reason: "manual_production", production_request_id: requestRecord?.id || null,
     });
   }
-  if (!readyProductionIdeaEligible(idea, requestRecord)) {
+  if (!readyProductionIdeaEligible(idea, requestRecord,env)) {
     const promoted = String(f(idea, "Promoted_Content_Record_ID") || "").trim()
       || linkedRecordIds(f(idea, "Content Items"))[0]
       || null;
@@ -14482,7 +14486,7 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     if (prior && !(prior.status === "blocked" && prior.completed_reason === "no_longer_eligible")) continue;
     try {
       const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
-      if (!readyProductionIdeaEligible(idea, draft)) continue;
+      if (!readyProductionIdeaEligible(idea, draft,env)) continue;
       // Existing reciprocal request is the only authority; never create a
       // second request to backfill this missing R2 job.
       const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
@@ -15402,6 +15406,9 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
       const canonical = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, owner);
       if (!canonical?.id || canonical.id !== owner || isExplicitManualIdea(canonical))
         throw new HttpError(409, "Automatic Production not authorized for this Idea");
+      if(storyFirstAutomaticHandoffEnabled(env)&&f(canonical,"Studio_Production_Source")==="script_a_short"&&
+          (f(canonical,"Candidate_Status")!=="Approved"||!hasStoryHandoffApproval(current)))
+        throw new HttpError(409,"Saved storyboard authoring approval is required");
     } else if (isExplicitManualIdea(idea)) {
       throw new HttpError(409, "Manual Production requires intermediate approval");
     }
