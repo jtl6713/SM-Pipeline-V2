@@ -30,7 +30,7 @@ jobs:
     if: github.event_name == 'push'
     needs: static
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -87,10 +87,11 @@ jobs:
           helper='issue3096-fences-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
           helper_path='/workers/scripts/'+helper
           assert get(helper_path+'/settings')[0]==404,'helper_already_exists_or_unverified'
-          auth=secrets.token_hex(32)
+          route='/'+secrets.token_urlsafe(48)
           source="""const ROWS=__ROWS__;
+          const ROUTE=__ROUTE__;
           export default {async fetch(req,env){
-            if(req.method!=='GET'||new URL(req.url).pathname!=='/exact'||req.headers.get('Authorization')!=='Bearer '+env.READ_TOKEN)return new Response('Not found',{status:404});
+            if(req.method!=='GET'||new URL(req.url).pathname!==ROUTE)return new Response('Not found',{status:404});
             const rows=[];
             for(const [n,rid] of ROWS){
               try{const h=await env.STUDIO_MEDIA.head('studio/state/initial-publish-fence/v1/'+rid+'.json');
@@ -99,8 +100,8 @@ jobs:
             }
             return Response.json({read_only:true,rows},{headers:{'Cache-Control':'no-store'}});
           }};
-          """.replace('__ROWS__',json.dumps([[n,rid] for n,rid,_,_ in exact]))
-          metadata={'main_module':'worker.mjs','compatibility_date':'2026-10-01','bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':buckets[0]},{'type':'plain_text','name':'READ_TOKEN','text':auth}]}
+          """.replace('__ROWS__',json.dumps([[n,rid] for n,rid,_,_ in exact])).replace('__ROUTE__',json.dumps(route))
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-10-01','bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':buckets[0]}]}
           def request(method,path,payload=None):
               req=urllib.request.Request(api+path,data=payload,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
               with urllib.request.urlopen(req,timeout=35) as res:
@@ -122,14 +123,21 @@ jobs:
               assert domain.replace('-','').isalnum()
               import time
               result=None
-              for attempt in range(10):
-                  try:
-                      req=urllib.request.Request('https://'+helper+'.'+domain+'.workers.dev/exact',headers={'Authorization':'Bearer '+auth},method='GET')
-                      with urllib.request.urlopen(req,timeout=20) as res: result=json.loads(res.read(65536))
-                      if result.get('read_only') is True: break
-                  except (urllib.error.URLError,ValueError): pass
-                  time.sleep(2)
-              assert result and result['read_only'] is True and len(result['rows'])==len(exact)
+              # Same unguessable-route + curl propagation polling pattern as
+              # the previously successful protected R2 checksum auditors.
+              with tempfile.TemporaryDirectory() as d:
+                  response=pathlib.Path(d)/'response.json'
+                  for attempt in range(18):
+                      proc=subprocess.run(['curl','-sS','--max-time','25','-o',str(response),'-w','%{http_code}','https://'+helper+'.'+domain+'.workers.dev'+route],capture_output=True,text=True)
+                      code=proc.stdout.strip()
+                      print('fence_helper_attempt='+str(attempt+1)+' http='+code+' curl_exit='+str(proc.returncode),flush=True)
+                      if proc.returncode==0 and code=='200':
+                          try:
+                              result=json.loads(response.read_text())
+                              if result.get('read_only') is True and len(result.get('rows',[]))==len(exact): break
+                          except (ValueError,OSError): pass
+                      time.sleep(5)
+              assert result and result['read_only'] is True and len(result['rows'])==len(exact),'helper_exact_response_unavailable'
               obs={x['output']:x['fence_observation'] for x in result['rows']}
               rows=[{'output':n,'fence_observation':obs[n],'lane_enabled':enabled and profile+'::'+platform in lanes} for n,rid,profile,platform in exact]
               print('ISSUE3096_FENCE_LANE='+json.dumps({'read_only':True,'worker_version':version,'authority_enabled':enabled,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
