@@ -11,6 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
+  let storyboardHandoffBusy = false;
   const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {}, videoCostOffer: null };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
@@ -1227,7 +1228,7 @@
     $("storyFirstProgress").textContent=selected+" of "+scenes.length+
       " scenes have selected media — "+(scenes.length-selected)+" still need attention.";
     const handoff=$("storyFirstProduction");
-    if(handoff){handoff.hidden=selected!==scenes.length;handoff.disabled=selected!==scenes.length;
+    if(handoff){handoff.hidden=selected!==scenes.length;handoff.disabled=selected!==scenes.length||storyboardHandoffBusy;
       handoff.title=handoff.disabled?"Select verified media for every scene":"Create editable Production draft";}
     const list=$("storyFirstShots");
     list.replaceChildren();
@@ -1927,8 +1928,43 @@
     }).catch(error => report(error.message, true));
   });
   $("storyFirstProduction")?.addEventListener("click", async () => {
+    if (storyboardHandoffBusy || current.busy) return;
+    storyboardHandoffBusy = true;
+    const handoffButton = $("storyFirstProduction");
+    handoffButton.disabled = true;
     try {
+      const targetProfile = assertProfile();
+      const caps = await call("/api/production-mode/capabilities", { timeoutMs: 8000 });
+      if (caps?.ok !== true) throw new Error("Production routing could not be verified. Try again.");
+      if (assertProfile() !== targetProfile) throw new Error("Profile changed. Reopen the storyboard.");
+      const automatic = caps.storyboard_auto_handoff_enabled === true;
+      if (!automatic && caps.ordinary_editor_boundary_enabled === true)
+        throw new Error("Automatic storyboard handoff is not available for this account. No Production request was submitted.");
       const record = await save();
+      if (assertProfile() !== targetProfile || current.record?.id !== record.id)
+        throw new Error("Storyboard changed. Reopen the saved Idea.");
+      if (automatic) {
+        if (record.production_mode !== "automatic" || record.production_source !== "script_a_short")
+          throw new Error("Saved storyboard routing is not verified. Reconcile the Idea before submitting.");
+        const count = current.story?.scenes?.length || 0;
+        if (!count || selectedCount() !== count)
+          throw new Error("All scenes need selected media before approval.");
+        if (!confirm("Approve this completed storyboard for automatic Production? Studio will prepare it for Approval Factory. Final human approval is still required before normal publishing.")) return;
+        report("Submitting approved storyboard for automatic Production…");
+        const receipt = await call("/api/ideas/" + encodeURIComponent(record.id) + "/storyboard-handoff?profile=" +
+          encodeURIComponent(targetProfile), {
+          method: "POST", body: JSON.stringify({ approve_storyboard: true }),
+        });
+        if (receipt?.ok !== true || receipt.idea_id !== record.id || receipt.publishing !== false ||
+            !(receipt.already_promoted === true || (receipt.queued === true && isId(receipt.production_request_id))))
+          throw new Error("Automatic handoff was not confirmed. Check the saved Idea and Factory before retrying.");
+        if (assertProfile() !== targetProfile || current.record?.id !== record.id) return;
+        report(receipt.already_promoted === true
+          ? "Storyboard already handed off. Check Approval Factory for its status."
+          : "Storyboard accepted. Studio will complete Production automatically. Review the finished outputs in Approval Factory.");
+        return;
+      }
+      // Legacy route only while the ordinary editor boundary is explicitly off.
       const expectedScenes = current.story.scenes.length;
       if (selectedCount() !== expectedScenes) throw new Error("All scenes need selected media before Production.");
       if (!confirm("Create an editable Production Request for this completed storyboard? Rendering and publishing remain under normal review controls.")) return;
@@ -1970,6 +2006,11 @@
         (productionId ? " · " + productionId : "") +
         " with " + persistedCount + " confirmed scene assets. No rendering or publishing was initiated.");
     } catch (error) { report(error.message, true); }
+    finally {
+      storyboardHandoffBusy = false;
+      if (handoffButton) handoffButton.disabled = !current.story?.scenes?.length ||
+        selectedCount() !== current.story.scenes.length;
+    }
   });
   // Script a Short is the only user-facing idea-first entry point.
   // Capture before the legacy submit handler to keep all other Ideas flows unchanged.
