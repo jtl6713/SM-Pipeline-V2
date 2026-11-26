@@ -33,3 +33,13 @@ test("emergency guard runs before scheduled mutating work, direct enqueue/render
   assert.ok(pub.indexOf("windowsOutagePublishBlock") < pub.indexOf("rows.push(candidate)"));
   assert.ok(pub.indexOf("windowsOutagePublishBlock",pub.indexOf("const preflight = assessFreshSupabasePublish")) < pub.indexOf("initial-publish-fence/v1/"));
 });
+
+test("common publisher defers before preparation and does not stamp outage deferrals", () => {
+  const source=readFileSync(new URL("worker-functions-03.mjs",import.meta.url),"utf8");
+  const primary=source.split("export async function studioDispatchApprovedPublishNow")[1];
+  assert.ok(primary.indexOf("windowsOutagePublishBlock") < primary.indexOf("studioPromoteDuePublishStatus"));
+  const schedule=source.split("export async function studioDispatchApprovedPublishAndSchedule")[1];
+  assert.ok(schedule.indexOf("windowsOutagePublishBlock") < schedule.indexOf("studioPublishDispatchTarget"));
+  const stamp=source.split("export async function studioStampPublishDispatch")[1];
+  assert.ok(stamp.indexOf("windows_outage_paused|outage_overdue_requires_mae_reschedule") < stamp.indexOf("publishDispatchAttemptStampFields"));
+});
