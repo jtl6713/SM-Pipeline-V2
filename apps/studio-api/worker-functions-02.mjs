@@ -1,5 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
+import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId } from "./automatic-ez-intake.mjs";
 import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
 import { readyProductionEnqueue, readyProductionRead } from "./ready-production-queue.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
@@ -4157,24 +4158,39 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
 
-export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null) {
+export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null, { automaticEzIntake = false } = {}) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(ideaRecordId)) throw new HttpError(400, "idea_record_id is required");
 
   let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
+  if (automaticEzIntake && !verifiedAutomaticEzDraftInput(idea,payload))
+    throw new HttpError(409,"Automatic EZ intake owner or configuration changed");
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
+  if (automaticEzIntake && preferredProfileId!==payload.content_profile_id)
+    throw new HttpError(409,"Automatic EZ intake profile mismatch");
   const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
     ? await verifiedStoryFirstProduction(env, idea) : null;
-  const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
+  let existing;
+  if (automaticEzIntake) {
+    let existingId;
+    try {
+      existingId=automaticEzExistingDraftId(await listSupabaseOpenProductionRequestsForIdea(env,ideaRecordId),idea);
+    } catch(error) { throw new HttpError(409,error?.message||"Automatic EZ draft ownership unverified"); }
+    existing=existingId ? await loadAuthorizedProductionRequest(env,existingId,authorization) : null;
+    if (existingId && existing?.id!==existingId) throw new HttpError(409,"Automatic EZ draft could not be read");
+  } else existing=await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
+    if (automaticEzIntake && !verifiedAutomaticEzDraftReceipt(existing,idea,payload))
+      throw new HttpError(409,"Existing draft is not the verified automatic EZ intake; reconcile before retrying");
     const validatedExisting = approvedStory
       ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
     return respond(request, env, {
       ok: true,
       created: false,
+      ...(automaticEzIntake ? { automatic_ez_draft_verified: true } : {}),
       record: mapProductionRequestLight(validatedExisting),
       ...(approvedStory ? {
         storyboard_verified: true,
@@ -4220,6 +4236,13 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
+  if (automaticEzIntake) {
+    const saved=await loadAuthorizedProductionRequest(env,created.id,authorization);
+    if (!verifiedAutomaticEzDraftReceipt(saved,idea,payload))
+      throw new HttpError(409,"Automatic EZ draft receipt is unverified; reconcile the saved Idea before retrying");
+    return respond(request,env,{ok:true,created:true,automatic_ez_draft_verified:true,
+      record:mapProductionRequestLight(saved)},201);
+  }
   const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
   return respond(request, env, {
     ok: true,

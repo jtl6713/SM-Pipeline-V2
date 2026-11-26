@@ -53,5 +53,34 @@ export function verifiedAutomaticEzDraftInput(idea, body) {
     origins.length === 1 && origins[0] === "ez-wizard" &&
     inputs.length === 1 && inputs[0] === kind &&
     !authorityNotes.test(notes) && !authorityNotes.test(String(f.Idea_Summary || "")) &&
+    !/\b(?:origin|ez-input)\s*=/i.test(String(f.Idea_Summary || "")) &&
     !Object.keys(body).some(key=>/^(?:publish|schedule|approval|approve|status|hold|test_run)/i.test(key)));
+}
+
+/** A replay never replaces an existing draft or accepts a different owner. */
+export function verifiedAutomaticEzDraftReceipt(record, idea, body) {
+  const f = record?.fields || {};
+  const kind = automaticEzIdeaKind(idea);
+  const notes = String(f.Production_Notes || "");
+  const origins = [...notes.matchAll(/\borigin\s*=\s*([a-z0-9_-]+)/gi)].map(x=>x[1].toLowerCase());
+  const inputs = [...notes.matchAll(/\bez-input\s*=\s*([a-z0-9_-]+)/gi)].map(x=>x[1].toLowerCase());
+  return Boolean(verifiedAutomaticEzDraftInput(idea,body) && rec.test(record?.id || "") &&
+    f.Request_Status === "Draft" && f.Active === true &&
+    Array.isArray(f.Idea_Candidate) && f.Idea_Candidate.length === 1 &&
+    f.Idea_Candidate[0] === idea.id && origins.length === 1 && origins[0] === "ez-wizard" &&
+    inputs.length === 1 && inputs[0] === kind && !authorityNotes.test(notes) &&
+    !String(f.Test_Run_ID || "").trim() && !(f.Promoted_Content_Item || []).length &&
+    !f.Studio_Publish_Batch_ID && !f.Studio_Publish_Requested_At);
+}
+// A canonical lookup failure or multiple open requests requires reconciliation;
+// never treat a failed read as permission to create another draft.
+export function automaticEzExistingDraftId(rows, idea) {
+  if (!Array.isArray(rows) || rows.length > 1 ||
+      rows.some(row=>!rec.test(row?.id || "")))
+    throw new Error("Automatic EZ draft ownership requires reconciliation");
+  const linked = idea?.fields?.["Production Requests"] || [];
+  if (!Array.isArray(linked) || linked.some(id=>!rec.test(id)) ||
+      linked.some(id=>id!==rows[0]?.id))
+    throw new Error("Automatic EZ reciprocal draft linkage requires reconciliation");
+  return rows[0]?.id || null;
 }

@@ -1,9 +1,9 @@
 import { handleQaApi } from "./qa-http.mjs";
 import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
-import { automaticEzCreateEnabled } from "./automatic-ez-intake.mjs";
+import { automaticEzCreateEnabled, automaticEzIntakeEnabled } from "./automatic-ez-intake.mjs";
 import { storyFirstAutomaticHandoffEnabled } from "./story-first-automatic-handoff.mjs";
 import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
-import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
+import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, dedicatedRouteEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -1012,7 +1012,7 @@ export default {
       }
       const dedicatedRoute = dedicatedProductionRoute(url.pathname, request.method);
       if (dedicatedRoute) {
-        if (!dedicatedRoute.allowed || !dedicatedProductionRoutesEnabled(env))
+        if (!dedicatedRoute.allowed || !dedicatedRouteEnabled(env,dedicatedRoute))
           throw new HttpError(405, "Dedicated Production route is unavailable");
         // Only the exact allowlisted alias is normalized. Verify the typed owner
         // after authentication, before any shared handler is executed.
@@ -2382,6 +2382,7 @@ export default {
           automatic_photo_wait_create_enabled: automaticPhotoWaitCreateEnabled(env, authorization),
           automatic_photo_wait_existing_enabled: automaticPhotoWaitExistingEnabled(env, authorization),
           automatic_ez_idea_create_enabled: automaticEzCreateEnabled(env,authorization),
+          automatic_ez_draft_create_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
           storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
             authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
@@ -2390,7 +2391,7 @@ export default {
       if (dedicatedRoute) {
         requirePermission(authorization,"production_configure");
         let body=null;
-        if(dedicatedRoute.kind==="finished_create") {
+        if(dedicatedRoute.kind==="finished_create" || dedicatedRoute.kind==="automatic_ez_create") {
           try {body=await request.clone().json();}
           catch {throw new HttpError(400,"Request body must be valid JSON");}
         }
@@ -4122,6 +4123,12 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
+          if (dedicatedRoute?.kind==="automatic_ez_create") {
+            if (!env.STUDIO_MEDIA) throw new HttpError(503,"Automatic EZ intake lock unavailable");
+            const ideaId=(await request.clone().json()).idea_record_id;
+            return withOutputApprovalLock(env.STUDIO_MEDIA,ideaId,
+              ()=>createProductionRequestFromBody(request,env,authorization,url,ctx,{automaticEzIntake:true}));
+          }
           return await createProductionRequestFromBody(request, env, authorization, url, ctx);
         }
         // Item 4 opens by loading the Production Request collection before a
