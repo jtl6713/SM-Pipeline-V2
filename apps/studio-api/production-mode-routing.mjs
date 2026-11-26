@@ -41,7 +41,7 @@ export function manualProductionListQuery({ profileUuid, orgRecordId, brandRecor
     "id","airtable_record_id","production_request_id","idea_candidate_id",
     "request_status","requested_title","production_notes","master_asset_status",
     "output_plan_status","variant_status","publish_status","created_at","updated_at",
-    "idea_candidates!inner(airtable_record_id,content_profile_id,production_mode,production_source,candidate_title)",
+    "idea_candidates!inner(id,airtable_record_id,content_profile_id,production_mode,production_source,candidate_title)",
     "organizations!inner(airtable_record_id)","brands!inner(airtable_record_id)",
   ].join(",");
   return "production_requests?select=" + select
@@ -68,6 +68,7 @@ export function verifiedManualProductionRow(row, {profileUuid,orgRecordId,brandR
     || (status === "Promoted" && notes.includes("[factory-revision-open]"));
   if (!recordId.test(String(row?.airtable_record_id || ""))
       || !uuid.test(String(row?.idea_candidate_id || ""))
+      || idea?.id !== row.idea_candidate_id
       || !recordId.test(String(idea?.airtable_record_id || ""))
       || idea?.production_mode !== "manual" || idea?.production_source !== "idea"
       || idea?.content_profile_id !== profileUuid || org !== orgRecordId
