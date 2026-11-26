@@ -4316,10 +4316,15 @@ export async function createIdea(request, env, authorization, ctx = null) {
       Production_Config_Notes: notes,
     });
   }
-  // Capture metadata only; do not change existing production admission.
-  // Finished Video and Vibe Cut retain their dedicated legacy contracts.
+  // Capture the exact dedicated Finished Video source without changing its
+  // approval or scheduling modes. Vibe Cut retains its separate contract.
+  const finishedVideo = modeSource === "finished_video";
   if (storyFirst) Object.assign(fields, newIdeaProductionCapture(env, "script_a_short"));
-  else if (!vibeCut && String(payload?.input_kind || "").trim() !== "finished-video") {
+  else if (finishedVideo) {
+    Object.assign(fields, newIdeaProductionCapture(env, "finished_video"));
+    if (env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" &&
+        env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") fields.Studio_Photo_Wait_Status = "Not Needed";
+  } else if (!vibeCut) {
     Object.assign(fields, newIdeaProductionCapture(env, "idea", {requestedMode:requestedProductionMode,humanChoice:true}));
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
@@ -4345,7 +4350,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   // matching fails. Cron's Waiting scan owns bounded retries.
   const modeVerified=requestedProductionMode!=="manual"||
     (f(created,"Studio_Production_Mode")==="manual"&&f(created,"Studio_Production_Source")==="idea");
-  if (!vibeCut && ctx?.waitUntil && !storyFirst && modeVerified) {
+  if (!vibeCut && !(finishedVideo && env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" && env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") && ctx?.waitUntil && !storyFirst && modeVerified) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
