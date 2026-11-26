@@ -23,6 +23,7 @@ jobs:
           assert 'initial-publish-fence/v1/' in s
           assert 'STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST' in s
           assert 'recKw7c9aZ75tDOWU' in s
+          assert 'recnNoYbLLfxG2E5u' in s and 'recWLk01kPlyja6J7' in s
           assert 'read_only' in s
           print('exact_fence_lane_audit_static=PASS')
           PY
@@ -79,6 +80,12 @@ jobs:
             (10444,'recOCe3oLSIjoFy2l','recgtK8Z7eNADNtVy','facebook'),
             (10461,'recIorCsOniQbv9n3','recT2rbKX3MF7cVFU','facebook'),
             (10487,'recZZUOojvU7mnQYW','recT2rbKX3MF7cVFU','facebook'),
+            (10202,'recXpkl7j6DbgnhOR','recgtK8Z7eNADNtVy','facebook'),
+            (10251,'recNygAzltwzGPPmN','recgtK8Z7eNADNtVy','facebook'),
+            (10313,'recnNoYbLLfxG2E5u','recT2rbKX3MF7cVFU','facebook'),
+            (10373,'recWLk01kPlyja6J7','recT2rbKX3MF7cVFU','facebook'),
+            (10430,'recehG1fslmTeJWAa','recgtK8Z7eNADNtVy','facebook'),
+            (10503,'recZO983kR5OcIOAI','recT2rbKX3MF7cVFU','facebook'),
           ]
           # Account token cannot read R2 REST objects (403). Resolve the exact
           # production R2 binding and use a short-lived, scoped HEAD-only helper.
