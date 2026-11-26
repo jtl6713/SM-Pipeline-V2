@@ -1,5 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
+import { automaticEzIdeaKind, automaticEzAcceptanceMarked, automaticEzAcceptedContext } from "./automatic-ez-intake.mjs";
 import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
@@ -13969,6 +13970,7 @@ function readyProductionIdeaEligible(idea, requestRecord = null, env = null) {
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
   if (linkedRecordIds(f(idea, "Content Items")).length) return false;
   if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
+  if(automaticEzIdeaKind(idea))return status==="approved"&&automaticEzAcceptanceMarked(requestRecord)&&readyProductionExistingDraftEligible(idea,requestRecord);
   if (storyFirstAutomaticHandoffEnabled(env)&&f(idea,"Studio_Production_Source")==="script_a_short") {
     return status==="approved"&&hasStoryHandoffApproval(requestRecord)&&readyProductionExistingDraftEligible(idea,requestRecord);
   }
@@ -14268,7 +14270,10 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  const manualAssetSelection = verifiedVibeDraft || Boolean(requestRecord
+  const acceptedEz=automaticEzIdeaKind(idea)?automaticEzAcceptedContext(requestRecord,idea):null;
+  if(automaticEzIdeaKind(idea)&&!acceptedEz)throw new HttpError(409,"Accepted automatic EZ media receipt changed");
+  if(acceptedEz){plan.platforms=autonomousItem4Platforms(canonicalProductionPlatforms(f(requestRecord,"Target_Platforms")));plan.contentType=String(f(requestRecord,"Master_Content_Type")||"");}
+  const manualAssetSelection = Boolean(acceptedEz) || verifiedVibeDraft || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
   const selectedMasterIds = requestRecord
@@ -15406,6 +15411,8 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
       const canonical = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, owner);
       if (!canonical?.id || canonical.id !== owner || isExplicitManualIdea(canonical))
         throw new HttpError(409, "Automatic Production not authorized for this Idea");
+      if(automaticEzIdeaKind(canonical)&&(f(canonical,"Candidate_Status")!=="Approved"||!automaticEzAcceptedContext(current,canonical)))
+        throw new HttpError(409,"Verified automatic EZ intake acceptance is required");
       if(storyFirstAutomaticHandoffEnabled(env)&&f(canonical,"Studio_Production_Source")==="script_a_short"&&
           (f(canonical,"Candidate_Status")!=="Approved"||!hasStoryHandoffApproval(current)))
         throw new HttpError(409,"Saved storyboard authoring approval is required");
