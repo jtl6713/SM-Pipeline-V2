@@ -12,11 +12,18 @@ export function ideaProductionModeSelect(env) {
   return productionModeCaptureEnabled(env) ? ",production_mode,production_source" : "";
 }
 
-// The caller is a trusted, authorized server creation entrypoint. The user
-// cannot choose manual yet: claim and editor boundaries must land first.
-export function newIdeaProductionCapture(env, source) {
+// Only enable explicit human opt-in when the complete runtime boundaries
+// have been independently validated. No default changes on existing records.
+export function manualIdeaCaptureEnabled(env) {
+  return productionModeCaptureEnabled(env)&&env?.STUDIO_PRODUCTION_MODE_ROUTING==="true"&&
+    env?.STUDIO_PRODUCTION_EDITOR_GUARD==="true"&&env?.STUDIO_MANUAL_IDEA_CREATE==="true";
+}
+// The caller is a trusted, authorized server creation entrypoint. Model
+// generated Ideas and dedicated callers use the automatic-only default.
+export function newIdeaProductionCapture(env, source, {requestedMode,humanChoice=false}={}) {
+  if(requestedMode==="manual"&&!manualIdeaCaptureEnabled(env)) throw new Error("Manual Production opt-in is not yet enabled");
   if (!productionModeCaptureEnabled(env)) return {};
-  return {[MODE_FIELD]:initialProductionMode({source}),[SOURCE_FIELD]:source};
+  return {[MODE_FIELD]:initialProductionMode({source,requestedMode,humanChoice}),[SOURCE_FIELD]:source};
 }
 
 // Only new POST rows can carry this internal capture marker. Generic edits,
@@ -29,7 +36,9 @@ export function splitIdeaProductionCapture(env, fields, {creating=false}={}) {
   let typed={};
   if (productionModeCaptureEnabled(env) && creating &&
       (mode!==undefined || source!==undefined)) {
-    if (mode!==initialProductionMode({source}) || mode!=="automatic")
+    if (mode==="manual" && (!manualIdeaCaptureEnabled(env)||source!=="idea"))
+      throw new Error("Invalid new Idea Production capture");
+    if (mode!==initialProductionMode({source,requestedMode:mode,humanChoice:mode==="manual"}))
       throw new Error("Invalid new Idea Production capture");
     typed={production_mode:mode,production_source:source};
   }
