@@ -26,7 +26,7 @@ def project_typed_idea_mode(row: dict, fields: dict) -> None:
     source, mode = row.get("production_source"), row.get("production_mode")
     valid = (
         source == "idea" and mode in ("automatic", "manual")
-        or source in ("script_a_short", "finished_video") and mode == "automatic"
+        or source in ("script_a_short", "finished_video", "vibe_cut") and mode == "automatic"
     )
     if valid:
         fields["Studio_Production_Mode"] = mode
