@@ -85,3 +85,12 @@ test("existing row collision aborts before any capture write",async()=>{
     assert.equal(writes,0);
   } finally {globalThis.fetch=original;}
 });
+
+test("Vibe Cut typed capture round-trips without granting manual or AZ authority",()=>{
+  const fields=newIdeaProductionCapture(enabled,"vibe_cut");
+  assert.deepEqual(fields,{Studio_Production_Mode:"automatic",Studio_Production_Source:"vibe_cut"});
+  assert.deepEqual(splitIdeaProductionCapture(enabled,fields,{creating:true}),{fields:{},typed:{production_mode:"automatic",production_source:"vibe_cut"}});
+  assert.deepEqual(projectIdeaProductionMode({production_mode:"automatic",production_source:"vibe_cut"},{}),fields);
+  assert.deepEqual(projectIdeaProductionMode({production_mode:"manual",production_source:"vibe_cut"},fields),{});
+  assert.throws(()=>newIdeaProductionCapture({...enabled,STUDIO_PRODUCTION_MODE_ROUTING:"true",STUDIO_PRODUCTION_EDITOR_GUARD:"true",STUDIO_MANUAL_IDEA_CREATE:"true"},"vibe_cut",{requestedMode:"manual",humanChoice:true}),/human Idea/);
+});
