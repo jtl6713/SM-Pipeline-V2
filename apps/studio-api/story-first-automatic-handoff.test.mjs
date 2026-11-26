@@ -99,3 +99,10 @@ test("Worker dedicated route is authorized, locked and sends only to governed qu
   assert.match(handler,/readyProductionEnqueue/);
   assert.doesNotMatch(handler,/promoteProductionRequestViaI3I4|publishNow|scheduleReservation/);
 });
+
+test("browser capability requires the real storyboard flag and both route permissions",()=>{
+  const root=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  const cap=root.slice(root.indexOf('if (url.pathname === "/api/production-mode/capabilities")'),root.indexOf("if (dedicatedRoute)",root.indexOf('if (url.pathname === "/api/production-mode/capabilities")')));
+  assert.match(cap,/storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled\(env\) &&\s*authorization\.permissions\?\.ideas_promote === true && authorization\.permissions\?\.production_configure === true/);
+  assert.match(cap,/request\.method !== "GET"/);
+});

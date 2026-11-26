@@ -1,4 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
+import { storyFirstAutomaticHandoffEnabled } from "./story-first-automatic-handoff.mjs";
 import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
@@ -2376,6 +2377,8 @@ export default {
           manual_idea_choice_enabled: manualIdeaCreateEnabled(env) &&
             authorization.permissions?.ideas_create === true && authorization.permissions?.production_configure === true,
           finished_video_transport_enabled: dedicatedProductionRoutesEnabled(env),
+          storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
+            authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
         });
       }
