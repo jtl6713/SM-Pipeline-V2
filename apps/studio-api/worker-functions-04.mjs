@@ -720,6 +720,7 @@ import {
   studioApproveAllCandidateFormula,
   listContentProfileRecords,
   resolveAuthorizedContentProfiles,
+  loadAuthorizedIdea,
   resolveFactoryReviewResolveAuthorization,
   resolveWorkingContentProfile,
   outputRowsForProductionRequest,
