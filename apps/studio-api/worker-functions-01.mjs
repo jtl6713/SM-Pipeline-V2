@@ -4471,6 +4471,9 @@ export async function updateIdea(request, env, url, authorization) {
   const record = await loadAuthorizedIdea(env, recordId, authorization);
   assertIdeaUnpromoted(record, "Editing");
   assertIdeaNotApproved(record, "Editing");
+  if (/\[automatic-ez-(?:intake|accepted)\.1\]/i.test(String(f(record,"Production_Config_Notes")||"")) ||
+      /\[automatic-ez-(?:intake|accepted)\.1\]/i.test(JSON.stringify(payload)))
+    throw new HttpError(409,"Automatic EZ intake configuration is managed by its dedicated wizard");
 
   const input = cleanIdeaUpdatePayload(payload);
   const wantsStoryFirstUpdate = Object.prototype.hasOwnProperty.call(payload || {}, "storyboard");
