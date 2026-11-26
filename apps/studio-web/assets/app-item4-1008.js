@@ -351,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1106-existing-photo-wait-3094";
+  const BUILD_ID = "item4-0.6.1107-automatic-ez-home-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -8778,6 +8778,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function resetEzWizard({ silent = false } = {}) {
+    if(automaticEzWizardSession&&!automaticEzWizardSession.writeStarted)automaticEzWizardSession=null;
     ezWizardStep = "start";
     ezWizardAnswers = azFinishedPath ? ezWizardAnswers : {};
     ezWizardHistory = [];
@@ -9049,6 +9050,9 @@ function timedScriptAssetLabel(asset, index) {
       void finishEzWizard();
       return;
     }
+    if(nextStep==="confirm"&&automaticEzWizardCandidate(ezWizardAnswers)) {
+      void routeAutomaticEzWizardConfirmation();return;
+    }
     ezWizardGo(nextStep);
   }
 
@@ -9071,6 +9075,7 @@ function timedScriptAssetLabel(asset, index) {
     ezWizardSetMessage();
     const answers = ezWizardAnswers;
     const count = helpers?.ezWizardPhotoCount?.(answers) || 1;
+    if(ezWizardStep==="automaticEzIntake"){renderAutomaticEzWizardIntake(automaticEzWizardSession);return;}
 
     if (ezWizardStep === "start") {
       prompt.textContent = "Where do you want to start?";
@@ -9534,6 +9539,247 @@ function timedScriptAssetLabel(asset, index) {
     return;
   }
 
+  // #3094: dedicated ordinary EZ intake stays in the Home wizard.
+  let automaticEzWizardSession = null;
+  const automaticEzWizardKinds = new Set(["single-photo","multiple-photos","single-ai","multiple-ai","mixed","video-clips","photos-and-clips"]);
+  function automaticEzWizardCandidate(answers) {
+    return !answers?.ideaId && !answers?.photoWait && automaticEzWizardKinds.has(answers?.inputKind);
+  }
+  function automaticEzWizardCounts(answers, helpers) {
+    const kind=answers.inputKind;
+    const photos=kind==="mixed"?Number(answers.manualCount):["single-photo","multiple-photos","photos-and-clips"].includes(kind)?Number(helpers.ezWizardPhotoCount(answers)):0;
+    const clips=["video-clips","photos-and-clips"].includes(kind)?Number(helpers.ezWizardClipCount(answers)):0;
+    const ai=kind==="mixed"?Number(answers.aiCount):["single-ai","multiple-ai"].includes(kind)?Number(helpers.ezWizardPhotoCount(answers)):0;
+    if([photos,clips,ai].some(n=>!Number.isInteger(n)||n<0||n>30)||photos+clips+ai<1)throw new Error("Invalid media counts");
+    return {photos,clips,ai,total:photos+clips+ai};
+  }
+  async function runAutomaticEzWizardMedia({session,call,assertCurrent,files,preparePhoto,makeMetadata,isVideo,progress}) {
+    const {profile,kind,counts,planned}=session;
+    const validId=id=>/^rec[A-Za-z0-9]{14}$/.test(String(id||""));
+    const requestPath=()=>"/api/automatic-ez/production-requests/"+encodeURIComponent(session.requestId);
+    const scoped=path=>path+"?profile="+encodeURIComponent(profile);
+    const send=async(path,options={})=>{assertCurrent();const result=await call(scoped(path),{...options,retries:0});assertCurrent();return result;};
+    const post=(path,body,timeoutMs=30000)=>send(path,{method:"POST",body:JSON.stringify(body),timeoutMs});
+    const equalSet=(a,b)=>Array.isArray(a)&&a.length===b.length&&new Set(a).size===b.length&&b.every(v=>a.includes(v));
+    if(!session.ideaId) {
+      if(session.writeStarted)throw new Error("Idea save was not confirmed. Reconcile before retrying.");
+      session.writeStarted=true;
+      const result=await post("/api/ideas",{title:session.title,summary:session.summary,primary_location:session.location,
+        content_profile_id:profile,input_kind:kind,production_mode:"automatic",automatic_ez_intake:true});
+      if(validId(result.record?.id))session.ideaId=result.record.id;
+      if(result.automatic_ez_intake_saved!==true||!validId(session.ideaId)||result.record?.production_mode!=="automatic"||
+        result.record?.production_source!=="idea"||result.record?.status!=="Generated"||
+        !equalSet(result.record?.content_profile_links,[profile]))throw new Error("Automatic Idea receipt was not verified");
+    }
+    progress("Saving the exact destination and media plan…");
+    const draft=await post("/api/automatic-ez/production-requests",{idea_record_id:session.ideaId,content_profile_id:profile,...session.payload});
+    if(validId(draft.record?.id))session.requestId=draft.record.id;
+    if(draft.automatic_ez_draft_verified!==true||!validId(session.requestId)||draft.record?.idea_record_id!==session.ideaId||
+      !equalSet(draft.record?.platforms,planned.platforms)||draft.record?.content_type!==session.payload.content_type||
+      String(draft.record?.production_notes||"").split(/\r?\n/)[0]!==session.payload.production_notes||draft.record?.status!=="Draft"||
+      Number(draft.record?.studio_master_asset_count)!==0)throw new Error("Exact empty intake draft was not verified. No media was uploaded.");
+    let stored=0;
+    for(const file of files) {
+      progress("Saving original "+(stored+1)+" of "+files.length+"…");
+      const payload=await preparePhoto(file);
+      assertCurrent();
+      const form=new FormData();
+      form.append("files",payload,payload.name);
+      form.append("posters",new Blob([],{type:"application/octet-stream"}),"empty");
+      form.append("metadata",JSON.stringify(await makeMetadata([payload])));
+      form.append("origin_kind",kind);
+      const result=await send(requestPath()+"/assets",{method:"POST",body:form,timeoutMs:isVideo(file)?180000:90000});
+      if(result.ok!==true||result.record?.id!==session.requestId||result.uploaded!==1||
+        !Array.isArray(result.assets)||result.assets.length!==stored+1)throw new Error("Upload receipt was not verified. Do not upload again until reconciled.");
+      stored++;
+    }
+    for(let i=0;i<counts.ai;i++) {
+      progress("Generating AI image "+(i+1)+" of "+counts.ai+"…");
+      const result=await post(requestPath()+"/generate-ai-masters",{content_profile_id:profile,target_ai_count:counts.ai},120000);
+      if(result.ok!==true||result.production_request?.id!==session.requestId||result.content_profile_id!==profile||
+        Number(result.requested_count)!==counts.ai||Number(result.generated_count)!==i+1||
+        !Array.isArray(result.assets)||result.assets.length!==stored+i+1)throw new Error("AI image receipt was not verified. Do not regenerate until reconciled.");
+    }
+    session.mediaSubmitted=true;
+  }
+  async function checkAutomaticEzWizardAcceptance({session,call,assertCurrent}) {
+    const path="/api/automatic-ez/production-requests/"+encodeURIComponent(session.requestId);
+    const scoped=p=>p+"?profile="+encodeURIComponent(session.profile);
+    if(!session.mediaSubmitted)throw new Error("Media submission has not been verified");
+    assertCurrent();
+    if(!session.acceptStarted) {
+      const status=await call(scoped(path+"/item4"),{timeoutMs:8000,retries:0});
+      assertCurrent();
+      if(status.ok!==true||status.snapshot!==true||!Array.isArray(status.assets)||
+        status.assets.length!==session.counts.total)throw new Error("Saved media count or snapshot is not verified");
+      if(status.assets_status==="Error")throw new Error("Saved media processing needs reconciliation");
+      if(status.assets_status!=="Ready")return null;
+    }
+    // The acceptance endpoint is explicitly idempotent on the exact saved
+    // request; after an uncertain response replay acceptance, never upload.
+    session.acceptStarted=true;
+    const receipt=await call(scoped(path+"/accept"),{method:"POST",body:JSON.stringify({accept_intake:true}),timeoutMs:30000,retries:0});
+    assertCurrent();
+    if(receipt.ok!==true||receipt.queued!==true||receipt.idea_id!==session.ideaId||
+      receipt.production_request_id!==session.requestId||receipt.publishing!==false||
+      receipt.requires_factory_approval!==true)throw new Error("Queue receipt was not verified");
+    return receipt;
+  }
+  function automaticEzWizardAssertCurrent(session) {
+    if(automaticEzWizardSession!==session||selectedProfileId!==session.profile||ezWizardStep!=="automaticEzIntake"||!$("page-home")?.classList.contains("active"))
+      throw new Error("The wizard or working profile changed. Reconcile the saved intake before starting another.");
+  }
+  function automaticEzWizardError(session,error) {
+    const ids=[session.ideaId&&"Idea "+session.ideaId,session.requestId&&"request "+session.requestId].filter(Boolean).join("; ");
+    ezWizardSetMessage((error?.message||"Intake was not confirmed")+(ids?". Saved IDs: "+ids:""),"error-text");
+  }
+  async function finishAutomaticEzWizardMedia(session, {polls=5,manual=false}={}) {
+    if(session.checking)return;
+    session.checking=true;
+    if(manual)session.pollRounds=0;
+    session.pollRounds=(session.pollRounds||0)+1;
+    setEzWizardBusy(true,"Checking saved master media…");
+    try {
+      for(let i=0;i<polls;i++) {
+        const receipt=await checkAutomaticEzWizardAcceptance({session,call:api,assertCurrent:()=>automaticEzWizardAssertCurrent(session)});
+        if(receipt) {
+          automaticEzWizardSession=null;
+          resetEzWizard({silent:true});
+          switchToPage("ideas");
+          setIdeasAutonomousMessage("Idea accepted. Studio will prepare the selected outputs for Approval Factory. Nothing has been approved for publishing.","success");
+          loadIdeas().catch(()=>{});
+          return;
+        }
+        if(i+1<polls)await sleepMs(2500);
+      }
+      automaticEzWizardAssertCurrent(session);
+      if(session.pollRounds>=6||!$("page-home")?.classList.contains("active")) {
+        ezWizardSetMessage("Originals are saved. Background media preparation is still running. Check the same saved request again when ready; do not upload again.","success");
+      } else {
+        ezWizardSetMessage("Originals are saved. Studio is still preserving the master media; checking again automatically.","success");
+        session.pollTimer=window.setTimeout(()=>{
+          if(automaticEzWizardSession===session&&selectedProfileId===session.profile&&ezWizardStep==="automaticEzIntake"&&$("page-home")?.classList.contains("active"))
+            void finishAutomaticEzWizardMedia(session,{polls:1});
+        },20000);
+      }
+    } catch(error) {
+      if(automaticEzWizardSession===session)automaticEzWizardError(session,error);
+    } finally {
+      session.checking=false;
+      if(automaticEzWizardSession===session) {
+        setEzWizardBusy(false);
+        if($("ezWizardBack"))$("ezWizardBack").disabled=true;
+        if($("ezWizardReset"))$("ezWizardReset").disabled=true;
+      }
+    }
+  }
+  function renderAutomaticEzWizardIntake(session) {
+    if(!session||session.profile!==selectedProfileId) {
+      ezWizardHideForm();renderEzWizardChips([]);
+      ezWizardSetMessage("Return to the original profile to reconcile this intake.","error-text");return;
+    }
+    const prompt=$("ezWizardPrompt");
+    renderEzWizardChips([]);
+    if(session.writeStarted) {
+      if(prompt)prompt.textContent="Automatic intake — saved media";
+      ezWizardShowForm('<p class="subtle">Saved request: '+escapeHtml(session.requestId||"not yet confirmed")+'</p>'+
+        (session.mediaSubmitted?'<div class="ez-wizard-form-actions"><button type="submit">Check media and continue</button></div>':""),
+        ()=>{if(session.mediaSubmitted){window.clearTimeout(session.pollTimer);void finishAutomaticEzWizardMedia(session,{manual:true});}});
+      if($("ezWizardBack"))$("ezWizardBack").disabled=true;
+      if($("ezWizardReset"))$("ezWizardReset").disabled=true;
+      return;
+    }
+    const {counts,answers,planned}=session;
+    if(prompt)prompt.textContent="Send your idea and media to Automatic Production";
+    const uploadCount=counts.photos+counts.clips;
+    const accept=counts.photos&&counts.clips?"image/*,video/mp4,video/quicktime,.heic,.heif,.mp4,.mov":counts.clips?"video/mp4,video/quicktime,.mp4,.mov":"image/*,.heic,.heif";
+    ezWizardShowForm(
+      '<label>Title<input name="title" maxlength="160" required value="'+escapeHtml(answers.ideaTitle||"")+'"></label>'+
+      '<label>Summary / creative direction<textarea name="summary" maxlength="8000">'+escapeHtml(answers.ideaSummary||"")+'</textarea></label>'+
+      '<label>Primary location<input name="location" maxlength="200" value="'+escapeHtml(answers.ideaLocation||"")+'"></label>'+
+      (uploadCount?'<label>Select exactly '+counts.photos+' photo(s) and '+counts.clips+' clip(s)<input name="media" type="file" accept="'+accept+'" '+(uploadCount>1?"multiple ":"")+'required></label>':"")+
+      '<label>Voiceover<select name="voice"><option>Yes</option><option>No</option></select></label>'+
+      '<label>Background music<select name="music"><option>Yes</option><option>No</option></select></label>'+
+      '<label>Thumbnail<select name="thumbnail"><option value="Yes">AI generated</option><option>Use photo frame</option><option>No</option></select></label>'+
+      '<p class="subtle">'+escapeHtml(planned.platforms.join(", "))+' · '+counts.ai+' AI image(s). Final publishing approval and dates are handled in Approval Factory.</p>'+
+      '<div class="ez-wizard-form-actions"><button type="submit">Accept Idea and prepare automatically</button></div>',
+      data=>void submitAutomaticEzWizardIntake(session,data));
+  }
+  async function submitAutomaticEzWizardIntake(session,data) {
+    if(ezWizardBusy||session.writeStarted)return;
+    const {counts,kind,profile,answers,planned}=session;
+    const files=data.getAll("media").filter(file=>file&&file.size>0);
+    const videos=files.filter(item4FileLooksLikeVideo);
+    const photos=files.filter(file=>!item4FileLooksLikeVideo(file)&&(/^image\//i.test(file.type)||/\.(heic|heif)$/i.test(file.name)));
+    if(photos.length!==counts.photos||videos.length!==counts.clips||files.length!==photos.length+videos.length||
+      videos.some(file=>file.size>90*1024*1024)||photos.some(file=>file.size>25*1024*1024)) {
+      ezWizardSetMessage("Choose the exact photo and clip counts. This direct intake supports photos up to 25 MB and clips up to 90 MB; large multipart clips are not enabled here.","error-text");return;
+    }
+    session.title=String(data.get("title")||"").trim();
+    if(!session.title){ezWizardSetMessage("Enter an Idea title.","error-text");return;}
+    session.summary=String(data.get("summary")||"").trim()||session.title;
+    session.location=String(data.get("location")||"").trim();
+    const notes=ezPlanApi().ezOriginNotes({origin:"ez-wizard",inputKind:kind,captionMode:"ai",manualCount:counts.photos,
+      aiCount:counts.ai,clipCount:counts.clips,packageId:answers.packageId});
+    session.payload={content_type:planned.master_content_type,platforms:[...planned.platforms],
+      voiceover_mode:String(data.get("voice")||"Yes"),background_music_mode:String(data.get("music")||"Yes"),
+      thumbnail_mode:String(data.get("thumbnail")||"Yes"),video_duration_seconds:30,voiceover_duration_seconds:15,
+      video_clip_count_mode:counts.clips?"Exact":"AI decides",video_clip_count_exact:counts.clips||null,
+      carousel_slide_count_mode:counts.photos+counts.ai?"Exact":"AI decides",carousel_slide_count_exact:counts.photos+counts.ai||null,
+      carousel_image_mode:counts.ai?"Make AI Generated":"Manual Upload",primary_location:session.location,production_notes:notes};
+    setEzWizardBusy(true,"Saving Idea…");
+    try {
+      await runAutomaticEzWizardMedia({session,call:api,assertCurrent:()=>automaticEzWizardAssertCurrent(session),files:[...photos,...videos],
+        preparePhoto:item4PreparePhotoFile,makeMetadata:imageMetadataForFiles,isVideo:item4FileLooksLikeVideo,
+        progress:text=>ezWizardSetMessage(text,"success")});
+      automaticEzWizardAssertCurrent(session);
+      renderAutomaticEzWizardIntake(session);
+      await finishAutomaticEzWizardMedia(session);
+    } catch(error) {
+      if(automaticEzWizardSession===session) {
+        renderAutomaticEzWizardIntake(session);
+        automaticEzWizardError(session,error);
+      }
+    } finally {
+      if(automaticEzWizardSession===session) {
+        setEzWizardBusy(false);
+        if(session.writeStarted){if($("ezWizardBack"))$("ezWizardBack").disabled=true;if($("ezWizardReset"))$("ezWizardReset").disabled=true;}
+      }
+    }
+  }
+  async function offerAutomaticEzWizardIntake(answers) {
+    if(!automaticEzWizardCandidate(answers))return false;
+    const profile=selectedProfileId;
+    const caps=await api("/api/production-mode/capabilities",{timeoutMs:8000,retries:0});
+    if(caps?.ok!==true||typeof caps.ordinary_editor_boundary_enabled!=="boolean"||profile!==selectedProfileId)
+      throw new Error("Automatic intake routing could not be verified. Nothing was saved.");
+    if(!caps.ordinary_editor_boundary_enabled)return false;
+    if(!["automatic_ez_idea_create_enabled","automatic_ez_draft_create_enabled","automatic_ez_media_enabled","automatic_ez_accept_enabled"].every(key=>caps[key]===true))
+      throw new Error("Automatic EZ media intake is not available. Nothing was saved.");
+    if(!["video","slides"].includes(answers.packageId))
+      throw new Error("Custom formats are not yet supported by automatic intake. Choose a standard package; nothing was saved.");
+    const helpers=ezPlanApi(),planned=helpers.ezWizardResolvePackage(answers),counts=automaticEzWizardCounts(answers,helpers);
+    if(!planned?.platforms?.length||!planned.master_content_type)throw new Error("Choose a valid destination package");
+    if(automaticEzWizardSession?.writeStarted)throw new Error("Reconcile the previously saved intake before starting another");
+    const session={profile,kind:answers.inputKind,answers:{...answers},planned,counts};
+    automaticEzWizardSession=session;
+    ezWizardHistory.push(ezWizardStep);
+    ezWizardStep="automaticEzIntake";
+    renderAutomaticEzWizardIntake(session);
+    return true;
+  }
+  async function routeAutomaticEzWizardConfirmation() {
+    if(ezWizardBusy)return;
+    setEzWizardBusy(true,"Checking automatic intake…");
+    try {
+      if(!await offerAutomaticEzWizardIntake(ezWizardAnswers)) {
+        setEzWizardBusy(false);
+        ezWizardGo("confirm");
+      }
+    } catch(error){ezWizardSetMessage(error.message||"Automatic intake could not be verified","error-text");}
+    finally{setEzWizardBusy(false);}
+  }
+
   async function finishEzWizard() {
     if (ezWizardBusy) return;
     const helpers = ezPlanApi();
@@ -9543,6 +9789,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     setEzWizardBusy(true, "Saving your answers…");
     try {
+      if(await offerAutomaticEzWizardIntake(ezWizardAnswers)){setEzWizardBusy(false);return;}
       const helpersNow = ezPlanApi();
       const planned = helpersNow?.ezWizardResolvePackage?.(ezWizardAnswers) || applyEzWizardAnswersToIntake();
       ezWizardPending = { ...ezWizardAnswers, planned };

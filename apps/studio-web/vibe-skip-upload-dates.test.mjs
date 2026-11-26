@@ -8,9 +8,13 @@ const end = app.indexOf("  function renderEzWizard(", start);
 assert.ok(start >= 0 && end > start, "Wizard selection handler exists");
 const pickerCode = app.slice(start, end);
 
-function simulatePick(answers) {
-  const log = [], navigation = [], finish = [];
-  const make = new Function("initial", "log", "navigation", "finish", `
+const candidateCode = app.slice(app.indexOf("  const automaticEzWizardKinds ="), app.indexOf("  function automaticEzWizardCounts("));
+const confirmationCode = app.slice(app.indexOf("  async function routeAutomaticEzWizardConfirmation("), app.indexOf("  async function finishEzWizard("));
+assert.ok(candidateCode.includes("function automaticEzWizardCandidate") && confirmationCode.includes("function routeAutomaticEzWizardConfirmation"));
+
+function simulatePick(answers, {automatic = false} = {}) {
+  const log = [], navigation = [], finish = [], offers = [], messages = [];
+  const make = new Function("initial", "log", "navigation", "finish", "offers", "messages", "automatic", `
     let ezWizardStep = "vibeVersions";
     let ezWizardAnswers = { ...initial };
     function ezWizardLogAdd(role, text) { log.push({ role, text }); }
@@ -19,10 +23,16 @@ function simulatePick(answers) {
       finish.push({ ...ezWizardAnswers });
       return Promise.resolve();
     }
+    let ezWizardBusy = false;
+    function setEzWizardBusy(busy) { ezWizardBusy = busy; }
+    function ezWizardSetMessage(message) { messages.push(message); }
+    async function offerAutomaticEzWizardIntake(answers) { offers.push({...answers}); return automatic; }
+    ${candidateCode}
+    ${confirmationCode}
     ${pickerCode}
     return { pick: ezWizardPick, answers: () => ezWizardAnswers };
   `);
-  return { ...make(answers, log, navigation, finish), log, navigation, finish };
+  return { ...make(answers, log, navigation, finish, offers, messages, automatic), log, navigation, finish, offers, messages };
 }
 
 test("Vibe Cut goes straight from cut versions to upload without confirming dates", () => {
@@ -39,9 +49,11 @@ test("Vibe Cut goes straight from cut versions to upload without confirming date
   assert.match(wizard.log.at(-1).text, /final approval/i);
 });
 
-test("regular Studio paths still show their existing date confirmation", () => {
+test("regular Studio paths still show their existing date confirmation with the automatic editor boundary off", async () => {
   const wizard = simulatePick({ start: "photos", inputKind: "multiple-photos" });
   wizard.pick("Video", { packageId: "video" }, "confirm");
+  await Promise.resolve();
+  assert.equal(wizard.offers.length, 1);
   assert.deepEqual(wizard.navigation, ["confirm"]);
   assert.equal(wizard.finish.length, 0);
 });
@@ -62,4 +74,21 @@ test("all three Vibe cut-version choices still reach the shared selector", () =>
     assert.ok(section.includes(`vibeVersions: ${count}, packageId: "video" }, "confirm"`));
   }
   assert.match(app, /automatic(?:ally)?/i);
+});
+
+test("capability-enabled ordinary EZ intake does not show provisional dates", async () => {
+  const wizard = simulatePick({ start: "photos", inputKind: "multiple-photos" }, {automatic:true});
+  wizard.pick("Video", {packageId:"video"}, "confirm");
+  await Promise.resolve();
+  assert.equal(wizard.offers.length,1);
+  assert.deepEqual(wizard.navigation,[]);
+  assert.equal(wizard.finish.length,0);
+});
+test("existing Idea and dedicated finished-video paths retain date confirmation", () => {
+  for(const answers of [{start:"idea",ideaId:"recExisting",inputKind:"single-photo"},{start:"photos",inputKind:"finished-video"}]){
+    const wizard=simulatePick(answers,{automatic:true});
+    wizard.pick("Video",{packageId:"video"},"confirm");
+    assert.deepEqual(wizard.navigation,["confirm"]);
+    assert.equal(wizard.offers.length,0);
+  }
 });
