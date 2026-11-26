@@ -4350,7 +4350,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   // matching fails. Cron's Waiting scan owns bounded retries.
   const modeVerified=requestedProductionMode!=="manual"||
     (f(created,"Studio_Production_Mode")==="manual"&&f(created,"Studio_Production_Source")==="idea");
-  if (!vibeCut && !(finishedVideo && env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" && env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") && ctx?.waitUntil && !storyFirst && modeVerified) {
+  if (!vibeCut && ctx?.waitUntil && !storyFirst && !(finishedVideo && env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" && env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") && modeVerified) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
