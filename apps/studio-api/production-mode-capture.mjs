@@ -12,11 +12,21 @@ export function ideaProductionModeSelect(env) {
   return productionModeCaptureEnabled(env) ? ",production_mode,production_source" : "";
 }
 
-// The caller is a trusted, authorized server creation entrypoint. The user
-// cannot choose manual yet: claim and editor boundaries must land first.
-export function newIdeaProductionCapture(env, source) {
+// No new manual selection unless *all* rollout gates are explicitly enabled.
+// Avoid importing the editor module here (it depends on this capture module).
+export function manualProductionChoiceEnabled(env) {
+  return productionModeCaptureEnabled(env) &&
+    env?.STUDIO_PRODUCTION_MODE_ROUTING === "true" &&
+    env?.STUDIO_PRODUCTION_MODE_EDITOR === "true";
+}
+// Only a trusted authorized creation entrypoint passes humanChoice=true.
+// The generic writer validates the server-created marker a second time.
+export function newIdeaProductionCapture(env, source, {requestedMode,humanChoice=false}={}) {
+  const chosen=initialProductionMode({source,requestedMode,humanChoice});
+  if (chosen==="manual"&&!manualProductionChoiceEnabled(env))
+    throw new Error("Manual Production selection is not enabled");
   if (!productionModeCaptureEnabled(env)) return {};
-  return {[MODE_FIELD]:initialProductionMode({source}),[SOURCE_FIELD]:source};
+  return {[MODE_FIELD]:chosen,[SOURCE_FIELD]:source};
 }
 
 // Only new POST rows can carry this internal capture marker. Generic edits,
@@ -29,7 +39,10 @@ export function splitIdeaProductionCapture(env, fields, {creating=false}={}) {
   let typed={};
   if (productionModeCaptureEnabled(env) && creating &&
       (mode!==undefined || source!==undefined)) {
-    if (mode!==initialProductionMode({source}) || mode!=="automatic")
+    if (mode==="manual"&&!manualProductionChoiceEnabled(env))
+      throw new Error("Invalid new Idea Production capture");
+    if (mode!==initialProductionMode({source,requestedMode:mode,humanChoice:mode==="manual"}) ||
+        !["automatic","manual"].includes(mode))
       throw new Error("Invalid new Idea Production capture");
     typed={production_mode:mode,production_source:source};
   }
