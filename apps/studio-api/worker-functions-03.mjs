@@ -1,3 +1,4 @@
+import { windowsOutagePublishBlock } from "./windows-outage-control.mjs";
 import { isExplicitManualIdea } from "./production-mode-capture.mjs";
 import {
   airtableAiClassification,
@@ -14533,6 +14534,11 @@ export async function studioEnsureOutputCaption(env, record) {
 /*__STUDIO_WORKER_END:studioEnsureOutputCaption__*/
 
 export async function studioDispatchApprovedPublishNow(env, record) {
+  // #3159: no provider admission during the incident or from an expired reservation.
+  // An explicitly requested unscheduled manual path retains its pre-existing
+  // authorization after recovery; scheduled auto admission separately requires a date.
+  const outageBlock = windowsOutagePublishBlock(Date.parse(String(f(record, "Scheduled_Post_Date") || "")));
+  if (outageBlock && outageBlock !== "schedule_required") return { ok: true, skipped: outageBlock, record };
   if (!studioPublishCanDispatchNow(record)) {
     return {
       ok: true,
@@ -14662,6 +14668,8 @@ export function studioPublishDispatchNote(result) {
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
   if (!id) return;
+  // #3159: admission deferral is not a provider attempt, retry or failure.
+  if (/\bskipped:\s*(?:windows_outage_paused|outage_overdue_requires_mae_reschedule)\s*$/i.test(String(note || "").trim())) return;
   // A future schedule reservation / scheduled-hold is NOT a provider dispatch.
   // Counting it as an attempt permanently excludes the output from the
   // Supabase due-time first-publish lane (issue #2340). Preserve the actual
@@ -14699,6 +14707,11 @@ export async function studioStampPublishDispatch(env, record, note) {
 /*__STUDIO_WORKER_END:studioStampPublishDispatch__*/
 
 export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
+  // #3159: no provider admission during the incident or from an expired reservation.
+  // An explicitly requested unscheduled manual path retains its pre-existing
+  // authorization after recovery; scheduled auto admission separately requires a date.
+  const outageBlock = windowsOutagePublishBlock(Date.parse(String(f(record, "Scheduled_Post_Date") || "")));
+  if (outageBlock && outageBlock !== "schedule_required") return { ok: true, skipped: outageBlock, record };
   if (!studioPublishCanDispatchNow(record)) {
     const heldUntil = studioPublishHeldUntilIso(record);
     // Future reservations must not acquire a publish-attempt counter here.

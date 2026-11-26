@@ -1,3 +1,4 @@
+import { windowsOutageState } from "./windows-outage-control.mjs";
 import { handleQaApi } from "./qa-http.mjs";
 import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
 import { automaticEzCreateEnabled, automaticEzIntakeEnabled } from "./automatic-ez-intake.mjs";
@@ -1451,8 +1452,9 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1046-overdue-evidence-triage-3096",
+          version: "0.10.1047-windows-outage-fence-3159",
           airtable_activity: airtableActivity,
+          windows_outage: windowsOutageState(),
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4718,6 +4720,11 @@ export default {
       ctx.waitUntil(recordStudioAirtableCollectorHeartbeat(env).catch(error =>
         console.warn("airtable_retirement_collector_heartbeat_unavailable",
           String(error?.message || error))));
+    }
+    // #3159: emergency scheduler containment. No queued job or provider state is rewritten.
+    if (windowsOutageState().active) {
+      console.info("WINDOWS_OUTAGE_SCHEDULED_ADMISSION_PAUSED");
+      return;
     }
     // #2853: verified independent Supabase production recovery. The minute
     // owner is disjoint from the shared light/heavy sweep, including cooldown.
