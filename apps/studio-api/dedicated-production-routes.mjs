@@ -4,7 +4,7 @@
 import { exactEditorOwnership, editorAuthorityQuery, ideaEditorAuthorityQuery } from "./production-editor-boundary.mjs";
 import { productionModeCaptureEnabled } from "./production-mode-capture.mjs";
 import { isAzFinishedVideoOrigin } from "./az-finished-video.mjs";
-import { automaticEzIntakeEnabled, verifiedAutomaticEzDraftInput } from "./automatic-ez-intake.mjs";
+import { automaticEzIntakeEnabled, verifiedAutomaticEzDraftInput, automaticEzMediaContext, automaticEzMediaOperationAllowed } from "./automatic-ez-intake.mjs";
 
 export const dedicatedProductionRoutesEnabled=env=>productionModeCaptureEnabled(env)&&
   env?.STUDIO_DEDICATED_PRODUCTION_ROUTES==="true";
@@ -26,6 +26,14 @@ export function dedicatedProductionRoute(path,method) {
   const verb=String(method||"GET").toUpperCase();
   if(path==="/api/automatic-ez/production-requests")
     return {kind:"automatic_ez_create",allowed:verb==="POST",path:"/api/production-requests"};
+  const ez=/^\/api\/automatic-ez\/production-requests\/(rec[A-Za-z0-9]+)\/(item4|assets|generate-ai-masters)$/.exec(path);
+  if(ez){
+    const operation=ez[2]==="item4"&&verb==="GET"?"snapshot":
+      ez[2]==="assets"&&verb==="POST"?"upload":
+      ez[2]==="generate-ai-masters"&&verb==="POST"?"ai":null;
+    return {kind:"automatic_ez_request",id:ez[1],operation,allowed:rec.test(ez[1])&&Boolean(operation),
+      path:"/api/production-requests/"+ez[1]+"/"+ez[2]};
+  }
   if(path.startsWith("/api/automatic-ez/production-requests/"))
     return {kind:"invalid",allowed:false};
   if(path==="/api/finished-video/production-requests")
@@ -38,7 +46,7 @@ export function dedicatedProductionRoute(path,method) {
   return null;
 }
 export function dedicatedRouteEnabled(env,route) {
-  return route?.kind==="automatic_ez_create" ? automaticEzIntakeEnabled(env) : dedicatedProductionRoutesEnabled(env);
+  return ["automatic_ez_create","automatic_ez_request"].includes(route?.kind) ? automaticEzIntakeEnabled(env) : dedicatedProductionRoutesEnabled(env);
 }
 const one=rows=>Array.isArray(rows)&&rows.length===1?rows[0]:null;
 function dedicatedIdeaAuthority(row,id,source,scope) {
@@ -47,8 +55,20 @@ function dedicatedIdeaAuthority(row,id,source,scope) {
     profile?.id&&row.content_profile_id===profile.id&&rec.test(profile.airtable_record_id)&&
     scope?.profiles?.some(p=>p.id===profile.airtable_record_id&&p.brandIds?.length>0);
 }
-export async function verifyDedicatedProductionAccess({route,body,scope,read,loadIdea}) {
+export async function verifyDedicatedProductionAccess({route,body,scope,read,loadIdea,loadRequest}) {
   if(!route?.allowed)return false;
+  if(route.kind==="automatic_ez_request") {
+    const row=one(await read(editorAuthorityQuery(route.id)));
+    if(!exactEditorOwnership(row,{...scope,requestId:route.id})||
+       row.request_status!=="Draft"||row.idea_candidates.production_source!=="idea"||
+       row.idea_candidates.production_mode!=="automatic"||typeof loadRequest!=="function")return false;
+    const idea=await loadIdea(row.idea_candidates.airtable_record_id);
+    const draft=await loadRequest(route.id);
+    if(draft?.id!==route.id||draft.fields?.Production_Notes!==row.production_notes)return false;
+    const context=automaticEzMediaContext(draft,idea);
+    return Boolean(context&&context.profileId===row.idea_candidates.content_profiles.airtable_record_id&&
+      automaticEzMediaOperationAllowed(context.kind,route.operation));
+  }
   if(route.kind==="finished_request") {
     const row=one(await read(editorAuthorityQuery(route.id)));
     if(!exactEditorOwnership(row,{...scope,requestId:route.id}))return false;

@@ -16,7 +16,7 @@ test("dedicated draft alias is POST only, independently gated, and does not expo
   assert.equal(dedicatedRouteEnabled(env,route),true);
   assert.equal(dedicatedRouteEnabled({...env,STUDIO_AUTOMATIC_EZ_INTAKE:"false"},route),false);
   assert.equal(dedicatedProductionRoute("/api/automatic-ez/production-requests","GET").allowed,false);
-  for(const suffix of ["assets","promote","outputs","plan","generate-ai-masters"])
+  for(const suffix of ["promote","outputs","plan","variants","assets/upload-session"])
     assert.equal(dedicatedProductionRoute("/api/automatic-ez/production-requests/"+requestId+"/"+suffix,"POST").allowed,false);
   const canonical={airtable_record_id:id,production_source:"idea",production_mode:"automatic",content_profile_id:"p",content_profiles:{id:"p",airtable_record_id:profile}};
   const verify=(b=body,row=idea,c=canonical)=>verifyDedicatedProductionAccess({route,body:b,scope:{profiles:[{id:profile,brandIds:["brand"]}]},read:async()=>[c],loadIdea:async()=>row});

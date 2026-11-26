@@ -1,6 +1,6 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
-import { automaticEzIdeaFields, automaticEzIdeaKind } from "./automatic-ez-intake.mjs";
+import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed } from "./automatic-ez-intake.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -6751,7 +6751,7 @@ export async function abortItem4LargeVideoUploadSession(request, env, url, autho
 }
 /*__STUDIO_WORKER_END:abortItem4LargeVideoUploadSession__*/
 
-export async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
+export async function uploadItem4MasterAssets(request, env, url, authorization, ctx, {automaticEzIntake=false}={}) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   const recordId = item4RequestIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
@@ -6768,9 +6768,18 @@ export async function uploadItem4MasterAssets(request, env, url, authorization, 
   const existing = item4AssetManifest(record);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
-  const requestedKind = String(form.get("origin_kind") || "").trim().toLowerCase();
+  let requestedKind = String(form.get("origin_kind") || "").trim().toLowerCase();
   const videoFiles = files.filter((file) => item4IsSupportedVideoFile(file));
   const photoFiles = files.filter((file) => item4IsSupportedImageFile(file) && !item4IsSupportedVideoFile(file));
+  if(automaticEzIntake) {
+    const ideaId=firstLinkedRecordId(f(record,"Idea_Candidate"));
+    const idea=ideaId?await loadAuthorizedIdea(env,ideaId,authorization):null;
+    const context=automaticEzMediaContext(record,idea);
+    if(!context||files.length!==videoFiles.length+photoFiles.length||
+       !automaticEzUploadAllowed(context.kind,requestedKind,{photos:photoFiles.length,videos:videoFiles.length,existing:existing.length}))
+      throw new HttpError(409,"Uploaded media does not match the saved automatic EZ intake");
+    requestedKind=context.kind;
+  }
   const existingVideos = existing.filter(item4LooksLikeVideoAsset).length + videoFiles.length;
   const existingPhotos = existing.filter((asset) => !item4LooksLikeVideoAsset(asset)).length + photoFiles.length;
   const notesText = [
