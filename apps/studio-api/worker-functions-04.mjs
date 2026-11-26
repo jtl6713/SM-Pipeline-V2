@@ -1,5 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
+import { automaticEzIdeaKind, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, hasAutomaticEzIntakeMarker } from "./automatic-ez-intake.mjs";
 import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
@@ -13714,6 +13715,7 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
   if (!idea?.id) throw new HttpError(404, "Idea was not found");
   if (isExplicitManualIdea(idea)) throw new HttpError(409, "Manual Production requires intermediate review and approval");
+  if(hasAutomaticEzIntakeMarker(idea))throw new HttpError(409,"Use the dedicated automatic EZ acceptance route");
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
     throw new HttpError(409, "Restore this idea before preparing it for review");
   }
@@ -13969,6 +13971,7 @@ function readyProductionIdeaEligible(idea, requestRecord = null, env = null) {
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
   if (linkedRecordIds(f(idea, "Content Items")).length) return false;
   if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
+  if(hasAutomaticEzIntakeMarker(idea))return automaticEzIntakeEnabled(env)&&Boolean(automaticEzIdeaKind(idea))&&status==="approved"&&automaticEzAcceptanceMarked(requestRecord)&&readyProductionExistingDraftEligible(idea,requestRecord);
   if (storyFirstAutomaticHandoffEnabled(env)&&f(idea,"Studio_Production_Source")==="script_a_short") {
     return status==="approved"&&hasStoryHandoffApproval(requestRecord)&&readyProductionExistingDraftEligible(idea,requestRecord);
   }
@@ -14052,6 +14055,12 @@ async function discoverReadyVibeProductionDrafts(env, { limit = 25 } = {}) {
 
 async function readyProductionRequestForIdea(env, idea) {
   let ids = linkedRecordIds(f(idea, "Production Requests"));
+  if(automaticEzIdeaKind(idea)) {
+    const canonical=await listSupabaseOpenProductionRequestsForIdea(env,idea.id);
+    if(!Array.isArray(canonical)||canonical.length>1||ids.some(id=>id!==canonical[0]?.id))
+      throw new HttpError(409,"Automatic EZ request ownership requires reconciliation");
+    ids=canonical.map(row=>row.id);
+  }
   // Phase 6 SoR: Idea reciprocal bag is often empty. Fall back to
   // production_requests.idea_candidate_id before treating this as "no request".
   if (!ids.length && idea?.id) {
@@ -14268,7 +14277,10 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  const manualAssetSelection = verifiedVibeDraft || Boolean(requestRecord
+  const acceptedEz=automaticEzIdeaKind(idea)?automaticEzAcceptedContext(requestRecord,idea):null;
+  if(automaticEzIdeaKind(idea)&&!acceptedEz)throw new HttpError(409,"Accepted automatic EZ media receipt changed");
+  if(acceptedEz){plan.platforms=autonomousItem4Platforms(canonicalProductionPlatforms(f(requestRecord,"Target_Platforms")));plan.contentType=String(f(requestRecord,"Master_Content_Type")||"");}
+  const manualAssetSelection = verifiedVibeDraft || Boolean(acceptedEz) || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
   const selectedMasterIds = requestRecord
@@ -15406,6 +15418,8 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
       const canonical = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, owner);
       if (!canonical?.id || canonical.id !== owner || isExplicitManualIdea(canonical))
         throw new HttpError(409, "Automatic Production not authorized for this Idea");
+      if(hasAutomaticEzIntakeMarker(canonical)&&(!automaticEzIntakeEnabled(env)||f(canonical,"Candidate_Status")!=="Approved"||!automaticEzAcceptedContext(current,canonical)))
+        throw new HttpError(409,"Verified automatic EZ intake acceptance is required");
       if(storyFirstAutomaticHandoffEnabled(env)&&f(canonical,"Studio_Production_Source")==="script_a_short"&&
           (f(canonical,"Candidate_Status")!=="Approved"||!hasStoryHandoffApproval(current)))
         throw new HttpError(409,"Saved storyboard authoring approval is required");
@@ -15419,6 +15433,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
     pick.media_asset_ids
   );
+  if(hasAutomaticEzIntakeMarker(idea)&&incoming.length)throw new HttpError(409,"Automatic EZ cannot substitute accepted media");
   // Vibe Cut must never acquire additional library stills or a second source.
   if (incoming.length && !vibeAutoReviewVerifiedSource({
     notes: f(current, "Production_Notes"),

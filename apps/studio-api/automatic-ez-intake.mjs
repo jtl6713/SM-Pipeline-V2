@@ -29,6 +29,7 @@ export function automaticEzIdeaFields(env, auth, payload, { source, mode, profil
   // or AI masters are still being collected.
   return { Studio_Photo_Wait_Status: "Not Needed", Production_Config_Notes: marker + kind };
 }
+export const hasAutomaticEzIntakeMarker=idea=>/\[automatic-ez-intake\.1\]/i.test(String(idea?.fields?.Production_Config_Notes||""));
 export function automaticEzIdeaKind(idea) {
   const f = idea?.fields || {};
   const lines = String(f.Production_Config_Notes || "").split(/\r?\n/).filter(x=>x.startsWith(marker));
@@ -52,7 +53,7 @@ export function verifiedAutomaticEzDraftInput(idea, body) {
     !f.Promoted_Content_Record_ID && !(f["Content Items"] || []).length &&
     origins.length === 1 && origins[0] === "ez-wizard" &&
     inputs.length === 1 && inputs[0] === kind &&
-    !authorityNotes.test(notes) && !authorityNotes.test(String(f.Idea_Summary || "")) &&
+    !authorityNotes.test(notes) && !notes.includes("[automatic-ez-accepted.1]") && !authorityNotes.test(String(f.Idea_Summary || "")) &&
     !/\b(?:origin|ez-input)\s*=/i.test(String(f.Idea_Summary || "")) &&
     !Object.keys(body).some(key=>/^(?:publish|schedule|approval|approve|status|hold|test_run)/i.test(key)));
 }
@@ -90,7 +91,7 @@ export function automaticEzMediaContext(record, idea) {
   const profileId=idea?.fields?.Content_Profile?.[0];
   const body={idea_record_id:idea?.id,content_profile_id:profileId,
     production_notes:record?.fields?.Production_Notes};
-  if (!verifiedAutomaticEzDraftReceipt(record,idea,body)) return null;
+  if (!verifiedAutomaticEzDraftReceipt(record,idea,body) || automaticEzAcceptanceMarked(record)) return null;
   return {kind:automaticEzIdeaKind(idea),profileId};
 }
 export function automaticEzMediaOperationAllowed(kind,operation) {
@@ -118,4 +119,105 @@ export function automaticEzAiTarget(kind,record,body,profileId) {
   if(!Number.isInteger(target)||target<1||target>30||
      (body.target_ai_count!=null&&Number(body.target_ai_count)!==target))return null;
   return target;
+}
+
+const acceptanceMarker="[automatic-ez-accepted.1] ";
+const acceptanceTail="\norigin=prepare-to-review\nez-photo-wait=off\n";
+export function automaticEzAcceptanceMarked(record) {
+  const notes=String(record?.fields?.Production_Notes||"");
+  return notes.split(/\r?\n/).filter(line=>line.startsWith(acceptanceMarker)).length===1;
+}
+function acceptanceParts(record) {
+  const notes=String(record?.fields?.Production_Notes||"");
+  const index=notes.lastIndexOf(acceptanceTail+acceptanceMarker);
+  if(index<0||!automaticEzAcceptanceMarked(record))return null;
+  let receipt;try{receipt=JSON.parse(notes.slice(index+acceptanceTail.length+acceptanceMarker.length));}catch{return null;}
+  return {original:notes.slice(0,index),receipt};
+}
+// Strictly use saved master manifest, not supplied asset IDs or a Ready badge.
+export function automaticEzReadyMedia(record,context) {
+  const f=record?.fields||{};
+  if(!context||f.Studio_Master_Asset_Status!=="Ready")return null;
+  let assets;try{assets=JSON.parse(f.Studio_Master_Assets_JSON||"[]");}catch{return null;}
+  if(!Array.isArray(assets)||!assets.length||assets.length!==Number(f.Studio_Master_Asset_Count))return null;
+  if(assets.some((a,i)=>!a?.id||Number(a.order)!==i+1||!rec.test(a.media_asset_record_id||"")||
+      !String(a.google_drive_file_id||"").trim()||a.content_profile_id!==context.profileId||
+      a.compression_needed===true||["pending","queued","compressing","downloading","failed"].includes(a.compression_status)||
+      a.upload_status==="multipart_pending"))return null;
+  const ids=assets.map(a=>a.media_asset_record_id);
+  if(new Set(ids).size!==ids.length||new Set(assets.map(a=>a.id)).size!==assets.length)return null;
+  const linked=f.Studio_Master_Media_Assets;
+  if(!Array.isArray(linked)||linked.length!==ids.length||ids.some(id=>!linked.includes(id)))return null;
+  const video=a=>a.media_kind==="video"||String(a.mime_type||"").startsWith("video/");
+  const ai=a=>/^studio_ai/i.test(String(a.source||""));
+  const videos=assets.filter(video).length,generated=assets.filter(ai).length;
+  if(assets.some(a=>video(a)&&ai(a)))return null;
+  const photos=assets.length-videos-generated;
+  const notes=String(f.Production_Notes||"");
+  const count=key=>{
+    const matches=[...notes.matchAll(new RegExp("\\b"+key+"=(\\d+)(?:;|\\s|$)","gi"))];
+    return matches.length===1?Number(matches[0][1]):null;
+  };
+  const manual=count("ez-manual"), clips=count("ez-clips");
+  const exact=Number(f.Carousel_Slide_Count_Exact||0);
+  const clipExact=Number(f.Video_Clip_Count_Exact||0);
+  const kind=context.kind;
+  const aiTarget=automaticEzAiTarget(kind,record,{},context.profileId);
+  const okay=kind==="single-photo"?photos===1&&!videos&&!generated:
+    kind==="multiple-photos"?photos>=2&&!videos&&!generated&&photos===(manual||exact):
+    kind==="single-ai"||kind==="multiple-ai"?generated===aiTarget&&!photos&&!videos:
+    kind==="mixed"?photos>0&&photos===manual&&generated===aiTarget&&!videos:
+    kind==="video-clips"?videos>0&&videos===(clips||clipExact)&&!photos&&!generated:
+    kind==="photos-and-clips"?videos>0&&videos===(clips||clipExact)&&photos>0&&(!manual||photos===manual)&&!generated:false;
+  return okay?ids:null;
+}
+export function automaticEzAcceptedContext(record,idea) {
+  const parts=acceptanceParts(record);
+  const state=idea?.fields?.Candidate_Status;
+  if(!parts||!["Generated","Approved"].includes(state))return null;
+  const original={...record,fields:{...record.fields,Production_Notes:parts.original,Request_Status:"Draft"}};
+  const staged={...idea,fields:{...idea.fields,Candidate_Status:"Generated"}};
+  const context=automaticEzMediaContext(original,staged);
+  if(!context||!["Draft","Ready","Submitted"].includes(record.fields.Request_Status))return null;
+  const ids=automaticEzReadyMedia(original,context);
+  if(!ids||JSON.stringify(parts.receipt)!==JSON.stringify({kind:context.kind,profile:context.profileId,ids}))return null;
+  return {...context,ids};
+}
+export function automaticEzAcceptanceNotes(record,idea) {
+  const context=automaticEzMediaContext(record,idea);
+  const ids=automaticEzReadyMedia(record,context);
+  if(!ids||automaticEzAcceptanceMarked(record))throw new Error("Complete the selected original and AI media before accepting the Idea");
+  const notes=String(record.fields.Production_Notes||"")+acceptanceTail+acceptanceMarker+
+    JSON.stringify({kind:context.kind,profile:context.profileId,ids});
+  if(notes.length>10000)throw new Error("Automatic EZ acceptance metadata exceeds the note limit");
+  return notes;
+}
+export async function queueAcceptedAutomaticEz({idea,draft,listRequests,commitDraft,commitIdea,readJob,enqueue}) {
+  const existing=await listRequests(idea.id);
+  if(automaticEzExistingDraftId(existing,idea)!==draft.id)throw new Error("Exact automatic EZ draft required");
+  const prior=await readJob(idea.id);
+  let context=automaticEzAcceptedContext(draft,idea);
+  if(!context) {
+    if(prior||idea.fields.Candidate_Status!=="Generated"||automaticEzAcceptanceMarked(draft))
+      throw new Error("Automatic EZ acceptance requires reconciliation");
+    const notes=automaticEzAcceptanceNotes(draft,idea);
+    const saved=await commitDraft(draft,notes);
+    context=automaticEzAcceptedContext(saved,idea);
+    if(saved?.id!==draft.id||saved.fields.Production_Notes!==notes||!context)
+      throw new Error("Automatic EZ media acceptance receipt not verified");
+    draft=saved;
+  }
+  if(prior&&(prior.idea_id!==idea.id||prior.profile_id!==context.profileId||
+      (prior.production_request_id&&prior.production_request_id!==draft.id)))
+    throw new Error("Existing queue job does not match the accepted intake");
+  if(idea.fields.Candidate_Status!=="Approved") {
+    const saved=await commitIdea(idea,draft);
+    if(saved?.id!==idea.id||saved.fields?.Candidate_Status!=="Approved"||!automaticEzAcceptedContext(draft,saved))
+      throw new Error("Automatic EZ Idea acceptance could not be verified");
+  }
+  const job=prior||await enqueue(idea.id,context.profileId);
+  if(!job||job.idea_id!==idea.id||job.profile_id!==context.profileId||
+      (job.production_request_id&&job.production_request_id!==draft.id))throw new Error("Acceptance saved; durable queue needs reconciliation");
+  return {queued:true,idea_id:idea.id,production_request_id:draft.id,job_status:job.status||null,
+    publishing:false,requires_factory_approval:true};
 }

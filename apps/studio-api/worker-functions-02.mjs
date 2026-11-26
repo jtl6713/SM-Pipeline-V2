@@ -1,6 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
-import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId, automaticEzMediaContext, automaticEzAiTarget } from "./automatic-ez-intake.mjs";
+import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId, automaticEzMediaContext, automaticEzAiTarget, queueAcceptedAutomaticEz } from "./automatic-ez-intake.mjs";
 import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
 import { readyProductionEnqueue, readyProductionRead } from "./ready-production-queue.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
@@ -4158,9 +4158,38 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
 
-export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null, { automaticEzIntake = false } = {}) {
+export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null, { automaticEzIntake = false, automaticEzAcceptId = null } = {}) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  if(automaticEzAcceptId) {
+    if(!payload||Object.keys(payload).length!==1||payload.accept_intake!==true)
+      throw new HttpError(400,"Explicit saved EZ intake acceptance required");
+    const draft=await loadAuthorizedProductionRequest(env,automaticEzAcceptId,authorization);
+    const ideaId=firstLinkedRecordId(f(draft,"Idea_Candidate"));
+    const idea=await loadAuthorizedIdea(env,ideaId,authorization);
+    const platforms=canonicalProductionPlatforms(f(draft,"Target_Platforms"));
+    const contentType=String(f(draft,"Master_Content_Type")||"").trim();
+    if(!platforms.length||!contentType)throw new HttpError(409,"Saved EZ destination settings are incomplete");
+    try {
+      const receipt=await queueAcceptedAutomaticEz({idea,draft,
+        listRequests:id=>listSupabaseOpenProductionRequestsForIdea(env,id),
+        commitDraft:async(row,notes)=>{
+          await item4UpdateRequestState(env,row.id,{Production_Notes:notes});
+          return loadAuthorizedProductionRequest(env,row.id,authorization);
+        },
+        commitIdea:async(row)=>{
+          await airtableFetch(env,env.AIRTABLE_IDEA_TABLE_ID,row.id,{method:"PATCH",body:JSON.stringify({fields:{
+            Candidate_Status:"Approved",Approved_At:f(row,"Approved_At")||new Date().toISOString(),
+            Production_Target_Platforms:platforms,Production_Content_Type:contentType,
+          },typecast:true})});
+          return loadAuthorizedIdea(env,row.id,authorization);
+        },
+        readJob:id=>readyProductionRead(env.STUDIO_MEDIA,id),
+        enqueue:async(id,profileId)=>(await readyProductionEnqueue(env.STUDIO_MEDIA,{ideaId:id,profileId})).job,
+      });
+      return respond(request,env,{ok:true,...receipt},202);
+    }catch(error){if(error instanceof HttpError)throw error;throw new HttpError(409,String(error?.message||"Automatic EZ acceptance needs reconciliation"));}
+  }
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(ideaRecordId)) throw new HttpError(400, "idea_record_id is required");
 
