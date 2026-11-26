@@ -99,3 +99,47 @@ export function productionEditorDecision(route, row, allowed) {
   }
   return false;
 }
+
+const exactId=id=>typeof id==="string"&&/^rec[A-Za-z0-9]{14}$/.test(id);
+const profileSelect="id,airtable_record_id,active,organization_id,brand_id,organizations(id,airtable_record_id),brands(id,airtable_record_id,organization_id)";
+const ideaSelect="id,airtable_record_id,content_profile_id,production_mode,production_source,content_profiles("+profileSelect+")";
+const requestSelect="id,airtable_record_id,idea_candidate_id,organization_id,brand_id,request_status,origin,production_notes,publish_status,organizations(id,airtable_record_id),brands(id,airtable_record_id,organization_id),idea_candidates("+ideaSelect+")";
+const one=(rows,field,id)=>Array.isArray(rows)&&rows.length===1&&rows[0]?.[field]===id?rows[0]:null;
+function exactQuery(table,field,id,select) {
+  return table+"?"+new URLSearchParams({[field]:"eq."+id,select,limit:"2"}).toString();
+}
+
+/** Resolve a single canonical record. No legacy bag, read cache or request header
+ * can substitute for its typed ownership. Fail closed on a malformed receipt.
+ * The Worker supplies its already-authorized active profile inventory.
+ */
+export async function authorizeProductionEditorHttp({request,url,env,read,allowed}) {
+  if (!productionEditorBoundaryEnabled(env)) return {allowed:true,reason:"disabled"};
+  const route=classifyProductionEditorRoute(url,request.method);
+  if (!route) return {allowed:true,reason:"other_route"};
+  if (!productionEditorBoundaryReady(env)) return {allowed:false,status:503,reason:"Production editor rollout is not ready"};
+  if (route.scope==="invalid") return {allowed:false,status:403,reason:"Invalid Production workflow scope"};
+  if (route.kind==="create") {
+    let id=route.id;
+    if (!id) {
+      let body;
+      try {body=await request.clone().json()} catch {return {allowed:false,status:400,reason:"Invalid Idea request body"}}
+      id=body?.idea_record_id;
+    }
+    if (!exactId(id)) return {allowed:false,status:400,reason:"Invalid Idea record ID"};
+    const idea=one(await read(exactQuery("idea_candidates","airtable_record_id",id,ideaSelect)),"airtable_record_id",id);
+    return productionEditorDecision(route,idea,allowed)?{allowed:true}:{allowed:false,status:403,reason:"Idea is not authorized for this Production workflow"};
+  }
+  if (!exactId(route.id)) return {allowed:false,status:400,reason:"Invalid Production record ID"};
+  let row;
+  if (route.kind==="output") {
+    const output=one(await read(exactQuery("production_request_outputs","airtable_record_id",route.id,
+      "id,airtable_record_id,production_request_id,organization_id,brand_id,production_requests("+requestSelect+")")),"airtable_record_id",route.id);
+    row=output?.production_requests;
+    if (!row||row.id!==output.production_request_id||row.organization_id!==output.organization_id||
+        row.brand_id!==output.brand_id) row=null;
+  } else {
+    row=one(await read(exactQuery("production_requests","airtable_record_id",route.id,requestSelect)),"airtable_record_id",route.id);
+  }
+  return productionEditorDecision(route,row,allowed)?{allowed:true}:{allowed:false,status:403,reason:"This item is not available in the requested Production workflow"};
+}
