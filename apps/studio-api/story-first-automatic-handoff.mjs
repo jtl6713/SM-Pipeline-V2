@@ -56,6 +56,11 @@ export async function queueApprovedStoryFirst({idea,verifyStory,listRequests,loa
   if(draft&&(hasStoryHandoffApproval(draft)||String(val(draft,"Request_Status"))==="Submitted"||prior)) {
     // A retry cannot overwrite an active/previously accepted storyboard.
     if(!hasStoryHandoffApproval(draft))throw new Error("Existing Production job must be reconciled before storyboard handoff");
+    if(state!=="Approved") {
+      const accepted=await commitIdeaAcceptance(idea,approved);
+      if(accepted?.id!==idea.id||val(accepted,"Candidate_Status")!=="Approved")
+        throw new Error("Storyboard Idea acceptance could not be verified");
+    }
     const job=prior||await enqueue(idea.id,approved.story.profile_id);
     return {already_accepted:true,queued:Boolean(job),idea_id:idea.id,production_request_id:draft.id,
       job_status:job?.status||null,publishing:false};
