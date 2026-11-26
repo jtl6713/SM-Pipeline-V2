@@ -37,7 +37,8 @@ def _trigger_i4(record_id: str, payload: dict[str, Any], *, trigger: bool,
             "decision": first_value(payload, "decision"),
         },
         python_call=lambda: process_i4(record_id=record_id, dry_run=False,
-                                       trusted_production_request_id=trusted_production_request_id),
+                                       **({"trusted_production_request_id": trusted_production_request_id}
+                                          if trusted_production_request_id else {})),
     )
 
 
@@ -151,7 +152,8 @@ def process_request(
 
     client.update_record(SOURCE_CANDIDATES_TABLE, candidate["id"], fields, typecast=True)
     next_result = _trigger_i4(candidate["id"], payload, trigger=trigger_i4,
-                              trusted_production_request_id=trusted_production_request_id)
+                              **({"trusted_production_request_id": trusted_production_request_id}
+                                 if trusted_production_request_id else {}))
     return {
         "processed": True,
         "html": confirmation("Idea approved", message),
