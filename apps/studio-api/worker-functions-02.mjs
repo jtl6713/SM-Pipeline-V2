@@ -1,4 +1,5 @@
-import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
 import { claimItem4PollResume } from "./item4-poll-resume.mjs";
 import { readCommittedPromotionFanout } from "./production-promotion-readback.mjs";
 import { NYC_20261121_EXACT_HANDOFF, selectExactNycHandoffSlot, exactNycHandoffPreflight } from "./nyc-handoff-20261121.mjs";
@@ -47,6 +48,7 @@ import {
   listSupabaseIdeaLane,
   listSupabaseOpenProductionRequestsForIdea,
   listSupabaseRevisionOpenProductionRequests,
+  listSupabaseManualProductionRequests,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -4322,6 +4324,24 @@ export async function listProductionRequests(request, env, url, authorization) {
   const limit = clampLimit(url, 100, 100);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const orgId = String(authorization?.organization?.record_id || "none");
+  if (productionModeRoutingEnabled(env)) {
+    // Ordinary editor list only. Do not use the broad cached list or
+    // post-limit mode filtering. A fresh canonical FK read keeps a stale
+    // manual card from surviving an authorized mode change.
+    const brands = arrayOrEmpty(f(profile, "Brand"))
+      .filter(id => membershipAllowsBrand(authorization, [id]));
+    const manual = await listSupabaseManualProductionRequests(env, {
+      profileId: profile.id, organizationId: orgId, brandIds: brands, limit,
+    });
+    return respond(request, env, {
+      ok: true, production_mode_scope: "manual",
+      records: manual.map(({record,ideaTitle}) => ({
+        ...mapProductionRequestSummary(record, ideaTitle),
+        production_mode: "manual", production_source: "idea",
+      })),
+      photo_watch_waiting_count: 0,
+    });
+  }
   const payload = await studioReadCoalesce(`production-requests:${orgId}:${profile.id}:${limit}`, 25000, async () => {
   const records = await listOpenProductionRequests(env, { limit });
   const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
@@ -12894,6 +12914,7 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
     }
     return approveIdeaAndWaitForPhotos(request, env, record, input, authorization);
   }
+  if (isExplicitManualIdea(record)) throw new HttpError(409, "Manual Production requires intermediate review and approval");
   if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
   const webhook = promotionWebhookUrl(env, recordId, input);
   try {

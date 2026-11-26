@@ -1,4 +1,5 @@
-import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
 import { globalWorkloadEnabled, globalWorkloadAdmission, globalWorkloadRpc, startGlobalWorkloadHeartbeat } from "./global-workload-coordinator.mjs";
@@ -13711,6 +13712,7 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
 
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
   if (!idea?.id) throw new HttpError(404, "Idea was not found");
+  if (isExplicitManualIdea(idea)) throw new HttpError(409, "Manual Production requires intermediate review and approval");
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
     throw new HttpError(409, "Restore this idea before preparing it for review");
   }
@@ -13956,7 +13958,7 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
 }
 
 function readyProductionIdeaEligible(idea, requestRecord = null) {
-  if (!idea?.id) return false;
+  if (!idea?.id || isExplicitManualIdea(idea)) return false;
   if (exploreIdeaNeedsApproval({
     sourcingMode: f(idea, "Asset_Sourcing_Mode"),
     candidateStatus: f(idea, "Candidate_Status"),
@@ -13976,6 +13978,7 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
     const rows = await listSupabaseIdeaLane(env, { lane: "ready_production", limit: cap }).catch(() => null);
     if (Array.isArray(rows)) return rows.filter(readyProductionIdeaEligible);
   }
+  if (productionModeRoutingEnabled(env)) throw new HttpError(503, "Canonical automatic Idea discovery unavailable");
   const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: cap,
     sortField: "Create_Date",
@@ -14189,6 +14192,7 @@ async function reconcileAutonomousPlanOutputSpillover(env, requestRecord) {
 }
 
 async function processReadyProductionClaim(env, authorization, ctx, lease, { deferProduce = false } = {}) {
+  if (productionModeRoutingEnabled(env)) assertManualListSchemaReady(env);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, lease.job.idea_id);
   let requestRecord = await readyProductionRequestForIdea(env, idea);
   if (requestRecord && String(f(requestRecord, "Request_Status") || "").trim() === "Promoted") {
@@ -14219,6 +14223,14 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
     });
   }
 
+  // A stale R2 claim cannot bypass a saved Manual Production choice. Already
+  // promoted work was handled by the monitoring branch above.
+  if (isExplicitManualIdea(idea)) {
+    return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+      status: "blocked", stage: "manual_production",
+      completed_reason: "manual_production", production_request_id: requestRecord?.id || null,
+    });
+  }
   if (!readyProductionIdeaEligible(idea, requestRecord)) {
     const promoted = String(f(idea, "Promoted_Content_Record_ID") || "").trim()
       || linkedRecordIds(f(idea, "Content Items"))[0]
@@ -15381,6 +15393,20 @@ export async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80
 
 export async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, options = {}) {
   const requestId = requestRecord.id;
+  const verifyAutomaticMode = async current => {
+    if (String(f(current, "Request_Status") || "").trim() === "Promoted") return;
+    if (productionModeRoutingEnabled(env)) {
+      assertManualListSchemaReady(env);
+      const owner = firstLinkedRecordId(f(current, "Idea_Candidate"));
+      if (!owner || owner !== idea?.id) throw new HttpError(409, "Automatic Production owner unverified");
+      const canonical = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, owner);
+      if (!canonical?.id || canonical.id !== owner || isExplicitManualIdea(canonical))
+        throw new HttpError(409, "Automatic Production not authorized for this Idea");
+    } else if (isExplicitManualIdea(idea)) {
+      throw new HttpError(409, "Manual Production requires intermediate approval");
+    }
+  };
+  await verifyAutomaticMode(requestRecord);
   let current = await ensureAutonomousSelectedMusic(env, requestRecord);
   const incoming = autonomousIncomingMediaIds(
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
@@ -15477,6 +15503,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
       return { waiting: true, waiting_reason: "variants_still_preparing",
         production_request_id: requestId, idea_id: idea.id };
     }
+    await verifyAutomaticMode(current);
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
       const blockers = (preflight.issues || []).filter((issue) => !/preview image is still catching up/i.test(String(issue || "")));
@@ -15623,7 +15650,7 @@ export async function ensureAutonomousSelectedMusic(env, requestRecord, profileR
 /*__STUDIO_WORKER_END:ensureAutonomousSelectedMusic__*/
 
 export async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, requestRecord) {
-  if (!idea?.id || !requestRecord?.id) return requestRecord;
+  if (!idea?.id || !requestRecord?.id || isExplicitManualIdea(idea)) return requestRecord;
   const alreadyAutonomous = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
   const profileId = firstLinkedRecordId(f(idea, "Content_Profile"))
     || firstLinkedRecordId(f(requestRecord, "Content_Profile"));
@@ -15661,6 +15688,7 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
     ideas = await listSupabaseIdeaLane(env, { lane: "photo_ready", limit: 40 }).catch(() => null);
   }
   if (!Array.isArray(ideas)) {
+    if (productionModeRoutingEnabled(env)) throw new HttpError(503, "Canonical automatic Idea adoption unavailable");
     ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
       limit: 40,
       sortField: "Create_Date",
@@ -15689,7 +15717,7 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
     draftByIdea.set(ideaId, record);
   }
 
-  const plain = ideas.map((idea) => {
+  const plain = ideas.filter(idea => !isExplicitManualIdea(idea)).map((idea) => {
     const draft = draftByIdea.get(idea.id) || null;
     return {
       id: idea.id,
@@ -15716,9 +15744,9 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
     // Legacy projected lists omit newer sourcing fields. Refresh the exact
     // candidate when mode is missing rather than adding an unsupported field
     // to the lean projection (which can make the entire queue HTTP 422).
-    if (!idea.sourcing_mode) {
+    if (!idea.sourcing_mode || productionModeRoutingEnabled(env)) {
       const liveIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => null);
-      if (!liveIdea || exploreIdeaNeedsApproval({
+      if (!liveIdea || isExplicitManualIdea(liveIdea) || exploreIdeaNeedsApproval({
         sourcingMode: f(liveIdea, "Asset_Sourcing_Mode"),
         candidateStatus: f(liveIdea, "Candidate_Status"),
       })) continue;
@@ -15791,12 +15819,13 @@ export async function annotateAutonomousResumeDrafts(env, drafts) {
     // variants would clear a deferred stamp and this draft would lock FIFO again.
     if (productionNotesRevisionOpen(notes)) continue;
     let profileId = "";
-    if (isAutonomousOrigin(notes)) {
+    if (isAutonomousOrigin(notes) || productionModeRoutingEnabled(env)) {
       const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
       const idea = ideaId
         ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId).catch(() => null)
         : null;
-      profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
+      if (isExplicitManualIdea(idea) || (productionModeRoutingEnabled(env) && !idea?.id)) continue;
+      if (isAutonomousOrigin(notes)) profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
     }
     let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
     let variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
@@ -15923,6 +15952,10 @@ export async function resumeAutonomousDrafts(env, authorization, ctx, drafts, ch
         continue;
       }
       const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+      if (isExplicitManualIdea(idea)) {
+        results.push({production_request_id:requestRecord.id,status:"skipped",skip_reason:"manual_production"});
+        continue;
+      }
       const contentType = autonomousCanonicalContentType(
         String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
       );

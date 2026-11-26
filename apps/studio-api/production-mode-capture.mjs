@@ -49,3 +49,10 @@ export function projectIdeaProductionMode(row, fields={}) {
   }
   return clean;
 }
+
+/** Only the canonical shaped record can veto legacy automatic admission.
+ * Null legacy mode grants no new authority; existing eligibility remains intact.
+ */
+export function isExplicitManualIdea(idea) {
+  return idea?.fields?.[SOURCE_FIELD]==="idea" && idea.fields[MODE_FIELD]==="manual";
+}
