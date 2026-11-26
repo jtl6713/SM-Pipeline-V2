@@ -1,6 +1,6 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
-import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed } from "./automatic-ez-intake.mjs";
+import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, automaticEzDestinationItemsMatch } from "./automatic-ez-intake.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { AIRTABLE_LONG_TEXT_MAX, parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -9707,6 +9707,13 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   const recordId=item4RequestIdFromPath(url);
   let record=await loadAuthorizedProductionRequest(env,recordId,authorization);
   assertEditableProductionRequest(record);
+  let acceptedEz=null;
+  if(automaticEzAcceptanceMarked(record)) {
+    const owner=firstLinkedRecordId(f(record,"Idea_Candidate"));
+    const idea=await loadAuthorizedIdea(env,owner,authorization);
+    acceptedEz=automaticEzIntakeEnabled(env)&&f(idea,"Candidate_Status")==="Approved"&&automaticEzAcceptedContext(record,idea);
+    if(!acceptedEz)throw new HttpError(409,"Verified automatic EZ destination receipt required before planning");
+  }
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
   // Accept a verified still-photo Vibe Cut as a montage while rejecting incomplete or mixed sources.
   if (studioIsVibeCut(record)) {
@@ -9791,7 +9798,9 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
     await item4EnsureFacebookSlideshowVoiceoverPayload(env, authorization);
   }
 
-  await item4SyncPlanOutputs(env,record,plannedItems,{ schedules: payload.schedules });
+  if(acceptedEz&&!automaticEzDestinationItemsMatch(plannedItems,acceptedEz.destination))
+    throw new HttpError(409,"Generated automatic EZ destinations differ from accepted package; no output rows changed");
+  await item4SyncPlanOutputs(env,record,plannedItems,{ schedules: acceptedEz?undefined:payload.schedules });
   const keepAiMode = String(f(record, "Carousel_Image_Mode") || "").trim() === "Make AI Generated";
   const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
   const maxCount=Math.min(15,Math.max(1,photoCount));
@@ -9804,7 +9813,7 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
     masterContentType = photoCount <= 1 ? "Feed Post" : "Photo Set";
   }
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:masterContentType, Target_Platforms:plannedItems.map(item=>item.platform),
+    Master_Content_Type:acceptedEz?acceptedEz.destination.contentType:masterContentType, Target_Platforms:acceptedEz?acceptedEz.destination.platforms:plannedItems.map(item=>item.platform),
     Carousel_Image_Mode: keepAiMode ? "Make AI Generated" : "Manual Upload",
     Carousel_Slide_Count_Mode:"Exact",
     Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,

@@ -1,6 +1,6 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
-import { automaticEzIdeaKind, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, hasAutomaticEzIntakeMarker } from "./automatic-ez-intake.mjs";
+import { automaticEzIdeaKind, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, hasAutomaticEzIntakeMarker, automaticEzDestinationPlanMatches } from "./automatic-ez-intake.mjs";
 import { productionModeRoutingEnabled, assertManualListSchemaReady } from "./manual-production-list.mjs";
 import { carouselCronCandidateAdmission } from "./carousel-cron-legacy-admission.mjs";
 import { runnerWorkerLease, startRunnerWorkerLeaseHeartbeat } from "./worker-shared-admission.mjs";
@@ -14279,7 +14279,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   const plan = readyProductionIdeaPlan(idea, requestRecord);
   const acceptedEz=automaticEzIdeaKind(idea)?automaticEzAcceptedContext(requestRecord,idea):null;
   if(automaticEzIdeaKind(idea)&&!acceptedEz)throw new HttpError(409,"Accepted automatic EZ media receipt changed");
-  if(acceptedEz){plan.platforms=autonomousItem4Platforms(canonicalProductionPlatforms(f(requestRecord,"Target_Platforms")));plan.contentType=String(f(requestRecord,"Master_Content_Type")||"");}
+  if(acceptedEz){plan.platforms=acceptedEz.destination.platforms;plan.contentType=acceptedEz.destination.contentType;}
   const manualAssetSelection = verifiedVibeDraft || Boolean(acceptedEz) || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
@@ -14333,16 +14333,18 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   if (!autonomousHasUsableItem4Plan(requestRecord)) {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms: plan.platforms,
-      overrides: autonomousPlanOverrides(plan.contentType),
-      extras: autonomousPlanExtras(),
+      overrides: acceptedEz?acceptedEz.destination.overrides:autonomousPlanOverrides(plan.contentType),
+      extras: acceptedEz?acceptedEz.destination.extras:autonomousPlanExtras(),
       skip_fbs1_guard: true,
     });
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   }
+  if(acceptedEz&&!automaticEzDestinationPlanMatches(requestRecord,acceptedEz.destination))
+    throw new HttpError(409,"Saved automatic EZ destination plan does not match acceptance");
   // Align only untouched auto-generated companion rows to the saved photo
   // plan. Existing media, operator choices and QA holds remain authoritative.
-  await reconcileAutonomousPlanOutputSpillover(env, requestRecord);
+  if(!acceptedEz)await reconcileAutonomousPlanOutputSpillover(env, requestRecord);
   const finished = await finishAutonomousProductionRequest(
     env,
     authorization,
@@ -15428,6 +15430,8 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     }
   };
   await verifyAutomaticMode(requestRecord);
+  const acceptedEz=hasAutomaticEzIntakeMarker(idea)?automaticEzAcceptedContext(requestRecord,idea):null;
+  if(hasAutomaticEzIntakeMarker(idea)&&!acceptedEz)throw new HttpError(409,"Verified automatic EZ destination receipt required");
   let current = await ensureAutonomousSelectedMusic(env, requestRecord);
   const incoming = autonomousIncomingMediaIds(
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
@@ -15446,14 +15450,16 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
   }
   if (!autonomousHasUsableItem4Plan(current)) {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
-      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
-      overrides: autonomousPlanOverrides(pick.content_type),
-      extras: autonomousPlanExtras(),
+      platforms: acceptedEz?acceptedEz.destination.platforms:[...AUTONOMOUS_STANDARD_PLATFORMS],
+      overrides: acceptedEz?acceptedEz.destination.overrides:autonomousPlanOverrides(pick.content_type),
+      extras: acceptedEz?acceptedEz.destination.extras:autonomousPlanExtras(),
       skip_fbs1_guard: true,
     });
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
     current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   }
+  if(acceptedEz&&!automaticEzDestinationPlanMatches(current,acceptedEz.destination))
+    throw new HttpError(409,"Saved automatic EZ destination plan does not match acceptance");
   if (pick.content_type) {
     current = await alignAutonomousDraftContentType(env, current, pick.content_type);
   }
@@ -15526,6 +15532,8 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
         production_request_id: requestId, idea_id: idea.id };
     }
     await verifyAutomaticMode(current);
+    if(acceptedEz&&!automaticEzDestinationPlanMatches(current,acceptedEz.destination))
+      throw new HttpError(409,"Automatic EZ destination plan changed before promotion");
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
       const blockers = (preflight.issues || []).filter((issue) => !/preview image is still catching up/i.test(String(issue || "")));

@@ -171,6 +171,43 @@ export function automaticEzReadyMedia(record,context) {
     kind==="photos-and-clips"?videos>0&&videos===(clips||clipExact)&&photos>0&&(!manual||photos===manual)&&!generated:false;
   return okay?ids:null;
 }
+// The ordinary EZ wizard chooses an explicit package and platform subset.
+// Never substitute the autonomous library Reel defaults for those choices.
+// Custom formats require a future persisted explicit destination manifest.
+const ezDestinationMaps=Object.freeze({
+  video:Object.freeze({Instagram:"Reel",Facebook:"Reel",TikTok:"Video Draft",YouTube:"Short"}),
+  single:Object.freeze({Instagram:"Single Image",Facebook:"Single Image",TikTok:"Single Photo"}),
+  slides:Object.freeze({Instagram:"Carousel",Facebook:"Multi-Image Post",TikTok:"Multi-Photo",YouTube:"Slideshow Video"}),
+});
+export function automaticEzDestinationPlan(record,kind) {
+  const f=record?.fields||{};
+  const packages=[...String(f.Production_Notes||"").matchAll(/\bez-package\s*=\s*([a-z-]+)(?:;|\s|$)/gi)];
+  const pkg=packages.length===1?packages[0][1].toLowerCase():null;
+  const count=Number(f.Studio_Master_Asset_Count);
+  const platforms=f.Target_Platforms;
+  const contentType=String(f.Master_Content_Type||"").trim();
+  if(!kinds.has(kind)||!["video","slides"].includes(pkg)||!Number.isInteger(count)||count<1||
+      !contentType||!Array.isArray(platforms)||!platforms.length||new Set(platforms).size!==platforms.length||
+      (pkg==="slides"&&["video-clips","photos-and-clips"].includes(kind)))return null;
+  const map=ezDestinationMaps[pkg==="slides"&&count===1?"single":pkg];
+  if(platforms.some(p=>typeof p!=="string"||!Object.hasOwn(map,p)))return null;
+  const overrides=Object.fromEntries(platforms.map(p=>[p,map[p]]));
+  const extras=pkg==="video"?platforms.filter(p=>p==="Instagram"||p==="Facebook").map(p=>({platform:p,output_type:"Story"})):[];
+  const items=[...platforms.map(p=>({platform:p,output_type:overrides[p]})),...extras];
+  return {package:pkg,contentType,platforms:[...platforms],overrides,extras,items};
+}
+export function automaticEzDestinationItemsMatch(items,destination) {
+  if(!destination||!Array.isArray(items)||items.length!==destination.items.length)return false;
+  const key=row=>JSON.stringify([row?.platform,row?.output_type]);
+  const expected=new Set(destination.items.map(key));
+  const actual=new Set(items.map(key));
+  return actual.size===expected.size&&[...actual].every(k=>expected.has(k));
+}
+export function automaticEzDestinationPlanMatches(record,destination) {
+  let saved;try{saved=JSON.parse(record?.fields?.Studio_Output_Plan_JSON||"null");}catch{return false;}
+  return record?.fields?.Studio_Output_Plan_Status==="Ready"&&automaticEzDestinationItemsMatch(saved?.items,destination);
+}
+
 export function automaticEzAcceptedContext(record,idea) {
   const parts=acceptanceParts(record);
   const state=idea?.fields?.Candidate_Status;
@@ -180,15 +217,18 @@ export function automaticEzAcceptedContext(record,idea) {
   const context=automaticEzMediaContext(original,staged);
   if(!context||!["Draft","Ready","Submitted"].includes(record.fields.Request_Status))return null;
   const ids=automaticEzReadyMedia(original,context);
-  if(!ids||JSON.stringify(parts.receipt)!==JSON.stringify({kind:context.kind,profile:context.profileId,ids}))return null;
-  return {...context,ids};
+  const destination=automaticEzDestinationPlan(original,context.kind);
+  if(!ids||!destination||JSON.stringify(parts.receipt)!==JSON.stringify({kind:context.kind,profile:context.profileId,ids,destination}))return null;
+  return {...context,ids,destination};
 }
 export function automaticEzAcceptanceNotes(record,idea) {
   const context=automaticEzMediaContext(record,idea);
   const ids=automaticEzReadyMedia(record,context);
   if(!ids||automaticEzAcceptanceMarked(record))throw new Error("Complete the selected original and AI media before accepting the Idea");
+  const destination=automaticEzDestinationPlan(record,context.kind);
+  if(!destination)throw new Error("Exact supported EZ package and destination choices required before acceptance");
   const notes=String(record.fields.Production_Notes||"")+acceptanceTail+acceptanceMarker+
-    JSON.stringify({kind:context.kind,profile:context.profileId,ids});
+    JSON.stringify({kind:context.kind,profile:context.profileId,ids,destination});
   if(notes.length>10000)throw new Error("Automatic EZ acceptance metadata exceeds the note limit");
   return notes;
 }
