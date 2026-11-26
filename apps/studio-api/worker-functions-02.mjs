@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
 import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
 import { readyProductionEnqueue, readyProductionRead } from "./ready-production-queue.mjs";
 import { productionModeRoutingEnabled } from "./manual-production-list.mjs";
@@ -12924,6 +12925,12 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
 
   const recordId = ideaRecordIdFromPath(url);
   const record = await loadAuthorizedIdea(env, recordId, authorization);
+
+  if (Object.prototype.hasOwnProperty.call(payload, "automatic_photo_wait_existing")) {
+    try {
+      assertAutomaticPhotoWaitExisting(env, authorization, record, payload.automatic_photo_wait_existing, payload);
+    } catch (error) { throw new HttpError(409, error?.message || "Invalid automatic existing-Idea photo wait"); }
+  }
 
   if (promotionCompleted(record)) {
     return respond(request, env, {
