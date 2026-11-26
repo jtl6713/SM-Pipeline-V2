@@ -1,4 +1,5 @@
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { verifiedVibeRequest, vibeRequestOperationAllowed } from "./vibe-dedicated-intake.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
 import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, automaticEzDestinationItemsMatch } from "./automatic-ez-intake.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
@@ -6481,7 +6482,7 @@ export function item4FindLargeUploadDraft(assets, assetId) {
 }
 /*__STUDIO_WORKER_END:item4FindLargeUploadDraft__*/
 
-export async function createItem4LargeVideoUploadSession(request, env, url, authorization) {
+export async function createItem4LargeVideoUploadSession(request, env, url, authorization, { dedicatedVibe = false } = {}) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   if (typeof env.STUDIO_MEDIA.createMultipartUpload !== "function") {
     throw new HttpError(503, "Large video staging is not available on this Worker yet");
@@ -6490,6 +6491,12 @@ export async function createItem4LargeVideoUploadSession(request, env, url, auth
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
   const body = await readJsonBody(request);
+  if(dedicatedVibe) {
+    const ideaIds=f(record,"Idea_Candidate");
+    const idea=Array.isArray(ideaIds)&&ideaIds.length===1?await loadAuthorizedIdea(env,ideaIds[0],authorization):null;
+    if(!verifiedVibeRequest(record,idea,f(idea,"Content_Profile")?.[0])||!vibeRequestOperationAllowed({operation:"start"},record,body))
+      throw new HttpError(409,"Dedicated Vibe Cut source or upload state changed; reconcile before retrying");
+  }
   const filename = item4SafeFileName(body?.filename || body?.name || "finished-video.mp4");
   const sizeBytes = Number(body?.size_bytes || body?.size || 0);
   const mimeType = String(body?.mime_type || body?.content_type || "video/mp4").trim() || "video/mp4";
@@ -6593,13 +6600,19 @@ export async function uploadItem4LargeVideoPart(request, env, url, authorization
 }
 /*__STUDIO_WORKER_END:uploadItem4LargeVideoPart__*/
 
-export async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx) {
+export async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx, { dedicatedVibe = false } = {}) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   const recordId = item4RequestIdFromPath(url);
   const assetId = item4LargeUploadSessionIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
   const body = await readJsonBody(request);
+  if(dedicatedVibe) {
+    const ideaIds=f(record,"Idea_Candidate");
+    const idea=Array.isArray(ideaIds)&&ideaIds.length===1?await loadAuthorizedIdea(env,ideaIds[0],authorization):null;
+    if(!verifiedVibeRequest(record,idea,f(idea,"Content_Profile")?.[0])||!vibeRequestOperationAllowed({operation:"complete",asset:assetId},record,body))
+      throw new HttpError(409,"Dedicated Vibe Cut source or upload state changed; reconcile before retrying");
+  }
   const parts = Array.isArray(body?.parts) ? body.parts : [];
   if (!parts.length) throw new HttpError(400, "parts are required");
   const assets = item4AssetManifest(record);
@@ -6701,7 +6714,7 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
       console.warn("Item 4 studio-compress pulse deferred after large upload", error);
     }));
   }
-  if (studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
+  if (!dedicatedVibe && studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(advanceAzFinishedVideo(env, recordId, authorization, ctx).catch((error) => {
       console.warn("AZ finished-video advance deferred after large upload", recordId, error);
     }));
@@ -6715,9 +6728,11 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
     execution_ids: [],
     record: mapProductionRequest(record),
     compression_pending: needsCompress,
-    message: needsCompress
-      ? "Video is staged. Studio is compressing it automatically — you can close this tab."
-      : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
+    message: dedicatedVibe
+      ? "Vibe Cut source is stored. Studio must verify the original and prepare outputs for human Factory review; nothing is approved for publishing."
+      : needsCompress
+        ? "Video is staged. Studio is compressing it automatically — you can close this tab."
+        : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
   }, 201);
 }
 /*__STUDIO_WORKER_END:completeItem4LargeVideoUploadSession__*/
