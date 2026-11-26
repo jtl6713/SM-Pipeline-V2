@@ -187,7 +187,23 @@ jobs:
           set -euo pipefail
           code=$(curl -sS --max-time 25 -o /tmp/pre-deploy-runner-health.json -w '%{http_code}' \
             'https://pipeline.chicagoshining.com/health' || true)
+          echo "runner_predeploy_health_http=$code"
           test "$code" = "200"
+          # Report only enumerated booleans and numeric counts, never raw health
+          # response, environment values, request URLs, or credentials.
+          jq -c '{
+            ok:(.ok==true),
+            write_supabase:(.studio_write_source=="supabase"),
+            phase6_supabase:(.studio_phase6_write_source=="supabase"),
+            output_read_supabase:(.studio_runner_output_read_source=="supabase"),
+            content_read_supabase:(.studio_runner_content_read_source=="supabase"),
+            supabase_writes:(.supabase_pipeline_writes==true),
+            egress_ok:(.airtable_activity.ok==true),
+            any_read:(.airtable_activity.any_read | if type=="boolean" then . else null end),
+            any_write:(.airtable_activity.any_write | if type=="boolean" then . else null end),
+            read_attempts:(.airtable_activity.read_attempts | if type=="number" then . else null end),
+            write_attempts:(.airtable_activity.write_attempts | if type=="number" then . else null end)
+          }' /tmp/pre-deploy-runner-health.json
           jq -e '.ok==true
             and .studio_write_source=="supabase"
             and .studio_phase6_write_source=="supabase"
