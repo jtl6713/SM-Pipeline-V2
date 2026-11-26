@@ -6,7 +6,7 @@ from config import StageRequest
 from stages._carousel import run_named_stage
 
 
-def run(request: StageRequest):
+def run(request: StageRequest, *, trusted_production_request_id: str | None = None):
     extra = dict(request.extra or {})
     if request.content_item_record_id and not extra.get("record_id"):
         extra["record_id"] = request.content_item_record_id
@@ -19,6 +19,7 @@ def run(request: StageRequest):
             "payload": extra,
             "dry_run": bool(extra.get("dry_run")),
             "trigger_i4": extra.get("trigger_i4") is not False,
+            **({"trusted_production_request_id": trusted_production_request_id} if trusted_production_request_id else {}),
         },
         skip_message="I3 did not apply an idea decision",
         ok_message="I3 applied route {route}",
