@@ -1,0 +1,94 @@
+name: Issue 3096 Exact Initial Publish Fences and MAE Lanes
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3096-exact-fence-lane-audit.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3096-exact-fence-lane-audit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: issue3096-exact-fence-lane-readonly
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify bounded read-only audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('.github/workflows/issue3096-exact-fence-lane-audit.yml').read_text()
+          assert 'initial-publish-fence/v1/' in s
+          assert 'STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST' in s
+          assert 'recKw7c9aZ75tDOWU' in s
+          assert 'read_only' in s
+          print('exact_fence_lane_audit_static=PASS')
+          PY
+  audit:
+    if: github.event_name == 'push'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Read exact active Worker binding and fence keys (GET only)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error,urllib.parse
+          api='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          assert token
+          def get(path):
+              req=urllib.request.Request(api+path,headers={'Authorization':'Bearer '+token},method='GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as res:
+                      return res.status,res.read(1024*1024)
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read(4096)
+          def obj(path):
+              status,body=get(path)
+              assert status==200, 'cloudflare_get_failed_'+str(status)
+              data=json.loads(body)
+              assert data.get('success') is True
+              return data['result']
+          worker='/workers/scripts/chicagoshining-studio-api'
+          deployments=obj(worker+'/deployments')
+          version=max(deployments['deployments'][0]['versions'],key=lambda x:x['percentage'])['version_id']
+          bindings=obj(worker+'/versions/'+version)['resources']['bindings']
+          plain={x['name']:x.get('text') for x in bindings if x['type']=='plain_text'}
+          buckets=[x['bucket_name'] for x in bindings if x['type']=='r2_bucket' and x['name']=='STUDIO_MEDIA']
+          assert len(buckets)==1
+          enabled=plain.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED')=='true'
+          lanes=set(x.strip() for x in (plain.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') or '').split(','))
+          exact=[
+            (5947,'recKw7c9aZ75tDOWU','recgtK8Z7eNADNtVy','instagram'),
+            (9851,'rec0TGgcWk6FF8Kem','recT2rbKX3MF7cVFU','facebook'),
+            (10205,'rec5bIppB59ZOoqAR','recgtK8Z7eNADNtVy','facebook'),
+            (10207,'recyvYSoXIn7O65on','recgtK8Z7eNADNtVy','facebook'),
+            (10214,'recEoyaoGOnHBuIAx','recgtK8Z7eNADNtVy','facebook'),
+            (10311,'recIkzEyedhLA1j9T','recT2rbKX3MF7cVFU','facebook'),
+            (10319,'recb47Ep2N5cn6lC9','recT2rbKX3MF7cVFU','facebook'),
+            (10328,'recMwox4BM73Tt6ZK','recT2rbKX3MF7cVFU','facebook'),
+            (10357,'recsK443k84pwX2ZN','recT2rbKX3MF7cVFU','facebook'),
+            (10432,'rec2h64uHpZRvoP1d','recgtK8Z7eNADNtVy','facebook'),
+            (10444,'recOCe3oLSIjoFy2l','recgtK8Z7eNADNtVy','facebook'),
+            (10461,'recIorCsOniQbv9n3','recT2rbKX3MF7cVFU','facebook'),
+            (10487,'recZZUOojvU7mnQYW','recT2rbKX3MF7cVFU','facebook'),
+          ]
+          # A 404 is meaningful only with an authenticated positive bucket read.
+          bucket='/r2/buckets/'+urllib.parse.quote(buckets[0],safe='')
+          bucket_check=obj(bucket)
+          assert bucket_check.get('name')==buckets[0]
+          rows=[]
+          for n,rid,profile,platform in exact:
+              key='studio/state/initial-publish-fence/v1/'+rid+'.json'
+              status,_=get(bucket+'/objects/'+urllib.parse.quote(key,safe=''))
+              rows.append({'output':n,'fence_http':status,'fence_observation':'present' if status==200 else 'not_found' if status==404 else 'unverified','lane_enabled':enabled and profile+'::'+platform in lanes})
+          print('ISSUE3096_FENCE_LANE='+json.dumps({'read_only':True,'worker_version':version,'authority_enabled':enabled,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')))
+          assert all(x['fence_http'] in (200,404) for x in rows),'fence_get_unavailable'
+          PY
