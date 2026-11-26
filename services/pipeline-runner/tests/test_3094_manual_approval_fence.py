@@ -149,3 +149,15 @@ def test_only_authenticated_stage_can_pass_private_owner_argument():
     assert "i3.run(body)" in hook and "trusted_production_request_id" not in hook
     i4stage=(root/"stages"/"i4.py").read_text(encoding="utf-8")
     assert "trusted_production_request_id" not in i4stage
+
+def test_vibe_cut_canonical_projection_never_grants_manual_authority():
+    raw = {"airtable_record_id": IDEA, "status": "Generated",
+        "payload": {"Studio_Production_Mode": "manual", "Studio_Production_Source": "idea"},
+        "production_source": "vibe_cut", "production_mode": "automatic"}
+    record = _record_from_row(raw, SOURCE_CANDIDATES_TABLE)
+    assert record["fields"]["Studio_Production_Mode"] == "automatic"
+    assert record["fields"]["Studio_Production_Source"] == "vibe_cut"
+    assert not explicit_manual_idea(record)
+    corrupt = _record_from_row({**raw, "production_mode": "manual"}, SOURCE_CANDIDATES_TABLE)
+    assert "Studio_Production_Mode" not in corrupt["fields"]
+    assert not explicit_manual_idea(corrupt)
