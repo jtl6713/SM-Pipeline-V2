@@ -1,4 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
+import { authorizeProductionEditorHttp, classifyProductionEditorRoute, productionEditorBoundaryEnabled } from "./production-editor-boundary.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -2351,6 +2352,25 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      // #3094: ordinary Production HTTP access is distinct from dedicated
+      // intake and narrow Factory progress. Internal producer function calls
+      // retain their existing lease and preflight checks.
+      if (productionEditorBoundaryEnabled(env) && classifyProductionEditorRoute(url, request.method)) {
+        const profiles = await reviewAuthorizedProfiles(env, authorization);
+        const allowed = {
+          organizationRecordId: authorization.organization?.record_id,
+          profileRecordIds: profiles.map(profile => profile.id),
+          brandRecordIds: [...new Set(profiles.flatMap(profile => {
+            const links = f(profile, "Brand");
+            return Array.isArray(links) ? links : [];
+          }))],
+        };
+        const access = await authorizeProductionEditorHttp({
+          request, url, env, allowed, read: path => adminHoldSupabaseRest(env, path),
+        });
+        if (!access.allowed) throw new HttpError(access.status || 403, access.reason);
       }
 
       // QA is tenant-admin-only and cannot mutate pipeline output or publish state.
