@@ -206,14 +206,14 @@ export async function queueAcceptedAutomaticEz({idea,draft,listRequests,commitDr
       throw new Error("Automatic EZ media acceptance receipt not verified");
     draft=saved;
   }
+  if(prior&&(prior.idea_id!==idea.id||prior.profile_id!==context.profileId||
+      (prior.production_request_id&&prior.production_request_id!==draft.id)))
+    throw new Error("Existing queue job does not match the accepted intake");
   if(idea.fields.Candidate_Status!=="Approved") {
     const saved=await commitIdea(idea,draft);
     if(saved?.id!==idea.id||saved.fields?.Candidate_Status!=="Approved"||!automaticEzAcceptedContext(draft,saved))
       throw new Error("Automatic EZ Idea acceptance could not be verified");
   }
-  if(prior&&(prior.idea_id!==idea.id||prior.profile_id!==context.profileId||
-      (prior.production_request_id&&prior.production_request_id!==draft.id)))
-    throw new Error("Existing queue job does not match the accepted intake");
   const job=prior||await enqueue(idea.id,context.profileId);
   if(!job)throw new Error("Acceptance saved; durable queue needs reconciliation");
   return {queued:true,idea_id:idea.id,production_request_id:draft.id,job_status:job.status||null,
