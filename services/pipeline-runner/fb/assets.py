@@ -102,6 +102,7 @@ _LEGACY_3096_GALLERIES = {
     "recZZUOojvU7mnQYW": 10487, "recIkzEyedhLA1j9T": 10311,
     "recb47Ep2N5cn6lC9": 10319, "recMwox4BM73Tt6ZK": 10328,
     "recsK443k84pwX2ZN": 10357,
+    "recnNoYbLLfxG2E5u": 10313, "recWLk01kPlyja6J7": 10373,
 }
 
 
