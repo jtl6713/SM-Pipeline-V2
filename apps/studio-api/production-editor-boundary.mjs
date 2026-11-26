@@ -73,6 +73,16 @@ export function manualEditorAuthority(row,{requestId,organizationId,profiles}={}
   const authorized=Array.isArray(profiles)&&profiles.some(p=>p.id===profile.airtable_record_id&&
       p.brandIds?.includes(row.brands.airtable_record_id));
   if(!authorized) return false;
+  const bag=row.publish_status||{};
+  const consistent=(value,expected)=>value==null||value===""||
+    (Array.isArray(value)?value.length===0||(value.length===1&&value[0]===expected):value===expected);
+  // Shared legacy-shaped downstream handlers still use these compatibility
+  // links. A conflicting bag is not permitted to redirect an exact editor.
+  if(!consistent(bag.idea_candidate_airtable_id,owner.airtable_record_id)||
+     !consistent(bag.Idea_Candidate,owner.airtable_record_id)||
+     !consistent(bag.Organization,organizationId)||
+     !consistent(bag.Brand,row.brands.airtable_record_id)||
+     !consistent(bag.content_profile_airtable_id,profile.airtable_record_id))return false;
   // Reuse the exact same mode, dedicated-origin, status and active gates as the list.
   return manualProductionRowVerified(row,{profileUuid:profile.id,organizationUuid:row.organizations.id,brandUuids:[row.brands.id]});
 }
@@ -99,9 +109,14 @@ export async function verifyEditorHttpAccess({route,requestId,scope,read,loadIde
   if(route.kind==="create_request"||route.kind==="idea_draft") {
     const id=route.id||requestId;
     if(!isRecordId(id)) return false;
+    const rows=await read(ideaEditorAuthorityQuery(id));
+    if(!Array.isArray(rows)||rows.length!==1||!manualIdeaAuthority(rows[0],id,scope))return false;
+    // The existing permission path must agree with the canonical profile.
     const idea=await loadIdea(id);
-    return idea?.id===id&&idea?.fields?.Studio_Production_Mode==="manual"&&
-      idea?.fields?.Studio_Production_Source==="idea";
+    const fields=idea?.fields;
+    return idea?.id===id&&fields?.Studio_Production_Mode==="manual"&&
+      fields?.Studio_Production_Source==="idea"&&Array.isArray(fields.Content_Profile)&&
+      fields.Content_Profile.length===1&&fields.Content_Profile[0]===rows[0].content_profiles.airtable_record_id;
   }
   let id=route.id,child=null;
   if(route.kind==="output") {
@@ -116,4 +131,17 @@ export async function verifyEditorHttpAccess({route,requestId,scope,read,loadIde
   if(child&&(child.production_request_id!==row.id||
       child.organization_id!==row.organization_id||child.brand_id!==row.brand_id))return false;
   return manualEditorAuthority(row,{...scope,requestId:id});
+}
+
+export function ideaEditorAuthorityQuery(id) {
+  if(!isRecordId(id)) throw new Error("Invalid exact Idea ID");
+  return "idea_candidates?"+new URLSearchParams({airtable_record_id:"eq."+id,
+    select:"airtable_record_id,production_mode,production_source,content_profile_id,content_profiles(id,airtable_record_id)",limit:"2"});
+}
+export function manualIdeaAuthority(row,id,scope) {
+  const profile=row?.content_profiles;
+  return row?.airtable_record_id===id&&isRecordId(id)&&row.production_mode==="manual"&&
+    row.production_source==="idea"&&profile?.id&&row.content_profile_id===profile.id&&
+    isRecordId(profile.airtable_record_id)&&Array.isArray(scope?.profiles)&&
+    scope.profiles.some(p=>p.id===profile.airtable_record_id&&p.brandIds?.length>0);
 }
