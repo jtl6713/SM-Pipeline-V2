@@ -20,7 +20,7 @@ test("hard hold always wins against a media-ready package",()=>{
 test("retry false and null never count as publication permission",()=>{
  for(const value of [false,null]){
   const got=call({...base,fields:{...base.fields,Publish_Retry_Eligible:value}});
-  assert.match(got.action_group,/^G\./);assert.equal(got.public_publish_authorized,false);
+  assert.match(got.action_group,/^T\./);assert.equal(got.public_publish_authorized,false);
  }
 });
 test("existing remote draft is routed to user rather than new TikTok upload",()=>{
@@ -76,6 +76,7 @@ test("#3096 explicit matching old hold is an audit candidate only, not a provide
  const row=dueFresh();
  Object.assign(row.fields,{Studio_Publish_Dispatch_Count:1,
   Studio_Publish_Dispatch_At:"2026-11-10T10:00:00Z",
+  Review_Decision_At:"2026-11-10T09:59:58Z",
   Studio_Publish_Dispatch_Note:"held until 2026-11-20T12:00:00Z"});
  let got=call(row);
  assert.equal(got.evidence_state,"explicit_early_hold_requires_audit");
@@ -108,4 +109,48 @@ test("#3096 native Meta credential failure stays reconciliation-only even with z
   FB_Slideshow_Response_JSON:"{'error': {'message': 'Error validating access token'}}"});
  const got=call(row);assert.equal(got.evidence_state,"native_attempt_or_response");
  assert.equal(got.action_group,"F. Meta authentication");assert.equal(got.can_repost,false);
+});
+
+
+function historicalHold(){
+ const row=dueFresh();
+ Object.assign(row.fields,{Studio_Publish_Dispatch_Count:1,
+   Studio_Publish_Dispatch_At:"2026-11-10T10:00:00Z",
+   Review_Decision_At:"2026-11-10T09:59:58Z",
+   Studio_Publish_Dispatch_Note:"held until 2026-11-20T12:00:00.000Z",
+   Publish_Retry_Eligible:null});
+ return row;
+}
+test("#3096 a historical hold must match original approval and due clock, with no provider evidence",()=>{
+ assert.match(call(historicalHold()).action_group,/^S\./);
+ for(const [key,value] of [
+  ["Review_Decision_At",null],["Review_Decision_At","2026-11-09T09:59:58Z"],
+  ["Scheduled_Post_Date","2026-11-20T11:00:00Z"],
+  ["Studio_Publish_Dispatch_Note","held until 2026-11-20"],
+  ["Test_Run_ID","synthetic"],["Platform_Post_URL","https://example.com/post"],
+  ["Publish_Error_Message","provider error"],["Publish_Locked_At","2026-11-10T10:00:00Z"],
+  ["Publish_Locked_By","worker"],["Publish_Attempt_Count",1],
+  ["Platform_Publish_Response_JSON",{"id":"remote"}],
+ ]){
+  const row=historicalHold();row.fields[key]=value;
+  const got=call(row);
+  assert.notEqual(got.evidence_state,"explicit_early_hold_requires_audit",key);
+  assert.doesNotMatch(got.action_group,/^[RS]\./,key);
+  assert.equal(got.public_publish_authorized,false,key);
+ }
+});
+test("#3096 cooldown and remote identity precede nullable retry flags and historical holds",()=>{
+ const row=historicalHold();row.fields.Publish_Next_Retry_At="2099-01-01T00:00:00Z";
+ assert.match(call(row).action_group,/^H\./);
+ delete row.fields.Publish_Next_Retry_At;
+ row.fields.IG_Carousel_Parent_Container_ID="old-remote";
+ assert.match(call(row).action_group,/^N\./);
+});
+test("#3096 missing fresh media is a Studio preflight repair rather than a user retry decision",()=>{
+ const row=dueFresh();row.fields.Publish_Asset_URL="";row.fields.Publish_Retry_Eligible=null;
+ const got=call(row);
+ assert.match(got.action_group,/^U\./);
+ assert.equal(got.first_publish_gate_reason,"media_not_ready");
+ assert.equal(got.owner,"Studio");
+ assert.equal(got.public_publish_authorized,false);
 });
