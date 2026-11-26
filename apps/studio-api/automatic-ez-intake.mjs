@@ -196,14 +196,16 @@ export function automaticEzDestinationPlan(record,kind) {
   const items=[...platforms.map(p=>({platform:p,output_type:overrides[p]})),...extras];
   return {package:pkg,contentType,platforms:[...platforms],overrides,extras,items};
 }
-export function automaticEzDestinationPlanMatches(record,destination) {
-  let saved;try{saved=JSON.parse(record?.fields?.Studio_Output_Plan_JSON||"null");}catch{return false;}
-  if(!destination||record?.fields?.Studio_Output_Plan_Status!=="Ready"||
-      !Array.isArray(saved?.items)||saved.items.length!==destination.items.length)return false;
+export function automaticEzDestinationItemsMatch(items,destination) {
+  if(!destination||!Array.isArray(items)||items.length!==destination.items.length)return false;
   const key=row=>JSON.stringify([row?.platform,row?.output_type]);
   const expected=new Set(destination.items.map(key));
-  const actual=new Set(saved.items.map(key));
+  const actual=new Set(items.map(key));
   return actual.size===expected.size&&[...actual].every(k=>expected.has(k));
+}
+export function automaticEzDestinationPlanMatches(record,destination) {
+  let saved;try{saved=JSON.parse(record?.fields?.Studio_Output_Plan_JSON||"null");}catch{return false;}
+  return record?.fields?.Studio_Output_Plan_Status==="Ready"&&automaticEzDestinationItemsMatch(saved?.items,destination);
 }
 
 export function automaticEzAcceptedContext(record,idea) {
