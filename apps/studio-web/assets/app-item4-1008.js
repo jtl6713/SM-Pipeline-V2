@@ -347,7 +347,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1100-production-blockers-2853";
+  const BUILD_ID = "item4-0.6.1101-manual-production-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2597,6 +2597,29 @@
     }
   }
 
+  // A separate per-Idea opt-in; entering an Idea by hand is not Manual Production.
+  let manualIdeaChoiceAvailable = false;
+  let manualIdeaChoiceRequest = 0;
+  async function refreshManualIdeaChoice() {
+    const generation = ++manualIdeaChoiceRequest;
+    const group = $("ideaProductionModeChoice");
+    const checkbox = $("ideaManualProduction");
+    if (!group || !checkbox) return;
+    manualIdeaChoiceAvailable = false;
+    checkbox.disabled = true;
+    checkbox.checked = false;
+    group.hidden = true;
+    try {
+      const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 });
+      if (generation !== manualIdeaChoiceRequest || $("ideaCreatePanel")?.hidden) return;
+      manualIdeaChoiceAvailable = caps?.manual_idea_choice_enabled === true;
+      group.hidden = !manualIdeaChoiceAvailable;
+      checkbox.disabled = !manualIdeaChoiceAvailable;
+    } catch {
+      // An unavailable capability never permits a client-side manual opt-in.
+    }
+  }
+
   function ideaPathMode() {
     const checked = document.querySelector('input[name="ideaPathMode"]:checked');
     return checked?.value === "manual" ? "manual" : "existing";
@@ -3273,7 +3296,12 @@
     panel.hidden = !open;
     $("ideaFormMessage").textContent = "";
     $("ideaFormMessage").className = "form-message";
-    if (!open) return;
+    if (!open) {
+      ++manualIdeaChoiceRequest;
+      manualIdeaChoiceAvailable = false;
+      return;
+    }
+    void refreshManualIdeaChoice();
     if (mode === "manual" || mode === "existing") {
       const radio = document.querySelector(`input[name="ideaPathMode"][value="${mode}"]`);
       if (radio) radio.checked = true;
@@ -3329,13 +3357,25 @@
         message.textContent = "Enter an idea title.";
         return;
       }
+      const manualRequested = $("ideaManualProduction")?.checked === true;
+      if (manualRequested && !manualIdeaChoiceAvailable) {
+        throw new Error("Manual Production is not currently available. No Idea was created.");
+      }
       button.textContent = "Creating…";
       const result = await api("/api/ideas", {
         method: "POST",
-        body: JSON.stringify({ title, summary }),
+        body: JSON.stringify({ title, summary,
+          ...(manualIdeaChoiceAvailable ? { production_mode: manualRequested ? "manual" : "automatic" } : {}),
+        }),
+        // An uncertain create must not be retried automatically.
+        retries: 0,
       });
-      message.className = "form-message success";
-      message.textContent = `Created idea ${result.record?.candidate_id ? `#${result.record.candidate_id}` : "successfully"}.`;
+      const modeUnverified = manualRequested && (result.production_mode_verified !== true ||
+        result.record?.production_mode !== "manual" || result.record?.production_source !== "idea");
+      message.className = modeUnverified ? "form-message error-text" : "form-message success";
+      message.textContent = modeUnverified
+        ? "Idea saved, but Manual Production could not be verified. Refresh this exact Idea; do not create it again."
+        : `Created idea ${result.record?.candidate_id ? `#${result.record.candidate_id}` : "successfully"}.`;
       $("ideaCreateForm").reset();
       const existingRadio = document.querySelector('input[name="ideaPathMode"][value="existing"]');
       if (existingRadio) existingRadio.checked = true;
@@ -3343,7 +3383,10 @@
       const created = result.record;
       setTimeout(() => {
         setIdeaFormOpen(false);
-        if (created?.id) openIdeaDrawer(created);
+        if (created?.id) {
+          openIdeaDrawer(created);
+          if (modeUnverified) setManageMessage("Idea saved, but Manual Production could not be verified. Refresh this exact Idea; do not create it again.", "error-text");
+        }
       }, 500);
     } catch (e) {
       message.className = "form-message error-text";
