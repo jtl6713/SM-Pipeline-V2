@@ -203,6 +203,9 @@
   let ezWizardHistory = [];
   let ezWizardBusy = false;
   let azFinishedPath = false;
+  let azDedicatedTransport = false;
+  const azDedicatedRequests = new Map();
+  let azStartingTransport = false;
   let azFinishedGroupReleased = false;
   let ezPortalPath = null;
   let azProgressTimer = 0;
@@ -347,7 +350,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1102-storyboard-handoff-3094";
+  const BUILD_ID = "item4-0.6.1103-finished-video-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -479,7 +482,17 @@
   let productionContentRecords = [];
   const pipelineProgressHighWater = new Map();
 
+  // Only the exact request returned by dedicated intake may use its aliases.
+  // The Worker still verifies canonical source, tenant, profile and allowed operation.
+  function azDedicatedRequestPath(path) {
+    const match = /^\/api\/production-requests\/(rec[A-Za-z0-9]{14})(?=\/|\?|$)/.exec(String(path || ""));
+    if (!match || !azFinishedPath || azDedicatedRequests.get(match[1]) !== selectedProfileId)
+      return path;
+    return String(path).replace(/^\/api\/production-requests\//, "/api/finished-video/production-requests/");
+  }
+
   function withStudioProfile(path) {
+    path = azDedicatedRequestPath(path);
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
@@ -487,6 +500,7 @@
       || pathname === "/api/scripted-short/accept"
       || pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
       || pathname === "/api/production-requests" || pathname.startsWith("/api/production-requests/")
+      || pathname === "/api/finished-video/production-requests" || pathname.startsWith("/api/finished-video/production-requests/")
       || pathname === "/api/content"
       || pathname === "/api/outputs"
       || pathname === "/api/outputs/approve-all"
@@ -8618,6 +8632,21 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function createEzProductionRequest(ideaId, payload) {
+    if (azFinishedPath && azDedicatedTransport) {
+      if (activeIdea?.id !== ideaId || activeIdea.production_mode !== "automatic" ||
+          activeIdea.production_source !== "finished_video")
+        throw new Error("Finished Video Idea routing is not verified. Reconcile the saved Idea before retrying.");
+      const profile = selectedProfileId;
+      const result = await api("/api/finished-video/production-requests", {
+        method: "POST", body: JSON.stringify({ idea_record_id: ideaId, ...payload }),
+        retries: 0,
+      });
+      if (!/^rec[A-Za-z0-9]{14}$/.test(String(result.record?.id || "")) ||
+          ideaIdFromRequest(result.record) !== ideaId || selectedProfileId !== profile)
+        throw new Error("Finished Video request was not confirmed. Check the saved Idea before retrying.");
+      azDedicatedRequests.set(result.record.id, profile);
+      return result;
+    }
     try {
       return await api("/api/production-requests", { method: "POST", body: JSON.stringify({ idea_record_id: ideaId, ...payload }) });
     } catch (error) {
@@ -9743,6 +9772,11 @@ function timedScriptAssetLabel(asset, index) {
       }
     }
     if (activeProductionRequest?.id && nextFiles.length) {
+      if (azFinishedPath && azDedicatedTransport &&
+          azDedicatedRequests.get(activeProductionRequest.id) !== selectedProfileId) {
+        failAzFinishedIngest("Existing request is not verified for this Finished Video intake. Reopen or reconcile it before uploading.");
+        return false;
+      }
       await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
       return true;
     }
@@ -9836,6 +9870,7 @@ function timedScriptAssetLabel(asset, index) {
           source_video_height: aspectBundle?.height || 0,
           vibe_target_seconds: pending?.vibeTargetSeconds || 15,
         }),
+        ...(azFinishedPath && azDedicatedTransport ? { retries: 0 } : {}),
       });
       activeIdea = idea.record;
       if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
@@ -10058,7 +10093,7 @@ function timedScriptAssetLabel(asset, index) {
       setAzFinishedMessage("Drop one MP4 (or MOV).", "error-text");
       return;
     }
-    if (item4Uploading || ezStarting) {
+    if (item4Uploading || ezStarting || azStartingTransport) {
       setAzFinishedMessage("This video is already uploading.", "error-text");
       return;
     }
@@ -10079,6 +10114,22 @@ function timedScriptAssetLabel(asset, index) {
     )) {
       setAzFinishedMessage("Publish Now cancelled. No video was uploaded.");
       return;
+    }
+    // Resolve transport before creating any Idea or starting any upload.
+    azStartingTransport = true;
+    try {
+      const profile = selectedProfileId;
+      const caps = await api("/api/production-mode/capabilities", { timeoutMs: 8000, retries: 0 });
+      if (caps?.ok !== true || profile !== selectedProfileId)
+        throw new Error("Finished Video routing could not be verified for this profile.");
+      azDedicatedTransport = caps.finished_video_transport_enabled === true;
+      if (!azDedicatedTransport && caps.ordinary_editor_boundary_enabled === true)
+        throw new Error("Finished Video intake is not enabled. Nothing was uploaded.");
+    } catch (error) {
+      setAzFinishedMessage(error.message || "Finished Video routing unavailable.", "error-text");
+      return;
+    } finally {
+      azStartingTransport = false;
     }
     azFinishedPath = true;
     azFinishedGroupReleased = false;
