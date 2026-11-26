@@ -32,6 +32,7 @@
 
 import { IDEA_TITLE_UNIQUENESS_DAYS, studioIdeaTitleYearFormula } from "./idea-title-uniqueness.mjs";
 import { ideaProductionModeSelect, splitIdeaProductionCapture, projectIdeaProductionMode } from "./production-mode-capture.mjs";
+import { autoLaneModeFilter, manualProductionListQuery, verifiedManualProductionRow } from "./production-mode-routing.mjs";
 import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
@@ -1463,6 +1464,7 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
   } else {
     throw new Error("Unknown idea lane");
   }
+  filter += autoLaneModeFilter(env, lane);
   const rows = await supabaseRest(
     env,
     `idea_candidates?${filter}&select=${select}&order=created_at.asc.nullslast&limit=${cap}`,
@@ -8584,6 +8586,32 @@ export function translateProductionRequestFormula(formula) {
 
 /** Allowlisted Production Request list formulas under Phase6 SoR. */
 /** Only explicitly reopened promoted productions; never page through all promoted records. */
+/** Ordinary manual editor list only. Never reuse for Factory or operations counts. */
+export async function listSupabaseManualProductionRequests(env, scope) {
+  if (!studioSupabaseConfigured(env) || studioWriteSource(env) !== "supabase") throw new Error("Canonical Manual Production store unavailable");
+  const profileUuid = await resolveSupabaseProfileId(env, scope.profileRecordId);
+  const verifiedScope = {...scope, profileUuid};
+  const rows = await supabaseRest(env, manualProductionListQuery(verifiedScope));
+  if (!Array.isArray(rows)) throw new Error("Manual Production list returned invalid data");
+  return rows.filter(row => verifiedManualProductionRow(row, verifiedScope)).map(row => {
+    // A compatibility payload may have stale links. Use typed joins exclusively.
+    const bag = isPlainObject(row.publish_status) ? row.publish_status : {};
+    const canonical = {...row, publish_status: {
+      ...bag,
+      Organization: [row.organizations.airtable_record_id],
+      Brand: [row.brands.airtable_record_id],
+      Idea_Candidate: [row.idea_candidates.airtable_record_id],
+      idea_candidate_airtable_id: row.idea_candidates.airtable_record_id,
+      content_profile_airtable_id: scope.profileRecordId,
+    }};
+    const record = airtableShapedProductionRequestFromSupabase(canonical);
+    record.fields.Idea_Title = row.idea_candidates.candidate_title || null;
+    record.fields.Studio_Production_Mode = "manual";
+    record.fields.Studio_Production_Source = "idea";
+    return record;
+  });
+}
+
 export async function listSupabaseRevisionOpenProductionRequests(env, { limit = 100 } = {}) {
   if (!studioSupabaseConfigured(env)) return [];
   const cap = Math.max(1, Math.min(100, Number(limit) || 100));
