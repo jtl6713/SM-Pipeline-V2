@@ -61,7 +61,7 @@ export function editorAuthorityQuery(id) {
   const select="id,airtable_record_id,organization_id,brand_id,idea_candidate_id,request_status,origin,production_notes,publish_status,organizations(id,airtable_record_id),brands(id,airtable_record_id),idea_candidates!inner(id,airtable_record_id,production_mode,production_source,content_profile_id,content_profiles(id,airtable_record_id))";
   return "production_requests?"+new URLSearchParams({airtable_record_id:"eq."+id,select,limit:"2"});
 }
-export function manualEditorAuthority(row,{requestId,organizationId,profiles}={}) {
+export function exactEditorOwnership(row,{requestId,organizationId,profiles}={}) {
   const owner=row?.idea_candidates;
   const profile=owner?.content_profiles;
   if(row?.airtable_record_id!==requestId||!isRecordId(requestId)||!isRecordId(organizationId)||
@@ -83,8 +83,13 @@ export function manualEditorAuthority(row,{requestId,organizationId,profiles}={}
      !consistent(bag.Organization,organizationId)||
      !consistent(bag.Brand,row.brands.airtable_record_id)||
      !consistent(bag.content_profile_airtable_id,profile.airtable_record_id))return false;
+  return true;
+}
+export function manualEditorAuthority(row,scope={}) {
+  if(!exactEditorOwnership(row,scope))return false;
   // Reuse the exact same mode, dedicated-origin, status and active gates as the list.
-  return manualProductionRowVerified(row,{profileUuid:profile.id,organizationUuid:row.organizations.id,brandUuids:[row.brands.id]});
+  return manualProductionRowVerified(row,{profileUuid:row.idea_candidates.content_profile_id,
+    organizationUuid:row.organizations.id,brandUuids:[row.brands.id]});
 }
 
 export function childEditorAuthorityQuery(id) {
