@@ -91,6 +91,62 @@ def recover_approved_photo_count(slides: list[dict[str, Any]], *, max_photos: in
     return count if seen == set(range(1, count + 1)) else None
 
 
+# Historical #3096 media packages have an explicit Final Approved review and
+# Shared_Asset_Approved, but predate the separate Approved For Final field.
+# Scope compatibility to the independently audited cohort and a committed MAE
+# receipt. Never interpret an explicitly false modern decision as approval.
+_LEGACY_3096_GALLERIES = {
+    "rec5bIppB59ZOoqAR": 10205, "recyvYSoXIn7O65on": 10207,
+    "recEoyaoGOnHBuIAx": 10214, "rec2h64uHpZRvoP1d": 10432,
+    "recOCe3oLSIjoFy2l": 10444, "recIorCsOniQbv9n3": 10461,
+    "recZZUOojvU7mnQYW": 10487, "recIkzEyedhLA1j9T": 10311,
+    "recb47Ep2N5cn6lC9": 10319, "recMwox4BM73Tt6ZK": 10328,
+    "recsK443k84pwX2ZN": 10357,
+}
+
+
+def _legacy_3096_review_proven(output: dict[str, Any]) -> bool:
+    record_id = str(output.get("id") or "")
+    number = parse_int(field(output, "Output_ID"), None)
+    if _LEGACY_3096_GALLERIES.get(record_id) != number or number is None:
+        return False
+    if (field_str(output, "Review_Status") != "Approved"
+            or field_str(output, "Output_Status") != "Approved for Publishing"
+            or field_str(output, "Platform") != "Facebook"
+            or field_str(output, "Studio_Output_Type") != "Multi-Image Post"
+            or field_str(output, "FB_Image_Publish_Mode") != "Multi-Photo Collage"
+            or field_str(output, "FB_Resolved_Publish_Mode") != "Multi-Photo Collage"
+            or field_str(output, "Studio_Early_Hold_Recovery_Proof") != "issue-2340-scheduled-hold-v1"):
+        return False
+    receipt = parse_json_field(field(output, "Studio_Overdue_MAE_Recovery_Receipt"))
+    if not isinstance(receipt, dict) or any(receipt.get(k) != v for k, v in {
+        "state": "committed", "version": "issue-3096-mae-v1",
+        "output_record_id": record_id, "platform": "Facebook",
+        "output_type": "Facebook Photo Set",
+    }.items()):
+        return False
+    try:
+        def stamp(value):
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("timezone required")
+            return parsed
+        approval = stamp(field(output, "Review_Decision_At"))
+        dispatch = stamp(field(output, "Studio_Early_Hold_Original_Dispatch_At"))
+        original = stamp(field(output, "Studio_Early_Hold_Original_Scheduled_At"))
+        scheduled = stamp(field(output, "Scheduled_Post_Date"))
+        return (
+            0 <= (dispatch - approval).total_seconds() <= 120
+            and dispatch < original <= stamp(receipt.get("planned_at")) < scheduled
+            and dispatch == stamp(receipt.get("original_dispatch_at"))
+            and original == stamp(receipt.get("original_scheduled_at"))
+            and scheduled == stamp(receipt.get("scheduled_for"))
+            and scheduled == stamp(field(output, "Studio_Scheduled_At"))
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def native_photo_preflight_reason(output: dict[str, Any], slides: list[dict[str, Any]]) -> str | None:
     """#2294: fail closed BEFORE FB0 attempt/lock for native multi-image posts.
 
@@ -148,8 +204,12 @@ def native_photo_preflight_reason(output: dict[str, Any], slides: list[dict[str,
                 or str(fields.get("Asset_Family_Key") or "").strip() != asset_family):
             return "native_gallery_original_source_provenance_invalid"
         used_sources.add(source_file)
+        # Missing legacy checkbox is not equivalent to an explicit rejection.
+        # All manifest, source, owner, order and provider-ID gates still apply.
+        legacy_final = ("Approved For Final" not in fields
+                        and _legacy_3096_review_proven(output))
         if (fields.get("Shared_Asset_Approved") is not True
-                or fields.get("Approved For Final") is not True
+                or (fields.get("Approved For Final") is not True and not legacy_final)
                 or str(fields.get("Review Status") or "").strip() != "Final Approved"):
             return "native_gallery_final_creative_approval_missing"
         if fields.get("FB_Photo_ID"):
