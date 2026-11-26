@@ -26,11 +26,11 @@ const hasResponse=v=>{
   if(typeof v==="object") return Object.keys(v).length>0;
   return !["","null","{}","[]"].includes(str(v));
 };
-function dispatchEvidence(row) {
+function dispatchEvidence(row,nowMs) {
   const read=name=>field(row,name,name.toLowerCase());
   const remote=REMOTE_KEYS.some(name=>Boolean(str(read(name))));
   const native=NATIVE_COUNTERS.some(name=>hasCount(read(name)))
-    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At"]
+    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At","Publish_Locked_By","Publish_Locked_At"]
       .some(name=>Boolean(str(read(name))))
     || hasResponse(read("Platform_Publish_Response"))
     || hasResponse(read("Platform_Publish_Response_JSON"))
@@ -43,10 +43,15 @@ function dispatchEvidence(row) {
     || hasCount(read("Studio_Publish_Dispatch_Count"))
     || Boolean(str(read("Studio_Publish_Dispatch_Note")));
   const note=str(read("Studio_Publish_Dispatch_Note"));
-  const heldUntil=/^held until\s+(\S+)$/i.exec(note);
+  const heldUntil=/^held until (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)$/i.exec(note);
+  const approvalAt=dateMs(read("Review_Decision_At"));
   const explicitEarlyHold=!remote&&!native
     && Number(read("Studio_Publish_Dispatch_Count"))===1
-    && dispatchAt!==null&&scheduledAt!==null&&dispatchAt<scheduledAt
+    && dispatchAt!==null&&scheduledAt!==null&&dispatchAt<scheduledAt&&scheduledAt<=nowMs
+    && approvalAt!==null&&dispatchAt>=approvalAt&&dispatchAt-approvalAt<=30000
+    && str(read("Review_Status"))==="Approved"&&str(read("Output_Status"))==="Approved for Publishing"
+    && !["Test_Run_ID","Published_At","Platform_Post_URL","Manual_Published_URL",
+      "Publish_Error_Stage","Publish_Error_Message"].some(name=>str(read(name)))
     && heldUntil!==null&&dateMs(heldUntil[1])===scheduledAt;
   let evidence_state="no_saved_attempt_evidence";
   if(remote) evidence_state="saved_remote_identity";
@@ -76,7 +81,7 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
   const held=truth(read("Do_Not_Publish","do_not_publish"));
   const auto=truth(read("Auto_Publish_Enabled","auto_publish_enabled"));
   const retryEligible=truth(read("Publish_Retry_Eligible","publish_retry_eligible"));
-  const evidence=dispatchEvidence(row);
+  const evidence=dispatchEvidence(row,nowMs);
   const hasRemote=evidence.remote;
   const firstPublish=assessFreshSupabasePublish(row,{nowMs});
   const stage=str(read("FB_Slideshow_Status","fb_slideshow_status"));
@@ -104,6 +109,8 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
   if(publish==="Publishing"||(platform==="YouTube"&&videoId)) return assign("D. Existing platform processing","Studio","Authenticated provider readback; reconcile existing upload only");
   if(/RATE_LIMIT/i.test(errorStage)||/limit how often|request limit reached/i.test(nativeErrors)) return assign("E. Platform cooldown/rate restriction","Studio + User","Honor provider cooldown and check current connection state");
   if(/session has been invalidated|log in to www\.facebook\.com|Page Access Token|subject does not have permission to post videos|error validating access token/i.test(nativeErrors)) return assign("F. Meta authentication","User","Reconnect/validate impacted Page and Instagram permissions");
+  if(retryAt!==null&&retryAt>nowMs) return assign("H. Cooling down","Studio","Wait until existing retry time; do not shorten");
+  if(hasRemote) return assign("N. Existing remote identity","Studio","Authenticated owner-scoped provider readback before any retry");
   // Retry=false/null does not disqualify a genuinely untouched first publish.
   // Reuse the real admission check; never treat this diagnostic as a claim,
   // provider non-delivery proof, or permission to invoke the provider.
@@ -111,14 +118,16 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
     return assign("R. Fresh due candidate","Studio","Check approved media and account in the normal fenced first-publish path; no forced retry");
   if(evidence.evidence_state==="explicit_early_hold_requires_audit")
     return assign("S. Historical scheduled hold","Studio","Audit exact original slot and provider history; use existing per-output proof path only after verification");
-  if(!retryEligible) return assign("G. Retry prohibited or unconfirmed","User + Studio","Investigate denied/null retry gate without re-enabling automatically");
-  if(retryAt!==null&&retryAt>nowMs) return assign("H. Cooling down","Studio","Wait until existing retry time; do not shorten");
+
+  if(!retryEligible && (evidence.native || evidence.evidence_state==="ambiguous_dispatch"))
+    return assign("T. Ambiguous historical attempt","Studio","Reconcile exact account, provider and dispatch history before any reschedule or retry");
+  if(!retryEligible)
+    return assign("U. First-publish preflight incomplete","Studio","Resolve the first-publish gate reason; retry eligibility is not a first-attempt requirement");
   if(attempts>=8) return assign("I. Attempts exhausted","Studio","Investigate and reconcile before resetting any attempt cap");
   if(platform==="Facebook"&&outputType==="Facebook Photo Set"&&fbStatus==="Ready for Assets") return assign("J. Facebook photo-package defect","Studio + User","Verify unique ordered slide media and stage readiness; no Graph POST");
   if(platform==="Instagram"&&outputType==="Instagram Story"&&["Failed","Publishing"].includes(storyStatus)) return assign("K. Instagram Story stage repair","Studio","Existing-container/status audit; no new container without proof");
   if(platform==="Facebook"&&outputType==="Facebook Reel"&&stage==="Video Ready") return assign("L. Facebook Reel staging","Studio","Check staged public MP4 and Meta post receipt before resume");
   if(platform==="Instagram"&&outputType==="Instagram Carousel") return assign("M. Instagram carousel repair","Studio","Check child/parent container identities and previous Graph results");
-  if(hasRemote) return assign("N. Existing remote identity","Studio","Authenticated owner-scoped provider readback before any retry");
   if(evidence.native||evidence.evidence_state==="ambiguous_dispatch")
     return assign("T. Ambiguous historical attempt","Studio","Reconcile exact account, provider and dispatch history before any reschedule or retry");
   if(publish==="Failed") return assign("O. Failed publishing stage","Studio","Root-cause and repair failed stage; no blanket retry");
