@@ -37,6 +37,7 @@ test("manual and exact tenant/profile/brand filters are applied at the database 
   assert.match(p.get("select"),/idea_candidates!inner\(/);
   assert.match(p.get("and"),/request_status.in.\(Draft,Ready,Submitted\)/);
   assert.match(p.get("and"),/production_notes.not.ilike.\*ez-input=finished-video\*/);
+  assert.match(p.get("and"),/production_notes.not.ilike.\*ez-input=vibe-cut\*/);
   assert.equal(p.get("limit"),"20");
   assert.throws(()=>manualProductionListQuery({scope:{...scope,profileUuid:null},requestSelect:"id,idea_candidates(airtable_record_id)"}),/scope/);
 });
@@ -47,6 +48,8 @@ test("exact receipt independently verifies canonical manual authority",()=>{
     {idea_candidates:null},{idea_candidates:{...valid.idea_candidates,production_mode:"automatic"}},
     {idea_candidates:{...valid.idea_candidates,production_mode:null}},
     {idea_candidates:{...valid.idea_candidates,production_source:"script_a_short"}},
+    {idea_candidates:{...valid.idea_candidates,production_source:"vibe_cut"}},
+    {origin:"vibe_cut"},{origin:"vibe-cut"},{production_notes:"origin=ez-wizard; ez-input=vibe-cut"},
     {idea_candidates:{...valid.idea_candidates,content_profile_id:brandUuid}},
     {origin:"az-finished-video"},{production_notes:"origin=az-finished-video"},
     {production_notes:"origin=ez-wizard; ez-input=finished-video"},
