@@ -47,6 +47,7 @@ jobs:
                   return
               name="auth" if auth else "anonymous"
               print(name+"_http="+str(status))
+              print(name+"_cloudflare_1033_marker="+str(b"1033" in body or b"tunnel error" in body.lower()))
               print(name+"_content_type="+str(hdr.get("content-type","unknown")).split(";")[0][:55])
               print(name+"_access_edge_headers="+("YES" if hdr.get("cf-ray") or hdr.get("cf-mitigated") else "NO"))
               print(name+"_cf_mitigated="+str(hdr.get("cf-mitigated","none"))[:40])
@@ -125,6 +126,28 @@ jobs:
           if token and account:
               base_headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
               tunnel="f7a22f0f-f760-4e16-a085-3538d22981f1"
+              # Status and connection counts only, never connector IDs,
+              # origin IPs, tunnel credentials, or full API responses.
+              tunnel_base="https://api.cloudflare.com/client/v4/accounts/"+account+"/cfd_tunnel/"+tunnel
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(tunnel_base,headers=base_headers),timeout=25) as res:
+                      details=json.load(res).get("result") or {}
+                  status=details.get("status")
+                  print("tunnel_status="+(status if status in ("healthy","degraded","down","inactive") else "unknown"))
+                  connections=details.get("connections")
+                  print("tunnel_reported_connection_count="+str(len(connections) if isinstance(connections,list) else "unknown"))
+              except urllib.error.HTTPError as err:
+                  print("tunnel_status_read_http="+str(err.code))
+              except Exception as err:
+                  print("tunnel_status_read_error="+type(err).__name__)
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(tunnel_base+"/connections",headers=base_headers),timeout=25) as res:
+                      records=json.load(res).get("result")
+                  print("tunnel_connections_api_count="+str(len(records) if isinstance(records,list) else "unknown"))
+              except urllib.error.HTTPError as err:
+                  print("tunnel_connections_read_http="+str(err.code))
+              except Exception as err:
+                  print("tunnel_connections_read_error="+type(err).__name__)
               tunnel_url="https://api.cloudflare.com/client/v4/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations"
               try:
                   with urllib.request.urlopen(urllib.request.Request(tunnel_url,headers=base_headers),timeout=25) as res:
@@ -163,6 +186,7 @@ jobs:
                               dd=json.load(res)
                           rs=dd.get("result") or []
                           print("pipeline_dns_records_count="+str(len(rs)))
+                          print("pipeline_dns_target_matches_expected_tunnel="+str(any(x.get("type")=="CNAME" and str(x.get("content") or "").rstrip(".").lower()==tunnel+".cfargotunnel.com" for x in rs)))
                           print("pipeline_dns_record_types="+",".join(sorted({str(x.get("type")) for x in rs}))[:50])
                           print("pipeline_dns_records_proxied="+str(all(x.get("proxied") is True for x in rs) if rs else "unknown"))
                       except urllib.error.HTTPError as err:
