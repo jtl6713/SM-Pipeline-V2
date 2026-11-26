@@ -95,7 +95,11 @@ test("only human ordinary Idea creation can explicitly capture manual when all f
 });
 test("actual Worker gate runs after authenticated authorization and before ordinary handlers",()=>{
   const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
-  const a=worker.indexOf("if (editorGuardEnabled(env))");
+  const a=worker.indexOf("if (editorGuardEnabled(env) && !dedicatedRoute)");
+  const dedicated=worker.indexOf("const allowed=await verifyDedicatedProductionAccess({");
+  assert.ok(dedicated>0 && dedicated<a);
+  assert.ok(worker.lastIndexOf("if (!authorization.authorized)",dedicated)>0);
+  assert.match(worker.slice(dedicated,a),/if\(!allowed\)throw new HttpError\(403/);
   assert.ok(a>0);
   assert.ok(worker.lastIndexOf("if (!authorization.authorized)",a)>0);
   assert.ok(a<worker.indexOf("if (isIdeaProductionRequestRoute) {"));
