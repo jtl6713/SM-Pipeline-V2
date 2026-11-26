@@ -790,10 +790,25 @@ def run_stage(stage_name: str):
     else:
         body = StageRequest.from_dict(request.get_json(silent=True))
     handler = get_handler(stage_name)
+    # The exact production owner is passed as a server-side argument only
+    # after _verify_secret and strict payload validation; email hooks and
+    # direct I4 calls never gain this capability from arbitrary extras.
+    trusted_production_request_id = None
+    if stage_name == "i3" and settings.get("pipeline_runner_shared_secret", "").strip():
+        from production_mode_guard import mode_capture_enabled
+        if mode_capture_enabled():
+            from studio_produce.recovery_approval import parse_recovery_promotion
+            parsed_owner = parse_recovery_promotion(request.get_json(silent=True))
+            if parsed_owner:
+                trusted_production_request_id = parsed_owner[0]
+    def execute_handler():
+        if trusted_production_request_id:
+            return handler(body, trusted_production_request_id=trusted_production_request_id)
+        return handler(body)
     if recovery_media:
         try:
             with workload_governor.resource_slot("recovery_media_stage", limit=1):
-                result = handler(body)
+                result = execute_handler()
         except workload_governor.AdmissionDeferred:
             return jsonify({"error": "recovery_media_capacity_deferred"}), 503
     elif recovery_approval:
@@ -803,7 +818,7 @@ def run_stage(stage_name: str):
             with workload_governor.resource_slot("recovery_idea_promotion", limit=1):
                 owner_id, idea_id = parse_recovery_promotion(request.get_json(silent=True))
                 validate_recovery_promotion_authority(owner_id, idea_id)
-                result = handler(body)
+                result = execute_handler()
         except workload_governor.AdmissionDeferred:
             return jsonify({"error": "recovery_approval_capacity_deferred"}), 503
         except (ValueError, RuntimeError, LookupError) as error:
@@ -817,7 +832,7 @@ def run_stage(stage_name: str):
             return jsonify({"error": "recovery_i4_not_confirmed",
                             "stage": "i3", "recovery_approval_hold": True}), 503
     else:
-        result = handler(body)
+        result = execute_handler()
 
     status_code = 200
     if result.status == "not_implemented":
