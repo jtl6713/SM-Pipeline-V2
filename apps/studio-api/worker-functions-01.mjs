@@ -6616,10 +6616,31 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   const parts = Array.isArray(body?.parts) ? body.parts : [];
   if (!parts.length) throw new HttpError(400, "parts are required");
   const assets = item4AssetManifest(record);
+  // A Vibe source is not a Finished Video passthrough. Persist the SAME
+  // original's master transfer before acknowledging completion, including
+  // replay after a lost response. This keeps preservation independent of
+  // browser polling; a failed queue write leaves the stored source intact.
+  const preserveDedicatedVibeSource = async (savedAssets) => {
+    if (!dedicatedVibe) return;
+    const pending=savedAssets.filter(asset=>!asset.google_drive_file_id||!asset.media_asset_record_id);
+    if(!pending.length)return;
+    const expected=await item4UpsertMasterQueue(env,recordId,pending);
+    if(expected.length!==pending.length||expected.some(row=>!row.queue_record_id))
+      throw new HttpError(503,"Vibe Cut original is stored but preservation queue is unverified; retry completion, not upload");
+    if(ctx?.waitUntil)ctx.waitUntil((async()=>{
+      try {
+        await item4DrainVariantWorker(env,recordId,Math.min(8,Math.max(2,expected.length+2)),{maxMs:ITEM4_DRAIN_POST_BUDGET_MS});
+        await item4ReconcileMasterAuthority(env,recordId);
+      } catch(error){console.warn("Dedicated Vibe original preservation deferred",recordId,error);}
+    })());
+  };
   const draft = item4FindLargeUploadDraft(assets, assetId);
   if (!draft) {
     const saved = assets.find(row => String(row?.id || "") === assetId && row?.upload_status === "complete");
     if (!saved) throw new HttpError(404, "Upload session not found");
+    await preserveDedicatedVibeSource(assets);
+    if(dedicatedVibe&&item4AssetCompressionPending(saved)&&ctx?.waitUntil)
+      ctx.waitUntil(item4PulseStudioCompressJob(env,recordId).catch(error=>console.warn("Vibe compression resume deferred",recordId,error)));
     // The completion response may have been lost after the canonical write.
     // Return existing state without duplicating queue work or replacing media.
     return respond(request, env, {
@@ -6700,15 +6721,16 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   record = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
     Studio_Master_Asset_Count: nextAssets.length,
-    Studio_Master_Asset_Status: needsCompress ? "Uploading" : "Ready",
+    Studio_Master_Asset_Status: dedicatedVibe || needsCompress ? "Uploading" : "Ready",
     Studio_Output_Plan_Status: "Needs Plan",
     Studio_Output_Plan_JSON: null,
     Studio_Variant_Manifest_JSON: null,
     Studio_Variant_Status: "None",
     Studio_Variant_Updated_At: null,
     Studio_Variant_Error: null,
-    Studio_Item4_State: needsCompress ? "Draft" : "Assets Ready",
+    Studio_Item4_State: dedicatedVibe || needsCompress ? "Draft" : "Assets Ready",
   });
+  await preserveDedicatedVibeSource(nextAssets);
   if (needsCompress && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {
       console.warn("Item 4 studio-compress pulse deferred after large upload", error);
@@ -6722,8 +6744,8 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   return respond(request, env, {
     ok: true,
     uploaded: 1,
-    authority_status: needsCompress ? "Uploading" : "Ready",
-    authority_progress: { ready: needsCompress ? 0 : nextAssets.length, target: nextAssets.length },
+    authority_status: dedicatedVibe || needsCompress ? "Uploading" : "Ready",
+    authority_progress: { ready: dedicatedVibe || needsCompress ? 0 : nextAssets.length, target: nextAssets.length },
     assets: nextAssets,
     execution_ids: [],
     record: mapProductionRequest(record),
