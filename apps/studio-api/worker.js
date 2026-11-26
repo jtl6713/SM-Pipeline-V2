@@ -1,5 +1,6 @@
 import { handleQaApi } from "./qa-http.mjs";
-import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess } from "./production-editor-boundary.mjs";
+import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
+import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -1004,6 +1005,14 @@ export default {
 
       if (request.method === "OPTIONS") {
         return corsPreflight(request, env);
+      }
+      const dedicatedRoute = dedicatedProductionRoute(url.pathname, request.method);
+      if (dedicatedRoute) {
+        if (!dedicatedRoute.allowed || !dedicatedProductionRoutesEnabled(env))
+          throw new HttpError(405, "Dedicated Production route is unavailable");
+        // Only the exact allowlisted alias is normalized. Verify the typed owner
+        // after authentication, before any shared handler is executed.
+        url.pathname = dedicatedRoute.path;
       }
 
       const isMusicPreviewRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
@@ -2357,9 +2366,38 @@ export default {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
       }
 
+      if (url.pathname === "/api/production-mode/capabilities") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return respond(request, env, {
+          ok: true,
+          manual_idea_choice_enabled: manualIdeaCreateEnabled(env) &&
+            authorization.permissions?.ideas_create === true && authorization.permissions?.production_configure === true,
+          dedicated_workflows_enabled: dedicatedProductionRoutesEnabled(env),
+          ordinary_editor_boundary_enabled: editorGuardEnabled(env),
+        });
+      }
+      if (dedicatedRoute) {
+        requirePermission(authorization,"production_configure");
+        if (dedicatedRoute.kind==="story_submit") requirePermission(authorization,"ideas_promote");
+        let body=null;
+        if(dedicatedRoute.kind==="finished_create") {
+          try {body=await request.clone().json();}
+          catch {throw new HttpError(400,"Request body must be valid JSON");}
+        }
+        const profiles=(await resolveAuthorizedContentProfiles(env,authorization)).map(profile=>({
+          id:profile.id,brandIds:(Array.isArray(f(profile,"Brand"))?f(profile,"Brand"):[])
+            .filter(id=>membershipAllowsBrand(authorization,[id])),
+        }));
+        const allowed=await verifyDedicatedProductionAccess({
+          route:dedicatedRoute,body,scope:{organizationId:authorization?.organization?.record_id,profiles},
+          read:path=>adminHoldSupabaseRest(env,path),loadIdea:id=>loadAuthorizedIdea(env,id,authorization),
+        });
+        if(!allowed)throw new HttpError(403,"Dedicated Production source or ownership could not be verified");
+      }
+
       // #3094 ordinary editor boundary. Internal producers call shared helpers
       // directly and never acquire editor access from a browser-controlled flag.
-      if (editorGuardEnabled(env)) {
+      if (editorGuardEnabled(env) && !dedicatedRoute) {
         const editorRoute=classifyProductionEditorHttp(url.pathname,request.method,url.searchParams);
         if(editorRoute) {
           assertEditorGuardReady(env);
@@ -4058,7 +4096,9 @@ export default {
       if (isIdeaProductionRequestRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return await getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
+        return await getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx, {
+          automaticStoryHandoff: dedicatedRoute?.kind === "story_submit",
+        });
       }
 
       if (isProductionRequestCollectionRoute) {
