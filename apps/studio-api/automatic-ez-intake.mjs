@@ -29,6 +29,7 @@ export function automaticEzIdeaFields(env, auth, payload, { source, mode, profil
   // or AI masters are still being collected.
   return { Studio_Photo_Wait_Status: "Not Needed", Production_Config_Notes: marker + kind };
 }
+export const hasAutomaticEzIntakeMarker=idea=>/\[automatic-ez-intake\.1\]/i.test(String(idea?.fields?.Production_Config_Notes||""));
 export function automaticEzIdeaKind(idea) {
   const f = idea?.fields || {};
   const lines = String(f.Production_Config_Notes || "").split(/\r?\n/).filter(x=>x.startsWith(marker));
@@ -215,7 +216,8 @@ export async function queueAcceptedAutomaticEz({idea,draft,listRequests,commitDr
       throw new Error("Automatic EZ Idea acceptance could not be verified");
   }
   const job=prior||await enqueue(idea.id,context.profileId);
-  if(!job)throw new Error("Acceptance saved; durable queue needs reconciliation");
+  if(!job||job.idea_id!==idea.id||job.profile_id!==context.profileId||
+      (job.production_request_id&&job.production_request_id!==draft.id))throw new Error("Acceptance saved; durable queue needs reconciliation");
   return {queued:true,idea_id:idea.id,production_request_id:draft.id,job_status:job.status||null,
     publishing:false,requires_factory_approval:true};
 }
