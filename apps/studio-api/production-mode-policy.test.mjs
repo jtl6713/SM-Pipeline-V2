@@ -14,7 +14,7 @@ test("new human and AI Ideas both default to Automatic Production", () => {
 });
 
 test("dedicated workflows cannot opt in to Manual Production", () => {
-  for (const source of ["script_a_short","finished_video"]) {
+  for (const source of ["script_a_short","finished_video","vibe_cut"]) {
     assert.equal(initialProductionMode({source}),"automatic");
     assert.throws(()=>initialProductionMode({source,requestedMode:"manual",humanChoice:true}),/human Idea/);
     const route=productionRouting({source,persistedMode:"manual"});
@@ -26,7 +26,7 @@ test("dedicated workflows cannot opt in to Manual Production", () => {
 });
 
 test("only an explicit canonical Manual Idea may enter ordinary Production", () => {
-  for (const source of ["idea","script_a_short","finished_video","unknown",undefined]) {
+  for (const source of ["idea","script_a_short","finished_video","vibe_cut","unknown",undefined]) {
     for (const persistedMode of ["manual","automatic",null,"invalid"]) {
       const result=productionRouting({source,persistedMode});
       const visible=source==="idea"&&persistedMode==="manual";
@@ -61,7 +61,7 @@ test("automatic mode does not bypass existing acceptance or admission gates", ()
 test("Finished Video retains existing approval/scheduling modes, not a new grant", () => {
   assert.equal(productionRouting({source:"finished_video"}).approval_policy,
     "preserve_existing_finished_video_mode");
-  for (const source of ["idea","script_a_short"]) {
+  for (const source of ["idea","script_a_short","vibe_cut"]) {
     assert.equal(productionRouting({source,persistedMode:"automatic"}).approval_policy,"human_factory");
   }
 });
@@ -74,8 +74,17 @@ test("mode transitions require human intent, owner authorization, safe lease and
   for (const key of ["humanChoice","authorizedOwnerVerified","safeLeaseBoundary","editableIdea"]) {
     assert.throws(()=>validateProductionModeChange({...allowed,[key]:false}),Error,key);
   }
-  for (const source of ["finished_video","script_a_short"]) {
+  for (const source of ["finished_video","script_a_short","vibe_cut"]) {
     assert.throws(()=>validateProductionModeChange({...allowed,source}),/authorized human Idea/);
   }
   assert.throws(()=>validateProductionModeChange({...allowed,requestedMode:"bad"}),/Invalid Production mode/);
+});
+
+test("Vibe Cut requires existing eligibility, owner and lease and grants no publish authority",()=>{
+  const args={source:"vibe_cut",persistedMode:"automatic",existingEligibilityPassed:true,authorizedOwnerVerified:true,leaseAdmissionGranted:true};
+  assert.equal(canEnterAutomaticProduction(args),true);
+  for(const key of ["existingEligibilityPassed","authorizedOwnerVerified","leaseAdmissionGranted"])assert.equal(canEnterAutomaticProduction({...args,[key]:false}),false);
+  const route=productionRouting(args);
+  assert.equal(route.approval_policy,"human_factory");
+  assert.equal(route.grants_scheduling_or_publishing_authority,false);
 });
