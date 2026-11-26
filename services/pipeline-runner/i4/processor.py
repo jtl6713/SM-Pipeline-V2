@@ -15,6 +15,7 @@ from i4.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from idea.constants import DEFAULT_VOICEOVER_TAIL_SECONDS
 from idea.mapping import parse_number, resolve_tri_state
 from render.fields import field, field_str, first_linked_id
+from production_mode_guard import explicit_manual_idea, verify_manual_submitted_owner
 
 
 def _content_item_fields(
@@ -85,7 +86,8 @@ def _content_item_fields(
     return {key: value for key, value in fields.items() if value is not None and value != ""}
 
 
-def process_request(*, record_id: str | None, dry_run: bool = False) -> dict[str, Any]:
+def process_request(*, record_id: str | None, dry_run: bool = False,
+                    trusted_production_request_id: str | None = None) -> dict[str, Any]:
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
@@ -105,6 +107,8 @@ def process_request(*, record_id: str | None, dry_run: bool = False) -> dict[str
         return {"processed": False, "reason": "not_approved", **preview}
     if already:
         return {"processed": False, "reason": "already_promoted", "content_item_id": already, **preview}
+    if not dry_run and explicit_manual_idea(candidate) and not verify_manual_submitted_owner(record_id, trusted_production_request_id):
+        return {"processed": False, "reason": "manual_production_review_required", **preview}
 
     profile_id = first_linked_id(field(candidate, "Content_Profile"))
     production_profile = None
@@ -123,6 +127,9 @@ def process_request(*, record_id: str | None, dry_run: bool = False) -> dict[str
             **preview,
         }
 
+    # Recheck immediately before the Content Item write.
+    if explicit_manual_idea(candidate) and not verify_manual_submitted_owner(record_id, trusted_production_request_id):
+        return {"processed": False, "reason": "manual_production_review_required", **preview}
     created = client.create_records(
         CONTENT_ITEMS_TABLE,
         [_content_item_fields(candidate, production_profile)],
