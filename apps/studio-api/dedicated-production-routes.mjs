@@ -4,7 +4,7 @@
 import { exactEditorOwnership, editorAuthorityQuery, ideaEditorAuthorityQuery } from "./production-editor-boundary.mjs";
 import { productionModeCaptureEnabled } from "./production-mode-capture.mjs";
 import { isAzFinishedVideoOrigin } from "./az-finished-video.mjs";
-import { automaticEzIntakeEnabled, verifiedAutomaticEzDraftInput, automaticEzMediaContext, automaticEzMediaOperationAllowed } from "./automatic-ez-intake.mjs";
+import { automaticEzIntakeEnabled, verifiedAutomaticEzDraftInput, automaticEzMediaContext, automaticEzMediaOperationAllowed, automaticEzAcceptedContext } from "./automatic-ez-intake.mjs";
 
 export const dedicatedProductionRoutesEnabled=env=>productionModeCaptureEnabled(env)&&
   env?.STUDIO_DEDICATED_PRODUCTION_ROUTES==="true";
@@ -26,11 +26,12 @@ export function dedicatedProductionRoute(path,method) {
   const verb=String(method||"GET").toUpperCase();
   if(path==="/api/automatic-ez/production-requests")
     return {kind:"automatic_ez_create",allowed:verb==="POST",path:"/api/production-requests"};
-  const ez=/^\/api\/automatic-ez\/production-requests\/(rec[A-Za-z0-9]+)\/(item4|assets|generate-ai-masters)$/.exec(path);
+  const ez=/^\/api\/automatic-ez\/production-requests\/(rec[A-Za-z0-9]+)\/(item4|assets|generate-ai-masters|accept)$/.exec(path);
   if(ez){
     const operation=ez[2]==="item4"&&verb==="GET"?"snapshot":
       ez[2]==="assets"&&verb==="POST"?"upload":
-      ez[2]==="generate-ai-masters"&&verb==="POST"?"ai":null;
+      ez[2]==="generate-ai-masters"&&verb==="POST"?"ai":
+      ez[2]==="accept"&&verb==="POST"?"accept":null;
     return {kind:"automatic_ez_request",id:ez[1],operation,allowed:rec.test(ez[1])&&Boolean(operation),
       path:"/api/production-requests/"+ez[1]+"/"+ez[2]};
   }
@@ -65,9 +66,9 @@ export async function verifyDedicatedProductionAccess({route,body,scope,read,loa
     const idea=await loadIdea(row.idea_candidates.airtable_record_id);
     const draft=await loadRequest(route.id);
     if(draft?.id!==route.id||draft.fields?.Production_Notes!==row.production_notes)return false;
-    const context=automaticEzMediaContext(draft,idea);
+    const context=automaticEzMediaContext(draft,idea) || (route.operation==="accept"?automaticEzAcceptedContext(draft,idea):null);
     return Boolean(context&&context.profileId===row.idea_candidates.content_profiles.airtable_record_id&&
-      automaticEzMediaOperationAllowed(context.kind,route.operation));
+      (route.operation==="accept"||automaticEzMediaOperationAllowed(context.kind,route.operation)));
   }
   if(route.kind==="finished_request") {
     const row=one(await read(editorAuthorityQuery(route.id)));
