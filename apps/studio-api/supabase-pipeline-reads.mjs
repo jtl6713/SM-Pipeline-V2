@@ -32,6 +32,7 @@
 
 import { IDEA_TITLE_UNIQUENESS_DAYS, studioIdeaTitleYearFormula } from "./idea-title-uniqueness.mjs";
 import { ideaProductionModeSelect, splitIdeaProductionCapture, projectIdeaProductionMode } from "./production-mode-capture.mjs";
+import { assertManualListSchemaReady, productionModeRoutingEnabled, manualProductionListQuery, manualProductionRowVerified } from "./manual-production-list.mjs";
 import {
   protectedMediaReworkSourceRow,
   protectedMediaReworkShapedRecord,
@@ -1429,6 +1430,12 @@ export async function listSupabaseIdeaLane(env, { lane, limit = 100 } = {}) {
   const select = "airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,content_profiles(airtable_record_id)" + ideaProductionModeSelect(env);
   let filter = "or=(payload->>Test_Run_ID.is.null,payload->>Test_Run_ID.eq.)";
   if (lane === "ready_production" || lane === "photo_ready") {
+    if (productionModeRoutingEnabled(env)) {
+      assertManualListSchemaReady(env);
+      // Only dispatch discovery: do not filter Home, photo-wait or QA reads.
+      // Legacy rows retain their existing gates; manual opt-in is excluded.
+      filter += "&or=(production_mode.is.null,production_mode.neq.manual)";
+    }
     filter += `&payload->>Studio_Photo_Wait_Status=eq.${encodeDeskFilterValue("Ready")}`;
     filter += "&or=(payload->>Promoted_Content_Record_ID.is.null,payload->>Promoted_Content_Record_ID.eq.)";
     filter += "&status=neq.On Hold&status=neq.Rejected";
@@ -8597,6 +8604,37 @@ export async function listSupabaseRevisionOpenProductionRequests(env, { limit = 
   return (Array.isArray(rows) ? rows : [])
     .map(airtableShapedProductionRequestFromSupabase)
     .filter(row => row?.id);
+}
+
+/** Ordinary Production UI only. Internal/operational queries remain unfiltered.
+ * No fallback to the legacy broad list if scope, schema or readback is unavailable.
+ */
+export async function listSupabaseManualProductionRequests(env, {profileId,organizationId,brandIds,limit=100}={}) {
+  assertManualListSchemaReady(env);
+  if (!studioSupabaseConfigured(env) || studioPhase6WriteSource(env)!=="supabase")
+    throw new Error("Canonical Production list unavailable");
+  const brands=[...new Set(brandIds||[])];
+  if (!brands.length) return [];
+  const [profileUuid,organizationUuid,...brandUuids]=await Promise.all([
+    resolveSupabaseProfileId(env,profileId),
+    resolveSupabaseLinkedId(env,"organizations",organizationId),
+    ...brands.map(id=>resolveSupabaseLinkedId(env,"brands",id)),
+  ]);
+  const scope={profileUuid,organizationUuid,brandUuids};
+  const query=manualProductionListQuery({scope,requestSelect:REQUEST_SELECT,limit});
+  const rows=await supabaseRest(env,query);
+  if (!Array.isArray(rows)) throw new Error("Manual Production list unavailable");
+  return rows.filter(row=>manualProductionRowVerified(row,scope)).map(row=>{
+    const shaped=airtableShapedProductionRequestFromSupabase(row);
+    // Override stale compatibility bags with the exact verified FK scope.
+    shaped.fields.Idea_Candidate=[row.idea_candidates.airtable_record_id];
+    shaped.fields.Content_Profile=[profileId];
+    shaped.fields.Organization=[organizationId];
+    shaped.fields.Brand=[brands[brandUuids.indexOf(row.brand_id)]];
+    shaped.fields.Studio_Production_Mode="manual";
+    shaped.fields.Studio_Production_Source="idea";
+    return {record:shaped,ideaTitle:row.idea_candidates.candidate_title||null};
+  });
 }
 
 export async function listSupabaseProductionRequestsByFormula(env, formula, { limit = 50 } = {}) {

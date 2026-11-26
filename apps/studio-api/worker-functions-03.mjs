@@ -1,3 +1,4 @@
+import { isExplicitManualIdea } from "./production-mode-capture.mjs";
 import {
   airtableAiClassification,
   effectiveClassification,
@@ -1347,7 +1348,7 @@ export async function resumeIdeaDirectUploadedAssets(env, idea, state, {authoriz
     },typecast:true}),
   });
   draft = await stampPhotoReadyIdeaForAutonomousProduce(env, updated, draft);
-  if (env.STUDIO_MEDIA) {
+  if (env.STUDIO_MEDIA && !isExplicitManualIdea(updated)) {
     try {
       await readyProductionEnqueue(env.STUDIO_MEDIA, {
         ideaId:updated.id,profileId:profile,
@@ -1540,7 +1541,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     });
     // Stamp origin=autonomous so morning resume / Factory Auto High can pick this
     // up — photo Ready alone used to park forever as a blank-notes Draft.
-    const autonomousAdmitted = !exploreIdeaNeedsApproval({
+    const autonomousAdmitted = !isExplicitManualIdea(ideaReady) && !exploreIdeaNeedsApproval({
       sourcingMode: f(ideaReady, "Asset_Sourcing_Mode"),
       candidateStatus: f(ideaReady, "Candidate_Status"),
     });
