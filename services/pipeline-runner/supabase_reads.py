@@ -685,8 +685,11 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Manual_Classification_Audit"] = meta.get("manual_classification_audit")
         if meta.get("intake_date") is not None and "Intake_Date" not in shaped["fields"]:
             shaped["fields"]["Intake_Date"] = meta.get("intake_date")
-    elif table_id == SOURCE_CANDIDATES_TABLE and row.get("status") is not None:
-        shaped["fields"]["Candidate_Status"] = row.get("status")
+    elif table_id == SOURCE_CANDIDATES_TABLE:
+        from production_mode_guard import project_typed_idea_mode
+        project_typed_idea_mode(row, shaped["fields"])
+        if row.get("status") is not None:
+            shaped["fields"]["Candidate_Status"] = row.get("status")
     elif table_id == CONTENT_PROFILES_TABLE:
         if row.get("profile_name") is not None:
             shaped["fields"]["Profile_Name"] = row.get("profile_name")
