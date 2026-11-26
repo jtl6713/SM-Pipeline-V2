@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import { automaticEzAcceptanceNotes, automaticEzAcceptedContext, queueAcceptedAutomaticEz, automaticEzMediaContext, automaticEzDestinationPlan, automaticEzDestinationPlanMatches } from "./automatic-ez-intake.mjs";
 const ideaId="recIdea0000000001",profileId="recProfile0000001",requestId="recRequest0000001",assetId="recAsset000000001";
 const idea={id:ideaId,fields:{Content_Profile:[profileId],Studio_Production_Mode:"automatic",Studio_Production_Source:"idea",Candidate_Status:"Generated",Studio_Photo_Wait_Status:"Not Needed",Production_Config_Notes:"[automatic-ez-intake.1] single-photo"}};
@@ -59,4 +60,21 @@ test("saved output plan must match every accepted destination without duplicates
  for(const items of [[],[{platform:"Instagram",output_type:"Reel"}],
   [...destination.items,{platform:"Facebook",output_type:"Story"}],[...destination.items,...destination.items]])
   assert.equal(automaticEzDestinationPlanMatches(saved(items),destination),false);
+});
+
+test("both producer plan paths use accepted formats and Item4 fences writes before creating destinations",()=>{
+ const producer=readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+ const claim=producer.slice(producer.indexOf("async function processReadyProductionClaim("),producer.indexOf("async function studioReadyProductionCronResume("));
+ const finish=producer.slice(producer.indexOf("export async function finishAutonomousProductionRequest("));
+ for(const path of [claim,finish]){
+  assert.match(path,/overrides: acceptedEz\?acceptedEz\.destination\.overrides/);
+  assert.match(path,/extras: acceptedEz\?acceptedEz\.destination\.extras/);
+  assert.match(path,/automaticEzDestinationPlanMatches\(/);
+ }
+ const worker=readFileSync(new URL("./worker-functions-01.mjs",import.meta.url),"utf8");
+ const plan=worker.slice(worker.indexOf("function buildItem4OutputPlan("),worker.indexOf("/*__STUDIO_WORKER_END:buildItem4OutputPlan__*/"));
+ assert.ok(plan.indexOf("automaticEzDestinationItemsMatch(plannedItems,acceptedEz.destination)")>0);
+ assert.ok(plan.indexOf("automaticEzDestinationItemsMatch(plannedItems,acceptedEz.destination)")<plan.indexOf("await item4SyncPlanOutputs("));
+ assert.match(plan,/Target_Platforms:acceptedEz\?acceptedEz\.destination\.platforms/);
+ assert.match(plan,/schedules: acceptedEz\?undefined:payload\.schedules/);
 });
