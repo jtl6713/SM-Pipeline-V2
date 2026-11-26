@@ -29,6 +29,23 @@ export function approvedStoryHandoffNotes(notes) {
   if(next.length>10000)throw new Error("Approved storyboard and routing metadata exceed the saved note limit");
   return next;
 }
+export function storyHandoffMatches(request,approved) {
+  const story=approved?.story;
+  const lines=String(val(request,"Production_Notes")||"").split(/\r?\n/).filter(line=>line.startsWith(marker));
+  if(lines.length!==1||!Array.isArray(story?.scenes))return false;
+  let saved;try{saved=JSON.parse(lines[0].slice(marker.length));}catch{return false;}
+  if(saved?.schema!=="story-first-production.1"||saved.profile_id!==story.profile_id||
+      saved.target_seconds!==story.target_seconds||!Array.isArray(saved.scenes)||saved.scenes.length!==story.scenes.length)return false;
+  return saved.scenes.every((row,i)=>{
+    const scene=story.scenes[i];
+    if(!row||!scene||row.asset_id!==scene.assigned_asset_id||row.time!==scene.time||row.voiceover!==scene.voiceover||
+       row.visual!==scene.visual||row.media!==scene.media)return false;
+    for(const key of ["scene_label","on_screen_text","on_screen_text_instagram","voiceover_instagram"])
+      if((row[key]||"")!==(scene[key]||""))return false;
+    return Number(row.music_only_last_seconds||0)===Number(scene.music_only_last_seconds||0)&&
+      (row.media_override===true)===(scene.media_override===true);
+  });
+}
 export function hasStoryHandoffApproval(request) {
   return String(val(request,"Production_Notes")||"").split(/\r?\n/).some(line=>line.trim()===approvedMarker);
 }
@@ -55,7 +72,7 @@ export async function queueApprovedStoryFirst({idea,verifyStory,listRequests,loa
   const prior=await readJob(idea.id);
   if(draft&&(hasStoryHandoffApproval(draft)||String(val(draft,"Request_Status"))==="Submitted"||prior)) {
     // A retry cannot overwrite an active/previously accepted storyboard.
-    if(!hasStoryHandoffApproval(draft))throw new Error("Existing Production job must be reconciled before storyboard handoff");
+    if(!hasStoryHandoffApproval(draft)||!storyHandoffMatches(draft,approved))throw new Error("Existing Production job must be reconciled before storyboard handoff");
     if(state!=="Approved") {
       const accepted=await commitIdeaAcceptance(idea,approved);
       if(accepted?.id!==idea.id||val(accepted,"Candidate_Status")!=="Approved")
@@ -70,7 +87,7 @@ export async function queueApprovedStoryFirst({idea,verifyStory,listRequests,loa
   if(!ownerMatches(draft,idea)||!["Draft","Ready"].includes(String(val(draft,"Request_Status"))))
     throw new Error("Storyboard draft owner or status changed");
   draft=await verifyDraft(draft,approved);
-  if(!ownerMatches(draft,idea))throw new Error("Verified storyboard draft owner changed");
+  if(!ownerMatches(draft,idea)||!storyHandoffMatches(draft,approved))throw new Error("Verified storyboard draft owner or creative directives changed");
   const notes=approvedStoryHandoffNotes(val(draft,"Production_Notes"));
   // Commit exact marker only after all actual selected scene media were saved.
   // Do not approve scheduling or publishing.
