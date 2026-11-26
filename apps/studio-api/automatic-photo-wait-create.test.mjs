@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {automaticPhotoWaitCreateEnabled,automaticPhotoWaitCreateFields} from "./automatic-photo-wait-create.mjs";
+import {automaticPhotoWaitCreateEnabled,automaticPhotoWaitCreateFields,automaticPhotoWaitExistingEnabled,assertAutomaticPhotoWaitExisting} from "./automatic-photo-wait-create.mjs";
 
 const env={STUDIO_PRODUCTION_MODE_CAPTURE:"true",STUDIO_PRODUCTION_MODE_ROUTING:"true",STUDIO_PRODUCTION_EDITOR_GUARD:"true"};
 const auth={permissions:{ideas_create:true,ideas_promote:true,production_configure:true}};
@@ -66,4 +66,39 @@ test("create route applies validated settings before the only initial write and 
   assert.match(atomic,/automatic_photo_wait_saved !== true/);
   assert.match(atomic,/Approval Factory/);
   assert.doesNotMatch(atomic,/openIdeaDrawer|openProductionRequestForIdea|\/promote/);
+});
+
+test("existing automatic photo wait verifies exact typed owner, profile, permission and explicit settings",()=>{
+  const profile="rec12345678901234", id="rec22345678901234";
+  const existingAuth={permissions:{ideas_promote:true,production_configure:true}};
+  const record={id,fields:{Content_Profile:[profile],Studio_Production_Mode:"automatic",
+    Studio_Production_Source:"idea",Candidate_Status:"Generated"}};
+  const marker={profile_id:profile};
+  const payload={...config,photo_wait:true,carousel_slide_count_mode:"Target range",carousel_image_mode:"Wait for matching photos"};
+  assert.equal(automaticPhotoWaitExistingEnabled(env,existingAuth),true);
+  assert.doesNotThrow(()=>assertAutomaticPhotoWaitExisting(env,existingAuth,record,marker,payload));
+  for(const fields of [{Studio_Production_Mode:"manual"},{Studio_Production_Source:"finished_video"},
+    {Studio_Production_Source:"script_a_short"},{Content_Profile:[profile,"rec32345678901234"]},
+    {Candidate_Status:"Promoted"},{Test_Run_ID:"test"},{Promoted_Content_Record_ID:"rec32345678901234"}])
+    assert.throws(()=>assertAutomaticPhotoWaitExisting(env,existingAuth,{...record,fields:{...record.fields,...fields}},marker,payload));
+  assert.throws(()=>assertAutomaticPhotoWaitExisting(env,existingAuth,record,{profile_id:"rec32345678901234"},payload));
+  assert.throws(()=>assertAutomaticPhotoWaitExisting(env,{permissions:{ideas_promote:true}},record,marker,payload));
+  assert.throws(()=>assertAutomaticPhotoWaitExisting(env,existingAuth,record,marker,{...payload,photo_wait:false}));
+});
+
+test("existing EZ automatic photo wait checks exact saved Idea and avoids opening the Manage drawer",()=>{
+  const app=readFileSync(new URL("../studio-web/assets/app-item4-1008.js",import.meta.url),"utf8");
+  const wizard=app.slice(app.indexOf("async function finishEzWizard("),app.indexOf("function drainPendingMasterUploads("));
+  const path=wizard.slice(wizard.indexOf("let automaticExisting = false;"));
+  assert.match(path,/automatic_photo_wait_existing_enabled/);
+  assert.match(path,/automatic_photo_wait_existing: \{ profile_id: profile \}/);
+  const receipt=path.slice(path.indexOf("if (automaticExisting) {"),path.indexOf("updateIdeaDrawer(result.record || idea)"));
+  assert.match(receipt,/result\.waiting !== true/);
+  assert.match(receipt,/Approval Factory/);
+  assert.match(receipt,/return;/);
+  assert.doesNotMatch(receipt,/openIdeaDrawer/);
+  const worker=readFileSync(new URL("./worker-functions-02.mjs",import.meta.url),"utf8");
+  const promote=worker.slice(worker.indexOf("export async function promoteIdeaViaI3I4("),worker.indexOf("/*__STUDIO_WORKER_END:promoteIdeaViaI3I4__*/"));
+  assert.ok(promote.indexOf("assertAutomaticPhotoWaitExisting(")>0);
+  assert.ok(promote.indexOf("assertAutomaticPhotoWaitExisting(")<promote.indexOf("approveIdeaAndWaitForPhotos("));
 });

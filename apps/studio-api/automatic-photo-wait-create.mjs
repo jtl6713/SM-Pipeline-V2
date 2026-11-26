@@ -12,6 +12,36 @@ export function automaticPhotoWaitCreateEnabled(env, authorization) {
     p?.ideas_promote === true && p?.production_configure === true;
 }
 
+// Existing Ideas need promotion/configuration authority, not create authority.
+export function automaticPhotoWaitExistingEnabled(env, authorization) {
+  const p = authorization?.permissions;
+  return productionModeCaptureEnabled(env) && productionModeRoutingEnabled(env) &&
+    editorGuardEnabled(env) && p?.ideas_promote === true && p?.production_configure === true;
+}
+
+export function assertAutomaticPhotoWaitExisting(env, authorization, record, marker, payload) {
+  if (!automaticPhotoWaitExistingEnabled(env, authorization))
+    throw new Error("Automatic existing-Idea photo wait is unavailable");
+  assertEditorGuardReady(env);
+  const fields = record?.fields || {};
+  const profile = marker?.profile_id;
+  if (!marker || Object.keys(marker).length !== 1 || !/^rec[A-Za-z0-9]{14}$/.test(profile || "") ||
+      !/^rec[A-Za-z0-9]{14}$/.test(record?.id || "") ||
+      !Array.isArray(fields.Content_Profile) || fields.Content_Profile.length !== 1 ||
+      fields.Content_Profile[0] !== profile || fields.Studio_Production_Mode !== "automatic" ||
+      fields.Studio_Production_Source !== "idea" || String(fields.Test_Run_ID || "").trim() ||
+      !["Generated","Approved"].includes(fields.Candidate_Status) ||
+      fields.Promoted_Content_Record_ID || (fields["Content Items"] || []).length)
+    throw new Error("Exact existing automatic Idea and profile could not be verified");
+  if (payload?.photo_wait !== true || payload.carousel_slide_count_mode !== "Target range" ||
+      payload.carousel_image_mode !== "Wait for matching photos" ||
+      !Number.isInteger(payload.carousel_slide_count_min) || !Number.isInteger(payload.carousel_slide_count_max) ||
+      payload.carousel_slide_count_min < 1 || payload.carousel_slide_count_max > 20 ||
+      payload.carousel_slide_count_min > payload.carousel_slide_count_max ||
+      !photoTypes.has(payload.content_type) || !Array.isArray(payload.platforms) || !payload.platforms.length)
+    throw new Error("Valid explicit photo-wait settings required");
+}
+
 const allowedKeys = new Set(["approve_idea","content_type","platforms",
   "include_voiceover","include_background_music","include_thumbnail",
   "carousel_slide_count_min","carousel_slide_count_max"]);

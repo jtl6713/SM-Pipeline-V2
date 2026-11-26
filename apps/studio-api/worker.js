@@ -1,5 +1,5 @@
 import { handleQaApi } from "./qa-http.mjs";
-import { automaticPhotoWaitCreateEnabled } from "./automatic-photo-wait-create.mjs";
+import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
 import { storyFirstAutomaticHandoffEnabled } from "./story-first-automatic-handoff.mjs";
 import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
@@ -2379,6 +2379,7 @@ export default {
             authorization.permissions?.ideas_create === true && authorization.permissions?.production_configure === true,
           finished_video_transport_enabled: dedicatedProductionRoutesEnabled(env),
           automatic_photo_wait_create_enabled: automaticPhotoWaitCreateEnabled(env, authorization),
+          automatic_photo_wait_existing_enabled: automaticPhotoWaitExistingEnabled(env, authorization),
           storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
             authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
