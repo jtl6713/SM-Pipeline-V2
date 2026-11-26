@@ -4,6 +4,7 @@
 import { exactEditorOwnership, editorAuthorityQuery, ideaEditorAuthorityQuery } from "./production-editor-boundary.mjs";
 import { productionModeCaptureEnabled } from "./production-mode-capture.mjs";
 import { isAzFinishedVideoOrigin } from "./az-finished-video.mjs";
+import { automaticEzIntakeEnabled, verifiedAutomaticEzDraftInput } from "./automatic-ez-intake.mjs";
 
 export const dedicatedProductionRoutesEnabled=env=>productionModeCaptureEnabled(env)&&
   env?.STUDIO_DEDICATED_PRODUCTION_ROUTES==="true";
@@ -23,6 +24,10 @@ function finishedAllowed(op,verb) {
 }
 export function dedicatedProductionRoute(path,method) {
   const verb=String(method||"GET").toUpperCase();
+  if(path==="/api/automatic-ez/production-requests")
+    return {kind:"automatic_ez_create",allowed:verb==="POST",path:"/api/production-requests"};
+  if(path.startsWith("/api/automatic-ez/production-requests/"))
+    return {kind:"invalid",allowed:false};
   if(path==="/api/finished-video/production-requests")
     return {kind:"finished_create",allowed:verb==="POST",path:"/api/production-requests"};
   const finished=/^\/api\/finished-video\/production-requests\/(rec[A-Za-z0-9]+)(?:\/(.*))?$/.exec(path);
@@ -31,6 +36,9 @@ export function dedicatedProductionRoute(path,method) {
   if(path.startsWith("/api/finished-video/production-requests/"))
     return {kind:"invalid",allowed:false};
   return null;
+}
+export function dedicatedRouteEnabled(env,route) {
+  return route?.kind==="automatic_ez_create" ? automaticEzIntakeEnabled(env) : dedicatedProductionRoutesEnabled(env);
 }
 const one=rows=>Array.isArray(rows)&&rows.length===1?rows[0]:null;
 function dedicatedIdeaAuthority(row,id,source,scope) {
@@ -50,7 +58,7 @@ export async function verifyDedicatedProductionAccess({route,body,scope,read,loa
   }
   const id=body?.idea_record_id;
   if(!rec.test(String(id||"")))return false;
-  const source=route.kind==="finished_create"?"finished_video":null;
+  const source=route.kind==="finished_create"?"finished_video":route.kind==="automatic_ez_create"?"idea":null;
   if(!source)return false;
   // Dedicated finished creation must carry the existing AZ contract, not a
   // new mode inferred from a filename or arbitrary generic request.
@@ -58,6 +66,7 @@ export async function verifyDedicatedProductionAccess({route,body,scope,read,loa
   const row=one(await read(ideaEditorAuthorityQuery(id)));
   if(!dedicatedIdeaAuthority(row,id,source,scope))return false;
   const idea=await loadIdea(id);
+  if (route.kind==="automatic_ez_create" && (!verifiedAutomaticEzDraftInput(idea,body) || body.content_profile_id!==row.content_profiles.airtable_record_id)) return false;
   const fields=idea?.fields;
   return idea?.id===id&&fields?.Studio_Production_Mode==="automatic"&&fields?.Studio_Production_Source===source&&
     Array.isArray(fields.Content_Profile)&&fields.Content_Profile.length===1&&fields.Content_Profile[0]===row.content_profiles.airtable_record_id;
