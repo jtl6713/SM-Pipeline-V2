@@ -1,5 +1,6 @@
 import { handleQaApi } from "./qa-http.mjs";
 import { authorizeProductionEditorHttp, classifyProductionEditorRoute, productionEditorBoundaryEnabled } from "./production-editor-boundary.mjs";
+import { manualProductionChoiceEnabled } from "./production-mode-capture.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -2354,6 +2355,14 @@ export default {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
       }
 
+      if (url.pathname === "/api/production-mode/capabilities") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return respond(request, env, {
+          ok: true, manual_idea_choice_enabled: manualProductionChoiceEnabled(env) &&
+            authorization.permissions?.ideas_create === true,
+          ordinary_editor_boundary_enabled: productionEditorBoundaryEnabled(env),
+        });
+      }
       // #3094: ordinary Production HTTP access is distinct from dedicated
       // intake and narrow Factory progress. Internal producer function calls
       // retain their existing lease and preflight checks.
