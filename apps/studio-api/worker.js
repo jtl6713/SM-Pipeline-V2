@@ -2384,6 +2384,7 @@ export default {
           automatic_ez_idea_create_enabled: automaticEzCreateEnabled(env,authorization),
           automatic_ez_draft_create_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
           automatic_ez_media_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
+          automatic_ez_accept_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true && authorization.permissions?.ideas_promote === true,
           storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
             authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
@@ -2406,6 +2407,13 @@ export default {
           loadRequest:id=>loadAuthorizedProductionRequest(env,id,authorization),
         });
         if(!allowed)throw new HttpError(403,"Dedicated Production source or ownership could not be verified");
+        if(dedicatedRoute.kind==="automatic_ez_request" && dedicatedRoute.operation==="accept") {
+          assertWriteRequest(request,env);
+          requirePermission(authorization,"ideas_promote");
+          if(!env.STUDIO_MEDIA)throw new HttpError(503,"Automatic EZ intake lock unavailable");
+          return await withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>
+            createProductionRequestFromBody(request,env,authorization,url,ctx,{automaticEzAcceptId:dedicatedRoute.id}));
+        }
         if(dedicatedRoute.kind==="automatic_ez_request" && dedicatedRoute.operation==="snapshot")
           url.searchParams.set("snapshot","1");
       }
