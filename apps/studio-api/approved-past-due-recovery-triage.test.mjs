@@ -176,6 +176,8 @@ test("#3096 missing-note cohort excludes conflicting evidence and incomplete clo
   ["Scheduled_Post_Date","2026-11-21T00:00:00Z"],
   ["Studio_Publish_Dispatch_Note","held until 2026-11-20T13:00:00Z"],
   ["Publish_Started_At","2026-11-10T10:00:00Z"],
+  ["IG_Story_Locked_At","2026-11-10T10:00:00Z"],["IG_Story_Locked_By","worker"],
+  ["Platform_Publish_Response_Text",'{"id":"remote"}'],
   ["Platform_Publish_Response_JSON",{"id":"remote"}],
   ["IG_Carousel_Parent_Container_ID","remote"],
   ["Publish_Attempt_Count",1],["Platform_Post_URL","https://example.com/post"],
@@ -197,6 +199,7 @@ test("#3096 missing-note research must not override hold, disabled auto, or cool
   const row=historicalHold();row.fields.Studio_Publish_Dispatch_Note="";row.fields[key]=value;
   const got=call(row);
   assert.ok(got.action_group.startsWith(group),key);
+  if(key!=="Publish_Next_Retry_At") assert.equal(got.historical_hold_note_missing_candidate,false,key);
   assert.equal(got.public_publish_authorized,false);
   assert.equal(got.can_repost,false);
  }
