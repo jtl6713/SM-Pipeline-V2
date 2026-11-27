@@ -1,5 +1,6 @@
 import { windowsOutageState } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
+import { verifiedVibeRequest, vibeRequestOperationAllowed } from "./vibe-dedicated-intake.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
 import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, automaticEzDestinationItemsMatch } from "./automatic-ez-intake.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
@@ -6482,7 +6483,7 @@ export function item4FindLargeUploadDraft(assets, assetId) {
 }
 /*__STUDIO_WORKER_END:item4FindLargeUploadDraft__*/
 
-export async function createItem4LargeVideoUploadSession(request, env, url, authorization) {
+export async function createItem4LargeVideoUploadSession(request, env, url, authorization, { dedicatedVibe = false } = {}) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   if (typeof env.STUDIO_MEDIA.createMultipartUpload !== "function") {
     throw new HttpError(503, "Large video staging is not available on this Worker yet");
@@ -6491,6 +6492,12 @@ export async function createItem4LargeVideoUploadSession(request, env, url, auth
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
   const body = await readJsonBody(request);
+  if(dedicatedVibe) {
+    const ideaIds=f(record,"Idea_Candidate");
+    const idea=Array.isArray(ideaIds)&&ideaIds.length===1?await loadAuthorizedIdea(env,ideaIds[0],authorization):null;
+    if(!verifiedVibeRequest(record,idea,f(idea,"Content_Profile")?.[0])||!vibeRequestOperationAllowed({operation:"start"},record,body))
+      throw new HttpError(409,"Dedicated Vibe Cut source or upload state changed; reconcile before retrying");
+  }
   const filename = item4SafeFileName(body?.filename || body?.name || "finished-video.mp4");
   const sizeBytes = Number(body?.size_bytes || body?.size || 0);
   const mimeType = String(body?.mime_type || body?.content_type || "video/mp4").trim() || "video/mp4";
@@ -6594,20 +6601,47 @@ export async function uploadItem4LargeVideoPart(request, env, url, authorization
 }
 /*__STUDIO_WORKER_END:uploadItem4LargeVideoPart__*/
 
-export async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx) {
+export async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx, { dedicatedVibe = false } = {}) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   const recordId = item4RequestIdFromPath(url);
   const assetId = item4LargeUploadSessionIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
   const body = await readJsonBody(request);
+  if(dedicatedVibe) {
+    const ideaIds=f(record,"Idea_Candidate");
+    const idea=Array.isArray(ideaIds)&&ideaIds.length===1?await loadAuthorizedIdea(env,ideaIds[0],authorization):null;
+    if(!verifiedVibeRequest(record,idea,f(idea,"Content_Profile")?.[0])||!vibeRequestOperationAllowed({operation:"complete",asset:assetId},record,body))
+      throw new HttpError(409,"Dedicated Vibe Cut source or upload state changed; reconcile before retrying");
+  }
   const parts = Array.isArray(body?.parts) ? body.parts : [];
   if (!parts.length) throw new HttpError(400, "parts are required");
   const assets = item4AssetManifest(record);
+  // A Vibe source is not a Finished Video passthrough. Persist the SAME
+  // original's master transfer before acknowledging completion, including
+  // replay after a lost response. This keeps preservation independent of
+  // browser polling; a failed queue write leaves the stored source intact.
+  const preserveDedicatedVibeSource = async (savedAssets) => {
+    if (!dedicatedVibe) return;
+    const pending=savedAssets.filter(asset=>!asset.google_drive_file_id||!asset.media_asset_record_id);
+    if(!pending.length)return;
+    const expected=await item4UpsertMasterQueue(env,recordId,pending);
+    if(expected.length!==pending.length||expected.some(row=>!row.queue_record_id))
+      throw new HttpError(503,"Vibe Cut original is stored but preservation queue is unverified; retry completion, not upload");
+    if(ctx?.waitUntil)ctx.waitUntil((async()=>{
+      try {
+        await item4DrainVariantWorker(env,recordId,Math.min(8,Math.max(2,expected.length+2)),{maxMs:ITEM4_DRAIN_POST_BUDGET_MS});
+        await item4ReconcileMasterAuthority(env,recordId);
+      } catch(error){console.warn("Dedicated Vibe original preservation deferred",recordId,error);}
+    })());
+  };
   const draft = item4FindLargeUploadDraft(assets, assetId);
   if (!draft) {
     const saved = assets.find(row => String(row?.id || "") === assetId && row?.upload_status === "complete");
     if (!saved) throw new HttpError(404, "Upload session not found");
+    await preserveDedicatedVibeSource(assets);
+    if(dedicatedVibe&&item4AssetCompressionPending(saved)&&ctx?.waitUntil)
+      ctx.waitUntil(item4PulseStudioCompressJob(env,recordId).catch(error=>console.warn("Vibe compression resume deferred",recordId,error)));
     // The completion response may have been lost after the canonical write.
     // Return existing state without duplicating queue work or replacing media.
     return respond(request, env, {
@@ -6688,21 +6722,22 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   record = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
     Studio_Master_Asset_Count: nextAssets.length,
-    Studio_Master_Asset_Status: needsCompress ? "Uploading" : "Ready",
+    Studio_Master_Asset_Status: dedicatedVibe || needsCompress ? "Uploading" : "Ready",
     Studio_Output_Plan_Status: "Needs Plan",
     Studio_Output_Plan_JSON: null,
     Studio_Variant_Manifest_JSON: null,
     Studio_Variant_Status: "None",
     Studio_Variant_Updated_At: null,
     Studio_Variant_Error: null,
-    Studio_Item4_State: needsCompress ? "Draft" : "Assets Ready",
+    Studio_Item4_State: dedicatedVibe || needsCompress ? "Draft" : "Assets Ready",
   });
+  await preserveDedicatedVibeSource(nextAssets);
   if (needsCompress && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {
       console.warn("Item 4 studio-compress pulse deferred after large upload", error);
     }));
   }
-  if (studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
+  if (!dedicatedVibe && studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(advanceAzFinishedVideo(env, recordId, authorization, ctx).catch((error) => {
       console.warn("AZ finished-video advance deferred after large upload", recordId, error);
     }));
@@ -6710,15 +6745,17 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   return respond(request, env, {
     ok: true,
     uploaded: 1,
-    authority_status: needsCompress ? "Uploading" : "Ready",
-    authority_progress: { ready: needsCompress ? 0 : nextAssets.length, target: nextAssets.length },
+    authority_status: dedicatedVibe || needsCompress ? "Uploading" : "Ready",
+    authority_progress: { ready: dedicatedVibe || needsCompress ? 0 : nextAssets.length, target: nextAssets.length },
     assets: nextAssets,
     execution_ids: [],
     record: mapProductionRequest(record),
     compression_pending: needsCompress,
-    message: needsCompress
-      ? "Video is staged. Studio is compressing it automatically — you can close this tab."
-      : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
+    message: dedicatedVibe
+      ? "Vibe Cut source is stored. Studio must verify the original and prepare outputs for human Factory review; nothing is approved for publishing."
+      : needsCompress
+        ? "Video is staged. Studio is compressing it automatically — you can close this tab."
+        : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
   }, 201);
 }
 /*__STUDIO_WORKER_END:completeItem4LargeVideoUploadSession__*/

@@ -5,6 +5,7 @@ import { automaticEzCreateEnabled, automaticEzIntakeEnabled } from "./automatic-
 import { storyFirstAutomaticHandoffEnabled } from "./story-first-automatic-handoff.mjs";
 import { editorGuardEnabled, assertEditorGuardReady, classifyProductionEditorHttp, verifyEditorHttpAccess, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
 import { dedicatedProductionRoute, dedicatedProductionRoutesEnabled, dedicatedRouteEnabled, verifyDedicatedProductionAccess } from "./dedicated-production-routes.mjs";
+import { dedicatedVibeIntakeEnabled } from "./vibe-dedicated-intake.mjs";
 import {readFactoryReviewResolve,readFactoryReviewResolveReceipt} from "./factory-review-resolve.mjs";
 import { handleAdminPublishingHolds } from "./admin-publishing-holds.mjs";
 import { supabaseRest as adminHoldSupabaseRest } from "./supabase-pipeline-reads.mjs";
@@ -2388,6 +2389,7 @@ export default {
           automatic_ez_draft_create_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
           automatic_ez_media_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true,
           automatic_ez_accept_enabled: automaticEzIntakeEnabled(env) && authorization.permissions?.production_configure === true && authorization.permissions?.ideas_promote === true,
+          dedicated_vibe_intake_enabled: dedicatedVibeIntakeEnabled(env) && authorization.permissions?.production_configure === true && authorization.permissions?.ideas_promote === true,
           storyboard_auto_handoff_enabled: storyFirstAutomaticHandoffEnabled(env) &&
             authorization.permissions?.ideas_promote === true && authorization.permissions?.production_configure === true,
           ordinary_editor_boundary_enabled: editorGuardEnabled(env),
@@ -2396,7 +2398,8 @@ export default {
       if (dedicatedRoute) {
         requirePermission(authorization,"production_configure");
         let body=null;
-        if(dedicatedRoute.kind==="finished_create" || dedicatedRoute.kind==="automatic_ez_create") {
+        if(dedicatedRoute.kind==="vibe_create" || dedicatedRoute.kind==="vibe_request")requirePermission(authorization,"ideas_promote");
+        if(dedicatedRoute.kind==="finished_create" || dedicatedRoute.kind==="automatic_ez_create" || dedicatedRoute.kind==="vibe_create" || (dedicatedRoute.kind==="vibe_request" && dedicatedRoute.operation==="start")) {
           try {body=await request.clone().json();}
           catch {throw new HttpError(400,"Request body must be valid JSON");}
         }
@@ -2417,7 +2420,7 @@ export default {
           return await withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>
             createProductionRequestFromBody(request,env,authorization,url,ctx,{automaticEzAcceptId:dedicatedRoute.id}));
         }
-        if(dedicatedRoute.kind==="automatic_ez_request" && dedicatedRoute.operation==="snapshot")
+        if(["automatic_ez_request","vibe_request"].includes(dedicatedRoute.kind) && dedicatedRoute.operation==="snapshot")
           url.searchParams.set("snapshot","1");
       }
 
@@ -4138,6 +4141,12 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
+          if (dedicatedRoute?.kind==="vibe_create") {
+            if (!env.STUDIO_MEDIA)throw new HttpError(503,"Dedicated Vibe Cut intake lock unavailable");
+            const ideaId=(await request.clone().json()).idea_record_id;
+            return withOutputApprovalLock(env.STUDIO_MEDIA,ideaId,
+              ()=>createProductionRequestFromBody(request,env,authorization,url,ctx,{dedicatedVibe:true}));
+          }
           if (dedicatedRoute?.kind==="automatic_ez_create") {
             if (!env.STUDIO_MEDIA) throw new HttpError(503,"Automatic EZ intake lock unavailable");
             const ideaId=(await request.clone().json()).idea_record_id;
@@ -4184,6 +4193,10 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
+        if(dedicatedRoute?.kind==="vibe_request") {
+          if(!env.STUDIO_MEDIA)throw new HttpError(503,"Dedicated Vibe Cut upload lock unavailable");
+          return withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>createItem4LargeVideoUploadSession(request,env,url,authorization,{dedicatedVibe:true}));
+        }
         return createItem4LargeVideoUploadSession(request, env, url, authorization);
       }
 
@@ -4198,6 +4211,10 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
+        if(dedicatedRoute?.kind==="vibe_request") {
+          if(!env.STUDIO_MEDIA)throw new HttpError(503,"Dedicated Vibe Cut upload lock unavailable");
+          return withOutputApprovalLock(env.STUDIO_MEDIA,dedicatedRoute.id,()=>completeItem4LargeVideoUploadSession(request,env,url,authorization,ctx,{dedicatedVibe:true}));
+        }
         return completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx);
       }
 

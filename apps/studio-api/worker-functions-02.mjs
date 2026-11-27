@@ -1,5 +1,6 @@
 import { windowsOutageState } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
+import { verifiedVibeDraftInput, verifiedVibeDraftReceipt } from "./vibe-dedicated-intake.mjs";
 import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
 import { verifiedAutomaticEzDraftInput, verifiedAutomaticEzDraftReceipt, automaticEzExistingDraftId, automaticEzMediaContext, automaticEzAiTarget, queueAcceptedAutomaticEz } from "./automatic-ez-intake.mjs";
 import { storyFirstAutomaticHandoffEnabled, queueApprovedStoryFirst } from "./story-first-automatic-handoff.mjs";
@@ -4160,7 +4161,7 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
 
-export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null, { automaticEzIntake = false, automaticEzAcceptId = null } = {}) {
+export async function createProductionRequestFromBody(request, env, authorization, url, ctx = null, { automaticEzIntake = false, automaticEzAcceptId = null, dedicatedVibe = false } = {}) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   if(automaticEzAcceptId) {
@@ -4196,16 +4197,18 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   if (!/^rec[A-Za-z0-9]+$/.test(ideaRecordId)) throw new HttpError(400, "idea_record_id is required");
 
   let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
+  if (dedicatedVibe && !verifiedVibeDraftInput(idea,payload))
+    throw new HttpError(409,"Dedicated Vibe Cut owner or configuration changed");
   if (automaticEzIntake && !verifiedAutomaticEzDraftInput(idea,payload))
     throw new HttpError(409,"Automatic EZ intake owner or configuration changed");
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
-  if (automaticEzIntake && preferredProfileId!==payload.content_profile_id)
+  if ((automaticEzIntake || dedicatedVibe) && preferredProfileId!==payload.content_profile_id)
     throw new HttpError(409,"Automatic EZ intake profile mismatch");
   const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
     ? await verifiedStoryFirstProduction(env, idea) : null;
   let existing;
-  if (automaticEzIntake) {
+  if (automaticEzIntake || dedicatedVibe) {
     let existingId;
     try {
       existingId=automaticEzExistingDraftId(await listSupabaseOpenProductionRequestsForIdea(env,ideaRecordId),idea);
@@ -4214,6 +4217,8 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     if (existingId && existing?.id!==existingId) throw new HttpError(409,"Automatic EZ draft could not be read");
   } else existing=await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
+    if (dedicatedVibe && !verifiedVibeDraftReceipt(existing,idea,payload))
+      throw new HttpError(409,"Existing Vibe Cut draft requires reconciliation before reuse");
     if (automaticEzIntake && !verifiedAutomaticEzDraftReceipt(existing,idea,payload))
       throw new HttpError(409,"Existing draft is not the verified automatic EZ intake; reconcile before retrying");
     const validatedExisting = approvedStory
@@ -4222,6 +4227,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
       ok: true,
       created: false,
       ...(automaticEzIntake ? { automatic_ez_draft_verified: true } : {}),
+      ...(dedicatedVibe ? { dedicated_vibe_draft_verified: true } : {}),
       record: mapProductionRequestLight(validatedExisting),
       ...(approvedStory ? {
         storyboard_verified: true,
@@ -4267,6 +4273,11 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
+  if (dedicatedVibe) {
+    const saved=await loadAuthorizedProductionRequest(env,created.id,authorization);
+    if (!verifiedVibeDraftReceipt(saved,idea,payload))throw new HttpError(409,"Vibe Cut draft receipt is unverified; reconcile before retrying");
+    return respond(request,env,{ok:true,created:true,dedicated_vibe_draft_verified:true,record:mapProductionRequestLight(saved)},201);
+  }
   if (automaticEzIntake) {
     const saved=await loadAuthorizedProductionRequest(env,created.id,authorization);
     if (!verifiedAutomaticEzDraftReceipt(saved,idea,payload))
