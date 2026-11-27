@@ -30,10 +30,12 @@ function dispatchEvidence(row,nowMs) {
   const read=name=>field(row,name,name.toLowerCase());
   const remote=REMOTE_KEYS.some(name=>Boolean(str(read(name))));
   const native=NATIVE_COUNTERS.some(name=>hasCount(read(name)))
-    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At","Publish_Locked_By","Publish_Locked_At"]
+    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At","Publish_Locked_By","Publish_Locked_At",
+      "IG_Story_Locked_By","IG_Story_Locked_At"]
       .some(name=>Boolean(str(read(name))))
     || hasResponse(read("Platform_Publish_Response"))
     || hasResponse(read("Platform_Publish_Response_JSON"))
+    || hasResponse(read("Platform_Publish_Response_Text"))
     || ["FB_Slideshow_Response_JSON","IG_Story_Response_JSON","IG_Carousel_Parent_Response_JSON",
       "IG_Carousel_Publish_Response_JSON","TikTok_Draft_Response_JSON","YouTube_Response_JSON"]
       .some(name=>hasResponse(read(name)));
@@ -55,7 +57,9 @@ function dispatchEvidence(row,nowMs) {
   const explicitEarlyHold=approvalTimeHoldShape&&heldUntil!==null&&dateMs(heldUntil[1])===scheduledAt;
   // Missing historical notes are a research hint, NEVER proof of a scheduled hold.
   // Keep the ambiguous evidence state and existing publication admission fences.
-  const missingHoldNoteCandidate=approvalTimeHoldShape&&note==="";
+  const missingHoldNoteCandidate=approvalTimeHoldShape&&note===""
+    && truth(read("Auto_Publish_Enabled"))&&!truth(read("Do_Not_Publish"))
+    && ["Ready to Schedule","Ready to Publish"].includes(str(read("Publish_Status")));
   let evidence_state="no_saved_attempt_evidence";
   if(remote) evidence_state="saved_remote_identity";
   else if(native) evidence_state="native_attempt_or_response";
