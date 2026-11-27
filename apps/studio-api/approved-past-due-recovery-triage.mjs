@@ -30,10 +30,12 @@ function dispatchEvidence(row,nowMs) {
   const read=name=>field(row,name,name.toLowerCase());
   const remote=REMOTE_KEYS.some(name=>Boolean(str(read(name))));
   const native=NATIVE_COUNTERS.some(name=>hasCount(read(name)))
-    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At","Publish_Locked_By","Publish_Locked_At"]
+    || ["Last_Publish_Attempt_At","Publish_Started_At","IG_Story_Last_Attempt_At","Publish_Locked_By","Publish_Locked_At",
+      "IG_Story_Locked_By","IG_Story_Locked_At"]
       .some(name=>Boolean(str(read(name))))
     || hasResponse(read("Platform_Publish_Response"))
     || hasResponse(read("Platform_Publish_Response_JSON"))
+    || hasResponse(read("Platform_Publish_Response_Text"))
     || ["FB_Slideshow_Response_JSON","IG_Story_Response_JSON","IG_Carousel_Parent_Response_JSON",
       "IG_Carousel_Publish_Response_JSON","TikTok_Draft_Response_JSON","YouTube_Response_JSON"]
       .some(name=>hasResponse(read(name)));
@@ -45,20 +47,25 @@ function dispatchEvidence(row,nowMs) {
   const note=str(read("Studio_Publish_Dispatch_Note"));
   const heldUntil=/^held until (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)$/i.exec(note);
   const approvalAt=dateMs(read("Review_Decision_At"));
-  const explicitEarlyHold=!remote&&!native
+  const approvalTimeHoldShape=!remote&&!native
     && Number(read("Studio_Publish_Dispatch_Count"))===1
     && dispatchAt!==null&&scheduledAt!==null&&dispatchAt<scheduledAt&&scheduledAt<=nowMs
     && approvalAt!==null&&dispatchAt>=approvalAt&&dispatchAt-approvalAt<=30000
     && str(read("Review_Status"))==="Approved"&&str(read("Output_Status"))==="Approved for Publishing"
     && !["Test_Run_ID","Published_At","Platform_Post_URL","Manual_Published_URL",
-      "Publish_Error_Stage","Publish_Error_Message"].some(name=>str(read(name)))
-    && heldUntil!==null&&dateMs(heldUntil[1])===scheduledAt;
+      "Publish_Error_Stage","Publish_Error_Message"].some(name=>str(read(name)));
+  const explicitEarlyHold=approvalTimeHoldShape&&heldUntil!==null&&dateMs(heldUntil[1])===scheduledAt;
+  // Missing historical notes are a research hint, NEVER proof of a scheduled hold.
+  // Keep the ambiguous evidence state and existing publication admission fences.
+  const missingHoldNoteCandidate=approvalTimeHoldShape&&note===""
+    && truth(read("Auto_Publish_Enabled"))&&!truth(read("Do_Not_Publish"))
+    && ["Ready to Schedule","Ready to Publish"].includes(str(read("Publish_Status")));
   let evidence_state="no_saved_attempt_evidence";
   if(remote) evidence_state="saved_remote_identity";
   else if(native) evidence_state="native_attempt_or_response";
   else if(explicitEarlyHold) evidence_state="explicit_early_hold_requires_audit";
   else if(dispatchPresent) evidence_state="ambiguous_dispatch";
-  return {evidence_state,remote,native,dispatchAt,scheduledAt};
+  return {evidence_state,remote,native,dispatchAt,scheduledAt,missingHoldNoteCandidate};
 }
 
 export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
@@ -94,6 +101,7 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
     hold_active:held,auto_publish_enabled:auto,retry_eligible:retryEligible,
     evidence_state:evidence.evidence_state,
     native_attempt_evidence:evidence.native,
+    historical_hold_note_missing_candidate:evidence.missingHoldNoteCandidate,
     dispatch_at:evidence.dispatchAt===null?null:new Date(evidence.dispatchAt).toISOString(),
     scheduled_at:evidence.scheduledAt===null?null:new Date(evidence.scheduledAt).toISOString(),
     first_publish_gate_reason:firstPublish.reason,
@@ -118,6 +126,9 @@ export function classifyApprovedPastDueOutput(row,{nowMs=Date.now()}={}) {
     return assign("R. Fresh due candidate","Studio","Check approved media and account in the normal fenced first-publish path; no forced retry");
   if(evidence.evidence_state==="explicit_early_hold_requires_audit")
     return assign("S. Historical scheduled hold","Studio","Audit exact original slot and provider history; use existing per-output proof path only after verification");
+
+  if(evidence.missingHoldNoteCandidate)
+    return assign("T. Ambiguous historical attempt","Studio","Missing approval-time hold note: audit exact historical deployment, migration provenance, account-scoped provider history, media and dispatch fences; no retry or reschedule without independent proof");
 
   if(!retryEligible && (evidence.native || evidence.evidence_state==="ambiguous_dispatch"))
     return assign("T. Ambiguous historical attempt","Studio","Reconcile exact account, provider and dispatch history before any reschedule or retry");
