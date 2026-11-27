@@ -9819,15 +9819,15 @@ function timedScriptAssetLabel(asset, index) {
     const post=(path,body,timeoutMs=30000)=>send(path,{method:"POST",body:JSON.stringify(body),timeoutMs});
     const requestPath=()=>"/api/vibe-cut/production-requests/"+encodeURIComponent(s.requestId);
     const uploadPath=()=>requestPath()+"/assets/upload-session";
-    if(file.name!==s.file.name||file.size!==s.file.size||Number(file.lastModified||0)!==s.file.lastModified)
+    if(file.name!==s.file.name||file.size!==s.file.size)
       throw new Error("Select the same original video. The saved intake has not been replaced.");
     if(!s.ideaId) {
-      if(s.ideaStarted)throw new Error("The original Idea save was not confirmed. Reconcile this intake before recreating anything.");
+      if(!s.intakeToken)throw new Error("The original Idea identity is missing. Reconcile this intake before recreating anything.");
       s.ideaStarted=true;save(s);
       const result=await post("/api/ideas",{title:s.title,summary:s.summary,primary_location:s.location,
         content_profile_id:s.profile,input_kind:"vibe-cut",source_aspect:s.aspect,source_video_width:s.width,
-        source_video_height:s.height,vibe_target_seconds:s.plan.video_duration_seconds});
-      if(result?.ok!==true||!dedicatedVibeExactIdea(result.record,s)||result.record.status!=="Generated")
+        source_video_height:s.height,vibe_target_seconds:s.plan.video_duration_seconds,vibe_intake_token:s.intakeToken});
+      if(result?.ok!==true||result.dedicated_vibe_idea_verified!==true||!dedicatedVibeExactIdea(result.record,s)||result.record.status!=="Generated")
         throw new Error("Vibe Idea receipt was not verified. No draft was created.");
       s.ideaId=result.record.id;save(s);
     } else {
@@ -9953,7 +9953,7 @@ function timedScriptAssetLabel(asset, index) {
           const aspect=width>height?"horizontal":"vertical";
           const config=vibeCutConfigFromWizard(wrapper.answers);
           const title=String(data.get("title")||"").trim()||titleFromFiles([file]);
-          s={profile,aspect,width,height,plan:dedicatedVibePlan(config,aspect),title,
+          s={profile,aspect,width,height,intakeToken:crypto.randomUUID(),plan:dedicatedVibePlan(config,aspect),title,
             summary:String(data.get("summary")||"").trim()||title,location:String(data.get("location")||"").trim(),
             file:{name:file.name,size:file.size,lastModified:Number(file.lastModified||0)},parts:[]};
           save(s);
