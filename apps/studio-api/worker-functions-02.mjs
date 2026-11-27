@@ -2981,6 +2981,8 @@ export async function getItem4WorkspaceStatus(request, env, url, authorization, 
     return respond(request, env, {
       ok: true,
       snapshot: true,
+      production_request_id: record.id,
+      idea_id: Array.isArray(f(record,"Idea_Candidate")) && f(record,"Idea_Candidate").length === 1 ? f(record,"Idea_Candidate")[0] : null,
       state: f(record, "Studio_Item4_State") || "Draft",
       assets_status: f(record, "Studio_Master_Asset_Status") || "None",
       assets,
