@@ -351,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1107-automatic-ez-home-3094";
+  const BUILD_ID = "item4-0.6.1109-inline-idea-delete-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4807,7 +4807,7 @@
     if (!activeIdea?.id) return;
     const label = activeIdea.title || `Candidate ${activeIdea.candidate_id || activeIdea.id}`;
     const confirmed = window.confirm(
-      `Permanently delete "${label}"?\n\nThis removes the unpromoted Idea Candidate record from Airtable and cannot be undone.`
+      `Permanently delete "${label}"?\n\nThis removes the unpromoted Idea Candidate record and cannot be undone.`
     );
     if (!confirmed) return;
 
@@ -17891,6 +17891,12 @@ function timedScriptAssetLabel(asset, index) {
     return `<th><button type="button" class="table-sort${active ? " is-active" : ""}" data-idea-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
   }
 
+  const ideaRowDeletesInFlight = new Set();
+
+  function ideaInlineDeleteAllowed(idea) {
+    return Boolean(idea?.id) && ideaCanModify(idea) && !ideaHasProductionRequest(idea);
+  }
+
   function ideaRowHtml(r) {
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
@@ -17904,6 +17910,9 @@ function timedScriptAssetLabel(asset, index) {
     const timeline = !r.is_on_hold && (!ideaIsPromoted(r) || ideaDraftNeedsTimeline(r))
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${r.asset_readiness === "Needs new media" ? "Add media / pre-production" : ideaTimelineRowButtonLabel(r)}</button>`
       : "";
+    const deleteAction = ideaInlineDeleteAllowed(r)
+      ? `<button type="button" class="manage-button" data-idea-delete="${escapeHtml(r.id)}"${ideaRowDeletesInFlight.has(r.id) ? " disabled" : ""}>${ideaRowDeletesInFlight.has(r.id) ? "Deleting…" : "Delete"}</button>`
+      : "";
     const numericIdeaId = Number(r?.candidate_id);
     const ideaIdPrefix = Number.isSafeInteger(numericIdeaId) && numericIdeaId > 0 ? `${numericIdeaId} – ` : "";
     const title = `${ideaIdPrefix}${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
@@ -17912,7 +17921,7 @@ function timedScriptAssetLabel(asset, index) {
     const assetPlan = r.asset_readiness
       ? `<div class="subtle">Asset plan: ${escapeHtml(r.asset_readiness)}${sourceLabel ? " · " + escapeHtml(sourceLabel) : ""}${checklist.length ? " · Capture: " + escapeHtml(checklist.join("; ")) : ""}</div>`
       : "";
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div>${assetPlan}</td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div>${assetPlan}</td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}${deleteAction}</div></div></td></tr>`;
   }
 
   function upsertIdeaInCache(record) {
@@ -17972,8 +17981,54 @@ function timedScriptAssetLabel(asset, index) {
     bindIdeaRowButtons(fresh);
   }
 
+  async function deleteIdeaFromRow(ideaId, button) {
+    const idea = ideaFromCache(ideaId);
+    if (!ideaInlineDeleteAllowed(idea) || ideaRowDeletesInFlight.has(ideaId) || button.disabled) return;
+    const profile = selectedProfileId;
+    const label = idea.title || `Candidate ${idea.candidate_id || idea.id}`;
+    if (!window.confirm(`Permanently delete "${label}"?\n\nThis removes the unpromoted Idea Candidate record and cannot be undone.`)) return;
+    if (profile !== selectedProfileId) return;
+    ideaRowDeletesInFlight.add(ideaId);
+    button.disabled = true;
+    button.textContent = "Deleting…";
+    setIdeasAutonomousMessage("");
+    let deleted = false;
+    try {
+      await api(`/api/ideas/${encodeURIComponent(ideaId)}`, {
+        method: "DELETE",
+        body: JSON.stringify({}),
+        retries: 0,
+      });
+      deleted = true;
+      ideasCache = ideasCache.filter(row => row.id !== ideaId);
+      renderIdeasTable($("ideasList"), ideasCache);
+      if (activeIdea?.id === ideaId) await closeIdeaDrawer({ save: false, resumePhotoListening: false });
+      await Promise.all([loadIdeas(), loadDashboard()]);
+      if (profile === selectedProfileId) setIdeasAutonomousMessage("Idea deleted.", "success");
+    } catch (error) {
+      if (profile === selectedProfileId) {
+        setIdeasAutonomousMessage(deleted
+          ? "Idea deleted, but the list could not refresh. Refresh the page."
+          : `Delete was not confirmed: ${error.message || "Unknown error"}. Refresh before trying again.`, "error-text");
+      }
+    } finally {
+      ideaRowDeletesInFlight.delete(ideaId);
+      // Do not retry an ambiguous mutation or re-enable a stale button. Reload first.
+      if (!deleted && profile === selectedProfileId) {
+        try { await loadIdeas(); } catch { /* keep the original control disabled */ }
+      }
+    }
+  }
+
   function bindIdeaRowButtons(scope) {
     if (!scope) return;
+    scope.querySelectorAll("[data-idea-delete]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteIdeaFromRow(button.dataset.ideaDelete, button);
+      });
+    });
     scope.querySelectorAll("[data-idea-find-images]").forEach((button) => {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
