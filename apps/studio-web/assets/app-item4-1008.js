@@ -9815,7 +9815,7 @@ function timedScriptAssetLabel(asset, index) {
   }
   async function runDedicatedVibeWizardUpload({s,file,call,part,digest,save,assertCurrent,progress}) {
     const scoped=path=>path+(path.includes("?")?"&":"?")+"profile="+encodeURIComponent(s.profile);
-    const send=async(path,options={})=>{assertCurrent();const result=await call(scoped(path),{...options,retries:0});assertCurrent();return result;};
+    const send=async(path,options={})=>{assertCurrent();return call(scoped(path),{...options,retries:0});};
     const post=(path,body,timeoutMs=30000)=>send(path,{method:"POST",body:JSON.stringify(body),timeoutMs});
     const requestPath=()=>"/api/vibe-cut/production-requests/"+encodeURIComponent(s.requestId);
     const uploadPath=()=>requestPath()+"/assets/upload-session";
@@ -9872,13 +9872,13 @@ function timedScriptAssetLabel(asset, index) {
       if(asset.upload_status!=="multipart_pending"||!asset.multipart_upload_id)
         throw new Error("Stored source requires preservation reconciliation; no upload was repeated.");
       // A lost start response leaves the exact session in the server manifest.
-      s.assetId=asset.id;s.uploadId=asset.multipart_upload_id;s.partSize=16*1024*1024;s.parts=[];save(s);
+      s.assetId=asset.id;s.uploadId=asset.multipart_upload_id;s.partSize=snap.multipart_part_size;s.parts=[];save(s);
     }
     if(!sameAsset(asset)||!["multipart_pending","complete"].includes(asset.upload_status)||
       (asset.upload_status==="multipart_pending"&&asset.multipart_upload_id!==s.uploadId))
       throw new Error("Original upload session identity changed.");
     const count=Math.ceil(file.size/s.partSize);
-    if(!Number.isSafeInteger(count)||count<1||count>10000||!Array.isArray(s.parts))throw new Error("Invalid saved upload checkpoint.");
+    if(!Number.isSafeInteger(s.partSize)||s.partSize<5*1024*1024||!Number.isSafeInteger(count)||count<1||count>10000||!Array.isArray(s.parts))throw new Error("Invalid saved upload checkpoint.");
     for(let n=1;n<=count;n++) {
       assertCurrent();
       const chunk=file.slice((n-1)*s.partSize,Math.min(file.size,n*s.partSize));
@@ -9890,11 +9890,11 @@ function timedScriptAssetLabel(asset, index) {
       } else {
         if(asset.upload_status==="complete")throw new Error("Source is stored; preservation receipt needs reconciliation.");
         const result=await part(scoped(uploadPath()+"/"+encodeURIComponent(s.assetId)+"/parts/"+n),chunk,n);
-        assertCurrent();
         if(result?.ok!==true||result.asset_id!==s.assetId||result.part_number!==n||!result.etag)
           throw new Error("Upload part identity was not verified.");
         s.parts.push({part_number:n,etag:result.etag,digest:hash});save(s);
       }
+      assertCurrent();
       progress("Uploaded part "+n+" of "+count+"…");
     }
     if(s.parts.length!==count)throw new Error("Upload checkpoint contains unexpected parts.");
@@ -9963,7 +9963,14 @@ function timedScriptAssetLabel(asset, index) {
           progress:message=>ezWizardSetMessage(message),
           digest:async chunk=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",await chunk.arrayBuffer())))
             .map(b=>b.toString(16).padStart(2,"0")).join(""),
-          part:async(path,chunk)=>item4UploadPartWithProgress(path,chunk)});
+          part:async(path,chunk)=>{
+            for(let attempt=0;attempt<4;attempt++){
+              assertCurrent();
+              try{return await item4UploadPartWithProgress(path,chunk);}
+              catch(error){if(error.name==="AbortError"||(error.status>=400&&error.status<500&&![408,429].includes(error.status))||attempt===3)throw error;
+                await sleepMs(Math.min(8000,1000*(2**attempt)));}
+            }
+          }});
         assertCurrent();
         localStorage.removeItem(dedicatedVibeStorageKey(profile));
         dedicatedVibeWizardSession=null;
