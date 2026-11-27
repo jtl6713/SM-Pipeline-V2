@@ -351,7 +351,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.1107-automatic-ez-home-3094";
+  const BUILD_ID = "item4-0.6.1108-vibe-home-3094";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -9076,6 +9076,7 @@ function timedScriptAssetLabel(asset, index) {
     const answers = ezWizardAnswers;
     const count = helpers?.ezWizardPhotoCount?.(answers) || 1;
     if(ezWizardStep==="automaticEzIntake"){renderAutomaticEzWizardIntake(automaticEzWizardSession);return;}
+    if(ezWizardStep==="dedicatedVibeIntake"){renderDedicatedVibeWizardIntake(dedicatedVibeWizardSession);return;}
 
     if (ezWizardStep === "start") {
       prompt.textContent = "Where do you want to start?";
@@ -9780,6 +9781,229 @@ function timedScriptAssetLabel(asset, index) {
     finally{setEzWizardBusy(false);}
   }
 
+
+  // #3094: Home-only Vibe intake. This is not the ordinary editor or AZ.
+  const dedicatedVibeId=id=>/^rec[A-Za-z0-9]{14}$/.test(String(id||""));
+  function dedicatedVibePlan(config,aspect) {
+    if(!["horizontal","vertical"].includes(aspect))throw new Error("Could not verify source orientation.");
+    return {
+      production_notes:vibeCutApi().formatDirective(config)+"\norigin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; ez-package=video\nsource-aspect="+aspect,
+      content_type:aspect==="horizontal"?"Longform Video":"Vertical Short Video",
+      platforms:aspect==="horizontal"?["YouTube"]:["Instagram","Facebook","TikTok","YouTube"],
+      voiceover_mode:"No",background_music_mode:"Yes",thumbnail_mode:"Yes",
+      video_duration_seconds:config.target_seconds,
+    };
+  }
+  function dedicatedVibeFileName(name) {
+    return String(name||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,120);
+  }
+  function dedicatedVibeExactRecord(record,s) {
+    const expected=s.plan, platforms=record?.platforms;
+    return dedicatedVibeId(record?.id)&&(!s.requestId||record.id===s.requestId)&&
+      record.idea_record_id===s.ideaId&&record.content_type===expected.content_type&&
+      Array.isArray(platforms)&&platforms.length===expected.platforms.length&&
+      new Set(platforms).size===platforms.length&&expected.platforms.every(p=>platforms.includes(p))&&
+      String(record.production_notes||"").startsWith(expected.production_notes)&&
+      record.voiceover_mode==="No"&&record.background_music_mode==="Yes"&&record.thumbnail_mode==="Yes"&&
+      Number(record.video_duration_seconds)===Number(expected.video_duration_seconds)&&
+      !record.studio_publish_batch_id&&!record.studio_publish_requested_at;
+  }
+  function dedicatedVibeExactIdea(record,s) {
+    return dedicatedVibeId(record?.id)&&(!s.ideaId||record.id===s.ideaId)&&
+      record.production_source==="vibe_cut"&&record.production_mode==="automatic"&&
+      Array.isArray(record.content_profile_links)&&record.content_profile_links.length===1&&record.content_profile_links[0]===s.profile;
+  }
+  async function runDedicatedVibeWizardUpload({s,file,call,part,digest,save,assertCurrent,progress}) {
+    const scoped=path=>path+(path.includes("?")?"&":"?")+"profile="+encodeURIComponent(s.profile);
+    const send=async(path,options={})=>{assertCurrent();return call(scoped(path),{...options,retries:0});};
+    const post=(path,body,timeoutMs=30000)=>send(path,{method:"POST",body:JSON.stringify(body),timeoutMs});
+    const requestPath=()=>"/api/vibe-cut/production-requests/"+encodeURIComponent(s.requestId);
+    const uploadPath=()=>requestPath()+"/assets/upload-session";
+    if(file.name!==s.file.name||file.size!==s.file.size)
+      throw new Error("Select the same original video. The saved intake has not been replaced.");
+    if(!s.ideaId) {
+      if(!s.intakeToken)throw new Error("The original Idea identity is missing. Reconcile this intake before recreating anything.");
+      s.ideaStarted=true;save(s);
+      const result=await post("/api/ideas",{title:s.title,summary:s.summary,primary_location:s.location,
+        content_profile_id:s.profile,input_kind:"vibe-cut",source_aspect:s.aspect,source_video_width:s.width,
+        source_video_height:s.height,vibe_target_seconds:s.plan.video_duration_seconds,vibe_intake_token:s.intakeToken});
+      if(result?.ok!==true||result.dedicated_vibe_idea_verified!==true||!dedicatedVibeExactIdea(result.record,s)||result.record.status!=="Generated")
+        throw new Error("Vibe Idea receipt was not verified. No draft was created.");
+      s.ideaId=result.record.id;save(s);
+    } else {
+      const result=await send("/api/ideas/"+encodeURIComponent(s.ideaId));
+      if(result?.ok!==true||!dedicatedVibeExactIdea(result.record,s))throw new Error("Saved Idea identity changed.");
+    }
+    if(!s.requestId) {
+      progress("Saving the exact Vibe editing and destination plan…");
+      const draft=await post("/api/vibe-cut/production-requests",{idea_record_id:s.ideaId,content_profile_id:s.profile,
+        primary_location:s.location,...s.plan});
+      if(draft?.dedicated_vibe_draft_verified!==true||!dedicatedVibeExactRecord(draft.record,s)||draft.record.status!=="Draft")
+        throw new Error("Vibe request receipt was not verified. No upload started.");
+      s.requestId=draft.record.id;save(s);
+    }
+    const readSnapshot=async()=>{
+      const snap=await send(requestPath()+"/item4?snapshot=1");
+      if(snap?.ok!==true||snap.snapshot!==true||snap.production_request_id!==s.requestId||
+        snap.idea_id!==s.ideaId||!Array.isArray(snap.assets)||snap.assets.length>1)
+        throw new Error("Exact Vibe source snapshot was not verified.");
+      return snap;
+    };
+    let snap=await readSnapshot();
+    let asset=snap.assets[0];
+    const sameAsset=a=>a&&/^[A-Za-z0-9_-]{1,80}$/.test(a.id||"")&&a.origin_kind==="vibe-cut"&&a.media_kind==="video"&&
+      a.name===dedicatedVibeFileName(file.name)&&Number(a.original_size_bytes||a.size_bytes)===file.size&&(!s.assetId||a.id===s.assetId);
+    if(asset&&!sameAsset(asset))throw new Error("The original source identity changed. No replacement was attempted.");
+    if(!asset) {
+      if(s.assetId)throw new Error("The saved source is missing. Do not recreate it.");
+      const start=await post(uploadPath(),{filename:dedicatedVibeFileName(file.name),size_bytes:file.size,
+        mime_type:file.type||"video/mp4",origin_kind:"vibe-cut"},60000);
+      if(start?.ok!==true||!dedicatedVibeExactRecord(start.record,s)||!start.asset_id||!start.upload_id||
+        !Number.isSafeInteger(start.part_size)||start.part_size<5*1024*1024||
+        start.parts_expected!==Math.ceil(file.size/start.part_size))throw new Error("Upload session receipt was not verified.");
+      s.assetId=start.asset_id;s.uploadId=start.upload_id;s.partSize=start.part_size;s.parts=[];save(s);
+      snap=await readSnapshot();asset=snap.assets[0];
+      if(!sameAsset(asset)||asset.multipart_upload_id!==s.uploadId)throw new Error("Upload session snapshot disagreed with the receipt.");
+    }
+    if(asset.upload_status==="complete"&&snap.assets_status==="Ready"&&asset.google_drive_file_id&&asset.media_asset_record_id) {
+      return {alreadyPreserved:true};
+    }
+    if(!s.assetId) {
+      if(asset.upload_status!=="multipart_pending"||!asset.multipart_upload_id)
+        throw new Error("Stored source requires preservation reconciliation; no upload was repeated.");
+      // A lost start response leaves the exact session in the server manifest.
+      s.assetId=asset.id;s.uploadId=asset.multipart_upload_id;s.partSize=snap.multipart_part_size;s.parts=[];save(s);
+    }
+    if(!sameAsset(asset)||!["multipart_pending","complete"].includes(asset.upload_status)||
+      (asset.upload_status==="multipart_pending"&&asset.multipart_upload_id!==s.uploadId))
+      throw new Error("Original upload session identity changed.");
+    const count=Math.ceil(file.size/s.partSize);
+    if(!Number.isSafeInteger(s.partSize)||s.partSize<5*1024*1024||!Number.isSafeInteger(count)||count<1||count>10000||!Array.isArray(s.parts))throw new Error("Invalid saved upload checkpoint.");
+    for(let n=1;n<=count;n++) {
+      assertCurrent();
+      const chunk=file.slice((n-1)*s.partSize,Math.min(file.size,n*s.partSize));
+      const hash=await digest(chunk);
+      assertCurrent();
+      const prior=s.parts.find(p=>p.part_number===n);
+      if(prior) {
+        if(prior.digest!==hash||!prior.etag)throw new Error("Selected bytes do not match the original upload.");
+      } else {
+        if(asset.upload_status==="complete")throw new Error("Source is stored; preservation receipt needs reconciliation.");
+        const result=await part(scoped(uploadPath()+"/"+encodeURIComponent(s.assetId)+"/parts/"+n),chunk,n);
+        if(result?.ok!==true||result.asset_id!==s.assetId||result.part_number!==n||!result.etag)
+          throw new Error("Upload part identity was not verified.");
+        s.parts.push({part_number:n,etag:result.etag,digest:hash});save(s);
+      }
+      assertCurrent();
+      progress("Uploaded part "+n+" of "+count+"…");
+    }
+    if(s.parts.length!==count)throw new Error("Upload checkpoint contains unexpected parts.");
+    progress("Verifying and preserving the original video…");
+    const complete=await post(uploadPath()+"/"+encodeURIComponent(s.assetId)+"/complete",{
+      parts:s.parts.map(({part_number,etag})=>({part_number,etag})),width:s.width,height:s.height,
+    },300000);
+    if(complete?.ok!==true||complete.uploaded!==1||!dedicatedVibeExactRecord(complete.record,s)||
+      !Array.isArray(complete.assets)||complete.assets.length!==1||!sameAsset(complete.assets[0])||
+      complete.assets[0].upload_status!=="complete")throw new Error("Original preservation receipt was not verified. Resume, do not recreate.");
+    return complete;
+  }
+  function dedicatedVibeStorageKey(profile){return "studio:vibe-intake:3094:"+profile;}
+  function readDedicatedVibeSession(profile){
+    const raw=localStorage.getItem(dedicatedVibeStorageKey(profile));
+    return raw?JSON.parse(raw):null;
+  }
+  let dedicatedVibeWizardSession=null;
+  function renderDedicatedVibeWizardIntake(s) {
+    renderEzWizardChips([]);
+    const prompt=$("ezWizardPrompt");
+    if(prompt)prompt.textContent=s.saved?"Resume your original Vibe Cut upload":"Send your source video to Vibe Cut";
+    ezWizardShowForm((s.saved?
+      '<p class="subtle">Saved Idea: '+escapeHtml(s.saved.ideaId||"awaiting confirmation")+' · Request: '+escapeHtml(s.saved.requestId||"awaiting confirmation")+'. Select the original video; the saved editing choices will be retained.</p>':
+      '<label>Title<input name="title" maxlength="160" value="'+escapeHtml(s.answers.ideaTitle||"")+'"></label>'+
+      '<label>Summary / creative direction<textarea name="summary" maxlength="8000">'+escapeHtml(s.answers.ideaSummary||"")+'</textarea></label>'+
+      '<label>Primary location<input name="location" maxlength="200" value="'+escapeHtml(s.answers.ideaLocation||"")+'"></label>')+
+      '<label>Original video<input name="video" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" required></label>'+
+      '<p class="subtle">Music-driven edits; final human approval in Approval Factory. Nothing is scheduled or published by this upload.</p>'+
+      '<div class="ez-wizard-form-actions"><button type="submit">'+(s.saved?"Resume original upload":"Upload and prepare automatically")+'</button></div>',
+      data=>void submitDedicatedVibeWizardIntake(s,data));
+  }
+  async function submitDedicatedVibeWizardIntake(wrapper,data) {
+    if(ezWizardBusy)return;
+    const file=data.get("video"), profile=wrapper.profile;
+    const assertCurrent=()=>{
+      if(dedicatedVibeWizardSession!==wrapper||selectedProfileId!==profile||ezWizardStep!=="dedicatedVibeIntake"||
+        !$("page-home")?.classList.contains("active"))throw new Error("Return to this profile and Vibe Cut to resume the original upload.");
+    };
+    setEzWizardBusy(true,"Checking the original source…");
+    try {
+      assertCurrent();
+      if(!file||!item4FileLooksLikeVideo(file)||file.size<=0||file.size>ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES||
+        !/\.(mp4|mov|m4v|webm)$/i.test(dedicatedVibeFileName(file.name)))throw new Error("Choose one supported original video, within the existing upload limit.");
+      if(!navigator.locks?.request)throw new Error("This browser cannot safely lock a resumable upload. Use a supported browser.");
+      await navigator.locks.request(dedicatedVibeStorageKey(profile),{ifAvailable:true},async lock=>{
+        if(!lock)throw new Error("This profile already has a Vibe upload in another tab.");
+        assertCurrent();
+        let s=readDedicatedVibeSession(profile);
+        const save=value=>{localStorage.setItem(dedicatedVibeStorageKey(profile),JSON.stringify(value));wrapper.saved=value;};
+        if(!s) {
+          const meta=await aspectPlanFromVideoFiles([file],{inputKind:"vibe-cut"});
+          assertCurrent();
+          const width=Number(meta?.width),height=Number(meta?.height);
+          if(!(width>0&&height>0))throw new Error("Could not verify video orientation. No Idea was created.");
+          const aspect=width>height?"horizontal":"vertical";
+          const config=vibeCutConfigFromWizard(wrapper.answers);
+          const title=String(data.get("title")||"").trim()||titleFromFiles([file]);
+          s={profile,aspect,width,height,intakeToken:crypto.randomUUID(),plan:dedicatedVibePlan(config,aspect),title,
+            summary:String(data.get("summary")||"").trim()||title,location:String(data.get("location")||"").trim(),
+            file:{name:file.name,size:file.size,lastModified:Number(file.lastModified||0)},parts:[]};
+          save(s);
+        }
+        if(s.profile!==profile)throw new Error("Saved upload belongs to a different profile.");
+        await runDedicatedVibeWizardUpload({s,file,call:api,save,assertCurrent,
+          progress:message=>ezWizardSetMessage(message),
+          digest:async chunk=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",await chunk.arrayBuffer())))
+            .map(b=>b.toString(16).padStart(2,"0")).join(""),
+          part:async(path,chunk)=>{
+            for(let attempt=0;attempt<4;attempt++){
+              assertCurrent();
+              try{return await item4UploadPartWithProgress(path,chunk);}
+              catch(error){if(error.name==="AbortError"||(error.status>=400&&error.status<500&&![408,429].includes(error.status))||attempt===3)throw error;
+                await sleepMs(Math.min(8000,1000*(2**attempt)));}
+            }
+          }});
+        assertCurrent();
+        localStorage.removeItem(dedicatedVibeStorageKey(profile));
+        dedicatedVibeWizardSession=null;
+        resetEzWizard({silent:true});
+        renderEzWizard();
+        ezWizardSetMessage("Original video received. Studio will verify preservation and prepare the Vibe outputs for human Approval Factory review. You can leave this page.","success");
+      });
+    } catch(error) {
+      if(dedicatedVibeWizardSession===wrapper&&selectedProfileId===profile&&ezWizardStep==="dedicatedVibeIntake"){
+        renderDedicatedVibeWizardIntake(wrapper);
+        ezWizardSetMessage(error.message||"Upload interrupted. Resume the original video; do not create a duplicate.","error-text");
+      }
+    } finally{setEzWizardBusy(false);}
+  }
+  async function offerDedicatedVibeWizardIntake(answers) {
+    if(answers?.inputKind!=="vibe-cut")return false;
+    const profile=selectedProfileId;
+    const caps=await api("/api/production-mode/capabilities",{timeoutMs:8000,retries:0});
+    if(caps?.ok!==true||typeof caps.ordinary_editor_boundary_enabled!=="boolean"||profile!==selectedProfileId)
+      throw new Error("Vibe intake routing could not be verified. Nothing was saved.");
+    if(caps.dedicated_vibe_intake_enabled!==true) {
+      if(caps.ordinary_editor_boundary_enabled||readDedicatedVibeSession(profile))
+        throw new Error("Dedicated Vibe intake is unavailable. Nothing was recreated.");
+      return false;
+    }
+    if(answers.ideaId||answers.start==="idea")throw new Error("Existing-Idea Vibe intake requires a verified mode transition; no Idea was changed.");
+    dedicatedVibeWizardSession={profile,answers:{...answers},saved:readDedicatedVibeSession(profile)};
+    ezWizardHistory.push(ezWizardStep);
+    ezWizardStep="dedicatedVibeIntake";
+    renderDedicatedVibeWizardIntake(dedicatedVibeWizardSession);
+    return true;
+  }
+
   async function finishEzWizard() {
     if (ezWizardBusy) return;
     const helpers = ezPlanApi();
@@ -9789,6 +10013,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     setEzWizardBusy(true, "Saving your answers…");
     try {
+      if(await offerDedicatedVibeWizardIntake(ezWizardAnswers)){setEzWizardBusy(false);return;}
       if(await offerAutomaticEzWizardIntake(ezWizardAnswers)){setEzWizardBusy(false);return;}
       const helpersNow = ezPlanApi();
       const planned = helpersNow?.ezWizardResolvePackage?.(ezWizardAnswers) || applyEzWizardAnswersToIntake();

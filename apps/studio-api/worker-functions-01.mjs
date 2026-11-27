@@ -1,6 +1,7 @@
 import { windowsOutageState } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture } from "./production-mode-capture.mjs";
-import { verifiedVibeRequest, vibeRequestOperationAllowed } from "./vibe-dedicated-intake.mjs";
+import { dedicatedVibeIntakeEnabled, verifiedVibeRequest, vibeRequestOperationAllowed } from "./vibe-dedicated-intake.mjs";
+import { vibeIdeaIntakeIdentity } from "./vibe-idea-idempotency.mjs";
 import { automaticPhotoWaitCreateFields } from "./automatic-photo-wait-create.mjs";
 import { automaticEzIdeaFields, automaticEzIdeaKind, automaticEzMediaContext, automaticEzUploadAllowed, automaticEzAcceptanceMarked, automaticEzAcceptedContext, automaticEzIntakeEnabled, automaticEzDestinationItemsMatch } from "./automatic-ez-intake.mjs";
 import { parseNewIdeaModeChoice, manualIdeaCreateEnabled } from "./production-editor-boundary.mjs";
@@ -27,6 +28,7 @@ import {
   studioAuthReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
+  commitIdempotentVibeIdea,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -4263,6 +4265,21 @@ export async function createIdea(request, env, authorization, ctx = null) {
     throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  let vibeIdentity=null;
+  if(Object.prototype.hasOwnProperty.call(payload,"vibe_intake_token")){
+    if(!dedicatedVibeIntakeEnabled(env)||payload.input_kind!=="vibe-cut"||
+      authorization?.permissions?.production_configure!==true||authorization?.permissions?.ideas_promote!==true||
+      authorization?.permissions?.ideas_create!==true||
+      Object.prototype.hasOwnProperty.call(payload,"automatic_ez_intake")||
+      Object.prototype.hasOwnProperty.call(payload,"automatic_photo_wait"))
+      throw new HttpError(403,"Dedicated Vibe Idea intake is unavailable");
+    try{
+      vibeIdentity=await vibeIdeaIntakeIdentity({token:payload.vibe_intake_token,
+        organizationId:authorization.organization?.record_id,actorId:authorization.user?.record_id,
+        profileId:profile.id,input,aspect:sourceAspect,width:Number(payload.source_video_width),
+        height:Number(payload.source_video_height),seconds:Number(payload.vibe_target_seconds)});
+    }catch(error){throw new HttpError(400,error.message||"Invalid Vibe intake identity");}
+  }
   let storyFirst = null;
   if (String(payload?.input_kind || "").trim() === "story-first") {
     try { storyFirst = normalizeStoryFirst(payload?.storyboard, profile.id); }
@@ -4344,7 +4361,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Object.assign(fields, newIdeaProductionCapture(env, "finished_video"));
     if (env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" &&
         env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") fields.Studio_Photo_Wait_Status = "Not Needed";
-  } else if (!vibeCut) {
+  } else if (vibeCut) {
+    Object.assign(fields, newIdeaProductionCapture(env, "vibe_cut"));
+  } else {
     Object.assign(fields, newIdeaProductionCapture(env, "idea", {requestedMode:requestedProductionMode,humanChoice:true}));
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
@@ -4365,10 +4384,11 @@ export async function createIdea(request, env, authorization, ctx = null) {
   if (input.primary_location) fields.Primary_Location = input.primary_location;
   else if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
 
-  const created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
-    method: "POST",
-    body: JSON.stringify({ fields, typecast: false }),
-  });
+  const created = vibeIdentity
+    ? await commitIdempotentVibeIdea(env,fields,vibeIdentity)
+    : await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
+        method: "POST", body: JSON.stringify({ fields, typecast: false }),
+      });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
   const modeVerified=requestedProductionMode!=="manual"||
@@ -4384,6 +4404,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
     created: true,
     record: mapIdea(created),
     production_mode_verified: modeVerified,
+    ...(vibeIdentity ? { dedicated_vibe_idea_verified: true } : {}),
     ...(atomicEzIntakeFields ? { automatic_ez_intake_saved: f(created,"Studio_Production_Mode")==="automatic" && f(created,"Studio_Production_Source")==="idea" && f(created,"Candidate_Status")==="Generated" && f(created,"Studio_Photo_Wait_Status")==="Not Needed" && automaticEzIdeaKind(created)===payload.input_kind } : {}),
     ...(atomicPhotoWaitFields ? { automatic_photo_wait_saved: f(created,"Studio_Production_Mode")==="automatic" && f(created,"Studio_Production_Source")==="idea" && f(created,"Candidate_Status")==="Approved" && f(created,"Studio_Photo_Wait_Status")==="Waiting" } : {}),
     manual_production_available: manualIdeaCreateEnabled(env),

@@ -32,6 +32,7 @@
 
 import { IDEA_TITLE_UNIQUENESS_DAYS, studioIdeaTitleYearFormula } from "./idea-title-uniqueness.mjs";
 import { ideaProductionModeSelect, splitIdeaProductionCapture, projectIdeaProductionMode } from "./production-mode-capture.mjs";
+import { vibeIdeaIntakeMatches } from "./vibe-idea-idempotency.mjs";
 import { assertManualListSchemaReady, productionModeRoutingEnabled, manualProductionListQuery, manualProductionRowVerified } from "./manual-production-list.mjs";
 import {
   protectedMediaReworkSourceRow,
@@ -10524,6 +10525,52 @@ export async function studioSideTableRead(env, tableId, pathOrParams) {
     return body;
   }
   return null;
+}
+
+/** Exact insert-only Vibe intake. A repeated token can only read the same row;
+ * it cannot upsert, edit, reclassify, or approve an existing Idea. */
+export async function commitIdempotentVibeIdea(env, fields, identity) {
+  if(studioWriteSource(env)!=="supabase"||!ideaProductionModeSelect(env))
+    throw new Error("Canonical Vibe intake is unavailable");
+  const {fields:clean,typed}=splitIdeaProductionCapture(env,fields,{creating:true});
+  if(typed.production_mode!=="automatic"||typed.production_source!=="vibe_cut"||
+    clean.Candidate_Status!=="Generated"||!Array.isArray(clean.Content_Profile)||
+    clean.Content_Profile.length!==1||clean.Content_Profile[0]!==identity.profileId)
+    throw new Error("Canonical Vibe Idea creation context was not verified");
+  const profileUuid=await resolveSupabaseProfileId(env,identity.profileId);
+  if(!profileUuid)throw new Error("Canonical Vibe profile identity is missing");
+  const select="airtable_record_id,content_profile_id,candidate_title,idea_summary,status,payload,created_at,production_mode,production_source";
+  const read=async()=>{
+    const rows=await supabaseRest(env,"idea_candidates?airtable_record_id=eq."+encodeURIComponent(identity.recordId)+"&select="+select+"&limit=2");
+    if(!Array.isArray(rows)||rows.length>1)throw new Error("Vibe Idea lookup was not verified");
+    return rows[0]||null;
+  };
+  const verify=row=>{
+    if(!vibeIdeaIntakeMatches(row,identity,profileUuid))throw new Error("Vibe intake key conflicts with an existing Idea or changed intent");
+    return airtableShapedIdeaFromSupabase(row);
+  };
+  const existing=await read();
+  if(existing)return verify(existing);
+  const payload={...clean,content_profile_airtable_id:identity.profileId,Studio_Vibe_Intake_Receipt:identity.receipt};
+  const body={airtable_record_id:identity.recordId,content_profile_id:profileUuid,candidate_title:clean.Candidate_Title,
+    idea_summary:clean.Idea_Summary||null,status:"Generated",payload,...typed,updated_at:new Date().toISOString()};
+  let inserted;
+  try{
+    inserted=await supabaseRest(env,"idea_candidates?select="+select,{
+      method:"POST",body:[body],headers:{Prefer:"return=representation"},
+    });
+  }catch(error){
+    // Unique conflict or lost insert response: read the exact identity once.
+    // Never retry with a new ID and never overwrite the first committed row.
+    const saved=await read();
+    if(saved)return verify(saved);
+    throw error;
+  }
+  const row=Array.isArray(inserted)&&inserted.length===1?inserted[0]:null;
+  if(row)return verify(row);
+  const saved=await read();
+  if(saved)return verify(saved);
+  throw new Error("Vibe Idea insert receipt was not confirmed");
 }
 
 async function commitIdeaRecords(env, records, { creating = false } = {}) {
