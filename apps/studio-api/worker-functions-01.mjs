@@ -4344,7 +4344,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Object.assign(fields, newIdeaProductionCapture(env, "finished_video"));
     if (env?.STUDIO_DEDICATED_PRODUCTION_ROUTES === "true" &&
         env?.STUDIO_PRODUCTION_MODE_CAPTURE === "true") fields.Studio_Photo_Wait_Status = "Not Needed";
-  } else if (!vibeCut) {
+  } else if (vibeCut) {
+    Object.assign(fields, newIdeaProductionCapture(env, "vibe_cut"));
+  } else {
     Object.assign(fields, newIdeaProductionCapture(env, "idea", {requestedMode:requestedProductionMode,humanChoice:true}));
   }
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
