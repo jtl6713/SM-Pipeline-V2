@@ -859,7 +859,22 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
             output_status: null,
             publish_status: "Scheduled",
             platform: "Instagram",
-          }]);
+          }, ...[true,false].map((auto, i) => {
+            const columns = new URL(href).searchParams.get("select").split(",");
+            return {
+              airtable_record_id: i ? "recManualHold00001" : "recAutoDue00000001",
+              content_profile_id: "aa4b857d-e588-46aa-97ba-77cdd3c25dff",
+              output_number: 412 + i,
+              output_status: "Approved for Publishing",
+              review_status: "Approved",
+              publish_status: "Ready to Schedule",
+              platform: "Instagram",
+              do_not_publish: false,
+              scheduled_post_date: "2026-11-23T10:00:00Z",
+              error_messages: {},
+              ...(columns.includes("auto_publish_enabled") ? {auto_publish_enabled: auto} : {}),
+            };
+          })]);
         },
       };
     }
@@ -895,13 +910,21 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
       assert.match(outputCall.href, /final_file_url/);
       assert.match(outputCall.href, /thumbnail_url/);
       assert.match(outputCall.href, /selected_clip_count/);
+      assert.ok(new URL(outputCall.href).searchParams.get("select").split(",").includes("auto_publish_enabled"));
       assert.doesNotMatch(outputCall.href, /content_items\(/);
     }
     assert.equal(calls.some((call) => call.href.includes("idea_candidates")), false);
     assert.equal(pack.profilesMissing, false);
-    assert.equal(pack.outputs.length, 1);
+    assert.equal(pack.outputs.length, 3);
     assert.equal(pack.outputs[0].id, "recOpenOutput00001");
     assert.deepEqual(pack.outputs[0].fields.Content_Profile, ["recF7UAn0LkMZZrWZ"]);
+    const clock = Date.parse("2026-11-26T12:00:00Z");
+    const auto = pack.outputs.find(row => row.fields.Output_ID === 412);
+    const manual = pack.outputs.find(row => row.fields.Output_ID === 413);
+    assert.equal(auto.fields.Auto_Publish_Enabled, true);
+    assert.equal(manual.fields.Auto_Publish_Enabled, false);
+    assert.equal(homeOutputContribution(mapOutput(auto, null),clock).overdue_unpublished, 1);
+    assert.equal(homeOutputContribution(mapOutput(manual, null),clock).overdue_unpublished, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
