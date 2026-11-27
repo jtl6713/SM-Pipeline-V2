@@ -16,7 +16,7 @@ const config=window.ChicagoShiningVibeCut.defaultConfig({style:"fast-cuts",energ
 const idea={id:ideaId,production_source:"vibe_cut",production_mode:"automatic",status:"Generated",content_profile_links:[profile]};
 const partSize=5*1024*1024;
 const file={name:"original.mov",size:partSize+100,lastModified:123,type:"video/quicktime",slice:(start,end)=>({start,end})};
-function session(aspect="horizontal"){return {profile,aspect,width:aspect==="horizontal"?1920:1080,height:aspect==="horizontal"?1080:1920,plan:f.dedicatedVibePlan(config,aspect),title:"Vibe",summary:"Creative",location:"",file:{name:file.name,size:file.size,lastModified:file.lastModified},parts:[]};}
+function session(aspect="horizontal"){return {profile,intakeToken:"c8ee8d47-54f3-42be-ae0b-20722e6cf065",aspect,width:aspect==="horizontal"?1920:1080,height:aspect==="horizontal"?1080:1920,plan:f.dedicatedVibePlan(config,aspect),title:"Vibe",summary:"Creative",location:"",file:{name:file.name,size:file.size,lastModified:file.lastModified},parts:[]};}
 function record(s){return {id:requestId,idea_record_id:ideaId,status:"Draft",...s.plan};}
 const pending={id:"asset1",name:file.name,size_bytes:file.size,origin_kind:"vibe-cut",media_kind:"video",upload_status:"multipart_pending",multipart_upload_id:"session1"};
 const complete={...pending,upload_status:"complete",multipart_upload_id:undefined};
@@ -38,7 +38,7 @@ test("canonical Vibe creative settings and destination policy match the server f
 });
 test("new Vibe upload only uses scoped dedicated multipart transport and leaves Ready status to the server",async()=>{
  const s=session();
- const x=args(s,[{ok:true,record:idea},{dedicated_vibe_draft_verified:true,record:record(s)},snapshot(),
+ const x=args(s,[{ok:true,dedicated_vibe_idea_verified:true,record:idea},{dedicated_vibe_draft_verified:true,record:record(s)},snapshot(),
   {ok:true,asset_id:"asset1",upload_id:"session1",part_size:partSize,parts_expected:2,record:record(s)},snapshot(pending),
   {ok:true,uploaded:1,record:record(s),assets:[complete],authority_status:"Uploading"}]);
  const result=await f.runDedicatedVibeWizardUpload(x.opts);
@@ -71,7 +71,7 @@ test("incorrect Idea, request snapshot, session identity and changed acknowledge
   [{...session(),ideaId,requestId},[{ok:true,record:idea},snapshot(pending,{idea_id:"wrong"})]],
   [{...session(),ideaId,requestId,assetId:"asset1",uploadId:"wrong",partSize},[{ok:true,record:idea},snapshot(pending)]],
   [{...session(),ideaId,requestId,assetId:"asset1",uploadId:"session1",partSize,parts:[{part_number:1,etag:"etag1",digest:"different"}]},[{ok:true,record:idea},snapshot(pending)]],
-  [{...session(),ideaStarted:true},[]],
+  [{...session(),intakeToken:null,ideaStarted:true},[]],
  ];
  for(const [s,responses] of cases){const x=args(s,responses);await assert.rejects(f.runDedicatedVibeWizardUpload(x.opts));assert.equal(x.parts.length,0);assert.ok(x.calls.every(x=>!x.path.includes("/complete?")));}
 });
@@ -81,4 +81,21 @@ test("Home integration checks dedicated capability before ordinary intake and ne
  const dedicated=source.slice(start,source.indexOf("  async function finishEzWizard(",start));
  assert.match(dedicated,/dedicated_vibe_intake_enabled/);assert.match(dedicated,/navigator\.locks\.request/);
  assert.doesNotMatch(dedicated,/openProductionRequestForIdea|vibe-to-review|azAutoApprove|switchToPage\("production"\)/);
+});
+
+test("lost initial Idea response uses the same persisted token and does not generate a new identity",async()=>{
+ const s={...session(),ideaStarted:true};
+ const x=args(s,[{ok:true,dedicated_vibe_idea_verified:true,record:idea},{dedicated_vibe_draft_verified:true,record:record(s)},snapshot(pending),
+  {ok:true,uploaded:1,record:record(s),assets:[complete],authority_status:"Uploading"}]);
+ await f.runDedicatedVibeWizardUpload(x.opts);
+ assert.equal(JSON.parse(x.calls[0].options.body).vibe_intake_token,s.intakeToken);
+ assert.equal(x.calls.filter(c=>c.path.startsWith("/api/ideas?")).length,1);
+ assert.equal(s.ideaId,ideaId);
+});
+test("canonical Vibe creation actually stamps typed source and uses insert-only replay path",()=>{
+ const create=readFileSync(new URL("./worker-functions-01.mjs",import.meta.url),"utf8");
+ const body=create.slice(create.indexOf("export async function createIdea("),create.indexOf("export function ideaRecordIdFromPath("));
+ assert.match(body,/else if \(vibeCut\) \{\s*Object\.assign\(fields, newIdeaProductionCapture\(env, "vibe_cut"\)\)/);
+ assert.match(body,/commitIdempotentVibeIdea\(env,fields,vibeIdentity\)/);
+ assert.match(body,/dedicated_vibe_idea_verified: true/);
 });
