@@ -8,18 +8,20 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(root, "assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const begin = app.indexOf("  function ideaRowHtml(r) {");
+const begin = app.indexOf("  const ideaRowDeletesInFlight = new Set();");
 const end = app.indexOf("\n  function upsertIdeaInCache(", begin);
 assert.ok(begin >= 0 && end > begin, "Ideas row renderer must be available");
+const guardsBegin = app.indexOf("  function ideaIsPromoted(idea) {");
+const guardsEnd = app.indexOf("  function productionRequestNotesHaveTimedScript(", guardsBegin);
+assert.ok(guardsBegin >= 0 && guardsEnd > guardsBegin, "Actual Idea modification and request guards must be available");
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;")
   .replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const ideaRowHtml = vm.runInNewContext(
-  `(() => { ${app.slice(begin, end)}; return ideaRowHtml; })()`,
+  `(() => { ${app.slice(guardsBegin, guardsEnd)} ${app.slice(begin, end)}; return ideaRowHtml; })()`,
   {
     ideaShowPromoteAction: () => false,
-    ideaIsPromoted: () => false,
     ideaDraftNeedsTimeline: () => false,
     ideaTimelineRowButtonLabel: () => "Create VO timeline",
     escapeHtml,
@@ -67,4 +69,16 @@ test("Idea title remains HTML escaped", () => {
 test("Studio cache-bust agrees with the updated Ideas JS release", () => {
   assert.match(app, /BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/);
   assert.match(html, /app-item4-1008\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
+});
+
+test("Inline delete is only rendered for eligible unpromoted ideas without a request", () => {
+  assert.match(render(), /data-idea-delete="recfETIGvizOeh9ew"/);
+  for (const overrides of [
+    { status: "Approved" }, { status: "Promoted" },
+    { production_request_id: "request-id" },
+    { production_request_links: ["request-id"] },
+    { promoted_content_record_id: "content-id" },
+  ]) {
+    assert.doesNotMatch(render(overrides), /data-idea-delete=/);
+  }
 });
