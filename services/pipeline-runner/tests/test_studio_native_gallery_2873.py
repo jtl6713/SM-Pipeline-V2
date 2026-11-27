@@ -54,8 +54,8 @@ def test_linked_slide_identity_is_deterministic_and_cannot_reuse_approved_or_for
     assert not g._same_slide({**row,"fields":{**f,"Platform Output":[id2]}},row)
 
 
-@pytest.mark.parametrize("duplicate,legacy", [(False,False),(True,False),(False,True)])
-def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, duplicate, legacy):
+@pytest.mark.parametrize("duplicate,legacy,distinct_overlay", [(False,False,False),(True,False,False),(False,True,False),(True,False,True)])
+def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, duplicate, legacy, distinct_overlay):
     from copy import deepcopy
     rid="rec"+"r"*14
     pid="rec"+"p"*14
@@ -164,7 +164,13 @@ def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, du
     monkeypatch.setattr(g,"_cover_jpeg",lambda data:data)
     monkeypatch.setattr(g,"_image_proof",lambda data:"a"*64)
     monkeypatch.setattr(g,"_prepare_body_jpeg",lambda data:data)
-    monkeypatch.setattr(g,"letter_jpeg_bytes",lambda data,text:data)
+    if distinct_overlay:
+        # Distinct lettering made identical source bytes look like distinct
+        # final JPEG hashes; the pre-lettering guard must still skip the duplicate.
+        monkeypatch.setattr(g,"overlay_text_for_clip",lambda clip,title:clip["source_asset_id"])
+        monkeypatch.setattr(g,"letter_jpeg_bytes",lambda data,text:data+text.encode())
+    else:
+        monkeypatch.setattr(g,"letter_jpeg_bytes",lambda data,text:data)
     monkeypatch.setattr(g,"apply_watermark_bytes",lambda data,mark,**kw:data)
     import hashlib
     monkeypatch.setattr(g,"_stage",lambda uploader,data,pid:(g.CDN+"studio/previews/"+hashlib.sha256(data).hexdigest()+".jpg",hashlib.sha256(data).hexdigest()))
@@ -177,6 +183,8 @@ def test_build_both_native_siblings_as_exact_unapproved_packages(monkeypatch, du
         expected = [source_ids[0], *source_ids[2:10]] if duplicate else source_ids[:9]
         assert [x["source_asset_id"] for x in result[1:]]==expected
         assert len(marker["skipped_exact_duplicate_sources"]) == int(duplicate)
+        if duplicate:
+            assert marker["skipped_exact_duplicate_sources"][0]["reason"] == "duplicate_pre_lettering_source"
         assert len({x["sha256"] for x in result}) == (5 if legacy else 10)
         assert outputs[oid]["selected_clip_count"]==(5 if legacy else 10)
         if legacy:
