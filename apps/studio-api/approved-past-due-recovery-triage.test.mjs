@@ -154,3 +154,50 @@ test("#3096 missing fresh media is a Studio preflight repair rather than a user 
  assert.equal(got.owner,"Studio");
  assert.equal(got.public_publish_authorized,false);
 });
+
+test("#3096 blank approval-time dispatch note is an audit hint, not nonpublication proof",()=>{
+ for(const retry of [null,false,true]){
+  const row=historicalHold();row.fields.Studio_Publish_Dispatch_Note="";row.fields.Publish_Retry_Eligible=retry;
+  const got=call(row);
+  assert.equal(got.historical_hold_note_missing_candidate,true);
+  assert.equal(got.evidence_state,"ambiguous_dispatch");
+  assert.match(got.action_group,/^T\./);
+  assert.match(got.next_action,/migration provenance/);
+  assert.equal(got.public_publish_authorized,false);
+  assert.equal(got.can_repost,false);
+ }
+});
+test("#3096 missing-note cohort excludes conflicting evidence and incomplete clocks",()=>{
+ for(const [key,value] of [
+  ["Studio_Publish_Dispatch_Count",2],["Studio_Publish_Dispatch_Count",0],
+  ["Review_Decision_At",null],["Review_Decision_At","2026-11-10T09:59:00Z"],
+  ["Review_Decision_At","2026-11-10T10:00:01Z"],
+  ["Scheduled_Post_Date","2026-11-10T09:59:00Z"],
+  ["Scheduled_Post_Date","2026-11-21T00:00:00Z"],
+  ["Studio_Publish_Dispatch_Note","held until 2026-11-20T13:00:00Z"],
+  ["Publish_Started_At","2026-11-10T10:00:00Z"],
+  ["Platform_Publish_Response_JSON",{"id":"remote"}],
+  ["IG_Carousel_Parent_Container_ID","remote"],
+  ["Publish_Attempt_Count",1],["Platform_Post_URL","https://example.com/post"],
+  ["Publish_Error_Message","provider error"],["Test_Run_ID","synthetic"]
+ ]){
+  const row=historicalHold();row.fields.Studio_Publish_Dispatch_Note="";row.fields[key]=value;
+  const got=call(row);
+  assert.equal(got.historical_hold_note_missing_candidate,false,key);
+  assert.equal(got.public_publish_authorized,false,key);
+  assert.equal(got.can_repost,false,key);
+ }
+});
+test("#3096 missing-note research must not override hold, disabled auto, or cooldown",()=>{
+ for(const [key,value,group] of [
+  ["Do_Not_Publish",true,"A."],["Auto_Publish_Enabled",false,"B."],
+  ["Publish_Next_Retry_At","2099-01-01T00:00:00Z","H."],
+  ["Publish_Status","Publishing","D."]
+ ]){
+  const row=historicalHold();row.fields.Studio_Publish_Dispatch_Note="";row.fields[key]=value;
+  const got=call(row);
+  assert.ok(got.action_group.startsWith(group),key);
+  assert.equal(got.public_publish_authorized,false);
+  assert.equal(got.can_repost,false);
+ }
+});
