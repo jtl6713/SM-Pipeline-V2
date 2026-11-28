@@ -379,7 +379,8 @@ def test_exact_storage_scope_excludes_all_four_approved_siblings(monkeypatch):
     import pytest
     from studio_produce import steps, story_voiceover
 
-    rid, (job, parent_id, targets, siblings) = next(iter(steps._EXACT_3159_STORAGE_SCOPES.items()))
+    rid = "recLprSXgeNbgKABG"
+    job, parent_id, targets, siblings = steps._EXACT_3159_STORAGE_SCOPES[rid]
     monkeypatch.setattr(steps, "_output_missing_review_cover", lambda _: False)
     parent = _output(id=parent_id, Voiceover_URL="https://example.test/parent.mp3")
     rows = [_output(id=i, Output_Status="Approved for Publishing", Review_Status="Approved",
