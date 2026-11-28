@@ -36,6 +36,33 @@ HISTORY_RECOVERY = {
         "sha256": "7776de868a7f8d7f0ee6cbb844275e7e5d7f54409ddd2048d6ea7f9f461a42aa",
         "outputs": {"rec72bKqmIjLMs1gI", "recRI9JfNjjhLLo2m"},
     },
+    # Unique original identity and decoded duration from protected run
+    # 46174627928/job141070490983; exact companion identities from inventory
+    # 46161305343/job141037273982. No admission or stale-schedule override.
+    "recAdiURMeoS8VJnJ": {
+        "fingerprint": "9362a08d77676c85b03fb4d40e2c0f5ae68b8e465216dc57d7384f5a0551e9f3",
+        "created_at": 1795662013,
+        "sha256": "9da1b64b3f60f958dd7d286a7551ba7be72601d4bcf9483b95712df980a832ef",
+        "outputs": {"recDH1TiBHlR3kJ85", "recqs15ffqAvC0bU7"},
+        "held": True,
+        "cached_only_required": True,
+    },
+    "rec2XJdAZlS3N8hbE": {
+        "fingerprint": "c611f5ecef231d8bc4825ddb194e121fbf968bb189b18e692763da4ef17ad388",
+        "created_at": 1795651287,
+        "sha256": "82024d3371b0e0714721ee9c11720a9c308622f8d81a7dbf28484d2f6339b569",
+        "outputs": {"recSxK5fHXrgZrRJd", "rec8OqXuGHJaodnMz"},
+        "held": False,
+        "cached_only_required": True,
+    },
+    "rec8vqR7UnviPMoH7": {
+        "fingerprint": "aab9bf8503392847c34bc90bdc5c61b1d39e764fd6bf55e364026b8aa331089a",
+        "created_at": 1795672407,
+        "sha256": "0151636fb93bcd6e04f1914df25a5615d83c8ecf587201bce36992b40fa7f988",
+        "outputs": {"recGWbCjBIVt7B7nG", "recLsIWmTB2oKGlNA"},
+        "held": False,
+        "cached_only_required": True,
+    },
 }
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -82,10 +109,15 @@ def download_audited_history(evidence, text, voice_id):
 
 # Protected original-media proof 46166270330: both original recordings are
 # checksum verified but below the existing 2-second Story duration contract.
-# Only these two independently audited byte identities may be pace-corrected.
+# Only independently audited byte identities in this exact set may be corrected.
+# Three additional originals were decoded in run 46174627928. The 1.207s
+# original for 11268 and both ambiguous pairs are deliberately excluded.
 _SHORT_AUDITED_ORIGINALS = {
     "9977a3100b5ede15666c69ea061aafb25054221e9ceb6a345d319a5c0d23bd05",
     "7776de868a7f8d7f0ee6cbb844275e7e5d7f54409ddd2048d6ea7f9f461a42aa",
+    "9da1b64b3f60f958dd7d286a7551ba7be72601d4bcf9483b95712df980a832ef",
+    "82024d3371b0e0714721ee9c11720a9c308622f8d81a7dbf28484d2f6339b569",
+    "0151636fb93bcd6e04f1914df25a5615d83c8ecf587201bce36992b40fa7f988",
 }
 
 

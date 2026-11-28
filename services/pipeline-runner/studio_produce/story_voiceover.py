@@ -113,6 +113,8 @@ def exact_3159_cache_receipt(output, parent_id, receipt):
 # These holds remain set throughout rendering and final human review.
 HELD_CACHE_RECOVERY = {
     **EXACT_3159_CACHED_STORIES,
+    "recDH1TiBHlR3kJ85": "recAdiURMeoS8VJnJ",
+    "recqs15ffqAvC0bU7": "recAdiURMeoS8VJnJ",
     "recoheiAMq2vG48V3": "rec9qS53G7HDoyCL5",
     "reccgtEdV1EKo4Hlp": "rec9qS53G7HDoyCL5",
     "rec0suYTujG4dje1R": "rec3fNJ6QgaL7EMBn",
@@ -222,6 +224,16 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
             ))
             or not field_str(output, "Composition_ID")
             or not field_str(output, "Render_Clip_List_JSON")):
+        return False
+    # Newly audited history pairs may rearm only from a genuinely unapproved,
+    # unscheduled, non-publishable revision. Legacy dates require reconciliation.
+    from studio_produce.story_history_recovery import HISTORY_RECOVERY
+    exact_history = HISTORY_RECOVERY.get(parent["id"], {})
+    if (exact_history.get("cached_only_required")
+            and output.get("id") in exact_history["outputs"]
+            and (not cached_only or field(output, "Do_Not_Publish") is not exact_history["held"]
+                 or field_str(output, "Scheduled_Post_Date")
+                 or field_str(output, "Publish_Status") != "Not Ready")):
         return False
     if field_str(output, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR:
         # This failure is retryable only from its own persisted, verified
@@ -448,7 +460,8 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                 # receipt and independently verified provider bytes. Default
                 # remains held for the earlier incident; Echo Park is unheld.
                 expected_hold = history.get("held", True)
-                if (digest != history["fingerprint"] or len(claims)!=1
+                if ((history.get("cached_only_required") and allow_generate)
+                        or digest != history["fingerprint"] or len(claims)!=1
                         or claims[0].get("state")!="failed"
                         or field(current,"Do_Not_Publish") is not expected_hold
                         or not story_sentence_recovery_candidate(current,live_parent,cached_only=True)):

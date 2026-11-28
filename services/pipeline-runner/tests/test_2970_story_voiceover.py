@@ -319,7 +319,8 @@ def test_private_story_render_source_requires_exact_verified_receipt():
 
 
 @pytest.mark.parametrize("held", [True, False])
-def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(monkeypatch, held):
+@pytest.mark.parametrize("strict", [True, False])
+def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(monkeypatch, held, strict):
     import hashlib
     from copy import deepcopy
     from contextlib import nullcontext
@@ -335,12 +336,12 @@ def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(
     digest=story.fingerprint(p["id"],"voice-1",story.story_text(p["fields"]["Voiceover_Script"]),story.story_seconds(output()))
     url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
     evidence={"fingerprint":digest,"created_at":1795576594,"sha256":hashlib.sha256(raw).hexdigest(),
-              "outputs":{"recjqFCCxBroLyoQJ"}, "held":held}
+              "outputs":{"recjqFCCxBroLyoQJ"}, "held":held,"cached_only_required":strict}
     monkeypatch.setitem(history.HISTORY_RECOVERY,p["id"],evidence)
     row=output(Content_Item=[p["id"]],Output_Status="In Production",Render_Status="Blocked",
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
         Composition_ID="Story",Render_Clip_List_JSON='[{"durationFrames":300}]',
-        Do_Not_Publish=held,Auto_Publish_Enabled=False,
+        Do_Not_Publish=held,Auto_Publish_Enabled=False,Publish_Status="Not Ready",
         Studio_Story_Voiceover_Receipt_JSON=json.dumps({"state":"failed","fingerprint":digest,"url":url}))
     row["id"]="recjqFCCxBroLyoQJ"
     rows={p["id"]:p,row["id"]:row}
@@ -358,14 +359,21 @@ def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
     monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
-    monkeypatch.setattr(history,"download_audited_history",lambda *a:raw)
+    provider_get=Mock(return_value=raw)
+    monkeypatch.setattr(history,"download_audited_history",provider_get)
     monkeypatch.setattr(normalizer_client,"normalize_voiceover",lambda *a,**k:({},data))
     monkeypatch.setattr(story,"checked_voice",lambda *a:4.0)
     objects={}
     monkeypatch.setattr(R2UploadClient,"story_audio_exists",lambda self,key:key in objects)
     monkeypatch.setattr(R2UploadClient,"put_object",lambda self,key,body,typ:objects.update({key:body}))
     monkeypatch.setattr(R2UploadClient,"read_story_audio",lambda self,key,sha:objects[key])
+    if strict:
+        with pytest.raises(story.StoryVoiceoverError,match="history recovery identity changed"):
+            story.ensure_story_voiceover(client,deepcopy(row),p,allow_generate=True)
+        provider_get.assert_not_called()
+        assert not objects and json.loads(row["fields"][story.RECEIPT])["state"]=="failed"
     result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
+    provider_get.assert_called_once()
     assert result["fields"]["Render_Status"]=="Ready for Render"
     assert result["fields"]["Do_Not_Publish"] is held
     assert result["fields"]["Auto_Publish_Enabled"] is False
@@ -698,3 +706,38 @@ def test_3159_exact_concise_story_does_not_change_parent_or_other_outputs():
     assert not story.story_sentence_recovery_candidate(row,changed)
     row["fields"]["Scheduled_Post_Date"] = "2026-12-01"
     assert not story.story_sentence_recovery_candidate(row,p)
+
+
+@pytest.mark.parametrize("parent_id,output_id,held,sha", [
+    ("recAdiURMeoS8VJnJ", "recDH1TiBHlR3kJ85", True, "9da1b64b3f60f958dd7d286a7551ba7be72601d4bcf9483b95712df980a832ef"),
+    ("rec2XJdAZlS3N8hbE", "recSxK5fHXrgZrRJd", False, "82024d3371b0e0714721ee9c11720a9c308622f8d81a7dbf28484d2f6339b569"),
+    ("rec8vqR7UnviPMoH7", "recGWbCjBIVt7B7nG", False, "0151636fb93bcd6e04f1914df25a5615d83c8ecf587201bce36992b40fa7f988"),
+])
+def test_new_exact_history_rearm_requires_cache_and_no_legacy_schedule(parent_id, output_id, held, sha):
+    from studio_produce.story_history_recovery import HISTORY_RECOVERY, _SHORT_AUDITED_ORIGINALS
+    p=parent(); p["id"]=parent_id
+    evidence=HISTORY_RECOVERY[parent_id]
+    assert evidence["sha256"]==sha and sha in _SHORT_AUDITED_ORIGINALS
+    assert evidence["cached_only_required"] and evidence["held"] is held and len(evidence["outputs"])==2
+    row=output(Content_Item=[parent_id],Output_Status="In Production",Render_Status="Blocked",
+        Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
+        Composition_ID="Story",Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Do_Not_Publish=held,Auto_Publish_Enabled=False,Publish_Status="Not Ready")
+    row["id"]=output_id
+    assert story.story_sentence_recovery_candidate(row,p,cached_only=True)
+    assert not story.story_sentence_recovery_candidate(row,p,cached_only=False)
+    row["fields"]["Scheduled_Post_Date"]="2026-12-21"
+    assert not story.story_sentence_recovery_candidate(row,p,cached_only=True)
+    del row["fields"]["Scheduled_Post_Date"]
+    row["fields"]["Publish_Status"]="Ready to Publish"
+    assert not story.story_sentence_recovery_candidate(row,p,cached_only=True)
+    row["fields"]["Publish_Status"]="Not Ready"
+    row["fields"]["Do_Not_Publish"]=not held
+    assert not story.story_sentence_recovery_candidate(row,p,cached_only=True)
+
+
+def test_new_history_excludes_ambiguous_and_excessively_short_originals():
+    from studio_produce.story_history_recovery import HISTORY_RECOVERY, _SHORT_AUDITED_ORIGINALS
+    for parent_id in ("rec1LmWHV6VvfdXp0","reczNIelMId8KIXzx","rec4dPzGEJe0WbZpv"):
+        assert parent_id not in HISTORY_RECOVERY
+    assert "22bbdf330553cf64221415445570720022e217df831bbeb6ff8d2afe0017dc6d" not in _SHORT_AUDITED_ORIGINALS
