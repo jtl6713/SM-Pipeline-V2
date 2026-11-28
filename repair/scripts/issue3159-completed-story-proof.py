@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 
 BASE=Path.cwd()/"Services"/"pipeline-runner"/"service"
 PROJECT="https://vkwvscgisqsbuwagdvtb.supabase.co"
-LIMIT=32*1024*1024
+# Protected Drive metadata run 46175262381 proved #11240 is a valid
+# 53,678,415-byte MP4. This cap is local to the four exact audit artifacts,
+# never the producer, storage, or publication path.
+LIMIT=64*1024*1024
 # Verified canonical identities from the two accepted (never replay) parents.
 COHORT=[
  ("recLprSXgeNbgKABG","spj-b8cba2008c3b","recbjg7rXQCiA6DzY",
@@ -32,6 +35,24 @@ def receipt(row):
         else: break
     return {}
 
+def stream_exact_media(response, path, expected_size):
+    """Reject an oversized/mismatched response before it can fill disk."""
+    require(0<expected_size<=LIMIT,"media_size_budget")
+    require(response.status_code==200,"media_unavailable")
+    declared=response.headers.get("Content-Length")
+    require(declared is None or (declared.isdecimal() and int(declared)==expected_size),"media_content_length")
+    n=0
+    with path.open("wb") as out:
+        for chunk in response.iter_content(1024*1024):
+            n+=len(chunk)
+            require(n<=expected_size,"media_byte_budget")
+            out.write(chunk)
+    require(n==expected_size,"media_length_mismatch")
+
+def file_sha256(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source,"sha256").hexdigest()
+
 def inspect(path):
     info=json.loads(subprocess.check_output(
         ["ffprobe","-v","error","-count_frames","-show_streams","-show_format","-of","json",str(path)],
@@ -44,7 +65,7 @@ def inspect(path):
     p=subprocess.run(["ffmpeg","-hide_banner","-nostats","-xerror","-i",str(path),"-map","0:v:0","-map","0:a:0","-af","volumedetect","-f","null","NUL"],capture_output=True,text=True,timeout=60)
     peak=re.search(r"max_volume:\s*(-?[0-9.]+) dB",p.stderr)
     require(p.returncode==0 and peak and float(peak.group(1))>-50,"video_decode_or_audio")
-    return {"bytes":path.stat().st_size,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"frames":300,
+    return {"bytes":path.stat().st_size,"sha256":file_sha256(path),"frames":300,
             "width":1080,"height":1920,"duration":dur,"peak_db":float(peak.group(1)),"decode":"PASS"}
 
 def main():
@@ -113,14 +134,16 @@ def main():
                     require(diagnostic["identity_matches"] and diagnostic["trashed"] is False,"drive_identity_or_trashed")
                     require(diagnostic["video_mp4"],"drive_mime_type")
                     require(0<size<=LIMIT,"drive_size_budget")
-                    drive.download_file_to_path(drive_id,str(a),timeout=45)
-                    require(a.stat().st_size==size and 0<size<=LIMIT,"drive_byte_budget_or_length")
-                    with requests.get(preview,stream=True,timeout=30,allow_redirects=False) as response:
-                        require(response.status_code==200,"preview_unavailable")
-                        n=0
-                        with b.open("wb") as f:
-                            for chunk in response.iter_content(65536):
-                                n+=len(chunk); require(n<=LIMIT,"preview_byte_budget"); f.write(chunk)
+                    # Use the existing Drive credential client, but enforce the
+                    # exact metadata size on every streamed chunk, not after download.
+                    with requests.get("https://www.googleapis.com/drive/v3/files/"+drive_id,
+                        params={"alt":"media","supportsAllDrives":"true"},
+                        headers={"Authorization":"Bearer "+drive.access_token()},
+                        stream=True,timeout=(5,45),allow_redirects=False) as response:
+                        stream_exact_media(response,a,size)
+                    with requests.get(preview,stream=True,timeout=(5,45),allow_redirects=False) as response:
+                        stream_exact_media(response,b,size)
+                    require(drive.get_file(drive_id,fields="id,size,mimeType,trashed")==meta,"drive_metadata_changed")
                 PHASE="decode"
                 first=inspect(a); second=inspect(b)
                 require(first["sha256"]==second["sha256"],"drive_preview_byte_mismatch")
