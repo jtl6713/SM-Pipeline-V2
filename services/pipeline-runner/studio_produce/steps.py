@@ -1241,6 +1241,79 @@ def _exact_3159_history_scope(ctx):
     return targets
 
 
+# Exact held storage cohort from protected inventory 46161305343. Only the
+# two unfinished Stories may enter rendering; completed siblings are read-only.
+_EXACT_3159_STORAGE_SCOPES = {
+    "recLprSXgeNbgKABG": ("spj-b8cba2008c3b", "recbjg7rXQCiA6DzY",
+        {"recONsGlBKsE8VTdP", "recKwClsbFCOJaKbC"},
+        {"recDpIhU2YQzjNX8a", "recXr2l859AnZkK1f", "recEyaTmyn4m2YBzg", "recvLW8Slruf38vHE"}),
+    "recqfMGjV1CnCP5CB": ("spj-507e47315148", "rec0gE5IoTuSoqy5E",
+        {"receOfwtyngfyCboh", "recgCPmQEWy5cA5Nw"},
+        {"recZ4VQiZwDFdV3ES", "rec0MgDWDbnFMMv1R", "recv2FiOR2Cirmjq2", "recCdUyGSbCgELtlD"}),
+    "recKEr3ODsfNktfRr": ("spj-7312a08e15ed", "rec1LmWHV6VvfdXp0",
+        {"recv8TRI6cYAwF1AF", "recqIuVlct8IMs56a"},
+        {"recB1EBNPlsSH2wic", "recdpFoKZso5MJvqP", "recdQfNKS3NDaeu5a", "recmCasHl2KczFhHh"}),
+    "recmnzwPSdKUYTioL": ("spj-36974e5ee4a9", "recKTD3ZnQpNxxvgH",
+        {"reczMVFz209yngV1H", "recCypRwiZF4xHMgE"},
+        {"recWAZYeW0AjXRzfU", "recjZ3rO1mKOtCkw6", "rec5Uan8VDPoYosN5", "reclg0bUmZ4FujelK"}),
+    "recA97cVeskb9KQBm": ("spj-204c783abd6c", "recQnOwB4Qg9FHIup",
+        {"reclCt4yPUBDhPR9Y", "recfrU5PjR5d5VwsR"},
+        {"recdO6F0E2rIsoUu6", "recNSZat1EbYwKHYP", "rectAMY2i0IqdJijk", "rec14ac9uFPpXEwJ4"}),
+    "rec2yYRS9aVFeK1r3": ("spj-ecee66d967b7", "recrUkXlSXxtwztFU",
+        {"recRHAB4dpThNs7TT", "recewgpHg6l7SI344"},
+        {"recNKpKKQOdo7ttQM", "recKoUN5ybT1Bycrm", "recdhHruzJ1MuTlXP", "rec0p3ccFHUeGLP0u"}),
+    "reci9P7UQXRVFtuTM": ("spj-fc821999471c", "recsusqK58K0eP6z3",
+        {"recihZZobVTvXDuer", "rec5wWC93FYeXiqRR"},
+        {"recA47MByJcYZ84sk", "recqbTgXsFDUiH77C", "rec3ryKwcQbNcODCb", "recf2NMDrZMXhQXA1"}),
+    "recenOlc16BzYh6XV": ("spj-485602388fb9", "recs0vBdT1jmUIWL0",
+        {"recBOQEGqk0lgF4HF", "reckFi5S3Ynrxxggl"},
+        {"rec67KnX39WE2FEAS", "recrYAgLe1h1HIWzs", "recfUmaVUQZIllhgA", "reccS9JI9e5j0nKUp"}),
+}
+
+
+def _exact_3159_storage_scope(ctx):
+    from studio_produce.story_voiceover import (
+        HELD_STORAGE_RECOVERY, RECEIPT, STORY_STORAGE_GUARD,
+        held_storage_identity, needs_story_voiceover,
+    )
+    from render.fields import parse_json_field
+    job_id, parent_id, targets, siblings = _EXACT_3159_STORAGE_SCOPES[ctx["request_id"]]
+    parent = ctx.get("parent") or {}
+    rows = {r["id"]: r for r in ctx.get("outputs") or []}
+    if (set(rows) != targets | siblings or len(ctx.get("outputs") or []) != 6
+            or (ctx.get("job") or {}).get("job_id") != job_id
+            or parent.get("id") != parent_id or not field_str(parent, "Voiceover_URL")
+            or any(not _output_file_ready(rows[s])
+                   or field_str(rows[s], "Output_Status") != "Approved for Publishing"
+                   or field_str(rows[s], "Review_Status") != "Approved"
+                   or _output_missing_review_cover(rows[s]) for s in siblings)):
+        raise StepBlocked("Exact storage Story identity or approved sibling package changed")
+    checksums = set()
+    for ident in targets:
+        row = rows[ident]
+        state = field_str(row, "Render_Status")
+        receipt = parse_json_field(field(row, RECEIPT)) or {}
+        mapped = HELD_STORAGE_RECOVERY.get(ident)
+        if (not mapped or mapped[0] != parent_id
+                or not needs_story_voiceover(row) or first_linked_id(field(row, "Content_Item")) != parent_id
+                or not held_storage_identity(row, parent)
+                or field_str(row, "Output_Status") not in {"In Production", "Ready for Review"}
+                or state not in {"Blocked", "Ready for Render", "Waiting in Render Queue", "Rendering", "Rendered"}
+                or (state == "Blocked" and field_str(row, "Remotion_Error_Message") != STORY_STORAGE_GUARD)
+                or not isinstance(receipt, dict)
+                or (receipt and (receipt.get("fingerprint") != mapped[1]
+                    or receipt.get("url") != f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{mapped[1]}.mp3"
+                    or receipt.get("state") != "verified"
+                    or not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get("sha256") or ""))))
+                or (state in {"Rendering", "Rendered"} and not receipt)):
+            raise StepBlocked("Exact held storage Story receipt or publication fence changed")
+        if receipt:
+            checksums.add(receipt["sha256"])
+    if len(checksums) > 1:
+        raise StepBlocked("Exact storage sibling narration checksums disagree")
+    return frozenset(targets)
+
+
 def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | frozenset[str] | None:
     """Exact #3159 probe: render only the held Story, not approved siblings.
 
@@ -1248,6 +1321,8 @@ def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | frozenset[str] 
     finished sibling packages and their schedules while proving its render
     step can genuinely complete. Do not widen to a different revision.
     """
+    if ctx.get("request_id") in _EXACT_3159_STORAGE_SCOPES:
+        return _exact_3159_storage_scope(ctx)
     if ctx.get("request_id") in _EXACT_3159_HISTORY_SCOPES:
         return _exact_3159_history_scope(ctx)
     if ctx.get("request_id") in _EXACT_3159_CACHE_SCOPES:
