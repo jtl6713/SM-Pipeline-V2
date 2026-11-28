@@ -13,6 +13,10 @@ on:
       - '.github/workflows/issue3159-ten-minute-recovery.yml'
       - 'repair/scripts/issue3159-becky-storage-sweep.py'
   workflow_dispatch:
+  workflow_run:
+    workflows: ['Deploy Pipeline Runner via Ops Dashboard']
+    types: [completed]
+    branches: [main]
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
 permissions:
@@ -96,7 +100,7 @@ jobs:
           assert 'source_or_hold_changed' in s and 'ambiguous_narration_attempt_no_retry' in s
           PY
   readback:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -182,7 +186,7 @@ jobs:
           if not rows: print('sweep3159=backlog_zero_no_submissions')
           PY
   recover-storage:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.readback.outputs.storage_candidate == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && needs.readback.outputs.storage_candidate == 'true'
     needs: [validate, readback]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -222,7 +226,13 @@ jobs:
           git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
           deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
           test "$(jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"' <<<"$deployed_status")" = success
-          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11234-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
+          # The obsolete separate pair workflow recorded failure on this SHA.
+          # The consolidated workflow verified BOTH pairs; bind to its actual job.
+          proven=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs/46167098212")
+          jq -e '.head_sha=="124fb31441ff637ce0b60483fd7c3643815ee9c2" and .status=="completed" and .conclusion=="success"' <<<"$proven" >/dev/null
+          jobs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs/46167098212/jobs?per_page=100")
+          jq -e 'any(.jobs[]; .id==141047104300 and .name=="audit-second-pair" and .status=="completed" and .conclusion=="success")' <<<"$jobs" >/dev/null
+          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11202-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
       - name: Verify scheduler still minute-only before exact recovery
         if: steps.quiet.outputs.ok == 'true'
         env:
@@ -324,7 +334,7 @@ jobs:
           print('story3159_post_crons=minute_only')
           PY
   recover-audited-pair:
-    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.readback.result == 'success' && needs.readback.outputs.candidate == 'true' && (needs.recover-storage.result == 'skipped' || (needs.recover-storage.result == 'success' && needs.recover-storage.outputs.no_submission == 'true'))
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && needs.validate.result == 'success' && needs.readback.result == 'success' && needs.readback.outputs.candidate == 'true' && (needs.recover-storage.result == 'skipped' || (needs.recover-storage.result == 'success' && needs.recover-storage.outputs.no_submission == 'true'))
     needs: [validate, readback, recover-storage]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -362,7 +372,13 @@ jobs:
           git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
           deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
           test "$(jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"' <<<"$deployed_status")" = success
-          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11234-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
+          # The obsolete separate pair workflow recorded failure on this SHA.
+          # The consolidated workflow verified BOTH pairs; bind to its actual job.
+          proven=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs/46167098212")
+          jq -e '.head_sha=="124fb31441ff637ce0b60483fd7c3643815ee9c2" and .status=="completed" and .conclusion=="success"' <<<"$proven" >/dev/null
+          jobs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs/46167098212/jobs?per_page=100")
+          jq -e 'any(.jobs[]; .id==141047104300 and .name=="audit-second-pair" and .status=="completed" and .conclusion=="success")' <<<"$jobs" >/dev/null
+          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11202-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
       - name: Verify scheduler still minute-only before exact recovery
         if: steps.quiet.outputs.ok == 'true'
         env:
