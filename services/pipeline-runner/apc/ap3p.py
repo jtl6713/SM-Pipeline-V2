@@ -14,10 +14,9 @@ from apc.constants import (
     MAKE_AP3P_ID,
     MAKE_AP3P_NAME,
     PARENT_FINISHED,
-    PARENT_NOT_CREATED,
     RETRY_MINUTES,
     STAGE_AP3P,
-    STATUS_CHILDREN_READY,
+    STATUS_RETRY,
     STATUS_PARENT_PROCESSING,
     STATUS_PARENT_READY,
 )
@@ -136,25 +135,21 @@ def process_request(
             record_id,
             {
                 **unlock_fields(),
-                "IG_Carousel_Status": STATUS_CHILDREN_READY,
-                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
+                "IG_Carousel_Status": STATUS_RETRY,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
                 "IG_Carousel_Error_Stage": ERROR_AP3P,
                 "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
                 "IG_Carousel_Error_Message": (
                     f"AP3P parent container terminal state or poll timeout. Status: {parent_status}; "
-                    f"attempts: {attempt}. AP3C will recreate the parent."
+                    f"attempts: {attempt}. "
+                    "QA-IG-AP3P-RECONCILIATION-REQUIRED: existing parent identity retained; no automatic recreation."
                 ),
-                "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "IG_Carousel_Parent_Status": PARENT_NOT_CREATED,
-                "IG_Carousel_Parent_Created_At": None,
-                "IG_Carousel_Parent_Container_ID": "",
-                "IG_Carousel_Parent_Last_Checked_At": None,
-                "IG_Carousel_Parent_Poll_Attempt_Count": 0,
+                "IG_Carousel_Next_Retry_At": None,
             },
             typecast=True,
         )
-        return {"processed": True, "needs_parent": True, **result}
+        return {"processed": True, "reconciliation_required": True, **result}
 
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,

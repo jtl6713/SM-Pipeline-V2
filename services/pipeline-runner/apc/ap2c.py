@@ -19,7 +19,7 @@ from apc.constants import (
     MAKE_AP2C_NAME,
     RETRY_MINUTES,
     STAGE_AP2C,
-    STATUS_ASSETS_READY,
+    STATUS_RETRY,
     STATUS_CHILDREN_PROCESSING,
     STATUS_CHILDREN_READY,
 )
@@ -151,21 +151,21 @@ def process_request(
             record_id,
             {
                 **unlock_fields(),
-                "IG_Carousel_Status": STATUS_ASSETS_READY,
-                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
+                "IG_Carousel_Status": STATUS_RETRY,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
                 "IG_Carousel_Error_Stage": ERROR_AP2C_VERIFY,
                 "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
                 "IG_Carousel_Error_Message": (
                     f"AP2C verified child-count mismatch. Stored linked children: {len(stored)}; expected: {expected}. "
-                    "The output was returned to AP1C instead of remaining locked."
+                    "QA-IG-AP2C-RECONCILIATION-REQUIRED: existing child identities retained; no automatic recreation."
                 ),
-                "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+                "IG_Carousel_Next_Retry_At": None,
                 "IG_Carousel_Children_Ready_Count": 0,
             },
             typecast=True,
         )
-        return {"processed": True, "needs_children": True, **result}
+        return {"processed": True, "reconciliation_required": True, **result}
 
     if finished == expected and finished > 1:
         client.update_record(
@@ -193,21 +193,22 @@ def process_request(
             record_id,
             {
                 **unlock_fields(),
-                "IG_Carousel_Status": STATUS_ASSETS_READY,
-                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
+                "IG_Carousel_Status": STATUS_RETRY,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
                 "IG_Carousel_Error_Stage": ERROR_AP2C,
                 "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
                 "IG_Carousel_Error_Message": (
                     f"AP2C verified terminal child failure or poll timeout. Finished: {finished}; "
-                    f"terminal: {terminal}; max attempts: {attempts}. AP1C will recreate children."
+                    f"terminal: {terminal}; max attempts: {attempts}. "
+                    "QA-IG-AP2C-RECONCILIATION-REQUIRED: existing child identities retained; no automatic recreation."
                 ),
-                "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+                "IG_Carousel_Next_Retry_At": None,
                 "IG_Carousel_Children_Ready_Count": finished,
             },
             typecast=True,
         )
-        return {"processed": True, "needs_children": True, "finished": finished, **result}
+        return {"processed": True, "reconciliation_required": True, "finished": finished, **result}
 
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
