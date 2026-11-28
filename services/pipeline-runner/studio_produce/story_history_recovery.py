@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
+from pathlib import Path
 import re
+import subprocess
+import tempfile
 
 import requests
 
@@ -74,3 +78,54 @@ def download_audited_history(evidence, text, voice_id):
     if len(raw)<32 or hashlib.sha256(raw).hexdigest()!=evidence["sha256"]:
         raise RuntimeError("Story history original checksum changed")
     return bytes(raw)
+
+
+# Protected original-media proof 46166270330: both original recordings are
+# checksum verified but below the existing 2-second Story duration contract.
+# Only these two independently audited byte identities may be pace-corrected.
+_SHORT_AUDITED_ORIGINALS = {
+    "9977a3100b5ede15666c69ea061aafb25054221e9ceb6a345d319a5c0d23bd05",
+    "7776de868a7f8d7f0ee6cbb844275e7e5d7f54409ddd2048d6ea7f9f461a42aa",
+}
+
+
+def fit_short_audited_history(raw, evidence):
+    """Preserve the original spoken words and pitch, never pad with silence.
+
+    Run before standard loudness normalization; the unchanged final duration
+    and audibility guard must still pass. Reject a corrupt or excessively
+    short original rather than relaxing the Story media contract.
+    """
+    if evidence.get("sha256") not in _SHORT_AUDITED_ORIGINALS:
+        return raw
+    if hashlib.sha256(raw).hexdigest() != evidence["sha256"] or not 32 <= len(raw) <= MAX_BYTES:
+        raise RuntimeError("Audited short Story original checksum mismatch")
+    from audio.leading_silence import ffmpeg_bin
+    from audio.voiceover_duration import probe_audio_duration_bytes
+    from audio.speech_activity import probe_max_volume_db
+
+    duration = probe_audio_duration_bytes(raw)
+    peak = probe_max_volume_db(raw)
+    if not math.isfinite(duration) or duration < 1.35 or peak is None or not math.isfinite(peak) or peak < -24:
+        raise RuntimeError("Audited short Story original is not safely pace-correctable")
+    if duration >= 2.2:
+        return raw
+    tempo = duration / 2.25
+    if not 0.60 <= tempo < 1.0:
+        raise RuntimeError("Audited short Story tempo exceeds correction bound")
+    with tempfile.TemporaryDirectory(prefix="audited-story-pace-") as tmp:
+        src = Path(tmp) / "original.mp3"
+        dst = Path(tmp) / "paced.mp3"
+        src.write_bytes(raw)
+        proc = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-nostats", "-xerror", "-y",
+             "-i", str(src), "-map", "0:a:0", "-af", f"atempo={tempo:.8f}",
+             "-c:a", "libmp3lame", "-b:a", "128k", str(dst)],
+            capture_output=True, timeout=30, check=False)
+        if proc.returncode or not dst.is_file() or not 32 <= dst.stat().st_size <= MAX_BYTES:
+            raise RuntimeError("Audited short Story pitch-preserving correction failed")
+        paced = dst.read_bytes()
+    measured = probe_audio_duration_bytes(paced)
+    if not 2.05 <= measured <= 2.65:
+        raise RuntimeError("Audited short Story paced duration outside target")
+    return paced

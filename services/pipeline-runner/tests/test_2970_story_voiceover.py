@@ -583,3 +583,32 @@ def test_3159_exact_history_pair_preserves_approved_scope(monkeypatch, request_i
     rows[-1]["fields"][story.RECEIPT]=json.dumps({"fingerprint":digest,"url":url,"state":"verified","sha256":"a"*64,
         "history_original_sha256":evidence["sha256"],"history_created_at":evidence["created_at"]})
     assert steps._verified_story_recovery_scope(ctx)==frozenset(evidence["outputs"])
+
+
+def test_audited_short_history_pitch_correction_is_checksum_bound(monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+    from pathlib import Path
+    from studio_produce import story_history_recovery as history
+    from audio import voiceover_duration, speech_activity
+
+    original=b"original speech bytes "*100
+    paced=b"pitch preserved speech "*100
+    digest=hashlib.sha256(original).hexdigest()
+    monkeypatch.setattr(history,"_SHORT_AUDITED_ORIGINALS",{digest})
+    monkeypatch.setattr(voiceover_duration,"probe_audio_duration_bytes",lambda data:1.439637 if data==original else 2.24)
+    monkeypatch.setattr(speech_activity,"probe_max_volume_db",lambda data:-21.6)
+    def transcode(cmd,**kw):
+        assert "-xerror" in cmd and "apad" not in " ".join(cmd)
+        assert 0.60 <= float(cmd[cmd.index("-af")+1].split("=")[1]) < 1.0
+        assert Path(cmd[cmd.index("-i")+1]).read_bytes()==original
+        Path(cmd[-1]).write_bytes(paced)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(history.subprocess,"run",transcode)
+    assert history.fit_short_audited_history(original,{"sha256":digest})==paced
+    with pytest.raises(RuntimeError,match="checksum mismatch"):
+        history.fit_short_audited_history(original+b"changed",{"sha256":digest})
+    assert history.fit_short_audited_history(original,{"sha256":"unrelated"})==original
+    monkeypatch.setattr(speech_activity,"probe_max_volume_db",lambda data:-45)
+    with pytest.raises(RuntimeError,match="not safely pace-correctable"):
+        history.fit_short_audited_history(original,{"sha256":digest})
