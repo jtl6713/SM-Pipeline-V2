@@ -109,7 +109,7 @@ jobs:
             if [[ "$status" == ok ]]; then
               jq -r '.job.log // ""' /tmp/p1-4785-job.json | grep '^IG3159_STATUS=' | sed 's/^IG3159_STATUS=//' | jq -s . >/tmp/p1-4785-evidence.json
               # Print the sanitized, allowlisted phase proof even if live acceptance fails.
-              jq -c '[.[] | {output,read_only,provider_writes,output_writes,retry_authorized,phase,failure_class,reason,owner_verified,canonical_unchanged,provider_get_calls,inventory_complete,posts_scanned,child_statuses,exact_caption_candidates}]' /tmp/p1-4785-evidence.json
+              jq -c '[.[] | {output,read_only,provider_writes,output_writes,retry_authorized,phase,failure_class,reason,owner_verified,canonical_unchanged,provider_get_calls,inventory_complete,inventory_pages,oldest_timestamp,newest_timestamp,timestamp_order_verified,posts_scanned,child_statuses,exact_caption_candidates}]' /tmp/p1-4785-evidence.json
               jq -e 'length==1 and .[0].output==8357 and .[0].read_only==true and .[0].provider_writes==0 and .[0].output_writes==0 and .[0].retry_authorized==false and .[0].owner_verified==true and .[0].canonical_unchanged==true and (.[0].child_statuses|length)==8 and .[0].provider_get_calls<=14 and .[0].phase=="complete"' /tmp/p1-4785-evidence.json >/dev/null
               exit 0
             elif [[ "$status" == failed ]];then echo 'Ops status job failed; no provider retries';exit 3;fi
