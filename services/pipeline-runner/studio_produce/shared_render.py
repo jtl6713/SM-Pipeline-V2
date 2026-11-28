@@ -321,6 +321,27 @@ def propagate_render_result(client, source: dict[str, Any], sibling_ids: list[st
     for sibling_id in sibling_ids:
         if not sibling_id or sibling_id == source.get("id"):
             continue
+        # A finished approved/scheduled package is immutable to production
+        # continuation. Re-read the target, not just the initial grouping:
+        # a reviewer may approve it after the shared plan was constructed.
+        target = client.get_record(PLATFORM_OUTPUTS_TABLE, sibling_id)
+        if not isinstance(target, dict) or target.get("id") != sibling_id:
+            raise RuntimeError("Shared render sibling identity unavailable")
+        if (field_str(target, "Review_Status") in {"Approved", "Final Approved"}
+                or field_str(target, "Output_Status") in {"Approved for Publishing", "Published"}
+                or field_str(target, "Publish_Status") in {"Ready to Schedule", "Ready to Publish", "Published"}
+                or field(target, "Auto_Publish_Enabled") is True
+                or any(field_str(target, key) for key in (
+                    "Production_Approved_At", "Scheduled_Post_Date", "Studio_Scheduled_At",
+                    "YouTube_Scheduled_Publish_At", "Published_At", "Platform_Post_ID",
+                    "Platform_Media_ID", "Platform_Post_URL", "Publish_Started_At",
+                    "Last_Publish_Attempt_At", "Studio_Publish_Dispatch_At", "Publish_Locked_At"))
+                or any(field_str(target, key) not in {"", "0"} for key in (
+                    "Publish_Attempt_Count", "Studio_Publish_Dispatch_Count"))):
+            continue
+        if (field_str(target, "Render_Status") == "Rendered"
+                and (field_str(target, "Final_File_URL") or field_str(target, "Studio_Preview_URL"))):
+            continue
         client.update_record(PLATFORM_OUTPUTS_TABLE, sibling_id, fields, typecast=True)
         updated.append(sibling_id)
     return updated
