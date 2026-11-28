@@ -165,6 +165,32 @@ def _persist_measured_timed_script(
         )
 
 
+def _narration_request(client: AirtableClient, item: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve both canonical and legacy request links; never discard an authored timeline."""
+    fields = item.get("fields") or {}
+    ids = set(linked_ids(fields.get("Production_Request")) + linked_ids(fields.get("Production Requests")))
+    if len(ids) > 1:
+        raise ValueError("Ambiguous production request for narration")
+    from studio_produce.timed_script import timed_script_from_request
+
+    parent_notes = field_str(item, "Production_Request_Notes")
+    parent_has_timeline = any(marker in parent_notes.lower() for marker in ("[timed-script]", "[story-first-production.1]"))
+    if not ids:
+        if parent_has_timeline:
+            raise ValueError("Authored scene narration requires a linked production request")
+        return None
+    request_id = next(iter(ids))
+    request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+    if request.get("id") != request_id:
+        raise ValueError("Narration request identity mismatch")
+    owners = linked_ids((request.get("fields") or {}).get("Promoted_Content_Item"))
+    if owners and owners != [item["id"]]:
+        raise ValueError("Narration request belongs to another content item")
+    if parent_has_timeline and not timed_script_from_request(request):
+        raise ValueError("Authored scene narration missing from linked production request")
+    return request
+
+
 def _load_content_item(
     client: AirtableClient,
     *,
@@ -422,10 +448,7 @@ def process_request(
             **_preview(item, route=route),
         }
 
-    request = None
-    request_id = first_linked_id(item.get("fields", {}).get("Production Requests"))
-    if request_id:
-        request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+    request = _narration_request(client, item)
     from p2.timed_script_voiceover import synthesize_timed_script_voiceover
     from studio_produce.timed_script import (
         speech_speed_for_timeline,
