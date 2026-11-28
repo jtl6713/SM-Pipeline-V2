@@ -100,6 +100,15 @@ jobs:
           out=job.get('log','')
           lines=[line for line in out.splitlines() if line.startswith('RECOVERY3159_MEDIA=')]
           errors=[line for line in out.splitlines() if re.fullmatch(r'RECOVERY3159_MEDIA_ERROR=[A-Za-z_]+',line)]
+          for line in out.splitlines():
+              if not re.fullmatch(r'RECOVERY3159_DRIVE_META=\{.*\}',line): continue
+              item=json.loads(line.split('=',1)[1])
+              assert set(item)=={'output','identity_matches','trashed','video_mp4','size_bytes','limit_bytes'}
+              assert item['output'] in [11240,11241,11262,11263]
+              assert all(type(item[k]) is bool for k in ('identity_matches','video_mp4'))
+              assert item['trashed'] is None or type(item['trashed']) is bool
+              assert all(type(item[k]) is int and item[k]>=0 for k in ('size_bytes','limit_bytes'))
+              print('RECOVERY3159_DRIVE_META='+json.dumps(item,separators=(',',':')))
           for error in errors: print(error)
           if job['status']!='ok': raise SystemExit('protected_media_audit_failed')
           assert len(lines)==4 and 'RECOVERY3159_COMPLETED_MEDIA=PASS' in out.splitlines(),'audit_receipt_incomplete'

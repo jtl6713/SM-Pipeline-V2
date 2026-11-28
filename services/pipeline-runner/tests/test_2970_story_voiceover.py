@@ -319,7 +319,8 @@ def test_private_story_render_source_requires_exact_verified_receipt():
 
 
 @pytest.mark.parametrize("held", [True, False])
-def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(monkeypatch, held):
+@pytest.mark.parametrize("strict", [True, False])
+def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(monkeypatch, held, strict):
     import hashlib
     from copy import deepcopy
     from contextlib import nullcontext
@@ -335,12 +336,12 @@ def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(
     digest=story.fingerprint(p["id"],"voice-1",story.story_text(p["fields"]["Voiceover_Script"]),story.story_seconds(output()))
     url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
     evidence={"fingerprint":digest,"created_at":1795576594,"sha256":hashlib.sha256(raw).hexdigest(),
-              "outputs":{"recjqFCCxBroLyoQJ"}, "held":held}
+              "outputs":{"recjqFCCxBroLyoQJ"}, "held":held,"cached_only_required":strict}
     monkeypatch.setitem(history.HISTORY_RECOVERY,p["id"],evidence)
     row=output(Content_Item=[p["id"]],Output_Status="In Production",Render_Status="Blocked",
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
         Composition_ID="Story",Render_Clip_List_JSON='[{"durationFrames":300}]',
-        Do_Not_Publish=held,Auto_Publish_Enabled=False,
+        Do_Not_Publish=held,Auto_Publish_Enabled=False,Publish_Status="Not Ready",
         Studio_Story_Voiceover_Receipt_JSON=json.dumps({"state":"failed","fingerprint":digest,"url":url}))
     row["id"]="recjqFCCxBroLyoQJ"
     rows={p["id"]:p,row["id"]:row}
@@ -358,14 +359,21 @@ def test_recover_original_provider_history_preserves_hold_and_never_synthesizes(
     monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
     monkeypatch.setattr(context,"load_outputs",lambda *_:[deepcopy(row)])
     monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
-    monkeypatch.setattr(history,"download_audited_history",lambda *a:raw)
+    provider_get=Mock(return_value=raw)
+    monkeypatch.setattr(history,"download_audited_history",provider_get)
     monkeypatch.setattr(normalizer_client,"normalize_voiceover",lambda *a,**k:({},data))
     monkeypatch.setattr(story,"checked_voice",lambda *a:4.0)
     objects={}
     monkeypatch.setattr(R2UploadClient,"story_audio_exists",lambda self,key:key in objects)
     monkeypatch.setattr(R2UploadClient,"put_object",lambda self,key,body,typ:objects.update({key:body}))
     monkeypatch.setattr(R2UploadClient,"read_story_audio",lambda self,key,sha:objects[key])
+    if strict:
+        with pytest.raises(story.StoryVoiceoverError,match="history recovery identity changed"):
+            story.ensure_story_voiceover(client,deepcopy(row),p,allow_generate=True)
+        provider_get.assert_not_called()
+        assert not objects and json.loads(row["fields"][story.RECEIPT])["state"]=="failed"
     result=story.rearm_story_sentence_guard(client,deepcopy(row),p)
+    provider_get.assert_called_once()
     assert result["fields"]["Render_Status"]=="Ready for Render"
     assert result["fields"]["Do_Not_Publish"] is held
     assert result["fields"]["Auto_Publish_Enabled"] is False
