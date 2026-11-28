@@ -19,11 +19,22 @@ PUT_ATTEMPTS = 3
 
 
 class R2UploadClient:
-    def __init__(self, settings: PipelineSettings | None = None) -> None:
+    def __init__(
+        self, settings: PipelineSettings | None = None, *,
+        upload_url: str | None = None, upload_secret: str | None = None,
+    ) -> None:
         self._runtime = load_settings()
         self._settings = settings
+        self._explicit_url = upload_url
+        self._explicit_secret = upload_secret
+        if (upload_url is None) != (upload_secret is None):
+            raise ValueError("Explicit upload endpoint and secret must be supplied together")
+        if upload_url is not None and (not upload_url.strip() or not upload_secret.strip()):
+            raise ValueError("Explicit upload endpoint and secret must not be empty")
 
     def _upload_url(self) -> str:
+        if self._explicit_url is not None:
+            return self._explicit_url.rstrip("/")
         env_url = str(self._runtime.get("r2_upload_worker_url") or "").rstrip("/")
         if env_url:
             return env_url
@@ -32,6 +43,8 @@ class R2UploadClient:
         raise RuntimeError("R2_UPLOAD_WORKER_URL is not configured")
 
     def _secret(self) -> str:
+        if self._explicit_secret is not None:
+            return self._explicit_secret
         env_secret = str(self._runtime.get("r2_upload_worker_secret") or "").strip()
         if env_secret:
             return env_secret
