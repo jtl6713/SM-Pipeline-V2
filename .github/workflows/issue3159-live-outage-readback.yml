@@ -1,0 +1,59 @@
+name: Issue 3159 live outage readback
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3159-live-outage-readback.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-live-outage-readback.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python repair/scripts/issue3159_cron_containment.py selftest
+  readback:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read exact live cron inventory and Worker health without mutation
+        run: |
+          set -euo pipefail
+          PYTHONPATH=repair/scripts python - <<'PY'
+          import datetime, json, urllib.request, urllib.error
+          from issue3159_cron_containment import call, schedules
+          print('checked_at='+datetime.datetime.now(datetime.timezone.utc).isoformat())
+          crons=schedules(call('GET'))
+          print('verified_crons='+json.dumps(crons))
+          healthy=False
+          for path in ('/api/health','/health'):
+              try:
+                  req=urllib.request.Request('https://studio.chicagoshining.com'+path,headers={'Accept':'application/json','Cache-Control':'no-cache'})
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      status=response.status
+                      body=json.load(response)
+                  flag=body.get('windows_outage') or {}
+                  result={'http':status,'service':body.get('service'),'version':body.get('version'),'active':flag.get('active'),'resumed_at':flag.get('resumed_at')}
+                  print('worker_health='+json.dumps(result))
+                  healthy=(status==200 and body.get('ok') is True and body.get('service')=='chicagoshining-studio-api' and flag.get('active') is True and flag.get('resumed_at') is None)
+                  if healthy: break
+              except urllib.error.HTTPError as err:
+                  print('worker_health_http='+str(err.code))
+              except Exception as err:
+                  print('worker_health_unverified='+type(err).__name__)
+          if crons or not healthy:
+              raise SystemExit('Incident runtime proof incomplete: do not restore publishing')
+          print('outage_runtime_readback=PASS')
+          PY
