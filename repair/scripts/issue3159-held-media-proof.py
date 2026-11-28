@@ -16,11 +16,15 @@ PREVIEW = "https://media.chicagoshining.com/studio/previews/rechGp2O1CBjGyetM/jo
 LIMIT = 64 * 1024 * 1024
 def require(ok, reason):
     if not ok: raise RuntimeError(reason)
+PHASE="init"
 def main():
+    global PHASE
     require((BASE/".env").is_file(), "env_missing")
     load_dotenv(BASE/".env",override=False)
+    if not os.getenv("PORT"): os.environ["PORT"]="3350"
     require(os.environ.get("SUPABASE_URL","").rstrip("/")==PROJECT,"wrong_project")
     sys.path.insert(0,str(BASE))
+    PHASE="runner_import"
     from integrations.google_drive import GoogleDriveClient
     from studio_produce import workload_governor as g
     require(g.enabled() and not g.recovery_read_only_active() and not g.circuit_open(),"governor_unavailable")
@@ -32,11 +36,13 @@ def main():
         rows=res.json()
         require(len(rows)==1,"row_identity")
         return rows[0]
+    PHASE="canonical_read"
     r=read()
     require(r["output_number"]==11246 and r["content_profile_id"]=="65e9071a-d2fd-4898-88a4-111bf8a3bfb5" and r["output_status"]=="Ready for Review" and r["render_status"]=="Rendered" and r["do_not_publish"] is True and r["auto_publish_enabled"] is False and not r["review_status"] and not r["published_at"] and not r["platform_post_url"] and r["publish_status"]=="Not Ready","hold_or_revision_changed")
     require(r["final_file_url"]=="https://drive.google.com/file/d/"+FINAL+"/view" and r["studio_preview_url"]==PREVIEW and r["remotion_job_id"]=="job-20261126025808-942b43a1" and r["render_total_frames"]==805 and r["studio_effective_voiceover_mode"]==r["studio_effective_background_music_mode"]=="Yes","media_identity_changed")
     clip=r["selected_assets"]["selected_clips"][0]
     require(clip["media_asset_record_id"]==ASSET and clip["google_drive_file_id"]==SOURCE,"source_identity_changed")
+    PHASE="drive_config"
     drive=GoogleDriveClient()
     def inspect(path):
         args=["ffprobe","-v","error","-count_frames","-show_streams","-show_format","-of","json",str(path)]
@@ -53,19 +59,24 @@ def main():
         require(m and peak and float(peak.group(1))>-50,"audio_silent_or_unverified")
         return {"bytes":path.stat().st_size,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"video_codec":v["codec_name"],"frames":int(v["nb_read_frames"]),"width":v["width"],"height":v["height"],"duration":float(info["format"]["duration"]),"audio_codec":aud[0]["codec_name"],"mean_db":float(m.group(1)),"peak_db":float(peak.group(1)),"decode":"PASS"}
     with tempfile.TemporaryDirectory(prefix="3159-media-") as d:
+        PHASE="transfer_admission"
         with g.resource_slot("transfer",key="3159-held-media-11246",limit=1,wait_seconds=5):
+            PHASE="drive_metadata"
             for ident,cap in ((SOURCE,16*1024*1024),(FINAL,LIMIT)):
                 meta=drive.get_file(ident,fields="id,size,mimeType,trashed")
                 require(meta["id"]==ident and not meta.get("trashed") and 0<int(meta["size"])<=cap,"drive_size_or_identity")
+            PHASE="source_download"
             src,mime=drive.download_file(SOURCE,timeout=35)
             require(mime in ("image/jpeg","image/png") and 0<len(src)<=16*1024*1024,"source_bytes")
             with Image.open(io.BytesIO(src)) as im:
                 require(im.width*im.height<=25000000,"source_pixel_budget")
                 im.load()
                 source={"bytes":len(src),"sha256":hashlib.sha256(src).hexdigest(),"width":im.width,"height":im.height}
+            PHASE="final_download"
             mp4=Path(d)/"drive.mp4"
             drive.download_file_to_path(FINAL,str(mp4),timeout=45)
             require(0<mp4.stat().st_size<=LIMIT,"drive_video_size")
+            PHASE="preview_download"
             cdn=Path(d)/"preview.mp4"
             with requests.get(PREVIEW,stream=True,timeout=30,allow_redirects=False) as res:
                 require(res.status_code==200,"cdn_http")
@@ -75,13 +86,16 @@ def main():
                         n+=len(chunk)
                         require(n<=LIMIT,"cdn_video_size")
                         out.write(chunk)
+        PHASE="drive_decode"
         a=inspect(mp4)
+        PHASE="preview_decode"
         b=inspect(cdn)
+    PHASE="canonical_readback"
     require(read()==r,"canonical_changed")
     print("RECOVERY3159_MEDIA="+json.dumps({"output":11246,"source":source,"drive":a,"preview":b,"byte_identical":a["sha256"]==b["sha256"],"canonical_unchanged":True,"output_writes":0,"provider_writes":0},separators=(",",":")),flush=True)
 
 if __name__=="__main__":
     try: main()
     except Exception as exc:
-        print("RECOVERY3159_MEDIA_ERROR="+(str(exc) if isinstance(exc,RuntimeError) and re.fullmatch(r"[a-z_]+",str(exc)) else type(exc).__name__),flush=True)
+        print("RECOVERY3159_MEDIA_ERROR="+PHASE+"_"+(str(exc) if isinstance(exc,RuntimeError) and re.fullmatch(r"[a-z_]+",str(exc)) else type(exc).__name__),flush=True)
         sys.exit(1)
