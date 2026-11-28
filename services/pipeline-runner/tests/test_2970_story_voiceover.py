@@ -238,7 +238,8 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     client.update_record.assert_not_called()
 
 
-def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
+@pytest.mark.parametrize('verified_cache_error', [False, True])
+def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch, verified_cache_error):
     import hashlib
     from copy import deepcopy
     from contextlib import nullcontext
@@ -254,6 +255,17 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
         Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
         Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"state":"failed","url":url,"sha256":hashlib.sha256(data).hexdigest()}))
+    if verified_cache_error:
+        row["fields"]["Remotion_Error_Message"]=story.STORY_VERIFIED_CACHE_ERROR
+        claim=json.loads(row["fields"][story.RECEIPT])
+        claim["state"]="verified"
+        row["fields"][story.RECEIPT]=json.dumps(claim)
+        assert story.story_sentence_recovery_candidate(row,p,cached_only=True)
+        bad=deepcopy(row)
+        claim.pop("sha256")
+        bad["fields"][story.RECEIPT]=json.dumps(claim)
+        assert not story.story_sentence_recovery_candidate(bad,p,cached_only=True)
+        assert not story.story_sentence_recovery_candidate(row,p,cached_only=False)
     rows={p["id"]:p,row["id"]:row}
     class Client:
         def get_record(self,table,rid):
