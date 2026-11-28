@@ -1,3 +1,4 @@
+import { runNycGalleryMaeRepair } from "./issue3159-nyc-mae-repair.mjs";
 import { runStagedGalleryRecovery } from "./staged-gallery-recovery.mjs";
 import { windowsOutageState, windowsOutageProductionPaused } from "./windows-outage-control.mjs";
 import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
@@ -4767,6 +4768,14 @@ export default {
           } catch (error) { console.warn("3159 staged production recovery deferred", String(error?.message || error)); }
         })());
         ctx.waitUntil(factoryBatchCronResume(env, ctx).catch(error => console.warn("3159 staged Factory recovery deferred", String(error?.message || error))));
+        // #3159 exact NYC repair, schedule only, before the gallery tick.
+        if (collectorMinute % 5 === 0) {
+          ctx.waitUntil((async()=>{
+            const horizonDays=await studioScheduleHorizonDays(env);
+            const result=await runNycGalleryMaeRepair(env,{horizonDays});
+            console.info("3159 NYC MAE repair",JSON.stringify(result));
+          })().catch(()=>console.warn("3159 NYC MAE repair deferred")));
+        }
         // Stage 3B: exactly one independently fenced native-gallery canary.
         // General publishing remains fenced; subsequent outputs require a new release.
         if (collectorMinute % 5 === 0) {
