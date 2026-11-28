@@ -51,14 +51,19 @@ def main():
     global PHASE
     require((BASE/".env").is_file(),"env_missing")
     load_dotenv(BASE/".env",override=False)
+    if not os.getenv("PORT"): os.environ["PORT"]="3350"
+    PHASE="runner_import"
     require(os.environ.get("SUPABASE_URL","").rstrip("/")==PROJECT,"wrong_project")
     sys.path.insert(0,str(BASE))
     from integrations.google_drive import GoogleDriveClient
     from studio_produce import workload_governor as g
+    PHASE="governor"
     require(g.enabled() and not g.recovery_read_only_active() and not g.circuit_open(),"governor_unavailable")
     key=os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     headers={"apikey":key,"Authorization":"Bearer "+key}
+    PHASE="drive_config"
     drive=GoogleDriveClient()
+    PHASE="queue_config"
     queue=Path(os.environ["STUDIO_GOVERNOR_DB_PATH"])
     require(queue.is_absolute() and queue.is_file(),"queue_identity")
     def read(table,ident):
