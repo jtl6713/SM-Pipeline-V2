@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: python repair/scripts/issue3159_cron_containment.py selftest
+      - run: node --test apps/studio-api/windows-outage-control.test.mjs
       - name: Verify protected release uses live cron inventory
         run: |
           python - <<'PY'
@@ -24,9 +25,8 @@ jobs:
           guard=p.index("if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:")
           deploy=p.index('if ! ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log')
           post=p.index("if observed != expected:", deploy)
-          incident=p.index("OUTAGE_ACTIVE=$(node --input-type=module", capture)
-          empty=p.index("true) jq -e '. == []'", incident)
-          assert capture < incident < empty < config < guard < deploy < post
+          incident=p.index("if (!windowsOutageCronInventoryAllowed(JSON.parse(readFileSync", capture)
+          assert capture < incident < config < guard < deploy < post
           assert "'triggers':{'crons':[" not in p
           assert "group: chicagoshining-studio-api-production-deploy" in p
           for crons in ([], ['* * * * *', '*/5 * * * *', '0 6 * * *']):

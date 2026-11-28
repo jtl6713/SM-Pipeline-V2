@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { windowsOutageState, windowsOutagePublishBlock, WINDOWS_OUTAGE_STARTED_AT } from "./windows-outage-control.mjs";
+import { windowsOutageState, windowsOutagePublishBlock, windowsOutageProductionPaused, windowsOutageCronInventoryAllowed, WINDOWS_OUTAGE_STARTED_AT } from "./windows-outage-control.mjs";
 
 const start = Date.parse(WINDOWS_OUTAGE_STARTED_AT);
 const resume = "2026-11-26T15:00:00.000Z";
@@ -42,4 +42,23 @@ test("common publisher defers before preparation and does not stamp outage defer
   assert.ok(schedule.indexOf("windowsOutagePublishBlock") < schedule.indexOf("studioPublishDispatchTarget"));
   const stamp=source.split("export async function studioStampPublishDispatch")[1];
   assert.ok(stamp.indexOf("windows_outage_paused|outage_overdue_requires_mae_reschedule") < stamp.indexOf("publishDispatchAttemptStampFields"));
+});
+
+test("staged production never unblocks publishing or other cron inventory", () => {
+  assert.equal(windowsOutageProductionPaused(resumed,null,false),true);
+  assert.equal(windowsOutageProductionPaused(resumed,null,true),false);
+  assert.equal(windowsOutagePublishBlock(resumed+1,resumed,null),"windows_outage_paused");
+  assert.equal(windowsOutageCronInventoryAllowed([],resumed,null,false),true);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"],resumed,null,false),false);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"],resumed,null,true),true);
+  assert.equal(windowsOutageCronInventoryAllowed(["*/5 * * * *"],resumed,null,true),false);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *","0 6 * * *"],resumed,null,true),false);
+  const worker=readFileSync(new URL("worker.js",import.meta.url),"utf8");
+  const block=worker.split('console.info("WINDOWS_OUTAGE_SCHEDULED_ADMISSION_PAUSED");')[1].split("// #2853: verified independent")[0];
+  assert.match(block,/collectorCron === "\* \* \* \* \*"/);
+  assert.match(block,/maxCandidates: 2/);
+  assert.match(block,/studioReadyProductionCronResume/);
+  assert.match(block,/factoryBatchCronResume/);
+  assert.doesNotMatch(block,/studioReconcileApprovedPublishes|studioPublicationRecoveryCron|studioDispatchApprovedPublish/);
+  assert.match(block,/return;/);
 });

@@ -261,13 +261,8 @@ jobs:
           Path('/tmp/production-crons-before.json').write_text(json.dumps(crons))
           print('predeploy_cron_inventory='+json.dumps(crons))
           PY
-          # An active incident fence must never be staged with live triggers.
-          OUTAGE_ACTIVE=$(node --input-type=module -e 'import {windowsOutageState} from "./apps/studio-api/windows-outage-control.mjs"; console.log(windowsOutageState().active)')
-          case "$OUTAGE_ACTIVE" in
-            true) jq -e '. == []' /tmp/production-crons-before.json >/dev/null ;;
-            false) ;;
-            *) exit 1 ;;
-          esac
+          # Preserve exact live inventory; during staged recovery only the minute trigger is allowed.
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import {windowsOutageCronInventoryAllowed} from "./apps/studio-api/windows-outage-control.mjs"; if (!windowsOutageCronInventoryAllowed(JSON.parse(readFileSync("/tmp/production-crons-before.json","utf8")))) process.exit(1);'
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
           jq -e '.success==true' /tmp/deployments-before.json >/dev/null
           BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)

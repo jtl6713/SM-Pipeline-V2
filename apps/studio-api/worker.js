@@ -1,4 +1,4 @@
-import { windowsOutageState } from "./windows-outage-control.mjs";
+import { windowsOutageState, windowsOutageProductionPaused } from "./windows-outage-control.mjs";
 import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
 import { handleQaApi } from "./qa-http.mjs";
 import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
@@ -1460,9 +1460,9 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1049-exact-zoo-factory-method-3159",
+          version: "0.10.1050-staged-production-recovery-3159",
           airtable_activity: airtableActivity,
-          windows_outage: windowsOutageState(),
+          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused() },
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4753,6 +4753,20 @@ export default {
     // #3159: emergency scheduler containment. No queued job or provider state is rewritten.
     if (windowsOutageState().active) {
       console.info("WINDOWS_OUTAGE_SCHEDULED_ADMISSION_PAUSED");
+      // Stage 1 permits only the minute cadence, normal bounded admission and
+      // existing authenticated Factory approvals. All other scheduled paths,
+      // including publisher reconciliation and provider continuations, stay off.
+      if (!windowsOutageProductionPaused() && collectorCron === "* * * * *" && studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
+        ctx.waitUntil((async () => {
+          try {
+            if (collectorMinute % 5 === 2 && env.STUDIO_PRODUCE_WATCHDOG_INDEPENDENT_ENABLED !== "false") {
+              await resumeStaleStudioProductionJobs(env, { maxCandidates: 2, scheduledTime: scheduledAt || Date.now() });
+            }
+            await studioReadyProductionCronResume(env, ctx);
+          } catch (error) { console.warn("3159 staged production recovery deferred", String(error?.message || error)); }
+        })());
+        ctx.waitUntil(factoryBatchCronResume(env, ctx).catch(error => console.warn("3159 staged Factory recovery deferred", String(error?.message || error))));
+      }
       return;
     }
     // #2853: verified independent Supabase production recovery. The minute
