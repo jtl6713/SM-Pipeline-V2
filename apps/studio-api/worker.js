@@ -4771,8 +4771,7 @@ export default {
         // #3159 exact NYC repair, schedule only, before the gallery tick.
         if (collectorMinute % 5 === 0) {
           ctx.waitUntil((async()=>{
-            const horizonDays=await studioScheduleHorizonDays(env);
-            const result=await runNycGalleryMaeRepair(env,{horizonDays});
+            const result=await runNycGalleryMaeRepair(env);
             console.info("3159 NYC MAE repair",JSON.stringify(result));
           })().catch(()=>console.warn("3159 NYC MAE repair deferred")));
         }
