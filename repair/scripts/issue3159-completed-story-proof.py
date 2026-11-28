@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 BASE=Path.cwd()/"Services"/"pipeline-runner"/"service"
 PROJECT="https://vkwvscgisqsbuwagdvtb.supabase.co"
 # Protected Drive metadata run 46175262381 proved #11240 is a valid
-# 53,678,415-byte MP4. This cap is local to the four exact audit artifacts,
+# 53,678,415-byte MP4. This cap is local to the six exact audit artifacts,
 # never the producer, storage, or publication path.
 LIMIT=64*1024*1024
 # Verified canonical identities from the two accepted (never replay) parents.
@@ -22,6 +22,11 @@ COHORT=[
   "8855207430ea046ae85e52808d23ca7cb3d3613c4cf1ebff33e303c868839b73",
   [(11262,"receOfwtyngfyCboh","job-20261128180141-023bba1a","1vzN1xcqNbBFw7lgdwMMBq7PUZBFEW7K5"),
    (11263,"recgCPmQEWy5cA5Nw","job-20261128180244-8e8009e1","1kYejq5tK9cy1nYo6VOLbx4Mj5E1-ALtu")]),
+ ("recA97cVeskb9KQBm","spj-204c783abd6c","recQnOwB4Qg9FHIup",
+  "44025e7f5c36ee7be229c8bfc18f8a50c5a05956da5418d6c2ba41a3d0552ccb",
+  "3a4124902a171fe79989ee69f04d7d1c6c7286fda8688813b5460d83f3cc5753",
+  [(11316,"reclCt4yPUBDhPR9Y","job-20261128190630-a62d36ff","1xCY2Mwv1r2WWVaAClbzp4L1u1MjjA2IV"),
+   (11317,"recfrU5PjR5d5VwsR","job-20261128190808-9378785a","18kIYqnoqv7SrcJMAADXDl5BNoD7SN8rb")]),
 ]
 PHASE="init"
 def require(ok, reason):
