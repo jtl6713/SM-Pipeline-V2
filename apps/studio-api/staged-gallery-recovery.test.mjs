@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stagedGalleryCandidate,GALLERY_STAGE_CUTOFF,committedGalleryReservation } from "./staged-gallery-recovery.mjs";
+import { stagedGalleryCandidate,GALLERY_STAGE_CUTOFF,committedGalleryReservation,exactGalleryFinalizationReadback } from "./staged-gallery-recovery.mjs";
 const id="rec12345678901234", profile="rec12345678901235";
 const now=GALLERY_STAGE_CUTOFF+600000;
 const fresh=()=>({profileId:profile,profileUuid:"profile-uuid",row:{airtable_record_id:id,content_item_id:"content",platform:"Instagram",platform_output_type:"Instagram Carousel",studio_output_type:"Carousel",render_status:"Native Photo Route",review_status:"Approved",output_status:"Approved for Publishing",publish_status:"Ready to Publish",publish_method:"Automated",do_not_publish:false,auto_publish_enabled:true,scheduled_post_date:new Date(now-1000).toISOString(),studio_scheduled_at:new Date(now-1000).toISOString(),asset_set_revision:"r1"},record:{id,fields:{Platform:"Instagram",Platform_Output_Type:"Instagram Carousel",Review_Status:"Approved",Output_Status:"Approved for Publishing",Publish_Status:"Ready to Publish",Do_Not_Publish:false,Auto_Publish_Enabled:true,Scheduled_Post_Date:new Date(now-1000).toISOString(),Image_Count:4,Assets_Ready_Count:4,Output_Caption:"Verified gallery",IG_Carousel_Status:"Ready for Asset Prep"}}});
@@ -43,4 +43,28 @@ test("new owner and historical hold conflicts fail closed",()=>{
  const e=fresh(),m=proof(e);e.row.ig_carousel_status="Publishing";e.record.fields.IG_Carousel_Published_Media_ID="123456789";
  e.record.fields.Platform_Media_ID="987654321";assert.equal(stagedGalleryCandidate(e,now,m).ok,false);
  delete e.record.fields.Platform_Media_ID;e.row.publish_hold_reason="owner hold";assert.equal(stagedGalleryCandidate(e,now,m).ok,false);
+});
+
+test("gallery finalization requires exact canonical provider ID, profile, URL and time",()=>{
+ const before=fresh();before.row.content_item_airtable_id="rec12345678901236";
+ const receipt={remote_id:"123456789",permalink:"https://www.instagram.com/p/example/",published_at:new Date(now).toISOString()};
+ const after=structuredClone(before);
+ Object.assign(after.row,{output_status:"Published",publish_status:"Published",platform_post_url:receipt.permalink,published_at:receipt.published_at});
+ assert.equal(exactGalleryFinalizationReadback(before,after,receipt),false);
+ after.record.fields.IG_Carousel_Published_Media_ID=receipt.remote_id;
+ assert.equal(exactGalleryFinalizationReadback(before,after,receipt),true);
+ after.record.fields.Platform_Post_ID="987654321";
+ assert.equal(exactGalleryFinalizationReadback(before,after,receipt),false);
+ after.record.fields.Platform_Post_ID=receipt.remote_id;
+ assert.equal(exactGalleryFinalizationReadback(before,after,{...receipt,remote_id:"987654321"}),false);
+ assert.equal(exactGalleryFinalizationReadback(before,{...after,profileId:"other"},receipt),false);
+ assert.equal(exactGalleryFinalizationReadback(before,{...after,row:{...after.row,published_at:null}},receipt),false);
+ const fb=structuredClone(before);fb.row.platform="Facebook";
+ const fbAfter=structuredClone(after);fbAfter.row.platform="Facebook";
+ const fbReceipt={...receipt,remote_id:"123456789_987654321",permalink:"https://www.facebook.com/example"};
+ fbAfter.row.platform_post_url=fbReceipt.permalink;
+ fbAfter.record.fields.Platform_Post_ID=fbReceipt.remote_id;
+ assert.equal(exactGalleryFinalizationReadback(fb,fbAfter,fbReceipt),true);
+ fbAfter.record.fields.Platform_Media_ID="wrong";
+ assert.equal(exactGalleryFinalizationReadback(fb,fbAfter,fbReceipt),false);
 });
