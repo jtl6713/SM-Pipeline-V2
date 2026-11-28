@@ -1,4 +1,5 @@
 import { windowsOutageState } from "./windows-outage-control.mjs";
+import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
 import { handleQaApi } from "./qa-http.mjs";
 import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
 import { automaticEzCreateEnabled, automaticEzIntakeEnabled } from "./automatic-ez-intake.mjs";
@@ -923,6 +924,7 @@ import {
   factoryBatchStatusRoute,
   factoryBatchSubmitRoute,
   factoryBatchCronResume,
+  factoryBatchProcess,
   studioResumeApproveAllJobs,
   studioEnqueueOvernightScheduleRegenJobs,
   studioResumeScheduleRegenJobs,
@@ -1453,7 +1455,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1047-windows-outage-fence-3159",
+          version: "0.10.1048-exact-zoo-factory-recovery-3159",
           airtable_activity: airtableActivity,
           windows_outage: windowsOutageState(),
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
@@ -1865,6 +1867,11 @@ export default {
           ok: true,
           ...authorization,
         }, authorization.authenticated ? 200 : 401);
+      }
+
+      if (url.pathname === "/api/internal/factory/zoo3093-resume") {
+        requireConfig(env);
+        return respond(request,env,await exactZooFactoryDrain(request,env,factoryBatchProcess));
       }
 
       // Native gallery claim has a dedicated table, exact R2 output lock,
