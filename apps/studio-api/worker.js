@@ -4773,6 +4773,11 @@ export default {
             .then(result=>console.info("3159 staged native gallery",JSON.stringify(result)))
             .catch(()=>console.warn("3159 staged native gallery unavailable")));
         }
+        if (collectorMinute % 5 === 4) {
+          ctx.waitUntil(studioPublicationRecoveryCron(env, { stagedPublicReceipts: true })
+            .then(result=>console.info("3159 staged public receipt reconciliation",JSON.stringify(result)))
+            .catch(()=>console.warn("3159 staged public receipt reconciliation unavailable")));
+        }
         // Stage 2: restore only bounded non-publishing maintenance. Spread
         // metadata repair, render admission and read-only QA across separate
         // minute slots; retain the existing single Remotion slot and broker.

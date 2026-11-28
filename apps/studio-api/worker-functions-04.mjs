@@ -1,3 +1,4 @@
+import { runStagedPublicReceiptRecovery } from "./staged-public-receipt-recovery.mjs";
 import { windowsOutageState, windowsOutagePublishBlock } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { storyFirstAutomaticHandoffEnabled, hasStoryHandoffApproval } from "./story-first-automatic-handoff.mjs";
@@ -11102,7 +11103,18 @@ async function appendPublicationRecoveryAudit(env,event) {
     readback.records[0].fields?.Intent_JSON!==fields.Intent_JSON)
     throw new Error("audit_append_readback_failed");
 }
-export async function studioPublicationRecoveryCron(env) {
+export async function studioPublicationRecoveryCron(env, options = {}) {
+  if (options.stagedPublicReceipts === true) {
+    if (!windowsOutageState().active || studioWriteSource(env)!=="supabase" || !studioSupabaseConfigured(env))
+      return {status:"unavailable",reason:"staged_canonical_fence_required"};
+    return runStagedPublicReceiptRecovery({
+      bucket:env.STUDIO_MEDIA,rest:(path,opts)=>supabaseRest(env,path,opts),
+      read:async id=>(await factorySupabaseApprovalRows(env,[id])).get(id),
+      readSource:id=>exceptionRecoveryReadVerifiedOutput(env,id),
+      verifyRemote:row=>exceptionRecoveryReadAuthenticatedProvider(env,row),
+      lock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+    });
+  }
   // Do not run a legacy Airtable discovery/PATCH reconciler after the
   // canonical write source has moved to Supabase. Explicitly fail closed.
   if (studioWriteSource(env) === "supabase")
