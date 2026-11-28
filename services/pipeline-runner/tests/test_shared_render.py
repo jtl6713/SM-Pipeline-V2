@@ -339,3 +339,68 @@ def test_vibe_shared_render_never_exempts_finished_passthrough_or_single_clip():
     assert is_shared_render_eligible(normal) is False
     assert is_shared_render_eligible(fake) is False
     assert is_shared_render_eligible(passthrough) is False
+
+
+def test_propagation_preserves_approved_siblings_and_still_repairs_pending():
+    from unittest.mock import Mock
+    from studio_produce.shared_render import propagate_render_result
+
+    source = _output(id="recSource", Final_File_URL="https://media.chicagoshining.com/render.mp4")
+    rows = {
+        "recApproved": _output(id="recApproved", Output_Status="Approved for Publishing", Review_Status="Approved"),
+        "recReviewDrift": _output(id="recReviewDrift", Output_Status="Ready for Review", Review_Status="Approved"),
+        "recScheduled": _output(id="recScheduled", Studio_Scheduled_At="2026-12-01T01:00:00Z"),
+        "recAttempt": _output(id="recAttempt", Publish_Attempt_Count=1),
+        "recCompleted": _output(id="recCompleted", Render_Status="Rendered", Final_File_URL="https://media.chicagoshining.com/own.mp4"),
+        "recPending": _output(id="recPending", Render_Status="Waiting in Render Queue"),
+    }
+    client = Mock()
+    client.get_record.side_effect = lambda _table, ident: rows[ident]
+    assert propagate_render_result(client, source, list(rows)) == ["recPending"]
+    assert client.update_record.call_count == 1
+    assert client.update_record.call_args.args[1] == "recPending"
+
+
+def test_propagation_fails_closed_when_live_sibling_identity_is_wrong():
+    import pytest
+    from unittest.mock import Mock
+    from studio_produce.shared_render import propagate_render_result
+
+    source = _output(id="recSource", Final_File_URL="https://media.chicagoshining.com/render.mp4")
+    client = Mock()
+    client.get_record.return_value = _output(id="recOther")
+    with pytest.raises(RuntimeError, match="sibling identity"):
+        propagate_render_result(client, source, ["recExpected"])
+    client.update_record.assert_not_called()
+
+
+def test_exact_storage_scope_excludes_all_four_approved_siblings(monkeypatch):
+    import json
+    import pytest
+    from studio_produce import steps, story_voiceover
+
+    rid, (job, parent_id, targets, siblings) = next(iter(steps._EXACT_3159_STORAGE_SCOPES.items()))
+    monkeypatch.setattr(steps, "_output_missing_review_cover", lambda _: False)
+    parent = _output(id=parent_id, Voiceover_URL="https://example.test/parent.mp3")
+    rows = [_output(id=i, Output_Status="Approved for Publishing", Review_Status="Approved",
+                    Render_Status="Rendered", Final_File_URL="https://example.test/approved.mp4")
+            for i in siblings]
+    stories = [_output(id=i, Content_Item=[parent_id], Studio_Output_Type="Story",
+        Studio_Effective_Voiceover_Mode="Yes", Output_Filename="studio-story.mp4",
+        Output_Status="In Production", Render_Status="Blocked",
+        Remotion_Error_Message=story_voiceover.STORY_STORAGE_GUARD, Do_Not_Publish=True,
+        Auto_Publish_Enabled=False, Publish_Status="Not Ready") for i in targets]
+    ctx = {"request_id":rid, "job":{"job_id":job}, "parent":parent, "outputs":rows+stories}
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    stories[0]["fields"]["Render_Status"] = "Ready for Render"
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    ident = stories[0]["id"]
+    digest = story_voiceover.HELD_STORAGE_RECOVERY[ident][1]
+    stories[0]["fields"][story_voiceover.RECEIPT] = json.dumps({
+        "state":"verified", "fingerprint":digest, "sha256":"a"*64,
+        "url":f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{digest}.mp3"})
+    stories[0]["fields"]["Render_Status"] = "Rendering"
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    rows[0]["fields"]["Output_Status"] = "Ready for Review"
+    with pytest.raises(steps.StepBlocked, match="approved sibling"):
+        steps._verified_story_recovery_scope(ctx)
