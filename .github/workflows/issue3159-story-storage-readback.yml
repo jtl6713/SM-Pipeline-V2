@@ -23,6 +23,7 @@ jobs:
           s=Path('.github/workflows/issue3159-story-storage-readback.yml').read_text()
           assert 'studio/previews/story-voiceover/' in s
           assert 'env.STUDIO_MEDIA.head' in s
+          assert 'chicagoshining-r2-upload' in s and 'positive_control_failed' in s
           assert 'rec9qS53G7HDoyCL5' in s
           assert 'recbjg7rXQCiA6DzY' in s and 'recs0vBdT1jmUIWL0' in s
           assert 'read_only' in s
@@ -66,12 +67,23 @@ jobs:
               data=json.loads(body)
               assert data.get('success') is True
               return data['result']
-          worker='/workers/scripts/chicagoshining-studio-api'
-          deployments=obj(worker+'/deployments')
-          version=max(deployments['deployments'][0]['versions'],key=lambda x:x['percentage'])['version_id']
-          bindings=obj(worker+'/versions/'+version)['resources']['bindings']
-          buckets=[x['bucket_name'] for x in bindings if x['type']=='r2_bucket' and x['name']=='STUDIO_MEDIA']
+          # The Runner uses the upload Worker lifecycle authority, not the
+          # studio API media binding. Match the proven #2853 live audit
+          # binding precedence and retain the known-good positive control.
+          worker='/workers/scripts/chicagoshining-r2-upload'
+          settings=obj(worker+'/settings')
+          bindings=settings['bindings']
+          buckets=[]
+          binding_name=None
+          for name in ('PUBLISH_BUCKET','STUDIO_MEDIA','MEDIA_BUCKET','BUCKET'):
+              found=[x['bucket_name'] for x in bindings if x['type']=='r2_bucket' and x['name']==name]
+              if found:
+                  assert len(found)==1
+                  buckets=found
+                  binding_name=name
+                  break
           assert len(buckets)==1
+          print('story_upload_binding='+binding_name,flush=True)
           exact=[
             (11196,'rec9qS53G7HDoyCL5','0454c4863049a512c784d2964e74a587387baa5665a2753a1bb8f5b3c501c18d'),
             (11240,'recbjg7rXQCiA6DzY','1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852'),
@@ -144,8 +156,8 @@ jobs:
               rows=result['rows']
               assert {x['output'] for x in rows}=={n for n,_,_ in exact}
               control=next(x for x in rows if x['output']==11196)
+              print('ISSUE3159_STORY_STORAGE='+json.dumps({'read_only':True,'upload_binding':binding_name,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
               assert control['storage_observation']=='present' and control['bytes']==92413,'positive_control_failed'
-              print('ISSUE3159_STORY_STORAGE='+json.dumps({'read_only':True,'worker_version':version,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
               assert all(x['storage_observation'] in ('present','not_found') for x in rows),'storage_head_unavailable'
           finally:
               if owned:
