@@ -1,0 +1,64 @@
+name: Issue 3159 remaining duplicate-gallery media gate
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3159-final-three-gallery-byte-gate.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3159-final-three-gallery-byte-gate.yml']
+permissions:
+  contents: read
+concurrency:
+  group: issue3159-final-three-gallery-readonly
+  cancel-in-progress: false
+jobs:
+  exact-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Read exact original gallery media
+        run: |
+          python - <<'PY'
+          import json, importlib.util
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          spec=importlib.util.spec_from_file_location("prior_audit","repair/scripts/issue3096-13-approved-fb-gallery-cdn.py")
+          audit=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(audit)
+          entries=[
+            (10206,"reccufVKM4b1JnkzR",["rec2omJU6ITSqFXVZ","recaJZzJlSwaP6bRZ","recpdIpo5DGdOHxSA","recn1PMnpt5MXXnFY","recoWBbdlwtyTZ9Vc","rec0fYFIZlCYgY7kj","rec1NMeMeqPGWwRaW","recSxUdYPYY6ThoKj"]),
+            (10393,"recNRKHOuETa0ZOPs",["recQUiYV3L63EnIJS","recYenEMADnp3tiCK","recZg8eGtedKyRHSM","reckpfHPN46VPuUlc"]),
+            (10428,"recIP8p1GXLi7fuBF",["recavkHf72Vv3znjt","recEVngTbprSGjeE1","recJIxQr2Kv9YPaTB","recohJ9XCmjalGieL"]),
+          ]
+          batch=[]
+          for n,rid,ids in entries:
+              for i,sid in enumerate(ids):
+                  url=f"https://media.chicagoshining.com/studio/previews/lettered/{rid}/{i}.jpg"
+                  assert audit.safe(url)
+                  batch.append((n,{"slide":i+1,"slide_id":sid,"cdn_url":url}))
+          assert len(batch)==16
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              rows=list(pool.map(audit.check,batch))
+          summary=[]
+          for n,_,ids in entries:
+              subset=[r for r in rows if r["output"]==n]
+              good=all(r["verified"] for r in subset)
+              distinct=good and len({r["sha256"] for r in subset})==len(ids)
+              summary.append({"output":n,"expected":len(ids),"verified":sum(r["verified"] for r in subset),"distinct_bytes":distinct})
+          report={"read_only":True,"publication_authorized":False,"creative_correctness_verified":False,"output_writes":0,"provider_writes":0,"summary":summary,"images":rows}
+          Path("/tmp/issue3159-final-three-gallery-byte-gate.json").write_text(json.dumps(report,indent=2))
+          print("ISSUE3159_FINAL_THREE="+json.dumps(report,separators=(",",":")))
+          assert all(r["verified"]==r["expected"] and r["distinct_bytes"] for r in summary),"media gate failed"
+          PY
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3159-final-three-gallery-byte-gate
+          path: /tmp/issue3159-final-three-gallery-byte-gate.json
+          retention-days: 30
+          if-no-files-found: error
