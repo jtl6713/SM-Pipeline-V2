@@ -13,7 +13,7 @@ permissions:
   contents: read
   statuses: write
 concurrency:
-  group: chicagoshining-studio-api-production-deploy
+  group: ${{ github.event_name == 'push' && 'chicagoshining-studio-api-production-deploy' || format('3159-miami-audit-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: false
 jobs:
   static-safety:
@@ -76,10 +76,19 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,pathlib
-          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({
-            'command':pathlib.Path('repair/scripts/issue3159-8357-instagram-owner-readonly.ps1').read_text(),
-            'confirm':True}))
+          import hashlib,json,os,re,pathlib
+          source=pathlib.Path('repair/scripts/issue3159-8357-instagram-owner-readonly.ps1')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3159-miami8357-'+[guid]::NewGuid().ToString('N')+'.ps1');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& $tmp}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          assert len(command)<8000
+          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           admitted=false
           for attempt in $(seq 1 2); do
