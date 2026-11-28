@@ -249,6 +249,18 @@ jobs:
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          # #3159: ordinary releases must not re-enable a suspended scheduler.
+          PYTHONPATH=repair/scripts python - <<'PY'
+          import json
+          from pathlib import Path
+          from issue3159_cron_containment import call, schedules, TARGET
+          import os
+          if os.environ['TARGET_WORKER'] != TARGET:
+              raise SystemExit('Unexpected cron target')
+          crons=schedules(call('GET'))
+          Path('/tmp/production-crons-before.json').write_text(json.dumps(crons))
+          print('predeploy_cron_inventory='+json.dumps(crons))
+          PY
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
           jq -e '.success==true' /tmp/deployments-before.json >/dev/null
           BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
@@ -430,7 +442,7 @@ jobs:
             'workers_dev':False,
             'keep_vars':False,
             'vars':active_vars,
-            'triggers':{'crons':['*/5 * * * *', '0 6 * * *', '* * * * *']},
+            'triggers':{'crons':json.loads(Path('/tmp/production-crons-before.json').read_text())},
             'observability':{'enabled':True,'head_sampling_rate':1},
             'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
@@ -495,6 +507,16 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/wrangler-production
+          # Read again immediately before the release. No schedule mutation or retry.
+          PYTHONPATH="$GITHUB_WORKSPACE/repair/scripts" python - <<'PY'
+          import json
+          from pathlib import Path
+          from issue3159_cron_containment import call, schedules
+          expected=json.loads(Path('/tmp/production-crons-before.json').read_text())
+          config=json.loads(Path('wrangler.jsonc').read_text())
+          if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:
+              raise SystemExit('Cron inventory changed before deployment')
+          PY
           if ! ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log 2>&1; then
             # Never emit arbitrary error text, config, tokens, or binding values.
             # The classifier prints only numeric Cloudflare codes and fixed categories.
@@ -528,6 +550,17 @@ jobs:
             exit 1
           fi
           echo "wrangler_deploy=PASS"
+          PYTHONPATH="$GITHUB_WORKSPACE/repair/scripts" python - <<'PY'
+          import json
+          from pathlib import Path
+          from issue3159_cron_containment import call, schedules
+          expected=json.loads(Path('/tmp/production-crons-before.json').read_text())
+          observed=schedules(call('GET'))
+          Path('/tmp/production-crons-after.json').write_text(json.dumps(observed))
+          if observed != expected:
+              raise SystemExit('Deployment cron inventory mismatch; investigate, no automatic cron write')
+          print('postdeploy_cron_inventory_verified='+json.dumps(observed))
+          PY
 
       - name: Verify active source and live Supabase binding contract
         shell: bash
@@ -1618,5 +1651,7 @@ jobs:
             /tmp/ready-production-diagnostic.json
             /tmp/rollback-decision.json
             /tmp/wrangler-deploy-sanitized.json
+            /tmp/production-crons-before.json
+            /tmp/production-crons-after.json
           if-no-files-found: ignore
           retention-days: 30
