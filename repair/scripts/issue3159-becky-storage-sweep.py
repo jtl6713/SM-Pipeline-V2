@@ -302,13 +302,13 @@ def target_fence(row):
             [clips[0].get(k) for k in ("asset_name","media_asset_record_id","source_asset_id","google_drive_file_id")]==MARKET["clip"],"market_source_drift")
         rec=receipt(row)
         if rec.get("state")=="verified":
-            require(row.get("output_caption")==MARKET["caption"] and rec.get("text")==MARKET["text"]
+            require(row.get("output_caption")==MARKET["caption"] and row.get("output_hashtags")==MARKET["caption"].rsplit("\n\n",1)[-1] and rec.get("text")==MARKET["text"]
                 and rec.get("creative_revision")=="3159-market-story-v1"
                 and rec.get("previous_fingerprint")==MARKET["previous_fingerprint"]
                 and rec.get("original_caption_sha256")==hashlib.sha256(MARKET["old_caption"].encode()).hexdigest()
                 and rec.get("original_script_sha256")==hashlib.sha256(MARKET["source"].encode()).hexdigest(),"market_revision_unverified")
         else:
-            require(row.get("output_caption")==MARKET["old_caption"],"market_original_copy_drift")
+            require(row.get("output_caption")==MARKET["old_caption"] and row.get("output_hashtags")==MARKET["old_caption"].rsplit("\n\n",1)[-1],"market_original_copy_drift")
 
 def observe_governor(w):
     """Check configured capacity, not artificial exclusivity of a single probe.
