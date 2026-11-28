@@ -17,6 +17,16 @@ BASE = Path.cwd() / "Services" / "pipeline-runner" / "service"
 PROJECT = "https://vkwvscgisqsbuwagdvtb.supabase.co"
 COHORT = [
     {
+        "request": "recCliROtkw6N03tW",
+        "parent": "recAdiURMeoS8VJnJ",
+        "job": "spj-d9d4ff9b8fcf",
+        "name": "PR-20261125013438-6G94EM",
+        "stories": {"recDH1TiBHlR3kJ85":11250,"recqs15ffqAvC0bU7":11251},
+        "siblings": ["rechGp2O1CBjGyetM","recKuxwvLaWscxH96","recTf8L9nZvozugAN","recgr10CGfPa5AsIM"],
+        "fingerprint": "9362a08d77676c85b03fb4d40e2c0f5ae68b8e465216dc57d7384f5a0551e9f3",
+        "history": {"claim":"recDH1TiBHlR3kJ85","sha256":"9da1b64b3f60f958dd7d286a7551ba7be72601d4bcf9483b95712df980a832ef","created_at":1795662013}
+    },
+    {
         "request": "recLprSXgeNbgKABG",
         "parent": "recbjg7rXQCiA6DzY",
         "job": "spj-b8cba2008c3b",
@@ -173,6 +183,7 @@ COHORT = [
 REQUEST = PARENT = JOB = FINGERPRINT = NAME = None
 PAIR = {}
 SIBLINGS = set()
+HISTORY = None
 LOCAL = "http://127.0.0.1:3350"
 REMOTION = "http://127.0.0.1:3333"
 GATE = dt.datetime(2026,11,28,7,tzinfo=dt.timezone.utc)
@@ -202,7 +213,15 @@ def require_receipt(row):
     if r.get("state") in ("prepared","verified"):
         require(re.fullmatch(r"[a-f0-9]{64}",str(r.get("sha256") or "")),"receipt_checksum")
     elif r.get("state")=="failed":
-        raise RuntimeError("ambiguous_narration_attempt_no_retry")
+        require(HISTORY and row["airtable_record_id"]==HISTORY["claim"]
+            and row["render_status"]=="Blocked" and not r.get("sha256")
+            and not row.get("remotion_job_id") and not row.get("final_file_url"),
+            "ambiguous_narration_attempt_no_retry")
+    if HISTORY and r.get("state") in ("prepared","verified"):
+        require(r.get("history_original_sha256")==HISTORY["sha256"]
+            and r.get("history_created_at")==HISTORY["created_at"],"history_provenance_changed")
+    if HISTORY:
+        require(r.get("state")!="generating","history_paid_generation_forbidden")
 
 def target_fence(row):
     require(row["airtable_record_id"] in PAIR and row["output_number"]==PAIR[row["airtable_record_id"]]
@@ -239,8 +258,9 @@ def observe_governor(w):
 
 
 def recover(candidate):
-    global PHASE, REQUEST, PARENT, JOB, FINGERPRINT, NAME, PAIR, SIBLINGS
+    global PHASE, REQUEST, PARENT, JOB, FINGERPRINT, NAME, PAIR, SIBLINGS, HISTORY
     REQUEST,PARENT,JOB,FINGERPRINT,NAME,PAIR,SIBLINGS=(candidate["request"],candidate["parent"],candidate["job"],candidate["fingerprint"],candidate["name"],candidate["stories"],set(candidate["siblings"]))
+    HISTORY=candidate.get("history")
     require(dt.datetime.now(dt.timezone.utc)>=GATE,"before_owner_gate")
     marker=BASE/f"outage3159-storage-{REQUEST}-once.json"
     if marker.exists():
@@ -308,16 +328,29 @@ def recover(candidate):
     before=rows()
     if any(before[i].get(k) for i in PAIR for k in ("scheduled_post_date","studio_scheduled_at","youtube_scheduled_publish_at","published_at","platform_post_url","production_approved_at")) or any(before[i]["publish_status"]!="Not Ready" for i in PAIR):
         return False
-    require(all(not receipt(before[i]) for i in PAIR),"unexpected_prior_narration_receipt")
-    require(all((before[i].get("error_messages") or {}).get("Remotion_Error_Message")==("Studio Story narration integrity guard: Story needs a complete concise narration sentence" if 11226 in PAIR.values() else "Studio Story narration integrity guard: Story narration storage existence not safely resolved") for i in PAIR),"storage_guard_changed")
+    if HISTORY:
+        claim=HISTORY["claim"]
+        require(claim in PAIR and set(i for i in before if receipt(before[i]))=={claim},"history_claim_set_changed")
+        r=receipt(before[claim])
+        require(r.get("state")=="failed" and not r.get("sha256") and r.get("fingerprint")==FINGERPRINT,"history_claim_changed")
+        require(all((before[i].get("error_messages") or {}).get("Remotion_Error_Message")==(
+            "Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt" if i==claim else
+            "Studio Story narration integrity guard: Story narration attempt already recorded on a sibling; reconcile before retrying paid generation") for i in PAIR),"history_guard_changed")
+    else:
+        require(all(not receipt(before[i]) for i in PAIR),"unexpected_prior_narration_receipt")
+        require(all((before[i].get("error_messages") or {}).get("Remotion_Error_Message")==("Studio Story narration integrity guard: Story needs a complete concise narration sentence" if 11226 in PAIR.values() else "Studio Story narration integrity guard: Story narration storage existence not safely resolved") for i in PAIR),"storage_guard_changed")
     require(job()["step"]=="render","job_step_changed")
     for ident in PAIR:
         target=before[ident]
         target_fence(target)
         require(target["render_status"]=="Blocked" and target["output_status"]=="In Production"
                 and not target.get("final_file_url") and not target.get("remotion_job_id"),"target_baseline_changed")
-    require(all(before[i]["output_status"]=="Approved for Publishing" and before[i]["review_status"]=="Approved"
-        and before[i]["render_status"]=="Rendered" and before[i].get("final_file_url") and before[i].get("thumbnail_url")
+    require(all(before[i]["render_status"]=="Rendered" and before[i].get("final_file_url") and before[i].get("thumbnail_url")
+        and ((before[i]["output_status"]=="Approved for Publishing" and before[i]["review_status"]=="Approved") if not HISTORY else
+             (before[i]["output_status"]=="Ready for Review" and not before[i]["review_status"] and before[i]["publish_status"]=="Not Ready"
+              and before[i]["do_not_publish"] is True and before[i]["auto_publish_enabled"] is False
+              and before[i]["publish_hold_reason"]=="Music duration not verified; repair before rendering."
+              and not any(before[i].get(k) for k in ("production_approved_at","scheduled_post_date","studio_scheduled_at","published_at"))))
         for i in SIBLINGS),"approved_sibling_changed")
     # Deployed R4 validates live fingerprint, exact source/hold, durable sibling
     # claim and storage absence before any first synthesis. No blind retry.
@@ -349,7 +382,7 @@ def recover(candidate):
         for ident in PAIR:
             target_fence(current[ident])
             require(all(current[ident].get(k)==before[ident].get(k) for k in ("selected_assets","render_clip_list","publish_hold_reason")),"source_or_hold_changed")
-        require(j["step"] not in ("blocked","escalated"),"producer_blocked")
+        require(j["step"] not in ("blocked","escalated") and queue_state()[0]!=[("paused",)],"producer_blocked")
         if j["step"]=="done" and queue_state()[0]==[]:
             after={i:current[i] for i in PAIR}; break
     require(after is not None,"observe_timeout_no_retry")
@@ -380,13 +413,13 @@ def recover(candidate):
     sample,errors=observe_governor(work())
     print("STORY3159_GOVERNOR="+json.dumps({"phase":"final","sample":sample,"errors":errors}),flush=True)
     require(not errors,"final_governor")
-    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"submissions":1,"media":proofs}),flush=True)
+    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"submissions":1,"history_original_sha256":HISTORY["sha256"] if HISTORY else None,"media":proofs}),flush=True)
 
     return True
 
 def main():
     global PHASE
-    require(len(COHORT)==9 and len({x["request"] for x in COHORT})==9,"cohort_identity")
+    require(len(COHORT)==10 and len({x["request"] for x in COHORT})==10,"cohort_identity")
     require((BASE/".env").is_file(),"runner_env_missing")
     load_dotenv(BASE/".env",override=False)
     path=Path(os.environ["STUDIO_GOVERNOR_DB_PATH"])
