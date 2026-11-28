@@ -59,7 +59,11 @@ test("staged production never unblocks publishing or other cron inventory", () =
   assert.match(block,/maxCandidates: 2/);
   assert.match(block,/studioReadyProductionCronResume/);
   assert.match(block,/factoryBatchCronResume/);
-  assert.doesNotMatch(block,/studioReconcileApprovedPublishes|studioPublicationRecoveryCron|studioDispatchApprovedPublish/);
+  assert.doesNotMatch(block,/studioReconcileApprovedPublishes|studioDispatchApprovedPublish/);
+  assert.match(block,/studioPublicationRecoveryCron\(env, \{ stagedPublicReceipts: true \}\)/);
+  assert.doesNotMatch(block,/studioPublicationRecoveryCron\(env\)/);
+  assert.doesNotMatch(worker,/runStagedGalleryRecovery|staged-gallery-recovery\.mjs/);
+  assert.match(worker,/native_gallery_recovery_enabled: false, public_receipt_recovery_enabled: true/);
   assert.match(block,/return;/);
 });
 
@@ -71,7 +75,7 @@ test("stage two restores staggered render and read-only Quality work without pub
   assert.match(stage,/collectorMinute % 5 === 4[\s\S]*?runQualityFactoryHandoffCron/);
   assert.match(stage,/QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true"/);
   assert.match(stage,/sweepSchedulingApprovalPreflight\(env, \{ limit: 2 \}\)/);
-  assert.doesNotMatch(stage,/repair:|canaryRecordId:|studioReconcileApprovedPublishes|studioPublicationRecoveryCron|studioDispatchApprovedPublish|studioReconcileInstagramCarousels|studioReconcileTiktokDrafts/);
+  assert.doesNotMatch(stage,/repair:|canaryRecordId:|studioReconcileApprovedPublishes|studioDispatchApprovedPublish|studioReconcileInstagramCarousels|studioReconcileTiktokDrafts/);
   assert.equal(windowsOutagePublishBlock(resumed+1,resumed,null),"windows_outage_paused");
   assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"],resumed,null,true),true);
   assert.equal(windowsOutageCronInventoryAllowed(["*/5 * * * *"],resumed,null,true),false);
