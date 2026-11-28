@@ -1296,7 +1296,12 @@ export default {
       // This predicate grants method admission ONLY; all flags/auth stay off.
       const isNativeGalleryControlledPost =
         isNativeGalleryControlledPostPath(url.pathname,request.method);
+      // Method admission only; exact handler still requires its protected Runner
+      // secret, original authenticated ledger, unchanged revision and expiry.
+      const isExactZooFactoryResumePost = request.method === "POST" &&
+        url.pathname === "/api/internal/factory/zoo3093-resume";
       const allowedMethod =
+        isExactZooFactoryResumePost ||
         isNativeGalleryControlledPost ||
         isChicagoReviewPost ||
         isInternalIgPublishLeasePost ||
@@ -1455,7 +1460,7 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1048-exact-zoo-factory-recovery-3159",
+          version: "0.10.1049-exact-zoo-factory-method-3159",
           airtable_activity: airtableActivity,
           windows_outage: windowsOutageState(),
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
