@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 
 import requests
@@ -13,6 +14,7 @@ from audio.voiceover_duration import probe_audio_duration_bytes, probe_audio_dur
 from render.fields import field, field_str, first_linked_id, parse_json_field
 
 RECEIPT = "Studio_Story_Voiceover_Receipt_JSON"
+logger = logging.getLogger(__name__)
 
 class StoryVoiceoverError(RuntimeError):
     pass
@@ -245,7 +247,12 @@ def rearm_story_sentence_guard(client, output, parent):
         from studio_produce.workload_governor import AdmissionDeferred
         try:
             recovered = ensure_story_voiceover(client, current, live_parent, allow_generate=False)
-        except (StoryVoiceoverError, AdmissionDeferred, requests.RequestException):
+        except (StoryVoiceoverError, AdmissionDeferred, requests.RequestException) as exc:
+            # Do not emit provider payloads, URLs or credentials. Surface the
+            # bounded safe history stage, rather than a silent rendering 4/6 loop.
+            if not isinstance(exc, AdmissionDeferred):
+                stage = getattr(exc, "history_stage", "cache_or_identity")
+                logger.warning("story_rearm_deferred output=%s stage=%s error_type=%s", current.get("id"), stage, type(exc).__name__)
             return current
         current = client.get_record(PLATFORM_OUTPUTS_TABLE, current["id"])
         if (not story_sentence_recovery_candidate(current, live_parent, cached_only=True)
@@ -339,7 +346,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
             raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
         claims=matching_story_claims(client,live_parent,current["id"],digest,url)
         known = {claim["sha256"] for claim in claims if claim.get("sha256")}
-        from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history
+        from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history, fit_short_audited_history
         history = HISTORY_RECOVERY.get(parent["id"])
         provenance = {}
         if exact_cache:
@@ -370,15 +377,22 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                         or field(current,"Do_Not_Publish") is not expected_hold
                         or not story_sentence_recovery_candidate(current,live_parent,cached_only=True)):
                     raise StoryVoiceoverError("Story history recovery identity changed")
+                history_stage = "storage_preflight"
                 try:
                     settings = pipeline_settings(client)
                     storage = R2UploadClient(settings)
                     if storage.story_audio_exists(key):
                         raise StoryVoiceoverError("Unexpected existing Story audio without receipt checksum")
+                    history_stage = "original_provider_get"
                     raw = download_audited_history(history,text,voice_id)
-                    _,data=normalize_voiceover(raw,filename="story-history-"+digest[:16]+".mp3",
+                    history_stage = "audited_pitch_preserving_pace"
+                    paced = fit_short_audited_history(raw,history)
+                    history_stage = "normalize"
+                    _,data=normalize_voiceover(paced,filename="story-history-"+digest[:16]+".mp3",
                         normalizer_base_url=settings.get(PIPELINE_SETTING_NORMALIZER_URL))
+                    history_stage = "normalized_duration_and_peak"
                     measured=checked_voice(data,cap)
+                    history_stage = "revision_readback"
                     latest=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
                     latest_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
                     if (not story_sentence_recovery_candidate(latest,latest_parent,cached_only=True)
@@ -392,15 +406,19 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                                 "history_created_at":history["created_at"]}
                     prepared={"fingerprint":digest,"state":"prepared","url":url,
                               "sha256":hashlib.sha256(data).hexdigest(),**provenance}
+                    history_stage = "persist_prepared_checksum"
                     client.update_record(PLATFORM_OUTPUTS_TABLE,latest["id"],{RECEIPT:json.dumps(prepared)},typecast=True)
                     if parse_json_field(field(client.get_record(PLATFORM_OUTPUTS_TABLE,latest["id"]),RECEIPT))!=prepared:
                         raise StoryVoiceoverError("Story history checksum receipt not durable")
+                    history_stage = "checksum_bound_storage"
                     if not storage.story_audio_exists(key):
                         storage.put_object(key,data,"audio/mpeg")
                     if storage.read_story_audio(key,prepared["sha256"])!=data:
                         raise StoryVoiceoverError("Recovered Story history storage readback failed")
-                except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
-                    raise StoryVoiceoverError("Exact Story history recovery failed; no new synthesis") from exc
+                except (OSError, RuntimeError, ValueError, requests.RequestException, TimeoutError) as exc:
+                    error=StoryVoiceoverError("Exact Story history recovery failed; no new synthesis")
+                    error.history_stage=history_stage
+                    raise error from exc
             else:
                 if len(known) != 1:
                     raise StoryVoiceoverError("Story narration attempt already recorded on a sibling; reconcile before retrying paid generation")
