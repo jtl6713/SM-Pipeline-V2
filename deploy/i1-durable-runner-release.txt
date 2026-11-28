@@ -181,3 +181,5 @@ Deploy 2026-11-15 runner 2026-11-15-zcloseout-slides-patch: Carousel Slides PATC
 2026-11-26 UTC — #3096 controlled redeploy of current main after #3145 obsolete-commit protective abort. Includes exact audited #10313/#10373 legacy gallery compatibility, no capacity or publication setting changes. Preserve all deployment guards and require exact deployed commit receipt and live Supabase-only health.
 
 2026-11-26 UTC — #3096 controlled current-main Runner release including merged #3148 after concurrent #3141 caused obsolete-cutover protective abort. Preserve exact deploy receipt, all existing safety gates, scheduling lanes and capacity. Follow-up source-byte audit is strictly read-only.
+
+2026-11-28 UTC — #3159 current-main protected Runner cutover including merged #3218 exact audited history scope after obsolete preflight abort; serialized first/second pair recovery with #3219. No capacity, schedule, approval or hold changes; preserve canonical Supabase authority, minute-only cron and provider fences. Require exact current main deployment receipt; never replay an accepted marker.
