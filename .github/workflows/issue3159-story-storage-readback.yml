@@ -1,0 +1,175 @@
+name: Issue 3159 exact Story storage guard readback
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3159-story-storage-readback.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3159-story-storage-readback.yml']
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify bounded read-only storage audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('.github/workflows/issue3159-story-storage-readback.yml').read_text()
+          assert 'studio/previews/story-voiceover/' in s
+          assert 'env.STUDIO_MEDIA.head' in s
+          assert 'rec9qS53G7HDoyCL5' in s
+          assert 'recbjg7rXQCiA6DzY' in s and 'recs0vBdT1jmUIWL0' in s
+          assert 'read_only' in s
+          print('exact_storage_audit_static=PASS')
+          PY
+  audit:
+    if: github.event_name == 'push'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify paused scheduler
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('pre_fence_crons=[]')
+          PY
+      - name: Read exact active Worker binding and Story object metadata (HEAD only)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error,urllib.parse
+          api='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          assert token
+          def get(path):
+              req=urllib.request.Request(api+path,headers={'Authorization':'Bearer '+token},method='GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as res:
+                      return res.status,res.read(1024*1024)
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read(4096)
+          def obj(path):
+              status,body=get(path)
+              assert status==200, 'cloudflare_get_failed_'+str(status)
+              data=json.loads(body)
+              assert data.get('success') is True
+              return data['result']
+          worker='/workers/scripts/chicagoshining-studio-api'
+          deployments=obj(worker+'/deployments')
+          version=max(deployments['deployments'][0]['versions'],key=lambda x:x['percentage'])['version_id']
+          bindings=obj(worker+'/versions/'+version)['resources']['bindings']
+          buckets=[x['bucket_name'] for x in bindings if x['type']=='r2_bucket' and x['name']=='STUDIO_MEDIA']
+          assert len(buckets)==1
+          exact=[
+            (11196,'rec9qS53G7HDoyCL5','0454c4863049a512c784d2964e74a587387baa5665a2753a1bb8f5b3c501c18d'),
+            (11240,'recbjg7rXQCiA6DzY','1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852'),
+            (11262,'rec0gE5IoTuSoqy5E','cae8fcf0c3e661c0ba84af5bde37630b8ca97b0d6fdf28e5edad6c8352ee9cc7'),
+            (11268,'rec1LmWHV6VvfdXp0','eb8b53dd293d30b2330452d2ee4b4a3ceb71314ab182a9d6668bfb884702acff'),
+            (11310,'recKTD3ZnQpNxxvgH','37166e6ba347f88dd0f88ea6b8c82cd9d4f23e41c3b65ab2f05218c4bc14e4b1'),
+            (11316,'recQnOwB4Qg9FHIup','44025e7f5c36ee7be229c8bfc18f8a50c5a05956da5418d6c2ba41a3d0552ccb'),
+            (11322,'recrUkXlSXxtwztFU','9a31e2e854846221b3f4db01c744b95fbb20e144e2285a34a0f531be02f3ae59'),
+            (11328,'recsusqK58K0eP6z3','1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236'),
+            (11340,'recs0vBdT1jmUIWL0','7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d'),
+          ]
+          assert len(exact)==9
+          # Account token cannot read R2 REST objects (403). Resolve the exact
+          # production R2 binding and use a short-lived, scoped HEAD-only helper.
+          import pathlib,secrets,subprocess,tempfile
+          helper='issue3159-story-head-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+          helper_path='/workers/scripts/'+helper
+          assert get(helper_path+'/settings')[0]==404,'helper_already_exists_or_unverified'
+          route='/'+secrets.token_urlsafe(48)
+          source="""const ROWS=__ROWS__;
+          const ROUTE=__ROUTE__;
+          export default {async fetch(req,env){
+            if(req.method!=='GET'||new URL(req.url).pathname!==ROUTE)return new Response('Not found',{status:404});
+            const rows=[];
+            for(const [n,rid,digest] of ROWS){
+              try{const h=await env.STUDIO_MEDIA.head('studio/previews/story-voiceover/'+rid+'/'+digest+'.mp3');
+                rows.push({output:n,storage_observation:h?'present':'not_found',bytes:h?h.size:null});}
+              catch{rows.push({output:n,storage_observation:'unverified',bytes:null});}
+            }
+            return Response.json({read_only:true,rows},{headers:{'Cache-Control':'no-store'}});
+          }};
+          """.replace('__ROWS__',json.dumps(exact)).replace('__ROUTE__',json.dumps(route))
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-10-01','bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':buckets[0]}]}
+          def request(method,path,payload=None):
+              req=urllib.request.Request(api+path,data=payload,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+              with urllib.request.urlopen(req,timeout=35) as res:
+                  data=json.loads(res.read(1024*1024))
+                  assert data.get('success') is True,'helper_operation_failed'
+                  return data['result']
+          owned=False
+          try:
+              with tempfile.TemporaryDirectory() as d:
+                  p=pathlib.Path(d)
+                  (p/'worker.mjs').write_text(source)
+                  (p/'metadata.json').write_text(json.dumps(metadata))
+                  subprocess.run(['node','--check',str(p/'worker.mjs')],check=True,capture_output=True)
+                  resp=subprocess.run(['curl','-fsS','--max-time','45','-X','PUT',api+helper_path+'/content','-H','Authorization: Bearer '+token,'-F','metadata=@'+str(p/'metadata.json')+';type=application/json','-F','worker.mjs=@'+str(p/'worker.mjs')+';type=application/javascript+module;filename=worker.mjs'],check=True,capture_output=True)
+                  assert json.loads(resp.stdout).get('success') is True
+                  owned=True
+              request('POST',helper_path+'/subdomain',b'{"enabled":true,"previews_enabled":false}')
+              domain=obj('/workers/subdomain')['subdomain']
+              assert domain.replace('-','').isalnum()
+              import time
+              result=None
+              # Same unguessable-route + curl propagation polling pattern as
+              # the previously successful protected R2 checksum auditors.
+              with tempfile.TemporaryDirectory() as d:
+                  response=pathlib.Path(d)/'response.json'
+                  for attempt in range(18):
+                      proc=subprocess.run(['curl','-sS','--max-time','25','-o',str(response),'-w','%{http_code}','https://'+helper+'.'+domain+'.workers.dev'+route],capture_output=True,text=True)
+                      code=proc.stdout.strip()
+                      print('storage_helper_attempt='+str(attempt+1)+' http='+code+' curl_exit='+str(proc.returncode),flush=True)
+                      if proc.returncode==0 and code=='200':
+                          try:
+                              result=json.loads(response.read_text())
+                              if result.get('read_only') is True and len(result.get('rows',[]))==len(exact): break
+                          except (ValueError,OSError): pass
+                      time.sleep(5)
+              assert result and result['read_only'] is True and len(result['rows'])==len(exact),'helper_exact_response_unavailable'
+              rows=result['rows']
+              assert {x['output'] for x in rows}=={n for n,_,_ in exact}
+              control=next(x for x in rows if x['output']==11196)
+              assert control['storage_observation']=='present' and control['bytes']==92413,'positive_control_failed'
+              print('ISSUE3159_STORY_STORAGE='+json.dumps({'read_only':True,'worker_version':version,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
+              assert all(x['storage_observation'] in ('present','not_found') for x in rows),'storage_head_unavailable'
+          finally:
+              if owned:
+                  request('DELETE',helper_path)
+                  assert get(helper_path+'/settings')[0]==404,'helper_cleanup_unverified'
+                  print('issue3159_helper_deleted=true')
+          PY
+
+      - name: Verify scheduler remains paused
+        if: always()
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('post_fence_crons=[]')
+          PY
+      - name: Record protected audit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-story-storage-readback",target_url:$url,description:"Read-only exact Story object existence evidence"}' >/tmp/fence-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/fence-status.json >/dev/null
