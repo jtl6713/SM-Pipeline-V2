@@ -7621,6 +7621,13 @@ export function item4PlanItemForOutput(requestRecord, outputRow) {
 /*__STUDIO_WORKER_END:item4PlanItemForOutput__*/
 
 export function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage, options = {}) {
+  // Review-only reconstruction is restricted to newly created, non-test,
+  // non-revision outputs. Legacy/test recovery retains its existing fence.
+  if (options.recoveryReviewOnly === true && (options.recoveryHold !== true
+      || productionRequestRevisionOpen(requestRecord)
+      || String(f(requestRecord, "Test_Run_ID") || "").trim())) {
+    throw new HttpError(409, "Review-only recovery requires a new non-test output");
+  }
   const planItem = item4PlanItemForOutput(requestRecord, outputRow) || {};
   const producerPending = /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(
     String(f(requestRecord, "Production_Notes") || "")
@@ -7807,7 +7814,10 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
         Render_Status: "Blocked",
         Asset_Selection_Notes: effective.recovery_media_issue,
       } : {}),
-      Do_Not_Publish: true,
+      // Ordinary zero-output recovery is a production/readiness state, not
+      // a discretionary publishing hold. Omit the field on newly created
+      // review-only rows; legacy fenced recovery remains unchanged.
+      ...(options.recoveryReviewOnly === true ? {} : { Do_Not_Publish: true }),
       Auto_Publish_Enabled: false,
       Output_Status: "In Production",
       Review_Status: "Pending Review",
@@ -11318,7 +11328,10 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       continue;
     }
     const sourcePackage=item4StudioSourcePackageForOutput(requestRecord,outputRow,effective,parent);
-    let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage,{recoveryHold:options.recoveryHold===true});
+    let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage,{
+      recoveryHold:options.recoveryHold===true,
+      recoveryReviewOnly:options.recoveryReviewOnly===true,
+    });
     let atomicSeedSchedule = null;
     let atomicSeedVacate = false;
     let atomicSeedHasScheduleMutation = false;
@@ -11326,7 +11339,10 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     // The global flag by itself is insufficient: other lanes must keep the
     // existing seed write, otherwise the atomic adapter calls its 503 guard.
     const seedProfileId = studioFirstLinkedId(f(parent, "Content_Profile"));
-    if (scheduleReservationLaneEnabled(env, seedProfileId, effective.platform)
+    // A newly created review-only row has no reservation to vacate. Keep its
+    // explicit null clocks in the canonical create and never call the scheduler.
+    if (options.recoveryReviewOnly !== true
+        && scheduleReservationLaneEnabled(env, seedProfileId, effective.platform)
         && Object.prototype.hasOwnProperty.call(seed, "Scheduled_Post_Date")) {
       atomicSeedHasScheduleMutation = true;
       atomicSeedVacate = seed.Scheduled_Post_Date == null || String(seed.Scheduled_Post_Date || "").trim() === "";
@@ -11393,6 +11409,11 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
           continue;
         }
       }
+    }
+    // A concurrent or partial fanout must never be restamped by this new
+    // zero-output-only policy, including an existing owner's hold or approval.
+    if (poId && options.recoveryReviewOnly === true) {
+      throw new HttpError(409, "Existing output discovered during review-only recovery; reconcile instead");
     }
     let po;
     let createdNewPlatformOutput=false;
@@ -11500,7 +11521,8 @@ export async function completeProductionRequestPromotionSideEffects(env, request
         contentItemId,
         studioFinishedOriginKind(current) === "finished-video"
           ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
-          : { onlyMissing: !productionRequestRevisionOpen(current), recoveryHold: options.recoveryHold === true }
+          : { onlyMissing: !productionRequestRevisionOpen(current), recoveryHold: options.recoveryHold === true,
+              recoveryReviewOnly: options.recoveryReviewOnly === true }
       );
     } catch (error) {
       if (options.recoveryHold === true) {
@@ -12036,8 +12058,8 @@ export async function studioResumeFreeSkylineHeldProduceCron(env) {
  * Missing-fanout repair for ALL profiles. The legacy escalation watchdog
  * skips when PO count is zero, guaranteeing a UI dead end. This repair verifies
  * the original Idea/PR/Content/plan ownership and reuses standard I3/I4
- * creation. Recover only output identities; retain no-publish, no-schedule,
- * pending-review until normal media QA explicitly releases the output.
+ * creation. Recover only output identities; retain non-publishable lifecycle
+ * states, no scheduling, and pending human review without a discretionary hold.
  */
 export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
   if (studioWriteSource(env) !== "supabase" || !studioSupabaseConfigured(env) || !env.STUDIO_MEDIA)
@@ -12092,6 +12114,7 @@ export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
       && String(f(requestRecord,"Production_Notes")||"").includes("origin=autonomous")
       && !productionRequestRevisionOpen(requestRecord)
       && !String(f(requestRecord,"Test_Run_ID")||"").trim()
+      && studioFinishedOriginKind(requestRecord)!=="finished-video"
       && String(f(requestRecord,"Studio_Master_Asset_Status")||"")==="Ready"
       && String(f(requestRecord,"Studio_Output_Plan_Status")||"")==="Ready"
       && String(f(requestRecord,"Studio_Variant_Status")||"")==="Ready"
@@ -12121,7 +12144,7 @@ export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
     if(!claimed)return {request:sampled.id,skipped:"concurrent_claim"};
     try{
       const result=await finalizeProductionRequestPromotion(env,sampled.id,idea,ctx,{
-        recoveryHold:true,skipDirectiveSync:true,
+        recoveryHold:true,skipDirectiveSync:true,recoveryReviewOnly:true,
       });
       const [real,links]=await Promise.all([
         listSupabaseContentPlatformOutputs(env,contentId,{limit:60}),
@@ -12135,8 +12158,20 @@ export async function studioRecoverEmptyPlatformOutputCron(env, ctx = null) {
         && Number(result?.outputFanout?.blocked_count||0)===0
         && links.every(row=>Boolean(f(row,"Platform_Output_Exists")))
         && actual.size===planned.size && [...planned].every(item=>actual.has(item))
-        && real.every(row=>f(row,"Do_Not_Publish")===true
-          && f(row,"Auto_Publish_Enabled")!==true
+        && real.every(row=>f(row,"Do_Not_Publish")===false
+          && f(row,"Output_Status")==="In Production"
+          && f(row,"Review_Status")==="Pending Review"
+          && f(row,"Publish_Status")==="Not Ready"
+          && f(row,"Auto_Publish_Enabled")===false
+          && !f(row,"Review_Decision_At") && !f(row,"Published_At")
+          && !f(row,"Platform_Post_URL") && !f(row,"YouTube_Video_ID")
+          && ["Platform_Post_ID","Platform_Media_ID","IG_Story_Container_ID",
+            "IG_Story_Post_ID","Instagram_Reel_Container_ID","IG_Carousel_Parent_Container_ID",
+            "IG_Carousel_Published_Media_ID","FB_Slideshow_Meta_Video_ID","TikTok_Draft_Publish_ID",
+            "Publish_Started_At","Publish_Locked_By","Publish_Locked_At","Studio_Publish_Dispatch_At",
+            "Last_Publish_Attempt_At"].every(field=>!f(row,field))
+          && Number(f(row,"Publish_Attempt_Count")||0)===0
+          && Number(f(row,"Studio_Publish_Dispatch_Count")||0)===0
           && !f(row,"Scheduled_Post_Date") && !f(row,"Studio_Scheduled_At")
           && !f(row,"YouTube_Scheduled_Publish_At"));
       const needsMedia=real.some(row=>String(f(row,"Render_Status")||"")==="Blocked");
@@ -12275,6 +12310,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
       requestRecord,
       contentItemId,
       { routingOnly: true, recoveryHold: options.recoveryHold === true,
+        recoveryReviewOnly: options.recoveryReviewOnly === true,
         skipDirectiveSync: options.recoveryHold === true && options.skipDirectiveSync === true }
     );
     requestRecord = routing.requestRecord || requestRecord;

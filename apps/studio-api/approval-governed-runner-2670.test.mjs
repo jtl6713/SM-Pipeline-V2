@@ -49,5 +49,10 @@ test("failed or ambiguous network completion preserves Submitted until readback"
   assert.match(promote,/This request remains Submitted/);
   assert.match(promote,/recoveryHold: promotionHandoff\?\.recoveryHold === true/);
   assert.match(promote,/Request_Status: "Draft", Submitted_At: null/);
-  assert.match(source,/Do_Not_Publish: true,[\s\S]*?Auto_Publish_Enabled: false/);
+  // Ambiguous network recovery keeps the legacy hold. Only the separate,
+  // exact zero-output cron may opt into review-only reconstruction.
+  const seed=source.slice(source.indexOf("export function platformOutputSeedFields("),
+    source.indexOf("/*__STUDIO_WORKER_END:platformOutputSeedFields__*/"));
+  assert.match(seed,/options\.recoveryReviewOnly === true \? \{\} : \{ Do_Not_Publish: true \}\),\s*Auto_Publish_Enabled: false/);
+  assert.doesNotMatch(promote,/recoveryReviewOnly/);
 });
