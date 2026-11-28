@@ -66,7 +66,7 @@ def exact_story_snapshot(output, parent_id):
     return tuple(field_str(output, name) for name in (
         "Output_Filename", "Voiceover_URL", "Studio_Effective_Voiceover_Mode",
         "Studio_Effective_Background_Music_Mode", "Render_Total_Frames",
-        "Selected_Assets_JSON", "Render_Clip_List_JSON",
+        "Selected_Assets_JSON", "Render_Clip_List_JSON", "Output_Caption",
     ))
 
 
@@ -146,10 +146,10 @@ HELD_STORAGE_RECOVERY = {
     "recfrU5PjR5d5VwsR": ("recQnOwB4Qg9FHIup", "44025e7f5c36ee7be229c8bfc18f8a50c5a05956da5418d6c2ba41a3d0552ccb"),
     "recRHAB4dpThNs7TT": ("recrUkXlSXxtwztFU", "9a31e2e854846221b3f4db01c744b95fbb20e144e2285a34a0f531be02f3ae59"),
     "recewgpHg6l7SI344": ("recrUkXlSXxtwztFU", "9a31e2e854846221b3f4db01c744b95fbb20e144e2285a34a0f531be02f3ae59"),
-    "recihZZobVTvXDuer": ("recsusqK58K0eP6z3", "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236"),
-    "rec5wWC93FYeXiqRR": ("recsusqK58K0eP6z3", "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236"),
-    "recBOQEGqk0lgF4HF": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
-    "reckFi5S3Ynrxxggl": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
+    "recihZZobVTvXDuer": ("recsusqK58K0eP6z3", "20ce6514c9de91ab392c2625283c31be43f2fe64119e51e4762537e25581dbe9"),
+    "rec5wWC93FYeXiqRR": ("recsusqK58K0eP6z3", "20ce6514c9de91ab392c2625283c31be43f2fe64119e51e4762537e25581dbe9"),
+    "recBOQEGqk0lgF4HF": ("recs0vBdT1jmUIWL0", "0879d727fc0930051e9ef72a5489617991708e6aa34b323f510780d09b21685c"),
+    "reckFi5S3Ynrxxggl": ("recs0vBdT1jmUIWL0", "0879d727fc0930051e9ef72a5489617991708e6aa34b323f510780d09b21685c"),
 }
 
 
@@ -160,7 +160,61 @@ _CONCISE_3159_SOURCE = "Make the most of a CTA day pass and roam Chicago—bounc
 _CONCISE_3159_TEXT = "Make the most of a CTA day pass and roam Chicago."
 
 
+# Exact unapproved companion Story revisions, verified against canonical
+# profile, source asset and original copy after incident 3159. The parent
+# script and its already-approved siblings are intentionally not rewritten.
+MARKET_STORY_REVISIONS = {
+    "recsusqK58K0eP6z3": {
+        "outputs": ["recihZZobVTvXDuer","rec5wWC93FYeXiqRR"],
+        "previous_fingerprint": "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236",
+        "fingerprint": "20ce6514c9de91ab392c2625283c31be43f2fe64119e51e4762537e25581dbe9",
+        "source": "Chicago’s Union Station is a masterclass in Art Deco—glimmering brass, geometric stonework, and that iconic Great Hall glow. Even in quick moments, the details tell a story of travel’s golden age. Save this for your next architecture walk and tell us your favorite Deco detail!",
+        "old_caption": "Chicago’s Union Station is a masterclass in Art Deco—glimmering brass, geometric stonework, and that iconic Great Hall glow. Even in quick moments, the details tell a story of travel’s golden age.\nSave this for your next architecture walk and tell us your favorite Deco detail!\n\n#Chicago #UnionStation #ArtDeco #Architecture #Travel",
+        "text": "Look closer at Los Angeles Union Station, where geometric details and graceful arches make every arrival memorable.",
+        "caption": "Look closer at Los Angeles Union Station. Discover its geometric details and graceful arches on your next downtown LA architecture walk. Save this stop for your next visit.\n\n#LosAngeles #UnionStation #ArtDeco #DowntownLA #Architecture",
+        "clip": ["Los-Angeles-Union-Station-11__9x16__fill-crop-v2.jpg","rec6rAQttG3BQcBr1","1cc04717e008442381","1bk0EOa7xDlwEYeugsJDsBbENOMVbUddV"],
+    },
+    "recs0vBdT1jmUIWL0": {
+        "outputs": ["recBOQEGqk0lgF4HF","reckFi5S3Ynrxxggl"],
+        "previous_fingerprint": "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d",
+        "fingerprint": "0879d727fc0930051e9ef72a5489617991708e6aa34b323f510780d09b21685c",
+        "source": "Why did Wynwood Walls matter? Because it proved street art could be a living museum—open-air, ever-changing, and for everyone. That spark reshaped how we experience murals in cities like Chicago, turning alleys and walls into must-see galleries. Save this to inspire your next art walk and tell us your favorite mural spot.",
+        "old_caption": "Why did Wynwood Walls matter? Because it proved street art could be a living museum—open-air, ever-changing, and for everyone. That spark reshaped how we experience murals in cities like Chicago, turning alleys and walls into must-see galleries. Save this to inspire your next art walk and tell us your favorite mural spot.\n\n#Chicago #StreetArt #UrbanCulture #TravelReels #ArtLovers",
+        "text": "Wynwood Walls turns Miami street art into an open-air gallery, where murals bring color to every corner.",
+        "caption": "Explore Wynwood Walls in Miami, where street art transforms an open-air gallery into a colorful celebration of creativity. Save this stop for your next Wynwood art walk.\n\n#Miami #WynwoodWalls #Wynwood #StreetArt #VisitMiami",
+        "clip": ["Wynwood-Walls-13__9x16__fill-crop-v2.jpg","recrzwFYGHdK7SWdm","8b6e66e5b2ee489996","1y2Vg_IyD44nZOon3s7USJlM7zjhxSpdw"],
+    },
+}
+
+
+def market_story_revision(output, parent):
+    ident = output.get("id")
+    matches = [(pid, spec) for pid, spec in MARKET_STORY_REVISIONS.items() if ident in spec["outputs"]]
+    if not matches:
+        return None
+    pid, spec = matches[0]
+    manifest = parse_json_field(field(output, "Selected_Assets_JSON")) or {}
+    clips = manifest.get("selected_clips") if isinstance(manifest, dict) else None
+    keys = ("asset_name", "media_asset_record_id", "source_asset_id", "google_drive_file_id")
+    caption = field_str(output, "Output_Caption")
+    own = parse_json_field(field(output, RECEIPT)) or {}
+    if (parent.get("id") != pid or not held_storage_identity(output, parent)
+            or field_str(output, "Publish_Hold_Reason") != "Music duration not verified; repair before rendering."
+            or field_str(parent, "Voiceover_Script") != spec["source"]
+            or not isinstance(clips, list) or len(clips) != 1 or not isinstance(clips[0], dict)
+            or [clips[0].get(k) for k in keys] != spec["clip"]
+            or caption not in (spec["old_caption"], spec["caption"])
+            or (own and (not isinstance(own, dict) or own.get("fingerprint") != spec["fingerprint"]))
+            or (caption == spec["caption"] and (own.get("state") != "verified"
+                 or own.get("text") != spec["text"]))):
+        raise StoryVoiceoverError("Audited market Story source, copy, hold or receipt changed")
+    return spec
+
+
 def story_text_for_output(output, parent):
+    revision = market_story_revision(output, parent)
+    if revision:
+        return revision["text"]
     source = field_str(parent, "Voiceover_Script")
     if output.get("id") in _CONCISE_3159_IDS:
         if parent.get("id") != "rec98yS7Pl7tAAqih" or source.strip() != _CONCISE_3159_SOURCE:
@@ -397,6 +451,10 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
     exact_cache = output.get("id") in EXACT_3159_CACHED_STORIES
     if exact_cache and not exact_3159_cache_receipt(output, parent["id"], receipt):
         raise StoryVoiceoverError("Exact cached Story receipt or hold changed; no new synthesis")
+    if output.get("id") in {i for v in MARKET_STORY_REVISIONS.values() for i in v["outputs"]}:
+        market_story_revision(output,parent)
+        if existing and existing!=parent_url and not receipt:
+            raise StoryVoiceoverError("Market Story has unexpected existing narration; no new synthesis")
     if allow_generate and existing and existing!=parent_url and not receipt:
         # Preserve explicit per-output VO, including exact incident recovery.
         try:
@@ -561,12 +619,27 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
             raise StoryVoiceoverError("Parent script or voice changed before narration binding")
         if exact_story_snapshot(fresh,parent["id"])!=snapshot or story_seconds(fresh)!=cap:
             raise StoryVoiceoverError("Story changed before narration binding")
+        revision = market_story_revision(fresh, live_parent)
+        if revision:
+            provenance = {**provenance, "creative_revision": "3159-market-story-v1",
+                "previous_fingerprint": revision["previous_fingerprint"],
+                "original_caption_sha256": hashlib.sha256(revision["old_caption"].encode()).hexdigest(),
+                "original_script_sha256": hashlib.sha256(revision["source"].encode()).hexdigest()}
         patch={"Voiceover_URL":url,"Voiceover_Duration_Seconds":measured,
                "Studio_Effective_Voiceover_Duration_Seconds":measured,"Voiceover_Render_Volume":1,
                "Voiceover_Tail_Seconds":0,"Studio_Effective_Voiceover_Tail_Seconds":0,
                RECEIPT:json.dumps({"fingerprint":digest,"state":"verified","url":url,"text":text,
                     "seconds":measured,"sha256":hashlib.sha256(data).hexdigest(),**provenance},separators=(",",":"))}
+        if revision:
+            patch["Output_Caption"] = revision["caption"]
         client.update_record(PLATFORM_OUTPUTS_TABLE,fresh["id"],patch,typecast=True)
+        if revision:
+            confirmed = client.get_record(PLATFORM_OUTPUTS_TABLE,fresh["id"])
+            if (field_str(confirmed,"Output_Caption") != revision["caption"]
+                    or parse_json_field(field(confirmed,RECEIPT)) != json.loads(patch[RECEIPT])
+                    or not held_storage_identity(confirmed,live_parent)):
+                raise StoryVoiceoverError("Market Story caption and narration receipt not durably bound")
+            return confirmed
         return {**fresh,"fields":{**fresh["fields"],**patch}}
 
 
