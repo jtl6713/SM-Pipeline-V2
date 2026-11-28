@@ -1,4 +1,5 @@
 """Becky incident 3159: at most one exact storage-guard parent per cycle. No publishing or approval writes."""
+import ast
 import datetime as dt
 import hashlib
 import json
@@ -143,7 +144,7 @@ COHORT = [
             "rec3ryKwcQbNcODCb",
             "recf2NMDrZMXhQXA1"
         ],
-        "fingerprint": "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236"
+        "fingerprint": "20ce6514c9de91ab392c2625283c31be43f2fe64119e51e4762537e25581dbe9"
     },
     {
         "request": "recenOlc16BzYh6XV",
@@ -160,7 +161,7 @@ COHORT = [
             "recfUmaVUQZIllhgA",
             "reccS9JI9e5j0nKUp"
         ],
-        "fingerprint": "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"
+        "fingerprint": "0879d727fc0930051e9ef72a5489617991708e6aa34b323f510780d09b21685c"
     },
     {
         "request": "recB4H2MSi6b0zhqz",
@@ -184,6 +185,7 @@ REQUEST = PARENT = JOB = FINGERPRINT = NAME = None
 PAIR = {}
 SIBLINGS = set()
 HISTORY = None
+MARKET = None
 LOCAL = "http://127.0.0.1:3350"
 REMOTION = "http://127.0.0.1:3333"
 GATE = dt.datetime(2026,11,28,7,tzinfo=dt.timezone.utc)
@@ -195,10 +197,11 @@ LIMIT = 64*1024*1024
 # synthesis until an exact output-specific correction has been proven.
 CREATIVE_EXCEPTIONS = {
     "rec2yYRS9aVFeK1r3": "dim_sum_source_logan_boulevard_requires_reconciliation",
-    "reci9P7UQXRVFtuTM": "los_angeles_source_chicago_narration_requires_reconciliation",
+    "recKEr3ODsfNktfRr": "prior_failed_paid_narration_requires_revision_reconciliation",
 }
 def candidate_priority(candidate):
-    return (11226 not in candidate["stories"].values(),)
+    numbers=set(candidate["stories"].values())
+    return (0 if 11226 in numbers else 1 if 11340 in numbers else 2 if 11328 in numbers else 3,)
 
 def require(value, reason):
     if not value: raise RuntimeError(reason)
@@ -268,6 +271,17 @@ def require_receipt(row):
     if HISTORY:
         require(r.get("state")!="generating","history_paid_generation_forbidden")
 
+def market_spec(candidate):
+    if not set(candidate["stories"].values()) & {11328,11329,11340,11341}:
+        return None
+    source=BASE/"studio_produce"/"story_voiceover.py"
+    tree=ast.parse(source.read_text(encoding="utf-8"))
+    revisions=ast.literal_eval(next(n.value for n in tree.body if isinstance(n,ast.Assign)
+        and any(isinstance(t,ast.Name) and t.id=="MARKET_STORY_REVISIONS" for t in n.targets)))
+    spec=revisions[candidate["parent"]]
+    require(set(spec["outputs"])==set(candidate["stories"]) and spec["fingerprint"]==candidate["fingerprint"],"market_revision_identity")
+    return spec
+
 def target_fence(row):
     require(row["airtable_record_id"] in PAIR and row["output_number"]==PAIR[row["airtable_record_id"]]
         and row["do_not_publish"] is True and row["auto_publish_enabled"] is False
@@ -282,6 +296,19 @@ def target_fence(row):
     require(not any(bag.get(k) for k in ("Production_Approved_At","Platform_Post_ID","Platform_Media_ID","IG_Story_Container_ID","IG_Story_Post_ID","Publish_Started_At","Last_Publish_Attempt_At","Studio_Publish_Dispatch_At","Publish_Locked_At")),"target_attempt_evidence")
     require(not any(str(bag.get(k) or "") not in ("","0") for k in ("Publish_Attempt_Count","Studio_Publish_Dispatch_Count")),"target_attempt_counter")
     require_receipt(row)
+    if MARKET:
+        clips=(row.get("selected_assets") or {}).get("selected_clips")
+        require(isinstance(clips,list) and len(clips)==1 and
+            [clips[0].get(k) for k in ("asset_name","media_asset_record_id","source_asset_id","google_drive_file_id")]==MARKET["clip"],"market_source_drift")
+        rec=receipt(row)
+        if rec.get("state")=="verified":
+            require(row.get("output_caption")==MARKET["caption"] and rec.get("text")==MARKET["text"]
+                and rec.get("creative_revision")=="3159-market-story-v1"
+                and rec.get("previous_fingerprint")==MARKET["previous_fingerprint"]
+                and rec.get("original_caption_sha256")==hashlib.sha256(MARKET["old_caption"].encode()).hexdigest()
+                and rec.get("original_script_sha256")==hashlib.sha256(MARKET["source"].encode()).hexdigest(),"market_revision_unverified")
+        else:
+            require(row.get("output_caption")==MARKET["old_caption"],"market_original_copy_drift")
 
 def observe_governor(w):
     """Check configured capacity, not artificial exclusivity of a single probe.
@@ -303,9 +330,10 @@ def observe_governor(w):
 
 
 def recover(candidate):
-    global PHASE, REQUEST, PARENT, JOB, FINGERPRINT, NAME, PAIR, SIBLINGS, HISTORY
+    global PHASE, REQUEST, PARENT, JOB, FINGERPRINT, NAME, PAIR, SIBLINGS, HISTORY, MARKET
     REQUEST,PARENT,JOB,FINGERPRINT,NAME,PAIR,SIBLINGS=(candidate["request"],candidate["parent"],candidate["job"],candidate["fingerprint"],candidate["name"],candidate["stories"],set(candidate["siblings"]))
     HISTORY=candidate.get("history")
+    MARKET=market_spec(candidate)
     require(dt.datetime.now(dt.timezone.utc)>=GATE,"before_owner_gate")
     marker=BASE/f"outage3159-storage-{REQUEST}-once.json"
     if marker.exists():
@@ -323,8 +351,10 @@ def recover(candidate):
         result=get(PROJECT+"/rest/v1/"+name,params=params,headers=sb)
         require(isinstance(result,list),"canonical_read_invalid")
         return result
-    parent_rows=table("content_items",{"airtable_record_id":"eq."+PARENT,"select":"id,airtable_record_id","limit":2})
+    parent_rows=table("content_items",{"airtable_record_id":"eq."+PARENT,"select":"id,airtable_record_id,extras" if MARKET else "id,airtable_record_id","limit":2})
     require(len(parent_rows)==1 and parent_rows[0]["airtable_record_id"]==PARENT,"parent_identity")
+    if MARKET:
+        require((parent_rows[0].get("extras") or {}).get("Voiceover_Script")==MARKET["source"],"market_parent_script_drift")
     def rows():
         rs=table("platform_outputs",{"content_item_id":"eq."+parent_rows[0]["id"],"select":"*","limit":7})
         require(len(rs)==6 and {r["airtable_record_id"] for r in rs}==SIBLINGS|set(PAIR),"sibling_identity_changed")
@@ -472,10 +502,12 @@ def recover(candidate):
     require(len({receipt(row)["sha256"] for row in after.values()})==1,"shared_narration_checksum")
     PHASE="final_readback"
     require(rows()=={**before,**after} and job()["step"]=="done" and queue_state()[0]==[],"final_readback_changed")
+    if MARKET:
+        require(table("content_items",{"airtable_record_id":"eq."+PARENT,"select":"id,airtable_record_id,extras","limit":2})==parent_rows,"market_parent_changed")
     sample,errors=observe_governor(work())
     print("STORY3159_GOVERNOR="+json.dumps({"phase":"final","sample":sample,"errors":errors}),flush=True)
     require(not errors,"final_governor")
-    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"submissions":1,"history_original_sha256":HISTORY["sha256"] if HISTORY else None,"media":proofs}),flush=True)
+    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"market_revision_verified":bool(MARKET),"submissions":1,"history_original_sha256":HISTORY["sha256"] if HISTORY else None,"media":proofs}),flush=True)
 
     return True
 
