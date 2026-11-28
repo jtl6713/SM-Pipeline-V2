@@ -423,3 +423,51 @@ test("Bryant Park legacy draft signature diagnoses existing slides, missing capt
   assert.ok(exact.results.every(x=>x.matched&&x.existing_draft_slides===4));
   assert.equal(exact.approval_actions+exact.schedule_actions+exact.publish_actions,0);
 });
+
+test("#3159 blocked Story legacy dates and prior production approval are preserved as reconciliation evidence",()=>{
+  const p=request();p.output_plan.items[3]={platform:"Instagram",output_type:"Story"};
+  const all=source();
+  const original={...all[3],platform:"Instagram",studio_output_type:"Story",
+    platform_output_type:"Instagram Story",output_status:"In Production",render_status:"Blocked",
+    review_status:null,final_file_url:null,do_not_publish:false,auto_publish_enabled:null,
+    publish_status:"Ready to Publish",scheduled_post_date:"2026-12-21T06:16:00Z",studio_scheduled_at:null};
+  for(const fields of [{},{production_approved_at:"2026-11-25T23:12:21Z"},
+    {publish_status:null,scheduled_post_date:null,production_approved_at:"2026-11-26T05:38:49Z"},
+    {output_status:"Approved for Publishing",review_status:"Approved",publish_status:"Scheduled"}]){
+    all[3]={...original,...fields};
+    const before=structuredClone(all);
+    const result=assessProductionFactoryHandoff({request:p,outputs:all});
+    const match=result.findings.find(x=>x.output_id===10858);
+    assert.equal(result.status,"repair_required");
+    assert.equal(match.reason,"blocked_story_lifecycle_conflict_requires_reconciliation");
+    assert.equal(match.preserve_existing_approval,true);
+    assert.equal(match.preserve_existing_schedule,true);
+    assert.equal(match.automatic_action_authorized,false);
+    assert.equal(match.approval_evidence_present,Boolean(fields.production_approved_at||fields.review_status));
+    assert.equal(match.canonical_schedule_present,false);
+    assert.equal(result.schedule_actions+result.publish_actions,0);
+    assert.deepEqual(all,before);
+  }
+  all[3]={...original,scheduled_post_date:null,publish_status:"Not Ready",do_not_publish:true};
+  assert.equal(assessProductionFactoryHandoff({request:p,outputs:all}).findings.find(x=>x.output_id===10858).reason,"generation_or_render_failed");
+  all[3]={...original,published_at:"2026-11-25T00:00:00Z",platform_post_url:"https://example.com/receipt"};
+  assert.equal(assessProductionFactoryHandoff({request:p,outputs:all}).findings.some(x=>x.output_id===10858),false);
+});
+test("#3159 rendered sibling with approved review and retained schedule is not reapproved or rerendered",()=>{
+  const all=source();
+  Object.assign(all[3],{review_status:"Approved",output_status:"Ready for Review",
+    publish_status:"Ready to Schedule",auto_publish_enabled:true,
+    scheduled_post_date:"2026-12-01T03:18:00Z",studio_scheduled_at:"2026-12-01T03:18:00Z"});
+  const before=structuredClone(all);
+  const result=assessProductionFactoryHandoff({request:request(),outputs:all});
+  const f=result.findings.find(x=>x.output_id===10858);
+  assert.equal(f.reason,"approved_rendered_sibling_lifecycle_drift");
+  assert.equal(f.preserve_existing_artifact,true);
+  assert.equal(f.preserve_existing_approval,true);
+  assert.equal(f.preserve_existing_schedule,true);
+  assert.equal(f.automatic_action_authorized,false);
+  assert.equal(result.schedule_actions+result.publish_actions,0);
+  assert.deepEqual(all,before);
+  all[3].output_status="Approved for Publishing";
+  assert.equal(assessProductionFactoryHandoff({request:request(),outputs:all}).findings.some(x=>x.output_id===10858),false);
+});
