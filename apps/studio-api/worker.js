@@ -1460,9 +1460,9 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1050-staged-production-recovery-3159",
+          version: "0.10.1051-staged-render-quality-recovery-3159",
           airtable_activity: airtableActivity,
-          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused() },
+          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused(), recovery_stage: 2 },
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4766,6 +4766,39 @@ export default {
           } catch (error) { console.warn("3159 staged production recovery deferred", String(error?.message || error)); }
         })());
         ctx.waitUntil(factoryBatchCronResume(env, ctx).catch(error => console.warn("3159 staged Factory recovery deferred", String(error?.message || error))));
+        // Stage 2: restore only bounded non-publishing maintenance. Spread
+        // metadata repair, render admission and read-only QA across separate
+        // minute slots; retain the existing single Remotion slot and broker.
+        if (collectorMinute % 5 === 1) {
+          ctx.waitUntil(sweepR4TypedMetadataRecovery(env, { limit: 2 })
+            .then(result => console.info("3159 staged R4 metadata", JSON.stringify(result)))
+            .catch(error => console.warn("3159 staged R4 metadata unavailable", String(error?.message || error))));
+        }
+        if (collectorMinute % 5 === 3 && r4CronAdmissionAllowed({
+          writeSource: studioWriteSource(env),
+          supabaseConfigured: studioSupabaseConfigured(env),
+          airtableCooldownMs: airtableCooldownWaitMs(),
+          failFastMs: AIRTABLE_SLOT_FAIL_FAST_MS,
+        })) {
+          ctx.waitUntil(studioAdmitRenderQueue(env, { limit: 80 })
+            .then(result => console.info("3159 staged R4 admission", JSON.stringify({
+              admitted: result?.admitted === true, reason: result?.reason || null
+            })))
+            .catch(error => console.warn("3159 staged R4 admission unavailable", String(error?.message || error))));
+        }
+        if (collectorMinute % 5 === 4) {
+          ctx.waitUntil((async () => {
+            // No exact-canary repair callback in this recovery phase.
+            if (env.QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true") {
+              await runQualityFactoryHandoffCron({
+                read: path => adminHoldSupabaseRest(env, path),
+                limit: 4,
+                logger: receipt => console.info("3159 staged Quality handoff", JSON.stringify(receipt)),
+              });
+            }
+            await sweepSchedulingApprovalPreflight(env, { limit: 2 });
+          })().catch(error => console.warn("3159 staged technical QA unavailable", String(error?.message || error))));
+        }
       }
       return;
     }
