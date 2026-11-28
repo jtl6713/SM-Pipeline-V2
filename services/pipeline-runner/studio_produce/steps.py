@@ -1183,13 +1183,73 @@ def _exact_3159_cache_scope(ctx):
     return target
 
 
-def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | None:
+# Two exact held history pairs from authenticated inventory 46161305343.
+_EXACT_3159_HISTORY_SCOPES = {
+    "rec9iM9aQBPhA1e2q": ("spj-6d4027b5f68c", "reccVyNLdmJJeI8hG",
+        {"recTGV5aRLO8ozQPN", "recDq8zXGSpvm0GIH", "recsWGXZRJPhud1YK", "recU8UApFqpBbWWED"}),
+    "recuuGJr8rUO5ZV4r": ("spj-6503040975b2", "recG0b34XYwYWggTp",
+        {"rec9QBtII1D3mQize", "rec6ZCHaBK3OPtzOd", "rec6guUOaK2BWOI5U", "recWLv9LxG1Pq4p5O"}),
+}
+
+
+def _exact_3159_history_scope(ctx):
+    from studio_produce.story_history_recovery import HISTORY_RECOVERY
+    from studio_produce.story_voiceover import RECEIPT, needs_story_voiceover, STORY_CACHE_ERRORS
+    from render.fields import parse_json_field
+    job_id, parent_id, siblings = _EXACT_3159_HISTORY_SCOPES[ctx["request_id"]]
+    evidence = HISTORY_RECOVERY[parent_id]
+    targets = frozenset(evidence["outputs"])
+    rows = {r["id"]:r for r in ctx.get("outputs") or []}
+    if (set(rows) != siblings | targets or len(ctx.get("outputs") or []) != 6
+            or (ctx.get("job") or {}).get("job_id") != job_id
+            or (ctx.get("parent") or {}).get("id") != parent_id
+            or not field_str(ctx.get("parent") or {}, "Voiceover_URL")
+            or any(not _output_file_ready(rows[s]) or field_str(rows[s], "Output_Status") != "Approved for Publishing"
+                   or field_str(rows[s], "Review_Status") != "Approved" or _output_missing_review_cover(rows[s]) for s in siblings)):
+        raise StepBlocked("Exact history Story parent or approved sibling package changed")
+    digest = evidence["fingerprint"]
+    url = f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{digest}.mp3"
+    receipts = []
+    for ident in targets:
+        row = rows[ident]
+        r = parse_json_field(field(row, RECEIPT)) or {}
+        state = field_str(row, "Render_Status")
+        if (not needs_story_voiceover(row) or first_linked_id(field(row,"Content_Item")) != parent_id
+                or field(row,"Do_Not_Publish") is not True or field(row,"Auto_Publish_Enabled") is not False
+                or field_str(row,"Review_Status") not in {"","Pending Review","Review Sent"}
+                or field_str(row,"Publish_Status") != "Not Ready"
+                or field_str(row,"Output_Status") not in {"In Production","Ready for Review"}
+                or state not in {"Blocked","Ready for Render","Waiting in Render Queue","Rendering","Rendered"}
+                or any(field_str(row,k) for k in ("Scheduled_Post_Date","Studio_Scheduled_At","YouTube_Scheduled_Publish_At",
+                    "Production_Approved_At","Published_At","Platform_Post_URL","Manual_Published_URL","Platform_Post_ID",
+                    "Platform_Media_ID","Publish_Started_At","Last_Publish_Attempt_At","Studio_Publish_Dispatch_At",
+                    "Publish_Locked_At","IG_Story_Container_ID","IG_Story_Post_ID"))
+                or any(field_str(row,k) not in {"","0"} for k in ("Publish_Attempt_Count","Studio_Publish_Dispatch_Count"))
+                or not isinstance(r,dict)
+                or (state=="Blocked" and field_str(row,"Remotion_Error_Message") not in STORY_CACHE_ERRORS)
+                or (r and (r.get("fingerprint")!=digest or r.get("url")!=url
+                           or r.get("state") not in {"failed","verified"}))
+                or (r.get("state")=="failed" and r.get("sha256"))
+                or (r.get("state")=="verified" and (r.get("history_original_sha256")!=evidence["sha256"]
+                    or r.get("history_created_at")!=evidence["created_at"]
+                    or not re.fullmatch(r"[a-f0-9]{64}",str(r.get("sha256") or ""))))
+                or (state!="Blocked" and r.get("state")!="verified")):
+            raise StepBlocked("Exact audited history Story receipt or publication fence changed")
+        if r: receipts.append(r)
+    if not receipts or len({r["sha256"] for r in receipts if r.get("sha256")})>1:
+        raise StepBlocked("Exact audited history claim missing or ambiguous")
+    return targets
+
+
+def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | frozenset[str] | None:
     """Exact #3159 probe: render only the held Story, not approved siblings.
 
     The existing parent job remains the canonical, governed unit. Preserve
     finished sibling packages and their schedules while proving its render
     step can genuinely complete. Do not widen to a different revision.
     """
+    if ctx.get("request_id") in _EXACT_3159_HISTORY_SCOPES:
+        return _exact_3159_history_scope(ctx)
     if ctx.get("request_id") in _EXACT_3159_CACHE_SCOPES:
         return _exact_3159_cache_scope(ctx)
     if (ctx.get("request_id") != "recEDPsqJlxaGHCyO"
@@ -1258,11 +1318,12 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 "the visual-integrity guard."
             )
     exact_story = _verified_story_recovery_scope(ctx)
+    exact_targets = {exact_story} if isinstance(exact_story,str) else exact_story
     if voiceover_missing(ctx["request"], ctx.get("parent")):
         # R4 refuses to start without narration. Generate it here instead of
         # looping on "Rendering 0/N" with no Remotion job.
         run_voiceover_p2(client, ctx)
-    render_rows = [row for row in ctx["outputs"] if not exact_story or row["id"] == exact_story]
+    render_rows = [row for row in ctx["outputs"] if not exact_targets or row["id"] in exact_targets]
     copy_voiceover_to_outputs(client, ctx.get("parent") or {}, render_rows)
     from studio_produce.shared_render import (
         build_shared_render_plan,
@@ -1450,7 +1511,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     # plan time can still inherit the Instagram Final_File_URL.
     if exact_story and _verified_story_recovery_scope(ctx) != exact_story:
         raise StepBlocked("Exact held Story recovery scope changed")
-    shared_plan = build_shared_render_plan([row for row in ctx["outputs"] if not exact_story or row["id"] == exact_story])
+    shared_plan = build_shared_render_plan([row for row in ctx["outputs"] if not exact_targets or row["id"] in exact_targets])
     for output in ctx["outputs"]:
         meta = shared_plan.get(output["id"]) or {}
         if meta.get("role") != "sibling" or _output_ready(output):
