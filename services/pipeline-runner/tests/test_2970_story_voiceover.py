@@ -675,3 +675,26 @@ def test_3159_held_storage_rearm_is_exact_and_no_paid_call(monkeypatch, mode, ex
     else:
         assert client.update_record.call_count == 1
         assert client.update_record.call_args.args[2] == {"Render_Status":"Ready for Render"}
+
+
+def test_3159_exact_concise_story_does_not_change_parent_or_other_outputs():
+    from copy import deepcopy
+    p = {"id":"rec98yS7Pl7tAAqih","fields":{"Voiceover_Script":story._CONCISE_3159_SOURCE}}
+    original = deepcopy(p)
+    row = output(Content_Item=[p["id"]], Output_Status="In Production",
+        Render_Status="Blocked", Remotion_Error_Message=story.STORY_MISSING_SENTENCE,
+        Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
+        Do_Not_Publish=True, Auto_Publish_Enabled=False, Publish_Status="Not Ready")
+    row["id"] = "recZVRMvmIYwTwKTd"
+    assert story.story_text_for_output(row,p) == "Make the most of a CTA day pass and roam Chicago."
+    assert story.fingerprint(p["id"],"xVQH621DS3eyBYrseRt5",
+        story.story_text_for_output(row,p),story.story_seconds(row)) == story.HELD_STORAGE_RECOVERY[row["id"]][1]
+    assert story.story_sentence_recovery_candidate(row,p)
+    assert p == original
+    unrelated = {**row,"id":"recOther"}
+    assert not story.story_sentence_recovery_candidate(unrelated,p)
+    changed = deepcopy(p)
+    changed["fields"]["Voiceover_Script"] += " Changed."
+    assert not story.story_sentence_recovery_candidate(row,changed)
+    row["fields"]["Scheduled_Post_Date"] = "2026-12-01"
+    assert not story.story_sentence_recovery_candidate(row,p)
