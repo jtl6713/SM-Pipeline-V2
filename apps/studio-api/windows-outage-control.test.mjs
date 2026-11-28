@@ -62,6 +62,8 @@ test("staged production never unblocks publishing or other cron inventory", () =
   assert.doesNotMatch(block,/studioReconcileApprovedPublishes|studioDispatchApprovedPublish/);
   assert.match(block,/studioPublicationRecoveryCron\(env, \{ stagedPublicReceipts: true \}\)/);
   assert.doesNotMatch(block,/studioPublicationRecoveryCron\(env\)/);
+  assert.doesNotMatch(worker,/runStagedGalleryRecovery|staged-gallery-recovery\.mjs/);
+  assert.match(worker,/native_gallery_recovery_enabled: false, public_receipt_recovery_enabled: true/);
   assert.match(block,/return;/);
 });
 
