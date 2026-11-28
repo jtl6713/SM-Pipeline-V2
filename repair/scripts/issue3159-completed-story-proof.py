@@ -102,9 +102,19 @@ def main():
                 a=Path(tmp)/"drive.mp4"; b=Path(tmp)/"preview.mp4"
                 with g.resource_slot("transfer",key=f"3159-completed-{number}",limit=1,wait_seconds=5):
                     meta=drive.get_file(drive_id,fields="id,size,mimeType,trashed")
-                    require(meta["id"]==drive_id and not meta.get("trashed") and 0<int(meta["size"])<=LIMIT,"drive_size_or_identity")
+                    # Safe diagnostic: distinguish a size cap from identity, type,
+                    # or deletion problems; no raw metadata or file names in logs.
+                    size_text=str(meta.get("size") or "")
+                    size=int(size_text) if size_text.isdecimal() else 0
+                    diagnostic={"output":number,"identity_matches":meta.get("id")==drive_id,
+                        "trashed":meta.get("trashed"),"video_mp4":meta.get("mimeType")=="video/mp4",
+                        "size_bytes":size,"limit_bytes":LIMIT}
+                    print("RECOVERY3159_DRIVE_META="+json.dumps(diagnostic,separators=(",",":")),flush=True)
+                    require(diagnostic["identity_matches"] and diagnostic["trashed"] is False,"drive_identity_or_trashed")
+                    require(diagnostic["video_mp4"],"drive_mime_type")
+                    require(0<size<=LIMIT,"drive_size_budget")
                     drive.download_file_to_path(drive_id,str(a),timeout=45)
-                    require(0<a.stat().st_size<=LIMIT,"drive_byte_budget")
+                    require(a.stat().st_size==size and 0<size<=LIMIT,"drive_byte_budget_or_length")
                     with requests.get(preview,stream=True,timeout=30,allow_redirects=False) as response:
                         require(response.status_code==200,"preview_unavailable")
                         n=0
