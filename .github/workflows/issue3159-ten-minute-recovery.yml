@@ -215,7 +215,9 @@ jobs:
           set -euo pipefail
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           statuses=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/124fb31441ff637ce0b60483fd7c3643815ee9c2/status")
-          deployed=6fa6ffbdc524cde148ede0259ab006285ca65b33
+          runs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs?branch=main&event=push&status=success&per_page=100")
+          deployed=$(jq -er '[.workflow_runs[] | select(.name=="Deploy Pipeline Runner via Ops Dashboard" and .head_branch=="main" and .conclusion=="success")][0].head_sha' <<<"$runs")
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
           git fetch --quiet --depth=1 origin "$deployed"
           git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
           deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
@@ -353,7 +355,9 @@ jobs:
           set -euo pipefail
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           statuses=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/124fb31441ff637ce0b60483fd7c3643815ee9c2/status")
-          deployed=6fa6ffbdc524cde148ede0259ab006285ca65b33
+          runs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs?branch=main&event=push&status=success&per_page=100")
+          deployed=$(jq -er '[.workflow_runs[] | select(.name=="Deploy Pipeline Runner via Ops Dashboard" and .head_branch=="main" and .conclusion=="success")][0].head_sha' <<<"$runs")
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
           git fetch --quiet --depth=1 origin "$deployed"
           git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
           deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
