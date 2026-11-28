@@ -85,9 +85,32 @@ STORY_CACHE_ERRORS = {
 }
 
 
+# Exact paused Story cache candidates, authenticated inventory 46161305343.
+# These two specific outputs must never use paid regeneration, even if a
+# receipt disappears during an existing render-stage continuation.
+EXACT_3159_CACHED_STORIES = {
+    "recLzYh6rylP7ghEy": "rec7Pz6dVvZpnDMjT",
+    "recRyS2Gsy8uh10ND": "recm83Z4R3CdpgQrI",
+}
+
+
+def exact_3159_cache_receipt(output, parent_id, receipt):
+    if (EXACT_3159_CACHED_STORIES.get(output.get("id")) != parent_id
+            or field(output, "Do_Not_Publish") is not True
+            or field(output, "Auto_Publish_Enabled") is not False
+            or not isinstance(receipt, dict)
+            or receipt.get("state") not in {"failed", "verified"}):
+        return False
+    digest, sha = receipt.get("fingerprint"), receipt.get("sha256")
+    return bool(re.fullmatch(r"[a-f0-9]{64}", str(digest or ""))
+                and re.fullmatch(r"[a-f0-9]{64}", str(sha or ""))
+                and receipt.get("url") == f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{digest}.mp3")
+
+
 # Exact parked cohort with confirmed original R2 checksums (audit 45616089704).
 # These holds remain set throughout rendering and final human review.
 HELD_CACHE_RECOVERY = {
+    **EXACT_3159_CACHED_STORIES,
     "recoheiAMq2vG48V3": "rec9qS53G7HDoyCL5",
     "reccgtEdV1EKo4Hlp": "rec9qS53G7HDoyCL5",
     "rec0suYTujG4dje1R": "rec3fNJ6QgaL7EMBn",
@@ -137,7 +160,7 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
         # immutable byte receipt. Never fall through to paid/history recovery.
         receipt = parse_json_field(field(output, RECEIPT)) or {}
         if (not cached_only or not isinstance(receipt, dict)
-                or receipt.get("state") != "verified"
+                or (receipt.get("state") != "verified" and not exact_3159_cache_receipt(output, parent["id"], receipt))
                 or not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get("sha256") or ""))
                 or not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get("fingerprint") or ""))
                 or receipt.get("url") != f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent['id']}/{receipt.get('fingerprint')}.mp3"):
@@ -280,6 +303,9 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
     existing=field_str(output,"Voiceover_URL")
     parent_url=field_str(parent,"Voiceover_URL")
     receipt=parse_json_field(field(output,RECEIPT)) or {}
+    exact_cache = output.get("id") in EXACT_3159_CACHED_STORIES
+    if exact_cache and not exact_3159_cache_receipt(output, parent["id"], receipt):
+        raise StoryVoiceoverError("Exact cached Story receipt or hold changed; no new synthesis")
     if allow_generate and existing and existing!=parent_url and not receipt:
         # Preserve explicit per-output VO, including exact incident recovery.
         try:
@@ -316,7 +342,13 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history
         history = HISTORY_RECOVERY.get(parent["id"])
         provenance = {}
-        if (field_str(current, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR
+        if exact_cache:
+            own = parse_json_field(field(current, RECEIPT)) or {}
+            if (not exact_3159_cache_receipt(current, live_parent["id"], own)
+                    or own.get("fingerprint") != digest or own.get("url") != url
+                    or known != {own.get("sha256")} or own.get("sha256") != receipt.get("sha256")):
+                raise StoryVoiceoverError("Exact cached Story fingerprint or checksum changed; no new synthesis")
+        if ((not exact_cache and field_str(current, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR)
                 or (current["id"] == "recoheiAMq2vG48V3" and live_parent["id"] == "rec9qS53G7HDoyCL5"
                     and field(current, "Do_Not_Publish") is True)):
             # Also enforce the exact held probe after rearm, when R4 may

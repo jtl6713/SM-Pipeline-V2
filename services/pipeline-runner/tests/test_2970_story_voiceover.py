@@ -514,3 +514,38 @@ def test_exact_3159_story_recovery_fails_closed_on_scope_drift(monkeypatch, drif
         ctx["outputs"][-1]["fields"][story.RECEIPT] = "{}"
     with pytest.raises(steps.StepBlocked):
         steps._verified_story_recovery_scope(ctx)
+
+@pytest.mark.parametrize("request_id", ["recyGAoFNARh8msjb", "recv3RruCzNtq4bes"])
+def test_3159_new_cached_story_scope_and_no_paid_fallback(monkeypatch, request_id):
+    from studio_produce import steps
+    ctx = exact_3159_context()
+    job, pid, target, siblings = steps._EXACT_3159_CACHE_SCOPES[request_id]
+    ctx["request_id"] = request_id
+    ctx["job"]["job_id"] = job
+    ctx["parent"]["id"] = pid
+    for row, ident in zip(ctx["outputs"][:-1], sorted(siblings)):
+        row["id"] = ident
+    row = ctx["outputs"][-1]
+    row["id"] = target
+    url = f"https://media.chicagoshining.com/studio/previews/story-voiceover/{pid}/{'a'*64}.mp3"
+    row["fields"].update(Content_Item=[pid], Output_Status="In Production", Render_Status="Blocked",
+                         Review_Status="Pending Review", Remotion_Error_Message=next(iter(story.STORY_CACHE_ERRORS)),
+                         Final_File_URL="", Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]')
+    proof={"state":"failed","fingerprint":"a"*64,"sha256":"b"*64,"url":url}
+    row["fields"][story.RECEIPT]=json.dumps(proof)
+    monkeypatch.setattr(steps, "_output_missing_review_cover", lambda row: False)
+    assert steps._verified_story_recovery_scope(ctx) == target
+    assert story.story_sentence_recovery_candidate(row, ctx["parent"], cached_only=True)
+    row["fields"][story.RECEIPT]="{}"
+    client=Mock()
+    with pytest.raises(story.StoryVoiceoverError, match="no new synthesis"):
+        story.ensure_story_voiceover(client,row,ctx["parent"])
+    client.update_record.assert_not_called()
+    with pytest.raises(steps.StepBlocked):
+        steps._verified_story_recovery_scope(ctx)
+    row["fields"][story.RECEIPT]=json.dumps({**proof,"state":"verified"})
+    row["fields"].update(Output_Status="Ready for Review",Render_Status="Rendered",Final_File_URL="https://example.test/story.mp4")
+    assert steps._verified_story_recovery_scope(ctx)==target
+    ctx["outputs"][0]["fields"]["Review_Status"]="Pending Review"
+    with pytest.raises(steps.StepBlocked):
+        steps._verified_story_recovery_scope(ctx)

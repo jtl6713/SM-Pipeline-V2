@@ -1,0 +1,160 @@
+name: Issue 3159 governed Story 11334 recovery
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue3159-story11334-governed-probe.py'
+      - '.github/workflows/issue3159-story11334-governed-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-story11334-governed-probe.yml'
+      - 'repair/scripts/issue3159-story11334-governed-probe.py'
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m py_compile repair/scripts/issue3159-story11334-governed-probe.py
+          python -m pip install -q pillow
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          text=Path('repair/scripts/issue3159-story11334-governed-probe.py').read_text()
+          ast.parse(text)
+          assert text.count('requests.post(')==1
+          assert 'LOCAL+"/jobs/studio-produce/resume"' in text
+          assert 'marker.open("x"' in text and 'before_owner_gate' in text
+          for forbidden in ('requests.patch','requests.put','requests.delete','/publish-now','force-release','confirm_half_open_progress','DELETE FROM','UPDATE producer_jobs'):
+              assert forbidden not in text
+          assert 'all(current[i]==before[i] for i in SIBLINGS)' in text
+          print('EXACT_STORY11334_SCOPE_PASS')
+          PY
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+      - name: Wait for the exact protected Runner deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -ge "$(date -u -d '2026-11-28 07:00:00' +%s)"
+          for i in $(seq 1 100); do
+            status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/status" | jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"')
+            [[ "$status" != failure && "$status" != error ]] || exit 1
+            [[ "$status" == success ]] && break
+            sleep 5
+          done
+          test "$status" = success
+          echo 'exact_runner_release=PASS'
+      - name: Verify scheduler still minute-only before exact recovery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_pre_crons=minute_only')
+          PY
+      - name: Exact one-shot governed Story recovery through protected Ops
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue3159-story11334-governed-probe.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3159-story11334-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 3); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 120); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','')
+          lines=out.splitlines()
+          for line in lines:
+              if re.fullmatch(r'STORY3159_ERROR=[A-Za-z_]+',line) or line=='STORY3159_ACCEPTED_ONCE=recyGAoFNARh8msjb':
+                  print(line)
+              elif re.fullmatch(r'STORY3159_(AUDIO|PROOF)=\{.*\}',line):
+                  print(line)
+          if job['status']!='ok': raise SystemExit('exact_story_probe_incomplete_no_automatic_retry')
+          proofs=[line for line in lines if line.startswith('STORY3159_PROOF=')]
+          assert len(proofs)==1
+          proof=json.loads(proofs[0].split('=',1)[1])
+          assert proof['output']==11334 and proof['circuit']=='closed'
+          assert proof['sibling_records_unchanged']==5 and proof['hold_preserved'] and proof['approval_required']
+          PY
+      - name: Verify final scheduler remains minute-only
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_post_crons=minute_only')
+          PY
+      - name: Record protected evidence status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-story11334-governed-probe",target_url:$url,description:"Exact governed Story recovery"}' >/tmp/media-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/media-status.json >/dev/null

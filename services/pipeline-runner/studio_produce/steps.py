@@ -1142,6 +1142,47 @@ def waiting_on_existing_render_job(output: dict[str, Any]) -> bool:
     )
 
 
+# Exact protected inventory 46161305343. Existing five finished siblings
+# are never passed to render, shared propagation, or thumbnail regeneration.
+_EXACT_3159_CACHE_SCOPES = {
+    "recyGAoFNARh8msjb": ("spj-df966d390fcf", "rec7Pz6dVvZpnDMjT", "recLzYh6rylP7ghEy",
+        {"reca0sGK6zAqbjB2z", "reczznW0ZqbaSXcdS", "recse6A8NtKbGvTKp", "rec6trCDSrCbcLpoX", "recXHofND6ZV8Zt3m"}),
+    "recv3RruCzNtq4bes": ("spj-847eb830f431", "recm83Z4R3CdpgQrI", "recRyS2Gsy8uh10ND",
+        {"rec4z6GbCVC2ZOQ9k", "rec6ljYtGgeZntLIC", "recgLHhzj6GETHT5r", "recDg9Z5w2bVsViCg", "recSD98TJ66ys0Yin"}),
+}
+
+
+def _exact_3159_cache_scope(ctx):
+    job_id, parent_id, target, siblings = _EXACT_3159_CACHE_SCOPES[ctx["request_id"]]
+    from studio_produce.story_voiceover import RECEIPT, exact_3159_cache_receipt, needs_story_voiceover
+    from render.fields import parse_json_field
+    rows = {row["id"]: row for row in ctx.get("outputs") or []}
+    row = rows.get(target)
+    if (set(rows) != siblings | {target} or len(ctx.get("outputs") or []) != 6
+            or (ctx.get("job") or {}).get("job_id") != job_id
+            or (ctx.get("parent") or {}).get("id") != parent_id or not row
+            or not field_str(ctx.get("parent") or {}, "Voiceover_URL")
+            or not needs_story_voiceover(row)
+            or first_linked_id(field(row, "Content_Item")) != parent_id
+            or not exact_3159_cache_receipt(row, parent_id, parse_json_field(field(row, RECEIPT)) or {})
+            or field_str(row, "Review_Status") not in {"", "Pending Review", "Review Sent"}
+            or field_str(row, "Publish_Status") != "Not Ready"
+            or field_str(row, "Output_Status") not in {"In Production", "Ready for Review"}
+            or field_str(row, "Render_Status") not in {"Blocked", "Ready for Render", "Waiting in Render Queue", "Rendering", "Rendered"}
+            or (field_str(row, "Render_Status") != "Blocked"
+                and (parse_json_field(field(row, RECEIPT)) or {}).get("state") != "verified")
+            or any(field_str(row, key) for key in (
+                "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At",
+                "Production_Approved_At", "Published_At", "Platform_Post_URL", "Manual_Published_URL",
+                "Platform_Post_ID", "Platform_Media_ID", "Publish_Started_At", "Last_Publish_Attempt_At",
+                "Studio_Publish_Dispatch_At", "Publish_Locked_At", "IG_Story_Container_ID", "IG_Story_Post_ID"))
+            or any(field_str(row, key) not in {"", "0"} for key in ("Publish_Attempt_Count", "Studio_Publish_Dispatch_Count"))
+            or any(not _output_file_ready(rows[s]) or field_str(rows[s], "Output_Status") != "Approved for Publishing"
+                   or field_str(rows[s], "Review_Status") != "Approved" or _output_missing_review_cover(rows[s]) for s in siblings)):
+        raise StepBlocked("Exact cached Story recovery identity, receipt or approved sibling package changed")
+    return target
+
+
 def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | None:
     """Exact #3159 probe: render only the held Story, not approved siblings.
 
@@ -1149,6 +1190,8 @@ def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | None:
     finished sibling packages and their schedules while proving its render
     step can genuinely complete. Do not widen to a different revision.
     """
+    if ctx.get("request_id") in _EXACT_3159_CACHE_SCOPES:
+        return _exact_3159_cache_scope(ctx)
     if (ctx.get("request_id") != "recEDPsqJlxaGHCyO"
             or (ctx.get("job") or {}).get("job_id") != "spj-854f9cd1bdf8"):
         return None
