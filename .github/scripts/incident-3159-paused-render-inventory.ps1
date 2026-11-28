@@ -52,7 +52,7 @@ print("paused3159_health="+json.dumps({"circuit":w.get("database_circuit_phase")
 with sqlite3.connect(Path(os.environ["INV_DB"]).resolve().as_uri()+"?mode=ro",uri=True,timeout=3) as db:
  q=db.execute("SELECT request_id,state,consecutive_yields FROM producer_jobs WHERE state='paused' ORDER BY request_id LIMIT 25").fetchall()
 if len(q)>24:raise ValueError("inventory_cap")
-history={"recnsuB2LUYKwygWI":"74db136af97d9f28c27cc8f95fc8248d316546b35bd54b0649c295eb5446c293","reccVyNLdmJJeI8hG":"b55b795ffb32c1bf079705ddf7ad1248762847b0c5600b76c88df8e7401f6260","recG0b34XYwYWggTp":"69e65eb8a0e00385ba952c8bfee7926fa8b6c6bc3562c2a3909e07718df71147"}
+history={"recAdiURMeoS8VJnJ":"9362a08d77676c85b03fb4d40e2c0f5ae68b8e465216dc57d7384f5a0551e9f3","recnsuB2LUYKwygWI":"74db136af97d9f28c27cc8f95fc8248d316546b35bd54b0649c295eb5446c293","reccVyNLdmJJeI8hG":"b55b795ffb32c1bf079705ddf7ad1248762847b0c5600b76c88df8e7401f6260","recG0b34XYwYWggTp":"69e65eb8a0e00385ba952c8bfee7926fa8b6c6bc3562c2a3909e07718df71147"}
 cache={};probes=0
 for rid,state,yields in q:
  result={"request_record":rid if ident(rid) else "invalid","state":state,"yields":yields,"classification":"unverified","outputs":[]}
