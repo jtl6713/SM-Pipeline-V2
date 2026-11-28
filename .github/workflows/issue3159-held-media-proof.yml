@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/issue3159-held-media-proof.yml'
+      - 'repair/scripts/issue3159-held-media-proof.py'
 permissions:
   contents: read
   statuses: write
