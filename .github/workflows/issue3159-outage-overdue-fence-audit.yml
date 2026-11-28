@@ -1,0 +1,189 @@
+name: Issue 3159 overdue candidate initial fences and MAE lanes
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3159-outage-overdue-fence-audit.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3159-outage-overdue-fence-audit.yml']
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify bounded read-only audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('.github/workflows/issue3159-outage-overdue-fence-audit.yml').read_text()
+          assert 'initial-publish-fence/v1/' in s
+          assert 'STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST' in s
+          assert 'recFFqtIBJ5SDiyH7' in s
+          assert 'rec0zq77NEKd3tB6Q' in s and 'recxUvPK2jWMuloGi' in s
+          assert 'read_only' in s
+          print('exact_fence_lane_audit_static=PASS')
+          PY
+  audit:
+    if: github.event_name == 'push'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify paused scheduler
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('pre_fence_crons=[]')
+          PY
+      - name: Read exact active Worker binding and fence keys (GET only)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error,urllib.parse
+          api='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CLOUDFLARE_ACCOUNT_ID']
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          assert token
+          def get(path):
+              req=urllib.request.Request(api+path,headers={'Authorization':'Bearer '+token},method='GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as res:
+                      return res.status,res.read(1024*1024)
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read(4096)
+          def obj(path):
+              status,body=get(path)
+              assert status==200, 'cloudflare_get_failed_'+str(status)
+              data=json.loads(body)
+              assert data.get('success') is True
+              return data['result']
+          worker='/workers/scripts/chicagoshining-studio-api'
+          deployments=obj(worker+'/deployments')
+          version=max(deployments['deployments'][0]['versions'],key=lambda x:x['percentage'])['version_id']
+          bindings=obj(worker+'/versions/'+version)['resources']['bindings']
+          plain={x['name']:x.get('text') for x in bindings if x['type']=='plain_text'}
+          buckets=[x['bucket_name'] for x in bindings if x['type']=='r2_bucket' and x['name']=='STUDIO_MEDIA']
+          assert len(buckets)==1
+          enabled=plain.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED')=='true'
+          lanes=set(x.strip() for x in (plain.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') or '').split(','))
+          exact=[
+            (4375,'recWrlgRb9HvomZPT','recpNlNn6U6eq0M9r','instagram'),
+            (10038,'recFFqtIBJ5SDiyH7','recT2rbKX3MF7cVFU','facebook'),
+            (10074,'recyzDyeBLn7RKadB','recT2rbKX3MF7cVFU','facebook'),
+            (10201,'recdpHw8PReiOahCn','recgtK8Z7eNADNtVy','instagram'),
+            (10204,'rec0zq77NEKd3tB6Q','recgtK8Z7eNADNtVy','instagram'),
+            (10206,'reccufVKM4b1JnkzR','recgtK8Z7eNADNtVy','instagram'),
+            (10250,'recF9wayz8BT0uH2H','recgtK8Z7eNADNtVy','instagram'),
+            (10393,'recNRKHOuETa0ZOPs','recgtK8Z7eNADNtVy','instagram'),
+            (10394,'rec70MjVXZOEkRKSK','recgtK8Z7eNADNtVy','facebook'),
+            (10395,'recBr7LBeegx0jBz3','recgtK8Z7eNADNtVy','instagram'),
+            (10396,'recbcJJ2oqJsBiDgG','recgtK8Z7eNADNtVy','facebook'),
+            (10398,'rectpjVdZkYh8gTAo','recgtK8Z7eNADNtVy','facebook'),
+            (10416,'recwhWDbOaVitRWop','recgtK8Z7eNADNtVy','instagram'),
+            (10424,'rec5rWGZ6TuLtLu44','recgtK8Z7eNADNtVy','instagram'),
+            (10425,'recCOfsIt9A235W9J','recgtK8Z7eNADNtVy','instagram'),
+            (10427,'recqpfjbIQQrRZ4ZO','recgtK8Z7eNADNtVy','facebook'),
+            (10428,'recIP8p1GXLi7fuBF','recgtK8Z7eNADNtVy','facebook'),
+            (10429,'recTVJt0UALIwjpf2','recgtK8Z7eNADNtVy','instagram'),
+            (10431,'recUluiTOrNz0GPDX','recgtK8Z7eNADNtVy','instagram'),
+            (10443,'reclVG2udKm7v77Ip','recgtK8Z7eNADNtVy','instagram'),
+            (10476,'recpU21rKHVJ6vlrH','recgtK8Z7eNADNtVy','instagram'),
+            (10477,'recxUvPK2jWMuloGi','recgtK8Z7eNADNtVy','facebook'),
+          ]
+          # Account token cannot read R2 REST objects (403). Resolve the exact
+          # production R2 binding and use a short-lived, scoped HEAD-only helper.
+          import pathlib,secrets,subprocess,tempfile
+          print('ISSUE3159_LANES='+json.dumps({'worker_version':version,'authority_enabled':enabled,'rows':[{'output':n,'lane_enabled':enabled and profile+'::'+platform in lanes} for n,rid,profile,platform in exact]},separators=(',',':')),flush=True)
+          helper='issue3159-fences-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+          helper_path='/workers/scripts/'+helper
+          assert get(helper_path+'/settings')[0]==404,'helper_already_exists_or_unverified'
+          route='/'+secrets.token_urlsafe(48)
+          source="""const ROWS=__ROWS__;
+          const ROUTE=__ROUTE__;
+          export default {async fetch(req,env){
+            if(req.method!=='GET'||new URL(req.url).pathname!==ROUTE)return new Response('Not found',{status:404});
+            const rows=[];
+            for(const [n,rid] of ROWS){
+              try{const h=await env.STUDIO_MEDIA.head('studio/state/initial-publish-fence/v1/'+rid+'.json');
+                rows.push({output:n,fence_observation:h?'present':'not_found'});}
+              catch{rows.push({output:n,fence_observation:'unverified'});}
+            }
+            return Response.json({read_only:true,rows},{headers:{'Cache-Control':'no-store'}});
+          }};
+          """.replace('__ROWS__',json.dumps([[n,rid] for n,rid,_,_ in exact])).replace('__ROUTE__',json.dumps(route))
+          metadata={'main_module':'worker.mjs','compatibility_date':'2026-10-01','bindings':[{'type':'r2_bucket','name':'STUDIO_MEDIA','bucket_name':buckets[0]}]}
+          def request(method,path,payload=None):
+              req=urllib.request.Request(api+path,data=payload,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+              with urllib.request.urlopen(req,timeout=35) as res:
+                  data=json.loads(res.read(1024*1024))
+                  assert data.get('success') is True,'helper_operation_failed'
+                  return data['result']
+          owned=False
+          try:
+              with tempfile.TemporaryDirectory() as d:
+                  p=pathlib.Path(d)
+                  (p/'worker.mjs').write_text(source)
+                  (p/'metadata.json').write_text(json.dumps(metadata))
+                  subprocess.run(['node','--check',str(p/'worker.mjs')],check=True,capture_output=True)
+                  resp=subprocess.run(['curl','-fsS','--max-time','45','-X','PUT',api+helper_path+'/content','-H','Authorization: Bearer '+token,'-F','metadata=@'+str(p/'metadata.json')+';type=application/json','-F','worker.mjs=@'+str(p/'worker.mjs')+';type=application/javascript+module;filename=worker.mjs'],check=True,capture_output=True)
+                  assert json.loads(resp.stdout).get('success') is True
+                  owned=True
+              request('POST',helper_path+'/subdomain',b'{"enabled":true,"previews_enabled":false}')
+              domain=obj('/workers/subdomain')['subdomain']
+              assert domain.replace('-','').isalnum()
+              import time
+              result=None
+              # Same unguessable-route + curl propagation polling pattern as
+              # the previously successful protected R2 checksum auditors.
+              with tempfile.TemporaryDirectory() as d:
+                  response=pathlib.Path(d)/'response.json'
+                  for attempt in range(18):
+                      proc=subprocess.run(['curl','-sS','--max-time','25','-o',str(response),'-w','%{http_code}','https://'+helper+'.'+domain+'.workers.dev'+route],capture_output=True,text=True)
+                      code=proc.stdout.strip()
+                      print('fence_helper_attempt='+str(attempt+1)+' http='+code+' curl_exit='+str(proc.returncode),flush=True)
+                      if proc.returncode==0 and code=='200':
+                          try:
+                              result=json.loads(response.read_text())
+                              if result.get('read_only') is True and len(result.get('rows',[]))==len(exact): break
+                          except (ValueError,OSError): pass
+                      time.sleep(5)
+              assert result and result['read_only'] is True and len(result['rows'])==len(exact),'helper_exact_response_unavailable'
+              obs={x['output']:x['fence_observation'] for x in result['rows']}
+              rows=[{'output':n,'fence_observation':obs[n],'lane_enabled':enabled and profile+'::'+platform in lanes} for n,rid,profile,platform in exact]
+              print('ISSUE3159_FENCE_LANE='+json.dumps({'read_only':True,'worker_version':version,'authority_enabled':enabled,'rows':rows,'output_writes':0,'provider_writes':0},separators=(',',':')),flush=True)
+              assert all(x['fence_observation'] in ('present','not_found') for x in rows),'fence_head_unavailable'
+          finally:
+              if owned:
+                  request('DELETE',helper_path)
+                  assert get(helper_path+'/settings')[0]==404,'helper_cleanup_unverified'
+                  print('issue3159_helper_deleted=true')
+          PY
+
+      - name: Verify scheduler remains paused
+        if: always()
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('post_fence_crons=[]')
+          PY
+      - name: Record protected audit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-overdue-fence-audit",target_url:$url,description:"Read-only candidate fence and lane evidence"}' >/tmp/fence-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/fence-status.json >/dev/null
