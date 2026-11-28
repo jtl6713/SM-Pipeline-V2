@@ -1704,3 +1704,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-28 UTC — #3159 stage 3 includes separate Supabase status-only reconciliation for exact saved Instagram/YouTube IDs, authenticated owner receipt, full observed CAS and readback; no provider writes or schedule/hold changes. One candidate per 5-minute slot, per-ID hourly cooldown.
 
 2026-11-28 UTC — #3159 reconcile #3204 into deployed receipt-only Worker after verified Runner #3207. Single lifetime gallery canary; exact committed lane reservation, original approved fresh slot, scoped owner GET and unchanged package proof, global one stage/5min, one-shot create/finalization, no new candidate even after success until separately reviewed expansion. Preserve minute-only cron, active general outage fence and receipt reconciliation. Merge only after serialized #3209 exact Story recovery clears Ops conflict and CI succeeds.
+
+2026-11-28 UTC — #3159 strengthen single-gallery finalization proof: exact saved provider ID, unchanged profile/content, permalink and publication time must match canonical readback. No capacity or schedule changes; retain all canary and outage fences.
