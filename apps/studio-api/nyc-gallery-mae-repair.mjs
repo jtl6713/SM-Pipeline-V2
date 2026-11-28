@@ -222,12 +222,32 @@ export async function recoverNycGalleryMae(env, id, {horizonDays, now=Date.now} 
   } finally { await release(before.profileId,owner); }
 }
 
-/** At most one exact successful schedule move per call. A pending receipt or
- * ambiguous transaction is never automatically replayed. */
+/** One lifetime attempt per exact output; the bounded R2 journal prevents
+ * repeated DB reads after all four are classified. An uncertain attempt may
+ * only be reconciled through a separately reviewed recovery, never replayed. */
 export async function runNycGalleryScheduleRepair(env,{horizonDays}={}){
+  const bucket=env.STUDIO_MEDIA;
+  if(!bucket)return {status:"journal_unavailable"};
+  const prefix="studio/state/3159-nyc-mae-v1/";
+  if(await bucket.get(prefix+"complete.json"))return {status:"exact_repair_journal_complete"};
   for(const id of Object.keys(NYC_GALLERY_REPAIR_IDS)){
-    const result=await recoverNycGalleryMae(env,id,{horizonDays});
-    if(result.rescheduled)return {status:"rescheduled",output:NYC_GALLERY_REPAIR_IDS[id],scheduled_for:result.scheduled_for};
+    const marker=prefix+id+"/entered.json";
+    if(await bucket.get(marker))continue;
+    const at=Date.now();
+    const entry={version:1,id,output:NYC_GALLERY_REPAIR_IDS[id],entered_at:new Date(at).toISOString()};
+    if(!await bucket.put(marker,JSON.stringify(entry),{onlyIf:new Headers({"If-None-Match":"*"})}))return {status:"exact_repair_already_claimed"};
+    let result;
+    try{result=await recoverNycGalleryMae(env,id,{horizonDays});}
+    catch{result={id,skipped:"uncertain_transaction_reconcile_no_replay"};}
+    const outcome={...entry,...result,completed_at:new Date().toISOString()};
+    if(!await bucket.put(prefix+id+"/outcome.json",JSON.stringify(outcome),{onlyIf:new Headers({"If-None-Match":"*"})}))
+      return {status:"outcome_journal_unconfirmed_no_replay",output:entry.output};
+    return result.rescheduled?{status:"rescheduled",output:entry.output,scheduled_for:result.scheduled_for}:
+      {status:"blocked_no_replay",output:entry.output,reason:result.skipped};
   }
-  return {status:"no_eligible_exact_repair"};
+  // Do not claim completion while another isolate has entered but not recorded
+  // its outcome. No additional database calls are made in that case.
+  for(const id of Object.keys(NYC_GALLERY_REPAIR_IDS))if(!await bucket.get(prefix+id+"/outcome.json"))return {status:"entered_outcome_unresolved"};
+  await bucket.put(prefix+"complete.json",JSON.stringify({version:1,completed_at:new Date().toISOString()}),{onlyIf:new Headers({"If-None-Match":"*"})});
+  return {status:"exact_repair_journal_complete"};
 }
