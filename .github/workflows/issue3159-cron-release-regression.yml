@@ -24,7 +24,9 @@ jobs:
           guard=p.index("if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:")
           deploy=p.index('if ! ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log')
           post=p.index("if observed != expected:", deploy)
-          assert capture < config < guard < deploy < post
+          incident=p.index("OUTAGE_ACTIVE=$(node --input-type=module", capture)
+          empty=p.index("true) jq -e '. == []'", incident)
+          assert capture < incident < empty < config < guard < deploy < post
           assert "'triggers':{'crons':[" not in p
           assert "group: chicagoshining-studio-api-production-deploy" in p
           for crons in ([], ['* * * * *', '*/5 * * * *', '0 6 * * *']):
