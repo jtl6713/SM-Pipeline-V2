@@ -1,0 +1,34 @@
+name: Issue 3159 cron release regression
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deploy-cloudflare-worker-production.yml'
+      - '.github/workflows/issue3159-cron-release-regression.yml'
+      - 'repair/scripts/issue3159_cron_containment.py'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python repair/scripts/issue3159_cron_containment.py selftest
+      - name: Verify protected release uses live cron inventory
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('.github/workflows/deploy-cloudflare-worker-production.yml').read_text()
+          capture=p.index("crons=schedules(call('GET'))")
+          config=p.index("'triggers':{'crons':json.loads(Path('/tmp/production-crons-before.json').read_text())}")
+          guard=p.index("if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:")
+          deploy=p.index('if ! ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/wrangler-deploy.log')
+          post=p.index("if observed != expected:", deploy)
+          assert capture < config < guard < deploy < post
+          assert "'triggers':{'crons':[" not in p
+          assert "group: chicagoshining-studio-api-production-deploy" in p
+          for crons in ([], ['* * * * *', '*/5 * * * *', '0 6 * * *']):
+              staged={'triggers':{'crons':json.loads(json.dumps(crons))}}
+              assert staged['triggers']['crons']==crons
+          print('cron release contract PASS')
+          PY
