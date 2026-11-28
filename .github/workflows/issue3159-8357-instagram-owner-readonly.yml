@@ -13,7 +13,7 @@ permissions:
   contents: read
   statuses: write
 concurrency:
-  group: chicagoshining-studio-api-production-deploy
+  group: ${{ github.event_name == 'push' && 'chicagoshining-studio-api-production-deploy' || format('3159-miami-audit-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: false
 jobs:
   static-safety:
