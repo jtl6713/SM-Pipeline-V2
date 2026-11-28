@@ -1,0 +1,276 @@
+name: Issue 3159 ten-minute governed recovery sweep
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-ten-minute-recovery.yml'
+      - 'repair/scripts/issue3159-story11252-scheduled-probe.py'
+      - '.github/scripts/incident-3159-paused-render-inventory.ps1'
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('3159-sweep-pr-{0}', github.event.pull_request.number) || 'issue3159-ten-minute-recovery-sweep' }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse read-only diagnostic
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.github/scripts/incident-3159-paused-render-inventory.ps1'),
+            [ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){$errors | ForEach-Object {Write-Output ('parse_error='+$_.ErrorId+' line='+$_.Extent.StartLineNumber)};throw 'readonly_script_parse_invalid'}
+          if((Get-Content '.github/scripts/incident-3159-paused-render-inventory.ps1' -Raw).Length -gt 7800){throw 'readonly_script_too_large'}
+      - name: Compile embedded read-only Python queue probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          s=Path('.github/scripts/incident-3159-paused-render-inventory.ps1').read_text()
+          probes=re.findall(r"(?m)^\$(?:code|probe)\s*=\s*@'\n([\s\S]*?)\n'@$",s)
+          assert len(probes)==1
+          for i, source in enumerate(probes):
+              compile(source, f"read_only_probe_{i}", "exec")
+          PY
+      - name: Compile and test exact scheduled action fences
+        shell: bash
+        run: |
+          python -m py_compile repair/scripts/issue3159-story11252-scheduled-probe.py
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          s=Path('repair/scripts/issue3159-story11252-scheduled-probe.py').read_text()
+          tree=ast.parse(s)
+          assert s.count('requests.post(')==1
+          assert 'marker.open("x"' in s and 'if marker.exists()' in s
+          assert 'existing_schedule_or_publish_state_requires_reconciliation' in s
+          for forbidden in ('requests.patch','requests.put','requests.delete','/publish-now','force-release','UPDATE producer_jobs','DELETE FROM'):
+              assert forbidden not in s
+          fn=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='observe_governor')
+          ns={}
+          exec(compile(ast.Module(body=[fn],type_ignores=[]),'monitor','exec'),ns)
+          check=ns['observe_governor']
+          idle=dict(ok=True,enabled=True,active_jobs=0,active_worker_heavy=0,combined_heavy_active=0,queued_jobs=0,paused_jobs=15,max_jobs=2,worker_heavy_limit=1,database_circuit_phase='closed',admission_paused=False,smv1_maintenance_active=False)
+          assert not check(idle)[1]
+          assert check(dict(idle,database_circuit_phase='open'))[1]
+          assert check(dict(idle,max_jobs=3))[1]
+          assert check(dict(idle,active_jobs=2,active_worker_heavy=1,combined_heavy_active=3))[1]
+          PY
+  readback:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      candidate: ${{ steps.inventory.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Avoid competing main-branch protected operations
+        id: quiet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs"
+          for status in in_progress queued pending waiting requested; do
+            runs=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api?branch=main&status=$status&per_page=100")
+            jq -e '.total_count <= 100' <<<"$runs" >/dev/null
+            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep")' <<<"$runs" >/dev/null; then
+              echo 'sweep3159_skip=competing_main_workflow'
+              exit 0
+            fi
+          done
+          echo 'ok=true' >> "$GITHUB_OUTPUT"
+      - name: Read exact paused jobs, output fences and existing audio bytes
+        id: inventory
+        if: steps.quiet.outputs.ok == 'true'
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' .github/scripts/incident-3159-paused-render-inventory.ps1 > /tmp/readonly.json
+          job=''
+          for attempt in $(seq 1 1); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/readonly.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "readonly_ops_launch_http=$code"; exit 1; }
+            sleep 5
+          done
+          [[ -n "$job" ]] || { echo 'sweep3159_skip=ops_busy'; exit 0; }
+          echo "watchdog2853_ops_job_id=$job"
+          for attempt in $(seq 1 45); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/readonly-status.json
+            state=$(jq -r '.job.status' /tmp/readonly-status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          # Never print the shell command, raw transcript or response body.
+          python - <<'PY'
+          import json,re,os
+          from pathlib import Path
+          data=json.loads(Path('/tmp/readonly-status.json').read_text())
+          job=data['job']
+          lines=job.get('log','').splitlines()
+          health=[json.loads(l.split('=',1)[1]) for l in lines if l.startswith('paused3159_health=')]
+          rows=[json.loads(l.split('=',1)[1]) for l in lines if l.startswith('paused3159_row=')]
+          proof=[json.loads(l.split('=',1)[1]) for l in lines if l.startswith('paused3159_proof=')]
+          if job.get('status')!='ok' or len(health)!=1 or len(proof)!=1 or proof[0]['count']!=len(rows) or len(rows)>24 or proof[0]['writes']!=0 or proof[0]['submissions']!=0:
+              raise SystemExit('paused3159_readback_incomplete')
+          print('paused3159_health='+json.dumps(health[0],sort_keys=True))
+          for row in rows: print('paused3159_row='+json.dumps(row,sort_keys=True))
+          print('paused3159_proof='+json.dumps(proof[0],sort_keys=True))
+          h=health[0]
+          candidate=(h['circuit']=='closed' and h['cap']==2 and h['active']==h['queued']==h['remotion_active']==0 and any(r.get('request_record')=='recp4apT5iDDfphbh' and r.get('job')=='spj-0e8e0ebc1337' and r.get('classification')=='read_only_inventory' for r in rows))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('candidate='+str(candidate).lower()+'\n')
+          if not rows: print('sweep3159=backlog_zero_no_submissions')
+          PY
+  recover-audited-pair:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.readback.outputs.candidate == 'true'
+    needs: [validate, readback]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Avoid competing main-branch protected operations
+        id: quiet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs"
+          for status in in_progress queued pending waiting requested; do
+            runs=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api?branch=main&status=$status&per_page=100")
+            jq -e '.total_count <= 100' <<<"$runs" >/dev/null
+            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep")' <<<"$runs" >/dev/null; then
+              echo 'sweep3159_skip=competing_main_workflow'
+              exit 0
+            fi
+          done
+          echo 'ok=true' >> "$GITHUB_OUTPUT"
+      - name: Verify exact deployed Runner and second pair proof
+        if: steps.quiet.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          statuses=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/124fb31441ff637ce0b60483fd7c3643815ee9c2/status")
+          deployed=cfef3e3da13b5ad16c12a837fcf84aec8044d608
+          git fetch --quiet --depth=1 origin "$deployed"
+          git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
+          deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
+          test "$(jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"' <<<"$deployed_status")" = success
+          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11234-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
+      - name: Verify scheduler still minute-only before exact recovery
+        if: steps.quiet.outputs.ok == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_pre_crons=minute_only')
+          PY
+      - name: Exact one-shot Story 11252 pair recovery through protected Ops
+        if: steps.quiet.outputs.ok == 'true'
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue3159-story11252-scheduled-probe.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3159-story11252-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 1); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          [[ -n "$job" ]] || { echo "sweep3159_skip=ops_busy"; exit 0; }
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 240); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','')
+          lines=out.splitlines()
+          skips=[line for line in lines if re.fullmatch(r'SWEEP3159_SKIP=[a-z_]+',line)]
+          if job['status']=='ok' and len(skips)==1 and not any(line.startswith('STORY3159_ACCEPTED_ONCE=') for line in lines):
+              print(skips[0]); raise SystemExit(0)
+          for line in lines:
+              if re.fullmatch(r'STORY3159_ERROR=[A-Za-z_]+',line) or line=='STORY3159_ACCEPTED_ONCE=recp4apT5iDDfphbh':
+                  print(line)
+              elif re.fullmatch(r'STORY3159_(AUDIO|GOVERNOR|PROOF)=\{.*\}',line):
+                  print(line)
+          if job['status']!='ok': raise SystemExit('exact_story_probe_incomplete_no_automatic_retry')
+          proofs=[line for line in lines if line.startswith('STORY3159_PROOF=')]
+          assert len(proofs)==1
+          proof=json.loads(proofs[0].split('=',1)[1])
+          assert proof['output']==11252 and proof['circuit']=='closed'
+          assert proof['outputs']==[11252,11253] and proof['sibling_records_unchanged']==4 and proof['publication_fence_preserved'] and proof['approval_required'] and proof['submissions']==1
+          assert set(proof['media'])=={'11252','11253'} and all(v['frames']==300 and v['render_job'].startswith('job-') for v in proof['media'].values())
+          PY
+      - name: Verify final scheduler remains minute-only
+        if: always() && steps.quiet.outputs.ok == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_post_crons=minute_only')
+          PY
