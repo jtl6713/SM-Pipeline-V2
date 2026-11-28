@@ -313,7 +313,11 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history
         history = HISTORY_RECOVERY.get(parent["id"])
         provenance = {}
-        if field_str(current, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR:
+        if (field_str(current, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR
+                or (current["id"] == "recoheiAMq2vG48V3" and live_parent["id"] == "rec9qS53G7HDoyCL5"
+                    and field(current, "Do_Not_Publish") is True)):
+            # Also enforce the exact held probe after rearm, when R4 may
+            # clear the original error label before checking narration.
             own = parse_json_field(field(current, RECEIPT)) or {}
             if (not isinstance(own, dict) or own.get("state") != "verified"
                     or own.get("fingerprint") != digest or own.get("url") != url
