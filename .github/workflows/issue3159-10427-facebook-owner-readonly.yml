@@ -1,0 +1,138 @@
+name: Issue 3159 exact NYC Facebook gallery provider inventory
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3159-10427-facebook-owner-readonly.yml'
+      - 'repair/scripts/issue3159-10427-facebook-owner-readonly.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-10427-facebook-owner-readonly.yml'
+      - 'repair/scripts/issue3159-10427-facebook-owner-readonly.ps1'
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact gallery and GET-only scope
+        shell: pwsh
+        run: |
+          $file='repair/scripts/issue3159-10427-facebook-owner-readonly.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $src=Get-Content -Raw $file
+          foreach($required in @('vkwvscgisqsbuwagdvtb','recqpfjbIQQrRZ4ZO','recgtK8Z7eNADNtVy','graph.facebook.com','NYC_FACEBOOK_PAGE_ID','NYC_FACEBOOK_PAGE_ACCESS_TOKEN','provider_writes=0','output_writes=0','retry_authorized=$false')){
+            if(-not $src.Contains($required)){throw 'required_identity_or_safety_constraint_missing'}
+          }
+          foreach($bad in @('-Method Post','-Method Patch','-Method Put','-Method Delete','/photos','/media_publish','api.airtable.com','Write-Output $secret','Write-Host $secret')){
+            if($src.Contains($bad)){throw 'provider_write_or_unsafe_operation_prohibited'}
+          }
+          Write-Output 'FB3159_EXACT_STATUS_STATIC_PASS'
+  live-owner-readback:
+    if: github.event_name == 'push'
+    needs: static-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify minute-only scheduler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('fb3159_pre_crons=minute_only')
+          PY
+      - name: Obtain existing protected Ops credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$OPS_A" "$OPS_B" "$OPS_C"; do
+            test -n "$candidate" || continue
+            http=$(curl -sS --max-time 20 -o /tmp/p1-4785-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" 'https://ops.chicagoshining.com/api/catalog' || true)
+            if [[ "$http" == 200 ]] && jq -e '.ok==true' /tmp/p1-4785-catalog.json >/dev/null; then
+              echo "::add-mask::$candidate"
+              echo "P1_4785_OPS_TOKEN=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'Ops authentication unavailable; no provider action';exit 1
+      - name: Read exact NYC Page and bounded feed inventory only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib
+          pathlib.Path('/tmp/p1-4785-request.json').write_text(json.dumps({
+            'command':pathlib.Path('repair/scripts/issue3159-10427-facebook-owner-readonly.ps1').read_text(),
+            'confirm':True}))
+          PY
+          admitted=false
+          for attempt in $(seq 1 2); do
+            http=$(curl -sS --max-time 30 -o /tmp/p1-4785-start.json -w '%{http_code}' \
+              -X POST 'https://ops.chicagoshining.com/api/shell' \
+              -H "Authorization: Bearer $P1_4785_OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/p1-4785-request.json || true)
+            if [[ "$http" == 200 || "$http" == 202 ]]; then admitted=true;break;fi
+            if [[ "$http" != 409 ]]; then echo "Ops denied protected status check ($http)";exit 2;fi
+            sleep 8
+          done
+          if [[ "$admitted" != true ]]; then echo 'Ops busy; no provider status call';exit 2;fi
+          job=$(jq -er '.job.id // .jobId' /tmp/p1-4785-start.json)
+          for n in $(seq 1 130); do
+            curl -fsS --max-time 30 -H "Authorization: Bearer $P1_4785_OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/p1-4785-job.json
+            status=$(jq -r '.job.status // empty' /tmp/p1-4785-job.json)
+            if [[ "$status" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/p1-4785-job.json | grep '^FB3159_STATUS=' | sed 's/^FB3159_STATUS=//' | jq -s . >/tmp/p1-4785-evidence.json
+              jq -e 'length==1 and .[0].output==10427 and .[0].read_only==true and .[0].provider_writes==0 and .[0].output_writes==0 and .[0].retry_authorized==false and .[0].owner_verified==true and .[0].provider_get_calls<=6' /tmp/p1-4785-evidence.json >/dev/null
+              jq -c . /tmp/p1-4785-evidence.json
+              exit 0
+            elif [[ "$status" == failed ]];then echo 'Ops status job failed; no provider retries';exit 3;fi
+            sleep 4
+          done
+          echo 'Original Facebook inventory unresolved';exit 4
+      - name: Retain sanitized status evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3159-10427-fb-owner-inventory
+          path: /tmp/p1-4785-evidence.json
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Verify cron unchanged
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('fb3159_post_crons=minute_only')
+          PY
+      - name: Record protected readback receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-10427-facebook-owner-inventory",target_url:$url,description:"Read-only exact NYC Facebook owner and inventory evidence"}' >/tmp/tt3159-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/tt3159-status.json >/dev/null
