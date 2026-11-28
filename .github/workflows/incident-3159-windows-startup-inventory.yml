@@ -1,0 +1,114 @@
+name: Issue 3159 Windows startup inventory
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/incident-3159-windows-startup-inventory.yml'
+      - '.github/scripts/incident-3159-windows-startup-inventory.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/incident-3159-windows-startup-inventory.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse exact script and assert bounded operation
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.github/scripts/incident-3159-windows-startup-inventory.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'smoke_script_parse_invalid'}
+          $s=Get-Content '.github/scripts/incident-3159-windows-startup-inventory.ps1' -Raw
+          if($s.Length -gt 7800 -or $s -notmatch 'Get-ScheduledTask' -or $s -notmatch 'Win32_Service' -or $s -match '(?i)Register-ScheduledTask|Set-ScheduledTask|Start-Service|Stop-Service|Restart-Computer|Set-Service|New-Service|Remove-Item'){throw 'startup_inventory_scope_invalid'}
+  readback:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify cloud publishing remains paused
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('pre_inventory_crons=[]')
+          PY
+      - name: Execute read-only Windows service and task inventory through protected Ops
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' .github/scripts/incident-3159-windows-startup-inventory.ps1 > /tmp/readonly.json
+          job=''
+          for attempt in $(seq 1 3); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/readonly.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "readonly_ops_launch_http=$code"; exit 1; }
+            sleep 5
+          done
+          [[ -n "$job" ]] || { echo "startup3159_ops_busy_no_job"; exit 1; }
+          echo "startup3159_ops_job_id=$job"
+          for attempt in $(seq 1 70); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/readonly-status.json
+            state=$(jq -r '.job.status' /tmp/readonly-status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          j=json.loads(Path('/tmp/readonly-status.json').read_text())['job']
+          lines=j.get('log','').splitlines()
+          for key in ('BOOT','SERVICES','TASKS','LOGIN_COMMANDS'):
+              matches=[l for l in lines if l.startswith('STARTUP3159_'+key+'=')]
+              assert len(matches)==1,'inventory_receipt_missing_'+key
+              print(matches[0])
+          if j.get('status')!='ok' or lines.count('STARTUP3159_PROOF=PASS_READONLY')!=1:
+              raise SystemExit('inventory proof incomplete')
+          print('STARTUP3159_PROOF=PASS_READONLY')
+          PY
+      - name: Verify final scheduler configuration
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==[]
+          print('post_inventory_crons=[]')
+          PY
+      - name: Publish canary evidence link
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-windows-startup-inventory",target_url:$url,description:"Windows startup inventory evidence"}' >/tmp/smoke-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/smoke-status.json >/dev/null
