@@ -921,7 +921,9 @@ def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> No
                 settings,
                 "platform_outputs?on_conflict=airtable_record_id",
                 "POST",
-                [_output_row(record, profile_uuid, content_uuid)],
+                [_preserve_existing_native_gallery_hold(
+                    settings, _output_row(record, profile_uuid, content_uuid)
+                )],
                 prefer="resolution=merge-duplicates,return=minimal",
             )
     else:
@@ -1238,13 +1240,44 @@ def _mirror_media(settings: dict, record: dict) -> None:
     _enqueue_outbox(settings, "media", record, "PATCH")
 
 
+def _preserve_existing_native_gallery_hold(settings: dict, row: dict) -> dict:
+    """Never clear an existing DNP hold through a generic full-row upsert.
+
+    #2294: a partial projection silently defaults missing Do_Not_Publish to
+    False. Hold release is a separate authorized lifecycle action, never an
+    incidental effect of branding, rendering, or a mirror refresh.
+    """
+    record_id = str(row.get("airtable_record_id") or "")
+    if not record_id:
+        raise RuntimeError("native_gallery_hold_identity_missing")
+    existing = _rest(
+        settings,
+        f"platform_outputs?airtable_record_id=eq.{record_id}"
+        "&select=do_not_publish,auto_publish_enabled,publish_retry_eligible,"
+        "scheduled_post_date,studio_scheduled_at&limit=1",
+        "GET",
+    )
+    if not isinstance(existing, list) or len(existing) > 1:
+        raise RuntimeError("native_gallery_hold_readback_unavailable")
+    if existing and existing[0].get("do_not_publish") is True:
+        row = dict(row)
+        row["do_not_publish"] = True
+        row["auto_publish_enabled"] = False
+        row["publish_retry_eligible"] = False
+        row["scheduled_post_date"] = None
+        row["studio_scheduled_at"] = None
+    return row
+
+
 def _mirror_create_one(settings: dict, kind: str, record: dict) -> None:
     """Insert an Output or Content Item before Airtable has minted its id."""
     fields = record.get("fields") or {}
     if kind == "output":
         profile_uuid = _profile_uuid(settings, _first_link(fields.get("Content_Profile")))
         content_uuid = _content_uuid(settings, _first_link(fields.get("Content_Item")))
-        row = _output_row(record, profile_uuid, content_uuid)
+        row = _preserve_existing_native_gallery_hold(
+            settings, _output_row(record, profile_uuid, content_uuid)
+        )
         _rest(
             settings,
             "platform_outputs?on_conflict=airtable_record_id",
