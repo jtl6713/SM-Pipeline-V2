@@ -435,8 +435,9 @@ def recover(candidate):
     require(not errors and sample["active_jobs"]==0 and sample["queued_jobs"]==0 and sample["combined_heavy_active"]<2,"governor_drift")
     # Permanent receipt before the single POST. A failure or timeout is not
     # permission to retry; reconcile actual state before any new authorization.
+    admitted_at=dt.datetime.now(dt.timezone.utc)
     with marker.open("x",encoding="utf-8") as file:
-        json.dump({"request":REQUEST,"job":JOB,"outputs":sorted(PAIR.values()),"fingerprint":FINGERPRINT,"at":dt.datetime.now(dt.timezone.utc).isoformat()},file)
+        json.dump({"request":REQUEST,"job":JOB,"outputs":sorted(PAIR.values()),"fingerprint":FINGERPRINT,"at":admitted_at.isoformat()},file)
         file.flush();os.fsync(file.fileno())
     PHASE="submit"
     response=requests.post(LOCAL+"/jobs/studio-produce/resume",headers=rh,json={"production_request_record_id":REQUEST,"resume":True},timeout=30)
@@ -507,9 +508,23 @@ def recover(candidate):
     sample,errors=observe_governor(work())
     print("STORY3159_GOVERNOR="+json.dumps({"phase":"final","sample":sample,"errors":errors}),flush=True)
     require(not errors,"final_governor")
-    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"market_revision_verified":bool(MARKET),"submissions":1,"history_original_sha256":HISTORY["sha256"] if HISTORY else None,"media":proofs}),flush=True)
+    remaining=current_eligible_candidates()
+    require(REQUEST not in remaining and len(remaining)<=sample["paused_jobs"],"continuation_inventory_drift")
+    print("STORY3159_PROOF="+json.dumps({"output":min(PAIR.values()),"outputs":sorted(PAIR.values()),"sibling_records_unchanged":4,"circuit":"closed","publication_fence_preserved":True,"approval_required":True,"market_revision_verified":bool(MARKET),"remaining_eligible":remaining,"next_sweep_not_before_unix":int(admitted_at.timestamp())+600,"submissions":1,"history_original_sha256":HISTORY["sha256"] if HISTORY else None,"media":proofs}),flush=True)
 
     return True
+
+def remaining_eligible_candidates(paused, candidates, exceptions, marker_exists):
+    return sorted(c["request"] for c in candidates if c["request"] in paused
+                  and c["request"] not in exceptions and not marker_exists(c["request"]))
+
+def current_eligible_candidates():
+    path=Path(os.environ["STUDIO_GOVERNOR_DB_PATH"])
+    require(path.is_absolute() and path.is_file(),"governor_db_missing")
+    with sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=3) as db:
+        paused={r[0] for r in db.execute("SELECT request_id FROM producer_jobs WHERE state='paused'")}
+    return remaining_eligible_candidates(paused,COHORT,CREATIVE_EXCEPTIONS,
+        lambda rid:(BASE/f"outage3159-storage-{rid}-once.json").exists())
 
 def main():
     global PHASE
