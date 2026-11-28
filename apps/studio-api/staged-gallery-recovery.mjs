@@ -175,6 +175,28 @@ async function verifyGalleryOwner(env,entry,decision){
   return {account};
 }
 
+// A matching permalink and timestamp alone cannot prove the canonical remote ID.
+export function exactGalleryFinalizationReadback(before,after,receipt){
+  const r=before?.row,v=after?.row;
+  if(!r||!v||!after.record||!present(receipt?.remote_id)||!present(receipt?.permalink)||
+     !Number.isFinite(ms(receipt?.published_at)))return false;
+  const ig=r.platform==="Instagram";
+  if(!ig&&r.platform!=="Facebook")return false;
+  const post=String(val(after.record,"Platform_Post_ID")||"");
+  const media=String(val(after.record,"IG_Carousel_Published_Media_ID")||"");
+  const generic=String(val(after.record,"Platform_Media_ID")||"");
+  const remote=String(receipt.remote_id);
+  const ids=(ig?[post,media,generic]:[post,generic]).filter(Boolean);
+  return after.profileId===before.profileId&&v.airtable_record_id===r.airtable_record_id&&
+    v.platform===r.platform&&v.content_item_airtable_id===r.content_item_airtable_id&&
+    ids.length>0&&ids.every(id=>id===remote)&&(ig?Boolean(post||media):Boolean(post))&&
+    v.output_status==="Published"&&v.publish_status==="Published"&&
+    v.platform_post_url===receipt.permalink&&Number.isFinite(ms(v.published_at))&&
+    Math.abs(ms(v.published_at)-ms(receipt.published_at))<=120000&&
+    v.review_status===r.review_status&&v.do_not_publish===r.do_not_publish&&
+    v.scheduled_post_date===r.scheduled_post_date&&v.studio_scheduled_at===r.studio_scheduled_at;
+}
+
 export async function runStagedGalleryRecovery(env,{now=Date.now,rest=(path,opts)=>supabaseRest(env,path,opts),
   read=async id=>(await factorySupabaseApprovalRows(env,[id])).get(id),
   lock=(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
@@ -257,11 +279,7 @@ export async function runStagedGalleryRecovery(env,{now=Date.now,rest=(path,opts
         const result=await pulse(decision.stage,entry.record);
         if(evidence.receipt){
           const after=await load(id),v=after?.row;
-          const verified=v?.output_status==="Published"&&v.publish_status==="Published"&&
-            v.platform_post_url===evidence.receipt.permalink&&Number.isFinite(ms(v.published_at))&&
-            Math.abs(ms(v.published_at)-ms(evidence.receipt.published_at))<=120000&&
-            v.review_status===r.review_status&&v.do_not_publish===r.do_not_publish&&
-            v.scheduled_post_date===r.scheduled_post_date&&v.studio_scheduled_at===r.studio_scheduled_at;
+          const verified=exactGalleryFinalizationReadback(entry,after,evidence.receipt);
           if(verified&&await claim(bucket,prefix+"verified/"+id+".json",{id,output:r.output_number,remote:evidence.receipt.remote_id,published_at:v.published_at,checked_at:now()}))
             return {status:"verified_publication",output:r.output_number,stage:decision.stage};
           return {status:"finalization_unconfirmed_no_replay",output:r.output_number};
