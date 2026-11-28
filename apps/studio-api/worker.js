@@ -1,3 +1,4 @@
+import { runStagedGalleryRecovery } from "./staged-gallery-recovery.mjs";
 import { windowsOutageState, windowsOutageProductionPaused } from "./windows-outage-control.mjs";
 import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
 import { handleQaApi } from "./qa-http.mjs";
@@ -1460,9 +1461,9 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1052-staged-public-receipts-3159",
+          version: "0.10.1053-staged-single-gallery-3159",
           airtable_activity: airtableActivity,
-          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused(), recovery_stage: 3, native_gallery_recovery_enabled: false, public_receipt_recovery_enabled: true },
+          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused(), recovery_stage: 3, native_gallery_recovery_enabled: env.STUDIO_3159_GALLERY_DISABLED !== "true", public_receipt_recovery_enabled: true },
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4766,9 +4767,14 @@ export default {
           } catch (error) { console.warn("3159 staged production recovery deferred", String(error?.message || error)); }
         })());
         ctx.waitUntil(factoryBatchCronResume(env, ctx).catch(error => console.warn("3159 staged Factory recovery deferred", String(error?.message || error))));
-        // Stage 3A: reconcile exact existing public receipts only. Native gallery dispatch
-        // remains disconnected until AP2C/AP3P preserve terminal provider identities
-        // and continuation/finalization ownership is independently verified.
+        // Stage 3B: exactly one independently fenced native-gallery canary.
+        // General publishing remains fenced; subsequent outputs require a new release.
+        if (collectorMinute % 5 === 0) {
+          ctx.waitUntil(runStagedGalleryRecovery(env)
+            .then(result=>console.info("3159 staged gallery",JSON.stringify(result)))
+            .catch(()=>console.warn("3159 staged gallery unavailable")));
+        }
+        // Stage 3A: preserve independent exact existing receipt reconciliation.
         if (collectorMinute % 5 === 4) {
           ctx.waitUntil(studioPublicationRecoveryCron(env, { stagedPublicReceipts: true })
             .then(result=>console.info("3159 staged public receipt reconciliation",JSON.stringify(result)))
