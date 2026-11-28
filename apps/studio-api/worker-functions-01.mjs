@@ -2280,13 +2280,37 @@ export function normalizedOutputState(record) {
   // before Approve (Output 1795). Only approved / in-flight / published publish states
   // suppress the review badge. "Ready to Schedule" still maps to Scheduled later when
   // the row is already approved.
+  // #2915: a pre-revision TikTok arming label alone is not a schedule.
+  // Only ignore it for an explicitly disarmed, unscheduled formal-review row
+  // with no provider identity or attempt evidence. Do not change any writer.
+  const staleTikTokWaitingForSchedule = formalReviewReady
+    && text("Platform").toLowerCase() === "tiktok"
+    && text("Review_Status").toLowerCase() === "review sent"
+    && publishStatusLc === "not ready"
+    && fields.Do_Not_Publish === false
+    && fields.Auto_Publish_Enabled === false
+    && !fields.Factory_Review_Handoff_Safety_Hold_At
+    && !fields.Publish_Retry_Eligible
+    && !text("Scheduled_Post_Date") && !text("Studio_Scheduled_At")
+    && !text("YouTube_Scheduled_Publish_At")
+    && !text("Published_At") && !text("Platform_Post_URL") && !text("Platform_Post_ID")
+    && !text("Manual_Published_URL")
+    && !text("TikTok_Draft_Publish_ID") && !text("TikTok_Publish_ID")
+    && !text("TikTok_Draft_ID") && !text("TikTok_Upload_ID")
+    && !text("Platform_Media_ID")
+    && !text("Last_Publish_Attempt_At") && !text("Studio_Publish_Dispatch_At")
+    && !text("Publish_Started_At") && !text("Publish_Locked_At")
+    && !text("Publish_Next_Retry_At")
+    && Number(fields.Studio_Publish_Dispatch_Count || 0) === 0
+    && Number(fields.TikTok_Draft_Attempt_Count || 0) === 0
+    && text("TikTok_Draft_Status").toLowerCase() === "waiting for schedule";
   const approvedOrScheduledEarly =
     has("Review_Status", "approved")
     || has("Output_Status", "approved for publishing")
     || has("Publish_Status", "scheduled")
     || has("Publish_Status", "publishing")
     || has("Publish_Status", "published")
-    || has("TikTok_Draft_Status", "waiting for schedule")
+    || (has("TikTok_Draft_Status", "waiting for schedule") && !staleTikTokWaitingForSchedule)
     || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
@@ -2423,7 +2447,7 @@ export function normalizedOutputState(record) {
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
   // "Ready to Schedule" must win over stale Publish_Retry_Eligible and Approved — future-dated posts are armed, not waiting on retry.
-  if (has("Publish_Status", "ready to schedule") || text("Publish_Status").toLowerCase() === "scheduled" || has("TikTok_Draft_Status", "waiting for schedule")) return "Scheduled";
+  if (has("Publish_Status", "ready to schedule") || text("Publish_Status").toLowerCase() === "scheduled" || (has("TikTok_Draft_Status", "waiting for schedule") && !staleTikTokWaitingForSchedule)) return "Scheduled";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
   // Only a recorded retry with a real next-attempt time may receive this badge.
   // The old eligibility-only rule mislabeled #11125-11127 as Retry Pending.

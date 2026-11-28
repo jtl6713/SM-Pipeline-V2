@@ -184,3 +184,45 @@ test("#2618: independent held-QA Supabase pack and Factory output mapper both pr
   assert.match(worker, /creativeQa \? "creative_qa_hold"/);
   assert.match(worker, /review_package_ready: \(mediaRework \|\| metaRepair \|\| creativeQa/);
 });
+
+
+test("#2915 TikTok 10865: stale waiting-for-schedule label cannot hide corrected, disarmed review", () => {
+  const row = native({
+    Platform: "TikTok", Studio_Output_Type: "Multi-Photo",
+    Review_Status: "Review Sent", Publish_Status: "Not Ready",
+    Auto_Publish_Enabled: false, Publish_Retry_Eligible: false,
+    TikTok_Draft_Status: "Waiting for Schedule",
+    "Carousel Slides": [],
+    Selected_Clip_Count: 8,
+    Selected_Assets_JSON: JSON.stringify({ selected_clips: Array.from({length:8}, (_,i) => ({
+      url: CDN + "studio/previews/repairs/issue2915/nyc-2223/tiktok-9x16/slide-" + i + ".jpg"
+    })) }),
+  }, "recFHzU0h4f4mjgrj");
+  assert.equal(formalFactoryApprovalReady(row), true);
+  assert.equal(normalize(row), "Ready for Review");
+  const visibility = factoryReviewVisibility(row, evaluateReviewPackage(row), normalize(row), true);
+  assert.equal(visibility.visible, true);
+  const card = {
+    id: row.id, kind: "output", output_id: 10865, platform: "TikTok",
+    studio_state: normalize(row), output_status: "Ready for Review",
+    render_status: "Native Photo Route", review_status: "Review Sent",
+    publish_status: "Not Ready", do_not_publish: false, auto_publish_enabled: false,
+    review_package_ready: visibility.visible, thumbnail_url: row.fields.Thumbnail_URL,
+  };
+  assert.equal(partitionFactoryLanes([card]).summary.needs_eyes, 1);
+  for (const evidence of [
+    { Auto_Publish_Enabled: true },
+    { Auto_Publish_Enabled: undefined },
+    { Scheduled_Post_Date: "2026-12-24T03:25:00Z" },
+    { Studio_Scheduled_At: "2026-12-24T03:25:00Z" },
+    { TikTok_Draft_Publish_ID: "existing-provider-id" },
+    { Studio_Publish_Dispatch_Count: 1 },
+    { TikTok_Draft_Attempt_Count: 1 },
+    { Publish_Retry_Eligible: true },
+    { TikTok_Draft_Status: "Draft Delivered" },
+    { Review_Status: "Approved", Output_Status: "Approved for Publishing" },
+  ]) {
+    const protectedRow = { ...row, fields: { ...row.fields, ...evidence } };
+    assert.notEqual(normalize(protectedRow), "Ready for Review", JSON.stringify(evidence));
+  }
+});
