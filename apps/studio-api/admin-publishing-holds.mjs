@@ -29,7 +29,7 @@ const dispatchKeys = [
 // convenience checkbox. This is deliberately fail-closed: a stale marker must
 // be reconciled by the original workflow rather than overridden here.
 const holdEvidenceKey = key =>
-  /(^|_)(hold|held|fence)(_|$)|unsafe.?gallery|copyright|legal.?block|rights.?block|false_changes_requested_recovery/i.test(key);
+  /(^|_)(hold|held|rehold|re_hold|fence)(_|$)|unsafe.?gallery|copyright|legal.?block|rights.?block|false_changes_requested_recovery/i.test(key);
 const activeEvidence = value => {
   if (value == null || value === false || value === 0) return false;
   const text=str(value).toLowerCase();
@@ -52,6 +52,13 @@ function describeAdminHold(row,extras,markers) {
     if (value) return {reason:value.slice(0,500),source:"Recorded output evidence: "+key};
   }
   if(markers.length) {
+    // Prefer the recorded reason on an explicit safety/re-hold receipt rather
+    // than leaving an operator with an opaque marker key.
+    const marker=extras[markers[0]];
+    const documented=marker && typeof marker==="object" && !Array.isArray(marker)
+      ? str(marker.reason) : "";
+    if(documented) return {reason:documented.slice(0,500),
+      source:"Recorded output safety evidence: "+markers[0]};
     // This identifies an actual recorded safety marker. It is NOT a guessed
     // root cause or proof that the underlying creative issue remains open.
     return {reason:"Historical protected hold marker: "+markers[0].replaceAll("_"," "),
@@ -76,6 +83,9 @@ export function classifyAdminPublishingHold(row) {
   const block = note => ({ releasable:false, block_reason:note, reason, reason_source:source });
   if (!yes(row?.do_not_publish)) return block("This output is not on hold");
   if (str(row?.test_run_id)) return block("Test output: this is a permanent publishing restriction");
+  if (markers.some(key=>/native_gallery.*(?:rehold|re_hold)/i.test(key))) {
+    return block("Native-gallery recovery hold: review and finally approve the exact slides in Factory before release (see issue #2294)");
+  }
   if (yes(extras.Studio_Render_Review_Hold_Active) ||
       markers.length>0 ||
       safetyKeys.some(key => activeEvidence(extras[key]))) {
