@@ -741,3 +741,102 @@ def test_new_history_excludes_ambiguous_and_excessively_short_originals():
     for parent_id in ("rec1LmWHV6VvfdXp0","reczNIelMId8KIXzx","rec4dPzGEJe0WbZpv"):
         assert parent_id not in HISTORY_RECOVERY
     assert "22bbdf330553cf64221415445570720022e217df831bbeb6ff8d2afe0017dc6d" not in _SHORT_AUDITED_ORIGINALS
+
+
+@pytest.mark.parametrize("parent_id", sorted(story.MARKET_STORY_REVISIONS))
+def test_exact_market_story_revision_requires_original_copy_and_source(parent_id):
+    from copy import deepcopy
+    spec=story.MARKET_STORY_REVISIONS[parent_id]
+    p=parent()
+    p["id"]=parent_id
+    p["fields"]["Voiceover_Script"]=spec["source"]
+    p["fields"]["Voice_ID"]="xVQH621DS3eyBYrseRt5"
+    keys=("asset_name","media_asset_record_id","source_asset_id","google_drive_file_id")
+    row=output(Content_Item=[parent_id],Output_Status="In Production",Render_Status="Blocked",
+        Remotion_Error_Message=story.STORY_STORAGE_GUARD, Composition_ID="Story",
+        Render_Clip_List_JSON='[{"durationFrames":300}]',Publish_Status="Not Ready",
+        Do_Not_Publish=True,Auto_Publish_Enabled=False,
+        Publish_Hold_Reason="Music duration not verified; repair before rendering.",
+        Output_Caption=spec["old_caption"],Output_Hashtags=spec["old_caption"].rsplit("\n\n",1)[-1],Selected_Assets_JSON=json.dumps({
+            "target_total_frames":300,"selected_clips":[dict(zip(keys,spec["clip"]))]}))
+    row["id"]=spec["outputs"][0]
+    assert story.story_text_for_output(row,p)==spec["text"]
+    assert story.story_sentence_recovery_candidate(row,p)
+    assert story.fingerprint(parent_id,p["fields"]["Voice_ID"],spec["text"],story.story_seconds(row))==spec["fingerprint"]
+    assert spec["fingerprint"]!=spec["previous_fingerprint"]
+    assert "#Chicago" not in spec["caption"] and len(spec["text"].split())<=20
+    for patch in (
+        {"Output_Caption":"changed"}, {"Output_Caption":spec["caption"]}, {"Output_Hashtags":"#Wrong"},
+        {"Selected_Assets_JSON":json.dumps({"selected_clips":[{}]})},
+        {"Do_Not_Publish":False},{"Review_Status":"Approved"},
+        {"Scheduled_Post_Date":"2026-12-01"},{"Production_Approved_At":"2026-11-25"},
+        {story.RECEIPT:json.dumps({"state":"failed","fingerprint":spec["previous_fingerprint"]})},
+    ):
+        bad=deepcopy(row); bad["fields"].update(patch)
+        with pytest.raises(story.StoryVoiceoverError):
+            story.story_text_for_output(bad,p)
+        assert not story.story_sentence_recovery_candidate(bad,p)
+    drift=deepcopy(p); drift["fields"]["Voiceover_Script"]="Different source."
+    with pytest.raises(story.StoryVoiceoverError):
+        story.story_text_for_output(row,drift)
+    accepted=deepcopy(row); accepted["fields"]["Output_Caption"]=spec["caption"]
+    accepted["fields"]["Output_Hashtags"]=spec["caption"].rsplit("\n\n",1)[-1]
+    accepted["fields"][story.RECEIPT]=json.dumps({"state":"verified","fingerprint":spec["fingerprint"],"text":spec["text"]})
+    assert story.story_text_for_output(accepted,p)==spec["text"]
+    unrelated=deepcopy(row); unrelated["id"]="recUnrelated"
+    assert story.story_text_for_output(unrelated,p)==story.story_text(spec["source"])
+
+
+@pytest.mark.parametrize("parent_id", sorted(story.MARKET_STORY_REVISIONS))
+def test_market_story_binding_is_output_only_and_shared_paid_claim_once(monkeypatch,parent_id):
+    from copy import deepcopy
+    from contextlib import nullcontext
+    from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+    from studio_produce import workload_governor, context
+    from p2 import elevenlabs_client, normalizer_client
+    from integrations.r2_upload import R2UploadClient
+    from item4 import settings as item_settings
+    spec=story.MARKET_STORY_REVISIONS[parent_id]
+    p=parent();p["id"]=parent_id;p["fields"]["Voiceover_Script"]=spec["source"]
+    keys=("asset_name","media_asset_record_id","source_asset_id","google_drive_file_id")
+    rows={}
+    for ident in spec["outputs"]:
+        row=output(Content_Item=[parent_id],Output_Status="In Production",Render_Status="Ready for Render",
+            Publish_Status="Not Ready",Do_Not_Publish=True,Auto_Publish_Enabled=False,
+            Publish_Hold_Reason="Music duration not verified; repair before rendering.",
+            Output_Caption=spec["old_caption"],Output_Hashtags=spec["old_caption"].rsplit("\n\n",1)[-1],Selected_Assets_JSON=json.dumps({
+                "target_total_frames":300,"selected_clips":[dict(zip(keys,spec["clip"]))]}))
+        row["id"]=ident;rows[ident]=row
+    original=deepcopy(p)
+    writes=[]
+    class Client:
+        def get_record(self,table,rid):
+            return deepcopy(p if table==CONTENT_ITEMS_TABLE else rows[rid])
+        def update_record(self,table,rid,patch,**kw):
+            assert table==PLATFORM_OUTPUTS_TABLE and rid in spec["outputs"]
+            assert not set(patch)&{"Do_Not_Publish","Review_Status","Publish_Status","Auto_Publish_Enabled","Scheduled_Post_Date"}
+            rows[rid]["fields"].update(patch);writes.append(deepcopy(patch))
+    client=Client()
+    monkeypatch.setattr(workload_governor,"enabled",lambda:True)
+    monkeypatch.setattr(workload_governor,"resource_slot",lambda *a,**k:nullcontext())
+    monkeypatch.setattr(elevenlabs_client,"resolve_content_voice_id",lambda _:"xVQH621DS3eyBYrseRt5")
+    paid=Mock(return_value=b"raw")
+    monkeypatch.setattr(elevenlabs_client,"synthesize_voiceover_by_id",paid)
+    monkeypatch.setattr(normalizer_client,"normalize_voiceover",lambda *a,**k:(None,b"normalized"))
+    monkeypatch.setattr(item_settings,"pipeline_settings",lambda *_:{})
+    monkeypatch.setattr(context,"load_outputs",lambda *_:deepcopy(list(rows.values())))
+    monkeypatch.setattr(R2UploadClient,"story_audio_exists",lambda *_:False)
+    monkeypatch.setattr(R2UploadClient,"put_object",lambda *_:None)
+    monkeypatch.setattr(R2UploadClient,"read_story_audio",lambda *_:b"normalized")
+    monkeypatch.setattr(story,"checked_voice",lambda *_:5.5)
+    for ident in spec["outputs"]:
+        result=story.ensure_story_voiceover(client,deepcopy(rows[ident]),p)
+        assert result["fields"]["Output_Caption"]==spec["caption"]
+        assert result["fields"]["Output_Hashtags"]==spec["caption"].rsplit("\n\n",1)[-1]
+        rec=json.loads(result["fields"][story.RECEIPT])
+        assert rec["creative_revision"]=="3159-market-story-v1"
+        assert rec["previous_fingerprint"]==spec["previous_fingerprint"]
+        assert rec["state"]=="verified" and rec["text"]==spec["text"]
+    paid.assert_called_once_with(spec["text"],voice_id="xVQH621DS3eyBYrseRt5")
+    assert p==original and all(row["fields"]["Do_Not_Publish"] for row in rows.values())
+    assert sum("Output_Caption" in w for w in writes)==2

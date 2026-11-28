@@ -77,6 +77,7 @@ _OUTPUT_FIELDS = {
     "Do_Not_Publish": "do_not_publish",
     "Output_Filename": "output_filename",
     "Render_Total_Frames": "render_total_frames",
+    "Publish_Hold_Reason": "publish_hold_reason",
 }
 _CONTENT_FIELDS = dict(CONTENT_PATCH_COLUMNS)
 _REQUEST_FIELDS = {

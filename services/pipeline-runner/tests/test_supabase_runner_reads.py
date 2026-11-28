@@ -327,6 +327,7 @@ def test_exact_r4_get_uses_authoritative_typed_filename_frames_and_clips(monkeyp
             "render_status": "Ready for Render",
             "output_filename": "studio-typed-youtube-short.mp4",
             "render_total_frames": 900,
+            "publish_hold_reason": "Canonical hold",
             "render_clip_list": [
                 {"url": "https://media.chicagoshining.com/a.jpg"},
                 {"url": "https://media.chicagoshining.com/b.jpg"},
@@ -339,6 +340,7 @@ def test_exact_r4_get_uses_authoritative_typed_filename_frames_and_clips(monkeyp
                 # A stale archived bag must not override typed values.
                 "Output_Filename": "stale-file.mp4",
                 "Render_Total_Frames": 30,
+                "Publish_Hold_Reason": "Stale archived reason",
             },
             "content_items": {"airtable_record_id": "recParent"},
             "content_profiles": {"airtable_record_id": "recProfile"},
@@ -351,6 +353,7 @@ def test_exact_r4_get_uses_authoritative_typed_filename_frames_and_clips(monkeyp
     )
     assert row["fields"]["Output_Filename"] == "studio-typed-youtube-short.mp4"
     assert row["fields"]["Render_Total_Frames"] == 900
+    assert row["fields"]["Publish_Hold_Reason"] == "Canonical hold"
     assert len(row["fields"]["Render_Clip_List_JSON"]) == 2
     assert _eligible_exact_output(row) is True
     row["fields"]["Remotion_Job_ID"] = "job-existing"
