@@ -44,21 +44,23 @@ jobs:
             assert.equal(u.pathname,'/api/admin/approved-past-due/triage');
             return Response.json({status:'ok',source_of_truth:'supabase',read_only:true,publish_actions_enabled:false,total:1,groups:[{group:'test',count:1}],items:[{private_field:'must-not-leak'}]});
           }}};
-          for (const [path,method] of [['/wrong','GET'],['/test-token','POST'],['/test-token?x=1','GET']]){
+          for (const [path,method] of [['/wrong','GET'],['/test-token/receipt','POST'],['/test-token/triage?x=1','GET'],['/test-token/other','GET']]){
             const denied=await bridge.fetch(new Request('https://probe.example'+path,{method}),env);
             assert.equal(denied.status,404);
             assert.equal(denied.headers.get('X-Outage-Probe'),'denied');
           }
           assert.equal(calls,0);
-          const response=await bridge.fetch(new Request('https://probe.example/test-token'),env);
-          const result=await response.json();
-          assert.equal(result.receipt.output_id,10204);
-          assert.equal(result.receipt.no_output_write,true);
-          assert.equal(result.triage.total,1);
-          assert.equal(result.triage.publish_actions_enabled,false);
-          assert.equal(JSON.stringify(result).includes('must-not-leak'),false);
-          assert.equal(calls,3);
-          console.log('exact receipt and triage scope PASS');
+          const receipt=await (await bridge.fetch(new Request('https://probe.example/test-token/receipt'),env)).json();
+          const triage=await (await bridge.fetch(new Request('https://probe.example/test-token/triage'),env)).json();
+          assert.equal(receipt.output_id,10204);
+          assert.equal(receipt.no_output_write,true);
+          assert.equal(triage.total,1);
+          assert.equal(triage.publish_actions_enabled,false);
+          assert.equal(JSON.stringify([receipt,triage]).includes('must-not-leak'),false);
+          assert.equal(calls,4);
+          const failed=await (await bridge.fetch(new Request('https://probe.example/test-token/receipt'),{STUDIO_API:{fetch:async()=>{throw new Error('secret');}}})).json();
+          assert.deepEqual(failed,{error:'service_binding_failed',stage:'health'});
+          console.log('exact separate readbacks scope PASS');
           JS
   readback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -102,19 +104,26 @@ jobs:
           cat >/tmp/outage-health-worker.js <<EOF
           export default {
             async fetch(request, env) {
-              const u = new URL(request.url);
-              if (request.method !== 'GET' || u.pathname !== '/$TOKEN' || u.search) return new Response('Not found', {status:404,headers:{'X-Outage-Probe':'denied','Cache-Control':'no-store'}});
-              const health=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/health',{method:'GET',headers:{Accept:'application/json'}}));
-              const h=await health.json().catch(()=>({}));
-              if(health.status!==200 || h.ok!==true || h.windows_outage?.active!==true || h.windows_outage?.resumed_at!==null) return Response.json({error:'outage_fence_unverified'},{status:503});
-              const headers={Accept:'application/json',Origin:'https://studio.chicagoshining.com','Cf-Access-Authenticated-User-Email':'joseph.t.logan@gmail.com'};
-              const r=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/exception-recovery/rec0zq77NEKd3tB6Q/receipt?authenticated=1',{method:'GET',headers}));
-              const d=await r.json().catch(()=>({}));
-              const t=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/approved-past-due/triage?limit=1',{method:'GET',headers}));
-              const x=await t.json().catch(()=>({}));
-              const receipt={http:r.status,output_id:d.output_id??null,verified_public:d.verified_public===true,verified_delivery:d.verified_delivery===true,ownership_verified:d.ownership_verified===true,evidence:typeof d.evidence==='string'&&/^[a-z0-9_]{1,120}$/i.test(d.evidence)?d.evidence:null,no_output_write:d.verification?.no_output_write===true,unchanged:d.verification?.authoritative_state_unchanged===true,eligible:d.verification?.eligible===true};
-              const triage={http:t.status,status:x.status??null,source:x.source_of_truth??null,read_only:x.read_only===true,publish_actions_enabled:x.publish_actions_enabled??null,total:x.total??null,groups:(Array.isArray(x.groups)?x.groups:[]).map(y=>({group:y.group,count:y.count,platforms:y.platforms??{}}))};
-              return Response.json({receipt,triage},{headers:{'Cache-Control':'no-store'}});
+              const u=new URL(request.url);
+              const receiptPath='/$TOKEN/receipt',triagePath='/$TOKEN/triage';
+              if(request.method!=='GET'||u.search||![receiptPath,triagePath].includes(u.pathname)) return new Response('Not found',{status:404,headers:{'X-Outage-Probe':'denied','Cache-Control':'no-store'}});
+              let stage='health';
+              try {
+                const health=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/health',{method:'GET',headers:{Accept:'application/json'}}));
+                const h=await health.json().catch(()=>({}));
+                if(health.status!==200||h.ok!==true||h.windows_outage?.active!==true||h.windows_outage?.resumed_at!==null) return Response.json({error:'outage_fence_unverified',http:health.status});
+                const headers={Accept:'application/json',Origin:'https://studio.chicagoshining.com','Cf-Access-Authenticated-User-Email':'joseph.t.logan@gmail.com'};
+                if(u.pathname===receiptPath){
+                  stage='receipt';
+                  const r=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/exception-recovery/rec0zq77NEKd3tB6Q/receipt?authenticated=1',{method:'GET',headers}));
+                  const d=await r.json().catch(()=>({}));
+                  return Response.json({http:r.status,output_id:d.output_id??null,verified_public:d.verified_public===true,verified_delivery:d.verified_delivery===true,ownership_verified:d.ownership_verified===true,evidence:typeof d.evidence==='string'&&/^[a-z0-9_]{1,120}$/i.test(d.evidence)?d.evidence:null,no_output_write:d.verification?.no_output_write===true,unchanged:d.verification?.authoritative_state_unchanged===true,eligible:d.verification?.eligible===true},{headers:{'Cache-Control':'no-store'}});
+                }
+                stage='triage';
+                const t=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/approved-past-due/triage?limit=1',{method:'GET',headers}));
+                const x=await t.json().catch(()=>({}));
+                return Response.json({http:t.status,status:x.status??null,source:x.source_of_truth??null,read_only:x.read_only===true,publish_actions_enabled:x.publish_actions_enabled??null,total:x.total??null,groups:(Array.isArray(x.groups)?x.groups:[]).map(y=>({group:y.group,count:y.count,platforms:y.platforms??{}}))},{headers:{'Cache-Control':'no-store'}});
+              } catch {return Response.json({error:'service_binding_failed',stage});}
             }
           };
           EOF
@@ -139,12 +148,13 @@ jobs:
             sleep 5
           done
           test "$READY" = true
-          CODE=$(curl -sS --max-time 150 -o /tmp/outage-health-result.json -w '%{http_code}' "$BASE/$TOKEN")
-          echo "bridge_health_http=$CODE"
-          test "$CODE" = 200
-          jq -c '.receipt' /tmp/outage-health-result.json
-          jq -c '.triage' /tmp/outage-health-result.json
-          jq -e '.receipt.http==200 and .receipt.output_id==10204 and .receipt.no_output_write==true and .receipt.unchanged==true and .triage.http==200 and .triage.status=="ok" and .triage.source=="supabase" and .triage.read_only==true and .triage.publish_actions_enabled==false and (.triage.total==([.triage.groups[].count]|add))' /tmp/outage-health-result.json >/dev/null
+          for ROUTE in receipt triage; do
+            CODE=$(curl -sS --max-time 120 -o "/tmp/outage-$ROUTE.json" -w '%{http_code}' "$BASE/$TOKEN/$ROUTE" || true)
+            echo "bridge_${ROUTE}_http=$CODE"
+            if [[ "$CODE" == 200 ]]; then jq -c . "/tmp/outage-$ROUTE.json"; fi
+          done
+          jq -e '.http==200 and .output_id==10204 and .no_output_write==true and .unchanged==true' /tmp/outage-receipt.json >/dev/null
+          jq -e '.http==200 and .status=="ok" and .source=="supabase" and .read_only==true and .publish_actions_enabled==false and (.total==([.groups[].count]|add))' /tmp/outage-triage.json >/dev/null
           echo 'provider_triage_readback=PASS'
       - name: Remove temporary health probe and verify absence
         if: always()
