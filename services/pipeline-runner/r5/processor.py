@@ -114,6 +114,17 @@ def _upload_preview(
         if token
         else f"{prefix}/{output_id}/current.mp4"
     )
+    from integrations.r2_upload import DIRECT_PUT_MAX_BYTES, R2UploadClient
+
+    # Long renders can exceed Cloudflare's request body limit. Use the
+    # existing bounded multipart transport and preserve the exact R5
+    # endpoint, credential, revision-specific key, and public preview URL.
+    if len(content) > DIRECT_PUT_MAX_BYTES:
+        R2UploadClient(upload_url=upload_url, upload_secret=upload_secret).put_object(
+            key, content, "video/mp4"
+        )
+        return key, f"{public_base}/{key}"
+
     import requests
 
     response = requests.put(
