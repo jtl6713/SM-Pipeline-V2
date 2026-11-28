@@ -25,40 +25,92 @@ jobs:
       contents: read
       statuses: write
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v6
-      - name: Read exact live cron inventory and Worker health without mutation
+      - name: Read exact live cron inventory
         run: |
           set -euo pipefail
           PYTHONPATH=repair/scripts python - <<'PY'
-          import datetime, json, urllib.request, urllib.error
+          import datetime, json
           from issue3159_cron_containment import call, schedules
-          print('checked_at='+datetime.datetime.now(datetime.timezone.utc).isoformat())
           crons=schedules(call('GET'))
+          print('checked_at='+datetime.datetime.now(datetime.timezone.utc).isoformat())
           print('verified_crons='+json.dumps(crons))
-          healthy=False
-          for path in ('/api/health','/health'):
-              try:
-                  req=urllib.request.Request('https://studio.chicagoshining.com'+path,headers={'Accept':'application/json','Cache-Control':'no-cache'})
-                  with urllib.request.urlopen(req,timeout=20) as response:
-                      status=response.status
-                      body=json.load(response)
-                  flag=body.get('windows_outage') or {}
-                  result={'http':status,'service':body.get('service'),'version':body.get('version'),'active':flag.get('active'),'resumed_at':flag.get('resumed_at')}
-                  print('worker_health='+json.dumps(result))
-                  healthy=(status==200 and body.get('ok') is True and body.get('service')=='chicagoshining-studio-api' and flag.get('active') is True and flag.get('resumed_at') is None)
-                  if healthy: break
-              except urllib.error.HTTPError as err:
-                  print('worker_health_http='+str(err.code))
-              except Exception as err:
-                  print('worker_health_unverified='+type(err).__name__)
-          if crons or not healthy:
-              raise SystemExit('Incident runtime proof incomplete: do not restore publishing')
-          print('outage_runtime_readback=PASS')
+          if crons:
+              raise SystemExit('Scheduler not paused')
+          PY
+      - name: Create exact health-only temporary service-binding probe
+        id: bridge
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="studio-outage-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$TOKEN"
+          printf '%s' "$TOKEN" >/tmp/outage-health-token
+          # Never overwrite any existing script, even an earlier diagnostic.
+          CODE=$(curl -sS --max-time 20 -o /tmp/outage-probe-exists.json -w '%{http_code}' "$API/workers/scripts/$NAME/settings" -H "$AUTH")
+          test "$CODE" = 404
+          printf '%s' "$NAME" >/tmp/outage-health-owned-name
+          cat >/tmp/outage-health-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const u = new URL(request.url);
+              if (request.method !== 'GET' || u.pathname !== '/$TOKEN' || u.search) return new Response('Not found', {status:404});
+              const r = await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/health', {method:'GET',headers:{Accept:'application/json'}}));
+              const d = await r.json().catch(()=>({}));
+              return Response.json({http:r.status,ok:d.ok===true,service:d.service??null,version:d.version??null,active:d.windows_outage?.active??null,resumed_at:d.windows_outage?.resumed_at??null,watermark_present:Object.hasOwn(d.windows_outage??{},'resumed_at')},{headers:{'Cache-Control':'no-store'}});
+            }
+          };
+          EOF
+          node --input-type=module --check </tmp/outage-health-worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/outage-health-metadata.json
+          curl -fsS --max-time 25 -X PUT "$API/workers/scripts/$NAME/content" -H "$AUTH" -F 'metadata=@/tmp/outage-health-metadata.json;type=application/json' -F 'worker.js=@/tmp/outage-health-worker.js;type=application/javascript+module;filename=worker.js' -o /tmp/outage-health-upload.json
+          jq -e '.success==true' /tmp/outage-health-upload.json >/dev/null
+          curl -fsS --max-time 25 -X POST "$API/workers/scripts/$NAME/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/outage-health-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/outage-health-enabled.json >/dev/null
+          curl -fsS --max-time 20 "$API/workers/subdomain" -H "$AUTH" -o /tmp/outage-health-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/outage-health-subdomain.json)
+          [[ "$SUBDOMAIN" =~ ^[a-z0-9-]+$ ]]
+          BASE="https://$NAME.$SUBDOMAIN.workers.dev"
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -sS --max-time 20 -o /tmp/outage-health-denied.json -w '%{http_code}' "$BASE/not-authorized" || true)
+            if [[ "$CODE" == 404 ]]; then break; fi
+            sleep 2
+          done
+          test "$CODE" = 404
+          curl -fsS --max-time 30 "$BASE/$TOKEN" -o /tmp/outage-health-result.json
+          jq -c '{http,ok,service,version,active,resumed_at,watermark_present}' /tmp/outage-health-result.json
+          jq -e '.http==200 and .ok==true and .service=="chicagoshining-studio-api" and .active==true and .watermark_present==true and .resumed_at==null' /tmp/outage-health-result.json >/dev/null
+          echo 'outage_runtime_readback=PASS'
+      - name: Remove temporary health probe and verify absence
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/outage-health-owned-name ]]; then exit 0; fi
+          NAME=$(cat /tmp/outage-health-owned-name)
+          test "$NAME" = "studio-outage-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE=$(curl -sS --max-time 20 -X DELETE "$API/workers/scripts/$NAME" -H "$AUTH" -o /tmp/outage-health-delete.json -w '%{http_code}')
+          if [[ "$CODE" != 404 ]]; then
+            [[ "$CODE" -ge 200 && "$CODE" -lt 300 ]]
+            jq -e '.success==true' /tmp/outage-health-delete.json >/dev/null
+          fi
+          CODE=$(curl -sS --max-time 20 "$API/workers/scripts/$NAME/settings" -H "$AUTH" -o /tmp/outage-health-gone.json -w '%{http_code}')
+          test "$CODE" = 404
+          echo 'temporary_health_probe_removed=PASS'
+          PYTHONPATH=repair/scripts python - <<'PY'
+          import json
+          from issue3159_cron_containment import call, schedules
+          crons=schedules(call('GET'))
+          print('final_verified_crons='+json.dumps(crons))
+          assert crons==[]
           PY
       - name: Publish readback result and evidence link
         if: always()
