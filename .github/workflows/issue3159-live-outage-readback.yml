@@ -18,6 +18,37 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: python repair/scripts/issue3159_cron_containment.py selftest
+      - name: Exercise exact bridge code offline without secrets
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/issue3159-live-outage-readback.yml').read_text()
+          body=text.split('cat >/tmp/outage-health-worker.js <<EOF\n',1)[1].split('\n          EOF',1)[0]
+          code='\n'.join(line[10:] for line in body.splitlines()).replace('$TOKEN','test-token')
+          Path('/tmp/outage-bridge.mjs').write_text(code)
+          PY
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import bridge from '/tmp/outage-bridge.mjs';
+          let calls=0;
+          const env={STUDIO_API:{fetch:async r=>{
+            calls++;
+            assert.equal(r.method,'GET');
+            assert.equal(r.url,'https://studio.chicagoshining.com/api/health');
+            return Response.json({ok:true,service:'chicagoshining-studio-api',version:'test',windows_outage:{active:true,resumed_at:null},private_field:'must-not-leak'});
+          }}};
+          for (const [path,method] of [['/wrong','GET'],['/test-token','POST'],['/test-token?x=1','GET']]){
+            assert.equal((await bridge.fetch(new Request('https://probe.example'+path,{method}),env)).status,404);
+          }
+          assert.equal(calls,0);
+          const response=await bridge.fetch(new Request('https://probe.example/test-token'),env);
+          assert.deepEqual(await response.json(),{http:200,ok:true,service:'chicagoshining-studio-api',version:'test',active:true,resumed_at:null,watermark_present:true});
+          assert.equal(calls,1);
+          const absent=await bridge.fetch(new Request('https://probe.example/test-token'),{STUDIO_API:{fetch:async()=>Response.json({ok:true})}});
+          assert.equal((await absent.json()).watermark_present,false);
+          console.log('health-only bridge scope and projection PASS');
+          JS
   readback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: preflight
