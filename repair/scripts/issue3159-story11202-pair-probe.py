@@ -1,4 +1,4 @@
-"""One exact governed Story recovery. No publishing, approval, or schedule writes."""
+"""Read-only reconciliation of accepted 11202/11203. Never resubmit."""
 import datetime as dt
 import hashlib
 import json
@@ -124,63 +124,29 @@ def main():
             leases=db.execute("SELECT count(*) FROM resource_leases WHERE lease_until>?",(time.time(),)).fetchone()[0]
             return q,n,leases
         finally: db.close()
+    PHASE="accepted_marker"
+    marker=BASE/"outage3159-story11202-once.json"
+    saved=json.loads(marker.read_text(encoding="utf-8"))
+    require(all(saved.get(k)==v for k,v in {"request":REQUEST,"job":JOB,"output":11202,"sha256":SHA}.items()),"accepted_marker_mismatch")
     PHASE="health"
     health=get(LOCAL+"/health")
     h=get(REMOTION+"/health")
     require(health.get("ok") is True and health.get("studio_write_source")=="supabase"
         and health.get("supabase_pipeline_writes") is True and health.get("workload_governor_enabled") is True
-        and health.get("recovery_read_only") is False
+        and health.get("i1_durable_jobs") is True and health.get("recovery_read_only") is False
         and health.get("airtable_activity",{}).get("any_activity") is False,"runner_health")
     require(h.get("ok") is True and h.get("remotionMaxConcurrent")==1
-        and all(h.get(k)==0 for k in ("remotionActiveRenders","remotionPreparingJobs","remotionQueuedRenders","remotionInFlightJobs")),"renderer_busy")
-    w=work()
-    sample,errors=observe_governor(w)
-    print("STORY3159_GOVERNOR="+json.dumps({"phase":"preflight","sample":sample,"errors":errors}),flush=True)
-    require(not errors and sample["active_jobs"]==0 and sample["queued_jobs"]==0
-        and sample["combined_heavy_active"]<2,"preflight_capacity")
-    paused=w["paused_jobs"]
-    require(paused>=1 and queue_state()[0]==[("paused",)],"queue_identity")
-    # Check persisted I1 spool without claiming/recovering unrelated work.
-    i1=Path(os.environ["I1_JOB_DB_PATH"])
-    require(i1.is_absolute() and i1.is_file(),"i1_spool_missing")
-    with sqlite3.connect(i1.resolve().as_uri()+"?mode=ro",uri=True,timeout=3) as db:
-        require(db.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]==0,"i1_busy")
-    # Normal globally coordinated admissions remain authoritative. No lease is reset or bypassed.
-    PHASE="baseline"
+        and type(h.get("remotionActiveRenders")) is int and 0<=h["remotionActiveRenders"]<=1,"renderer_capacity")
+    sample,errors=observe_governor(work())
+    require(not errors,"governor_invariants_failed")
     before=rows()
-    original=receipt(before[TARGET])
-    require(original.get("fingerprint")==FINGERPRINT and original.get("state")=="failed" and not original.get("sha256"),"original_history_claim_changed")
-    require(job()["step"]=="render","job_step_changed")
-    for ident in PAIR:
-        target=before[ident]
-        target_fence(target)
-        require(target["render_status"]=="Blocked" and target["output_status"]=="In Production"
-                and not target.get("final_file_url") and not target.get("remotion_job_id"),"target_baseline_changed")
+    require(job()["step"] in ("render","done"),"accepted_parent_state")
     require(all(before[i]["output_status"]=="Approved for Publishing" and before[i]["review_status"]=="Approved"
         and before[i]["render_status"]=="Rendered" and before[i].get("final_file_url") and before[i].get("thumbnail_url")
         for i in SIBLINGS),"approved_sibling_changed")
-    # The deployed history recovery performs exact provider GET and original
-    # checksum validation before normalization/storage; never generate new TTS.
-    PHASE="pre_submit"
-    require(rows()==before and job()["step"]=="render" and queue_state()[0]==[("paused",)],"baseline_drift")
-    sample,errors=observe_governor(work())
-    require(not errors and sample["active_jobs"]==0 and sample["queued_jobs"]==0 and sample["combined_heavy_active"]<2,"governor_drift")
-    # Permanent receipt before the single POST. A failure or timeout is not
-    # permission to retry; reconcile actual state before any new authorization.
-    marker=BASE/"outage3159-story11202-once.json"
-    with marker.open("x",encoding="utf-8") as file:
-        json.dump({"request":REQUEST,"job":JOB,"output":11202,"sha256":SHA,"at":dt.datetime.now(dt.timezone.utc).isoformat()},file)
-        file.flush();os.fsync(file.fileno())
-    PHASE="submit"
-    response=requests.post(LOCAL+"/jobs/studio-produce/resume",headers=rh,json={"production_request_record_id":REQUEST,"resume":True},timeout=30)
-    require(response.status_code==202,"submission_not_verified")
-    answer=response.json()
-    require(answer.get("ok") is True and answer.get("accepted") is True
-        and answer.get("queued") is True and answer.get("production_request_record_id")==REQUEST,"acceptance_unverified")
-    print("STORY3159_ACCEPTED_ONCE="+REQUEST,flush=True)
     PHASE="observe"
     after=None
-    for _ in range(42):
+    for _ in range(84):
         time.sleep(5)
         w=work(); current=rows(); j=job()
         sample,errors=observe_governor(w)
@@ -219,7 +185,7 @@ def main():
     sample,errors=observe_governor(work())
     print("STORY3159_GOVERNOR="+json.dumps({"phase":"final","sample":sample,"errors":errors}),flush=True)
     require(not errors,"final_governor")
-    print("STORY3159_PROOF="+json.dumps({"output":11202,"outputs":[11202,11203],"sibling_records_unchanged":4,"circuit":"closed","hold_preserved":True,"approval_required":True,"submissions":1,"media":proofs}),flush=True)
+    print("STORY3159_PROOF="+json.dumps({"output":11202,"outputs":[11202,11203],"siblings_unchanged_during_readback":4,"circuit":"closed","hold_preserved":True,"approval_required":True,"submissions":0,"media":proofs}),flush=True)
 
 if __name__=="__main__":
     try: main()

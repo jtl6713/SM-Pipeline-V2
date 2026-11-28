@@ -52,7 +52,7 @@ def require_receipt(row):
     if r.get("state")=="failed":
         require(row["render_status"]=="Blocked" and not r.get("sha256"),"unexpected_failed_checksum")
     else:
-        require(r.get("state")=="verified" and r.get("history_original_sha256")==SHA and r.get("history_created_at")==HISTORY_CREATED and re.fullmatch(r"[a-f0-9]{64}",str(r.get("sha256") or "")),"history_provenance")
+        require(r.get("state") in ("prepared","verified") and r.get("history_original_sha256")==SHA and r.get("history_created_at")==HISTORY_CREATED and re.fullmatch(r"[a-f0-9]{64}",str(r.get("sha256") or "")),"history_provenance")
 
 def target_fence(row):
     require(row["airtable_record_id"] in PAIR and row["output_number"]==PAIR[row["airtable_record_id"]]
@@ -180,7 +180,7 @@ def main():
     print("STORY3159_ACCEPTED_ONCE="+REQUEST,flush=True)
     PHASE="observe"
     after=None
-    for _ in range(42):
+    for _ in range(84):
         time.sleep(5)
         w=work(); current=rows(); j=job()
         sample,errors=observe_governor(w)
