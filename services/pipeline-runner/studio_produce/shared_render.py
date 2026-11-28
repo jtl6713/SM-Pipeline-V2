@@ -332,7 +332,7 @@ def propagate_render_result(client, source: dict[str, Any], sibling_ids: list[st
                 or field_str(target, "Publish_Status") in {"Ready to Schedule", "Ready to Publish", "Published"}
                 or field(target, "Auto_Publish_Enabled") is True
                 or any(field_str(target, key) for key in (
-                    "Production_Approved_At", "Scheduled_Post_Date", "Studio_Scheduled_At",
+                    "Scheduled_Post_Date", "Studio_Scheduled_At",
                     "YouTube_Scheduled_Publish_At", "Published_At", "Platform_Post_ID",
                     "Platform_Media_ID", "Platform_Post_URL", "Publish_Started_At",
                     "Last_Publish_Attempt_At", "Studio_Publish_Dispatch_At", "Publish_Locked_At"))
