@@ -39,7 +39,9 @@ jobs:
             return Response.json({ok:true,service:'chicagoshining-studio-api',version:'test',windows_outage:{active:true,resumed_at:null},private_field:'must-not-leak'});
           }}};
           for (const [path,method] of [['/wrong','GET'],['/test-token','POST'],['/test-token?x=1','GET']]){
-            assert.equal((await bridge.fetch(new Request('https://probe.example'+path,{method}),env)).status,404);
+            const denied=await bridge.fetch(new Request('https://probe.example'+path,{method}),env);
+            assert.equal(denied.status,404);
+            assert.equal(denied.headers.get('X-Outage-Probe'),'denied');
           }
           assert.equal(calls,0);
           const response=await bridge.fetch(new Request('https://probe.example/test-token'),env);
@@ -92,7 +94,7 @@ jobs:
           export default {
             async fetch(request, env) {
               const u = new URL(request.url);
-              if (request.method !== 'GET' || u.pathname !== '/$TOKEN' || u.search) return new Response('Not found', {status:404});
+              if (request.method !== 'GET' || u.pathname !== '/$TOKEN' || u.search) return new Response('Not found', {status:404,headers:{'X-Outage-Probe':'denied','Cache-Control':'no-store'}});
               const r = await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/health', {method:'GET',headers:{Accept:'application/json'}}));
               const d = await r.json().catch(()=>({}));
               return Response.json({http:r.status,ok:d.ok===true,service:d.service??null,version:d.version??null,active:d.windows_outage?.active??null,resumed_at:d.windows_outage?.resumed_at??null,watermark_present:Object.hasOwn(d.windows_outage??{},'resumed_at')},{headers:{'Cache-Control':'no-store'}});
@@ -109,13 +111,20 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/outage-health-subdomain.json)
           [[ "$SUBDOMAIN" =~ ^[a-z0-9-]+$ ]]
           BASE="https://$NAME.$SUBDOMAIN.workers.dev"
-          for i in 1 2 3 4 5; do
-            CODE=$(curl -sS --max-time 20 -o /tmp/outage-health-denied.json -w '%{http_code}' "$BASE/not-authorized" || true)
-            if [[ "$CODE" == 404 ]]; then break; fi
-            sleep 2
+          READY=false
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            CODE=$(curl -sS --max-time 10 -D /tmp/outage-health-denied.headers -o /tmp/outage-health-denied.json -w '%{http_code}' "$BASE/not-authorized" || true)
+            echo "bridge_denial_http=$CODE attempt=$i"
+            if [[ "$CODE" == 404 ]] && grep -qi '^x-outage-probe: denied' /tmp/outage-health-denied.headers; then
+              READY=true
+              break
+            fi
+            sleep 5
           done
-          test "$CODE" = 404
-          curl -fsS --max-time 30 "$BASE/$TOKEN" -o /tmp/outage-health-result.json
+          test "$READY" = true
+          CODE=$(curl -sS --max-time 30 -o /tmp/outage-health-result.json -w '%{http_code}' "$BASE/$TOKEN")
+          echo "bridge_health_http=$CODE"
+          test "$CODE" = 200
           jq -c '{http,ok,service,version,active,resumed_at,watermark_present}' /tmp/outage-health-result.json
           jq -e '.http==200 and .ok==true and .service=="chicagoshining-studio-api" and .active==true and .watermark_present==true and .resumed_at==null' /tmp/outage-health-result.json >/dev/null
           echo 'outage_runtime_readback=PASS'
