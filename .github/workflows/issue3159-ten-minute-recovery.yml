@@ -86,8 +86,8 @@ jobs:
           path=Path('repair/scripts/issue3159-becky-storage-sweep.py')
           s=path.read_text(); tree=ast.parse(s)
           cohort=ast.literal_eval(next(n.value for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='COHORT' for t in n.targets)))
-          assert len(cohort)==8 and len({r['request'] for r in cohort})==8
-          assert sorted(n for r in cohort for n in r['stories'].values())==[11240,11241,11262,11263,11268,11269,11310,11311,11316,11317,11322,11323,11328,11329,11340,11341]
+          assert len(cohort)==9 and len({r['request'] for r in cohort})==9
+          assert sorted(n for r in cohort for n in r['stories'].values())==[11226,11227,11240,11241,11262,11263,11268,11269,11310,11311,11316,11317,11322,11323,11328,11329,11340,11341]
           deployed=ast.parse(Path('services/pipeline-runner/studio_produce/story_voiceover.py').read_text())
           held=ast.literal_eval(next(n.value for n in deployed.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='HELD_STORAGE_RECOVERY' for t in n.targets)))
           assert held=={i:(r['parent'],r['fingerprint']) for r in cohort for i in r['stories']}
