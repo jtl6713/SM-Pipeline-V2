@@ -1,0 +1,66 @@
+name: Issue 3159 exact duplicate-gallery media gate
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3159-two-gallery-byte-gate.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3159-two-gallery-byte-gate.yml']
+permissions:
+  contents: read
+concurrency:
+  group: issue3159-two-gallery-byte-readonly
+  cancel-in-progress: false
+jobs:
+  exact-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned decoder
+        run: python -m pip install --disable-pip-version-check --quiet Pillow==11.3.0
+      - name: Verify eight exact approved manifest URLs
+        run: |
+          python - <<'PY'
+          import json, importlib.util
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          spec=importlib.util.spec_from_file_location("prior_audit", "repair/scripts/issue3096-13-approved-fb-gallery-cdn.py")
+          audit=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(audit)
+          # Live canonical selected/render manifests agree on source IDs.
+          # These are the expected lettered URLs, not the duplicate-row order.
+          entries=[
+              (10250,"recF9wayz8BT0uH2H",["recfmjYO5iOmAnTKJ","rec8KC6UthbDjevcf","recIa312syhWNG5Ns","recAkXrAfs9QmOPoU"]),
+              (10427,"recqpfjbIQQrRZ4ZO",["rec0NYmjChS6w2l6B","recfqd231dSwJ2Xj3","reciIaf0TKqcSbxpk","recAhHZARWk5f4lXE"]),
+          ]
+          batch=[]
+          for n,rid,ids in entries:
+              for i,sid in enumerate(ids):
+                  url=f"https://media.chicagoshining.com/studio/previews/lettered/{rid}/{i}.jpg"
+                  assert audit.safe(url)
+                  batch.append((n,{"slide":i+1,"slide_id":sid,"cdn_url":url}))
+          assert len(batch)==8
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              rows=list(pool.map(audit.check,batch))
+          summary=[]
+          for n,_,_ in entries:
+              subset=[r for r in rows if r["output"]==n]
+              good=all(r["verified"] for r in subset)
+              distinct=good and len({r["sha256"] for r in subset})==4
+              summary.append({"output":n,"verified":sum(r["verified"] for r in subset),"distinct_bytes":distinct})
+          report={"read_only":True,"publication_authorized":False,"output_writes":0,"provider_writes":0,"summary":summary,"images":rows}
+          Path("/tmp/issue3159-two-gallery-byte-gate.json").write_text(json.dumps(report,indent=2))
+          print("ISSUE3159_TWO_GALLERY="+json.dumps(report,separators=(",",":")))
+          assert all(r["verified"]==4 and r["distinct_bytes"] for r in summary),"media gate failed"
+          PY
+      - name: Preserve exact read-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue3159-two-gallery-byte-gate
+          path: /tmp/issue3159-two-gallery-byte-gate.json
+          retention-days: 30
+          if-no-files-found: error
