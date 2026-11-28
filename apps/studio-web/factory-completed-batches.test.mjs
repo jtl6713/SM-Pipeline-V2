@@ -15,7 +15,10 @@ const source = readFileSync(join(here, "assets/factory-desk.js"), "utf8");
 const first = source.indexOf("  function updateFactoryBatchFreshness() {");
 const last = source.indexOf("  // Batch status is independently polled", first);
 assert.ok(first !== -1 && last > first);
-const body = source.slice(first, last);
+const resumeStart = source.indexOf("  function factoryPendingGroupResumePayload(batch)");
+const resumeEnd = source.indexOf("  async function resumeFactoryPendingGroup", resumeStart);
+assert.ok(resumeStart !== -1 && resumeEnd > resumeStart);
+const body = source.slice(resumeStart, resumeEnd) + "\n" + source.slice(first, last);
 
 function viewHarness() {
   const ids = [
