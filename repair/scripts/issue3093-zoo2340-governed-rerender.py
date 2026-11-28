@@ -77,7 +77,7 @@ def main():
         h=get(LOCAL+"/health"); rem=get(REMOTION+"/health"); w=work()
         require(h.get("ok") is True and h.get("studio_write_source")=="supabase" and h.get("supabase_pipeline_writes") is True and h.get("workload_governor_enabled") is True and h.get("recovery_read_only") is False and h.get("airtable_activity",{}).get("any_activity") is False,"runner_health")
         require(rem.get("ok") is True and rem.get("remotionMaxConcurrent")==1 and all(rem.get(k)==0 for k in ("remotionActiveRenders","remotionPreparingJobs","remotionQueuedRenders","remotionInFlightJobs")),"renderer_busy")
-        require(w.get("ok") is True and w.get("enabled") is True and w.get("database_circuit_phase")=="closed" and w.get("max_jobs")==2 and w.get("admission_paused") is False and w.get("smv1_maintenance_active") is False and all(w.get(k)==0 for k in ("active_jobs","queued_jobs","active_worker_heavy")) and sum(w.get("active_resource_slots",{}).values())==0,"governor_not_idle_closed")
+        require(w.get("ok") is True and w.get("enabled") is True and w.get("database_circuit_phase") in ("closed","half_open") and w.get("max_jobs")==2 and w.get("admission_paused") is False and w.get("smv1_maintenance_active") is False and all(w.get(k)==0 for k in ("active_jobs","queued_jobs","active_worker_heavy")) and sum(w.get("active_resource_slots",{}).values())==0,"governor_not_idle_recovery")
         require(queue()==([("paused",)],0,0),"queue_not_exactly_idle")
         i1=Path(os.environ["I1_JOB_DB_PATH"])
         require(i1.is_absolute() and i1.is_file(),"i1_spool_missing")
@@ -106,10 +106,12 @@ def main():
             require([v["mediaAssetRecordId"] for v in sorted(clips,key=lambda x:int(x["order"]))]==(ASSETS[:1] if n in (11370,11371) else ASSETS),"asset_order_changed")
         return request,parent,rows,script_hash
     PHASE="health"
+    # Half-open admission is a single naturally governed recovery probe. Never
+    # force circuit closure or admit a second request while it is active.
     w=health_gate()
     PHASE="baseline"
     before=baseline()
-    print("ZOO3093_PREPARED="+json.dumps({"content":2340,"outputs":6,"scenes":7,"script_sha256":before[3],"voice":"Briony","circuit":"closed","all_unpublished":True}),flush=True)
+    print("ZOO3093_PREPARED="+json.dumps({"content":2340,"outputs":6,"scenes":7,"script_sha256":before[3],"voice":"Briony","circuit":w.get("database_circuit_phase"),"all_unpublished":True}),flush=True)
     PHASE="pre_submit"
     require(baseline()==before,"baseline_drift")
     health_gate()
@@ -125,7 +127,7 @@ def main():
     print("ZOO3093_ACCEPTED_ONCE="+REQUEST,flush=True)
     PHASE="observe"
     w=work()
-    require(w.get("database_circuit_phase")=="closed" and w.get("active_jobs",99)<=1 and w.get("queued_jobs",99)<=1 and w.get("active_worker_heavy")==0,"post_submit_governor")
+    require(w.get("database_circuit_phase") in ("closed","half_open") and w.get("active_jobs",99)<=1 and w.get("queued_jobs",99)<=1 and w.get("active_worker_heavy")==0,"post_submit_governor")
     print("ZOO3093_SUBMISSION_PROOF="+json.dumps({"request":REQUEST,"outputs":6,"accepted":True,"scope":"render_only","publication_authorized":False}),flush=True)
 
 if __name__=="__main__":
